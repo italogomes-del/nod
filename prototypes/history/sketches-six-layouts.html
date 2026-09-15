@@ -1,0 +1,292 @@
+<title>Seis Lugares para a Frota</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --pg:#F4F4F1; --card:#FFFFFF; --ink:#16181C; --ink2:#55585F; --ink3:#8A8E96; --ink4:#B7BAC1;
+  --line:#E2E2DC; --line2:#CFCFC7;
+  --dk:#1A1D21; --dk2:#14161A; --dk3:#23262C; --dkline:#31353C;
+  --agent:#E8912D; --emp:#6B4E8F; --emp2:#C2410C; --blue:#1D9BD1;
+  --f:"Inter",system-ui,-apple-system,sans-serif; --fm:"JetBrains Mono",monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --pg:#111214; --card:#1B1D21; --ink:#ECEDEF; --ink2:#A6A9B0; --ink3:#797D85; --ink4:#565A61;
+  --line:#2A2D33; --line2:#3A3E45;
+}}
+:root[data-theme="dark"]{
+  --pg:#111214; --card:#1B1D21; --ink:#ECEDEF; --ink2:#A6A9B0; --ink3:#797D85; --ink4:#565A61;
+  --line:#2A2D33; --line2:#3A3E45;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:400 14px/1.55 var(--f);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--agent);outline-offset:2px;border-radius:4px}
+
+.wrap{max-width:1180px;margin:0 auto;padding:40px 20px 90px}
+header{margin-bottom:30px;max-width:720px}
+h1{margin:0 0 10px;font-size:27px;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+.lede{margin:0;font-size:15px;color:var(--ink2);line-height:1.6}
+.lede b{color:var(--ink);font-weight:600}
+.legenda{display:flex;gap:16px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--ink3)}
+.legenda span{display:flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;border-radius:3px;flex:none}
+.sw.a{background:var(--agent)}.sw.e{background:var(--emp)}.sw.n{background:var(--line2)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px}
+.opt{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;display:flex;flex-direction:column}
+.opt.win{border-color:var(--agent);box-shadow:0 0 0 1px var(--agent)}
+.ohd{padding:15px 17px 12px;display:flex;align-items:flex-start;gap:10px}
+.num{width:22px;height:22px;border-radius:6px;background:var(--ink);color:var(--card);font-size:11px;font-weight:700;display:grid;place-items:center;flex:none;margin-top:1px}
+.opt.win .num{background:var(--agent);color:#16181C}
+.oh{flex:1;min-width:0}
+.oh h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em}
+.oh .sub{font-size:12.5px;color:var(--ink3);margin-top:2px}
+.tag{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:4px;padding:2px 6px;flex:none;margin-top:2px}
+.tag.w{background:var(--agent);color:#16181C}
+.tag.r{background:var(--line);color:var(--ink3)}
+
+/* ---- o diagrama ---- */
+.dia{margin:0 17px;height:132px;background:var(--dk);border:1px solid var(--dkline);border-radius:9px;display:flex;overflow:hidden;position:relative}
+.c{height:100%;position:relative;flex:none}
+.c.rail{width:15px;background:var(--dk2)}
+.c.nav{width:17px;background:#1A1D22;border-right:1px solid var(--dkline)}
+.c.side{width:56px;background:#1E2126}
+.c.stage{flex:1;background:var(--dk);min-width:20px}
+.c.cais{width:20px;background:var(--dk3);border-left:1px solid var(--dkline)}
+
+/* blocos dentro das colunas */
+.e{width:9px;height:9px;border-radius:3px;background:var(--emp);margin:4px auto 0;display:block}
+.e.b{background:var(--emp2)}
+.e.g{background:#3A3E45}
+.a{width:9px;height:9px;border-radius:2px;background:var(--agent);margin:3px auto 0;display:block}
+.a.sm{width:7px;height:7px}
+.ln{height:3px;border-radius:2px;background:#33373E;margin:4px 6px 0}
+.ln.w{background:#4A4F57}
+.ln.hi{background:var(--blue);opacity:.5}
+.div{height:1px;background:var(--dkline);margin:5px 3px}
+.tt{position:absolute;font-size:7px;font-weight:700;letter-spacing:.04em;color:#6E737B;text-transform:uppercase;white-space:nowrap}
+
+/* variantes de layout por opção */
+.faixa{position:absolute;top:0;left:0;right:0;height:22px;background:var(--dk3);border-bottom:1px solid var(--dkline);display:flex;align-items:center;gap:4px;padding:0 6px;z-index:2}
+.gav{position:absolute;top:0;bottom:0;right:0;width:38%;background:var(--dk3);border-left:1px solid var(--agent);z-index:3;padding:6px 5px}
+.gav .a{margin:0 auto 4px}
+.ov{position:absolute;inset:14px 18px;background:var(--dk3);border:1px solid var(--agent);border-radius:7px;z-index:4;padding:7px}
+.pop{position:absolute;left:19px;bottom:6px;width:64px;height:78px;background:var(--dk3);border:1px solid var(--agent);border-radius:7px;z-index:4;padding:6px 5px}
+.dock{position:absolute;left:0;right:0;bottom:0;height:26px;background:var(--dk3);border-top:1px solid var(--dkline);display:flex;align-items:center;justify-content:center;gap:5px;z-index:2}
+.dock .a{margin:0}
+
+.body{padding:14px 17px 16px;flex:1;display:flex;flex-direction:column}
+.claim{font-size:13.5px;line-height:1.55;color:var(--ink2);margin:0 0 11px}
+.claim b{color:var(--ink);font-weight:600}
+.pc{display:grid;gap:5px;margin-top:auto}
+.pc div{display:flex;gap:7px;font-size:12.5px;line-height:1.5;align-items:flex-start}
+.pc .s{flex:none;font-weight:700;width:12px}
+.pc .up .s{color:#2E8B57}
+.pc .dn .s{color:#C0522F}
+.pc .up{color:var(--ink2)}
+.pc .dn{color:var(--ink3)}
+
+.pick{margin:13px 17px 15px;padding:9px;border:1px dashed var(--line2);border-radius:8px;font-size:12.5px;color:var(--ink3);text-align:center}
+.pick:hover{border-color:var(--agent);color:var(--ink)}
+.opt[aria-pressed="true"] .pick{background:var(--agent);border-style:solid;border-color:var(--agent);color:#16181C;font-weight:600}
+.opt[aria-pressed="true"]{border-color:var(--agent);box-shadow:0 0 0 2px var(--agent)}
+
+.foot{margin-top:34px;padding-top:22px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2);line-height:1.65;max-width:720px}
+.foot b{color:var(--ink)}
+.foot code{font-family:var(--fm);font-size:12px;background:var(--line);padding:1px 5px;border-radius:4px}
+.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:var(--card);border:1px solid var(--line2);border-radius:99px;padding:9px 18px;box-shadow:0 8px 28px -12px rgba(0,0,0,.28);font-size:13px;z-index:50;display:flex;align-items:center;gap:10px}
+.bar b{font-weight:600}
+.themeb{position:fixed;top:16px;right:16px;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--ink3);border:1px solid var(--line);background:var(--card);z-index:50}
+@media (max-width:560px){.wrap{padding:26px 14px 90px}h1{font-size:22px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+
+<button class="themeb" id="theme" aria-label="Alternar tema">◐</button>
+
+<div class="wrap">
+<header>
+  <h1>Onde a frota mora</h1>
+  <p class="lede">Seis lugares possíveis para os seus agentes numa janela multi-empresa. O <b>Cais</b> é o que está no protótipo; os outros cinco são alternativas reais, incluindo duas que o painel descartou — você pode discordar dele. Escolha um e eu construo o mockup completo.</p>
+  <div class="legenda">
+    <span><i class="sw a"></i> seus agentes</span>
+    <span><i class="sw e"></i> empresas</span>
+    <span><i class="sw n"></i> conteúdo da empresa</span>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- 1 · CAIS -->
+  <div class="opt win" data-opt="cais">
+    <div class="ohd"><span class="num">1</span><span class="oh"><h2>O Cais</h2><span class="sub">coluna fixa na borda direita</span></span><span class="tag w">no protótipo</span></div>
+    <div class="dia">
+      <div class="c rail"><i class="e"></i><i class="e b"></i><i class="e g"></i><i class="e g"></i></div>
+      <div class="c nav"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c side"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="div"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c stage"></div>
+      <div class="c cais"><i class="a"></i><i class="a"></i><i class="a"></i><i class="div"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i></div>
+    </div>
+    <div class="body">
+      <p class="claim">A frota fica <b>fora do funil de escopo</b>. Troque de empresa: três colunas trocam, essa não move um pixel — e é essa permanência que prova que ela não pertence a ninguém.</p>
+      <div class="pc">
+        <div class="up"><span class="s">+</span><span>12 nomes legíveis no silêncio, sem clique</span></div>
+        <div class="up"><span class="s">+</span><span>brasão mostra em que empresa cada um opera</span></div>
+        <div class="dn"><span class="s">−</span><span>custa 76px permanentes, o maior de todos</span></div>
+      </div>
+    </div>
+    <button class="pick">Escolher esta</button>
+  </div>
+
+  <!-- 2 · SLOT ZERO -->
+  <div class="opt" data-opt="slot">
+    <div class="ohd"><span class="num">2</span><span class="oh"><h2>Slot Zero</h2><span class="sub">primeiro item do rail, acima da linha</span></span><span class="tag r">painel rejeitou</span></div>
+    <div class="dia">
+      <div class="c rail"><i class="a" style="border-radius:50%;width:11px;height:11px"></i><i class="div"></i><i class="e"></i><i class="e b"></i><i class="e g"></i></div>
+      <div class="c nav"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c side"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="div"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c stage"></div>
+    </div>
+    <div class="body">
+      <p class="claim">Você ocupa o slot de honra, separado das empresas por um filete. <code style="font-family:var(--fm);font-size:11.5px">Cmd+0</code> chega lá; as empresas são <code style="font-family:var(--fm);font-size:11.5px">Cmd+1..5</code>.</p>
+      <div class="pc">
+        <div class="up"><span class="s">+</span><span>zero pixel de crômo novo, atalho óbvio</span></div>
+        <div class="up"><span class="s">+</span><span>ganhou a lente de governança</span></div>
+        <div class="dn"><span class="s">−</span><span>disputa a barra de seleção com as empresas — vira "mais uma empresa"</span></div>
+        <div class="dn"><span class="s">−</span><span>no dia calmo você vê 1 avatar, não 12 nomes</span></div>
+      </div>
+    </div>
+    <button class="pick">Escolher esta</button>
+  </div>
+
+  <!-- 3 · FAIXA SUPERIOR -->
+  <div class="opt" data-opt="faixa">
+    <div class="ohd"><span class="num">3</span><span class="oh"><h2>A Régua</h2><span class="sub">faixa horizontal acima de tudo</span></span></div>
+    <div class="dia">
+      <div class="faixa"><i class="a sm" style="margin:0"></i><i class="a sm" style="margin:0"></i><i class="a sm" style="margin:0"></i><i class="a sm" style="margin:0"></i><i class="a sm" style="margin:0"></i><i class="a sm" style="margin:0;opacity:.4"></i><i class="a sm" style="margin:0;opacity:.4"></i></div>
+      <div class="c rail" style="padding-top:22px"><i class="e"></i><i class="e b"></i><i class="e g"></i></div>
+      <div class="c nav" style="padding-top:22px"><i class="ln w"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c side" style="padding-top:22px"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="div"></i><i class="ln"></i></div>
+      <div class="c stage"></div>
+    </div>
+    <div class="body">
+      <p class="claim">Uma faixa de 34px no topo, atravessando a janela inteira, com os agentes em fila horizontal. <b>Acima das empresas</b> — hierarquia dita por posição.</p>
+      <div class="pc">
+        <div class="up"><span class="s">+</span><span>lê como "o que é seu está acima de onde você trabalha"</span></div>
+        <div class="up"><span class="s">+</span><span>custa altura, não largura — sobra palco</span></div>
+        <div class="dn"><span class="s">−</span><span>o topo é a região que o olho menos visita</span></div>
+        <div class="dn"><span class="s">−</span><span>12 agentes em fila horizontal cortam cedo</span></div>
+      </div>
+    </div>
+    <button class="pick">Escolher esta</button>
+  </div>
+
+  <!-- 4 · DOCA INFERIOR -->
+  <div class="opt" data-opt="doca">
+    <div class="ohd"><span class="num">4</span><span class="oh"><h2>A Doca</h2><span class="sub">barra inferior, tipo dock do macOS</span></span></div>
+    <div class="dia">
+      <div class="c rail"><i class="e"></i><i class="e b"></i><i class="e g"></i><i class="e g"></i></div>
+      <div class="c nav"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c side"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="div"></i><i class="ln"></i></div>
+      <div class="c stage"></div>
+      <div class="dock"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a" style="opacity:.45"></i></div>
+    </div>
+    <div class="body">
+      <p class="claim">Doca de 48px colada embaixo, atravessando a janela. Os agentes como <b>ferramentas sempre ao alcance</b> — a metáfora que o macOS ensinou a todo mundo.</p>
+      <div class="pc">
+        <div class="up"><span class="s">+</span><span>metáfora que ninguém precisa aprender</span></div>
+        <div class="up"><span class="s">+</span><span>o canto inferior é caminho natural do mouse</span></div>
+        <div class="dn"><span class="s">−</span><span>briga com o composer, que também vive embaixo</span></div>
+        <div class="dn"><span class="s">−</span><span>dock diz "apps", e agente não é app</span></div>
+      </div>
+    </div>
+    <button class="pick">Escolher esta</button>
+  </div>
+
+  <!-- 5 · SEGUNDO PALCO -->
+  <div class="opt" data-opt="palco">
+    <div class="ohd"><span class="num">5</span><span class="oh"><h2>Dois Palcos</h2><span class="sub">a frota divide a tela com a empresa</span></span></div>
+    <div class="dia">
+      <div class="c rail"><i class="e"></i><i class="e b"></i><i class="e g"></i><i class="e g"></i></div>
+      <div class="c nav"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c side"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="div"></i><i class="ln"></i></div>
+      <div class="c stage" style="flex:1.4"></div>
+      <div class="c" style="width:74px;background:var(--dk3);border-left:1px solid var(--agent)">
+        <i class="ln w" style="margin:5px 6px 0"></i>
+        <i class="a" style="margin:5px auto 0"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a" style="opacity:.5"></i>
+      </div>
+    </div>
+    <div class="body">
+      <p class="claim">Um painel largo de ~320px à direita, onde você <b>conversa com o agente sem sair do canal</b>. A empresa de um lado, a frota do outro, ambas operáveis ao mesmo tempo.</p>
+      <div class="pc">
+        <div class="up"><span class="s">+</span><span>resolve o vai-e-vem: você lê o canal e fala com o agente juntos</span></div>
+        <div class="up"><span class="s">+</span><span>proeminência máxima — é metade da tela</span></div>
+        <div class="dn"><span class="s">−</span><span>come o palco; canal fica estreito</span></div>
+        <div class="dn"><span class="s">−</span><span>duas conversas ativas competem por atenção</span></div>
+      </div>
+    </div>
+    <button class="pick">Escolher esta</button>
+  </div>
+
+  <!-- 6 · FROTA COMO WORKSPACE -->
+  <div class="opt" data-opt="workspace">
+    <div class="ohd"><span class="num">6</span><span class="oh"><h2>Frota é Casa</h2><span class="sub">a tela inicial, antes das empresas</span></span></div>
+    <div class="dia">
+      <div class="c rail"><i class="a" style="width:11px;height:11px;border-radius:4px"></i><i class="div"></i><i class="e g"></i><i class="e g"></i><i class="e g"></i></div>
+      <div class="c nav"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+      <div class="c side" style="background:var(--dk3)"><i class="ln w"></i><i class="a" style="margin:5px auto 0"></i><i class="a"></i><i class="a"></i><i class="a"></i></div>
+      <div class="c stage" style="background:var(--dk3)">
+        <i class="ln w" style="margin:10px 12px 0;height:5px"></i>
+        <i class="ln" style="margin:7px 12px 0"></i><i class="ln" style="margin:5px 12px 0"></i>
+        <i class="ln" style="margin:11px 12px 0"></i><i class="ln" style="margin:5px 12px 0"></i>
+      </div>
+    </div>
+    <div class="body">
+      <p class="claim">A frota <b>é a tela que abre</b> quando você entra no produto. As empresas são lugares que você visita a partir dela — invertendo quem é o anfitrião e quem é o hóspede.</p>
+      <div class="pc">
+        <div class="up"><span class="s">+</span><span>o modelo mental fica inequívoco: o produto é seu, não da empresa</span></div>
+        <div class="up"><span class="s">+</span><span>"Sua vez" global vira a primeira coisa que você vê no dia</span></div>
+        <div class="dn"><span class="s">−</span><span>quem só quer conversar no #suporte paga um pedágio todo dia</span></div>
+        <div class="dn"><span class="s">−</span><span>as 18 pessoas do time não têm frota — para elas é tela vazia</span></div>
+      </div>
+    </div>
+    <button class="pick">Escolher esta</button>
+  </div>
+
+</div>
+
+<p class="foot">
+  <b>Como eu leria isso.</b> A pergunta que separa as seis não é estética — é <b>quanto da frota você vê quando nada está acontecendo</b>. As opções 2 e 3 só ficam visíveis quando os agentes trabalham; as 1, 5 e 6 são visíveis sempre; a 4 fica no meio. A segunda pergunta é <b>quanto custa em pixels</b>: a 2 custa zero, a 1 custa 76px, a 5 custa ~320px, a 6 custa um clique por dia.<br><br>
+  Se quiser, também dá para <b>combinar</b> — por exemplo a 1 com a 6 (cais permanente + frota como tela inicial), ou a 2 com a 4. Me diga o número, ou descreva a mistura, e eu construo o mockup completo com todas as telas.
+</p>
+</div>
+
+<div class="bar" id="bar"><span id="barmsg">Clique em <b>Escolher esta</b> para marcar sua preferência</span></div>
+
+<script>
+(function(){
+  var NOMES={cais:'O Cais',slot:'Slot Zero',faixa:'A Régua',doca:'A Doca',palco:'Dois Palcos',workspace:'Frota é Casa'};
+  var msg=document.getElementById('barmsg');
+  document.querySelectorAll('.opt').forEach(function(o){
+    o.querySelector('.pick').addEventListener('click', function(){
+      var on = o.getAttribute('aria-pressed')==='true';
+      document.querySelectorAll('.opt').forEach(function(x){
+        x.removeAttribute('aria-pressed');
+        x.querySelector('.pick').textContent='Escolher esta';
+      });
+      if(!on){
+        o.setAttribute('aria-pressed','true');
+        o.querySelector('.pick').textContent='✓ Escolhida';
+        msg.innerHTML='Você marcou <b>'+NOMES[o.dataset.opt]+'</b> — me diga isso no chat e eu construo o mockup completo';
+      } else {
+        msg.innerHTML='Clique em <b>Escolher esta</b> para marcar sua preferência';
+      }
+    });
+  });
+  document.getElementById('theme').addEventListener('click', function(){
+    var c=document.documentElement.getAttribute('data-theme');
+    var n=c==='dark'?'light':c==='light'?null:'dark';
+    if(n) document.documentElement.setAttribute('data-theme',n); else document.documentElement.removeAttribute('data-theme');
+  });
+})();
+</script>

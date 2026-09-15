@@ -1,0 +1,909 @@
+<title>Leapy Copiloto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#FBFAF8; --surface:#FFFFFF; --sunk:#F3F1ED; --rail:#F7F5F2;
+  --ink:#1C1D1F; --ink-2:#55575B; --ink-3:#85878C;
+  --line:#E4E2DD; --line-2:#D6D3CC;
+  --petrol:#1F5E6E; --petrol-soft:#E8F0F2; --petrol-ink:#17474F;
+  --amber:#B46A0F; --amber-soft:#FBF1E0;
+  --green:#3F6B4A; --red:#9E3B32; --red-soft:#FAEDEB;
+  --shadow:0 1px 2px rgba(28,29,31,.05), 0 8px 24px -12px rgba(28,29,31,.14);
+  --f-display:"Newsreader",Georgia,serif;
+  --f-sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+:root:not([data-theme="light"]){ }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#151617; --surface:#1C1E1F; --sunk:#121314; --rail:#191B1C;
+    --ink:#ECEAE6; --ink-2:#A8A9AC; --ink-3:#77797D;
+    --line:#2C2E30; --line-2:#3A3D3F;
+    --petrol:#6FB3C4; --petrol-soft:#16303612; --petrol-ink:#9CCFDC;
+    --amber:#D89A4A; --amber-soft:#2A200F;
+    --green:#7BAE87; --red:#D98279; --red-soft:#2C1917;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#151617; --surface:#1C1E1F; --sunk:#121314; --rail:#191B1C;
+  --ink:#ECEAE6; --ink-2:#A8A9AC; --ink-3:#77797D;
+  --line:#2C2E30; --line-2:#3A3D3F;
+  --petrol:#6FB3C4; --petrol-soft:#163036; --petrol-ink:#9CCFDC;
+  --amber:#D89A4A; --amber-soft:#2A200F;
+  --green:#7BAE87; --red:#D98279; --red-soft:#2C1917;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 13px/1.5 var(--f-sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+:focus-visible{outline:2px solid var(--petrol);outline-offset:2px;border-radius:3px}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.mono{font-family:var(--f-mono);font-size:12px;line-height:1.65}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:280px 1fr;height:100%;min-height:0}
+.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.brand{padding:16px 16px 10px;display:flex;align-items:baseline;gap:8px}
+.brand b{font:500 17px/1 var(--f-display);letter-spacing:-.01em}
+.brand span{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.search{margin:0 12px 10px;display:flex;align-items:center;gap:7px;background:var(--sunk);border:1px solid transparent;border-radius:7px;padding:7px 9px;color:var(--ink-3)}
+.search input{border:0;background:none;font:inherit;color:var(--ink);width:100%;outline:none}
+.filters{display:flex;gap:6px;padding:0 12px 10px}
+.pill{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;padding:5px 9px;border-radius:999px;color:var(--ink-3);border:1px solid var(--line)}
+.pill[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.pill .n{display:inline-block;margin-left:5px;padding:0 4px;border-radius:99px;background:var(--amber);color:#fff;font-size:10px}
+.pill[aria-pressed="true"] .n{background:var(--amber)}
+.convs{list-style:none;margin:0;padding:0 8px;overflow:auto;flex:1;min-height:0}
+.grp{display:flex;align-items:baseline;gap:7px;padding:14px 8px 5px}
+.grp:first-child{padding-top:2px}
+.grp .hint{font-size:10px;color:var(--ink-3);opacity:.8}
+.conv{width:100%;display:grid;grid-template-columns:28px 1fr 12px;gap:9px;align-items:center;height:56px;padding:0 8px;border-radius:8px;text-align:left}
+.conv:hover{background:var(--sunk)}
+.conv[aria-current="true"]{background:var(--surface);box-shadow:inset 0 0 0 1px var(--line)}
+.av{width:28px;height:28px;border-radius:50%;background:var(--sunk);border:1px solid var(--line-2);display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--ink-2);flex:none}
+.av.bot{border-radius:7px;background:var(--petrol-soft);border-color:transparent;color:var(--petrol-ink)}
+.conv .nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv .pv{font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.dot{width:8px;height:8px;border-radius:50%;justify-self:end}
+.dot.amber{background:var(--amber)}
+.dot.blue{background:var(--petrol)}
+.dot.off{border:1.5px solid var(--red);width:9px;height:9px}
+.typing{display:flex;gap:2.5px;justify-self:end}
+.typing i{width:3.5px;height:3.5px;border-radius:50%;background:var(--ink-3);animation:bl 1.3s infinite}
+.typing i:nth-child(2){animation-delay:.18s}.typing i:nth-child(3){animation-delay:.36s}
+@keyframes bl{0%,60%,100%{opacity:.28}30%{opacity:1}}
+.railfoot{border-top:1px solid var(--line);padding:9px 16px;display:flex;justify-content:space-between;align-items:center}
+.railfoot button{font-size:12px;color:var(--ink-2)}
+.railfoot button:hover{color:var(--ink)}
+
+/* ---------- main ---------- */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--paper);position:relative}
+.head{height:52px;flex:none;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 20px}
+.head h1{margin:0;font:500 15px/1 var(--f-display);letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.faces{display:flex;margin-left:2px}
+.faces .av{width:22px;height:22px;font-size:9.5px;margin-left:-6px;box-shadow:0 0 0 2px var(--paper)}
+.faces .av:first-child{margin-left:0}
+.headacts{margin-left:auto;display:flex;gap:2px;align-items:center}
+.privtag{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+.icb{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--ink-3)}
+.icb:hover{background:var(--sunk);color:var(--ink)}
+.icb[aria-pressed="true"]{background:var(--sunk);color:var(--ink)}
+.scroll{flex:1;overflow:auto;min-height:0}
+.wrap{max-width:720px;margin:0 auto;padding:24px 32px}
+
+/* transcript */
+.msg{display:grid;grid-template-columns:28px 1fr;gap:11px;margin-bottom:18px}
+.msg .who{font-size:13px;font-weight:600;margin-bottom:2px}
+.msg .who time{font-weight:400;font-size:11px;color:var(--ink-3);margin-left:7px}
+.msg p{margin:0;color:var(--ink-2)}
+.msg p+p{margin-top:8px}
+details.act{margin:0 0 18px 39px;border-left:2px solid var(--line);padding-left:11px}
+details.act summary{list-style:none;cursor:pointer;font-size:11px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+details.act summary::-webkit-details-marker{display:none}
+details.act summary::before{content:"▸";font-size:9px;color:var(--ink-3);transition:transform .15s}
+details.act[open] summary::before{transform:rotate(90deg)}
+details.act .body{margin-top:8px;padding:10px 12px;background:var(--sunk);border-radius:7px;font-size:12px;color:var(--ink-2)}
+.resolved{display:flex;align-items:center;gap:8px;margin:0 0 18px 39px;font-size:11.5px;color:var(--ink-3);opacity:.85}
+.tick{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;font-size:9px;color:#fff;background:var(--green);flex:none}
+.tick.no{background:var(--red)}
+
+/* composer zone */
+.dock{flex:none;padding:0 32px 20px;background:linear-gradient(to bottom,transparent,var(--paper) 22px);position:relative;z-index:2}
+.dockin{max-width:720px;margin:0 auto}
+.working{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-3);padding:0 2px 8px}
+.ping{width:6px;height:6px;border-radius:50%;background:var(--petrol);animation:pg 1.6s ease-in-out infinite}
+@keyframes pg{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+.composer{background:var(--surface);border:1px solid var(--line-2);border-radius:11px;padding:10px 12px;display:flex;align-items:flex-end;gap:10px;box-shadow:var(--shadow)}
+.composer textarea{flex:1;border:0;background:none;resize:none;font:inherit;color:var(--ink);outline:none;min-height:22px;max-height:120px}
+.composer textarea:disabled{color:var(--ink-3)}
+.btn{border-radius:7px;padding:7px 13px;font-size:12.5px;font-weight:500;border:1px solid transparent;white-space:nowrap}
+.btn.primary{background:var(--petrol);color:#fff}
+.btn.primary:hover{background:var(--petrol-ink)}
+.btn.ghost{border-color:var(--line-2);color:var(--ink-2)}
+.btn.ghost:hover{border-color:var(--ink-3);color:var(--ink)}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.danger:hover{background:var(--red-soft)}
+.btn.bare{color:var(--ink-3);padding:7px 4px;font-size:12px}
+.btn.bare:hover{color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* approval card */
+.card{background:var(--surface);border:1.5px solid var(--petrol);border-radius:11px;box-shadow:var(--shadow);overflow:hidden}
+.card.ask{border-color:var(--line-2)}
+.card.dead{border:1px solid var(--line);background:var(--sunk);box-shadow:none}
+.cardtop{padding:13px 16px 0;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.count{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:99px;background:var(--sunk);color:var(--ink-2);letter-spacing:.02em}
+.cardtitle{padding:7px 16px 12px;font-size:14px;font-weight:600;line-height:1.35}
+.items{list-style:none;margin:0;padding:0 16px 4px;border-top:1px solid var(--line)}
+.items li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.items li:last-child{border-bottom:0}
+.items input{width:15px;height:15px;accent-color:var(--petrol);flex:none;margin:0}
+.items .who2{font-size:13px;font-weight:500}
+.items .meta{font-size:11.5px;color:var(--ink-3);margin-left:auto;font-variant-numeric:tabular-nums;text-align:right}
+.items .late{color:var(--amber);font-weight:500}
+.tally{padding:8px 16px 0;font-size:11px;color:var(--ink-3)}
+.payload{margin:10px 16px;background:var(--sunk);border-radius:8px;padding:11px 13px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.payload .sum{font-size:12.5px;color:var(--ink-2)}
+.payload .sum b{color:var(--ink);font-weight:600}
+.reveal{border-top:1px solid var(--line);margin:0 16px;padding:12px 0 2px}
+.reveal .mono{background:var(--sunk);border-radius:8px;padding:12px 13px;color:var(--ink-2);white-space:pre-wrap}
+.cardacts{display:flex;align-items:center;gap:8px;padding:13px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+.cardacts .spacer{flex:1}
+.grant{font-size:10.5px;color:var(--ink-3);padding:0 16px 13px;margin-top:-6px;line-height:1.45}
+.opts{list-style:none;margin:0;padding:0 16px 6px;border-top:1px solid var(--line)}
+.opts li{padding:2px 0}
+.opt{width:100%;display:flex;gap:10px;align-items:flex-start;padding:10px 11px;border:1px solid var(--line);border-radius:8px;text-align:left}
+.opt:hover{border-color:var(--line-2);background:var(--sunk)}
+.opt[aria-pressed="true"]{border-color:var(--petrol);background:var(--petrol-soft)}
+.radio{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line-2);flex:none;margin-top:1px}
+.opt[aria-pressed="true"] .radio{border-color:var(--petrol);border-width:4px}
+.opt .t{font-size:13px;font-weight:500}
+.opt .d{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+.offline{display:flex;align-items:center;gap:9px;padding:12px 15px;font-size:12.5px;color:var(--ink-2)}
+.offline .dot.off{width:8px;height:8px;justify-self:auto}
+
+/* context panel */
+.panel{position:absolute;top:52px;right:0;bottom:0;width:380px;background:var(--surface);border-left:1px solid var(--line);box-shadow:-14px 0 32px -22px rgba(28,29,31,.4);display:flex;flex-direction:column;z-index:5}
+.panel .ph{height:52px;flex:none;display:flex;align-items:center;padding:0 12px 0 18px;border-bottom:1px solid var(--line)}
+.panel .ph b{font:500 14px/1 var(--f-display)}
+.tabs{display:flex;gap:2px;padding:9px 12px;border-bottom:1px solid var(--line);flex:none}
+.tab{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding:6px 9px;border-radius:6px}
+.tab[aria-selected="true"]{background:var(--sunk);color:var(--ink)}
+.pbody{overflow:auto;padding:14px 18px 22px;flex:1;min-height:0}
+.frame{font-size:11px;color:var(--ink-3);margin:0 0 12px;line-height:1.5}
+.perm{border-top:1px solid var(--line);padding:11px 0}
+.perm:last-of-type{border-bottom:1px solid var(--line)}
+.permrow{display:flex;align-items:center;gap:10px}
+.permrow .nm2{font-size:12.5px;flex:1}
+.lock{font-size:11px;color:var(--ink-3)}
+.seg{display:flex;background:var(--sunk);border-radius:7px;padding:2px;flex:none}
+.seg button{font-size:11px;padding:4px 8px;border-radius:5px;color:var(--ink-3);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(28,29,31,.08);font-weight:500}
+.seg.locked button[aria-pressed="true"]{color:var(--ink-2)}
+.granted{font-size:10.5px;color:var(--amber);margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.granted a{color:var(--amber);text-decoration:underline;text-underline-offset:2px}
+.scope{margin:16px 0 0;padding:12px 13px;background:var(--sunk);border-radius:8px;font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.know{list-style:none;margin:0;padding:0}
+.know li{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.know li>span:first-child{flex:1}
+.know .x{color:var(--ink-3);font-size:14px;line-height:1;flex:none;margin-top:-1px}
+.know .x:hover{color:var(--red)}
+.layer+.layer{margin-top:20px}
+.layerhead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.scopetag{font-size:10px;color:var(--ink-3);background:var(--sunk);border-radius:99px;padding:2px 7px}
+.scopetag.alt{background:var(--petrol-soft);color:var(--petrol-ink)}
+.promote{font-size:10.5px;color:var(--petrol);white-space:nowrap;flex:none;padding:2px 6px;border-radius:5px;border:1px solid transparent}
+.promote:hover{border-color:var(--petrol);background:var(--petrol-soft)}
+.sealed{font-size:10px;color:var(--ink-3);white-space:nowrap;flex:none}
+.layernote{margin:9px 0 0;font-size:10.5px;color:var(--ink-3);line-height:1.6}
+
+/* generic page blocks */
+.sheet{max-width:720px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.sheet+.sheet{margin-top:16px}
+.block{padding:15px 18px;border-bottom:1px solid var(--line)}
+.block:last-child{border-bottom:0}
+.block h3{margin:0 0 9px;font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.rname{display:flex;align-items:center;gap:12px}
+.rname .t{font:500 16px/1.2 var(--f-display);flex:1}
+.sw{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-2)}
+.sw i{width:30px;height:17px;border-radius:99px;background:var(--green);position:relative;flex:none}
+.sw i::after{content:"";position:absolute;top:2px;right:2px;width:13px;height:13px;border-radius:50%;background:#fff}
+.sentence{font-size:14px;line-height:2;color:var(--ink-2)}
+.slot{display:inline-flex;align-items:center;gap:5px;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:13px;color:var(--ink);font-weight:500;margin:0 1px}
+.slot::after{content:"▾";font-size:9px;color:var(--ink-3)}
+.link{font-size:12px;color:var(--petrol);text-decoration:underline;text-underline-offset:2px}
+.ta{width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:11px 12px;font:inherit;color:var(--ink-2);resize:vertical;min-height:76px;outline:none;line-height:1.55}
+.ta:focus{border-color:var(--petrol)}
+.chk{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--ink)}
+.chk input{width:15px;height:15px;accent-color:var(--petrol);margin:2px 0 0;flex:none}
+.sub{margin:9px 0 0 25px;padding-left:12px;border-left:2px solid var(--line);display:grid;gap:8px}
+.sub p{margin:0;font-size:12.5px;color:var(--ink-2);line-height:1.9}
+.sheetfoot{display:flex;align-items:center;padding:12px 18px;background:var(--sunk)}
+.sheetfoot .spacer{flex:1}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding:0 12px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tr:last-child td{border-bottom:0}
+.tbl .when{font-family:var(--f-mono);font-size:11.5px;color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.state{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.state i{width:7px;height:7px;border-radius:50%;flex:none}
+.i-ok{background:var(--green)}.i-wait{background:var(--amber)}.i-skip{background:var(--ink-3)}.i-err{background:var(--red)}
+.tag{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.t-ok{background:#EAF1EC;color:var(--green)}
+.t-no{background:var(--red-soft);color:var(--red)}
+.t-auto{background:var(--sunk);color:var(--ink-2)}
+.t-exp{background:var(--amber-soft);color:var(--amber)}
+:root[data-theme="dark"] .t-ok{background:#1B2A1F}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .t-ok{background:#1B2A1F}}
+.sup{color:var(--ink-3)}
+.sup.flag{color:var(--amber);font-weight:500}
+.exp{background:var(--sunk);font-size:12px;color:var(--ink-2);line-height:1.6}
+.exp dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px}
+.exp dt{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding-top:1px}
+.exp dd{margin:0}
+.filters2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 0;border-bottom:1px solid var(--line);margin-bottom:4px}
+.sel{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:12.5px;color:var(--ink-2);background:var(--surface)}
+.sel::after{content:"▾";font-size:9px;color:var(--ink-3)}
+.srch2{flex:1;min-width:150px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;padding:5px 10px;background:var(--surface);color:var(--ink-3)}
+.srch2 input{border:0;background:none;font:inherit;color:var(--ink);width:100%;outline:none}
+.tcount{font-size:11px;color:var(--ink-3);padding:10px 12px 0}
+
+/* settings */
+.sechead{max-width:720px;margin:0 auto 9px;display:flex;align-items:baseline;gap:9px}
+.sechead h2{margin:0;font:500 15px/1 var(--f-display)}
+.sechead span{font-size:11px;color:var(--ink-3)}
+.sechead+.sheet{margin-bottom:22px}
+.prow{display:flex;align-items:center;gap:11px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .nm3{font-size:13px;font-weight:500}
+.prow .em{font-size:11.5px;color:var(--ink-3)}
+.prow .spacer{flex:1}
+.note{padding:11px 18px;font-size:11px;color:var(--ink-3);line-height:1.6;background:var(--sunk);border-top:1px solid var(--line)}
+.stopbar{display:flex;align-items:center;gap:11px;padding:13px 18px;border-top:1px solid var(--line);background:var(--red-soft)}
+.stopbar p{margin:0;font-size:12px;color:var(--ink-2);flex:1;line-height:1.5}
+.killbanner{display:none;align-items:center;gap:11px;padding:9px 20px;background:var(--red);color:#fff;font-size:12.5px;flex:none}
+.killbanner .btn{border-color:rgba(255,255,255,.55);color:#fff}
+.killbanner .btn:hover{background:rgba(255,255,255,.14)}
+body.stopped .killbanner{display:flex}
+.empty{max-width:720px;margin:0 auto;text-align:center;padding:60px 20px;color:var(--ink-3);font-size:13px;line-height:1.7}
+
+/* screen switching */
+.screen{display:none;flex-direction:column;flex:1;min-height:0}
+.screen.on{display:flex}
+.panel{display:none}
+body.ctx .panel{display:flex}
+
+/* nav chrome for the mockup itself */
+.mocknav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;gap:2px;background:var(--surface);border:1px solid var(--line-2);border-radius:99px;padding:4px;box-shadow:var(--shadow)}
+.mocknav button{font-size:11.5px;padding:6px 13px;border-radius:99px;color:var(--ink-3);white-space:nowrap}
+.mocknav button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:500}
+.mocknav .sep{width:1px;background:var(--line);margin:4px 3px}
+
+@media (max-width:880px){
+  .app{grid-template-columns:1fr}
+  .rail{display:none}
+  .panel{width:100%;border-left:0}
+  .wrap,.dock{padding-left:16px;padding-right:16px}
+  .mocknav{overflow-x:auto;max-width:calc(100vw - 24px)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b>Leapy</b><span>Copiloto</span></div>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <input id="q" placeholder="Buscar" aria-label="Buscar conversas">
+    </div>
+    <div class="filters">
+      <button class="pill" id="f-all" aria-pressed="true">Todas</button>
+      <button class="pill" id="f-you" aria-pressed="false">Esperando você <span class="n">2</span></button>
+    </div>
+    <ul class="convs">
+      <li class="grp"><span class="lbl">Seus agentes</span><span class="hint" title="Só você vê estas conversas">privado</span></li>
+      <li><button class="conv" data-solo="1">
+        <span class="av bot">B</span>
+        <span><span class="nm">Bia</span><span class="pv">Só você · desenvolvimento e avaliações</span></span>
+        <span></span>
+      </button></li>
+      <li><button class="conv" data-solo="1">
+        <span class="av bot">T</span>
+        <span><span class="nm">Téo</span><span class="pv">Só você · contratos e renovações</span></span>
+        <span class="dot blue" title="Não lido"></span>
+      </button></li>
+      <li class="grp"><span class="lbl">Conversas</span><span class="hint">com o time</span></li>
+      <li><button class="conv" aria-current="true">
+        <span class="av bot">B</span>
+        <span><span class="nm">Acompanhamento de avaliações</span><span class="pv">Preparou 4 cobranças → aguardando você</span></span>
+        <span class="dot amber" title="Esperando você"></span>
+      </button></li>
+      <li><button class="conv">
+        <span class="av bot">B</span>
+        <span><span class="nm">Onboarding — Construtora Ferreira</span><span class="pv">Lendo o plano de desenvolvimento…</span></span>
+        <span class="typing" title="Trabalhando"><i></i><i></i><i></i></span>
+      </button></li>
+      <li><button class="conv">
+        <span class="av bot">T</span>
+        <span><span class="nm">Renovações de contrato</span><span class="pv">Téo: a gestora respondeu ontem</span></span>
+        <span class="dot blue" title="Não lido"></span>
+      </button></li>
+      <li><button class="conv">
+        <span class="av bot">T</span>
+        <span><span class="nm">Metalúrgica Andrade</span><span class="pv">Téo está fora do ar</span></span>
+        <span class="dot off" title="Agente fora do ar"></span>
+      </button></li>
+      <li><button class="conv">
+        <span class="av">PL</span>
+        <span><span class="nm">Dúvidas de RH</span><span class="pv">Patrícia: obrigada, resolvido</span></span>
+        <span></span>
+      </button></li>
+    </ul>
+    <div class="railfoot">
+      <button data-go="configuracoes">Configurações</button>
+      <button id="theme" title="Alternar tema" aria-label="Alternar tema">◐</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="killbanner">
+      <span>Os agentes estão parados desde 14:20, por Marlon W.</span>
+      <button class="btn ghost" id="resume" style="margin-left:auto">Retomar</button>
+    </div>
+
+    <!-- ====== 1. CONVERSA ====== -->
+    <section class="screen on" id="s-conversa">
+      <header class="head">
+        <h1>Acompanhamento de avaliações — Turma 2026.1</h1>
+        <span class="faces"><span class="av">MW</span><span class="av">PL</span><span class="av bot">B</span></span>
+        <span class="headacts">
+          <button class="icb" title="Buscar nesta conversa" aria-label="Buscar nesta conversa">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+          <button class="icb" id="ctxbtn" aria-pressed="false" title="Contexto da conversa" aria-label="Contexto da conversa">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M10 2.5v11" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+        </span>
+      </header>
+
+      <div class="scroll">
+        <div class="wrap" role="log" aria-live="polite">
+          <div class="msg">
+            <span class="av">MW</span>
+            <div><div class="who">Marlon W. <time>09:02</time></div>
+            <p>Quem ainda não entregou a avaliação do 2º trimestre?</p></div>
+          </div>
+
+          <details class="act">
+            <summary>Consultou as avaliações do 2º trimestre → 7 pendentes de 43</summary>
+            <div class="body">Buscou as avaliações da turma 2026.1 com situação “não entregue”. Considerou o prazo definido no plano de cada aprendiz. Nenhum dado pessoal saiu desta conversa.</div>
+          </details>
+
+          <div class="msg">
+            <span class="av bot">B</span>
+            <div><div class="who">Bia <time>09:03</time></div>
+            <p>Sete aprendizes ainda não entregaram. Quatro estão com prazo vencido há mais de 5 dias.</p>
+            <p>Quer que eu prepare a cobrança?</p></div>
+          </div>
+
+          <div class="msg">
+            <span class="av">MW</span>
+            <div><div class="who">Marlon W. <time>09:05</time></div>
+            <p>Sim, manda para os quatro atrasados.</p></div>
+          </div>
+
+          <div class="resolved"><span class="tick">✓</span> Você aprovou 3 de 4 itens às 14:32 · 01/09</div>
+        </div>
+      </div>
+
+      <div class="dock">
+        <div class="dockin">
+          <div class="card" id="approval">
+            <div class="cardtop">
+              <span class="lbl" style="color:var(--petrol)">Aguardando você</span>
+              <span class="count">1 de 1</span>
+            </div>
+            <div class="cardtitle">Enviar e-mail de cobrança de avaliação</div>
+            <ul class="items" id="items">
+              <li><input type="checkbox" id="i1" checked><label for="i1" class="who2">Ana Clara M.</label><span class="meta">venceu 08/09 · <span class="late">6 dias</span></span></li>
+              <li><input type="checkbox" id="i2" checked><label for="i2" class="who2">Bruno S.</label><span class="meta">venceu 08/09 · <span class="late">6 dias</span></span></li>
+              <li><input type="checkbox" id="i3" checked><label for="i3" class="who2">Larissa P.</label><span class="meta">venceu 07/09 · <span class="late">7 dias</span></span></li>
+              <li><input type="checkbox" id="i4" checked><label for="i4" class="who2">Thiago R.</label><span class="meta">venceu 06/09 · <span class="late">8 dias</span></span></li>
+            </ul>
+            <p class="tally" id="tally">4 de 4 selecionados</p>
+            <div class="payload">
+              <span class="sum"><b>4 destinatários</b> · 1 modelo de e-mail</span>
+              <button class="btn ghost" id="revealbtn">Ver conteúdo completo</button>
+            </div>
+            <div class="reveal" id="reveal" hidden>
+              <div class="mono">Assunto: Avaliação do 2º trimestre pendente
+
+Olá, [primeiro nome].
+
+Sua avaliação do 2º trimestre venceu em [data] e ainda consta como
+não entregue. Você pode preencher pelo portal até sexta-feira.
+
+Qualquer dúvida, é só responder este e-mail.
+
+— Equipe Leapy, em nome da Construtora Ferreira</div>
+            </div>
+            <div class="cardacts">
+              <button class="btn danger">Negar</button>
+              <span class="spacer"></span>
+              <button class="btn bare">Sempre aprovar esta ação</button>
+              <button class="btn primary" id="approve" disabled>Aprovar os 4 selecionados</button>
+            </div>
+            <p class="grant">“Sempre aprovar” vale por 30 dias, só nesta conversa. Aparece em Contexto → Permissões, onde você pode desfazer.</p>
+          </div>
+
+          <div class="composer" style="margin-top:10px">
+            <textarea id="msg" rows="1" disabled placeholder="Responda à solicitação acima para continuar"></textarea>
+            <button class="btn ghost" disabled>Enviar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== 2. ESTADOS DO COMPOSER ====== -->
+    <section class="screen" id="s-estados">
+      <header class="head"><h1>Estados do composer</h1>
+        <span class="headacts"><span class="lbl">Mesma conversa, quatro situações</span></span>
+      </header>
+      <div class="scroll"><div class="wrap" style="max-width:760px">
+
+        <p class="lbl" style="margin:0 0 9px">1 · Normal, agente trabalhando</p>
+        <div class="working"><span class="ping"></span> Lendo o plano de desenvolvimento da Ana Clara</div>
+        <div class="composer">
+          <textarea rows="1" placeholder="Escreva para a Bia…" aria-label="Mensagem"></textarea>
+          <button class="btn ghost">Enviar</button>
+        </div>
+
+        <p class="lbl" style="margin:30px 0 9px">2 · Pergunta — nunca tem Aprovar/Negar</p>
+        <div class="card ask">
+          <div class="cardtop"><span class="lbl">Pergunta</span></div>
+          <div class="cardtitle">Dois aprendizes têm o mesmo gestor. Envio uma cobrança por aprendiz ou uma só com os dois?</div>
+          <ul class="opts">
+            <li><button class="opt" aria-pressed="true"><span class="radio"></span><span><span class="t">Uma por aprendiz</span><span class="d">Mais claro para acompanhar, dois e-mails para a mesma pessoa.</span></span></button></li>
+            <li><button class="opt" aria-pressed="false"><span class="radio"></span><span><span class="t">Uma só, com os dois nomes</span><span class="d">Menos ruído na caixa do gestor.</span></span></button></li>
+            <li><button class="opt" aria-pressed="false"><span class="radio"></span><span><span class="t">Outro</span><span class="d">Escrever a orientação livremente.</span></span></button></li>
+          </ul>
+          <div class="cardacts"><span class="spacer"></span><button class="btn primary">Responder</button></div>
+        </div>
+
+        <p class="lbl" style="margin:30px 0 9px">3 · Agente fora do ar</p>
+        <div class="card dead">
+          <div class="offline">
+            <span class="dot off"></span>
+            <span>A Bia está fora do ar desde 14:20 — o provedor de IA não está respondendo. <b>Nada foi enviado.</b> O que você digitar fica guardado como rascunho.</span>
+          </div>
+        </div>
+
+        <p class="lbl" style="margin:30px 0 9px">4 · Teto da conversa atingido — escala, não tenta de novo</p>
+        <div class="card" style="border-color:var(--amber)">
+          <div class="cardtop"><span class="lbl" style="color:var(--amber)">Parei e chamei você</span></div>
+          <div class="cardtitle">A Bia mandou 6 mensagens seguidas sem resposta de ninguém.</div>
+          <div class="payload" style="background:var(--amber-soft)">
+            <span class="sum">Ela parou por conta própria em vez de continuar tentando. Nada saiu para nenhum aprendiz.</span>
+          </div>
+          <div class="cardacts"><span class="spacer"></span><button class="btn ghost">Ver o que ela tentou</button><button class="btn primary">Continuar daqui</button></div>
+        </div>
+
+        <p style="margin:26px 0 0;font-size:11.5px;color:var(--ink-3);line-height:1.7">
+          Herdado do <code style="font-family:var(--f-mono);font-size:11px">room-post-budget.ts</code> do OpenMausBot: o teto conta só as mensagens que ninguém respondeu, e estourar significa “pergunte à pessoa” — nunca “espere e tente de novo”.
+        </p>
+      </div></div>
+    </section>
+
+    <!-- ====== 2b. 1:1 COM O AGENTE ====== -->
+    <section class="screen" id="s-privado">
+      <header class="head">
+        <h1>Bia</h1>
+        <span class="privtag">Só você</span>
+        <span class="headacts">
+          <button class="icb" title="Contexto" aria-label="Contexto"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M10 2.5v11" stroke="currentColor" stroke-width="1.3"/></svg></button>
+        </span>
+      </header>
+      <div class="scroll"><div class="wrap">
+        <div class="msg">
+          <span class="av">MW</span>
+          <div><div class="who">Marlon W. <time>08:41</time></div>
+          <p>O Thiago R. tá com avaliação atrasada de novo. Antes de eu levar isso pro canal da Construtora, me ajuda a pensar — é padrão ou é caso isolado?</p></div>
+        </div>
+        <details class="act">
+          <summary>Consultou o histórico de entregas do aprendiz → 3 atrasos em 6 avaliações</summary>
+          <div class="body">Leu as avaliações da turma 2026.1 às quais esta conversa tem acesso. Nada saiu desta conversa.</div>
+        </details>
+        <div class="msg">
+          <span class="av bot">B</span>
+          <div><div class="who">Bia <time>08:42</time></div>
+          <p>É padrão: três atrasos em seis avaliações, sempre nas semanas de prova da escola técnica. Os outros aprendizes da mesma escola têm o mesmo desenho.</p>
+          <p>Antes de levar pro canal do cliente, vale conversar com ele? Uma cobrança automática num caso desses costuma piorar.</p></div>
+        </div>
+        <div class="msg">
+          <span class="av">MW</span>
+          <div><div class="who">Marlon W. <time>08:44</time></div>
+          <p>Boa. Manda um e-mail pra ele propondo remarcar, sem tom de cobrança.</p></div>
+        </div>
+      </div></div>
+
+      <div class="dock"><div class="dockin">
+        <div class="card">
+          <div class="cardtop">
+            <span class="lbl" style="color:var(--petrol)">Aguardando você</span>
+            <span class="count">mesma regra do canal</span>
+          </div>
+          <div class="cardtitle">Enviar e-mail ao aprendiz propondo remarcar a avaliação</div>
+          <ul class="items">
+            <li><input type="checkbox" id="p1" checked><label for="p1" class="who2">Thiago R.</label><span class="meta">3 atrasos em 6 · escola técnica</span></li>
+          </ul>
+          <div class="payload">
+            <span class="sum"><b>1 destinatário</b> · e-mail redigido agora, sem modelo</span>
+            <button class="btn ghost">Ver conteúdo completo</button>
+          </div>
+          <div class="cardacts">
+            <button class="btn danger">Negar</button>
+            <span class="spacer"></span>
+            <button class="btn primary">Aprovar o item selecionado</button>
+          </div>
+          <p class="grant">O 1:1 não é uma porta dos fundos: qualquer coisa que saia para uma pessoa real passa pelo mesmo gate e entra no mesmo registro. “Sempre aprovar” não aparece aqui — a ação toca um aprendiz individualmente.</p>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ====== 3. ROTINA ====== -->
+    <section class="screen" id="s-rotina">
+      <header class="head"><h1>Rotina</h1></header>
+      <div class="scroll"><div class="wrap">
+        <div class="sheet">
+          <div class="block">
+            <div class="rname">
+              <span class="t">Cobrança de avaliações pendentes</span>
+              <span class="sw"><i></i> Ativa</span>
+            </div>
+          </div>
+          <div class="block">
+            <h3>Quando</h3>
+            <p class="sentence" style="margin:0">Toda <span class="slot">segunda-feira</span> às <span class="slot">09:00</span>, horário de Brasília. <a class="link" href="#0">Outra frequência</a></p>
+          </div>
+          <div class="block">
+            <h3>O que fazer</h3>
+            <textarea class="ta" aria-label="O que fazer">Verificar quais aprendizes da turma 2026.1 estão com avaliação pendente há mais de 3 dias e preparar um e-mail de cobrança para cada um, seguindo os combinados da conversa.</textarea>
+          </div>
+          <div class="block">
+            <h3>Antes de agir</h3>
+            <label class="chk"><input type="checkbox" checked> Pedir minha aprovação antes de enviar qualquer coisa</label>
+            <div class="sub">
+              <p>Se eu não responder em <span class="slot">24 horas</span>, não envie e me avise.</p>
+              <p>Se a semana seguinte chegar sem resposta, <b>substituir o pedido anterior</b> e registrar que ele passou em branco.</p>
+            </div>
+          </div>
+          <div class="sheetfoot">
+            <button class="btn bare">Executar agora</button>
+            <span class="spacer"></span>
+            <button class="btn primary">Salvar</button>
+          </div>
+        </div>
+
+        <p class="lbl" style="margin:26px 0 10px">Últimas execuções</p>
+        <table class="tbl">
+          <thead><tr><th>Estado</th><th>Quando</th><th>Resultado</th></tr></thead>
+          <tbody>
+            <tr><td><span class="state"><i class="i-wait"></i> Aguardando você</span></td><td class="when">08/09 09:00</td><td>Preparou 4 cobranças → aguardando sua aprovação</td></tr>
+            <tr><td><span class="state"><i class="i-ok"></i> Concluída</span></td><td class="when">01/09 09:00</td><td>Enviou 2 cobranças → 2 avaliações entregues até quarta</td></tr>
+            <tr><td><span class="state"><i class="i-skip"></i> Não executou</span></td><td class="when">25/08 09:00</td><td>Feriado no calendário do cliente — nenhuma cobrança enviada</td></tr>
+            <tr><td><span class="state"><i class="i-skip"></i> Não executou</span></td><td class="when">18/08 09:00</td><td>O pedido de 11/08 passou em branco — substituído, sem envio</td></tr>
+            <tr><td><span class="state"><i class="i-err"></i> Falhou</span></td><td class="when">11/08 09:00</td><td>O provedor de IA não respondeu — nada foi enviado</td></tr>
+          </tbody>
+        </table>
+        <p style="margin:18px 0 0;font-size:11.5px;color:var(--ink-3);line-height:1.7">“Não executou” é um estado escrito na tela, com o motivo. Silêncio nunca é a resposta — é a coisa que a pessoa teria de adivinhar.</p>
+      </div></div>
+    </section>
+
+    <!-- ====== 4. CONFIGURAÇÕES ====== -->
+    <section class="screen" id="s-configuracoes">
+      <header class="head"><h1>Configurações</h1></header>
+      <div class="scroll"><div class="wrap">
+
+        <div class="sechead"><h2>Sua conta</h2></div>
+        <div class="sheet">
+          <div class="prow"><span class="av">MW</span><span><span class="nm3">Marlon W.</span><br><span class="em">marlon@leapy.com.br</span></span><span class="spacer"></span></div>
+          <div class="prow"><span class="nm3">Aparência</span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="false">Claro</button><button aria-pressed="false">Escuro</button><button aria-pressed="true">Como no sistema</button></span>
+          </div>
+        </div>
+
+        <div class="sechead"><h2>Pessoas</h2><span>3 no time</span></div>
+        <div class="sheet">
+          <div class="prow"><span class="av">MW</span><span><span class="nm3">Marlon W.</span><br><span class="em">marlon@leapy.com.br</span></span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="true">Administrador</button></span></div>
+          <div class="prow"><span class="av">PL</span><span><span class="nm3">Patrícia L.</span><br><span class="em">patricia@leapy.com.br</span></span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="true">Aprova decisões</button></span></div>
+          <div class="prow"><span class="av">RT</span><span><span class="nm3">Rafael T.</span><br><span class="em">rafael@leapy.com.br</span></span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="true">Acompanha</button></span></div>
+          <div class="prow"><button class="btn ghost">Convidar pessoa</button><span class="spacer"></span></div>
+          <p class="note">No MVP, cada conversa tem <b>uma</b> pessoa responsável por aprovar, escolhida na seção Agentes. Papéis de RH com escalonamento hierárquico e prazo em dias úteis exigem modelo de organização e vínculo aprendiz–gestor — entram quando o piloto provar que uma pessoa não basta.</p>
+        </div>
+
+        <div class="sechead"><h2>Agentes</h2></div>
+        <div class="sheet">
+          <div class="prow"><span class="av bot">B</span><span class="nm3">Bia</span><span class="spacer"></span>
+            <span class="em" style="margin-right:4px">Quem aprova</span><span class="seg"><button aria-pressed="true">Patrícia L.</button></span>
+            <span class="sw" style="margin-left:12px"><i></i> Ligada</span></div>
+          <div class="prow"><span class="av bot">T</span><span class="nm3">Téo</span><span class="spacer"></span>
+            <span class="em" style="margin-right:4px">Quem aprova</span><span class="seg"><button aria-pressed="true">Marlon W.</button></span>
+            <span class="sw" style="margin-left:12px"><i></i> Ligado</span></div>
+          <div class="stopbar">
+            <p>Interrompe tudo que os agentes estão fazendo agora, garantido pelo servidor. O que estava em voo é cancelado, não pausado.</p>
+            <button class="btn danger" id="stopall">Parar todos os agentes agora</button>
+          </div>
+        </div>
+
+        <div class="sechead"><h2>O que os agentes podem fazer por padrão</h2></div>
+        <div class="sheet">
+          <div class="prow"><span class="nm3">Consultar avaliações e planos</span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="false">Sempre pergunta</button><button aria-pressed="true">Pode fazer sozinho</button></span></div>
+          <div class="prow"><span class="nm3">Enviar e-mail de cobrança para aprendiz</span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="true">Sempre pergunta</button><button aria-pressed="false">Pode fazer sozinho</button></span></div>
+          <div class="prow"><span class="nm3">Registrar observação no plano de desenvolvimento</span> <span class="lock" title="Ação sobre dado individual de menor">🔒</span><span class="spacer"></span>
+            <span class="seg locked"><button aria-pressed="true">Sempre pergunta</button></span></div>
+          <div class="prow"><span class="nm3">Gerar relatório agregado para o time</span><span class="spacer"></span>
+            <span class="seg"><button aria-pressed="false">Sempre pergunta</button><button aria-pressed="true">Pode fazer sozinho</button></span></div>
+          <p class="note">Vale como padrão de conversas novas. Ações sobre dado individual de menor ficam travadas em “Sempre pergunta” e não podem ser liberadas nesta tela. Nada de motores, modelos, chaves de API ou orçamento em dólares aqui.</p>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- ====== 5. REGISTRO ====== -->
+    <section class="screen" id="s-registro">
+      <header class="head"><h1>Registro</h1>
+        <span class="headacts"><span class="lbl">Não entra no MVP</span></span>
+      </header>
+      <div class="scroll"><div class="wrap" style="max-width:940px">
+        <div class="filters2">
+          <span class="srch2">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <input placeholder="Buscar no registro" aria-label="Buscar no registro">
+          </span>
+          <span class="sel">Últimos 30 dias</span>
+          <span class="sel">Todas as conversas</span>
+          <span class="sel">Todas as decisões</span>
+          <button class="btn bare">Exportar</button>
+        </div>
+        <p class="tcount">1.248 registros no período</p>
+        <table class="tbl">
+          <thead><tr><th>Quando</th><th>Quem pediu</th><th>O que</th><th>Decisão</th><th>Supervisão</th><th>Onde</th></tr></thead>
+          <tbody>
+            <tr><td class="when">08/09 09:14</td><td>Bia</td><td>Preparou 4 cobranças de avaliação e enviou 3</td>
+              <td><span class="tag t-ok">Aprovado</span><br><span class="em" style="color:var(--ink-3);font-size:11px">Marlon W.</span></td>
+              <td class="sup">Pessoa presente</td><td>Acompanhamento de avaliações</td></tr>
+            <tr><td class="when">08/09 09:02</td><td>Bia</td><td>Consultou avaliações pendentes da turma 2026.1</td>
+              <td><span class="tag t-auto">Automático</span></td><td class="sup">Sem supervisão</td><td>Acompanhamento de avaliações</td></tr>
+            <tr><td class="when">05/09 16:41</td><td>Téo</td><td>Enviou proposta de renovação para a gestora do cliente</td>
+              <td><span class="tag t-no">Negado</span><br><span class="em" style="color:var(--ink-3);font-size:11px">Patrícia L.</span></td>
+              <td class="sup">Pessoa presente</td><td>Renovações de contrato</td></tr>
+            <tr><td class="when">04/09 03:00</td><td>Bia</td><td>Registrou observação no plano de desenvolvimento de A. C. M.</td>
+              <td><span class="tag t-auto">Automático</span></td><td class="sup flag">Sem supervisão</td><td>Metalúrgica Andrade</td></tr>
+            <tr><td colspan="6" class="exp">
+              <dl>
+                <dt>Como foi apresentado</dt><dd>“Registrar no plano de desenvolvimento de <b>A. C. M.</b> que a avaliação do 2º trimestre foi entregue com 6 dias de atraso.”</dd>
+                <dt>Regra que decidiu</dt><dd>Você marcou “Pode fazer sozinho” para esta ação nesta conversa em 12/08 — concessão válida por 30 dias.</dd>
+                <dt>Por que está em âmbar</dt><dd>Ação sem ninguém no teclado que tocou dado individual de um menor. Consulta de rotina sem supervisão é o caso normal e fica cinza.</dd>
+                <dt>Mascaramento</dt><dd>Nome reduzido a iniciais e CPF removido antes de gravar. O registro nunca guarda o dado pessoal em claro.</dd>
+              </dl>
+            </td></tr>
+            <tr><td class="when">03/09 11:20</td><td>Bia</td><td>Preparou 2 cobranças</td>
+              <td><span class="tag t-exp">Expirou</span></td><td class="sup">Pessoa presente</td><td>Metalúrgica Andrade</td></tr>
+          </tbody>
+        </table>
+        <p style="margin:18px 0 0;font-size:11.5px;color:var(--ink-3);line-height:1.7">
+          A coluna <b>O que</b> nunca mostra nome de ferramenta. A trilha é gravada desde a Fase 1; esta tela é só a leitura dela, e entra quando o primeiro cliente pedir auditoria.
+        </p>
+      </div></div>
+    </section>
+
+    <!-- context panel -->
+    <aside class="panel" aria-label="Contexto da conversa">
+      <div class="ph"><b>Contexto</b><button class="icb" id="ctxclose" style="margin-left:auto" aria-label="Fechar">✕</button></div>
+      <div class="tabs">
+        <button class="tab" id="t-perm" aria-selected="true">Permissões</button>
+        <button class="tab" id="t-know" aria-selected="false">O que a Bia sabe</button>
+      </div>
+      <div class="pbody" id="p-perm">
+        <p class="frame">O que a Bia pode fazer nesta conversa sem pedir sua aprovação.</p>
+        <div class="perm"><div class="permrow"><span class="nm2">Consultar avaliações e planos</span>
+          <span class="seg"><button aria-pressed="false">Sempre pergunta</button><button aria-pressed="true">Pode fazer sozinho</button></span></div></div>
+        <div class="perm"><div class="permrow"><span class="nm2">Enviar e-mail de cobrança para aprendiz</span>
+          <span class="seg"><button aria-pressed="false">Sempre pergunta</button><button aria-pressed="true">Pode fazer sozinho</button></span></div>
+          <p class="granted">Concedido por você em 12/08 · expira em 11/09 <a href="#0">Revogar agora</a></p></div>
+        <div class="perm"><div class="permrow"><span class="nm2">Enviar e-mail para gestor do cliente</span>
+          <span class="seg"><button aria-pressed="true">Sempre pergunta</button><button aria-pressed="false">Pode fazer sozinho</button></span></div></div>
+        <div class="perm"><div class="permrow"><span class="nm2">Registrar observação no plano <span class="lock" title="Dado individual de menor">🔒</span></span>
+          <span class="seg locked"><button aria-pressed="true">Sempre pergunta</button></span></div></div>
+        <div class="scope">Esta conversa dá acesso a: <b>avaliações e planos de desenvolvimento da turma 2026.1 da Construtora Ferreira.</b></div>
+        <p class="lbl" style="margin:18px 0 8px">Quem participa</p>
+        <p class="frame" style="margin:-2px 0 8px">Quem está aqui vê tudo o que a Bia faz nesta conversa. Para falar com ela sem o time, use o 1:1 na barra lateral.</p>
+        <div class="prow" style="padding:8px 0;border:0"><span class="av">MW</span><span class="nm3">Marlon W.</span><span class="spacer"></span><span class="em">Administrador</span></div>
+        <div class="prow" style="padding:8px 0;border:0"><span class="av">PL</span><span class="nm3">Patrícia L.</span><span class="spacer"></span><span class="em">Aprova</span></div>
+        <div class="prow" style="padding:8px 0;border:0"><span class="av bot">B</span><span class="nm3">Bia</span><span class="spacer"></span><span class="em">Agente</span></div>
+        <p style="margin:16px 0 0"><a class="link" href="#0">Ver histórico de decisões desta conversa</a></p>
+      </div>
+      <div class="pbody" id="p-know" hidden>
+        <p class="frame">A Bia lembra em duas camadas. O que ela aprende aqui <b>fica aqui</b> — a menos que você promova para a sua memória pessoal.</p>
+
+        <div class="layer">
+          <div class="layerhead">
+            <span class="lbl">Só nesta conversa</span>
+            <span class="scopetag">Construtora Ferreira · turma 2026.1</span>
+          </div>
+          <ul class="know">
+            <li><span>Cobrança de avaliação só por e-mail, nunca WhatsApp — pedido da gestora.</span>
+              <button class="promote" title="Promover para a sua memória pessoal">↑ pessoal</button>
+              <button class="x" aria-label="Remover">✕</button></li>
+            <li><span>Prazo de entrega é sempre sexta-feira; prorrogação máxima de 3 dias úteis.</span>
+              <button class="promote" title="Promover para a sua memória pessoal">↑ pessoal</button>
+              <button class="x" aria-label="Remover">✕</button></li>
+            <li><span>Thiago R. está de atestado desde 05/09 — não incluir em cobrança.</span>
+              <span class="sealed" title="Dado individual de aprendiz não pode subir para a memória pessoal">🔒 não promovível</span>
+              <button class="x" aria-label="Remover">✕</button></li>
+          </ul>
+        </div>
+
+        <div class="layer">
+          <div class="layerhead">
+            <span class="lbl">Sua memória pessoal</span>
+            <span class="scopetag alt">a Bia leva para todas as conversas</span>
+          </div>
+          <ul class="know">
+            <li><span>Prefiro receber propostas em lista, com o prazo de cada item visível.</span>
+              <button class="x" aria-label="Remover">✕</button></li>
+            <li><span>Aprendizes menores de 18: comunicação sobre desempenho passa pela gestora antes.</span>
+              <button class="x" aria-label="Remover">✕</button></li>
+          </ul>
+          <p class="layernote">Nada sobe para cá sozinho. Dado individual de aprendiz nunca pode ser promovido — fica na conversa que tem escopo para ele.</p>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<nav class="mocknav" aria-label="Telas do protótipo">
+  <button data-go="conversa" aria-pressed="true">Conversa</button>
+  <button data-go="privado" aria-pressed="false">1:1 com a Bia</button>
+  <button data-go="estados" aria-pressed="false">Estados</button>
+  <button data-go="rotina" aria-pressed="false">Rotina</button>
+  <button data-go="configuracoes" aria-pressed="false">Configurações</button>
+  <button data-go="registro" aria-pressed="false">Registro</button>
+</nav>
+
+<script>
+(function(){
+  var go = function(id){
+    document.querySelectorAll('.screen').forEach(function(s){ s.classList.toggle('on', s.id === 's'+'-'+id); });
+    document.querySelectorAll('[data-go]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.go === id)); });
+    if(id !== 'conversa') document.body.classList.remove('ctx');
+    var sc = document.querySelector('#s-'+id+' .scroll'); if(sc) sc.scrollTop = 0;
+  };
+  document.querySelectorAll('[data-go]').forEach(function(b){ b.addEventListener('click', function(){ go(b.dataset.go); }); });
+
+  // context panel
+  var ctxb = document.getElementById('ctxbtn');
+  ctxb.addEventListener('click', function(){
+    var on = document.body.classList.toggle('ctx');
+    ctxb.setAttribute('aria-pressed', String(on));
+  });
+  document.getElementById('ctxclose').addEventListener('click', function(){
+    document.body.classList.remove('ctx'); ctxb.setAttribute('aria-pressed','false');
+  });
+  var tp = document.getElementById('t-perm'), tk = document.getElementById('t-know');
+  function tab(which){
+    tp.setAttribute('aria-selected', String(which==='perm'));
+    tk.setAttribute('aria-selected', String(which==='know'));
+    document.getElementById('p-perm').hidden = which!=='perm';
+    document.getElementById('p-know').hidden = which!=='know';
+  }
+  tp.addEventListener('click', function(){ tab('perm'); });
+  tk.addEventListener('click', function(){ tab('know'); });
+
+  // approval card: selection drives the button label
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('#items input'));
+  var tally = document.getElementById('tally'), approve = document.getElementById('approve');
+  var readFirst = true;
+  function sync(){
+    var n = boxes.filter(function(b){ return b.checked; }).length;
+    tally.textContent = n + ' de ' + boxes.length + ' selecionados';
+    approve.textContent = n === 1 ? 'Aprovar o item selecionado' : 'Aprovar os ' + n + ' selecionados';
+    approve.disabled = n === 0 || readFirst;
+    approve.title = readFirst ? 'Abra o conteúdo completo antes de aprovar pela primeira vez' : '';
+  }
+  boxes.forEach(function(b){ b.addEventListener('change', sync); });
+
+  var rev = document.getElementById('reveal'), revb = document.getElementById('revealbtn');
+  revb.addEventListener('click', function(){
+    var open = rev.hidden;
+    rev.hidden = !open;
+    revb.textContent = open ? 'Ocultar conteúdo' : 'Ver conteúdo completo';
+    if(open){ readFirst = false; }
+    sync();
+  });
+  sync();
+
+  // segmented controls
+  document.querySelectorAll('.seg').forEach(function(seg){
+    if(seg.classList.contains('locked')) return;
+    var bs = seg.querySelectorAll('button');
+    if(bs.length < 2) return;
+    bs.forEach(function(b){ b.addEventListener('click', function(){
+      bs.forEach(function(o){ o.setAttribute('aria-pressed','false'); });
+      b.setAttribute('aria-pressed','true');
+    }); });
+  });
+
+  // question options
+  document.querySelectorAll('.opts').forEach(function(list){
+    var os = list.querySelectorAll('.opt');
+    os.forEach(function(o){ o.addEventListener('click', function(){
+      os.forEach(function(x){ x.setAttribute('aria-pressed','false'); });
+      o.setAttribute('aria-pressed','true');
+    }); });
+  });
+
+  // sidebar filter pills
+  var fa = document.getElementById('f-all'), fy = document.getElementById('f-you');
+  function filt(you){
+    fa.setAttribute('aria-pressed', String(!you));
+    fy.setAttribute('aria-pressed', String(you));
+    document.querySelectorAll('.convs li').forEach(function(li){
+      if(li.classList.contains('grp')){ li.hidden = you; return; }
+      var amber = li.querySelector('.dot.amber');
+      li.hidden = you && !amber;
+    });
+  }
+  fa.addEventListener('click', function(){ filt(false); });
+  fy.addEventListener('click', function(){ filt(true); });
+
+  // conversation selection
+  document.querySelectorAll('.conv').forEach(function(c){
+    c.addEventListener('click', function(){
+      document.querySelectorAll('.conv').forEach(function(o){ o.removeAttribute('aria-current'); });
+      c.setAttribute('aria-current','true');
+      go(c.dataset.solo ? 'privado' : 'conversa');
+    });
+  });
+
+  // promote a memory line from the conversation layer to the personal layer
+  document.querySelectorAll('.promote').forEach(function(b){
+    b.addEventListener('click', function(){
+      var li = b.closest('li');
+      var target = document.querySelectorAll('.layer .know')[1];
+      if(!li || !target) return;
+      b.remove();
+      target.appendChild(li);
+      li.style.background = 'var(--petrol-soft)';
+      setTimeout(function(){ li.style.background = ''; }, 900);
+    });
+  });
+
+  // removing a memory line
+  document.querySelectorAll('.know .x').forEach(function(b){
+    b.addEventListener('click', function(){ var li = b.closest('li'); if(li) li.remove(); });
+  });
+
+  // kill switch
+  document.getElementById('stopall').addEventListener('click', function(){ document.body.classList.add('stopped'); });
+  document.getElementById('resume').addEventListener('click', function(){ document.body.classList.remove('stopped'); });
+
+  // theme
+  document.getElementById('theme').addEventListener('click', function(){
+    var cur = document.documentElement.getAttribute('data-theme');
+    var next = cur === 'dark' ? 'light' : cur === 'light' ? null : 'dark';
+    if(next) document.documentElement.setAttribute('data-theme', next);
+    else document.documentElement.removeAttribute('data-theme');
+  });
+})();
+</script>

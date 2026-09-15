@@ -1,0 +1,569 @@
+<title>Time e Meus Agentes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  /* sidebar — always dark, like the real Slack */
+  --sb:#17131C; --sb2:#1E1A24; --sb-line:#2C2432; --sb-seg:#221C29; --sb-segon:#362C40;
+  --sb-tx:#BCB2C4; --sb-dim:#9B8FA5; --sb-mut:#8A7E94; --sb-hi:#FFFFFF; --sb-hov:#241E2B;
+  /* content pane — follows theme */
+  --bg:#FFFFFF; --sunk:#F6F6F4; --panel:#FFFFFF;
+  --ink:#1A1A1F; --ink2:#55555E; --ink3:#86868F; --ink4:#B2B2BA;
+  --line:#E6E6E1; --line2:#D6D3CC;
+  --blue:#2E7CF6; --amber:#B45309; --amber-bg:#FDF4E5; --amber-line:#E5C08A;
+  --amber-sb:#E8A33D; --green:#2BAC76;
+  --f:"Inter",system-ui,-apple-system,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1A1D21; --sunk:#141619; --panel:#22262B;
+  --ink:#EDEDF0; --ink2:#A3A3AC; --ink3:#77777F; --ink4:#55555E;
+  --line:#2A2E33; --line2:#373C42;
+  --amber:#D89A4A; --amber-bg:#2B2113; --amber-line:#5A4526;
+}}
+:root[data-theme="dark"]{
+  --bg:#1A1D21; --sunk:#141619; --panel:#22262B;
+  --ink:#EDEDF0; --ink2:#A3A3AC; --ink3:#77777F; --ink4:#55555E;
+  --line:#2A2E33; --line2:#373C42;
+  --amber:#D89A4A; --amber-bg:#2B2113; --amber-line:#5A4526;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 13px/1.45 var(--f);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--blue);outline-offset:1px;border-radius:4px}
+
+.app{display:grid;grid-template-columns:260px 1fr;height:100dvh;min-height:0}
+
+/* ================= SIDEBAR ================= */
+.sb{background:var(--sb);display:flex;flex-direction:column;min-height:0;color:var(--sb-tx)}
+.sbhd{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px}
+.sbhd b{font-size:15px;font-weight:600;color:var(--sb-hi)}
+.sbhd .chev{font-size:9px;color:var(--sb-dim)}
+.sbhd .ico{margin-left:auto;color:var(--sb-dim);font-size:14px}
+
+/* segmented tab selector */
+.seg{flex:none;height:40px;padding:4px 16px;display:flex}
+.segin{width:100%;height:32px;background:var(--sb-seg);border-radius:8px;display:grid;grid-template-columns:1fr 1fr;padding:2px;position:relative}
+.segbtn{display:flex;align-items:center;justify-content:center;gap:5px;border-radius:6px;font-size:12.5px;color:var(--sb-dim);z-index:1;white-space:nowrap;padding:0 4px}
+.segbtn[aria-pressed="true"]{background:var(--sb-segon);color:var(--sb-hi);font-weight:600}
+.segpill{font-size:11px;font-weight:700;border-radius:8px;padding:1px 6px;background:var(--amber-sb);color:#17131C;line-height:1.35}
+.segdot{width:7px;height:7px;border-radius:50%;background:var(--blue)}
+
+.fixed{flex:none;padding:2px 8px 0}
+.sbrow{width:100%;display:flex;align-items:center;gap:0;height:28px;padding:0 8px;border-radius:6px;color:var(--sb-tx);font-size:15px}
+.sbrow:hover{background:var(--sb-hov)}
+.sbrow[aria-current="true"]{background:#1164A3;color:#fff}
+.gut{width:20px;margin-right:8px;display:flex;align-items:center;justify-content:center;flex:none;position:relative}
+.lbl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px;color:var(--sb-tx)}
+.sbrow[aria-current="true"] .lbl{color:#fff}
+.you{font-size:13px;color:var(--sb-mut);margin-left:6px;flex:none}
+.hash{font-size:15px;color:var(--sb-mut);line-height:1}
+.unread .lbl,.unread .hash{color:var(--sb-hi);font-weight:700}
+.badge{flex:none;font-size:11px;font-weight:700;border-radius:9px;min-width:18px;height:18px;padding:0 6px;display:grid;place-items:center;line-height:1}
+.badge.blue{background:var(--blue);color:#fff}
+.badge.amb{background:var(--amber-sb);color:#17131C}
+.hr{height:1px;background:var(--sb-line);margin:8px 16px}
+
+.sbscroll{flex:1;min-height:0;overflow:auto;padding:0 8px 10px;position:relative}
+.sbsec{margin-top:10px}
+.sechd{width:100%;display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;color:var(--sb-dim);font-size:13px;border-radius:6px}
+.sechd:hover{background:var(--sb-hov)}
+.sechd .cv{font-size:9px;display:inline-block;transition:transform .14s}
+.sbsec.closed .cv{transform:rotate(-90deg)}
+.sbsec.closed .items{display:none}
+.sechd .cnt{margin-left:auto;font-size:11px;font-weight:700;background:var(--sb-mut);color:#17131C;border-radius:9px;padding:1px 6px;display:none}
+.sbsec.closed .cnt.has{display:block}
+
+/* the four shapes in one 20px gutter */
+.avp{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:600;color:#fff}
+.avb{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:9px;font-weight:600;color:#fff}
+.pres{position:absolute;right:-1px;bottom:-1px;width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 2px var(--sb)}
+.sbrow[aria-current="true"] .pres{box-shadow:0 0 0 2px #1164A3}
+.pres.on{background:var(--green)}
+.pres.off{background:var(--sb);border:1.5px solid var(--green)}
+.botmark{position:absolute;right:-2px;bottom:-2px;width:8px;height:8px;border-radius:2px;background:#6E6478;box-shadow:0 0 0 2px var(--sb)}
+.sbrow[aria-current="true"] .botmark{box-shadow:0 0 0 2px #1164A3}
+.botmark.run{background:#A79DB0;animation:pl 1.6s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:.5}50%{opacity:1}}
+.grp{position:relative;width:20px;height:20px}
+.grp>*{position:absolute;width:14px;height:14px;font-size:7px}
+.grp>*:nth-child(1){top:0;left:0;z-index:2;box-shadow:0 0 0 1.5px var(--sb)}
+.grp>*:nth-child(2){bottom:0;right:0;z-index:1}
+.sbrow[aria-current="true"] .grp>*:nth-child(1){box-shadow:0 0 0 1.5px #1164A3}
+
+.c1{background:#7E22CE}.c2{background:#0F766E}.c3{background:#BE185D}.c4{background:#A16207}
+.c5{background:#1D4ED8}.c6{background:#15803D}.c7{background:#9333EA}.c8{background:#C2410C}
+.c9{background:#0E7490}.c0{background:#5B5566}
+
+.pillup,.pilldn{position:sticky;z-index:5;display:flex;justify-content:center;pointer-events:none}
+.pillup{top:0}.pilldn{bottom:0}
+.pillup span,.pilldn span{background:#1164A3;color:#fff;font-size:12px;font-weight:500;border-radius:13px;height:26px;display:flex;align-items:center;padding:0 12px;pointer-events:auto}
+
+.sbfoot{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 16px;border-top:1px solid var(--sb-line)}
+.sbfoot .nm{font-size:13px;color:var(--sb-tx)}
+
+/* --- aba Meus agentes --- */
+.sb.meus{background:var(--sb2)}
+.sb.meus .pres,.sb.meus .botmark,.sb.meus .grp>*:nth-child(1){box-shadow:0 0 0 2px var(--sb2)}
+.cardlist{padding:2px 8px 10px;display:grid;gap:6px}
+.subhd{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--sb-mut);padding:12px 8px 2px}
+.card{width:100%;display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 10px;border-radius:9px;border-left:2px solid transparent;background:#241E2B}
+.card:hover{background:#2B2434}
+.card[aria-current="true"]{background:#332A3D}
+.card.wait{border-left-color:var(--amber-sb)}
+.card.run{border-left-color:#8A7E94}
+.cav{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;flex:none;position:relative}
+.cav .hashmark{position:absolute;right:-4px;bottom:-4px;width:14px;height:14px;border-radius:3px;background:#4A3F55;color:#fff;font-size:8px;font-weight:700;display:grid;place-items:center;box-shadow:0 0 0 2px var(--sb2)}
+.cb{min-width:0;flex:1}
+.cb .n{font-size:15px;color:var(--sb-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cb .d{font-size:13px;color:var(--sb-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.cw{font-size:12px;color:var(--amber-sb);flex:none;font-weight:500}
+.newag{width:100%;height:40px;border:1px dashed #3A3040;border-radius:9px;color:var(--sb-mut);font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:4px}
+.newag:hover{border-color:var(--sb-dim);color:var(--sb-tx)}
+
+/* ================= MAIN ================= */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg);position:relative}
+.mhd{flex:none;border-bottom:1px solid var(--line);padding:11px 20px}
+.mhd .r1{display:flex;align-items:center;gap:9px}
+.mhd h1{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:5px}
+.mhd h1 .h{color:var(--ink3);font-weight:400}
+.members{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:var(--ink3)}
+.members .st{display:flex}
+.members .st>*{margin-left:-5px;box-shadow:0 0 0 1.5px var(--bg)}
+.members .st>*:first-child{margin-left:0}
+.topic{font-size:12.5px;color:var(--ink3);margin-top:5px}
+.themeb{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--ink3);flex:none}
+.themeb:hover{background:var(--sunk);color:var(--ink)}
+
+.feed{flex:1;overflow:auto;min-height:0;padding:16px 20px 8px}
+.fin{max-width:680px}
+.sys{font-size:12.5px;color:var(--ink3);line-height:1.6;margin-bottom:12px;padding-left:40px}
+.msg{display:grid;grid-template-columns:32px 1fr;gap:10px;margin-bottom:14px}
+.mav{width:32px;height:32px;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff}
+.mav.p{border-radius:50%}
+.mav.b{border-radius:8px;background:#5B5566}
+.mh{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-bottom:2px}
+.mh .w{font-size:14px;font-weight:700}
+.mh .tag{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
+.mh time{font-size:11px;color:var(--ink4);font-family:var(--f-mono)}
+.mb{font-size:14.5px;line-height:1.55}
+.mb p{margin:0}.mb p+p{margin-top:7px}
+
+.card2{border:1px solid var(--line2);border-radius:10px;background:var(--panel);overflow:hidden;margin-top:9px;max-width:560px}
+.card2 .h2{padding:10px 14px 0;font-size:12px;color:var(--ink3)}
+.card2 .t2{padding:3px 14px 10px;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.ck{display:flex;align-items:flex-start;gap:10px;padding:8px 14px;font-size:14px;border-top:1px solid var(--line)}
+.ck input{width:16px;height:16px;accent-color:var(--ink);margin:1px 0 0;flex:none}
+.ck .said{margin-left:auto;font-size:11.5px;color:var(--ink3);flex:none}
+.card2 .nt{padding:10px 14px 0;font-size:12.5px;color:var(--ink3)}
+.card2 .ft{padding:11px 14px;display:flex;gap:8px;align-items:center}
+.b{border:1px solid var(--line2);background:var(--panel);border-radius:7px;padding:6px 13px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.b:hover{border-color:var(--ink3)}
+.b.pri{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.b.pri:disabled{opacity:.4;cursor:not-allowed}
+.b.txt{border-color:transparent;color:var(--ink3);font-weight:400;padding:6px 4px}
+.b.sm{padding:3px 9px;font-size:11.5px;font-weight:400}
+.rec{font-size:12.5px;color:var(--ink3);padding:9px 0;border-top:1px solid var(--line);margin-top:6px}
+
+.dock{flex:none;padding:0 20px 16px}
+.dockin{max-width:680px}
+.comp{border:1px solid var(--line2);border-radius:9px;padding:9px 11px;display:flex;align-items:flex-end;gap:9px;background:var(--panel)}
+.comp textarea{flex:1;border:0;background:none;resize:none;font:400 14px/1.5 var(--f);color:var(--ink);outline:none;min-height:21px}
+.hint{font-size:11.5px;color:var(--ink4);padding:0 3px 7px;line-height:1.5}
+
+/* ===== right panel: convite / onde atende ===== */
+.rp{position:fixed;top:0;right:0;bottom:0;width:400px;max-width:100%;background:var(--panel);border-left:1px solid var(--line);display:none;flex-direction:column;z-index:50;box-shadow:-18px 0 40px -28px rgba(0,0,0,.35)}
+body.painel .rp{display:flex}
+.rphd{flex:none;height:52px;display:flex;align-items:center;gap:10px;padding:0 12px 0 18px;border-bottom:1px solid var(--line)}
+.rphd b{font-size:14px;font-weight:600}
+.rpb{overflow:auto;flex:1;min-height:0;padding:16px 18px 20px}
+[hidden]{display:none!important}
+.blk{margin-bottom:18px}
+.blk h3{margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+.blk p{margin:0;font-size:13.5px;line-height:1.55;color:var(--ink2)}
+.blk .lk{font-size:12.5px;color:var(--blue);text-decoration:underline;text-underline-offset:2px;display:inline-block;margin-top:6px}
+.nogo{background:var(--sunk);border-radius:9px;padding:12px 14px}
+.nogo .it{display:flex;gap:9px;align-items:flex-start;font-size:13px;color:var(--ink2);padding:5px 0;line-height:1.5}
+.nogo .it .x{color:var(--ink4);flex:none;font-weight:600}
+.scan{border-left:3px solid var(--amber-line);background:var(--amber-bg);border-radius:0 8px 8px 0;padding:11px 13px;margin-bottom:16px}
+.scan .sh{font-size:12.5px;font-weight:600;color:var(--amber);margin-bottom:6px}
+.scan .sl{font-size:12.5px;color:var(--ink2);line-height:1.6;padding:3px 0;font-family:var(--f-mono);font-size:11.5px}
+.rpft{flex:none;border-top:1px solid var(--line);padding:12px 18px;display:flex;gap:8px;align-items:center}
+.where{border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-top:8px}
+.where .wr{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.where .wr:last-child{border-bottom:0}
+.where .wr .ch{color:var(--ink3);flex:none}
+.where .wr .ac{margin-left:auto;font-size:11.5px;color:var(--ink3)}
+.where .wr.sens{background:var(--amber-bg)}
+.where .wr.sens .ac{color:var(--amber)}
+
+/* screens */
+.screen{display:none}.screen.on{display:contents}
+.sbview{display:none}.sbview.on{display:contents}
+.nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;gap:2px;background:var(--panel);border:1px solid var(--line2);border-radius:99px;padding:4px;box-shadow:0 6px 22px -10px rgba(0,0,0,.3)}
+.nav button{font-size:11.5px;padding:6px 12px;border-radius:99px;color:var(--ink3);white-space:nowrap}
+.nav button[aria-pressed="true"]{background:var(--ink);color:var(--bg);font-weight:500}
+
+@media (max-width:900px){
+  .app{grid-template-columns:1fr}
+  .sb{display:none}
+  .rp{width:100%}
+  .nav{overflow-x:auto;max-width:calc(100vw - 20px)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+
+<div class="app">
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sb" id="sidebar">
+    <div class="sbhd"><b>Leapy</b><span class="chev">▾</span><span class="ico">✎</span></div>
+
+    <div class="seg"><div class="segin">
+      <button class="segbtn" id="tabTime" aria-pressed="true">Time</button>
+      <button class="segbtn" id="tabMeus" aria-pressed="false">Meus agentes <span class="segpill" id="meusPill">2</span></button>
+    </div></div>
+
+    <!-- ---------- ABA TIME ---------- -->
+    <div class="sbview on" id="viewTime" style="display:contents">
+      <div class="fixed">
+        <button class="sbrow"><span class="gut">◷</span><span class="lbl">Sua vez</span><span class="badge amb">1</span></button>
+        <button class="sbrow"><span class="gut">⌥</span><span class="lbl">Threads</span></button>
+        <button class="sbrow"><span class="gut">@</span><span class="lbl">Menções e reações</span></button>
+      </div>
+      <div class="hr"></div>
+      <div class="sbscroll">
+        <div class="pillup"><span>↑ Mais não lidas</span></div>
+
+        <div class="sbsec" data-sec>
+          <button class="sechd"><span class="cv">▾</span>Canais<span class="cnt has">4</span></button>
+          <div class="items">
+            <button class="sbrow unread" data-go="canal"><span class="gut"><span class="hash">#</span></span><span class="lbl">suporte</span><span class="badge blue">3</span></button>
+            <button class="sbrow"><span class="gut"><span class="hash">#</span></span><span class="lbl">vendas</span></button>
+            <button class="sbrow" data-go="canal" aria-current="true"><span class="gut"><span class="hash">#</span></span><span class="lbl">produto</span></button>
+            <button class="sbrow"><span class="gut">🔒</span><span class="lbl">diretoria</span></button>
+          </div>
+        </div>
+
+        <div class="sbsec" data-sec>
+          <button class="sechd"><span class="cv">▾</span>📕 Turmas<span class="cnt">0</span></button>
+          <div class="items">
+            <button class="sbrow"><span class="gut">📕</span><span class="lbl">turma-am6</span></button>
+            <button class="sbrow"><span class="gut">📕</span><span class="lbl">turma-am8</span></button>
+            <button class="sbrow"><span class="gut">📕</span><span class="lbl">turma-cm4</span></button>
+            <button class="sbrow"><span class="gut">📕</span><span class="lbl">turma-dm10</span></button>
+          </div>
+        </div>
+
+        <div class="sbsec" data-sec>
+          <button class="sechd"><span class="cv">▾</span>Mensagens diretas<span class="cnt">2</span></button>
+          <div class="items">
+            <button class="sbrow"><span class="gut"><span class="avp c1">MW</span><span class="pres on"></span></span><span class="lbl">Marlon Wanderllich</span><span class="you">você</span></button>
+            <!-- AGENTE DO TIME: quadrado, dentro das DMs, sem seção própria -->
+            <button class="sbrow" data-go="canal"><span class="gut"><span class="avb c0">RE</span><span class="botmark run"></span></span><span class="lbl">Ressaca</span></button>
+            <button class="sbrow unread"><span class="gut"><span class="avp c2">MJ</span><span class="pres on"></span></span><span class="lbl">Mari Jales</span><span class="badge blue">2</span></button>
+            <button class="sbrow"><span class="gut"><span class="avb c0">BZ</span><span class="botmark"></span></span><span class="lbl">BugZero</span><span class="badge amb">1</span></button>
+            <button class="sbrow"><span class="gut"><span class="avp c6">BR</span><span class="pres off"></span></span><span class="lbl">Bruno Rodrigues</span></button>
+            <!-- DM de grupo: dois avatares, forma de cada um preservada -->
+            <button class="sbrow"><span class="gut"><span class="grp"><span class="avp c3">MJ</span><span class="avb c0">RE</span></span></span><span class="lbl">Mari Jales, Ressaca</span></button>
+            <button class="sbrow"><span class="gut"><span class="grp"><span class="avp c4">LM</span><span class="avp c9">MF</span></span></span><span class="lbl">Lucas de Moraes, Matheus…</span></button>
+            <button class="sbrow"><span class="gut"><span class="avp c7">CV</span><span class="pres on"></span></span><span class="lbl">Carolina Victoria</span></button>
+            <button class="sbrow"><span class="gut"><span class="avp c8">IP</span><span class="pres off"></span></span><span class="lbl">Ingrid Pitta</span></button>
+            <button class="sbrow"><span class="gut"><span class="avp c5">JF</span><span class="pres off"></span></span><span class="lbl">Juliana Fragoso</span></button>
+          </div>
+        </div>
+
+        <div class="pilldn"><span>↓ Menções não lidas</span></div>
+      </div>
+      <div class="sbfoot"><span class="gut" style="position:relative"><span class="avp c1">MW</span><span class="pres on"></span></span><span class="nm">Marlon Wanderllich</span></div>
+    </div>
+
+    <!-- ---------- ABA MEUS AGENTES ---------- -->
+    <div class="sbview" id="viewMeus">
+      <div class="fixed">
+        <button class="sbrow"><span class="gut">◷</span><span class="lbl">Sua vez</span><span class="badge amb">2</span></button>
+      </div>
+      <div class="hr"></div>
+      <div class="sbscroll">
+        <div class="subhd">Trabalhando agora</div>
+        <div class="cardlist">
+          <button class="card run"><span class="cav c2">TR</span><span class="cb"><span class="n">Triagem</span><span class="d">lendo 14 e-mails de hoje</span></span></button>
+        </div>
+        <div class="subhd">Esperando você</div>
+        <div class="cardlist">
+          <button class="card wait" data-go="agente" aria-current="true"><span class="cav c9">CH</span><span class="cb"><span class="n">Chiquinho</span><span class="d">criar lista no ClickUp</span></span><span class="cw">há 3 h</span></button>
+          <button class="card wait"><span class="cav c4">AN</span><span class="cb"><span class="n">Angu</span><span class="d">enviar 4 respostas</span></span><span class="cw">há 20 min</span></button>
+        </div>
+        <div class="subhd">Parados</div>
+        <div class="cardlist">
+          <button class="card" data-go="onde"><span class="cav c0">RE<span class="hashmark">#</span></span><span class="cb"><span class="n">Ressaca</span><span class="d">PM · também atende em 2 canais</span></span></button>
+          <button class="card"><span class="cav c1">TA</span><span class="cb"><span class="n">Taga</span><span class="d">fala por você no #geral</span></span></button>
+          <button class="card"><span class="cav c3">MA</span><span class="cb"><span class="n">Marola</span><span class="d">Tech Lead</span></span></button>
+          <button class="card"><span class="cav c8">PI</span><span class="cb"><span class="n">Picasso</span><span class="d">Design</span></span></button>
+          <button class="card"><span class="cav c5">PS</span><span class="cb"><span class="n">Psico</span><span class="d">Product analytics</span></span></button>
+          <button class="card"><span class="cav c6">D1</span><span class="cb"><span class="n">Dev 1</span><span class="d">Dev Pool</span></span></button>
+          <button class="card"><span class="cav c6">D3</span><span class="cb"><span class="n">Dev 3</span><span class="d">Dev Pool</span></span></button>
+          <button class="newag">+ Criar agente</button>
+        </div>
+      </div>
+      <div class="sbfoot"><span class="gut" style="position:relative"><span class="avp c1">MW</span><span class="pres on"></span></span><span class="nm">Marlon Wanderllich</span></div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main">
+    <!-- ---- canal #produto ---- -->
+    <div class="screen on" id="sc-canal">
+      <div class="mhd">
+        <div class="r1">
+          <h1><span class="h">#</span>produto</h1>
+          <span class="members"><span class="st"><span class="mav p c2" style="width:20px;height:20px;font-size:8px">MJ</span><span class="mav p c6" style="width:20px;height:20px;font-size:8px">RF</span><span class="mav b c0" style="width:20px;height:20px;font-size:8px">RE</span></span> 7</span>
+          <button class="themeb" id="theme" aria-label="Alternar tema">◐</button>
+        </div>
+        <p class="topic">Produto e engenharia. Aprendiz é sempre “aprendiz”, nunca “menor”.</p>
+      </div>
+      <div class="feed"><div class="fin">
+        <p class="sys">Marlon convidou <b>Ressaca</b> para o canal. Ele chega sem nenhum acesso.</p>
+        <div class="msg"><span class="mav b c0">RE</span><div>
+          <div class="mh"><span class="w">Ressaca</span><span class="tag">agente</span><time>09:12</time></div>
+          <div class="mb"><p>Oi. Sou o Ressaca, ajudo com priorização e escrita de spec. Cheguei aqui sem acesso a nada — vou pedir conforme precisar.</p></div>
+        </div></div>
+        <div class="msg"><span class="mav p c2">MJ</span><div>
+          <div class="mh"><span class="w">Mari Jales</span><time>09:20</time></div>
+          <div class="mb"><p>Ressaca, consegue listar o que ficou pendente do piloto de onboarding?</p></div>
+        </div></div>
+        <div class="msg"><span class="mav b c0">RE</span><div>
+          <div class="mh"><span class="w">Ressaca</span><span class="tag">agente</span><time>09:21</time></div>
+          <div class="mb"><p>Consigo, mas preciso de acesso ao board. Pedindo aqui para todo mundo ver:</p></div>
+          <div class="card2">
+            <div class="h2">Pedido de acesso</div>
+            <div class="t2">ClickUp › Produto</div>
+            <label class="ck"><input type="checkbox" checked><span>Ler as tarefas deste board</span></label>
+            <label class="ck"><input type="checkbox"><span>Criar e mover tarefas</span><span class="said">deixei desmarcado</span></label>
+            <p class="nt">O acesso é do canal, não meu. Sai quando eu sair daqui.</p>
+            <div class="ft"><button class="b pri">Permitir</button><button class="b txt">Agora não</button></div>
+          </div>
+          <p class="rec">Mari permitiu ler as tarefas do board — hoje, 09:23. Criar e mover: não.</p>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">O agente chega de mãos vazias e pede o que precisa <b>na frente de todo mundo</b>. O consentimento fica registrado na conversa, não numa tela de configuração.</p>
+        <div class="comp"><textarea rows="1" placeholder="Mensagem para #produto"></textarea><button class="b pri">Enviar</button></div>
+      </div></div>
+    </div>
+
+    <!-- ---- convite ---- -->
+    <div class="screen" id="sc-convite">
+      <div class="mhd">
+        <div class="r1">
+          <h1><span class="h">#</span>produto</h1>
+          <span class="members"><span class="st"><span class="mav p c2" style="width:20px;height:20px;font-size:8px">MJ</span><span class="mav p c6" style="width:20px;height:20px;font-size:8px">RF</span></span> 6</span>
+          <button class="themeb" aria-label="Tema">◐</button>
+        </div>
+        <p class="topic">Produto e engenharia.</p>
+      </div>
+      <div class="feed"><div class="fin">
+        <div class="msg"><span class="mav p c2">MJ</span><div>
+          <div class="mh"><span class="w">Mari Jales</span><time>09:02</time></div>
+          <div class="mb"><p>Marlon, dá pra trazer aquele agente teu que organiza spec pra cá?</p></div>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">O painel à direita é o convite. Repare no bloco <b>“O que ele não leva”</b> — ele aparece sempre, mesmo quando não há nada sensível.</p>
+        <div class="comp"><textarea rows="1" placeholder="Mensagem para #produto"></textarea></div>
+      </div></div>
+    </div>
+
+    <!-- ---- conversa com agente pessoal ---- -->
+    <div class="screen" id="sc-agente">
+      <div class="mhd">
+        <div class="r1">
+          <h1>Chiquinho</h1>
+          <span class="members">só você</span>
+          <button class="themeb" aria-label="Tema">◐</button>
+        </div>
+        <p class="topic">Organiza o ClickUp: cria listas, move tarefas, mantém o board limpo.</p>
+      </div>
+      <div class="feed"><div class="fin">
+        <div class="msg"><span class="mav b c9">CH</span><div>
+          <div class="mh"><span class="w">Chiquinho</span><span class="tag">agente</span><time>08:40</time></div>
+          <div class="mb"><p>Board conferido. Achei 3 tarefas sem lista definida do piloto de onboarding.</p></div>
+          <div class="card2" style="border-color:var(--amber-line);background:var(--amber-bg)">
+            <div class="h2" style="color:var(--amber);font-weight:600">Esperando você · há 3 h</div>
+            <div class="t2">Criar a lista “Piloto onboarding — set/26” em ClickUp › Produto</div>
+            <div class="ft"><button class="b pri">Permitir</button><button class="b">Permitir sempre</button><button class="b txt">Negar</button></div>
+          </div>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">Esta conversa vive só na sua aba. As outras 18 pessoas não sabem que o Chiquinho existe.</p>
+        <div class="comp"><textarea rows="1" placeholder="Mensagem para Chiquinho"></textarea></div>
+      </div></div>
+    </div>
+
+    <!-- ---- onde ele atende ---- -->
+    <div class="screen" id="sc-onde">
+      <div class="mhd">
+        <div class="r1">
+          <h1>Ressaca</h1>
+          <span class="members">seu agente · também atende em 2 canais</span>
+          <button class="themeb" aria-label="Tema">◐</button>
+        </div>
+        <p class="topic">PM: prioriza, escreve spec, cobra prazo.</p>
+      </div>
+      <div class="feed"><div class="fin">
+        <div class="msg"><span class="mav b c0">RE</span><div>
+          <div class="mh"><span class="w">Ressaca</span><span class="tag">agente</span><time>ontem</time></div>
+          <div class="mb"><p>Revisei a spec do fluxo de matrícula. Três pontos ficaram ambíguos — listei no documento.</p></div>
+        </div></div>
+        <p class="sys">O que ele faz nos canais do time <b>não aparece aqui</b>. Você vê só onde ele está e o que alcança.</p>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">O painel à direita é o “um lugar só”: onde cada agente seu está exposto, com quais acessos, sem abrir canal por canal.</p>
+        <div class="comp"><textarea rows="1" placeholder="Mensagem para Ressaca"></textarea></div>
+      </div></div>
+    </div>
+
+
+  </main>
+
+    <!-- ===== painel direito ===== -->
+    <aside class="rp" aria-label="Painel">
+      <div class="rphd"><b id="rpt">Ressaca vai atender em #produto</b><button class="b sm" id="rpx" style="margin-left:auto">✕</button></div>
+
+      <div class="rpb" id="rp-convite">
+        <div class="blk" style="display:flex;gap:11px;align-items:center;margin-bottom:16px">
+          <span class="mav b c0" style="width:40px;height:40px;border-radius:9px;font-size:13px">RE</span>
+          <span><b style="font-size:14px">Ressaca</b><br><span style="font-size:12px;color:var(--ink3)">seu agente · PM</span></span>
+        </div>
+
+        <div class="blk">
+          <h3>O que ele leva</h3>
+          <p>O jeito dele de trabalhar. Como você ensinou ele a escrever spec, a cobrar prazo, a quebrar tarefa. Isso é o Ressaca, e vai junto.</p>
+          <a class="lk" href="#0">ler as instruções que vão junto (1.400 palavras)</a>
+        </div>
+
+        <div class="scan">
+          <div class="sh">Achei 2 trechos que parecem pessoais</div>
+          <div class="sl">“…quando o Marlon estiver de férias, segure entregas…”</div>
+          <div class="sl">“…a Patrícia costuma demorar a responder, insista…”</div>
+          <div style="margin-top:8px;display:flex;gap:7px">
+            <button class="b sm">Tirar os dois</button><button class="b sm">Revisar</button>
+          </div>
+        </div>
+
+        <div class="blk">
+          <h3>O que ele não leva</h3>
+          <div class="nogo">
+            <div class="it"><span class="x">✕</span><span>Seu Gmail — não vai, é a sua caixa pessoal.</span></div>
+            <div class="it"><span class="x">✕</span><span>Seu ClickUp com a sua credencial — não vai. Se fosse, tudo que ele fizesse no time apareceria como feito por você.</span></div>
+            <div class="it"><span class="x">✕</span><span>O que ele aprendeu conversando com você — não vai.</span></div>
+          </div>
+          <p style="margin-top:9px;font-size:12.5px;color:var(--ink3)">Ele chega vazio e pede lá o que precisar, na frente de quem está no canal.</p>
+        </div>
+
+        <div class="blk">
+          <h3>E o que vier de lá não volta</h3>
+          <p>O que ele aprender em #produto fica em #produto. Você vê onde ele está e o que alcança — nunca o que foi dito.</p>
+        </div>
+      </div>
+
+      <div class="rpb" id="rp-onde" hidden>
+        <div class="blk">
+          <h3>Onde ele atende</h3>
+          <div class="where">
+            <div class="wr"><span class="ch">#</span><span>produto</span><span class="ac">lê o board do ClickUp</span></div>
+            <div class="wr"><span class="ch">#</span><span>suporte</span><span class="ac">sem acesso a nada</span></div>
+            <div class="wr sens"><span class="ch">📕</span><span>turma-am6</span><span class="ac">canal sensível · memória isolada</span></div>
+          </div>
+          <a class="lk" href="#0">+ Convidar para outro canal</a>
+        </div>
+        <div class="blk">
+          <h3>O teto do canal</h3>
+          <p>Ele nunca alcança o que as pessoas daquele canal não alcançam. Ninguém em #suporte tem ClickUp, então ele também não tem ali.</p>
+        </div>
+        <div class="blk">
+          <h3>Tirar de um canal</h3>
+          <p>Sai na hora e os acessos daquele canal são revogados junto. O que ele fez fica no histórico do canal.</p>
+        </div>
+      </div>
+
+      <div class="rpft" id="rpft">
+        <button class="b pri" id="conf">Convidar para #produto</button>
+        <button class="b txt">Cancelar</button>
+      </div>
+    </aside>
+</div>
+
+<nav class="nav" aria-label="Telas">
+  <button data-go="canal" aria-pressed="true">Aba Time</button>
+  <button data-go="meus" aria-pressed="false">Aba Meus agentes</button>
+  <button data-go="convite" aria-pressed="false">O convite</button>
+  <button data-go="onde" aria-pressed="false">Onde ele atende</button>
+</nav>
+
+<script>
+(function(){
+  var body=document.body, sb=document.getElementById('sidebar');
+  var vT=document.getElementById('viewTime'), vM=document.getElementById('viewMeus');
+  var bT=document.getElementById('tabTime'), bM=document.getElementById('tabMeus');
+
+  function tab(which){
+    var meus = which==='meus';
+    bT.setAttribute('aria-pressed', String(!meus));
+    bM.setAttribute('aria-pressed', String(meus));
+    vT.style.display = meus ? 'none' : 'contents';
+    vM.style.display = meus ? 'contents' : 'none';
+    sb.classList.toggle('meus', meus);
+  }
+  bT.addEventListener('click', function(){ tab('time'); });
+  bM.addEventListener('click', function(){ tab('meus'); });
+  tab('time');
+
+  function screen(id){
+    document.querySelectorAll('.screen').forEach(function(s){ s.classList.toggle('on', s.id==='sc-'+id); });
+  }
+  function go(id){
+    document.querySelectorAll('.nav [data-go]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.go===id)); });
+    if(id==='meus'){ tab('meus'); screen('agente'); body.classList.remove('painel'); return; }
+    if(id==='convite'){ tab('time'); screen('convite'); body.classList.add('painel');
+      document.getElementById('rpt').textContent='Ressaca vai atender em #produto';
+      document.getElementById('rp-convite').hidden=false; document.getElementById('rp-onde').hidden=true;
+      document.getElementById('rpft').style.display='flex'; return; }
+    if(id==='onde'){ tab('meus'); screen('onde'); body.classList.add('painel');
+      document.getElementById('rpt').textContent='Ressaca';
+      document.getElementById('rp-convite').hidden=true; document.getElementById('rp-onde').hidden=false;
+      document.getElementById('rpft').style.display='none'; return; }
+    if(id==='agente'){ tab('meus'); screen('agente'); body.classList.remove('painel'); return; }
+    tab('time'); screen('canal'); body.classList.remove('painel');
+  }
+  document.querySelectorAll('[data-go]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation(); go(b.dataset.go); });
+  });
+  document.getElementById('rpx').addEventListener('click', function(){ body.classList.remove('painel'); });
+  document.getElementById('conf').addEventListener('click', function(){ body.classList.remove('painel'); go('canal'); });
+
+  document.querySelectorAll('[data-sec] .sechd').forEach(function(h){
+    h.addEventListener('click', function(){ h.closest('[data-sec]').classList.toggle('closed'); });
+  });
+  document.querySelectorAll('.sbrow, .card').forEach(function(r){
+    r.addEventListener('click', function(){
+      var scope = r.closest('.sbview');
+      if(scope) scope.querySelectorAll('.sbrow,.card').forEach(function(o){ o.removeAttribute('aria-current'); });
+      r.setAttribute('aria-current','true');
+    });
+  });
+  document.addEventListener('keydown', function(e){
+    if((e.metaKey||e.ctrlKey) && e.key==='1'){ e.preventDefault(); tab('time'); }
+    if((e.metaKey||e.ctrlKey) && e.key==='2'){ e.preventDefault(); tab('meus'); }
+    if(e.key==='Escape') body.classList.remove('painel');
+  });
+  document.querySelectorAll('.themeb').forEach(function(t){
+    t.addEventListener('click', function(){
+      var c=document.documentElement.getAttribute('data-theme');
+      var n=c==='dark'?'light':c==='light'?null:'dark';
+      if(n) document.documentElement.setAttribute('data-theme',n); else document.documentElement.removeAttribute('data-theme');
+    });
+  });
+})();
+</script>

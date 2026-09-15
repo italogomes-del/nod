@@ -1,0 +1,493 @@
+<title>O Cais da Frota</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap">
+<style>
+:root{
+  --bg:#1A1D21; --rail:#14161A; --nav:#1A1D22; --side:#1E2126; --cais:#23262C;
+  --line:#2B2F36; --line2:#34383F;
+  --tx:#D7DAE0; --tx2:#9AA1AB; --tx3:#7C8089; --tx4:#5A616B; --hi:#FFFFFF;
+  --blue:#1D9BD1; --amber:#E8912D; --sel:#1164A3; --purple:#6B4E8F;
+  --f:"Inter",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:400 13px/1.45 var(--f);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--blue);outline-offset:1px;border-radius:4px}
+[hidden]{display:none!important}
+
+.win{display:grid;grid-template-columns:64px 72px 260px minmax(320px,1fr) 76px;height:100dvh;min-height:0}
+
+/* ---------- COL 1 · rail de empresas ---------- */
+.rail{background:var(--rail);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:12px;min-height:0;overflow:auto}
+.ws{position:relative;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;flex:none}
+.ws .bar{position:absolute;left:-12px;top:8px;width:3px;height:24px;border-radius:0 2px 2px 0;background:#fff;opacity:0}
+.ws[aria-current="true"] .bar{opacity:1}
+.ws[aria-current="true"]{box-shadow:0 0 0 2px var(--rail),0 0 0 4px var(--purple)}
+.ws .bdg{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:#fff;font-size:10.5px;font-weight:700;display:grid;place-items:center;padding:0 5px;box-shadow:0 0 0 2px var(--rail)}
+/* órbita: agente seu trabalhando/travado nesta empresa */
+.ws .orb{position:absolute;inset:-4px;border-radius:15px;border:2px solid transparent}
+.ws .orb.work{border-top-color:var(--tx4);animation:spin 1.8s linear infinite}
+.ws .orb.stuck{border-color:var(--amber)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.addws{width:40px;height:40px;border-radius:12px;border:1.5px dashed #3A3F48;color:var(--tx4);display:grid;place-items:center;font-size:18px;margin-top:auto;flex:none}
+.addws:hover{border-color:var(--tx3);color:var(--tx2)}
+
+/* ---------- COL 2 · rail de navegação ---------- */
+.nav{background:var(--nav);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:16px;gap:4px}
+.nv{width:56px;padding:7px 0 6px;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--tx2);position:relative}
+.nv:hover{background:#22262C}
+.nv[aria-current="true"]{background:#262A31;color:var(--hi)}
+.nv .ic{font-size:17px;line-height:1}
+.nv .tl{font-size:10.5px;font-weight:500}
+.nv .b{position:absolute;top:4px;right:9px;min-width:16px;height:16px;border-radius:8px;background:var(--blue);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+.nv .pt{position:absolute;top:8px;right:14px;width:6px;height:6px;border-radius:50%;background:var(--blue)}
+
+/* ---------- COL 3 · sidebar ---------- */
+.side{background:var(--side);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.sh{height:48px;flex:none;display:flex;align-items:center;gap:7px;padding:0 16px}
+.sh b{font-size:15px;font-weight:700;color:var(--hi)}
+.sh .cv{font-size:9px;color:var(--tx2)}
+.sh .co{margin-left:auto;color:var(--tx2);font-size:14px}
+.sub{font-size:12px;color:var(--tx3);padding:0 16px 8px;margin-top:-6px}
+.sq{margin:0 12px 8px;display:flex;align-items:center;gap:7px;background:#16181C;border:1px solid var(--line);border-radius:7px;padding:6px 9px;color:var(--tx3);font-size:13px}
+.sscroll{flex:1;min-height:0;overflow:auto;padding:0 8px 10px}
+.sec{margin-top:10px}
+.sechd{width:100%;display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;color:var(--tx2);font-size:13px;border-radius:6px}
+.sechd:hover{background:#22262C}
+.sechd .cv{font-size:8px;display:inline-block;transition:transform .14s}
+.sec.closed .cv{transform:rotate(-90deg)}
+.sec.closed .items{display:none}
+.row{width:100%;display:flex;align-items:center;height:28px;padding:0 8px;border-radius:6px;font-size:15px;color:var(--tx)}
+.row:hover{background:#22262C}
+.row[aria-current="true"]{background:var(--sel);color:#fff}
+.g{width:20px;margin-right:8px;display:flex;align-items:center;justify-content:center;flex:none;position:relative}
+.lb{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+.hash{color:var(--tx3);font-size:15px}
+.row.un .lb,.row.un .hash{color:var(--hi);font-weight:700}
+.bd{flex:none;min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:#fff;font-size:10.5px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.you{font-size:12.5px;color:var(--tx3);margin-left:6px}
+/* as quatro formas */
+.p{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:8.5px;font-weight:600;color:#fff}
+.b2{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:8.5px;font-weight:600;color:#fff}
+.pr{position:absolute;right:-1px;bottom:-1px;width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 2px var(--side)}
+.row[aria-current="true"] .pr{box-shadow:0 0 0 2px var(--sel)}
+.pr.on{background:#2BAC76}.pr.off{background:var(--side);border:1.5px solid #2BAC76}
+.gp{position:relative;width:20px;height:20px}
+.gp>*{position:absolute;width:14px;height:14px;font-size:7px}
+.gp>*:nth-child(1){top:0;left:0;z-index:2;box-shadow:0 0 0 1.5px var(--side)}
+.gp>*:nth-child(2){bottom:0;right:0}
+/* cores de identidade */
+.k1{background:#7E22CE}.k2{background:#0F766E}.k3{background:#BE185D}.k4{background:#A16207}
+.k5{background:#1D4ED8}.k6{background:#15803D}.k7{background:#9333EA}.k8{background:#C2410C}
+.k9{background:#0E7490}.k0{background:#5B5566}
+
+/* ---------- COL 4 · palco ---------- */
+.stage{background:var(--bg);display:flex;flex-direction:column;min-width:0;min-height:0}
+.sthd{flex:none;min-height:56px;display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid var(--line)}
+.sthd h1{margin:0;font-size:17px;font-weight:700;color:var(--hi);display:flex;align-items:center;gap:6px}
+.sthd h1 .h{color:var(--tx3);font-weight:400}
+.ctx{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3);border:1px solid var(--line2);border-radius:99px;padding:3px 9px}
+.ctx .em{width:14px;height:14px;border-radius:4px;display:grid;place-items:center;font-size:7px;font-weight:700;color:#fff}
+.stbody{flex:1;overflow:auto;min-height:0;padding:16px 20px}
+.stin{max-width:680px}
+.sys{font-size:12.5px;color:var(--tx3);line-height:1.6;margin:0 0 12px;padding-left:40px}
+.msg{display:grid;grid-template-columns:32px 1fr;gap:10px;margin-bottom:14px}
+.mav{width:32px;height:32px;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff}
+.mav.p{border-radius:50%}.mav.b{border-radius:8px}
+.mh{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-bottom:2px}
+.mh .w{font-size:14px;font-weight:700;color:var(--hi)}
+.mh .tg{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
+.mh time{font-size:11px;color:var(--tx4)}
+.mb{font-size:14.5px;line-height:1.55;color:var(--tx)}
+.stdock{flex:none;padding:0 20px 16px}
+.cmp{max-width:680px;border:1px solid var(--line2);border-radius:9px;padding:9px 11px;display:flex;align-items:flex-end;gap:9px;background:#22252B}
+.cmp textarea{flex:1;border:0;background:none;resize:none;font:400 14px/1.5 var(--f);color:var(--tx);outline:none;min-height:21px}
+.hint{font-size:11.5px;color:var(--tx4);padding:0 3px 7px;line-height:1.5;max-width:680px}
+
+/* fila consolidada */
+.qhd{display:flex;align-items:center;gap:8px;margin:14px 0 8px}
+.qhd .em{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:8px;font-weight:700;color:#fff}
+.qhd .nm{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--tx2)}
+.q{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border:1px solid var(--line);border-radius:9px;margin-bottom:7px;background:#20242A}
+.q:hover{border-color:var(--line2)}
+.q .qa{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;font-size:10px;font-weight:600;color:#fff;flex:none}
+.q .qb{min-width:0;flex:1}
+.q .qt{font-size:14px;font-weight:500;color:var(--hi);line-height:1.4}
+.q .qm{font-size:12px;color:var(--tx3);margin-top:3px;display:flex;gap:7px;flex-wrap:wrap}
+.q .qm .old{color:var(--amber)}
+.qbtn{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.bt{border:1px solid var(--line2);border-radius:7px;padding:5px 11px;font-size:12px;font-weight:500;color:var(--tx);white-space:nowrap}
+.bt:hover{border-color:var(--tx3)}
+.bt.pri{background:var(--hi);color:#16181C;border-color:var(--hi)}
+
+/* ficha do agente */
+.fh{display:flex;gap:14px;align-items:center;padding:0 0 14px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.fh .fa{width:48px;height:48px;border-radius:11px;display:grid;place-items:center;font-size:15px;font-weight:700;color:#fff;flex:none}
+.fh .fn{font-size:20px;font-weight:700;color:var(--hi)}
+.fh .fs{font-size:13px;color:var(--tx3);margin-top:1px}
+.tabs{display:flex;gap:4px;margin-bottom:14px}
+.tb{padding:7px 12px;border-radius:7px;font-size:13px;color:var(--tx2)}
+.tb[aria-selected="true"]{background:#262A31;color:var(--hi);font-weight:600}
+.dep{display:flex;gap:12px;align-items:flex-start;padding:15px 0;border-bottom:1px solid var(--line)}
+.dep .em{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:8px;font-weight:700;color:#fff;flex:none;margin-top:2px}
+.dep .db{flex:1;min-width:0}
+.dep .dn{font-size:15px;font-weight:600;color:var(--hi)}
+.dep .dd{font-size:13px;color:var(--tx2);margin-top:3px;line-height:1.5}
+.dep .dd .warn{color:var(--amber)}
+
+/* ---------- COL 5 · O CAIS ---------- */
+.cais{background:var(--cais);border-left:1px solid var(--line2);display:flex;flex-direction:column;min-height:0}
+.chd{flex:none;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+.chd .me{width:28px;height:28px;border-radius:50%;background:#7E22CE;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff}
+.chd .lb2{font-size:9px;font-weight:700;letter-spacing:.06em;color:#8A9099}
+.cturn{flex:none;padding:0 0 10px;display:flex;flex-direction:column;align-items:center;gap:4px;border-bottom:1px solid var(--line2)}
+.cturn .pill{width:52px;height:32px;border-radius:10px;background:var(--amber);color:#16181C;font-size:15px;font-weight:700;display:grid;place-items:center}
+.cturn .pill.zero{background:transparent;border:1.5px solid var(--line);color:var(--tx4)}
+.cturn .pill[aria-pressed="true"]{box-shadow:0 0 0 2px var(--cais),0 0 0 4px #fff}
+.cturn .lb3{font-size:9px;font-weight:700;letter-spacing:.05em;color:#6B7280}
+.clist{flex:1;min-height:0;overflow:auto;padding:8px 0}
+.cblk{padding:4px 0}
+.cblk+.cblk{border-top:1px solid var(--line2);margin-top:8px;padding-top:10px}
+.ag{width:100%;height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;position:relative;padding:2px 0}
+.ag:hover{background:#2A2E35}
+.ag[aria-current="true"]{background:#2C313A}
+.ag[aria-current="true"]::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 2px 2px 0;background:var(--amber)}
+.ag .av{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;position:relative}
+.ag .nm{font-size:9.5px;color:var(--tx2);max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1}
+.ag.wait .av{box-shadow:0 0 0 2px var(--cais),0 0 0 4px var(--amber)}
+.ag.work .av{box-shadow:0 0 0 2px var(--cais),0 0 0 4px var(--tx4)}
+.ag.idle .av{opacity:.7}
+.ag .flag{position:absolute;right:-4px;bottom:-4px;width:14px;height:14px;border-radius:4px;display:grid;place-items:center;font-size:7px;font-weight:700;color:#fff;box-shadow:0 0 0 2px var(--cais)}
+.ag .flag2{position:absolute;right:9px;bottom:-4px;width:14px;height:14px;border-radius:4px;display:grid;place-items:center;font-size:7px;font-weight:700;color:#fff;box-shadow:0 0 0 2px var(--cais)}
+.emL{background:var(--purple)}.emG{background:#B45309}
+
+/* nav do protótipo */
+.pn{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:70;display:flex;gap:2px;background:#22262C;border:1px solid var(--line2);border-radius:99px;padding:4px;box-shadow:0 8px 26px -12px #000}
+.pn button{font-size:11.5px;padding:6px 12px;border-radius:99px;color:var(--tx2);white-space:nowrap}
+.pn button[aria-pressed="true"]{background:#fff;color:#16181C;font-weight:600}
+.scr{display:none}.scr.on{display:contents}
+
+@media (max-width:1180px){
+  .win{grid-template-columns:64px 56px 220px minmax(280px,1fr) 76px}
+  .nv .tl{display:none}
+  .nv{width:44px;padding:9px 0}
+}
+@media (max-width:960px){
+  .win{grid-template-columns:64px 0 0 1fr 56px}
+  .nav,.side{display:none}
+  .ag .nm{display:none}
+  .ag{height:48px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+
+<div class="win">
+  <!-- ========== COL 1 · empresas ========== -->
+  <nav class="rail" aria-label="Empresas">
+    <button class="ws k1" id="wsL" aria-current="true"><span class="bar"></span>LE<span class="bdg">29</span><span class="orb"></span></button>
+    <button class="ws k8" id="wsG"><span class="bar"></span>GA<span class="bdg">9</span><span class="orb stuck"></span></button>
+    <button class="ws k5"><span class="bar"></span>CF<span class="bdg">10</span><span class="orb"></span></button>
+    <button class="ws k6"><span class="bar"></span>NV<span class="bdg">5</span><span class="orb"></span></button>
+    <button class="ws k0"><span class="bar"></span>AP<span class="orb"></span></button>
+    <button class="addws" aria-label="Adicionar empresa">+</button>
+  </nav>
+
+  <!-- ========== COL 2 · navegação ========== -->
+  <nav class="nav" aria-label="Navegação">
+    <button class="nv" aria-current="true"><span class="ic">⌂</span><span class="tl">Início</span><span class="pt"></span></button>
+    <button class="nv"><span class="ic">✉</span><span class="tl">MDs</span></button>
+    <button class="nv"><span class="ic">◔</span><span class="tl">Atividade</span><span class="b">4</span></button>
+    <button class="nv"><span class="ic">▤</span><span class="tl">Arquivos</span></button>
+    <button class="nv"><span class="ic">⚑</span><span class="tl">Mais tarde</span></button>
+    <button class="nv"><span class="ic">⋯</span><span class="tl">Mais</span></button>
+  </nav>
+
+  <!-- ========== COL 3 · sidebar ========== -->
+  <aside class="side" id="side">
+    <!-- modo empresa -->
+    <div id="sideEmp" style="display:contents">
+      <div class="sh"><b id="wsName">Leapy</b><span class="cv">▾</span><span class="co">✎</span></div>
+      <div class="sq">🔍 <span id="wsSearch">Buscar na Leapy</span></div>
+      <div class="sscroll">
+        <div class="sec" data-sec>
+          <button class="sechd"><span class="cv">▾</span>Canais</button>
+          <div class="items" id="chList">
+            <button class="row un"><span class="g"><span class="hash">#</span></span><span class="lb">suporte</span><span class="bd">3</span></button>
+            <button class="row" aria-current="true"><span class="g">🔒</span><span class="lb">comitê-admissão</span></button>
+            <button class="row"><span class="g">🔒</span><span class="lb">comitê-faltas</span></button>
+            <button class="row"><span class="g"><span class="hash">#</span></span><span class="lb">dados-na-plataforma</span></button>
+            <button class="row"><span class="g"><span class="hash">#</span></span><span class="lb">kr1-e-kr2-q3-2026</span></button>
+          </div>
+        </div>
+        <div class="sec" data-sec>
+          <button class="sechd"><span class="cv">▾</span>🎓 Turmas</button>
+          <div class="items">
+            <button class="row"><span class="g">🎓</span><span class="lb">turma-12-bradesco</span></button>
+            <button class="row"><span class="g">🎓</span><span class="lb">turma-13-natura</span></button>
+          </div>
+        </div>
+        <div class="sec" data-sec>
+          <button class="sechd"><span class="cv">▾</span>Mensagens diretas</button>
+          <div class="items" id="dmList">
+            <button class="row"><span class="g"><span class="p k1">MW</span><span class="pr on"></span></span><span class="lb">Marlon W.</span><span class="you">você</span></button>
+            <button class="row un"><span class="g"><span class="p k2">AB</span><span class="pr on"></span></span><span class="lb">Ana Beatriz</span><span class="bd">2</span></button>
+            <button class="row"><span class="g"><span class="b2 k0">RE</span></span><span class="lb">Ressaca</span></button>
+            <button class="row"><span class="g"><span class="b2 k0">BZ</span></span><span class="lb">BugZero</span></button>
+            <button class="row"><span class="g"><span class="p k6">RC</span><span class="pr off"></span></span><span class="lb">Rodrigo Costa</span></button>
+            <button class="row"><span class="g"><span class="gp"><span class="p k3">CM</span><span class="b2 k0">RE</span></span></span><span class="lb">Camila, Ressaca</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- modo frota (índice) -->
+    <div id="sideFrota" hidden>
+      <div class="sh"><b>Meus agentes</b><span class="cv">▾</span></div>
+      <p class="sub">fora das empresas</p>
+      <div class="sq">🔍 Buscar na frota</div>
+      <div class="sscroll">
+        <button class="row" data-go="fila" aria-current="true"><span class="g">◷</span><span class="lb">Sua vez</span><span class="bd" style="background:var(--amber);color:#16181C">7</span></button>
+        <button class="row" data-go="ficha"><span class="g">▦</span><span class="lb">Todos os agentes</span></button>
+        <button class="row"><span class="g">◑</span><span class="lb">Rotinas</span></button>
+        <button class="row"><span class="g">✓</span><span class="lb">Aprovações</span></button>
+        <button class="row"><span class="g">◈</span><span class="lb">Memória</span></button>
+        <button class="row"><span class="g">▤</span><span class="lb">Registro</span></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== COL 4 · palco ========== -->
+  <main class="stage">
+    <!-- T1/T2 · canal -->
+    <div class="scr on" id="sc-canal">
+      <div class="sthd">
+        <h1 id="chName"><span class="h">🔒</span> comitê-admissão</h1>
+        <span class="ctx"><span class="em emL" id="ctxEm">LE</span><span id="ctxNm">Leapy</span></span>
+      </div>
+      <div class="stbody"><div class="stin">
+        <p class="sys">Marlon adicionou <b>Psico</b> ao canal. Psico é um agente pessoal de Marlon.</p>
+        <div class="msg"><span class="mav b k9">PS</span><div>
+          <div class="mh"><span class="w">Psico</span><span class="tg">agente de Marlon</span><time>14:30</time></div>
+          <div class="mb">Eu chego aqui sem nada do que aprendi na Leapy ou em qualquer outro canal. Não trago memória de lugar nenhum.</div>
+        </div></div>
+        <div class="msg"><span class="mav p k2">AB</span><div>
+          <div class="mh"><span class="w">Ana Beatriz</span><time>14:31</time></div>
+          <div class="mb">Psico, a presença da turma 12 caiu esse mês?</div>
+        </div></div>
+        <div class="msg"><span class="mav b k9">PS</span><div>
+          <div class="mh"><span class="w">Psico</span><span class="tg">agente de Marlon</span><time>14:32</time></div>
+          <div class="mb">Para responder preciso ler as mensagens deste canal. Meu teto aqui é o mesmo dos membros: não alcanço nada que vocês não alcancem.</div>
+        </div></div>
+        <p class="sys">Psico agora lê as mensagens de 🔒 comitê-faltas. Teto: o mesmo dos membros. Registrado em 15/09/2026, 14h32.</p>
+      </div></div>
+      <div class="stdock">
+        <p class="hint">Troque de empresa no rail da esquerda (<b>Leapy ↔ Gamefik</b>). Três colunas trocam. <b>O cais à direita não move um pixel</b> — é a prova de que a frota não pertence a nenhuma delas.</p>
+        <div class="cmp"><textarea rows="1" placeholder="Mensagem"></textarea><button class="bt pri">Enviar</button></div>
+      </div>
+    </div>
+
+    <!-- T3 · fila consolidada -->
+    <div class="scr" id="sc-fila">
+      <div class="sthd"><h1>Sua vez · 7</h1><span class="ctx">mostrando 7 de 7</span></div>
+      <div class="stbody"><div class="stin">
+        <div class="qhd"><span class="em emL">LE</span><span class="nm">Leapy · 4</span></div>
+        <div class="q"><span class="qa k9">CH</span><span class="qb">
+          <span class="qt">Posso fechar a sprint com 3 tarefas sem responsável?</span>
+          <span class="qm"><span>Chiquinho</span><span>#kr1-e-kr2-q3-2026</span><span>parado há 18min</span></span>
+          <span class="qbtn"><button class="bt pri">Pode</button><button class="bt">Não</button><button class="bt">Abrir</button></span>
+        </span></div>
+        <div class="q"><span class="qa k2">TR</span><span class="qb">
+          <span class="qt">Separei 12 e-mails de responsáveis legais. Respondo com o modelo padrão?</span>
+          <span class="qm"><span>Triagem</span><span>MD</span><span>parado há 1h05</span></span>
+          <span class="qbtn"><button class="bt pri">Pode</button><button class="bt">Não</button><button class="bt">Abrir</button></span>
+        </span></div>
+        <div class="q"><span class="qa k8">PI</span><span class="qb">
+          <span class="qt">Duas versões do banner da turma 13. Qual vai?</span>
+          <span class="qm"><span>Picasso</span><span>#dados-na-plataforma</span><span class="old">parado há 3h40</span></span>
+          <span class="qbtn"><button class="bt pri">Ver as duas</button><button class="bt">Abrir</button></span>
+        </span></div>
+        <div class="q"><span class="qa k5">PS</span><span class="qb">
+          <span class="qt">A queda de presença da turma 12 passou de 15%. Aviso o time?</span>
+          <span class="qm"><span>Psico</span><span>🔒 comitê-faltas</span><span class="old">parado há 6h12</span></span>
+          <span class="qbtn"><button class="bt pri">Avisa</button><button class="bt">Não</button><button class="bt">Abrir</button></span>
+        </span></div>
+
+        <div class="qhd"><span class="em emG">GA</span><span class="nm">Gamefik · 2</span></div>
+        <div class="q"><span class="qa k0">RE</span><span class="qb">
+          <span class="qt">O roadmap do Q4 tem dois épicos sem estimativa. Corto ou espero?</span>
+          <span class="qm"><span>Ressaca</span><span>#roadmap</span><span>parado há 2h20</span></span>
+          <span class="qbtn"><button class="bt pri">Espera</button><button class="bt">Corta</button><button class="bt">Abrir</button></span>
+        </span></div>
+        <div class="q"><span class="qa k3">MA</span><span class="qb">
+          <span class="qt">O PR #412 quebra dois testes de build. Reverto?</span>
+          <span class="qm"><span>Marola</span><span>#core</span><span>parado há 44min</span></span>
+          <span class="qbtn"><button class="bt pri">Reverte</button><button class="bt">Não</button><button class="bt">Abrir</button></span>
+        </span></div>
+
+        <div class="qhd"><span class="em" style="background:var(--line2)">—</span><span class="nm">Fora de conta · 1</span></div>
+        <div class="q"><span class="qa k1">TA</span><span class="qb">
+          <span class="qt">Achei 2 trechos pessoais nas suas instruções. Tiro antes de te destacar em algum canal?</span>
+          <span class="qm"><span>Taga</span><span>conversa privada</span><span>parado há 22min</span></span>
+          <span class="qbtn"><button class="bt pri">Tira</button><button class="bt">Revisar</button></span>
+        </span></div>
+      </div></div>
+      <div class="stdock"><p class="hint">Uma decisão parada na <b>Gamefik</b> aparece aqui mesmo com a Leapy aberta. Agrupada por empresa, conta ativa primeiro, e dentro de cada grupo o mais antigo no topo — porque o item esquecido é o que dói.</p></div>
+    </div>
+
+    <!-- T4 · ficha do agente -->
+    <div class="scr" id="sc-ficha">
+      <div class="sthd"><h1>Taga</h1><span class="ctx">Fora de conta</span></div>
+      <div class="stbody"><div class="stin">
+        <div class="fh">
+          <span class="fa k1">TA</span>
+          <span><span class="fn">Taga</span><br><span class="fs">fala por Marlon · agente pessoal</span></span>
+        </div>
+        <div class="tabs">
+          <button class="tb">Conversa</button>
+          <button class="tb" aria-selected="true">Onde eu estou</button>
+          <button class="tb">Memória</button>
+          <button class="tb">Instruções</button>
+        </div>
+        <p style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--tx2);margin:0 0 4px">Onde eu estou · 3 destacamentos</p>
+        <div class="dep"><span class="em emL">LE</span><span class="db">
+          <span class="dn">🔒 comitê-admissão</span>
+          <span class="dd">Na Leapy · leio as mensagens deste canal · <span class="warn">toca dado de aprendiz</span> · entrou em 12/08/2026</span>
+        </span><button class="bt">Tirar daqui</button></div>
+        <div class="dep"><span class="em emL">LE</span><span class="db">
+          <span class="dn">#dados-na-plataforma</span>
+          <span class="dd">Na Leapy · leio as mensagens deste canal · não toca dado de aprendiz · entrou em 02/09/2026</span>
+        </span><button class="bt">Tirar daqui</button></div>
+        <div class="dep"><span class="em emG">GA</span><span class="db">
+          <span class="dn">#roadmap</span>
+          <span class="dd">Na Gamefik · leio as mensagens deste canal · não toca dado de aprendiz · entrou em 28/08/2026</span>
+        </span><button class="bt">Tirar daqui</button></div>
+        <p class="sys" style="padding-left:0;margin-top:16px">O que ele aprende em cada canal fica lá. Não sobe para a frota e, por isso, <b>não desce para outra empresa</b> — o isolamento Leapy↔Gamefik é subproduto da trava de memória, não uma regra nova.</p>
+      </div></div>
+      <div class="stdock"><p class="hint">No cais, o avatar do Taga carrega <b>dois brasões</b>: Leapy e Gamefik. Você vê de relance em quantas empresas cada agente seu opera.</p></div>
+    </div>
+  </main>
+
+  <!-- ========== COL 5 · O CAIS ========== -->
+  <aside class="cais" aria-label="Meus agentes">
+    <div class="chd"><span class="me">MW</span><span class="lb2">FROTA</span></div>
+    <div class="cturn">
+      <button class="pill" id="turnPill" data-go="fila" aria-pressed="false">7</button>
+      <span class="lb3">SUA VEZ</span>
+    </div>
+    <div class="clist">
+      <div class="cblk">
+        <button class="ag wait" data-go="fila"><span class="av k0">RE<span class="flag emG">GA</span></span><span class="nm">Ressaca</span></button>
+        <button class="ag wait" data-go="fila"><span class="av k9">CH<span class="flag emL">LE</span></span><span class="nm">Chiquinho</span></button>
+        <button class="ag wait" data-go="fila"><span class="av k5">PS<span class="flag emL">LE</span></span><span class="nm">Psico</span></button>
+      </div>
+      <div class="cblk">
+        <button class="ag work" data-go="ficha"><span class="av k1">TA<span class="flag emG">GA</span><span class="flag2 emL">LE</span></span><span class="nm">Taga</span></button>
+        <button class="ag work"><span class="av k3">MA<span class="flag emG">GA</span></span><span class="nm">Marola</span></button>
+      </div>
+      <div class="cblk">
+        <button class="ag idle"><span class="av k2">TR</span><span class="nm">Triagem</span></button>
+        <button class="ag idle"><span class="av k8">PI<span class="flag emL">LE</span></span><span class="nm">Picasso</span></button>
+        <button class="ag idle"><span class="av k4">AN</span><span class="nm">Angu</span></button>
+        <button class="ag idle"><span class="av k0">BZ</span><span class="nm">BugZero</span></button>
+        <button class="ag idle"><span class="av k6">D1</span><span class="nm">Dev 1</span></button>
+        <button class="ag idle"><span class="av k6">D3</span><span class="nm">Dev 3</span></button>
+        <button class="ag idle"><span class="av k7">D5</span><span class="nm">Dev 5</span></button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<nav class="pn" aria-label="Telas">
+  <button data-go="canal" aria-pressed="true">Canal · Leapy</button>
+  <button data-go="troca" aria-pressed="false">Trocar p/ Gamefik</button>
+  <button data-go="fila" aria-pressed="false">Sua vez · global</button>
+  <button data-go="ficha" aria-pressed="false">Onde eu estou</button>
+</nav>
+
+<script>
+(function(){
+  var EMP={
+    L:{nome:'Leapy',em:'LE',cls:'emL',canal:'comitê-admissão',glyph:'🔒',
+       canais:[['#','suporte','3'],['🔒','comitê-admissão',''],['🔒','comitê-faltas',''],['#','dados-na-plataforma',''],['#','kr1-e-kr2-q3-2026','']],
+       dms:[['p','k1','MW','Marlon W.','você'],['p','k2','AB','Ana Beatriz','2'],['b','k0','RE','Ressaca',''],['b','k0','BZ','BugZero',''],['p','k6','RC','Rodrigo Costa',''],['g','','','Camila, Ressaca','']]},
+    G:{nome:'Gamefik',em:'GA',cls:'emG',canal:'roadmap',glyph:'#',
+       canais:[['#','geral',''],['#','roadmap',''],['#','core','4'],['🎮','builds',''],['#','arte','']],
+       dms:[['p','k1','MW','Marlon W.','você'],['p','k8','LV','Lucas Vieira',''],['b','k0','RE','Ressaca',''],['p','k5','TS','Thaís S.','1'],['b','k3','MA','Marola','']]}
+  };
+  var cur='L';
+  function paint(k){
+    var e=EMP[k]; cur=k;
+    document.getElementById('wsName').textContent=e.nome;
+    document.getElementById('wsSearch').textContent='Buscar na '+e.nome;
+    document.getElementById('chName').innerHTML='<span class="h">'+e.glyph+'</span> '+e.canal;
+    var ce=document.getElementById('ctxEm'); ce.textContent=e.em; ce.className='em '+e.cls;
+    document.getElementById('ctxNm').textContent=e.nome;
+    document.getElementById('chList').innerHTML=e.canais.map(function(c,i){
+      var g = c[0]==='#' ? '<span class="hash">#</span>' : c[0];
+      return '<button class="row'+(c[2]?' un':'')+(i===1?'" aria-current="true':'')+'"><span class="g">'+g+'</span><span class="lb">'+c[1]+'</span>'+(c[2]?'<span class="bd">'+c[2]+'</span>':'')+'</button>';
+    }).join('');
+    document.getElementById('dmList').innerHTML=e.dms.map(function(d){
+      var av = d[0]==='g'
+        ? '<span class="gp"><span class="p k3">CM</span><span class="b2 k0">RE</span></span>'
+        : '<span class="'+(d[0]==='p'?'p ':'b2 ')+d[1]+'">'+d[2]+'</span>'+(d[0]==='p'?'<span class="pr on"></span>':'');
+      var tail = d[4]==='você' ? '<span class="you">você</span>' : (d[4]?'<span class="bd">'+d[4]+'</span>':'');
+      return '<button class="row'+(d[4]&&d[4]!=='você'?' un':'')+'"><span class="g">'+av+'</span><span class="lb">'+d[3]+'</span>'+tail+'</button>';
+    }).join('');
+    document.getElementById('wsL').setAttribute('aria-current', String(k==='L'));
+    document.getElementById('wsG').setAttribute('aria-current', String(k==='G'));
+    wire();
+  }
+  function wire(){
+    document.querySelectorAll('#chList .row, #dmList .row').forEach(function(r){
+      r.addEventListener('click', function(){
+        document.querySelectorAll('#chList .row, #dmList .row').forEach(function(o){o.removeAttribute('aria-current')});
+        r.setAttribute('aria-current','true');
+      });
+    });
+  }
+  document.getElementById('wsL').addEventListener('click',function(){paint('L');screen('canal')});
+  document.getElementById('wsG').addEventListener('click',function(){paint('G');screen('canal')});
+
+  function screen(id){
+    document.querySelectorAll('.scr').forEach(function(s){ s.classList.toggle('on', s.id==='sc-'+id); });
+    var frota = (id==='fila'||id==='ficha');
+    document.getElementById('sideEmp').hidden = frota;
+    document.getElementById('sideFrota').hidden = !frota;
+    document.getElementById('turnPill').setAttribute('aria-pressed', String(id==='fila'));
+    document.querySelectorAll('.pn [data-go]').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.dataset.go===id));
+    });
+  }
+  function go(id){
+    if(id==='troca'){ paint(cur==='L'?'G':'L'); screen('canal');
+      document.querySelectorAll('.pn [data-go]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.go==='troca')); });
+      return; }
+    screen(id);
+  }
+  document.querySelectorAll('[data-go]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation(); go(b.dataset.go); });
+  });
+  document.querySelectorAll('.ag').forEach(function(a){
+    a.addEventListener('click', function(){
+      document.querySelectorAll('.ag').forEach(function(o){o.removeAttribute('aria-current')});
+      a.setAttribute('aria-current','true');
+    });
+  });
+  document.querySelectorAll('[data-sec] .sechd').forEach(function(h){
+    h.addEventListener('click', function(){ h.closest('[data-sec]').classList.toggle('closed'); });
+  });
+  document.querySelectorAll('.tb').forEach(function(t){
+    t.addEventListener('click', function(){
+      t.parentElement.querySelectorAll('.tb').forEach(function(o){o.removeAttribute('aria-selected')});
+      t.setAttribute('aria-selected','true');
+    });
+  });
+  document.addEventListener('keydown', function(e){
+    if((e.metaKey||e.ctrlKey)&&e.key==='1'){e.preventDefault();paint('L');screen('canal')}
+    if((e.metaKey||e.ctrlKey)&&e.key==='2'){e.preventDefault();paint('G');screen('canal')}
+    if((e.metaKey||e.ctrlKey)&&e.key==='0'){e.preventDefault();screen('fila')}
+  });
+  paint('L');
+})();
+</script>

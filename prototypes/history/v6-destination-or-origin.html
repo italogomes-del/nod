@@ -1,0 +1,275 @@
+<title>Destino ou Partida</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --pg:#F4F4F1; --card:#FFFFFF; --ink:#16181C; --ink2:#55585F; --ink3:#8A8E96; --ink4:#B7BAC1;
+  --line:#E2E2DC; --line2:#CFCFC7;
+  --dk:#1A1D21; --dk2:#14161A; --dk3:#23262C; --dkl:#31353C;
+  --ag:#E8912D; --emp:#6B4E8F; --emp2:#C2410C; --blue:#1D9BD1; --gr:#3F7D52;
+  --f:"Inter",system-ui,-apple-system,sans-serif; --fm:"JetBrains Mono",monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --pg:#111214; --card:#1B1D21; --ink:#ECEDEF; --ink2:#A6A9B0; --ink3:#797D85; --ink4:#565A61;
+  --line:#2A2D33; --line2:#3A3E45;
+}}
+:root[data-theme="dark"]{
+  --pg:#111214; --card:#1B1D21; --ink:#ECEDEF; --ink2:#A6A9B0; --ink3:#797D85; --ink4:#565A61;
+  --line:#2A2D33; --line2:#3A3E45;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pg);color:var(--ink);font:400 14px/1.55 var(--f);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--ag);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1200px;margin:0 auto;padding:40px 20px 100px}
+header{max-width:730px;margin-bottom:12px}
+h1{margin:0 0 10px;font-size:27px;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+.lede{margin:0;font-size:15px;color:var(--ink2);line-height:1.62}
+.lede b{color:var(--ink);font-weight:600}
+
+/* o ponto central */
+.core{margin:26px 0 30px;padding:18px 20px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--ag);border-radius:0 11px 11px 0;max-width:840px}
+.core h2{margin:0 0 9px;font-size:14px;font-weight:700}
+.core p{margin:0;font-size:14px;color:var(--ink2);line-height:1.62}
+.core .eq{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px}
+.core .eq>div{padding:11px 13px;background:var(--pg);border-radius:8px}
+.core .eq .t{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin-bottom:5px}
+.core .eq .v{font-size:14.5px;font-weight:600;line-height:1.45}
+@media(max-width:620px){.core .eq{grid-template-columns:1fr}}
+
+/* colunas das duas opções */
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+@media(max-width:900px){.duo{grid-template-columns:1fr}}
+.col{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.col.b{border-color:var(--ag)}
+.chd{padding:16px 18px 14px;border-bottom:1px solid var(--line)}
+.chd .n{display:flex;align-items:center;gap:9px;margin-bottom:3px}
+.chd .num{width:22px;height:22px;border-radius:6px;background:var(--ink);color:var(--card);font-size:11px;font-weight:700;display:grid;place-items:center;flex:none}
+.col.b .chd .num{background:var(--ag);color:#16181C}
+.chd h3{margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em}
+.chd .one{font-size:13px;color:var(--ink3);margin-top:1px}
+.chd .thesis{font-size:13.5px;color:var(--ink2);line-height:1.55;margin:9px 0 0}
+.chd .thesis b{color:var(--ink);font-weight:600}
+
+.step{padding:16px 18px;border-bottom:1px solid var(--line)}
+.step:last-of-type{border-bottom:0}
+.slab{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+.slab .k{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3)}
+.slab .w{font-size:13.5px;font-weight:600}
+.cap{font-size:12.5px;color:var(--ink3);line-height:1.55;margin:9px 0 0}
+.cap b{color:var(--ink2);font-weight:600}
+
+/* ---- o diagrama de tela ---- */
+.sc{height:124px;background:var(--dk);border:1px solid var(--dkl);border-radius:8px;display:flex;overflow:hidden;position:relative}
+.r{width:17px;background:var(--dk2);flex:none;padding-top:5px}
+.nv{width:16px;background:#1A1D22;border-right:1px solid var(--dkl);flex:none;padding-top:6px}
+.sd{width:58px;background:#1E2126;flex:none;padding-top:6px}
+.sd.f{background:var(--dk3)}
+.st{flex:1;background:var(--dk);min-width:16px;padding:8px 9px}
+.st.f{background:var(--dk3)}
+.e{width:10px;height:10px;border-radius:3px;margin:0 auto 5px;display:block;background:#3A3E45}
+.e.on{background:var(--emp)}
+.e.g{background:var(--emp2)}
+.a{width:10px;height:10px;border-radius:3px;margin:0 auto 5px;display:block;background:var(--ag)}
+.a.rd{border-radius:50%}
+.a.dim{opacity:.4}
+.dv{height:1px;background:var(--dkl);margin:2px 3px 6px}
+.ln{height:3px;border-radius:2px;background:#33373E;margin:0 6px 5px}
+.ln.w{background:#4A4F57}
+.ln.hi{background:var(--blue);opacity:.55}
+.ln.am{background:var(--ag);opacity:.75}
+.big{height:5px;border-radius:3px;background:#4A4F57;margin:0 0 8px;width:62%}
+.card2{height:15px;border-radius:4px;background:#2A2E35;margin-bottom:5px}
+.card2.am{background:rgba(232,145,45,.22);border-left:2px solid var(--ag)}
+.sel{position:absolute;left:0;width:3px;border-radius:0 2px 2px 0;background:#fff}
+.mark{position:absolute;font-size:7px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#7F848C;white-space:nowrap}
+
+/* comparação final */
+.tbl{margin-top:30px;background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.tbl .th{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:0;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);background:var(--pg);border-bottom:1px solid var(--line)}
+.tbl .th>*{padding:11px 15px}
+.tbl .tr{display:grid;grid-template-columns:1.1fr 1fr 1fr;border-bottom:1px solid var(--line);font-size:13.5px}
+.tbl .tr:last-child{border-bottom:0}
+.tbl .tr>*{padding:13px 15px;line-height:1.5}
+.tbl .q{color:var(--ink2);font-weight:500}
+.tbl .v2{border-left:1px solid var(--line)}
+.tbl .v6{border-left:1px solid var(--line)}
+.tbl b{font-weight:600}
+@media(max-width:700px){
+  .tbl .th{display:none}
+  .tbl .tr{grid-template-columns:1fr}
+  .tbl .tr>*{border-left:0!important;padding-bottom:4px}
+  .tbl .tr>*:last-child{padding-bottom:13px}
+  .tbl .v2::before{content:"Opção 2 · ";font-weight:700;color:var(--ink3);font-size:11px}
+  .tbl .v6::before{content:"Opção 6 · ";font-weight:700;color:var(--ink3);font-size:11px}
+}
+
+.foot{margin-top:28px;padding-top:20px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2);line-height:1.65;max-width:760px}
+.foot b{color:var(--ink)}
+.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:var(--card);border:1px solid var(--line2);border-radius:99px;padding:9px 18px;box-shadow:0 8px 28px -12px rgba(0,0,0,.28);font-size:13px;z-index:50}
+.themeb{position:fixed;top:16px;right:16px;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--ink3);border:1px solid var(--line);background:var(--card);z-index:50}
+.pickb{display:block;width:calc(100% - 36px);margin:0 18px 16px;padding:10px;border:1px dashed var(--line2);border-radius:8px;font-size:13px;color:var(--ink3);text-align:center}
+.pickb:hover{border-color:var(--ag);color:var(--ink)}
+.col[aria-pressed="true"] .pickb{background:var(--ag);border-style:solid;border-color:var(--ag);color:#16181C;font-weight:600}
+.col[aria-pressed="true"]{box-shadow:0 0 0 2px var(--ag);border-color:var(--ag)}
+</style>
+
+<button class="themeb" id="theme" aria-label="Alternar tema">◐</button>
+
+<div class="wrap">
+<header>
+  <h1>Destino ou partida</h1>
+  <p class="lede">As duas usam <b>o mesmo mecanismo</b>: um slot no rail da esquerda que troca a tela inteira. Por isso os diagramas ficaram parecidos. A diferença não é onde a frota fica — é <b>em qual delas o produto abre</b>, e o que isso faz com o resto.</p>
+</header>
+
+<div class="core">
+  <h2>A diferença, em uma frase</h2>
+  <p>Nas duas, o rail tem a sua frota em cima e as empresas embaixo. O que muda é a <b>ordem de chegada</b>.</p>
+  <div class="eq">
+    <div><div class="t">Opção 2 · Slot Zero</div><div class="v">Você abre na <b>Leapy</b>. A frota é onde você <i>vai</i>.</div></div>
+    <div><div class="t">Opção 6 · Frota é Casa</div><div class="v">Você abre na <b>frota</b>. As empresas são onde você <i>vai</i>.</div></div>
+  </div>
+</div>
+
+<div class="duo">
+
+  <!-- ============ OPÇÃO 2 ============ -->
+  <div class="col" data-opt="2">
+    <div class="chd">
+      <div class="n"><span class="num">2</span><h3>Slot Zero</h3></div>
+      <div class="one">a frota é um destino entre outros</div>
+      <p class="thesis">O produto continua sendo <b>um Slack multi-empresa</b>. A frota é um lugar a mais no rail, com o slot de honra e o atalho <code style="font-family:var(--fm);font-size:12px">Cmd+0</code> — mas o dia começa e termina dentro de uma empresa.</p>
+    </div>
+
+    <div class="step">
+      <div class="slab"><span class="k">Tela 1</span><span class="w">Ao abrir o produto</span></div>
+      <div class="sc">
+        <div class="r"><i class="a rd dim"></i><i class="dv"></i><i class="e on"></i><i class="e g"></i><i class="e"></i><i class="e"></i><span class="sel" style="top:28px;height:14px"></span></div>
+        <div class="nv"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="sd"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="dv"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="st"><i class="big"></i><i class="ln" style="margin-left:0;margin-right:24px"></i><i class="ln" style="margin-left:0;margin-right:40px"></i><i class="ln" style="margin-left:0;margin-right:16px"></i></div>
+      </div>
+      <p class="cap">Abre direto no <b>#comitê-admissão da Leapy</b>, onde você parou ontem. A frota está ali em cima, apagada, esperando. Igual ao Slack de hoje, mais um slot.</p>
+    </div>
+
+    <div class="step">
+      <div class="slab"><span class="k">Tela 2</span><span class="w">Você entra na frota</span></div>
+      <div class="sc">
+        <div class="r"><i class="a rd"></i><i class="dv"></i><i class="e"></i><i class="e g"></i><i class="e"></i><i class="e"></i><span class="sel" style="top:5px;height:12px"></span></div>
+        <div class="nv"><i class="ln am"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="sd f"><i class="ln w"></i><i class="a" style="margin:0 auto 4px"></i><i class="a"></i><i class="a"></i><i class="a dim"></i><i class="a dim"></i></div>
+        <div class="st f"><i class="big"></i><i class="card2 am"></i><i class="card2 am"></i><i class="card2"></i></div>
+      </div>
+      <p class="cap">A empresa <b>sai de cena inteira</b> — sidebar e palco viram a frota. O rail de navegação troca de conteúdo. Você está num modo separado, e a Leapy ficou para trás.</p>
+    </div>
+
+    <div class="step">
+      <div class="slab"><span class="k">Tela 3</span><span class="w">Um agente pede algo na Gamefik</span></div>
+      <div class="sc">
+        <div class="r"><i class="a rd" style="box-shadow:0 0 0 2px var(--ag)"></i><i class="dv"></i><i class="e on"></i><i class="e g" style="box-shadow:0 0 0 2px var(--ag)"></i><i class="e"></i><i class="e"></i><span class="sel" style="top:28px;height:14px"></span></div>
+        <div class="nv"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="sd"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="dv"></i><i class="ln"></i></div>
+        <div class="st"><i class="big"></i><i class="ln" style="margin-left:0;margin-right:24px"></i><i class="ln" style="margin-left:0;margin-right:40px"></i></div>
+        <span class="mark" style="right:7px;top:7px">anel âmbar no rail</span>
+      </div>
+      <p class="cap">Você está na Leapy e não vê a fila. O aviso é <b>um anel âmbar</b> no avatar da frota e no quadrado da Gamefik. Precisa notar o anel e clicar para saber o que é.</p>
+    </div>
+
+    <button class="pickb">Escolher a 2</button>
+  </div>
+
+  <!-- ============ OPÇÃO 6 ============ -->
+  <div class="col b" data-opt="6">
+    <div class="chd">
+      <div class="n"><span class="num">6</span><h3>Frota é Casa</h3></div>
+      <div class="one">a frota é o ponto de partida</div>
+      <p class="thesis">O produto é <b>seu painel de agentes</b>, e as empresas são lugares que você visita a partir dele. O dia começa vendo o que os seus agentes fizeram e o que esperam de você — em todas as contas de uma vez.</p>
+    </div>
+
+    <div class="step">
+      <div class="slab"><span class="k">Tela 1</span><span class="w">Ao abrir o produto</span></div>
+      <div class="sc">
+        <div class="r"><i class="a rd"></i><i class="dv"></i><i class="e"></i><i class="e g"></i><i class="e"></i><i class="e"></i><span class="sel" style="top:5px;height:12px"></span></div>
+        <div class="nv"><i class="ln am"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="sd f"><i class="ln w"></i><i class="a" style="margin:0 auto 4px"></i><i class="a"></i><i class="a"></i><i class="a dim"></i><i class="a dim"></i></div>
+        <div class="st f"><i class="big"></i><i class="card2 am"></i><i class="card2 am"></i><i class="card2"></i><i class="card2"></i></div>
+      </div>
+      <p class="cap">Abre na <b>fila consolidada</b>: 7 decisões esperando você, agrupadas por empresa, mais antigas no topo. Você resolve o que trava os agentes <b>antes</b> de entrar em qualquer conta.</p>
+    </div>
+
+    <div class="step">
+      <div class="slab"><span class="k">Tela 2</span><span class="w">Você entra numa empresa</span></div>
+      <div class="sc">
+        <div class="r"><i class="a rd dim"></i><i class="dv"></i><i class="e on"></i><i class="e g"></i><i class="e"></i><i class="e"></i><span class="sel" style="top:28px;height:14px"></span></div>
+        <div class="nv"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="sd"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="dv"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="st"><i class="big"></i><i class="ln" style="margin-left:0;margin-right:24px"></i><i class="ln" style="margin-left:0;margin-right:40px"></i><i class="ln" style="margin-left:0;margin-right:16px"></i></div>
+      </div>
+      <p class="cap">A Leapy abre e é <b>Slack puro</b> — idêntica à tela 1 da opção 2. O produto por dentro é o mesmo; o que mudou foi por onde você entrou.</p>
+    </div>
+
+    <div class="step">
+      <div class="slab"><span class="k">Tela 3</span><span class="w">Um agente pede algo na Gamefik</span></div>
+      <div class="sc">
+        <div class="r"><i class="a rd" style="box-shadow:0 0 0 2px var(--ag)"></i><i class="dv"></i><i class="e on"></i><i class="e g" style="box-shadow:0 0 0 2px var(--ag)"></i><i class="e"></i><i class="e"></i><span class="sel" style="top:28px;height:14px"></span></div>
+        <div class="nv"><i class="ln w"></i><i class="ln"></i><i class="ln"></i><i class="ln"></i></div>
+        <div class="sd"><i class="ln w"></i><i class="ln hi"></i><i class="ln"></i><i class="ln"></i><i class="dv"></i><i class="ln"></i></div>
+        <div class="st"><i class="big"></i><i class="ln" style="margin-left:0;margin-right:24px"></i><i class="ln" style="margin-left:0;margin-right:40px"></i></div>
+        <span class="mark" style="right:7px;top:7px">igual à 2 · mesmo anel</span>
+      </div>
+      <p class="cap">Aqui as duas são <b>idênticas</b>: dentro de uma empresa, o aviso é o mesmo anel âmbar. A vantagem da 6 não é neste momento — é que <b>você já tinha visto a fila ao abrir o dia</b>.</p>
+    </div>
+
+    <button class="pickb">Escolher a 6</button>
+  </div>
+</div>
+
+<div class="tbl">
+  <div class="th"><div>Pergunta</div><div>Opção 2 · Slot Zero</div><div>Opção 6 · Frota é Casa</div></div>
+  <div class="tr"><div class="q">O que abre quando você entra?</div><div class="v2">O canal onde você parou</div><div class="v6"><b>A fila dos seus agentes</b></div></div>
+  <div class="tr"><div class="q">Quantos cliques até a fila global?</div><div class="v2">1 clique (ou <code style="font-family:var(--fm);font-size:12px">Cmd+0</code>)</div><div class="v6"><b>Zero — ela já está aberta</b></div></div>
+  <div class="tr"><div class="q">Quantos cliques até o trabalho da empresa?</div><div class="v2"><b>Zero — já está aberto</b></div><div class="v6">1 clique (ou <code style="font-family:var(--fm);font-size:12px">Cmd+1</code>)</div></div>
+  <div class="tr"><div class="q">E para quem não tem agente nenhum?</div><div class="v2"><b>Não muda nada</b> — é o Slack de sempre</div><div class="v6">Abre numa tela vazia todo dia</div></div>
+  <div class="tr"><div class="q">O que a interface afirma?</div><div class="v2">“Você trabalha em empresas, e tem agentes”</div><div class="v6"><b>“Você tem agentes, e eles trabalham em empresas”</b></div></div>
+  <div class="tr"><div class="q">Decisão parada numa conta que você não abriu</div><div class="v2">Depende de você notar o anel</div><div class="v6"><b>Você viu ao abrir o dia</b></div></div>
+  <div class="tr"><div class="q">Risco principal</div><div class="v2">A frota vira lugar que você esquece de visitar</div><div class="v6">Pedágio diário para quem só quer o canal</div></div>
+  <div class="tr"><div class="q">Custo em pixels</div><div class="v2">Zero — nenhum crômo novo</div><div class="v6">Zero — nenhum crômo novo</div></div>
+</div>
+
+<p class="foot">
+  <b>O que realmente está em jogo.</b> As duas têm exatamente o mesmo custo de pixel e a mesma mecânica. Você não está escolhendo um layout — está escolhendo <b>qual é a primeira pergunta do seu dia</b>: “o que está acontecendo na Leapy?” ou “o que meus agentes precisam de mim?”.<br><br>
+  <b>Uma terceira via, se nenhuma convencer.</b> Abrir na frota <b>só quando há decisão parada</b>, e no último canal quando não há. Você ganha a 6 nos dias que importam e a 2 nos dias calmos — ao custo de a tela inicial não ser previsível, o que algumas pessoas odeiam.<br><br>
+  Me diga <b>2</b>, <b>6</b>, ou <b>a terceira via</b>, e eu construo o mockup completo com todas as telas em alta fidelidade.
+</p>
+</div>
+
+<div class="bar" id="bar">Clique em <b>Escolher</b> para marcar, ou me diga no chat</div>
+
+<script>
+(function(){
+  var bar=document.getElementById('bar');
+  var N={'2':'Slot Zero','6':'Frota é Casa'};
+  document.querySelectorAll('.col').forEach(function(c){
+    c.querySelector('.pickb').addEventListener('click',function(){
+      var on=c.getAttribute('aria-pressed')==='true';
+      document.querySelectorAll('.col').forEach(function(x){
+        x.removeAttribute('aria-pressed');
+        x.querySelector('.pickb').textContent='Escolher a '+x.dataset.opt;
+      });
+      if(!on){
+        c.setAttribute('aria-pressed','true');
+        c.querySelector('.pickb').textContent='✓ Escolhida';
+        bar.innerHTML='Você marcou a <b>opção '+c.dataset.opt+' · '+N[c.dataset.opt]+'</b> — me diga no chat e eu construo';
+      } else {
+        bar.innerHTML='Clique em <b>Escolher</b> para marcar, ou me diga no chat';
+      }
+    });
+  });
+  document.getElementById('theme').addEventListener('click',function(){
+    var c=document.documentElement.getAttribute('data-theme');
+    var n=c==='dark'?'light':c==='light'?null:'dark';
+    if(n) document.documentElement.setAttribute('data-theme',n); else document.documentElement.removeAttribute('data-theme');
+  });
+})();
+</script>

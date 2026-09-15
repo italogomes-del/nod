@@ -1,0 +1,425 @@
+<title>Frota é Casa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --rail:#14161A; --nav:#1A1D22; --side:#1E2126; --dkl:#31353C;
+  --bg:#FAFAF8; --panel:#FFFFFF; --sunk:#F3F2EE;
+  --ink:#17181C; --ink2:#55585F; --ink3:#86898F; --ink4:#B4B7BD;
+  --line:#E8E6E1; --line2:#D6D3CC;
+  --blue:#1D74D1; --amber:#B4690E; --amber-bg:#FDF3E4; --amber-line:#E3BE86;
+  --emp:#6B4E8F; --emp2:#C2410C;
+  --f:"Inter",system-ui,-apple-system,sans-serif; --fm:"JetBrains Mono",monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.5 var(--f);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:5px}
+[hidden]{display:none!important}
+
+.win{display:grid;grid-template-columns:64px 72px 250px 1fr;height:100dvh;min-height:0;padding-top:44px}
+
+/* ---- rail: frota em cima, empresas embaixo ---- */
+.rail{background:var(--rail);display:flex;flex-direction:column;align-items:center;padding:12px 0;min-height:0}
+.slot{position:relative;width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:none}
+.slot .bar{position:absolute;left:-12px;top:9px;width:3px;height:24px;border-radius:0 2px 2px 0;background:#fff;opacity:0}
+.slot[aria-current="true"] .bar{opacity:1}
+.slot.me{background:#E8912D;color:#16181C;font-size:12px;font-weight:700}
+.slot[aria-current="true"].me{box-shadow:0 0 0 2px var(--rail),0 0 0 4px #F5C177}
+.divi{width:26px;height:1px;background:#33373E;margin:11px 0}
+.ws{position:relative;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex:none;margin-bottom:9px}
+.ws .bar{position:absolute;left:-13px;top:7px;width:3px;height:24px;border-radius:0 2px 2px 0;background:#fff;opacity:0}
+.ws[aria-current="true"] .bar{opacity:1}
+.ws[aria-current="true"]{box-shadow:0 0 0 2px var(--rail),0 0 0 4px var(--emp)}
+.ws .bd{position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;border-radius:9px;background:var(--blue);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;padding:0 4px;box-shadow:0 0 0 2px var(--rail)}
+.ws .amb{position:absolute;inset:-4px;border-radius:14px;border:2px solid #E8912D}
+.addws{width:38px;height:38px;border-radius:11px;border:1.5px dashed #3A3F48;color:#5A616B;display:grid;place-items:center;font-size:17px;margin-top:auto;flex:none}
+.railcap{font-size:8px;font-weight:700;letter-spacing:.06em;color:#6E737B;margin-top:4px}
+
+/* ---- nav ---- */
+.nav{background:var(--nav);border-right:1px solid var(--dkl);display:flex;flex-direction:column;align-items:center;padding-top:14px;gap:3px}
+.nv{width:58px;padding:8px 0 6px;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:4px;color:#9AA1AB;position:relative}
+.nv:hover{background:#22262C}
+.nv[aria-current="true"]{background:#262A31;color:#fff}
+.nv .ic{font-size:16px;line-height:1}
+.nv .tl{font-size:10px;font-weight:500}
+.nv .b{position:absolute;top:4px;right:8px;min-width:16px;height:16px;border-radius:8px;background:#E8912D;color:#16181C;font-size:9.5px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+
+/* ---- sidebar ---- */
+.side{background:var(--side);display:flex;flex-direction:column;min-height:0;overflow:hidden;color:#C9CDD3}
+.sh{height:50px;flex:none;display:flex;align-items:center;gap:7px;padding:0 16px}
+.sh b{font-size:15px;font-weight:700;color:#fff}
+.sh .cv{font-size:9px;color:#8A9099}
+.subt{font-size:11.5px;color:#7C8089;padding:0 16px 8px;margin-top:-7px}
+.sq{margin:0 12px 8px;display:flex;align-items:center;gap:7px;background:#16181C;border:1px solid var(--dkl);border-radius:7px;padding:6px 9px;color:#7C8089;font-size:12.5px}
+.ss{flex:1;min-height:0;overflow:auto;padding:0 8px 10px}
+.sec{margin-top:9px}
+.sechd{width:100%;display:flex;align-items:center;gap:6px;height:25px;padding:0 8px;color:#8A9099;font-size:12.5px;border-radius:6px}
+.sechd .cv{font-size:8px}
+.sr{width:100%;display:flex;align-items:center;height:28px;padding:0 8px;border-radius:6px;font-size:14.5px;color:#C9CDD3}
+.sr:hover{background:#22262C}
+.sr[aria-current="true"]{background:#1164A3;color:#fff}
+.g{width:20px;margin-right:8px;display:flex;align-items:center;justify-content:center;flex:none;position:relative}
+.lb{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs{color:#7C8089}
+.sr.un .lb,.sr.un .hs{color:#fff;font-weight:700}
+.bd2{flex:none;min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.pp{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:8px;font-weight:600;color:#fff}
+.bb{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:8px;font-weight:600;color:#fff}
+.k1{background:#7E22CE}.k2{background:#0F766E}.k3{background:#BE185D}.k4{background:#A16207}
+.k5{background:#1D4ED8}.k6{background:#15803D}.k0{background:#5B5566}
+
+/* ================= PALCO ================= */
+.stage{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+.sthd{flex:none;min-height:54px;display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid var(--line)}
+.sthd h1{margin:0;font-size:17px;font-weight:700;display:flex;align-items:center;gap:6px}
+.sthd h1 .h{color:var(--ink3);font-weight:400}
+.chip{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink3);border:1px solid var(--line2);border-radius:99px;padding:3px 10px}
+.chip .em{width:14px;height:14px;border-radius:4px;display:grid;place-items:center;font-size:7px;font-weight:700;color:#fff}
+
+/* A CALHA — grid de 2 colunas, 88px SEMPRE reservados */
+.palco{flex:1;min-height:0;display:grid;grid-template-columns:1fr 88px}
+.fluxo{display:flex;flex-direction:column;min-width:0;min-height:0}
+.tr{flex:1;overflow:auto;min-height:0;padding:16px 20px}
+.trin{max-width:680px}
+.dock{width:88px;position:relative;border-left:1px solid transparent}
+.dock.active{background:var(--bg);border-left-color:var(--line)}
+.dockin{position:sticky;top:0;padding:16px 0;display:flex;flex-direction:column;align-items:center;gap:18px}
+
+/* ícones dos agentes — formas próprias, dessaturados sempre */
+.ag{position:relative;width:56px;display:flex;flex-direction:column;align-items:center;gap:5px}
+.ag svg{display:block;filter:saturate(.55)}
+.ag .ring{position:absolute;top:-5px;left:50%;transform:translateX(-50%);width:66px;height:66px;border-radius:50%;pointer-events:none}
+.ag.wait .ring{border:2.5px solid var(--amber)}
+.ag.work .ring{border:2.5px solid transparent;border-top-color:var(--ink4);animation:sp 2.4s linear infinite}
+@keyframes sp{to{transform:translateX(-50%) rotate(360deg)}}
+.ag.work svg{opacity:.62}
+.ag .nm{font-size:10.5px;font-weight:600;color:var(--ink2);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag .clk{font-size:9.5px;font-family:var(--fm);color:var(--ink3)}
+.ag .clk.soon{color:var(--amber);font-weight:500}
+.ag .cnt{position:absolute;top:-4px;right:2px;min-width:19px;height:19px;border-radius:10px;background:var(--amber);color:#fff;font-size:10.5px;font-weight:700;display:grid;place-items:center;padding:0 5px;box-shadow:0 0 0 2px var(--bg)}
+.ag.sm svg{width:40px;height:40px}
+.ag.sm .ring{width:50px;height:50px;top:-5px}
+.ag[aria-pressed="true"]::after{content:"";position:absolute;right:-16px;top:18px;width:3px;height:22px;border-radius:2px 0 0 2px;background:var(--amber)}
+
+/* transcript */
+.sys{font-size:12.5px;color:var(--ink3);line-height:1.6;margin:0 0 12px;padding-left:40px}
+.m{display:grid;grid-template-columns:32px 1fr;gap:10px;margin-bottom:14px}
+.mav{width:32px;height:32px;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff}
+.mav.p{border-radius:50%}.mav.b{border-radius:8px}
+.mh{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-bottom:2px}
+.mh .w{font-size:14px;font-weight:700}
+.mh .tg{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
+.mh time{font-size:11px;color:var(--ink4);font-family:var(--fm)}
+.mbd{font-size:14.5px;line-height:1.55;color:var(--ink)}
+
+/* composer — nunca é tocado */
+.dock2{flex:none;padding:0 20px 16px}
+.cmp{max-width:680px;border:1px solid var(--line2);border-radius:10px;background:var(--panel);padding:10px 12px;display:flex;align-items:flex-end;gap:10px}
+.cmp.focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,116,209,.12)}
+.cmp textarea{flex:1;border:0;background:none;resize:none;font:400 14.5px/1.55 var(--f);color:var(--ink);outline:none;min-height:22px}
+.bt{border:1px solid var(--line2);background:var(--panel);border-radius:7px;padding:6px 13px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.bt:hover{border-color:var(--ink3)}
+.bt.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.bt.sm{padding:4px 9px;font-size:11.5px;font-weight:400}
+.note{max-width:680px;font-size:11.5px;color:var(--ink4);padding:0 3px 7px;line-height:1.5}
+.note b{color:var(--ink2)}
+
+/* bandeja */
+.tray{position:absolute;right:88px;top:14px;width:360px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.12);z-index:20;padding:14px 15px}
+.tray h3{margin:0 0 3px;font-size:14.5px;font-weight:700}
+.tray .who{font-size:11.5px;color:var(--ink3);margin-bottom:10px}
+.tray .it{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.tray .it input{width:16px;height:16px;accent-color:var(--ink);margin:2px 0 0;flex:none}
+.tray .ft{display:flex;gap:7px;align-items:center;margin-top:11px;padding-top:11px;border-top:1px solid var(--line)}
+.tray .tm{font-size:11px;font-family:var(--fm);color:var(--amber);margin-left:auto}
+
+/* frota (tela inicial) */
+.qh{display:flex;align-items:center;gap:8px;margin:16px 0 8px}
+.qh .em{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:8px;font-weight:700;color:#fff}
+.qh .nm{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3)}
+.q{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:7px;background:var(--panel)}
+.q .qa{flex:none}
+.q .qa svg{filter:saturate(.85);display:block}
+.q .qb{min-width:0;flex:1}
+.q .qt{font-size:14px;font-weight:500;line-height:1.4}
+.q .qm{font-size:12px;color:var(--ink3);margin-top:3px;display:flex;gap:7px;flex-wrap:wrap}
+.q .qm .old{color:var(--amber);font-weight:500}
+.qb2{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+
+.pn{position:fixed;left:50%;transform:translateX(-50%);top:10px;z-index:60;display:flex;gap:2px;background:var(--panel);border:1px solid var(--line2);border-radius:99px;padding:4px;box-shadow:0 8px 26px -12px rgba(0,0,0,.25)}
+.pn button{font-size:11.5px;padding:6px 12px;border-radius:99px;color:var(--ink3);white-space:nowrap}
+.pn button[aria-pressed="true"]{background:var(--ink);color:#fff;font-weight:600}
+.scr{display:none}.scr.on{display:contents}
+
+@media (max-width:1100px){.win{grid-template-columns:64px 56px 210px 1fr}.nv .tl{display:none}.nv{width:44px}}
+@media (max-width:820px){.win{grid-template-columns:64px 0 0 1fr}.nav,.side{display:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="sq" viewBox="0 0 64 64"><rect x="2" y="2" width="60" height="60" rx="19" fill="#8B7FE8"/><ellipse cx="25" cy="31" rx="4.5" ry="7.5" fill="#fff"/><ellipse cx="43" cy="31" rx="4.5" ry="7.5" fill="#fff"/></symbol>
+  <symbol id="tri" viewBox="0 0 64 64"><path d="M32 5c2.6 0 5 1.4 6.4 3.7l22 38c1.4 2.4 1.4 5.4 0 7.8S56.6 58 53.8 58H10.2c-2.8 0-5.2-1.5-6.6-3.9s-1.4-5.4 0-7.8l22-38C27 6.4 29.4 5 32 5z" fill="#111"/><ellipse cx="25" cy="38" rx="4" ry="7" fill="#fff"/><ellipse cx="41" cy="38" rx="4" ry="7" fill="#fff"/></symbol>
+  <symbol id="hex" viewBox="0 0 64 64"><path d="M32 3l23 13.5v27L32 57 9 43.5v-27z" fill="#E8559B"/><ellipse cx="25" cy="30" rx="4.5" ry="7.5" fill="#fff"/><ellipse cx="43" cy="30" rx="4.5" ry="7.5" fill="#fff"/></symbol>
+  <symbol id="tri2" viewBox="0 0 64 64"><path d="M32 5c2.6 0 5 1.4 6.4 3.7l22 38c1.4 2.4 1.4 5.4 0 7.8S56.6 58 53.8 58H10.2c-2.8 0-5.2-1.5-6.6-3.9s-1.4-5.4 0-7.8l22-38C27 6.4 29.4 5 32 5z" fill="#4FC4AE"/><ellipse cx="25" cy="38" rx="4" ry="7" fill="#fff"/><ellipse cx="41" cy="38" rx="4" ry="7" fill="#fff"/><circle cx="52" cy="50" r="8" fill="#1D4ED8"/></symbol>
+  <symbol id="cir" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#E8912D"/><ellipse cx="25" cy="30" rx="4.5" ry="7.5" fill="#fff"/><ellipse cx="43" cy="30" rx="4.5" ry="7.5" fill="#fff"/></symbol>
+</defs></svg>
+
+<div class="win">
+  <!-- rail -->
+  <nav class="rail" aria-label="Contextos">
+    <button class="slot me" id="slotFrota" aria-current="true"><span class="bar"></span>MW</button>
+    <span class="railcap">FROTA</span>
+    <span class="divi"></span>
+    <button class="ws k1" id="wsL"><span class="bar"></span>LE<span class="bd">29</span><span class="amb"></span></button>
+    <button class="ws" id="wsG" style="background:#C2410C"><span class="bar"></span>GA<span class="bd">9</span></button>
+    <button class="ws k5"><span class="bar"></span>CF<span class="bd">10</span></button>
+    <button class="addws">+</button>
+  </nav>
+
+  <!-- nav -->
+  <nav class="nav" aria-label="Navegação">
+    <button class="nv" id="nv1" aria-current="true"><span class="ic">◷</span><span class="tl">Sua vez</span><span class="b">7</span></button>
+    <button class="nv"><span class="ic">▦</span><span class="tl">Agentes</span></button>
+    <button class="nv"><span class="ic">◑</span><span class="tl">Rotinas</span></button>
+    <button class="nv"><span class="ic">◈</span><span class="tl">Memória</span></button>
+    <button class="nv"><span class="ic">▤</span><span class="tl">Registro</span></button>
+  </nav>
+
+  <!-- sidebar -->
+  <aside class="side">
+    <div id="sdFrota" style="display:contents">
+      <div class="sh"><b>Meus agentes</b><span class="cv">▾</span></div>
+      <p class="subt">fora das empresas</p>
+      <div class="sq">🔍 Buscar na frota</div>
+      <div class="ss">
+        <button class="sr" aria-current="true"><span class="g">◷</span><span class="lb">Sua vez</span><span class="bd2" style="background:#B4690E">7</span></button>
+        <div class="sec"><button class="sechd"><span class="cv">▾</span>Esperando você</button>
+          <button class="sr"><span class="g"><svg width="18" height="18"><use href="#tri"/></svg></span><span class="lb">Marola</span></button>
+          <button class="sr"><span class="g"><svg width="18" height="18"><use href="#sq"/></svg></span><span class="lb">Ressaca</span></button>
+          <button class="sr"><span class="g"><svg width="18" height="18"><use href="#tri2"/></svg></span><span class="lb">BugZero</span></button>
+        </div>
+        <div class="sec"><button class="sechd"><span class="cv">▾</span>Trabalhando</button>
+          <button class="sr"><span class="g"><svg width="18" height="18"><use href="#hex"/></svg></span><span class="lb">Taga</span></button>
+          <button class="sr"><span class="g"><svg width="18" height="18"><use href="#cir"/></svg></span><span class="lb">Triagem</span></button>
+        </div>
+        <div class="sec"><button class="sechd"><span class="cv">▾</span>Parados · 7</button>
+          <button class="sr"><span class="g"><span class="bb k5">PS</span></span><span class="lb">Psico</span></button>
+          <button class="sr"><span class="g"><span class="bb k4">AN</span></span><span class="lb">Angu</span></button>
+          <button class="sr"><span class="g"><span class="bb k2">CH</span></span><span class="lb">Chiquinho</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sdEmp" hidden>
+      <div class="sh"><b id="empN">Leapy</b><span class="cv">▾</span></div>
+      <div class="sq">🔍 <span id="empS">Buscar na Leapy</span></div>
+      <div class="ss">
+        <div class="sec"><button class="sechd"><span class="cv">▾</span>Canais</button>
+          <button class="sr un"><span class="g"><span class="hs">#</span></span><span class="lb">suporte</span><span class="bd2">3</span></button>
+          <button class="sr" aria-current="true"><span class="g">🔒</span><span class="lb">comitê-admissão</span></button>
+          <button class="sr"><span class="g">🔒</span><span class="lb">comitê-faltas</span></button>
+          <button class="sr"><span class="g"><span class="hs">#</span></span><span class="lb">dados-na-plataforma</span></button>
+        </div>
+        <div class="sec"><button class="sechd"><span class="cv">▾</span>🎓 Turmas</button>
+          <button class="sr"><span class="g">🎓</span><span class="lb">turma-12-bradesco</span></button>
+          <button class="sr"><span class="g">🎓</span><span class="lb">turma-13-natura</span></button>
+        </div>
+        <div class="sec"><button class="sechd"><span class="cv">▾</span>Mensagens diretas</button>
+          <button class="sr"><span class="g"><span class="pp k1">MW</span></span><span class="lb">Marlon W.</span></button>
+          <button class="sr un"><span class="g"><span class="pp k2">AB</span></span><span class="lb">Ana Beatriz</span><span class="bd2">2</span></button>
+          <button class="sr"><span class="g"><span class="bb k0">RE</span></span><span class="lb">Ressaca</span></button>
+          <button class="sr"><span class="g"><span class="pp k6">RC</span></span><span class="lb">Rodrigo Costa</span></button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- palco -->
+  <main class="stage">
+    <!-- T1 · frota -->
+    <div class="scr on" id="sc-frota">
+      <div class="sthd"><h1>Sua vez · 7</h1><span class="chip">a primeira tela do seu dia</span></div>
+      <div class="palco" style="grid-template-columns:1fr">
+        <div class="fluxo"><div class="tr"><div class="trin">
+          <div class="qh"><span class="em" style="background:var(--emp)">LE</span><span class="nm">Leapy · 4</span></div>
+          <div class="q"><span class="qa"><svg width="34" height="34"><use href="#tri"/></svg></span><span class="qb">
+            <span class="qt">O PR #412 quebra dois testes de build. Reverto?</span>
+            <span class="qm"><span>Marola</span><span>#dados-na-plataforma</span><span>parado há 18min</span></span>
+            <span class="qb2"><button class="bt pri">Reverte</button><button class="bt">Não</button><button class="bt">Abrir</button></span></span></div>
+          <div class="q"><span class="qa"><svg width="34" height="34"><use href="#cir"/></svg></span><span class="qb">
+            <span class="qt">Separei 12 e-mails de responsáveis legais. Respondo com o modelo padrão?</span>
+            <span class="qm"><span>Triagem</span><span>MD</span><span>parado há 1h05</span></span>
+            <span class="qb2"><button class="bt pri">Pode</button><button class="bt">Não</button><button class="bt">Abrir</button></span></span></div>
+          <div class="q"><span class="qa"><svg width="34" height="34"><use href="#tri2"/></svg></span><span class="qb">
+            <span class="qt">3 bugs do mesmo componente. Junto num só card?</span>
+            <span class="qm"><span>BugZero</span><span>🔒 comitê-faltas</span><span class="old">parado há 3h40</span></span>
+            <span class="qb2"><button class="bt pri">Junta</button><button class="bt">Não</button><button class="bt">Abrir</button></span></span></div>
+
+          <div class="qh"><span class="em" style="background:var(--emp2)">GA</span><span class="nm">Gamefik · 2</span></div>
+          <div class="q"><span class="qa"><svg width="34" height="34"><use href="#sq"/></svg></span><span class="qb">
+            <span class="qt">O roadmap do Q4 tem dois épicos sem estimativa. Corto ou espero?</span>
+            <span class="qm"><span>Ressaca</span><span>#roadmap</span><span>parado há 2h20</span></span>
+            <span class="qb2"><button class="bt pri">Espera</button><button class="bt">Corta</button><button class="bt">Abrir</button></span></span></div>
+        </div></div>
+        <div class="dock2"><p class="note">Você abre o produto <b>aqui</b>, não num canal. Resolve o que trava os agentes e só então entra numa empresa — se quiser. Quem mantém o Slack da empresa pode usar só esta tela.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- T2/T3/T4 · canal com calha -->
+    <div class="scr" id="sc-canal">
+      <div class="sthd">
+        <h1><span class="h">🔒</span> comitê-admissão</h1>
+        <span class="chip"><span class="em" style="background:var(--emp)">LE</span>Leapy</span>
+      </div>
+      <div class="palco">
+        <div class="fluxo">
+          <div class="tr"><div class="trin">
+            <div class="m"><span class="mav p k2">AB</span><div>
+              <div class="mh"><span class="w">Ana Beatriz</span><time>09:12</time></div>
+              <div class="mbd">Pessoal, a turma 13 da Natura começa dia 2. Falta fechar o comitê de admissão.</div></div></div>
+            <div class="m"><span class="mav p k6">RC</span><div>
+              <div class="mh"><span class="w">Rodrigo Costa</span><time>09:20</time></div>
+              <div class="mbd">Eu consigo montar a lista até quinta. Quantas vagas?</div></div></div>
+            <div class="m"><span class="mav b k0">RE</span><div>
+              <div class="mh"><span class="w">Ressaca</span><span class="tg">agente de Marlon</span><time>09:24</time></div>
+              <div class="mbd">São 24 vagas. Puxei do contrato — confirmo com a gestora antes de vocês fecharem?</div></div></div>
+          </div></div>
+          <div class="dock2">
+            <p class="note" id="note">A calha à direita tem <b>88px reservados sempre</b>. Ela nunca muda de largura — por isso não tem como empurrar o campo de texto. Clique em <b>Digitando</b> na barra de baixo para ver o teste.</p>
+            <div class="cmp" id="cmp">
+              <textarea id="ta" rows="1" placeholder="Mensagem para #comitê-admissão"></textarea>
+              <button class="bt pri">Enviar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- A CALHA -->
+        <div class="dock active" id="dock">
+          <div class="dockin">
+            <button class="ag wait" id="agMarola" aria-pressed="false">
+              <span class="ring"></span><span class="cnt">2</span>
+              <svg width="56" height="56"><use href="#tri"/></svg>
+              <span class="nm">Marola</span><span class="clk soon">12 min</span>
+            </button>
+            <button class="ag wait">
+              <span class="ring"></span><span class="cnt">1</span>
+              <svg width="56" height="56"><use href="#tri2"/></svg>
+              <span class="nm">BugZero</span><span class="clk">2h14</span>
+            </button>
+            <button class="ag work sm">
+              <span class="ring"></span>
+              <svg width="40" height="40"><use href="#hex"/></svg>
+              <span class="nm">Taga</span>
+            </button>
+            <button class="ag work sm">
+              <span class="ring"></span>
+              <svg width="40" height="40"><use href="#cir"/></svg>
+              <span class="nm">Triagem</span>
+            </button>
+          </div>
+
+          <!-- bandeja -->
+          <div class="tray" id="tray" hidden>
+            <h3>Reverter o PR #412</h3>
+            <p class="who">Marola · 2 itens esperando você</p>
+            <label class="it"><input type="checkbox" checked><span>Reverter o commit <code style="font-family:var(--fm);font-size:12px">f83a8a64</code> em <b>payroll</b></span></label>
+            <label class="it"><input type="checkbox" checked><span>Abrir issue com os dois testes que quebraram</span></label>
+            <div class="ft"><button class="bt pri">Pode nos 2</button><button class="bt">Não</button><span class="tm">⏱ 12 min</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- T5 · repouso -->
+    <div class="scr" id="sc-repouso">
+      <div class="sthd">
+        <h1><span class="h">#</span> dados-na-plataforma</h1>
+        <span class="chip"><span class="em" style="background:var(--emp)">LE</span>Leapy</span>
+      </div>
+      <div class="palco">
+        <div class="fluxo">
+          <div class="tr"><div class="trin">
+            <div class="m"><span class="mav p k3">CM</span><div>
+              <div class="mh"><span class="w">Camila Lopes</span><time>11:02</time></div>
+              <div class="mbd">Subi o dashboard novo de frequência. Alguém revisa antes de eu mandar pro cliente?</div></div></div>
+            <div class="m"><span class="mav p k6">RC</span><div>
+              <div class="mh"><span class="w">Rodrigo Costa</span><time>11:09</time></div>
+              <div class="mbd">Olho hoje à tarde 👍</div></div></div>
+          </div></div>
+          <div class="dock2">
+            <p class="note">Nenhum agente ativo. A calha continua ocupando os mesmos 88px — mas <b>sem fundo, sem borda, sem ícone</b>. Some visualmente, e a conversa lê como se tivesse uma margem generosa. Compare com a tela anterior: a largura do texto é <b>exatamente a mesma</b>.</p>
+            <div class="cmp"><textarea rows="1" placeholder="Mensagem para #dados-na-plataforma"></textarea><button class="bt pri">Enviar</button></div>
+          </div>
+        </div>
+        <div class="dock"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<nav class="pn" aria-label="Telas">
+  <button data-s="frota" aria-pressed="true">1 · Frota é casa</button>
+  <button data-s="canal" aria-pressed="false">2 · Canal com calha</button>
+  <button data-s="digitar" aria-pressed="false">3 · Digitando</button>
+  <button data-s="bandeja" aria-pressed="false">4 · Bandeja</button>
+  <button data-s="repouso" aria-pressed="false">5 · Repouso</button>
+</nav>
+
+<script>
+(function(){
+  var ta=document.getElementById('ta'), cmp=document.getElementById('cmp'),
+      tray=document.getElementById('tray'), note=document.getElementById('note'),
+      dock=document.getElementById('dock'), agM=document.getElementById('agMarola');
+
+  function screen(id){
+    document.querySelectorAll('.scr').forEach(function(s){ s.classList.toggle('on', s.id==='sc-'+id); });
+  }
+  function nav(s){
+    document.querySelectorAll('.pn [data-s]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.s===s)); });
+    tray.hidden=true; agM.setAttribute('aria-pressed','false'); cmp&&cmp.classList.remove('focus');
+    if(s==='frota'){ screen('frota'); rail('frota'); return; }
+    if(s==='repouso'){ screen('repouso'); rail('emp'); return; }
+    screen('canal'); rail('emp');
+    if(s==='digitar'){
+      ta.value='Ana, consigo fechar a lista até quinta. Preciso confirmar com a gestora\nse as 24 vagas seguem valendo depois do ajuste do contrato.\n\nRodrigo, você consegue puxar os dados de frequência da turma 12 pra';
+      ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,200)+'px';
+      cmp.classList.add('focus'); ta.focus();
+      note.innerHTML='<b>O teste.</b> Você tem 4 linhas escritas e o cursor no fim. O Marola acabou de pedir aprovação — o ícone dele apareceu na calha, com anel âmbar e contador. <b>O texto não se moveu, o cursor não pulou, o botão Enviar não foi coberto.</b> A calha já estava ali.';
+    } else if(s==='bandeja'){
+      tray.hidden=false; agM.setAttribute('aria-pressed','true');
+      note.innerHTML='<b>Clicar não tira você do canal.</b> A bandeja abre ancorada à calha, sem modal e sem escurecer nada — o transcript continua legível atrás. Ela nunca desce além do topo do campo de texto.';
+    } else {
+      ta.value=''; ta.style.height='auto';
+      note.innerHTML='A calha à direita tem <b>88px reservados sempre</b>. Ela nunca muda de largura — por isso não tem como empurrar o campo de texto. Clique em <b>Digitando</b> na barra de baixo para ver o teste.';
+    }
+  }
+  function rail(m){
+    var f=m==='frota';
+    document.getElementById('slotFrota').setAttribute('aria-current', String(f));
+    document.getElementById('wsL').setAttribute('aria-current', String(!f));
+    document.getElementById('sdFrota').hidden=!f;
+    document.getElementById('sdEmp').hidden=f;
+    document.getElementById('sdFrota').style.display=f?'contents':'none';
+  }
+  document.querySelectorAll('.pn [data-s]').forEach(function(b){
+    b.addEventListener('click', function(){ nav(b.dataset.s); });
+  });
+  document.getElementById('slotFrota').addEventListener('click', function(){ nav('frota'); });
+  document.getElementById('wsL').addEventListener('click', function(){ nav('canal'); });
+  document.getElementById('wsG').addEventListener('click', function(){ nav('canal'); });
+  agM.addEventListener('click', function(){ nav(tray.hidden?'bandeja':'canal'); });
+  ta&&ta.addEventListener('input', function(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,200)+'px'; });
+  ta&&ta.addEventListener('focus', function(){ cmp.classList.add('focus'); });
+  ta&&ta.addEventListener('blur', function(){ cmp.classList.remove('focus'); });
+  document.querySelectorAll('.sr').forEach(function(r){
+    r.addEventListener('click', function(){
+      var sc=r.closest('.ss'); if(sc) sc.querySelectorAll('.sr').forEach(function(o){o.removeAttribute('aria-current')});
+      r.setAttribute('aria-current','true');
+    });
+  });
+  nav('frota');
+})();
+</script>

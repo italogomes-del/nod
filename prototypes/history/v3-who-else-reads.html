@@ -1,0 +1,665 @@
+<title>Quem Mais Lê</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#FAFAF8; --rail:#F2F2EF; --panel:#FFFFFF; --sunk:#F5F5F2; --sheet:#FFFFFF;
+  --ink:#16161A; --ink2:#53535C; --ink3:#8A8A93; --ink4:#B0B0B7;
+  --line:#E8E8E3; --line2:#D5D5CE;
+  --blue:#2563EB; --amber:#B45309; --amber-bg:#FDF3E3; --amber-line:#E5C08A; --ok:#3F7D52;
+  --agent-line:#8A9099; --agent-ink:#4E545C;
+  --f-ui:"Inter Tight",system-ui,-apple-system,sans-serif;
+  --f-msg:"Inter",system-ui,-apple-system,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#131316; --rail:#0F0F12; --panel:#191920; --sunk:#1D1D24; --sheet:#1C1C24;
+  --ink:#EDEDF0; --ink2:#A3A3AC; --ink3:#75757E; --ink4:#55555E;
+  --line:#26262E; --line2:#33333C;
+  --blue:#6D9BFB; --amber:#D89A4A; --amber-bg:#2B2113; --amber-line:#5A4526; --ok:#6FA97F;
+  --agent-line:#6B727B; --agent-ink:#A8AEB6;
+}}
+:root[data-theme="dark"]{
+  --bg:#131316; --rail:#0F0F12; --panel:#191920; --sunk:#1D1D24; --sheet:#1C1C24;
+  --ink:#EDEDF0; --ink2:#A3A3AC; --ink3:#75757E; --ink4:#55555E;
+  --line:#26262E; --line2:#33333C;
+  --blue:#6D9BFB; --amber:#D89A4A; --amber-bg:#2B2113; --amber-line:#5A4526; --ok:#6FA97F;
+  --agent-line:#6B727B; --agent-ink:#A8AEB6;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 13px/1.45 var(--f-ui);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+.top{height:40px;display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;border-bottom:1px solid var(--line);background:var(--rail);flex:none;z-index:30}
+.wordmark{font-weight:600;font-size:13px}
+.wordmark span{color:var(--ink3);font-weight:400;margin-left:7px;font-size:11px}
+.turn{margin-left:auto;display:flex;align-items:center;gap:8px;padding:5px 11px;border-radius:99px;background:var(--amber-bg);border:1px solid var(--amber-line);color:var(--amber);font-weight:500;font-size:12px}
+.themeb{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--ink3)}
+.themeb:hover{background:var(--sunk);color:var(--ink)}
+
+.shell{display:grid;grid-template-columns:260px 1fr;height:calc(100% - 40px);min-height:0;position:relative}
+.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.railtop{display:flex;align-items:center;gap:8px;padding:10px 12px 8px}
+.cmd{flex:1;display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;color:var(--ink3)}
+.cmd input{border:0;background:none;font:inherit;color:var(--ink);width:100%;outline:none}
+.newb{width:28px;height:28px;border-radius:8px;border:1px solid var(--line2);background:var(--panel);display:grid;place-items:center;font-size:16px;color:var(--ink2);flex:none}
+.newb:hover{border-color:var(--ink3);color:var(--ink)}
+.railscroll{overflow:auto;flex:1;min-height:0;padding:0 8px 8px}
+.sec{margin-top:10px}
+.sechd{width:100%;display:flex;align-items:center;gap:6px;padding:5px 8px;color:var(--ink3);font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase}
+.sechd .caret{font-size:8px;display:inline-block;transition:transform .15s}
+.sec.closed .caret{transform:rotate(-90deg)}
+.sec.closed .secitems{display:none}
+
+/* ---- THE ROW: 44px, reach band right ---- */
+.row{width:100%;display:grid;grid-template-columns:32px 1fr 88px;gap:9px;align-items:center;min-height:44px;padding:5px 8px;border-radius:8px}
+.row:hover{background:var(--sunk)}
+.row[aria-current="true"]{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line2)}
+.lead{display:flex;align-items:center;gap:5px;justify-self:start}
+.pdot{width:6px;height:6px;border-radius:50%;flex:none}
+.pdot.run{background:var(--ink4);animation:pulse 1.5s ease-in-out infinite}
+.pdot.wait{background:var(--amber)}
+.pdot.unread{background:var(--blue)}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+/* ===== avatares: pessoa é mancha cheia, agente é contorno vazio =====
+   A porta mora no contorno do agente: tracejado = só você, sólido = o time. */
+.av{display:grid;place-items:center;font-weight:600;flex:none;position:relative;
+    border-radius:50%;color:#fff;font-size:10px;letter-spacing:.02em}
+.a32{width:32px;height:32px;font-size:12.5px}
+.a24{width:24px;height:24px;font-size:9.5px}
+.a20{width:20px;height:20px;font-size:9px}
+
+/* AGENTE — quadrado vazado, 26px dentro do slot de 32px (compensação óptica) */
+.av.bot{background:transparent!important;color:var(--agent-ink);
+  border:1.5px solid var(--agent-line);border-radius:7px;font-weight:600}
+.av.bot.a32{width:26px;height:26px;font-size:10.5px;margin:3px}
+.av.bot.a24{width:20px;height:20px;font-size:9px;border-radius:6px;margin:2px}
+.av.bot.a20{width:17px;height:17px;font-size:8px;border-radius:5px}
+.av.bot.so-voce{border-style:dashed}   /* porta fechada */
+.av.bot.o-time{border-style:solid}     /* porta aberta  */
+
+/* CONVERSA DE VÁRIOS — dois círculos vazados, sem iniciais, sem # */
+.av.varios{background:none!important;border:0;width:32px;height:32px}
+.av.varios i{position:absolute;width:19px;height:19px;border-radius:50%;
+  background:transparent;border:1.5px solid var(--agent-line);font-style:normal}
+.av.varios i:nth-child(1){top:0;left:0;z-index:2;box-shadow:0 0 0 2px var(--rail)}
+.av.varios i:nth-child(2){bottom:0;right:0;z-index:1}
+.row[aria-current="true"] .av.varios i:nth-child(1){box-shadow:0 0 0 2px var(--panel)}
+.row:hover .av.varios i:nth-child(1){box-shadow:0 0 0 2px var(--sunk)}
+
+/* cor no avatar significa PESSOA e nada mais */
+.c1{background:#7E22CE}.c2{background:#0F766E}.c3{background:#BE185D}.c4{background:#A16207}
+.c5{background:#1D4ED8}.c6{background:#15803D}.c7{background:#7E22CE}.c8{background:#C2410C}
+.c9{background:#0F766E}.c0{background:#4E545C}.cg{background:var(--line2);color:var(--ink3)}
+.rowtxt{min-width:0}
+.rowtxt .t{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rowtxt .p{font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;display:flex;gap:6px;align-items:center}
+.rowtxt .p .tm{color:var(--ink4);flex:none}
+.rowtxt .p .clk{color:var(--ink4);flex:none}
+
+/* the reach band — this is the whole idea */
+.reach{display:flex;justify-content:flex-end;align-items:center;justify-self:end}
+.reach>*{margin-left:-6px;box-shadow:0 0 0 1.5px var(--rail)}
+.reach>*:first-child{margin-left:0}
+.row[aria-current="true"] .reach>*{box-shadow:0 0 0 1.5px var(--panel)}
+.row:hover .reach>*{box-shadow:0 0 0 1.5px var(--sunk)}
+.reach .proxy{width:22px;height:22px;border-radius:7px;font-size:9px;background:transparent!important;border:1.5px solid var(--agent-line);border-style:dashed;color:var(--agent-ink)}
+.reach .proxy .seal{position:absolute;right:-4px;bottom:-4px;width:14px;height:14px;border-radius:50%;box-shadow:0 0 0 2px var(--rail)}
+.row[aria-current="true"] .reach .proxy .seal{box-shadow:0 0 0 2px var(--panel)}
+.reach .onlytime{font-size:11px;color:var(--ink4);box-shadow:none;margin:0;font-family:var(--f-mono)}
+.railfoot{border-top:1px solid var(--line);padding:8px 12px;display:flex;align-items:center;gap:9px;flex:none}
+.railfoot .mk{font-size:12px;color:var(--ink2)}
+
+/* ---- center ---- */
+.center{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg);position:relative}
+.chd{flex:none;border-bottom:1px solid var(--line);padding:10px 20px}
+.chd .l1{display:flex;align-items:center;gap:9px;min-height:28px}
+.chd h1{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.chd h1.untitled{color:var(--ink3);font-weight:400}
+.addb{width:26px;height:26px;border-radius:50%;border:1px dashed var(--line2);color:var(--ink3);display:grid;place-items:center;font-size:14px;flex:none}
+.addb:hover{border-color:var(--ink);color:var(--ink);border-style:solid}
+.addlabel{font-size:12px;color:var(--ink3)}
+.clockchip{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink3);border:1px solid var(--line);border-radius:99px;padding:2px 9px}
+.hdlines{margin-top:7px;display:grid;gap:3px}
+.hdline{font-size:13px;color:var(--ink3);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.hdline .faces{display:flex}
+.hdline .faces>*{margin-left:-6px;box-shadow:0 0 0 1.5px var(--bg)}
+.hdline .faces>*:first-child{margin-left:0}
+.hdline.proxy{color:var(--amber)}
+.hdline a{color:var(--ink3);text-decoration:underline;text-underline-offset:2px}
+
+.feed{flex:1;overflow:auto;min-height:0;padding:16px 20px 8px}
+.feedin{max-width:660px}
+.sys{font-size:12px;color:var(--ink3);line-height:1.6;margin-bottom:13px;padding-left:38px}
+.sys.why{color:var(--ink4)}
+.m{display:grid;grid-template-columns:32px 1fr;gap:10px;margin-bottom:14px}
+.mhead{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-bottom:2px}
+.mhead .who{font-size:13.5px;font-weight:600}
+.mhead .by{font-size:12px;color:var(--ink3);font-weight:400}
+.mhead time{font-size:10.5px;color:var(--ink4);font-family:var(--f-mono)}
+.mbody{font:400 14.5px/1.55 var(--f-msg);color:var(--ink)}
+.me .mbody{color:var(--ink)}
+.status{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink3);margin-bottom:14px;padding-left:42px}
+.status .stop{font-size:12px;color:var(--ink4);text-decoration:underline;text-underline-offset:2px}
+
+/* consent card */
+.card{border:1px solid var(--line2);border-radius:10px;background:var(--panel);overflow:hidden;margin-top:9px;max-width:560px}
+.card .ch{padding:10px 15px 0;font-size:12px;color:var(--ink3)}
+.card .ct{padding:3px 15px 11px;font-size:16.5px;font-weight:500;letter-spacing:-.01em}
+.card .ci{padding:0 15px}
+.ckrow{display:flex;align-items:flex-start;gap:10px;padding:8px 0;font-size:14px;border-bottom:1px solid var(--line)}
+.ckrow:last-child{border-bottom:0}
+.ckrow input{width:17px;height:17px;accent-color:var(--ink);margin:1px 0 0;flex:none}
+.ckrow .said{font-size:12px;color:var(--ink3);margin-left:auto;flex:none;white-space:nowrap}
+.card .note{padding:10px 15px 0;font-size:12.5px;color:var(--ink3)}
+.card .cf{padding:12px 15px;display:flex;gap:8px;align-items:center}
+.b{border:1px solid var(--line2);background:var(--panel);border-radius:7px;padding:6px 13px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.b:hover{border-color:var(--ink3)}
+.b.pri{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.b.pri:hover{opacity:.87}
+.b.txt{border-color:transparent;color:var(--ink3);font-weight:400;padding:6px 4px}
+.b.txt:hover{color:var(--ink)}
+.b.sm{padding:3px 8px;font-size:11.5px;font-weight:400}
+.collapsed{font-size:12.5px;color:var(--ink3);padding:9px 0;border-top:1px solid var(--line);margin-top:4px}
+
+/* work block */
+.wblock{border:1px solid var(--line2);border-radius:10px;background:var(--panel);overflow:hidden;margin-top:9px}
+.wblock .wh{padding:11px 15px;font-size:13px;color:var(--ink3);border-bottom:1px solid var(--line)}
+.item{display:flex;gap:11px;align-items:flex-start;padding:12px 15px;border-bottom:1px solid var(--line)}
+.item input{width:17px;height:17px;accent-color:var(--ink);margin:2px 0 0;flex:none}
+.item .ib{min-width:0;flex:1}
+.item .l1{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+.item .from{font-size:14px;font-weight:500}
+.item .subj{font-size:14px;color:var(--ink3)}
+.item .tagme{font-size:12px;color:var(--ink3);background:var(--sunk);border-radius:5px;padding:1px 7px}
+.item .dr{font-size:12.5px;color:var(--ink3);line-height:1.5;margin-top:4px}
+.item .dr .see{color:var(--ink3);text-decoration:underline;text-underline-offset:2px;font-size:12px}
+.wf{padding:12px 15px;background:var(--sunk);display:flex;align-items:center;gap:10px}
+
+.dock{flex:none;padding:0 20px 16px}
+.dockin{max-width:660px}
+.comp{background:var(--panel);border:1px solid var(--line2);border-radius:11px;padding:9px 11px;display:flex;align-items:flex-end;gap:9px}
+.comp textarea{flex:1;border:0;background:none;resize:none;font:400 14px/1.5 var(--f-msg);color:var(--ink);outline:none;min-height:21px}
+.comp .ic{color:var(--ink3);font-size:15px}
+.hint{font-size:11.5px;color:var(--ink4);padding:0 3px 7px}
+
+/* ---- ADD SHEET ---- */
+.sheetwrap{position:absolute;inset:0;z-index:40;display:none}
+body.sheet .sheetwrap{display:block}
+.sheetscrim{position:absolute;inset:0;background:rgba(20,20,24,.10)}
+.sheet{position:absolute;left:20px;top:12px;bottom:110px;width:480px;max-width:calc(100% - 40px);background:var(--sheet);border:1px solid var(--line2);border-radius:12px;box-shadow:0 8px 32px rgba(20,20,24,.14);display:flex;flex-direction:column;overflow:hidden}
+.sheeth{padding:12px 16px 0;flex:none}
+.sheeth .q{font-size:12px;color:var(--ink3);margin-bottom:2px}
+.sheeth input{width:100%;border:0;background:none;outline:none;font:400 15px/1.5 var(--f-ui);color:var(--ink);padding:6px 0 12px}
+.sheeth input::placeholder{color:var(--ink3)}
+.sheetlist{overflow:auto;flex:1;min-height:0;border-top:1px solid var(--line)}
+.opt{width:100%;display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--line)}
+.opt:hover{background:var(--sunk)}
+.opt .ob{min-width:0;flex:1}
+.opt .on{font-size:15px;font-weight:500}
+.opt .od{font-size:12px;color:var(--ink3);margin-top:2px}
+.opt .ov{font-size:12px;color:var(--ink3);margin-top:5px;padding-left:10px;border-left:2px solid var(--line)}
+.opt .tagm{font-size:11px;color:var(--ink3);flex:none;align-self:center}
+.av.tmpl{background:transparent;border:1px dashed var(--line2);color:var(--ink3);font-size:14px}
+.sheetf{flex:none;padding:11px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--ink3);background:var(--sunk)}
+
+/* screens */
+.screen{display:none}
+.screen.on{display:contents}
+.navdots{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:2px;background:var(--panel);border:1px solid var(--line2);border-radius:99px;padding:4px;box-shadow:0 6px 22px -10px rgba(20,20,24,.3)}
+.navdots button{font-size:11.5px;padding:6px 12px;border-radius:99px;color:var(--ink3);white-space:nowrap}
+.navdots button[aria-pressed="true"]{background:var(--ink);color:var(--bg);font-weight:500}
+.legend{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:45;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:10px 13px;box-shadow:0 6px 22px -10px rgba(20,20,24,.3);font-size:11.5px;color:var(--ink3);max-width:245px;line-height:1.6}
+.legend b{color:var(--ink);font-weight:600;display:block;margin-bottom:6px;font-size:12px}
+.legend .lg{display:flex;align-items:center;gap:8px;padding:3px 0}
+.legend .lg .av{flex:none}
+.legend .x{position:absolute;top:5px;right:7px;color:var(--ink4);font-size:12px}
+body.nolegend .legend{display:none}
+
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .rail{display:none}
+  .feed,.dock,.chd{padding-left:16px;padding-right:16px}
+  .sheet{left:0;right:0;top:auto;bottom:0;width:100%;max-width:100%;border-radius:14px 14px 0 0;max-height:82%}
+  .legend{display:none}
+  .navdots{overflow-x:auto;max-width:calc(100vw - 20px)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+
+<div class="top">
+  <span class="wordmark">Leapy<span>quem mais lê</span></span>
+  <button class="turn" id="turnb"><b>Sua vez · 1</b></button>
+  <button class="themeb" id="theme" aria-label="Alternar tema">◐</button>
+</div>
+
+<div class="shell">
+  <!-- ================= RAIL ================= -->
+  <aside class="rail">
+    <div class="railtop">
+      <span class="cmd">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.6" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input placeholder="Buscar" aria-label="Buscar">
+      </span>
+      <button class="newb" data-go="p1" title="Nova conversa" aria-label="Nova conversa">+</button>
+    </div>
+
+    <div class="railscroll">
+      <div class="sec" data-sec>
+        <button class="sechd"><span class="caret">▾</span>Hoje</button>
+        <div class="secitems">
+          <!-- the journey conversation: reach band EMPTY -->
+          <button class="row" data-go="p7" aria-current="true">
+            <span class="lead"><span class="pdot wait"></span><span class="av bot a32 so-voce c2">TR</span></span>
+            <span class="rowtxt"><span class="t">Triagem</span><span class="p"><span class="clk">◷ 8h</span><span>Triei 142 — 8 precisam de você</span></span></span>
+            <span class="reach"><span class="onlytime">10:07</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av bot a32 o-time c0">RE</span></span>
+            <span class="rowtxt"><span class="t">Ressaca</span><span class="p"><span>Mari pediu o roadmap de outubro</span></span></span>
+            <span class="reach"><span class="onlytime">09:05</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av bot a32 so-voce c9">CH</span></span>
+            <span class="rowtxt"><span class="t">Chiquinho</span><span class="p"><span>board conferido, nada a fazer</span></span></span>
+            <span class="reach"><span class="onlytime">08:40</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="pdot run"></span><span class="av bot a32 o-time c1">MA</span></span>
+            <span class="rowtxt"><span class="t">Marola</span><span class="p"><span>lendo payroll/hours.ts</span></span></span>
+            <span class="reach"><span class="onlytime">09:18</span></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sec" data-sec>
+        <button class="sechd"><span class="caret">▾</span>Produto e Engenharia</button>
+        <div class="secitems">
+          <button class="row" data-go="p10">
+            <span class="lead"><span class="pdot unread"></span><span class="av a32 varios"><i></i><i></i></span></span>
+            <span class="rowtxt"><span class="t">#produto</span><span class="p"><span class="tm">09:31</span><span>Psico: aderência de agosto 91,2%</span></span></span>
+            <span class="reach"><span class="av a20 c6">RF</span><span class="av a20 c2">MS</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av a32 varios"><i></i><i></i></span></span>
+            <span class="rowtxt"><span class="t">Erro no cálculo de horas</span><span class="p"><span class="tm">09:22</span><span>Dev 3 rodando testes</span></span></span>
+            <span class="reach"><span class="av a20 c1">ML</span><span class="av a20 c2">MS</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av bot a32 so-voce c9">PS</span></span>
+            <span class="rowtxt"><span class="t">Psico</span><span class="p"><span>retenção da coorte caiu 4pp</span></span></span>
+            <span class="reach"><span class="onlytime">ontem</span></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sec" data-sec>
+        <button class="sechd"><span class="caret">▾</span>Dev Pool</button>
+        <div class="secitems">
+          <button class="row">
+            <span class="lead"><span class="av bot a32 so-voce c0">D1</span></span>
+            <span class="rowtxt"><span class="t">Dev 1</span><span class="p"><span>parado</span></span></span>
+            <span class="reach"><span class="onlytime">ontem</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av bot a32 so-voce c6">D3</span></span>
+            <span class="rowtxt"><span class="t">Dev 3</span><span class="p"><span class="tm">09:20</span><span>corrigindo arredondamento</span></span></span>
+            <span class="reach"><span class="av a20 c1">ML</span></span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av bot a32 so-voce c0">◷</span></span>
+            <span class="rowtxt"><span class="t">Resumo semanal repos</span><span class="p"><span class="clk">◷ seg 9h</span></span></span>
+            <span class="reach"><span class="onlytime">seg</span></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sec" data-sec>
+        <button class="sechd"><span class="caret">▾</span>Time</button>
+        <div class="secitems">
+          <button class="row" data-go="p11">
+            <span class="lead"><span class="pdot unread"></span><span class="av a32 varios"><i></i><i></i></span></span>
+            <span class="rowtxt"><span class="t">#geral</span><span class="p"><span class="tm">14:05</span><span>Taga: fechamento corrigido hoje</span></span></span>
+            <span class="reach">
+              <span class="av bot proxy">TA<span class="seal av c1" style="font-size:7px;color:#fff">MW</span></span>
+              <span class="av a20 c6">RF</span>
+              <span class="av a20 cg" style="color:var(--ink3);font-size:9.5px">+17</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="lead"><span class="av a32 c2">MS</span></span>
+            <span class="rowtxt"><span class="t">Mari</span><span class="p"><span class="tm">ontem</span><span>perfeito, obrigada</span></span></span>
+            <span class="reach"><span class="av a20 c2">MS</span></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="railfoot">
+      <button class="mk">Marketplace</button>
+      <span style="margin-left:auto"></span>
+      <span class="av a24 c1">MW</span>
+    </div>
+  </aside>
+
+  <!-- ================= CENTER ================= -->
+  <main class="center">
+
+    <!-- ===== P1: conversa em branco ===== -->
+    <div class="screen on" id="sc-p1">
+      <div class="chd">
+        <div class="l1">
+          <h1 class="untitled">Sem título</h1>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span class="av a24 c1">MW</span>
+            <button class="addb" data-go="p3">+</button>
+            <span class="addlabel">Adicionar quem faz</span>
+          </span>
+        </div>
+        <div class="hdlines"><div class="hdline">Só você.</div></div>
+      </div>
+      <div class="feed"><div class="feedin">
+        <p class="sys" style="padding-left:0">Escreva o que você quer, ou adicione quem faz.</p>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">Passo 1 de 5 — a conversa nasce vazia. Sem formulário, sem nome, sem escolher privacidade. Na lista, a faixa de alcance já está vazia: ela é só sua.</p>
+        <div class="comp"><button class="ic">+</button>
+          <textarea rows="1" placeholder="Escreva aqui" aria-label="Mensagem"></textarea>
+          <button class="b pri" data-go="p3">Enviar</button>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- ===== P3: folha de adicionar ===== -->
+    <div class="screen" id="sc-p3">
+      <div class="chd">
+        <div class="l1">
+          <h1 class="untitled">Sem título</h1>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span class="av a24 c1">MW</span>
+            <button class="addb">+</button>
+          </span>
+        </div>
+        <div class="hdlines"><div class="hdline">Só você.</div></div>
+      </div>
+      <div class="feed"><div class="feedin">
+        <div class="m"><span class="av a32 c1">MW</span><div>
+          <div class="mhead"><span class="who">Marlon</span><time>09:41</time></div>
+          <div class="mbody">Quero um agente só meu que me ajude a esvaziar a caixa de entrada.</div>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">Passo 2 e 3 — ele escreveu, não configurou. A folha sobe já preenchida e filtrada: ele não repete o que acabou de dizer.</p>
+        <div class="comp"><button class="ic">+</button><textarea rows="1" disabled placeholder="—"></textarea></div>
+      </div></div>
+    </div>
+
+    <!-- ===== P5: pedido de acesso ===== -->
+    <div class="screen" id="sc-p5">
+      <div class="chd">
+        <div class="l1">
+          <h1>Triagem</h1>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span class="av a24 c1">MW</span><span class="av bot a24 so-voce c2">TR</span>
+            <button class="addb">+</button>
+          </span>
+        </div>
+        <div class="hdlines"><div class="hdline">Só você e Triagem.</div><div class="hdline">Só você aciona a Triagem.</div></div>
+      </div>
+      <div class="feed"><div class="feedin">
+        <p class="sys">Você adicionou uma cópia de <b style="font-weight:500;color:var(--ink2)">Triagem de caixa de entrada</b>. Ela é sua, começa sem nenhum acesso, e o original não fica sabendo de nada.</p>
+        <p class="sys why">Por que isso: você pediu algo só seu, então ninguém mais vê esta conversa.</p>
+        <div class="m"><span class="av bot a32 so-voce c2">TR</span><div>
+          <div class="mhead"><span class="who">Triagem</span><time>09:42</time></div>
+          <div class="mbody">Oi Marlon. Eu separo e-mail, resumo o que importa e rascunho resposta. Ainda não vejo nada — me conta qual caixa você quer esvaziar.</div>
+        </div></div>
+        <div class="m me"><span class="av a32 c1">MW</span><div>
+          <div class="mhead"><span class="who">Marlon</span><time>09:43</time></div>
+          <div class="mbody">a minha, do trabalho. mas só ler e rascunhar, não envia nada.</div>
+        </div></div>
+        <div class="m"><span class="av bot a32 so-voce c2">TR</span><div>
+          <div class="mhead"><span class="who">Triagem</span><time>09:43</time></div>
+          <div class="mbody">Combinado. Preciso do acesso então.</div>
+          <div class="card">
+            <div class="ch">Pedido de acesso</div>
+            <div class="ct">Gmail de marlon@leapy.com.br</div>
+            <div class="ci">
+              <label class="ckrow"><input type="checkbox" checked> <span>Ler suas mensagens</span></label>
+              <label class="ckrow"><input type="checkbox" checked> <span>Escrever rascunhos de resposta</span></label>
+              <label class="ckrow"><input type="checkbox"> <span>Enviar mensagens por você</span><span class="said">você disse que não</span></label>
+            </div>
+            <p class="note">O acesso é seu, não dele. Some se você tirar.</p>
+            <div class="cf"><button class="b pri" data-go="p7">Permitir</button><button class="b txt">Agora não</button></div>
+          </div>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">Passo 5 — o acesso é pedido em português, no momento em que precisa. Repare que “Enviar” já veio desmarcado: o produto ouviu a frase e mostra onde ela foi parar.</p>
+        <div class="comp"><button class="ic">+</button><textarea rows="1" placeholder="Mensagem para Triagem"></textarea></div>
+      </div></div>
+    </div>
+
+    <!-- ===== P7: trabalho para aprovar ===== -->
+    <div class="screen" id="sc-p7">
+      <div class="chd">
+        <div class="l1">
+          <h1>Triagem</h1>
+          <span class="clockchip">◷ 8h</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span class="av a24 c1">MW</span><span class="av bot a24 so-voce c2">TR</span>
+            <button class="addb" data-go="p10">+</button>
+          </span>
+        </div>
+        <div class="hdlines">
+          <div class="hdline">Só você e Triagem.</div>
+          <div class="hdline">Só você aciona a Triagem.</div>
+          <div class="hdline">Roda todo dia às 8h.</div>
+        </div>
+      </div>
+      <div class="feed"><div class="feedin">
+        <p class="sys">Você permitiu ler o Gmail e escrever rascunhos — hoje, 09:43. Enviar: não.</p>
+        <div class="status"><span>Lendo — 142 mensagens.</span><button class="stop">parar</button></div>
+        <div class="m"><span class="av bot a32 so-voce c2">TR</span><div>
+          <div class="mhead"><span class="who">Triagem</span><time>10:07</time></div>
+          <div class="mbody">Triei 142. 118 não precisam de você, 16 já respondi que recebi, 8 precisam de resposta sua. Rascunhei as 8.</div>
+          <div class="wblock">
+            <div class="wh">8 respostas rascunhadas</div>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Ana Prado</span><span class="subj">Reunião de quinta</span></span>
+              <span class="dr">“Oi Ana, quinta às 14h funciona…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Pedro Lima</span><span class="subj">Contrato Multilaser</span></span>
+              <span class="dr">“Pedro, o aditivo já foi…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8"><span class="ib">
+              <span class="l1"><span class="from">RH Tecnoserv</span><span class="subj">Frequência da Júlia</span><span class="tagme">contém dado de aprendiz — desmarquei</span></span>
+              <span class="dr">“…” <a class="see" href="#0">ver por quê</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Rafa</span><span class="subj">Design da home</span></span>
+              <span class="dr">“Rafa, aprovei as duas primeiras…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Bia</span><span class="subj">Onboarding de setembro</span></span>
+              <span class="dr">“Bia, pode seguir com…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Carla Menezes</span><span class="subj">Renovação</span></span>
+              <span class="dr">“Carla, mandei para o jurídico…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Téo</span><span class="subj">Métricas da semana</span></span>
+              <span class="dr">“Téo, os números batem…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <label class="item"><input type="checkbox" class="dr8" checked><span class="ib">
+              <span class="l1"><span class="from">Fornecedor Alfa</span><span class="subj">Nota fiscal</span></span>
+              <span class="dr">“Recebemos, segue para…” <a class="see" href="#0">ver tudo</a></span></span></label>
+            <div class="wf"><button class="b pri" id="sendbtn">Enviar os 7</button><button class="b txt" id="clearall">Desmarcar todos</button></div>
+          </div>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">Passos 7 e 8 — desmarque um item e o botão muda ao vivo. A linha do RH sobre uma aprendiz veio desmarcada por conta própria. Depois é só dizer “faz isso todo dia às 8h”.</p>
+        <div class="comp"><button class="ic">+</button><textarea rows="1" placeholder="faz isso todo dia às 8h"></textarea><button class="b pri">Enviar</button></div>
+      </div></div>
+    </div>
+
+    <!-- ===== P10: a Mari entra — a ausência acaba ===== -->
+    <div class="screen" id="sc-p10">
+      <div class="chd">
+        <div class="l1">
+          <h1>Triagem</h1>
+          <span class="clockchip">◷ 8h</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span class="av a24 c1">MW</span><span class="av a24 c2">MS</span><span class="av bot a24 so-voce c2">TR</span>
+            <button class="addb">+</button>
+          </span>
+        </div>
+        <div class="hdlines">
+          <div class="hdline"><span class="faces"><span class="av a20 c2">MS</span></span> Tudo que for dito aqui, Mari lê.</div>
+          <div class="hdline">Você e Mari acionam a Triagem.</div>
+          <div class="hdline">Roda todo dia às 8h.</div>
+        </div>
+      </div>
+      <div class="feed"><div class="feedin">
+        <p class="sys">Você adicionou Mari. A partir de agora ela lê esta conversa, inclusive o que já foi dito.</p>
+        <div class="m"><span class="av bot a32 so-voce c2">TR</span><div>
+          <div class="mhead"><span class="who">Triagem</span><time>08:06</time></div>
+          <div class="mbody">Triei 96 mensagens. 6 precisam de resposta. Nenhuma toca dado de aprendiz hoje.</div>
+        </div></div>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">O teste da régua — olhe a linha “Triagem” na lista: ela tinha a faixa vazia e agora tem o rosto da Mari. A privacidade era comunicada por ausência, então a perda dela é comunicada pelo fim da ausência.</p>
+        <div class="comp"><button class="ic">+</button><textarea rows="1" placeholder="Mensagem"></textarea></div>
+      </div></div>
+    </div>
+
+    <!-- ===== P11: #geral com procuração ===== -->
+    <div class="screen" id="sc-p11">
+      <div class="chd">
+        <div class="l1">
+          <h1>#geral</h1>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <span class="av a24 c6">RF</span><span class="av a24 c2">MS</span><span class="av bot a24 so-voce c3">T</span>
+            <button class="addb">+</button>
+          </span>
+        </div>
+        <div class="hdlines">
+          <div class="hdline">19 pessoas leem esta conversa.</div>
+          <div class="hdline proxy">Taga fala por você aqui. <a href="#0">Tirar a procuração</a></div>
+        </div>
+      </div>
+      <div class="feed"><div class="feedin">
+        <div class="m"><span class="av a32 c6">RF</span><div>
+          <div class="mhead"><span class="who">Rafa</span><time>14:02</time></div>
+          <div class="mbody">Alguém sabe se o fechamento de agosto já foi pra Nova Rota?</div>
+        </div></div>
+        <div class="m"><span class="av bot a32 so-voce">TA<span class="av c1" style="position:absolute;right:-5px;bottom:-5px;width:15px;height:15px;font-size:7px;color:#fff;box-shadow:0 0 0 2px var(--bg)">MW</span></span><div>
+          <div class="mhead"><span class="who">Taga</span><span class="by">· por Marlon</span><time>14:05</time></div>
+          <div class="mbody">Foi corrigido hoje de manhã — era arredondamento de meia hora em jornada de 4h30. O fechamento da Nova Rota foi reprocessado e está correto.</div>
+        </div></div>
+        <p class="sys">Rafa adicionou Picasso.</p>
+      </div></div>
+      <div class="dock"><div class="dockin">
+        <p class="hint">Procuração é a única exceção da régua: o quadrado do Taga entra na faixa da lista, com o seu rosto no canto. É a linha mais densa do produto — e deve ser, é a de maior consequência.</p>
+        <div class="comp"><button class="ic">+</button><textarea rows="1" placeholder="Mensagem para #geral"></textarea></div>
+      </div></div>
+    </div>
+
+    <!-- ===== the add sheet overlay ===== -->
+    <div class="sheetwrap">
+      <div class="sheetscrim" id="sheetscrim"></div>
+      <div class="sheet" role="dialog" aria-label="Adicionar quem faz">
+        <div class="sheeth">
+          <p class="q">Quem faz isso?</p>
+          <input id="sheetq" value="caixa de entrada" aria-label="Nome, ou o que precisa ser feito">
+        </div>
+        <div class="sheetlist">
+          <button class="opt"><span class="av bot a32 c4">AN</span><span class="ob">
+            <span class="on">Angu</span><span class="od">lê seu Gmail · só com você</span></span></button>
+          <button class="opt" data-go="p5"><span class="av bot a32 tmpl">◇</span><span class="ob">
+            <span class="on">Triagem de caixa de entrada</span>
+            <span class="od">separa, resume e rascunha respostas · modelo, nasce sem acesso nenhum</span>
+            <span class="ov">O Angu já faz parecido, mas ele lê e-mail e não rascunha resposta.</span></span>
+            <span class="tagm">modelo</span></button>
+          <button class="opt"><span class="av a32 c7">AP</span><span class="ob">
+            <span class="on">Ana Prado</span><span class="od">Customer Success · Leapy</span></span></button>
+          <button class="opt"><span class="av bot a32 so-voce c9">CH</span><span class="ob">
+            <span class="on">Chiquinho</span><span class="od">mexe no ClickUp · em #produto, com 6 pessoas</span></span></button>
+          <button class="opt"><span class="av bot a32 tmpl">+</span><span class="ob">
+            <span class="on">Um agente novo, do zero</span><span class="od">ele nasce sem acesso nenhum</span></span></button>
+        </div>
+        <div class="sheetf">Esta conversa é só sua. Quem você adicionar aqui passa a enxergá-la.</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<nav class="navdots" aria-label="Passos da jornada">
+  <button data-go="p1" aria-pressed="true">1 · Começar</button>
+  <button data-go="p3" aria-pressed="false">2 · Adicionar</button>
+  <button data-go="p5" aria-pressed="false">3 · Acesso</button>
+  <button data-go="p7" aria-pressed="false">4 · Aprovar</button>
+  <button data-go="p10" aria-pressed="false">5 · Mari entra</button>
+  <button data-go="p11" aria-pressed="false">Procuração</button>
+</nav>
+
+<aside class="legend">
+  <button class="x" id="legx" aria-label="Fechar">✕</button>
+  <b>Duas réguas, dois lados</b>
+  <span class="lg"><span class="av a20 c5" style="font-size:8px">MS</span> <b style="display:inline">Cheio = pessoa.</b></span>
+  <span class="lg"><span class="av bot a20 so-voce"></span> <b style="display:inline">Tracejado = só você</b> aciona.</span>
+  <span class="lg"><span class="av bot a20 o-time"></span> <b style="display:inline">Sólido = o time</b> pode acionar.</span>
+  <span class="lg"><span class="av a20 varios" style="width:20px;height:20px"><i style="width:12px;height:12px"></i><i style="width:12px;height:12px"></i></span> <b style="display:inline">Dois = conversa de vários.</b></span>
+  <span style="display:block;margin-top:7px;padding-top:7px;border-top:1px solid var(--line)">À <b style="display:inline">esquerda</b>, o contorno diz quem pode <b style="display:inline">acionar o agente</b>. À <b style="display:inline">direita</b>, os rostos dizem quem <b style="display:inline">lê a conversa</b>. Podem discordar sem mentir.</span>
+</aside>
+
+<script>
+(function(){
+  var body=document.body;
+  function go(id){
+    if(id==='p3'){ body.classList.add('sheet'); setScreen('p3'); return; }
+    body.classList.remove('sheet');
+    setScreen(id);
+  }
+  function setScreen(id){
+    document.querySelectorAll('.screen').forEach(function(s){ s.classList.toggle('on', s.id==='sc-'+id); });
+    document.querySelectorAll('.navdots [data-go]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.go===id)); });
+    var f=document.querySelector('#sc-'+id+' .feed'); if(f) f.scrollTop=f.scrollHeight;
+  }
+  document.querySelectorAll('[data-go]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); go(b.dataset.go); });
+  });
+  document.getElementById('sheetscrim').addEventListener('click', function(){ body.classList.remove('sheet'); });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') body.classList.remove('sheet'); });
+
+  // live count on the approval block
+  var drs=Array.prototype.slice.call(document.querySelectorAll('.dr8'));
+  var send=document.getElementById('sendbtn');
+  function sync(){
+    var n=drs.filter(function(d){return d.checked}).length;
+    send.textContent = n===0 ? 'Nada selecionado' : n===1 ? 'Enviar 1' : 'Enviar os '+n;
+    send.disabled = n===0;
+  }
+  drs.forEach(function(d){ d.addEventListener('change', sync); });
+  document.getElementById('clearall').addEventListener('click', function(){
+    drs.forEach(function(d){ d.checked=false; }); sync();
+  });
+  sync();
+
+  // sidebar rows
+  document.querySelectorAll('.row').forEach(function(r){
+    r.addEventListener('click', function(){
+      document.querySelectorAll('.row').forEach(function(o){ o.removeAttribute('aria-current'); });
+      r.setAttribute('aria-current','true');
+    });
+  });
+  document.querySelectorAll('[data-sec] .sechd').forEach(function(h){
+    h.addEventListener('click', function(){ h.closest('[data-sec]').classList.toggle('closed'); });
+  });
+  document.getElementById('legx').addEventListener('click', function(){ body.classList.add('nolegend'); });
+  document.getElementById('theme').addEventListener('click', function(){
+    var c=document.documentElement.getAttribute('data-theme');
+    var n=c==='dark'?'light':c==='light'?null:'dark';
+    if(n) document.documentElement.setAttribute('data-theme',n); else document.documentElement.removeAttribute('data-theme');
+  });
+})();
+</script>
