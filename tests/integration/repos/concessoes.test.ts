@@ -56,6 +56,9 @@ describeIntegracao("concessoesRepo: por agente e capacidade, presa à mensagem d
       await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 5, tokensSaida: 10, custoUsd: 0.0032996, modelo: "claude-haiku-4-5-20251001", em });
       expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => g.custoUsd)).toEqual([0.0207631, 0.0032996]);
       expect(await repos.gastos.somarMes(em)).toBeCloseTo(0.0240627, 6);
+      // L9 (pendência L8 §3): filtro por executor — os dois gastos são do CLI local; o catcher não gastou nada.
+      expect(await repos.gastos.somarMes(em, "local")).toBeCloseTo(0.0240627, 6);
+      expect(await repos.gastos.somarMes(em, "catcher")).toBe(0);
     });
   });
 

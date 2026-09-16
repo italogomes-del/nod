@@ -47,6 +47,14 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /** A janela que ligou este turno à rotina (índice rotina_janelas_turno_idx, 0004) — pendência L7 §5. */
+    async buscarPorTurno(turnoId: string): Promise<JanelaRotina | null> {
+      const [l] = await conn<Linha[]>`
+        select tenant_id, rotina_id, instante_agendado, executor, machine_id, turno_id from rotina_janelas
+        where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId}`;
+      return l ? paraJanela(l) : null;
+    },
+
     async listar(rotinaId: string): Promise<JanelaRotina[]> {
       const linhas = await conn<Linha[]>`
         select tenant_id, rotina_id, instante_agendado, executor, machine_id, turno_id from rotina_janelas

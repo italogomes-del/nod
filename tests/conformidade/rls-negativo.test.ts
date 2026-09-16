@@ -18,7 +18,10 @@ describeIntegracao("gate: teste negativo", () => {
       expect(minhas).toEqual([
         "_sem_rls: sem ENABLE ROW LEVEL SECURITY",
         "_sem_rls: sem FORCE ROW LEVEL SECURITY",
-        "_sem_rls: sem policy PERMISSIVE nod_pessoa",
+        "_sem_rls: sem policy PERMISSIVE nod_pessoa_select (FOR SELECT)",
+        "_sem_rls: sem policy PERMISSIVE nod_pessoa_insert (FOR INSERT)",
+        "_sem_rls: sem policy PERMISSIVE nod_pessoa_update (FOR UPDATE)",
+        "_sem_rls: sem policy PERMISSIVE nod_pessoa_delete (FOR DELETE)",
         "_sem_rls: sem policy RESTRICTIVE nod_tenant",
       ]);
       // Só a tabela de propósito viola: o resto do banco continua verde.

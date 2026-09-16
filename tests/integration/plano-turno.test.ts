@@ -79,7 +79,11 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       expect(planoRotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
       expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa"]);
 
-      await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", exigeAprovacao: false, proximaExecucao: agora() + 1000 });
+      // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004): sem janela o gate fica ligado.
+      const r = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", exigeAprovacao: false, proximaExecucao: agora() + 1000 });
+      const instante = agora();
+      await repos.rotinaJanelas.reivindicar({ rotinaId: r?.id ?? "", instanteAgendado: instante, machineId: randomUUID(), executor: "catcher" });
+      await repos.rotinaJanelas.vincularTurno({ rotinaId: r?.id ?? "", instanteAgendado: instante, turnoId: rotina?.id ?? "" });
       const semGate = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
       expect(semGate.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
 

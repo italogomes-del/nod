@@ -26,6 +26,17 @@ O isolamento não sumiu, mudou de eixo — e o novo eixo é MAIS difícil, não 
 - **Identidade é só leitura para a aplicação:** `tenants`/`pessoas` têm `GRANT SELECT` a nod_app (o contrato fixado); quem escreve é o seed, como nod_dono. Testes que precisam de pessoas as criam com `tests/helpers/db-dono.ts` (`withRollbackDono`), que NUNCA lê tabela escopada — sob FORCE o dono sem policy não vê nada, e é assim que deve ficar.
 - **Escopo é da conexão, provado com duas conexões simultâneas** (`tests/concurrency/escopo-por-conexao.test.ts`): cada transação lê a sua pessoa; fora delas o parâmetro não existe ou está vazio (`''::uuid` não converte — fechado nos dois casos).
 
+## Refinamento (2026-09-16, 0003 — a decisora escreve)
+
+- A perna extra da policy só ABRE LEITURA: o WITH CHECK da `nod_escopar_tabela` exige `owner_id` = pessoa da sessão. Quem precisa que a perna também ESCREVA cria uma policy PERMISSIVE a mais, só para o comando necessário, e a registra por NOME em `POLICIES_EXTRAS` do gate (`tests/conformidade/gate-rls.ts`) — como `nod_decisora` (FOR UPDATE em `decisoes` e `itens_aprovacao`).
+- Uma policy FOR UPDATE concede o UPDATE de QUALQUER coluna (medido em 2026-09-16 com os triggers desligados: a decisora reescreveu frase/prazo e pôs `visibility = 'equipe'` na decisão da dona). Por isso a policy extra vem SEMPRE com um trigger BEFORE UPDATE que fecha a lista de colunas que quem não é a dona pode mudar (`colunasLivresDaDecisora` em `src/db/schema/decisoes.ts`), e o motivo em `POLICIES_EXTRAS` nomeia o trigger. Provado em `tests/integration/repos/decisora-escreve.test.ts`.
+
+## Refinamento (2026-09-16, 0004 — policies por comando)
+
+- A `nod_pessoa` FOR ALL da 0001 tinha um furo: USING vale para SELECT, UPDATE e DELETE, e DELETE não tem WITH CHECK — quem só devia LER pela perna extra ou por `'equipe'` conseguia APAGAR a linha (medido em 2026-09-16 em `tests/integration/repos/policies-por-comando.test.ts` com a 0001–0003: `delete from decisoes` pela decisora → count 1; `delete from agentes` numa linha 'equipe' por outra pessoa → count 1).
+- `nod_escopar_tabela` passa a criar QUATRO PERMISSIVE por comando — `nod_pessoa_select` (dono OU 'equipe' OU perna extra), `nod_pessoa_insert` (WITH CHECK dono), `nod_pessoa_update` (USING e WITH CHECK dono), `nod_pessoa_delete` (USING dono) — mais a RESTRICTIVE `nod_tenant`. A perna extra e 'equipe' abrem só o SELECT; UPDATE/DELETE por quem não é a dona afetam ZERO linhas (não estouram 42501: a linha não é vista), e o contrato "repositório devolve null, nunca lança" fica verdadeiro por construção. O gate confere nome E comando (`pg_policy.polcmd`).
+- Consequência para o ADR-007: a decisora continua decidindo pela policy extra FOR UPDATE da 0003; deixou de poder apagar a decisão que não é dela.
+
 ## Gatilho de reversão
 
-Reabrir se (a) o spike de regressão mostrar que SET LOCAL vaza entre transações do pool (hoje provado que não), ou (b) uma consulta legítima de produto precisar cruzar pessoas do mesmo tenant sem `visibility = 'equipe'` nem perna extra nomeada e não couber numa perna extra da policy — aí o eixo pessoa está errado, não a RLS.
+Reabrir se (a) o spike de regressão mostrar que SET LOCAL vaza entre transações do pool (hoje provado que não), ou (b) uma consulta legítima de produto precisar cruzar pessoas do mesmo tenant sem `visibility = 'equipe'` nem perna extra nomeada e não couber numa perna extra da policy — aí o eixo pessoa está errado, não a RLS. Reabrir o refinamento da 0004 se um fluxo de produto precisar que quem NÃO é a dona apague ou reescreva uma linha inteira pela perna extra — a resposta correta é outra policy extra nomeada com trigger, não voltar ao FOR ALL.

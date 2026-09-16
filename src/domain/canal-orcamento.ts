@@ -2,7 +2,14 @@ import type { EstadoOrcamento } from "../contracts/sala.ts";
 
 export type DecisaoOrcamento = "permitir" | "recusar" | "resfriar";
 
-/** definido em 2026-09-16: três remetentes distintos em sequência = anel A→B→C (portado do room-post-budget do openmausbot). */
+/**
+ * definido em 2026-09-16: três remetentes distintos em sequência = anel A→B→C (portado do room-post-budget
+ * do openmausbot). Reconciliação registrada pela L9 (EMENDA-L9 §6): a spec E5.5 dizia "anel de 3 → resfriar
+ * no quarto post"; o domínio detecta o anel no TERCEIRO remetente distinto (o candidato que fecharia A→B→C)
+ * e devolve 'recusar' — a tentativa é encerrada com negação escrita (terminal) em vez de resfriada, porque o
+ * anel é ricochete estrutural, não ritmo: esperar o quarto post seria deixar o anel fechar uma vez.
+ * O critério vale como está; tests/unit/domain/canal-orcamento.test.ts nomeia os dois lados.
+ */
 export const TAMANHO_ANEL = 3;
 /** definido em 2026-09-16: 6 posts de bot sem fala humana viram decisão em "Sua vez" (core-features §2). */
 export const TETO_POSTS_SEM_HUMANO = 6;

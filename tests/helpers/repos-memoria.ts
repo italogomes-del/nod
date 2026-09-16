@@ -717,6 +717,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar(rotinaId) {
         return doTenant(b.janelas).filter((j) => j.rotinaId === rotinaId).sort((x, y) => x.instanteAgendado - y.instanteAgendado);
       },
+      async buscarPorTurno(turnoId) {
+        return doTenant(b.janelas).find((j) => j.turnoId === turnoId) ?? null;
+      },
     },
 
     rotinaExecucoes: {
@@ -944,12 +947,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async doTurno(turnoId) {
         return doTenant(b.gastos).filter((g) => g.turnoId === turnoId).map(({ tenantId: _t, ownerId: _o, ...g }) => g);
       },
-      async somarMes(em) {
+      async somarMes(em, executor) {
         const inicio = new Date(em);
         inicio.setUTCDate(1);
         inicio.setUTCHours(0, 0, 0, 0);
         return doTenant(b.gastos)
-          .filter((g) => g.ownerId === escopo.pessoaId && g.em >= inicio.getTime())
+          .filter((g) => g.ownerId === escopo.pessoaId && g.em >= inicio.getTime() && (executor === undefined || g.executor === executor))
           .reduce((s, g) => s + (g.custoUsd ?? 0), 0);
       },
     },

@@ -26,6 +26,9 @@ describeIntegracao("rotinaJanelasRepo e rotinaExecucoesRepo: trava por instante 
         [instante, m1, "catcher", turno?.id],
         [instante + 60_000, m1, "catcher", null],
       ]);
+      // 0004 (pendência L7 §5): a janela acha-se pelo turno, sem varrer as rotinas.
+      expect(await repos.rotinaJanelas.buscarPorTurno(turno?.id ?? "")).toMatchObject({ rotinaId: r?.id, instanteAgendado: instante, turnoId: turno?.id });
+      expect(await repos.rotinaJanelas.buscarPorTurno(randomUUID())).toBeNull();
     });
   });
 

@@ -54,13 +54,19 @@ export function gastosRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraGasto);
     },
 
-    /** Métrica custo_servidor_mes (ADR-017): soma do mês civil (UTC) do instante dado, para a pessoa. */
-    async somarMes(agora: number): Promise<number> {
+    /**
+     * Soma do mês civil (UTC) do instante dado, para a pessoa, opcionalmente por executor (pendência L8 §3):
+     * `custo_servidor_mes` (ADR-017) só pode somar o executor de SERVIDOR, que nesta rodada não existe
+     * (Executor = 'local' | 'catcher'); sem filtro soma tudo (o que a assinatura da pessoa pagou).
+     */
+    async somarMes(agora: number, executor?: Executor): Promise<number> {
       const inicio = new Date(agora);
       inicio.setUTCDate(1);
       inicio.setUTCHours(0, 0, 0, 0);
       const [l] = await conn<{ total: string | null }[]>`
-        select sum(custo_usd)::text as total from gastos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and em >= ${inicio}`;
+        select sum(custo_usd)::text as total from gastos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and em >= ${inicio}
+          and (${executor ?? null}::text is null or executor = ${executor ?? null})`;
       return l?.total === null || l?.total === undefined ? 0 : Number(l.total);
     },
   };

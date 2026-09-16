@@ -16,7 +16,7 @@ describeIntegracao("gate: RLS por pessoa em toda tabela", () => {
     expect(r?.rolbypassrls).toBe(false);
   });
 
-  it("toda tabela tem ENABLE+FORCE e as policies nod_pessoa (PERMISSIVE) e nod_tenant (RESTRICTIVE), salvo exceção com motivo", async () => {
+  it("toda tabela tem ENABLE+FORCE, as quatro PERMISSIVE por comando (0004: nod_pessoa_select/insert/update/delete) e a RESTRICTIVE nod_tenant, salvo exceção com motivo", async () => {
     const tabelas = await lerTabelas(db);
     expect(tabelas.length).toBeGreaterThan(0);
     expect(avaliar(tabelas)).toEqual([]);

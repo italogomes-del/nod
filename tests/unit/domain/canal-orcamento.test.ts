@@ -8,6 +8,14 @@ describe("canal-orcamento", () => {
     expect(avaliarOrcamento({ estado: base, candidatoAgenteId: "c", eRotina: false, agora: 60_000 })).toBe("recusar");
   });
 
+  it("reconciliação EMENDA-L9 §6: o anel A→B→C é RECUSADO no terceiro remetente distinto (não 'resfriado' no quarto post); A→B→A não é anel", () => {
+    const depoisDeAB = { ...ORCAMENTO_INICIAL, ultimosPostsAgenteIds: ["a", "b"], postsSemHumano: 2, ultimoPostEm: 0 };
+    expect(avaliarOrcamento({ estado: depoisDeAB, candidatoAgenteId: "c", eRotina: false, agora: 60_000 })).toBe("recusar");
+    expect(avaliarOrcamento({ estado: depoisDeAB, candidatoAgenteId: "a", eRotina: false, agora: 60_000 })).toBe("permitir");
+    // 'resfriar' é o ritmo/teto (post rápido demais, 6 sem humano), nunca o anel.
+    expect(avaliarOrcamento({ estado: { ...depoisDeAB, ultimoPostEm: 59_000 }, candidatoAgenteId: "a", eRotina: false, agora: 60_000 })).toBe("resfriar");
+  });
+
   it("rotina é isenta", () => {
     expect(avaliarOrcamento({ estado: base, candidatoAgenteId: "c", eRotina: true, agora: 60_000 })).toBe("permitir");
   });

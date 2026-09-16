@@ -64,9 +64,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const modo = modoDoTurno(turno, conversa, agente);
   let rotina: { exigeAprovacao: boolean } | null = null;
   if (turno.origem === "rotina") {
-    // definido em 2026-09-16: o turno não aponta para a rotina; casa por (agente, conversa). Sem rotina identificável = gate LIGADO (fail-closed, E7.3).
-    const daConversa = (await deps.repos.rotinas.listarDoAgente(agente.id)).filter((r) => r.conversaId === turno.conversaId);
-    rotina = { exigeAprovacao: daConversa.length === 0 || daConversa.some((r) => r.exigeAprovacao) };
+    // A janela reivindicada liga o turno à rotina (rotinaJanelas.buscarPorTurno, 0004 — pendência L5 §6 resolvida).
+    // Sem janela (turno de rotina criado fora do scheduler) = gate LIGADO (fail-closed, E7.3).
+    const janela = await deps.repos.rotinaJanelas.buscarPorTurno(turno.id);
+    const daJanela = janela ? await deps.repos.rotinas.buscar(janela.rotinaId) : null;
+    rotina = { exigeAprovacao: daJanela ? daJanela.exigeAprovacao : true };
   }
 
   const parcial = montarPlano({

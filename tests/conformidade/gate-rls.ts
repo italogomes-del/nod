@@ -19,7 +19,20 @@ export const EXCECOES: Record<string, string> = {
 };
 
 /**
- * Policies ALÉM das duas da nod_escopar_tabela, aceitas por NOME (`tabela.policy`) com motivo
+ * As policies que nod_escopar_tabela cria (0004: uma PERMISSIVE por COMANDO — a perna extra e 'equipe'
+ * só abrem LEITURA; INSERT/UPDATE/DELETE são da dona — mais a RESTRICTIVE do tenant). O gate confere
+ * nome E comando (pg_policy.polcmd: r/a/w/d/*) no catálogo.
+ */
+export const POLICIES_BASE: Record<string, { permissiva: boolean; cmd: "r" | "a" | "w" | "d" | "*" }> = {
+  nod_pessoa_select: { permissiva: true, cmd: "r" },
+  nod_pessoa_insert: { permissiva: true, cmd: "a" },
+  nod_pessoa_update: { permissiva: true, cmd: "w" },
+  nod_pessoa_delete: { permissiva: true, cmd: "d" },
+  nod_tenant: { permissiva: false, cmd: "*" },
+};
+
+/**
+ * Policies ALÉM das da nod_escopar_tabela, aceitas por NOME (`tabela.policy`) com motivo
  * escrito. Qualquer outra policy no catálogo é acusada: uma policy nova é superfície de acesso
  * nova e precisa passar por aqui. definido em 2026-09-16 (0003).
  */
@@ -37,9 +50,13 @@ export interface Tabela {
   rls: boolean;
   force: boolean;
   temTenantId: boolean;
+  /** As quatro PERMISSIVE por comando da 0004 presentes com o comando certo. */
   permissiva: boolean;
+  /** A RESTRICTIVE nod_tenant FOR ALL presente. */
   restritiva: boolean;
-  /** Nomes de policy fora de {nod_pessoa, nod_tenant}: só passam se estiverem em POLICIES_EXTRAS. */
+  /** As policies base que FALTAM ou estão com o comando errado (vazio = ok). */
+  baseFaltando: string[];
+  /** Nomes de policy fora de POLICIES_BASE: só passam se estiverem em POLICIES_EXTRAS. */
   policiesExtras: string[];
   privilegiosApp: string[];
 }
@@ -54,9 +71,7 @@ export async function lerTabelas(conn: Conn): Promise<Tabela[]> {
       rls: boolean;
       force: boolean;
       tem_tenant_id: boolean;
-      permissiva: boolean;
-      restritiva: boolean;
-      policies_extras: string[];
+      policies: { nome: string; permissiva: boolean; cmd: string }[];
       privilegios: string[];
     }[]
   >`
@@ -66,9 +81,8 @@ export async function lerTabelas(conn: Conn): Promise<Tabela[]> {
            c.relrowsecurity as rls,
            c.relforcerowsecurity as force,
            exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped) as tem_tenant_id,
-           exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'nod_pessoa' and p.polpermissive) as permissiva,
-           exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'nod_tenant' and not p.polpermissive) as restritiva,
-           array(select p.polname from pg_policy p where p.polrelid = c.oid and p.polname not in ('nod_pessoa', 'nod_tenant') order by p.polname) as policies_extras,
+           coalesce((select json_agg(json_build_object('nome', p.polname, 'permissiva', p.polpermissive, 'cmd', p.polcmd) order by p.polname)
+                     from pg_policy p where p.polrelid = c.oid), '[]'::json) as policies,
            array(select priv from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) priv
                  where has_table_privilege('nod_app', c.oid, priv)) as privilegios
     from pg_class c
@@ -77,18 +91,24 @@ export async function lerTabelas(conn: Conn): Promise<Tabela[]> {
       and (n.nspname = 'public' or n.oid = pg_my_temp_schema())
     order by c.relname`;
   /* eslint-enable no-restricted-syntax */
-  return linhas.map((l) => ({
-    nome: l.nome,
-    particao: l.particao,
-    pai: l.pai,
-    rls: l.rls,
-    force: l.force,
-    temTenantId: l.tem_tenant_id,
-    permissiva: l.permissiva,
-    restritiva: l.restritiva,
-    policiesExtras: l.policies_extras,
-    privilegiosApp: l.privilegios,
-  }));
+  return linhas.map((l) => {
+    const baseFaltando = Object.entries(POLICIES_BASE)
+      .filter(([nome, esperado]) => !l.policies.some((p) => p.nome === nome && p.permissiva === esperado.permissiva && p.cmd === esperado.cmd))
+      .map(([nome]) => nome);
+    return {
+      nome: l.nome,
+      particao: l.particao,
+      pai: l.pai,
+      rls: l.rls,
+      force: l.force,
+      temTenantId: l.tem_tenant_id,
+      permissiva: !baseFaltando.some((n) => n.startsWith("nod_pessoa_")),
+      restritiva: !baseFaltando.includes("nod_tenant"),
+      baseFaltando,
+      policiesExtras: l.policies.map((p) => p.nome).filter((n) => !Object.hasOwn(POLICIES_BASE, n)),
+      privilegiosApp: l.privilegios,
+    };
+  });
 }
 
 /** Devolve a lista de violações (vazia = gate verde). Uma string por tabela, legível no CI. */
@@ -107,8 +127,10 @@ export function avaliar(tabelas: Tabela[]): string[] {
     if (!t.temTenantId) violacoes.push(`${t.nome}: sem coluna tenant_id e sem exceção escrita`);
     if (!t.rls) violacoes.push(`${t.nome}: sem ENABLE ROW LEVEL SECURITY`);
     if (!t.force) violacoes.push(`${t.nome}: sem FORCE ROW LEVEL SECURITY`);
-    if (!t.permissiva) violacoes.push(`${t.nome}: sem policy PERMISSIVE nod_pessoa`);
-    if (!t.restritiva) violacoes.push(`${t.nome}: sem policy RESTRICTIVE nod_tenant`);
+    for (const nome of t.baseFaltando) {
+      const b = POLICIES_BASE[nome];
+      violacoes.push(`${t.nome}: sem policy ${b?.permissiva ? "PERMISSIVE" : "RESTRICTIVE"} ${nome}${b && b.cmd !== "*" ? ` (FOR ${{ r: "SELECT", a: "INSERT", w: "UPDATE", d: "DELETE" }[b.cmd]})` : ""}`);
+    }
     for (const p of t.policiesExtras) {
       if (!POLICIES_EXTRAS[`${t.nome}.${p}`]) violacoes.push(`${t.nome}: policy ${p} fora da lista aceita (POLICIES_EXTRAS) — superfície de acesso sem motivo escrito`);
     }

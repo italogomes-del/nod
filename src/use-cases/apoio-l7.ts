@@ -124,9 +124,8 @@ export async function agenteVisivel(repos: Repos, agenteId: string): Promise<Age
 }
 
 /**
- * Liga um turno à rotina que o disparou pela janela reivindicada (rotina_janelas.turno_id). Turno
- * de retomada segue `retomaTurnoId` um salto. Varre as rotinas visíveis porque o repositório não
- * tem `buscarPorTurno` (pendência de contrato registrada); com 50 rotinas por bot é barato.
+ * Liga um turno à rotina que o disparou pela janela reivindicada (rotina_janelas.turno_id, índice da
+ * 0004 — pendência L7 §5 resolvida). Turno de retomada segue `retomaTurnoId` um salto.
  */
 export async function rotinaDoTurno(repos: Repos, turnoId: string): Promise<{ rotina: Rotina; turnoDisparado: Turno; instanteAgendado: number } | null> {
   const turno = await repos.turnos.buscar(turnoId);
@@ -134,11 +133,10 @@ export async function rotinaDoTurno(repos: Repos, turnoId: string): Promise<{ ro
   const idDisparado = turno.origem === "retomada" && turno.retomaTurnoId ? turno.retomaTurnoId : turno.id;
   const disparado = idDisparado === turno.id ? turno : await repos.turnos.buscar(idDisparado);
   if (!disparado || disparado.origem !== "rotina") return null;
-  for (const rotina of await repos.rotinas.listar()) {
-    const janela = (await repos.rotinaJanelas.listar(rotina.id)).find((j) => j.turnoId === disparado.id);
-    if (janela) return { rotina, turnoDisparado: disparado, instanteAgendado: janela.instanteAgendado };
-  }
-  return null;
+  const janela = await repos.rotinaJanelas.buscarPorTurno(disparado.id);
+  if (!janela) return null;
+  const rotina = await repos.rotinas.buscar(janela.rotinaId);
+  return rotina ? { rotina, turnoDisparado: disparado, instanteAgendado: janela.instanteAgendado } : null;
 }
 
 export function mesmoEscopo(a: Escopo, b: Escopo): boolean {

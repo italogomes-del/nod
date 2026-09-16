@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
-import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa, autoriaAgente, autoriaPessoa } from "../../helpers/fabricas.ts";
 import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
@@ -48,8 +47,8 @@ describeIntegracao("salasRepo: membership é grant de leitura ao dono do bot (AD
       expect((await comoAna.salas.listar()).map((s) => s.nome)).toEqual(["revisão"]);
       expect((await comoAna.salas.membros(salaId)).map((m) => m.agenteId)).toEqual([tuca.agenteId]); // só o grant DELA é visível
       expect(await comoAna.salas.buscar(outraId)).toBeNull();
-      // Ler não é escrever na sala de outra pessoa: a policy continua exigindo owner_id = pessoa.
-      await expectRejected(trx, () => trx`update salas set nome = 'minha' where id = ${salaId}`, "42501");
+      // Ler não é escrever na sala de outra pessoa: desde a 0004 o UPDATE nem enxerga a linha (zero linhas afetadas).
+      expect((await trx`update salas set nome = 'minha' where id = ${salaId}`).count).toBe(0);
       // Mas Ana escreve a PRÓPRIA mensagem na conversa da sala (owner_id = Ana), como o produto exige.
       const dela = await comoAna.mensagens.criar({ conversaId: conversa?.id ?? "", autoria: autoriaAgente(tuca.agenteId, PESSOA_ANA), kind: "texto", texto: "acho bom", confianca: "confiavel" });
       expect(dela?.id).toBeDefined();

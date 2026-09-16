@@ -57,18 +57,19 @@ describeIntegracao("isolamento por pessoa (nod_escopar_tabela)", () => {
       await vincularEscopo(trx, ANA);
       const comoAna = await trx`select rotulo from com_perna`;
       expect(comoAna.map((r) => r.rotulo)).toEqual(["marlon pede, ana decide"]);
-      // Ler pela perna extra não permite gravar linha de outra pessoa: o WITH CHECK continua exigindo
-      // owner_id = pessoa da sessão (a decisora só escreve no que é dela ou vira dona explicitamente).
+      // Ler pela perna extra não permite gravar linha de outra pessoa: o INSERT em nome de outra é 42501
+      // (WITH CHECK da nod_pessoa_insert) e, desde a 0004 (policies por comando), UPDATE/DELETE nem
+      // ENXERGAM a linha — afetam zero linhas em vez de estourar (a perna extra abre só o SELECT).
       await expectRejected(
         trx,
         () => trx`insert into com_perna (owner_id, decisor_id, rotulo) values (${PESSOA_MARLON}, ${PESSOA_ANA}, 'ana fingindo marlon')`,
         "42501",
       );
-      await expectRejected(
-        trx,
-        () => trx`update com_perna set owner_id = ${randomUUID()} where rotulo = 'marlon pede, ana decide'`,
-        "42501",
-      );
+      expect((await trx`update com_perna set owner_id = ${randomUUID()} where rotulo = 'marlon pede, ana decide'`).count).toBe(0);
+      // eslint-disable-next-line no-restricted-syntax -- o DELETE é o INSUMO da prova da policy (0004), sob rollback: espera-se zero linhas
+      expect((await trx`delete from com_perna where rotulo = 'marlon pede, ana decide'`).count).toBe(0);
+      await vincularEscopo(trx, MARLON);
+      expect((await trx`select count(*)::int as n from com_perna`)[0]?.n).toBe(2);
     });
   });
 });

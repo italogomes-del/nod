@@ -94,8 +94,8 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
  *  - pendencia_mais_velha_s: idade da decisão pendente/reaberta mais velha em que a pessoa é a decisora;
  *  - custo_servidor_mes: nesta rodada não existe executor de servidor (Executor = 'local' | 'catcher',
  *    ADR-022/028 — o catcher é driver in-process sem custo), então o valor é 0 por construção.
- *    gastosRepo.somarMes soma TODO executor da pessoa (inclusive o CLI local, que a assinatura dela
- *    paga) e por isso não alimenta esta métrica até ganhar filtro por executor (PENDENCIA-CONTRATO).
+ *    gastosRepo.somarMes(agora, executor) já filtra por executor (L9, pendência L8 §3); quando o
+ *    executor de servidor existir, é `somarMes(agora, 'servidor')` aqui e o valor deixa de ser 0.
  */
 export async function coletarGauges(conn: Conn, escopo: Escopo, agora: number, metricas: Metricas = registroPadrao): Promise<void> {
   const repos = criarRepos(conn, escopo);

@@ -14,3 +14,9 @@ Só o critério de agrupamento. A policy de duas pernas deixa de ser sobre tenan
 
 Este ADR já se chamava 'lê por PESSOA' — estava certo por antecipação e a premissa nova só tirou o ruído de tenant que o cercava. Uma frente escreveu um ADR NOVO inteiro, com quatro alternativas rejeitadas, para chegar onde este ADR já estava. Era uma emenda de um parágrafo. E a alternativa 'consultar com role privilegiado e filtrar na aplicação' fica MAIS perigosa agora: a fila é a única tela onde o trabalho de 19 pessoas legitimamente se mistura, é a tela de abertura, e é onde um bug de filtro expõe conversa privada de colega.
 
+## Refinamento (2026-09-16, 0003 e 0004 — a decisora decide, não apaga)
+
+- A segunda perna ("decisor designado") é `decisor_id = current_setting('nod.pessoa_id')` na policy de `decisoes` (EMENDA 1) e um EXISTS na decisão em `itens_aprovacao`. Ela abre a LEITURA; para a decisora DECIDIR, a 0003 criou `nod_decisora` (PERMISSIVE FOR UPDATE, USING e WITH CHECK pela perna) com o trigger que fecha as colunas do ato de decidir — estado, desfecho, decidida_em, decidida_por, vista_em, e `prazo_decisao_em` só na transição vencida → reaberta (o botão "reabrir"). Em `itens_aprovacao`: selecionado, marcado_por, marcado_em, texto_final, editado_por.
+- Com a 0004 (policies por comando), a decisora não apaga a decisão nem o item (DELETE é só da dona; antes o USING FOR ALL deixava). O que exige `owner_id` = pessoa — mensagem de resultado, turno de retomada, concessão — roda numa transação da DONA: a composição (`src/adapters/http/rotas/decisoes.ts`) separa a fase da decisora (marcar, fechar) da fase da dona (assentar, retomar), e a decisão diz quem é a dona (`ownerId`).
+- `listarSuaVez` carimba `vista_em` ao listar (listar = ver): é o único sinal que separa `expirou_sem_ninguem_ver` de `expirou_com_alguem_ciente` (ADR-017 #2); consultas de fundo passam `marcarVista: false`.
+
