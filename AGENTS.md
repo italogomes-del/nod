@@ -110,6 +110,12 @@ e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx
 - **Sessão stub por cookie** assinado (HMAC) só em 127.0.0.1; o servidor recusa outro `NOD_HOST`
   enquanto a sessão for stub (ADR-019/021).
 
+## Cloud Agents e gstack
+
+O `install` em `.cursor/environment.json` chama `scripts/cloud/install-gstack.sh`: instala bun 1.3.10 se faltar, clona https://github.com/garrytan/gstack.git em `~/.claude/skills/gstack` no commit `GSTACK_REF` (padrão `c43c850cae779bcd134b71a28eeec00628ba0792`), roda `./setup --host claude --no-prefix --no-team --no-plan-tune-hooks --quiet`, cria symlinks em `~/.cursor/skills/` sem sobrescrever o que já existir, desliga `telemetry` / `update_check` / `auto_upgrade` / `proactive`, e tenta o Chromium do Playwright sem derrubar o Build.
+
+Para trocar a versão: `GSTACK_REF=<sha-ou-tag> bash scripts/cloud/install-gstack.sh`. O padrão vive na variável `GSTACK_REF` do próprio script.
+
 ## Executor e custo
 
 Dev local não exige CLI nem chave: `NOD_EXECUTOR=catcher` é o padrão. Qualquer `claude -p` real
