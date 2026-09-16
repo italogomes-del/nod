@@ -20,7 +20,10 @@ export function trechoAplicavel(conteudo: string): string {
 }
 
 export async function migrar(urlDono: string, dir: string): Promise<{ aplicadas: string[] }> {
-  const sql = postgres(urlDono, { prepare: false, max: 1 });
+  // onnotice — definido em 2026-09-16: NOTICE não é erro ("relation schema_migrations already exists,
+  // skipping" a cada rodada); o default do postgres.js imprime via console, fora do wrapper único de
+  // log (Leapy §10), e poluía a saída de `npm run check`. Erros continuam lançando normalmente.
+  const sql = postgres(urlDono, { prepare: false, max: 1, onnotice: () => {} });
   const aplicadas: string[] = [];
   try {
     await sql`select pg_advisory_lock(${TRAVA})`;

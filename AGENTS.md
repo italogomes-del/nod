@@ -12,7 +12,7 @@ npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS pr
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
-npm run db:seed             # scripts/seed.ts (L3): identidade e exemplos como nod_dono, idempotente por id determinístico
+npm run db:seed             # AINDA NÃO RODA: scripts/seed.ts entra na L3 (identidade e exemplos como nod_dono, idempotente por id determinístico); até lá sai 1 com mensagem, não com stack de módulo ausente
 npm start                   # node src/adapters/http/server.ts — Node 24 roda .ts direto; é o mesmo CMD do Dockerfile
 ```
 
