@@ -1,0 +1,144 @@
+import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
+import type { Mensagem } from "../contracts/mensagem.ts";
+import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
+import type { Entrega } from "../contracts/ponte.ts";
+import type { Turno } from "../contracts/turno.ts";
+import { ErroDeDominio } from "../domain/erro.ts";
+import { descreverNegacao } from "../domain/estado-degradacao.ts";
+import { redigir } from "../domain/redacao.ts";
+import { autoriaAgente, evento } from "./autoria-evento.ts";
+import type { CasoDeUso } from "./tipos.ts";
+
+export type EntradaAssentarTurno = Entrega & { executor?: Executor };
+export type SaidaAssentarTurno = {
+  turno: Turno | null;
+  mensagem: Mensagem | null;
+  /** (turno, seq_local) já entregue: nada regravado (ADR-021). */
+  duplicada: boolean;
+  /** Turno já terminal (varredor/parar chegaram antes): a fala entra como anexo parcial, sem reabrir (ADR-010). */
+  tardia: boolean;
+};
+
+type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null };
+
+/**
+ * Regra do servidor (ADR-009, pendência da L2): o classificador não distingue parar de sumiço —
+ * interrompido SEM motivo vira parado_pela_pessoa se a pessoa pediu (parar_solicitado_em), senão
+ * sem_progresso. definido em 2026-09-16: com quatro estados (ADR-010) a falha técnica do CLI
+ * (result com subtype ≠ success) é um turno INTERROMPIDO cujo motivo_falha guarda o subtipo.
+ */
+export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm">, resultado: Entrega["resultado"]): Desfecho {
+  if (resultado.desfecho === "sucesso") return { estado: "concluido", motivoInterrupcao: null, motivoFalha: null };
+  if (resultado.desfecho === "falha") return { estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: resultado.motivoFalha ?? "erro_execucao" };
+  const motivo = resultado.motivoInterrupcao ?? (turno.pararSolicitadoEm !== null ? "parado_pela_pessoa" : "sem_progresso");
+  return { estado: "interrompido", motivoInterrupcao: motivo, motivoFalha: resultado.motivoFalha ?? null };
+}
+
+/**
+ * ENTREGAR (ADR-021): idempotente por (turno, seq_local); grava a fala do agente (autoria composta,
+ * confiança do turno, parcial se interrompido), sessão do CLI na conversa, gastos (ADR-015), o estado
+ * terminal com motivo, negações de permissão renderizadas (ADR-029) e os eventos — tudo na MESMA tx.
+ */
+export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> = async (deps, entrega) => {
+  const primeira = await deps.repos.turnos.registrarEntrega(entrega.turnoId, entrega.seqLocal);
+  if (!primeira) return { data: { turno: null, mensagem: null, duplicada: true, tardia: false } };
+  const turno = await deps.repos.turnos.buscar(entrega.turnoId);
+  if (!turno) throw new ErroDeDominio("nao_encontrado");
+  if (turno.machineId !== null && turno.machineId !== entrega.machineId) throw new ErroDeDominio("nao_permitido", { cause: "entrega de outra máquina" });
+
+  const agora = deps.agora();
+  const executor = entrega.executor ?? "catcher";
+  const resultado = entrega.resultado;
+  const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
+  const desfecho = desfechoDaEntrega(turno, resultado);
+  const interrompido = tardia || desfecho.estado === "interrompido";
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, machineId: entrega.machineId });
+  const events: RuntimeEvent[] = [];
+
+  let mensagem: Mensagem | null = null;
+  if (entrega.fala.tipo === "passe") {
+    const agente = await deps.repos.agentes.buscar(turno.agenteId);
+    mensagem = await deps.repos.mensagens.criar({
+      conversaId: turno.conversaId,
+      turnoId: turno.id,
+      autoria,
+      kind: "passe",
+      texto: redigir("passe", agora, { agente: agente?.nome ?? "agente", motivo: entrega.fala.motivo }),
+      payload: { kind: "passe", motivo: entrega.fala.motivo },
+      confianca: turno.entradaConfianca,
+      parcial: interrompido,
+    });
+  } else if (entrega.fala.texto.trim() !== "") {
+    mensagem = await deps.repos.mensagens.criar({
+      conversaId: turno.conversaId,
+      turnoId: turno.id,
+      autoria,
+      kind: "texto",
+      texto: entrega.fala.texto,
+      payload: null,
+      confianca: turno.entradaConfianca,
+      parcial: interrompido,
+    });
+  }
+  if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
+
+  if (resultado.sessaoCli) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli);
+  await deps.repos.gastos.registrar({
+    turnoId: turno.id,
+    executor,
+    tokensEntrada: resultado.tokens.entrada,
+    tokensSaida: resultado.tokens.saida,
+    custoUsd: resultado.custoUsd,
+    modelo: turno.modelo,
+    em: agora,
+  });
+
+  for (const nome of resultado.negacoesPermissao) {
+    const negacao = { classe: "ferramenta_negada" as const, nome, motivo: "fora_do_catalogo" as const, desde: agora, terminal: false };
+    const m = await deps.repos.mensagens.criar({
+      conversaId: turno.conversaId,
+      turnoId: turno.id,
+      autoria,
+      kind: "negacao",
+      texto: descreverNegacao(negacao, agora),
+      payload: { kind: "negacao", classe: negacao.classe, nome, motivo: negacao.motivo, terminal: false },
+      confianca: "confiavel",
+    });
+    events.push(evento(deps.escopo, { kind: "negacao", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { nome, motivo: negacao.motivo, classe: negacao.classe, terminal: false, mensagem_id: m?.id ?? null } }));
+  }
+
+  if (tardia) {
+    // Entrega depois do varredor/parar: aceita como anexo parcial, sem reabrir (ADR-010).
+    return { data: { turno, mensagem, duplicada: false, tardia: true }, events };
+  }
+
+  const assentado = await deps.repos.turnos.assentar(turno.id, {
+    estado: desfecho.estado,
+    motivoInterrupcao: desfecho.motivoInterrupcao,
+    motivoFalha: desfecho.motivoFalha,
+    sinais: resultado.sinais,
+    custoUsd: resultado.custoUsd,
+    tokensEntrada: resultado.tokens.entrada,
+    tokensSaida: resultado.tokens.saida,
+  });
+  if (!assentado) throw new ErroDeDominio("estado_invalido", { cause: "turno mudou de estado durante a entrega" });
+
+  if (desfecho.estado === "interrompido") {
+    await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+    const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
+    const aviso = await deps.repos.mensagens.criar({
+      conversaId: turno.conversaId,
+      turnoId: turno.id,
+      autoria,
+      kind: "sistema",
+      texto: redigir("turno-interrompido", agora, { motivo }),
+      confianca: "confiavel",
+    });
+    if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
+    events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, custo_usd: resultado.custoUsd } }));
+  } else {
+    events.push(evento(deps.escopo, { kind: "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: "concluido", custo_usd: resultado.custoUsd, ferramentas: resultado.ferramentasChamadas.length } }));
+  }
+
+  return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };
+};

@@ -1,0 +1,223 @@
+import { randomUUID } from "node:crypto";
+import { afterEach, expect, it, vi } from "vitest";
+import { iniciarOrquestrador, type IniciarLaco } from "../../src/adapters/fundo/orquestrador-turnos.ts";
+import { criarPonteInterna, type PonteInternaNod } from "../../src/adapters/fundo/ponte-interna.ts";
+import { varrer } from "../../src/adapters/fundo/varredor-lease.ts";
+import type { Registry } from "../../src/adapters/executor/spi.ts";
+import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../src/contracts/turno.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import { SINAIS_ZERADOS } from "../../src/domain/stream-json.ts";
+import { criarRepos } from "../../src/repositories/index.ts";
+import { criarInterruptor } from "../../src/services/interruptor.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
+import type { Tx } from "../../src/shared/types.ts";
+import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
+import { retomarTurno } from "../../src/use-cases/retomar-turno.ts";
+import { db } from "../helpers/db.ts";
+import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
+import { driverFalso } from "../helpers/driver-falso.ts";
+import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+
+/**
+ * Terceiro modo (ADR-011): a ponte in-process abre transações REAIS por pessoa (paraCadaPessoa/
+ * abrirTxEscopada) e commita — não cabe no withRollback. Linhas commitadas, apagadas por id/pessoa no
+ * afterEach. Pessoa PRÓPRIA deste arquivo (uuid aleatório, sem linha em pessoas): a fila é por pessoa.
+ */
+const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const listarPessoas = async () => [{ tenantId: PESSOA.tenantId, id: PESSOA.pessoaId }];
+const PRONTO = { estado: "pronto" as const, versao: "catcher", em: Date.now() };
+const criados = { agentes: [] as string[], conversas: [] as string[] };
+
+async function escopado<T>(fn: (trx: Tx) => Promise<T>): Promise<T> {
+  const caixa: { valor?: T } = {};
+  await db.begin(async (trx) => {
+    await vincularEscopo(trx, PESSOA);
+    caixa.valor = await fn(trx);
+  });
+  return caixa.valor as T;
+}
+
+const services = servicosDeTeste((t) => criarRepos(t, PESSOA), PESSOA, { interruptor: criarInterruptor() });
+const useCases = useCasesDeTeste();
+
+function novaPonte(): PonteInternaNod {
+  return criarPonteInterna(db, { services, useCases, executor: "catcher", listarPessoas, esquecerTurno: (id) => services.interruptor.esquecer(id) });
+}
+
+/** O laço mínimo (o da L4 faz o mesmo com o processo real): puxar → rodar com sinks → entregar uma vez. */
+async function rodarUmCiclo(ponte: PonteInternaNod, machineId: string): Promise<{ plano: PlanoTurno; resultado: ResultadoTurno; renovacoes: boolean[]; ferramentas: string[] } | null> {
+  const plano = await ponte.puxar(PESSOA.pessoaId);
+  if (!plano) return null;
+  const driver = driverFalso({ responder: (nome) => `RESULTADO_${nome}=ok` });
+  const instance = await driver.create({ env: {}, cwdBase: "/tmp" });
+  const adapter = instance.adapter(plano);
+  services.interruptor.registrar(plano.turnoId, () => adapter.interromper());
+  let sinais: SinaisTurno = { ...SINAIS_ZERADOS };
+  const renovacoes: boolean[] = [];
+  const ferramentas: string[] = [];
+  const registros: Promise<void>[] = [];
+  const resultado = await adapter.rodarTurno({
+    async sinal(s) {
+      sinais = { ...sinais, [s]: true };
+      renovacoes.push((await ponte.renovar({ turnoId: plano.turnoId, machineId, sinais, eventos: [] })).ativo);
+    },
+    evento(e: EventoStream) {
+      if (e.tipo === "tool_use") {
+        ferramentas.push(e.nome);
+        registros.push(escopado((trx) => services.catcher.registrar(trx, plano.turnoId, "tool_use", { nome: e.nome })));
+      }
+    },
+    delta() {},
+  });
+  await Promise.all(registros);
+  await ponte.entregar({ turnoId: plano.turnoId, machineId, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado });
+  return { plano, resultado, renovacoes, ferramentas };
+}
+
+afterEach(async () => {
+  await escopado(async (trx) => {
+    await trx`set local lock_timeout = '2s'`;
+    const p = PESSOA.pessoaId;
+    await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from gastos where owner_id = ${p}`;
+    await trx`delete from catcher_registros where owner_id = ${p}`;
+    await trx`delete from decisoes where owner_id = ${p}`;
+    await trx`delete from mensagens where owner_id = ${p}`;
+    await trx`delete from propostas where owner_id = ${p}`;
+    await trx`delete from agente_memorias where owner_id = ${p}`;
+    await trx`delete from paradas where owner_id = ${p}`;
+    await trx`delete from turnos where owner_id = ${p}`;
+    await trx`delete from inventario_motores where owner_id = ${p}`;
+    if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;
+    if (criados.agentes.length) await trx`delete from agentes where id in ${trx(criados.agentes)}`;
+    await trx`delete from events_outbox where owner_id = ${p}`;
+    await trx`delete from events where owner_id = ${p}`;
+  });
+  criados.agentes.length = criados.conversas.length = 0;
+});
+
+describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process): ciclo puxar → rodar → entregar com commit", () => {
+  it("o ciclo grava a fala do agente, gastos, sinais true, catcher_registros e frames no outbox; a entrega repetida é ignorada", async () => {
+    const machineId = randomUUID();
+    const ponte = novaPonte();
+    await ponte.conectar({ machineId, nome: "teste", inventario: PRONTO, versaoContrato: 1 });
+    const criado = await escopado(async (trx) => {
+      const deps = depsSobreTrx(trx, PESSOA, { services });
+      const c = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" })).data;
+      criados.agentes.push(c.agente.id);
+      criados.conversas.push(c.conversa.id);
+      await executar(deps, enviarMensagem, { conversaId: c.conversa.id, texto: '[[delta: olá]] [[tool: mcp__nod__lembrar {"tipo":"fato","texto":"x"}]] [[texto: resposta final]] [[custo: 0.0207631]]', inventario: PRONTO });
+      return c;
+    });
+
+    const ciclo = await rodarUmCiclo(ponte, machineId);
+    expect(ciclo).not.toBeNull();
+    expect(ciclo?.plano.entrada.sessaoCli).toBeNull();
+    expect(ciclo?.resultado.desfecho).toBe("sucesso");
+    expect(ciclo?.renovacoes.every((a) => a)).toBe(true);
+    expect(ciclo?.ferramentas).toEqual(["mcp__nod__lembrar"]);
+    expect(ponte.escopoDoTurno(ciclo?.plano.turnoId ?? "")).toBeNull();
+    expect(services.revogados).toContain(ciclo?.plano.turnoId);
+
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, PESSOA);
+      const turno = await repos.turnos.buscar(ciclo?.plano.turnoId ?? "");
+      expect(turno).toMatchObject({ estado: "concluido", custoUsd: 0.0207631, sinais: { attempted: true, promptSubmitted: true, producedOutput: true, rejected: false } });
+      expect((await repos.mensagens.listarDaConversa(criado.conversa.id)).map((m) => [m.kind, m.texto])).toEqual([
+        ["sistema", expect.stringContaining("identidade")],
+        ["texto", expect.stringContaining("[[delta")],
+        ["texto", "resposta final"],
+      ]);
+      expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => g.custoUsd)).toEqual([0.0207631]);
+      expect((await repos.catcher.listar(turno?.id ?? "")).map((r) => r.tipo)).toEqual(["tool_use"]);
+      expect((await repos.conversas.buscar(criado.conversa.id))?.sessaoCli).toBe(ciclo?.resultado.sessaoCli);
+      const outbox = await trx<{ tipo: string }[]>`select tipo from events_outbox where owner_id = ${PESSOA.pessoaId} order by criado_em`;
+      expect(outbox.map((o) => o.tipo)).toEqual(["agente_atualizado", "mensagem_criada", "mensagem_criada", "turno_criado", "mensagem_criada", "turno_encerrado"]);
+    });
+
+    await ponte.entregar({ turnoId: ciclo?.plano.turnoId ?? "", machineId, seqLocal: 1, fala: { tipo: "texto", texto: "de novo" }, resultado: ciclo?.resultado as ResultadoTurno });
+    await escopado(async (trx) => {
+      expect((await criarRepos(trx, PESSOA).mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.texto === "de novo")).toEqual([]);
+    });
+    expect(await ponte.puxar(PESSOA.pessoaId)).toBeNull();
+  });
+
+  it("novo processo lê do Postgres: a 2ª mensagem sai por outra ponte com --resume; lease vencido → varredor → retomada por turno novo", async () => {
+    const maquinaA = randomUUID();
+    const ponteA = novaPonte();
+    await ponteA.conectar({ machineId: maquinaA, nome: "A", inventario: PRONTO, versaoContrato: 1 });
+    const criado = await escopado(async (trx) => {
+      const deps = depsSobreTrx(trx, PESSOA, { services });
+      const c = (await executar(deps, criarAgente, { dono: "pessoa" })).data;
+      criados.agentes.push(c.agente.id);
+      criados.conversas.push(c.conversa.id);
+      await executar(deps, enviarMensagem, { conversaId: c.conversa.id, texto: "[[texto: primeira]]", inventario: PRONTO });
+      return c;
+    });
+    const primeiro = await rodarUmCiclo(ponteA, maquinaA);
+    const sessao = primeiro?.resultado.sessaoCli ?? null;
+    expect(sessao).not.toBeNull();
+
+    await escopado(async (trx) => {
+      await executar(depsSobreTrx(trx, PESSOA, { services }), enviarMensagem, { conversaId: criado.conversa.id, texto: "[[texto: segunda]]", inventario: PRONTO });
+    });
+    // "processo novo": outra ponte, sem memória do anterior — o estado está no Postgres
+    const maquinaB = randomUUID();
+    const ponteB = novaPonte();
+    await ponteB.conectar({ machineId: maquinaB, nome: "B", inventario: PRONTO, versaoContrato: 1 });
+    const plano2 = await ponteB.puxar(PESSOA.pessoaId);
+    expect(plano2).toMatchObject({ machineId: maquinaB, entrada: { texto: "[[texto: segunda]]", sessaoCli: sessao } });
+    // a ponte A não conhece o turno da B: renovar é fail-closed
+    expect((await ponteA.renovar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, sinais: SINAIS_ZERADOS, eventos: [] })).ativo).toBe(false);
+    expect((await ponteB.renovar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, sinais: SINAIS_ZERADOS, eventos: [] })).ativo).toBe(true);
+
+    // a máquina B some: o lease vence, o varredor (paraCadaPessoa, tx real) encerra e abre a decisão
+    const varrido = await varrer(db, Date.now() + LEASE_MS + 1, { listarPessoas });
+    expect(varrido[PESSOA.pessoaId]?.interrompidos).toEqual([plano2?.turnoId]);
+    const decisaoId = varrido[PESSOA.pessoaId]?.decisoes[0] ?? "";
+    expect((await ponteB.renovar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, sinais: SINAIS_ZERADOS, eventos: [] })).ativo).toBe(false);
+    // entrega tardia da B: anexo, sem reabrir
+    await ponteB.entregar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, seqLocal: 1, fala: { tipo: "texto", texto: "tarde" }, resultado: { ...(primeiro?.resultado as ResultadoTurno), texto: "tarde" } });
+
+    const retomado = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), retomarTurno, { decisaoId, texto: "[[texto: continuei]]" })).data);
+    expect(retomado.turno).toMatchObject({ origem: "retomada", retomaTurnoId: plano2?.turnoId, reenvios: 1 });
+    const terceiro = await rodarUmCiclo(ponteA, maquinaA);
+    expect(terceiro?.plano).toMatchObject({ turnoId: retomado.turno.id, entrada: { texto: "[[texto: continuei]]", sessaoCli: sessao } });
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, PESSOA);
+      expect((await repos.turnos.listarDaConversa(criado.conversa.id)).map((t) => [t.origem, t.estado])).toEqual([
+        ["conversa", "concluido"],
+        ["conversa", "interrompido"],
+        ["retomada", "concluido"],
+      ]);
+      expect((await repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.texto === "tarde").map((m) => m.parcial)).toEqual([true]);
+      expect((await repos.decisoes.buscar(decisaoId))?.estado).toBe("decidida");
+    });
+  });
+
+  it("iniciarOrquestrador anuncia a máquina com o inventário do registry e abre UM laço por pessoa; parar() fecha tudo", async () => {
+    const machineId = randomUUID();
+    const ponte = novaPonte();
+    const driver = driverFalso();
+    const instance = await driver.create({ env: {}, cwdBase: "/tmp" });
+    const registry: Registry = { catcher: { estado: "pronto", driver, instance }, "claude-cli": { estado: "sombra", motivo: "sem CLI neste teste" } };
+    const parados: string[] = [];
+    const iniciarLaco: IniciarLaco = vi.fn(({ pessoaId }) => ({ parar: () => void parados.push(pessoaId) }));
+
+    const orq = await iniciarOrquestrador({ db, registry, machineId, ponte, iniciarLaco, listarPessoas, intervaloMs: 20, nomeMaquina: "teste" });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(orq.lacos()).toEqual([PESSOA.pessoaId]);
+    expect(vi.mocked(iniciarLaco)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(iniciarLaco).mock.calls[0]?.[0]).toMatchObject({ pessoaId: PESSOA.pessoaId, machineId, ponte });
+    expect(ponte.maquinasConectadas()).toEqual([{ machineId, nome: "teste", inventario: { estado: "pronto", versao: "catcher", em: expect.any(Number) }, versaoContrato: 1 }]);
+
+    await orq.parar();
+    expect(parados).toEqual([PESSOA.pessoaId]);
+    expect(orq.lacos()).toEqual([]);
+    expect(ponte.maquinasConectadas()).toEqual([]);
+    expect(await ponte.puxar(PESSOA.pessoaId)).toBeNull();
+  });
+});
