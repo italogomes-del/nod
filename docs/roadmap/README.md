@@ -41,6 +41,9 @@ remotas — `server/vps-computer.ts`), nunca o modelo em que o turno inteiro emi
 | [02](jornada-02-bots-se-chamam.md) | Bots se chamam — delegação, @menção e workflows entre bots ([épicos](jornada-02-epicos.md)) | Multi-bot interativo (referência: Grok Bot; o OMB só tem channels). **nod já tem o motor; falta a experiência.** | **rascunho — detalhada** |
 
 > As evidências que motivam as jornadas ficam em [evidencias/](evidencias/README.md).
+>
+> Para pôr uma issue na esteira, veja [criar-issue-no-linear.md](criar-issue-no-linear.md) (issue do
+> `issues.md` → task do Linear → Cursor → gstack).
 
 ### Pré-esboços de ADR (viram ADR definitivo quando a jornada for construída)
 

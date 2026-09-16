@@ -115,6 +115,14 @@ agente de implementação nunca recebe issue com decisão de arquitetura pendent
 Respeite o grafo de dependência do `epicos.md`. Numere `E<N>.<k>` (E1.0, E1.1…). E1.0 costuma ser a
 spike de decisão.
 
+## Passo 4 — Publicar no Linear
+
+Com o `issues.md` pronto, cada issue vira uma task na esteira Linear → Cursor → gstack. Siga
+[docs/roadmap/criar-issue-no-linear.md](../../../docs/roadmap/criar-issue-no-linear.md): time Leapy /
+projeto Nod / status Todo, título `<ID> — <título>`, labels `jornada-NN` + `trilha`, `blocked by` por
+"Depende de", e anote o `Linear: LEA-…` de volta no `issues.md`. Só publique jornadas cuja pasta tenha
+`office-hours.md`.
+
 ## Estrutura de arquivos
 
 ```
