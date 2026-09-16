@@ -7,13 +7,16 @@ práticas herdadas, com evidência, em [docs/inherited-from-leapy.md](docs/inher
 
 ```bash
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
-npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test e roda o seed em nod
-npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use)
+npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0004) e roda o seed em nod
+npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
+npm run e2e:fumaca          # dez jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
+npm run e2e:haiku           # scripts/e2e-aceite.sh com o CLI real (haiku); imprime o custo somado — rode UMA vez, custa assinatura
+npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno haiku (~US$ 0,01). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
 npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
-npm start                   # node src/adapters/http/server.ts — Node 24 roda .ts direto; é o mesmo CMD do Dockerfile
+npm start                   # node src/adapters/http/server.ts → boot.ts (partições, compor, listen, registry, laços); é o mesmo CMD do Dockerfile
 ```
 
 O pre-commit roda só `lint-staged` (eslint --fix nos .ts). O gate pesado é `npm run check`, antes do push.
@@ -41,9 +44,13 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
   nunca lê tabela escopada.
 - **Toda tabela nova passa por `nod_escopar_tabela(tbl, perna_extra)`** na migração, senão
   `tests/conformidade/rls.test.ts` acusa (lê pg_catalog; exceções têm motivo escrito em `gate-rls.ts`).
-  A perna extra só ABRE LEITURA (o WITH CHECK exige `owner_id` = pessoa); quem precisa que a perna
-  também ESCREVA cria uma policy PERMISSIVE a mais, só para o comando necessário, e a registra por nome
-  em `POLICIES_EXTRAS` do gate — como `nod_decisora` (0003, FOR UPDATE em decisoes/itens_aprovacao).
+  Desde a 0004 a função cria QUATRO policies PERMISSIVE por comando — `nod_pessoa_select` (dono OU
+  'equipe' OU perna extra), `nod_pessoa_insert`/`update`/`delete` (só a dona) — e o gate confere nome E
+  comando (`polcmd`). A perna extra e 'equipe' só ABREM LEITURA: UPDATE/DELETE por quem não é a dona
+  afetam ZERO linhas (medido em 2026-09-16: com a policy FOR ALL da 0001 a decisora apagava a decisão
+  da dona). Quem precisa que a perna também ESCREVA cria uma policy PERMISSIVE a mais, só para o comando
+  necessário, e a registra por nome em `POLICIES_EXTRAS` do gate — como `nod_decisora` (0003, FOR UPDATE
+  em decisoes/itens_aprovacao).
   Uma policy FOR UPDATE concede UPDATE de QUALQUER coluna (medido em 2026-09-16 com os triggers da 0003
   desligados: a decisora reescreveu frase/prazo e pôs `visibility = 'equipe'` na decisão da dona); por isso a policy vem
   SEMPRE com um trigger BEFORE UPDATE que fecha a lista de colunas que quem não é a dona pode mudar
@@ -58,6 +65,14 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
   `src/adapters/http/erros.ts`; o resto vira 500 + `correlation_id`.
 - **Comentário registra medição e data**, não intenção: `definido em AAAA-MM-DD: <critério>` para
   escolhas, `medido em AAAA-MM-DD: <número> (<como>)` SÓ para o que foi cronometrado/observado.
+- **Id de fora nunca chega cru ao Postgres**: grupo `id`/`mid` de path fora de uuid → 404 no roteador;
+  22P02 (id malformado no corpo) → 400 `entrada_invalida` em `erros.ts`. Nunca 500.
+- **Quem assenta um turno lê a linha com trava** (`turnosRepo.buscarTravado`, FOR UPDATE): Parar e a
+  entrega correm em transações paralelas e a leitura sem trava assentava 'sem_progresso' no lugar de
+  'parado_pela_pessoa' (medido em 2026-09-16 no e2e).
+- **A web só faz `import type` de `src/`** (eslint) e nunca executa nada: pede por REST, recebe frames
+  SSE que dizem O QUE mudou (kind, conversaId, turnoId) e reidrata por REST (`web/estado/reducer.ts`).
+  O composer nunca é regravado dentro da mesma conversa (`web/lib/render.ts`).
 
 ## Quatro modos de teste
 
@@ -66,7 +81,25 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
 conexões de verdade, serial, limpeza própria por id). Testes nunca dependem do seed: criam as próprias
 linhas com `randomUUID` dentro do envelope; só `tests/helpers/ids.ts` (identidade) é fixo.
 
+## Composição (L9)
+
+`src/adapters/http/compor.ts` é o único lugar que liga as lanes: `comporApp({db, env})` monta o
+`Services` concreto, `UseCasesNod`, a ponte in-process, a fábrica `dentro` (abre `abrirTxEscopada` e
+monta `Deps`) e as rotas de todas as lanes; `boot.ts` sobe partições → listen → registry (claude-cli
+só quando `NOD_EXECUTOR=claude-cli`; a sonda custa um turno) → inventário por pessoa → orquestrador →
+scheduler 30 s → varredor de lease 15 s → varredor de expiração 30 s → despachante do outbox.
+`tests/helpers/servidor-completo.ts` sobe o mesmo app em porta 0 sobre `nod_test` (commita: por isso o
+e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx escopada lança
+`escopo_vazio` — o escopo dos `Services` vem do `AsyncLocalStorage` que `abrirTxEscopada` preenche.
+
 ## Desvios registrados
+
+- **O e2e commita** (laços reais, sessão, SSE) e mora em `tests/concurrency/e2e-catcher.test.ts`, não em
+  `tests/integration` como o plano nomeava; a `trilha` é imutável e as linhas do e2e (de uma pessoa
+  aleatória por execução) ficam em `nod_test`.
+- **`/metrics`** responde na raiz (server) e em `/api/metrics` (rota da L8) — EMENDA-L9 §3.
+- **Cron com minuto e hora fixos** (Regra 9): `* * * * *` é `entrada_invalida`; o aceite adianta
+  `proxima_execucao`.
 
 - **Docker compose com um serviço só** (desvio do §5 da Leapy, EMENDA 25): o catcher do nod não é um
   serviço como o Mailpit — é um driver in-process do executor (`NOD_EXECUTOR=catcher`), porque o que se

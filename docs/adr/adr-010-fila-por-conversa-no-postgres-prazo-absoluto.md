@@ -21,6 +21,10 @@ Este é o ADR que MAIS ganha com a mudança de premissa, e quem o lesse procuran
 - Abandono exige DUAS condições simultâneas: `tentativas >= OUTBOX_TETO_TENTATIVAS` E `criado_em < agora - OUTBOX_IDADE_MIN_MS` (ambas em `src/shared/constantes.ts`, com o critério datado). Só o teto esvaziaria a fila numa queda curta do consumidor; só a idade nunca abandonaria a linha envenenada. Abandonado é CONTADO (métrica `outbox_abandonados`, ADR-017), nunca apagado. Prova: `tests/integration/outbox-abandono.test.ts`.
 - Trava de reivindicação só se prova no terceiro modo de teste (duas conexões, `tests/concurrency`), nunca dentro do withRollback (ver ADR-011).
 
+## Refinamento (2026-09-16, L9 — assentar lê com trava)
+
+`assentarTurno` lê o turno com `FOR UPDATE` (`turnosRepo.buscarTravado`). Medido no e2e: Parar (que marca `parar_solicitado_em`) e a entrega do laço correm em transações paralelas; a leitura sem trava via `NULL`, esperava o commit de Parar só no UPDATE seguinte e assentava `sem_progresso` em vez de `parado_pela_pessoa`. Com a trava, a leitura espera o commit e o motivo sai certo — ADR-009: quem decide o motivo é o servidor, e ele precisa ler o estado commitado.
+
 ## Gatilho de reversão
 
 Reabrir (trocar por fila externa) se, medido em produção: latência de reivindicação p95 > 500 ms com o pool do ADR-001, ou `outbox_abandonados` > 0 por dia durante duas semanas seguidas sem causa no consumidor, ou a fila precisar de fan-out entre serviços que não compartilham o Postgres.
