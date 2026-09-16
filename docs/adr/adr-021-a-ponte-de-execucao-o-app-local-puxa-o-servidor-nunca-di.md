@@ -14,3 +14,11 @@ Novo. É o único mecanismo desta rodada que não existia em nenhum ADR.
 
 As suas decisões 3 e 4 fixam a direção da conexão e o comportamento no laptop fechado, mas nenhum ADR descrevia o canal — e sem isso escrito a implementação inventaria um, com alta chance de inventar um túnel. O custo que isso evita está inventariado: o companion/ inteiro do openmausbot existe só para deixar algo de fora alcançar a máquina, com um processo que mente sobre a própria origem, mais pareamento, mais token por dispositivo, mais scrubbing. Nada disso é necessário quando a máquina é quem disca. Pus o número de linhas dentro do ADR de propósito: a ponte parece um subsistema quando descrita como lista de exigências, e o time precisa ver que são dias, não semanas.
 
+
+## Estado nesta rodada (2026-09-16)
+
+O executor fala pela interface `PonteInterna` in-process (mesmo processo que o servidor). Do contrato já valem: Origin → 403 ANTES do token nas rotas `/api/interno/…` (`src/adapters/http/roteador.ts`), identidade derivada do token de turno e nunca de campo `remetente` no corpo, sessão do servidor (stub por cookie assinado, só em 127.0.0.1). A ponte HTTP multi-máquina entra depois sem trocar o driver.
+
+## Gatilho de reversão
+
+Reabrir (canal push, túnel ou relay) só se uma máquina precisar ser alcançada quando NÃO está puxando — hoje isso não existe por desenho: presença é o poll. Se o long-poll de 20 s virar custo mensurável de conexão no PaaS (ADR-001), ajustar o teto, não a direção.

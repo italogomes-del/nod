@@ -12,11 +12,6 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "baseUrl": ".",
-    "paths": {
-      "contracts/*": ["contracts/*"],
-      "core/*": ["core/*"]
-    }
+    "allowImportingTsExtensions": true
   }
 }

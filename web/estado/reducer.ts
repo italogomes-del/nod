@@ -1,6 +1,6 @@
-import type { Agente, Mensagem } from "../../contracts/agente.ts";
-import type { Concessao, ConectorCatalogo } from "../../contracts/conector.ts";
-import type { Rotina } from "../../contracts/rotina.ts";
+import type { Agente, Mensagem } from "../../src/contracts/agente.ts";
+import type { Concessao, ConectorCatalogo } from "../../src/contracts/conector.ts";
+import type { Rotina } from "../../src/contracts/rotina.ts";
 
 export type Pessoa = { tenantId: string; id: string; nome: string; iniciais: string };
 

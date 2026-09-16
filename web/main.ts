@@ -1,8 +1,8 @@
 import { agenteAtual, estadoInicial, mensagensDo, reduzir, type Estado, type Snapshot } from "./estado/reducer.ts";
 import { api } from "./lib/api.ts";
-import type { Agente, Mensagem } from "../contracts/agente.ts";
-import type { Rotina } from "../contracts/rotina.ts";
-import type { Concessao } from "../contracts/conector.ts";
+import type { Agente, Mensagem } from "../src/contracts/agente.ts";
+import type { Rotina } from "../src/contracts/rotina.ts";
+import type { Concessao } from "../src/contracts/conector.ts";
 
 let estado: Estado = estadoInicial;
 const app = document.getElementById("app")!;

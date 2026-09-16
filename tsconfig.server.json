@@ -6,13 +6,5 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext"
   },
-  "include": [
-    "contracts/**/*.ts",
-    "core/**/*.ts",
-    "db/**/*.ts",
-    "http/**/*.ts",
-    "drivers/**/*.ts",
-    "agent/**/*.ts"
-  ],
-  "exclude": ["**/*.test.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
 }

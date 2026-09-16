@@ -1,0 +1,29 @@
+// Constantes compartilhadas. "definido" = escolha com critério; "medido" só quando alguém cronometrou.
+
+/** Lease do turno. definido em 2026-09-16: 3x a renovação, tolera duas batidas perdidas antes de declarar máquina sem contato (ADR-010). */
+export const LEASE_MS = 90_000;
+/** Batida de renovação. definido em 2026-09-16: um terço do lease (ADR-010/021). */
+export const RENOVACAO_MS = 30_000;
+/** Máquina sem poll há mais que isto = offline. definido em 2026-09-16: dois pulls de 20s + folga (ADR-021, presença derivada do poll). */
+export const OFFLINE_MS = 60_000;
+/** Sonda de conector MCP. definido em 2026-09-16: a sonda de hoje viu um turno inteiro com MCP stdio em 8,3 s (mapa-cli); a descoberta tools/list precisa de bem menos. */
+export const PROBE_MS = 8_000;
+/** Fatia do long-poll de aprovação. definido em 2026-09-16: abaixo do teto do pull da ponte (20s no servidor, ADR-021); o teto real do tools/call do CLI é medido por scripts/sonda-mcp-timeout.ts (L4). */
+export const LONGPOLL_APROVACAO_MS = 20_000;
+/** Conteúdo não confiável menor que isto não é embrulhado. definido em 2026-09-16: copiado do limiar _UNTRUSTED_WRAP_MIN_CHARS do openmausbot (ADR-026). */
+export const UNTRUSTED_WRAP_MIN_CHARS = 32;
+/** Corte do resultado de ferramenta antes de entrar no contexto. definido em 2026-09-16: ~2k tokens, cabe num turno haiku sem estourar o cache (ADR-013). */
+export const ORCAMENTO_RESULTADO_CHARS = 8_000;
+/** Abandono do outbox exige AMBAS. definido em 2026-09-16: 5 tentativas cobre um despachante a cada 250ms com falha transitória (Leapy §7). */
+export const OUTBOX_TETO_TENTATIVAS = 5;
+/** definido em 2026-09-16: 30 min — só o teto esvaziaria a fila numa queda curta do consumidor (Leapy §7). */
+export const OUTBOX_IDADE_MIN_MS = 1_800_000;
+/** definido em 2026-09-16: limite do Grok Bot (docs/grokbot-comparison.md). */
+export const ROTINAS_POR_AGENTE = 50;
+/** definido em 2026-09-16: limite do Grok Bot. */
+export const EXECUCOES_GUARDADAS = 20;
+/** definido em 2026-09-16: sala = 2 a 6 bots (Grok Bot, ADR-027). */
+export const SALA_MIN = 2;
+export const SALA_MAX = 6;
+/** Frames guardados por pessoa para replay. definido em 2026-09-16: cobre ~1 min de deltas de um turno; buffer podado → resumed:false (ADR-016). */
+export const BUFFER_SSE_FRAMES = 500;

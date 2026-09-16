@@ -1,9 +1,9 @@
-# CLI pinado por versão EXATA. SEM as libs do Chrome. (ADR-014 / ADR-018)
-FROM node:22.14.0-bookworm-slim
+# Servidor do nod. SEM CLI do fornecedor: o executor roda na máquina da pessoa (ADR-014 invertido, ADR-021).
+FROM node:24.19.0-bookworm-slim
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY . .
 ENV NODE_ENV=production
-EXPOSE 8787
-CMD ["npx", "tsx", "http/server.ts"]
+EXPOSE 8888
+CMD ["npx", "tsx", "src/adapters/http/server.ts"]

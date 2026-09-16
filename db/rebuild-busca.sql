@@ -1,3 +1,0 @@
--- Lê a expressão do catálogo, dropa, recria. Escrito ANTES do primeiro uso (ADR-008).
--- SELECT pg_get_expr(adbin, adrelid) FROM pg_attrdef ...
-SELECT 1;

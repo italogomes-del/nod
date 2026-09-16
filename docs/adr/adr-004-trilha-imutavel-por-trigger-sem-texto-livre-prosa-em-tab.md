@@ -14,3 +14,14 @@ Só o acréscimo de owner_id, que vem do ADR-003.
 
 O rigor nunca veio do número de clientes. Veio de dois fatos que não mudaram: dados de aprendiz continuam em jogo, e o CHECK é o que impede que prosa entre na trilha. Se prosa entrar durante o uso interno, no dia do SaaS o passivo vai junto e não sai — numa trilha imutável 'limpar' não é DELETE. Uso interno gera MAIS texto informal e MENOS revisão, não menos. Custo de manter: uma linha.
 
+
+## Refinamentos (2026-09-16)
+
+- Exceção levantada por trigger deixa a transação ABORTADA (25P02): o teste "o trigger recusou E a linha original continua lá" só existe com SAVEPOINT. O helper `tests/helpers/expect-rejected.ts` (SAVEPOINT → tenta → ROLLBACK TO SAVEPOINT) entrou antes do primeiro trigger e é obrigatório em todo teste de imutabilidade.
+- O CHECK `trilha_sem_texto_livre` e os triggers `trilha_no_update`/`trilha_no_truncate` são declarados também em `src/db/schema/trilha.ts` com nome IDÊNTICO; `tests/conformidade/trilha.test.ts` compara com pg_constraint/pg_trigger.
+- Para `nod_app` a recusa vem antes, pelo REVOKE UPDATE/DELETE/TRUNCATE; o trigger é a segunda camada e vale inclusive para o dono. Só `nod_poda` apaga `trilha_prosa`.
+- A mensagem de erro é canal de vazamento: `ErroDeDominio` carrega código fechado e o detalhe em `cause`; a resposta HTTP nunca ecoa `message` (ver ADR-002).
+
+## Gatilho de reversão
+
+Reabrir se o jurídico exigir retenção de prosa junto ao registro (aí a tabela irmã apagável não serve) ou se um pedido de exclusão LGPD precisar tocar uma coluna tipada da trilha — hoje a premissa é que enum/uuid/timestamp/numérico não identificam o aprendiz.

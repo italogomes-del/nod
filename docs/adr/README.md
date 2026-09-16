@@ -2,6 +2,8 @@
 
 Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 
+**Regra do gatilho (desde 2026-09-16):** todo ADR decidido contra uma alternativa razoável traz uma seção **Gatilho de reversão** com condições VERIFICÁVEIS (número, evento, medição) que provariam o erro. Sem gatilho, um ADR só pode ser reaberto por opinião — que é o que este diretório existe para evitar. Refinamentos ganham seção própria datada, nunca reescrevem a decisão original.
+
 > Revisados em bloco quando o nod deixou de ser SaaS B2B e virou **ferramenta interna** da Leapy,
 > com o executor rodando na máquina de cada pessoa. Ver [a revisão completa](../internal-first.md).
 

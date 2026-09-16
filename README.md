@@ -4,14 +4,17 @@
 
 **Ferramenta interna da Leapy.** Cada colaborador usa a LLM que já está credenciada na própria máquina — Claude Code, Cursor ou Codex. O nod pilota, nunca vê a credencial. Virar SaaS é plano próximo, e a arquitetura protege isso sem pagar o custo agora. Ver [interno primeiro](docs/internal-first.md).
 
-Primeira versão funcional da frota pessoal (**Meus agentes**): criar um agente conversando, dizer o que ele faz, criar rotina via texto e conectar apps (Slack, Notion, ClickUp…). O resto do produto (fila global, canais, CLI do fornecedor) continua nos ADRs.
+Rodada de reconstrução em curso (branch `rebuild/fundacao-leapy`): a fundação herdada da Leapy está de pé — Postgres real com RLS por pessoa, `withRollback`, gates lendo o catálogo, log JSON, CI em três jobs. As features do produto (bots, turnos, proxy MCP, rotinas, salas, SSE) entram nas lanes seguintes sobre esta base.
 
 ```bash
-npm install
-npm run dev
+npm ci                 # Node 24.19.0 (.mise.toml)
+cp .env.example .env
+npm run dev:setup      # Postgres em 127.0.0.1:5434 + migrações (nod e nod_test)
+npm run check          # lint, typecheck, cerca do domínio, unit, integration, conformidade, concurrency
+npm run dev            # api :8888, web :5274
 ```
 
-Abre em `http://localhost:5173`. Protótipo de alta fidelidade: [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
+Ver [AGENTS.md](AGENTS.md) para os comandos, as regras que o código trava e os desvios registrados. Protótipo de alta fidelidade: [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
 
 ---
 
@@ -58,7 +61,6 @@ Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e 
 |---|---|
 | [`docs/adr/`](docs/adr/) | **29 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
 | [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
-| [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
 | [`docs/grokbot-comparison.md`](docs/grokbot-comparison.md) | **O Grok Bot muda alguma decisão?** Não — e as seis emendas baratas que a comparação revelou, incluindo uma contradição entre o E2.4 e o ADR-013. |
 | [`docs/internal-first.md`](docs/internal-first.md) | **A revisão para uso interno.** O que mudou quando o executor saiu do container e foi para a máquina de cada pessoa, a ponte app↔servidor, e as três coisas impossíveis de retroagir. |
 | [`docs/distribution-and-local-execution.md`](docs/distribution-and-local-execution.md) | **Alvos de distribuição e execução local.** Por que não é monorepo, por que um app web não alcança o CLI da sua máquina, e a ordem web → PWA → app nativo. |
@@ -94,7 +96,21 @@ Cada afirmação técnica no documento foi verificada contra o código, com cami
 
 ## Estado
 
-Há um pacote TypeScript único (ADR-018) com `core/`, `contracts/`, `db/`, `http/` e `web/`. A fatia **Meus agentes** já sobe localmente: persistência JSON cifrada para concessões, rotina normalizada para cron + fuso IANA, gate de aprovação ligado por padrão.
+Um pacote TypeScript único (ADR-018) no esqueleto vinculante de [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md): `src/{domain,contracts,shared,db,repositories,services,use-cases,adapters/{http,fundo,executor,mcp-proxy},obs}` e `tests/{helpers,unit,integration,conformidade,concurrency}`. O que já vale, provado por teste contra o Postgres real:
+
+- migração `0001_fundacao.sql` no eixo PESSOA (`nod_escopar_tabela` com policy PERMISSIVE por pessoa + RESTRICTIVE por tenant), trilha imutável por trigger + CHECK, `events` particionada em 12 meses sem catch-all, outbox transacional com abandono por duas condições;
+- `abrirTxEscopada`/`vincularEscopo` com tenant E pessoa obrigatórios; `withRollback` + `expectRejected` (SAVEPOINT);
+- gates `tests/conformidade/{rls,rls-negativo,trilha,fronteiras}` lendo o catálogo e o eslint;
+- servidor `node:http` com roteador (`/api/t/:tenantId/…`, `/api/interno/…`), sessão stub por cookie assinado, erros com código fechado.
+
+A web (`web/`) compila mas fica temporariamente sem `/api/frota` até a lane de integração recompor as rotas — aceito e registrado.
+
+## Decisões registradas nesta rodada
+
+- **Aprovação em lista tipada** segue a spec E4.1 (P0), e não o corte "binária nesta rodada" de core-features (EMENDA 23).
+- **Nome na criação:** `POST agentes {dono, nome?}` — nome opcional; ausente vira "Novo agente" e o modelo propõe pelo `atualizar_perfil`. Organização/membership ficam fora (um tenant) (EMENDA 17).
+- **Dois eixos de profundidade:** `profundidade` 0|1 de peer (perguntar_a_bot) e `HANDOFFS_POR_RODADA = 3` em `src/domain/rodada-sala.ts` — o quarto `encaminhar` na mesma rodada sem fala humana vira passe `teto_canal` (EMENDA 14).
+- **Skills por instrução** (nomeadas, todos os bots, `/`) ficam fora desta rodada (EMENDA 24).
 
 O faseamento estimado é de **27 a 29 semanas** para os oito épicos originais, mais **11 a 15 semanas** para os quatro épicos de infraestrutura — com dois deles (sobreviver ao restart, credenciais por tenant) obrigatoriamente na primeira fase, porque são propriedades do fundamento e são caros de adicionar depois.
 

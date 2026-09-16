@@ -14,3 +14,11 @@ Nada de mecanismo. A justificativa é reescrita, porque o cenário de frota que 
 
 Aqui uma frente manteve a coisa certa pelo motivo errado, e motivo errado sustenta a próxima coisa cara. O cenário 'dois laptops que abrem às 8h01 avaliam a mesma janela das 8h' é impossível: na ponte de pull o laptop não avalia cron nenhum, ele puxa trabalho que o servidor já enfileirou. O argumento verdadeiro é o original e continua bom: numa trilha imutável por trigger a linha duplicada não sai, e sob LGPD dado inexato retido é infração distinta. Duas UNIQUE numa migração. Para o turno local, SKIP LOCKED já resolve e é grátis.
 
+
+## Como se prova: três modos de teste, não dois (2026-09-16)
+
+A estratégia de testes tem TRÊS modos além do unitário: integração-sob-rollback (`tests/integration`, a esmagadora maioria), conformidade lendo o catálogo (`tests/conformidade`) e concorrência-com-duas-conexões (`tests/concurrency`, poucos arquivos, serial, limpeza própria por id, `SET LOCAL lock_timeout = '250ms'`). As duas UNIQUE deste ADR e a reivindicação do ADR-010 só se provam com duas transações de verdade disputando a mesma linha — o withRollback tem um envelope só, e tentar espremer o teste nele conclui erradamente que a trava funciona. Nunca apertar o `max` do pool (`tests/helpers/db.ts`): transações enfileiradas deixam esses testes verdes provando nada.
+
+## Gatilho de reversão
+
+Reabrir se um teste de concorrência com dois processos mostrar janela duplicada apesar da UNIQUE (impossível por construção; indicaria instante canônico não determinístico entre processos — corrigir `proximaJanela`, não a trava), ou se o scheduler precisar rodar fora do servidor (ADR-022 mudaria antes).

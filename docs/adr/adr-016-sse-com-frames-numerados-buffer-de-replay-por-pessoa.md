@@ -14,3 +14,7 @@ A chave do buffer: de tenant para pessoa. O contrato de resume é fixado; o dime
 
 Este é um vazamento REAL no dia 1 do uso interno, não uma questão de SaaS, e duas frentes passaram por ele — uma levantou como 'risco que não estava na pergunta', a outra revisou o ADR-016 e disse 'manter o buffer por tenant exatamente como está', ou seja, manteve o bug. Com um tenant só, buffer por tenant É buffer global, e o frame do seu turno privado entra no replay da Patrícia. O próprio ADR-016 chama o buffer global de 'o buraco mais grave do desenho copiado' e explica: o SSE é o único lugar onde o dado atravessa para fora do servidor, a RLS já ficou para trás, e o buffer retém isso em RAM sem aparecer em nenhum inventário e sem ser apagável por pedido de exclusão.
 
+
+## Gatilho de reversão
+
+Reabrir (trocar SSE por WebSocket, ou buffer em memória por buffer no Postgres) se `resumed:false` passar a ser rotina medida em uso normal (buffer de `BUFFER_SSE_FRAMES` frames insuficiente para uma reconexão típica), ou se a web precisar ENVIAR pelo mesmo canal — hoje comandos vão por REST e o canal é só servidor→navegador. Buffer por pessoa não é reversível: por tenant foi vazamento real.

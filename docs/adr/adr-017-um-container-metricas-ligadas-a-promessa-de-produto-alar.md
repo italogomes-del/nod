@@ -14,3 +14,11 @@ De sete para cinco métricas. A (2) é DEVOLVIDA com os dois rótulos depois de 
 
 Uma frente cortou a métrica (2) dizendo que ela foi justificada por cardinalidade segura com 70 clientes. Fui ao texto do ADR-017 e não foi: a justificativa é 'uma pendência que expira porque ninguém olhou não move CPU — o container fica saudável enquanto o produto falha em silêncio'. Os dois rótulos separam problemas OPOSTOS: ninguém viu (falha de notificação) versus viram e não decidiram (falha de carga). E a substituição proposta — 'entre 19 colegas que se veem todo dia alguém pergunta' — é exatamente a disciplina humana que o ADR-003 rejeitou como mecanismo. Custo de manter: dois valores num union fechado. Histórico não se inventa depois.
 
+
+## Refinamento (2026-09-16)
+
+Entra a sexta métrica, `outbox_abandonados` (por tenant), do ADR-010 refinado: item do outbox abandonado pelas DUAS condições é contado, não apagado — na Leapy isso era um `console.error` que ninguém lia. O rótulo continua union fechado em `src/obs/metricas.ts` (L8), sem id/email de aprendiz.
+
+## Gatilho de reversão
+
+Reabrir (segundo container ou métricas de infraestrutura) se o executor de servidor passar a competir por CPU com o long-poll a ponto de o `puxar` estourar o teto de 20 s medido, ou se alguma das seis métricas ficar dois meses sem gerar decisão operacional — aí ela sai, não entra outra.
