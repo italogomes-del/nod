@@ -1,50 +1,37 @@
-import type { Autoria } from "./evento.ts";
+import type { EpochMs, TenantId } from "./ids.ts";
 
 export type FormaAgente = "shape-square" | "shape-hex" | "shape-circle";
-export type CorAgente =
-  | "c-purple"
-  | "c-black"
-  | "c-pink"
-  | "c-teal"
-  | "c-blue"
-  | "c-orange"
-  | "c-green"
-  | "c-red";
+export type CorAgente = "c-purple" | "c-black" | "c-pink" | "c-teal" | "c-blue" | "c-orange" | "c-green" | "c-red";
 
-export type DonoAgente =
-  | { tipo: "pessoa"; pessoaId: string }
-  | { tipo: "empresa"; empresaId: string };
+/** Imutável após a criação (trigger nod_agente_dono_imutavel na 0002; erro `dono_imutavel`). */
+export type DonoAgente = "pessoa" | "empresa";
 
+export type Visibilidade = "privado" | "equipe";
+
+/**
+ * Agente (bot). Nasce 'Novo agente' (EMENDA 17) e o modelo propõe o perfil por `atualizar_perfil`.
+ * Sem `cwd` (EMENDA 11, ADR-014 literal): o driver cria um mkdtemp por turno e apaga no finally.
+ */
 export type Agente = {
-  tenantId: string;
+  tenantId: TenantId;
   id: string;
+  ownerId: string;
+  visibility: Visibilidade;
   nome: string;
-  /** O que ele faz — prosa da pessoa, não formulário. */
-  instrucoes: string;
+  titulo: string;
+  /** O que ele faz — prosa da pessoa ou proposta confirmada; vai no --append-system-prompt. */
+  descricao: string;
   dono: DonoAgente;
   forma: FormaAgente;
   cor: CorAgente;
-  secao: string;
-  favorito: boolean;
+  /** Pin (Grok Bot). */
+  fixado: boolean;
+  /** Hide (Grok Bot). */
+  oculto: boolean;
+  /** Perfil confirmado pela pessoa (nada aplicado antes disso). */
   confirmado: boolean;
-  criadoEm: number;
-};
-
-export type MensagemKind =
-  | "texto"
-  | "starter"
-  | "proposta-papel"
-  | "proposta-rotina"
-  | "proposta-concessao"
-  | "sistema";
-
-export type Mensagem = {
-  tenantId: string;
-  id: string;
-  agenteId: string;
-  autoria: Autoria;
-  kind: MensagemKind;
-  texto: string;
-  payload: Record<string, unknown> | null;
-  createdAt: number;
+  modelo: string;
+  /** Duplicate copia perfil, nunca memória nem histórico. */
+  duplicadoDe: string | null;
+  criadoEm: EpochMs;
 };

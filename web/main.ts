@@ -1,8 +1,14 @@
-import { agenteAtual, estadoInicial, mensagensDo, reduzir, type Estado, type Snapshot } from "./estado/reducer.ts";
+import { agenteAtual, estadoInicial, mensagensDo, reduzir, type Estado, type MensagemDaTela as Mensagem, type Snapshot } from "./estado/reducer.ts";
 import { api } from "./lib/api.ts";
-import type { Agente, Mensagem } from "../src/contracts/agente.ts";
+import type { Agente } from "../src/contracts/agente.ts";
 import type { Rotina } from "../src/contracts/rotina.ts";
-import type { Concessao } from "../src/contracts/conector.ts";
+import type { Concessao } from "../src/contracts/concessao.ts";
+
+// Ajuste mínimo de compilação contra os contratos congelados pela L2 (2026-09-16): a tela é reescrita
+// pela L9 por frames SSE. `payloadDe` lê o payload tipado como saco genérico só para renderizar.
+function payloadDe(m: Mensagem): Record<string, unknown> {
+  return (m.payload ?? {}) as Record<string, unknown>;
+}
 
 let estado: Estado = estadoInicial;
 const app = document.getElementById("app")!;
@@ -93,7 +99,7 @@ function renderSidebar(e: Estado): string {
       const last = e.snapshot?.mensagens.filter((m) => m.agenteId === a.id).at(-1);
       return `<button class="row${active}" data-act="open" data-id="${esc(a.id)}">
         ${icon(a)}
-        <span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.instrucoes || last?.texto || "Acabamos de nos conhecer.")}</span></span>
+        <span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.descricao || last?.texto || "Acabamos de nos conhecer.")}</span></span>
         <span class="meta">${a.confirmado ? "" : '<span class="dot"></span>'}</span>
       </button>`;
     })
@@ -106,9 +112,9 @@ function renderSidebar(e: Estado): string {
           <button class="create-trigger" data-act="palette" aria-label="Criar ou buscar bots">+</button>
         </div>
         <div class="favorites">
-          <div class="favorites-head"><span>Favoritos</span><b>${agentes.filter((a) => a.favorito).length} fixados</b></div>
+          <div class="favorites-head"><span>Favoritos</span><b>${agentes.filter((a) => a.fixado).length} fixados</b></div>
           <div class="fav-grid">${agentes
-            .filter((a) => a.favorito)
+            .filter((a) => a.fixado)
             .map(
               (a) =>
                 `<button class="fav" data-act="open" data-id="${esc(a.id)}">${icon(a)}<b>${esc(a.nome)}</b></button>`,
@@ -126,12 +132,13 @@ function renderSidebar(e: Estado): string {
 }
 
 function renderStarter(m: Mensagem): string {
-  const opts = (m.payload?.["options"] as string[][] | undefined) ?? [];
+  const pl = payloadDe(m);
+  const opts = (pl["options"] as string[][] | undefined) ?? [];
   return `<div class="starter">
     <div class="intro">${esc(m.texto)}</div>
     <div class="q">
-      <h4>${esc(String(m.payload?.["title"] ?? ""))}</h4>
-      <p>${esc(String(m.payload?.["subtitle"] ?? ""))}</p>
+      <h4>${esc(String(pl["title"] ?? ""))}</h4>
+      <p>${esc(String(pl["subtitle"] ?? ""))}</p>
       <div class="choices">
         ${opts
           .map(
@@ -146,7 +153,7 @@ function renderStarter(m: Mensagem): string {
 }
 
 function renderPapel(m: Mensagem, agenteId: string): string {
-  const p = m.payload ?? {};
+  const p = payloadDe(m);
   const acessos = (p["acessosPedidos"] as { nome: string }[] | undefined) ?? [];
   const nao = (p["naoDeveFazer"] as string[] | undefined) ?? [];
   const pendente = p["estado"] === "pendente";
@@ -169,7 +176,7 @@ function renderPapel(m: Mensagem, agenteId: string): string {
 }
 
 function renderRotina(m: Mensagem, agenteId: string): string {
-  const p = m.payload ?? {};
+  const p = payloadDe(m);
   const pendente = p["estado"] === "pendente";
   return `<div class="card-prop">
     <div class="hd">Rotina proposta — nada agendado ainda</div>
@@ -189,7 +196,7 @@ function renderRotina(m: Mensagem, agenteId: string): string {
 }
 
 function renderConcessao(m: Mensagem, agenteId: string): string {
-  const p = m.payload ?? {};
+  const p = payloadDe(m);
   const caps = (p["capacidades"] as { id: string; rotulo: string }[] | undefined) ?? [];
   const pendente = p["estado"] === "pendente";
   return `<div class="card-prop" data-card="concessao" data-id="${esc(m.id)}">
@@ -226,11 +233,12 @@ function renderConcessao(m: Mensagem, agenteId: string): string {
 }
 
 function renderMsg(m: Mensagem, agenteId: string): string {
-  if (m.kind === "starter") return renderStarter(m);
-  if (m.kind === "proposta-papel") return renderPapel(m, agenteId);
-  if (m.kind === "proposta-rotina") return renderRotina(m, agenteId);
-  if (m.kind === "proposta-concessao") return renderConcessao(m, agenteId);
-  const who = m.autoria.tipo === "pessoa" ? "you" : "bot";
+  const kind: string = m.kind;
+  if (kind === "starter") return renderStarter(m);
+  if (kind === "proposta-papel") return renderPapel(m, agenteId);
+  if (kind === "proposta-rotina") return renderRotina(m, agenteId);
+  if (kind === "proposta-concessao") return renderConcessao(m, agenteId);
+  const who = m.autoria.autor_tipo === "pessoa" ? "you" : "bot";
   return `<div class="message ${who}"><div class="bubble">${esc(m.texto)}</div></div>`;
 }
 
@@ -244,7 +252,7 @@ function renderDetalhes(e: Estado): string {
     <div class="dh">Detalhes da conversa <button class="btn" data-act="fecha-detalhes">×</button></div>
     <div class="db">
       <h3>O que faz</h3>
-      <p>${esc(a.instrucoes || "Ainda não definido — escreva na conversa.")}</p>
+      <p>${esc(a.descricao || "Ainda não definido — escreva na conversa.")}</p>
       <h3>Rotinas</h3>
       ${
         rotinas.length
@@ -262,7 +270,7 @@ function renderDetalhes(e: Estado): string {
           ? apps
               .map(
                 (c) =>
-                  `<div class="pill-app"><b>${esc(c.conectorId)}</b><span>${esc(c.estado)} · ${c.capacidadesLigadas.length} ligadas · ${esc(c.declaracao)}</span></div>`,
+                  `<div class="pill-app"><b>${esc(c.conectorId)}</b><span>${esc(c.capacidade)}</span></div>`,
               )
               .join("")
           : "<p>Nenhum. Diga «conecta com o Slack» ou Notion.</p>"

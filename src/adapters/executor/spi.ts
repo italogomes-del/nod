@@ -1,25 +1,55 @@
-export type DriverConfig = Record<string, unknown>;
+import type { Inventario } from "../../contracts/inventario.ts";
+import type { PlanoTurno } from "../../contracts/plano-turno.ts";
+import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/turno.ts";
 
-export type SinaisTurno = {
-  attempted: boolean;
-  rejected: boolean;
-  promptSubmitted: boolean;
-  producedOutput: boolean;
+/**
+ * SPI de três camadas (ADR-012): UM Driver com campo `locality`, nunca duas implementações.
+ * O executor recebe o PLANO e os SINKS e devolve o resultado; quem grava é o servidor (ADR-018).
+ * Nesta rodada há dois drivers no mesmo SPI: claude-cli (real) e catcher (default de dev/CI).
+ */
+export type IdDriver = "claude-cli" | "catcher";
+
+export type Localidade = "local" | "servidor" | "ambos";
+
+export type ConfigDriver = {
+  /** Caminho do binário; ausente = resolver no PATH aumentado (ADR-014). */
+  bin?: string;
+  /** Ambiente já filtrado por montarAmbiente(regime, source) — o driver não lê process.env. */
+  env: Record<string, string>;
+  /** Base para o mkdtemp por turno (EMENDA 11): NOD_HOME/turnos. */
+  cwdBase: string;
+  /** Roteiro do catcher (marcadores → sequência de eventos); ignorado pelo claude-cli. */
+  roteiro?: unknown;
 };
 
-export type Adapter = {
-  sendTurn: (texto: string) => Promise<{ texto: string; sinais: SinaisTurno }>;
-  interruptTurn: () => Promise<void>;
+/**
+ * Sinks do turno (ADR-009): `sinal` é AWAITED antes do efeito que ele anuncia (promptSubmitted
+ * antes de escrever no stdin); `evento`/`delta` alimentam renovação de lease e streaming.
+ */
+export type SinksTurno = {
+  sinal(s: keyof SinaisTurno): Promise<void>;
+  evento(e: EventoStream): void;
+  delta(texto: string): void;
 };
 
-export type Instance = {
-  adapter: Adapter;
-  dispose: () => Promise<void>;
-};
+export interface Adapter {
+  rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno>;
+  /** SIGTERM → 5s → SIGKILL (medido em 2026-09-16: exit 143 em ~640ms, filho MCP morre junto — s6.log). */
+  interromper(): Promise<void>;
+}
 
-export type Driver = {
-  id: string;
-  decodeConfig: (raw: unknown) => DriverConfig;
-  defaultConfig: () => DriverConfig;
-  create: (config: DriverConfig) => Promise<Instance>;
-};
+export interface Instance {
+  sondar(): Promise<Inventario>;
+  adapter(plano: PlanoTurno): Adapter;
+  dispose(): Promise<void>;
+}
+
+export interface Driver {
+  meta: { id: IdDriver; locality: Localidade };
+  create(cfg: ConfigDriver): Promise<Instance>;
+}
+
+/** create() que falha vira sombra com motivo escrito, nunca derruba o servidor (ADR-012). */
+export type RegistroDriver = { estado: "pronto"; driver: Driver; instance: Instance } | { estado: "sombra"; motivo: string };
+
+export type Registry = Record<IdDriver, RegistroDriver>;

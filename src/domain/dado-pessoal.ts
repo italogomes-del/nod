@@ -1,4 +1,4 @@
-import type { ClassificacaoOrigem, SensibilidadeDeclarada } from "../contracts/conector.ts";
+import type { ClassificacaoOrigem, Conector, SensibilidadeDeclarada } from "../contracts/conector.ts";
 
 export const VERSAO_REGRA_DADO_PESSOAL = 1 as const;
 
@@ -10,18 +10,21 @@ export type Procedencia = {
 };
 
 /**
- * Classifica por ORIGEM declarada no ato da concessão, nunca por texto (ADR-002).
+ * Classifica por ORIGEM declarada no registro do conector, nunca por texto (ADR-002).
  * Default fechado: não declarou → TOCA.
  */
 export function classificarOrigem(procedencia: Procedencia, _agora: number): ClassificacaoOrigem {
-  const toca =
-    procedencia.declaracao === "nao-toca" ? false : true;
   return {
     conectorId: procedencia.conectorId,
     fonte: procedencia.fonte,
     concessaoId: procedencia.concessaoId,
     declaracao: procedencia.declaracao,
-    tocaDadoPessoal: toca,
+    tocaDadoPessoal: procedencia.declaracao !== "nao-toca",
     versaoRegra: VERSAO_REGRA_DADO_PESSOAL,
   };
+}
+
+/** Atalho sobre o registro do conector: só `declaracao` decide (ADR-002). */
+export function conectorTocaAprendiz(conector: Pick<Conector, "declaracao">): boolean {
+  return conector.declaracao !== "nao-toca";
 }

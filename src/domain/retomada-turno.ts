@@ -1,4 +1,4 @@
-import type { SinaisAceitacao } from "../contracts/turno.ts";
+import type { SinaisTurno } from "../contracts/turno.ts";
 
 export type ClasseRetomada = "before-accept" | "after-accept" | "unknown";
 
@@ -11,7 +11,7 @@ export type ResultadoRetomada = {
  * Nenhum caminho lê texto de erro. unknown trata como after-accept (ADR-009).
  */
 export function classificarRetomada(
-  sinais: SinaisAceitacao,
+  sinais: SinaisTurno,
   reenvios: number,
   _agora: number,
 ): ResultadoRetomada {

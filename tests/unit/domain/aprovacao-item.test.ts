@@ -1,39 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { montarItens } from "../../../src/domain/aprovacao-item.ts";
-import { classificarOrigem } from "../../../src/domain/dado-pessoal.ts";
+import { JUSTIFICATIVA_SENSIVEL, montarItens } from "../../../src/domain/aprovacao-item.ts";
 
 const agora = 1;
+const destino = { conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: "ana" } };
 
 describe("montarItens", () => {
-  it("item que toca dado de aprendiz nasce desmarcado — caso adversarial", () => {
-    const origem = classificarOrigem(
-      { conectorId: "gmail", fonte: "responsavel", concessaoId: "c", declaracao: "toca" },
-      agora,
-    );
+  it("item que toca dado de aprendiz nasce desmarcado COM justificativa — caso adversarial", () => {
     const itens = montarItens({
       tenantId: "t",
-      decisaoId: { tenantId: "t", id: "d1" },
-      propostas: [{ texto: "Responder a Maria", destino: "gmail" }],
-      origem,
+      decisaoId: "d1",
+      propostas: [{ texto: "Responder a Maria", destino, origemSensivel: true }],
       agora,
     });
     expect(itens).toHaveLength(1);
-    expect(itens[0]?.nasceDesmarcado).toBe(true);
-    expect(itens[0]?.estado).toBe("proposto");
+    expect(itens[0]?.selecionado).toBe(false);
+    expect(itens[0]?.origemSensivel).toBe(true);
+    expect(itens[0]?.justificativa).toBe(JUSTIFICATIVA_SENSIVEL);
+    expect(itens[0]?.marcadoPor).toBeNull();
+    expect(itens[0]?.desfecho).toBeNull();
   });
 
-  it("origem não toca também nasce proposta, sem forçar marcado", () => {
-    const origem = classificarOrigem(
-      { conectorId: "github", fonte: "pr", concessaoId: "c", declaracao: "nao-toca" },
-      agora,
-    );
+  it("origem não sensível nasce marcada, sem justificativa, textoFinal = textoOriginal e idx sequencial", () => {
     const itens = montarItens({
       tenantId: "t",
-      decisaoId: { tenantId: "t", id: "d1" },
-      propostas: [{ texto: "Reverter PR", destino: "github" }],
-      origem,
+      decisaoId: "d1",
+      propostas: [
+        { texto: "Reverter PR", destino, origemSensivel: false },
+        { texto: "Avisar bia", destino, origemSensivel: false },
+      ],
       agora,
     });
-    expect(itens[0]?.nasceDesmarcado).toBe(false);
+    expect(itens.map((i) => i.idx)).toEqual([0, 1]);
+    expect(itens[0]?.selecionado).toBe(true);
+    expect(itens[0]?.justificativa).toBeNull();
+    expect(itens[1]?.textoFinal).toBe("Avisar bia");
+    expect(itens[1]?.id).toBe("d1:item:1");
   });
 });

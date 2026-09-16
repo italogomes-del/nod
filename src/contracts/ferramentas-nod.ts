@@ -1,0 +1,190 @@
+import type { MotivoPasse } from "./motivos.ts";
+import type { CodigoErro } from "./motivos.ts";
+
+/** Subconjunto de JSON Schema que o proxy expõe em tools/list e valida em tools/call. */
+export type JsonSchema = {
+  type: "object" | "string" | "number" | "integer" | "boolean" | "array";
+  description?: string;
+  properties?: Record<string, JsonSchema>;
+  required?: readonly string[];
+  additionalProperties?: boolean;
+  enum?: readonly string[];
+  items?: JsonSchema;
+  minLength?: number;
+  minItems?: number;
+};
+
+const texto = (description: string, minLength = 1): JsonSchema => ({ type: "string", description, minLength });
+
+/**
+ * As NOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa). Lista FECHADA: cada nome tem um
+ * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
+ * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
+ * `${slug}__${tool}` e não mora aqui.
+ */
+export const FERRAMENTAS_NOD = {
+  lembrar: {
+    type: "object",
+    description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
+    properties: {
+      tipo: { type: "string", enum: ["preferencia", "fato", "resumo"], description: "Tipo da memória." },
+      texto: texto("O que lembrar, em uma frase."),
+    },
+    required: ["tipo", "texto"],
+    additionalProperties: false,
+  },
+  atualizar_perfil: {
+    type: "object",
+    description: "Propõe nome, título e/ou descrição para este agente. Nada muda antes da pessoa confirmar.",
+    properties: {
+      nome: texto("Nome curto do agente."),
+      titulo: texto("Título de uma linha."),
+      descricao: texto("O que o agente faz e como responde (regras duráveis)."),
+    },
+    required: [],
+    additionalProperties: false,
+  },
+  pedir_acesso: {
+    type: "object",
+    description: "Pede à pessoa acesso a capacidades de um conector. Vira proposta; nada é concedido aqui.",
+    properties: {
+      conector: texto("Slug do conector registrado."),
+      capacidades: { type: "array", items: { type: "string" }, minItems: 1, description: "Nomes das ferramentas pedidas." },
+      nivel: { type: "string", enum: ["leitura", "escrita"] },
+      nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
+    },
+    required: ["conector", "capacidades", "nivel", "nao_pedido"],
+    additionalProperties: false,
+  },
+  criar_rotina: {
+    type: "object",
+    description: "Propõe uma rotina (cron de 5 campos + fuso IANA). A pessoa confirma; o gate de aprovação nasce ligado.",
+    properties: {
+      cron: texto("Expressão cron de 5 campos, ex.: '0 8 * * 1-5'."),
+      fuso_iana: texto("Fuso IANA nomeado, ex.: America/Sao_Paulo. Offset numérico é recusado."),
+      instrucao: texto("O que fazer em cada execução."),
+      fonte: texto("De onde vem o dado."),
+      entregavel: texto("O que sai ao final."),
+      limites_aprovacao: texto("O que exige aprovação antes de sair."),
+      politica_sem_dado: texto("O que fazer quando não houver dado."),
+    },
+    required: ["cron", "fuso_iana", "instrucao", "fonte", "entregavel", "limites_aprovacao", "politica_sem_dado"],
+    additionalProperties: false,
+  },
+  pedir_aprovacao: {
+    type: "object",
+    description:
+      "Submete itens de efeito externo para aprovação em lista. Se voltar 'pendente', ENCERRE o turno: a decisão retoma depois.",
+    properties: {
+      resumo: texto("Resumo do lote em uma frase."),
+      itens: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            texto: texto("O item como a pessoa vai ler."),
+            destino: {
+              type: "object",
+              properties: {
+                conector: texto("Slug do conector."),
+                ferramenta: texto("Ferramenta do conector."),
+                argumentos: { type: "object", description: "Argumentos da chamada." },
+              },
+              required: ["conector", "ferramenta", "argumentos"],
+              additionalProperties: false,
+            },
+            origem_conector: texto("Slug do conector de onde o dado veio, se veio de conector."),
+          },
+          required: ["texto", "destino"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["resumo", "itens"],
+    additionalProperties: false,
+  },
+  pedir_a_pessoa: {
+    type: "object",
+    description:
+      "Para o turno e pergunta à pessoa. tipo é obrigatório: 'pergunta' (julgamento), 'falta_de_dado' (diga o dado e quem destrava) ou 'permissao'. Não tente de novo depois de chamar.",
+    properties: {
+      tipo: { type: "string", enum: ["pergunta", "falta_de_dado", "permissao"] },
+      texto: texto("A pergunta ou o que falta, em uma frase."),
+      dado: texto("Nome do dado que falta."),
+      quem_destrava: texto("Nome da pessoa que pode destravar (entre as pessoas do tenant)."),
+    },
+    required: ["tipo", "texto"],
+    additionalProperties: false,
+  },
+  passar: {
+    type: "object",
+    description: "Passa a vez na sala sem falar. O motivo é tipado.",
+    properties: { motivo: { type: "string", enum: ["passei_sem_nada_a_dizer", "negado_fail_closed", "ausente_offline", "cota_esgotada"] } },
+    required: ["motivo"],
+    additionalProperties: false,
+  },
+  encaminhar: {
+    type: "object",
+    description: "Encaminha a rodada da sala para outro bot membro (handoff visível). No máximo 3 por rodada sem fala humana.",
+    properties: { para_agente: texto("Nome do bot destinatário."), motivo: texto("Por que ele é o certo para continuar.") },
+    required: ["para_agente", "motivo"],
+    additionalProperties: false,
+  },
+  perguntar_a_bot: {
+    type: "object",
+    description: "Pergunta em texto a outro bot do mesmo dono (1 salto). A resposta volta como conteúdo não confiável.",
+    properties: { agente: texto("Nome do bot."), pergunta: texto("A pergunta.") },
+    required: ["agente", "pergunta"],
+    additionalProperties: false,
+  },
+} as const satisfies Record<string, JsonSchema>;
+
+export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
+export const NOMES_FERRAMENTAS_NOD = Object.keys(FERRAMENTAS_NOD) as NomeFerramentaNod[];
+
+export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
+export type ArgsAtualizarPerfil = { nome?: string; titulo?: string; descricao?: string };
+export type ArgsPedirAcesso = { conector: string; capacidades: string[]; nivel: "leitura" | "escrita"; nao_pedido: string[] };
+export type ArgsCriarRotina = {
+  cron: string;
+  fuso_iana: string;
+  instrucao: string;
+  fonte: string;
+  entregavel: string;
+  limites_aprovacao: string;
+  politica_sem_dado: string;
+};
+export type ItemPedidoAprovacao = {
+  texto: string;
+  destino: { conector: string; ferramenta: string; argumentos: Record<string, unknown> };
+  origem_conector?: string;
+};
+export type ArgsPedirAprovacao = { resumo: string; itens: ItemPedidoAprovacao[] };
+export type ArgsPedirAPessoa = { tipo: "pergunta" | "falta_de_dado" | "permissao"; texto: string; dado?: string; quem_destrava?: string };
+export type ArgsPassar = { motivo: MotivoPasse };
+export type ArgsEncaminhar = { para_agente: string; motivo: string };
+export type ArgsPerguntarABot = { agente: string; pergunta: string };
+
+export type ResultadoLembrar = { ok: true; id: string };
+export type ResultadoProposta = { proposta_id: string };
+export type ResultadoCriarRotina = { proposta_id: string; proxima_execucao: number; resumo: string } | { erro: CodigoErro };
+export type ResultadoPedirAprovacao =
+  | { estado: "decidida"; itens: { idx: number; desfecho: string }[] }
+  | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" };
+export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
+export type ResultadoOk = { ok: true };
+export type ResultadoPerguntarABot = { tarefa_id: string };
+
+/** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
+export type ContratoFerramentaNod = {
+  lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
+  atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoProposta };
+  pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoProposta };
+  criar_rotina: { args: ArgsCriarRotina; resultado: ResultadoCriarRotina };
+  pedir_aprovacao: { args: ArgsPedirAprovacao; resultado: ResultadoPedirAprovacao };
+  pedir_a_pessoa: { args: ArgsPedirAPessoa; resultado: ResultadoPedirAPessoa };
+  passar: { args: ArgsPassar; resultado: ResultadoOk };
+  encaminhar: { args: ArgsEncaminhar; resultado: ResultadoOk };
+  perguntar_a_bot: { args: ArgsPerguntarABot; resultado: ResultadoPerguntarABot };
+};

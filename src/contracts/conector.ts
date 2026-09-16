@@ -1,5 +1,14 @@
+import type { Visibilidade } from "./agente.ts";
+import type { EpochMs, TenantId } from "./ids.ts";
+import type { JsonSchema } from "./ferramentas-nod.ts";
+import type { MotivoNegacao } from "./motivos.ts";
+
+/** Declarada pela pessoa no registro; não declarou = TOCA (ADR-002, default fechado). */
 export type SensibilidadeDeclarada = "toca" | "nao-toca" | "nao-declarou";
 
+export type TransporteConector = "stdio" | "http";
+
+/** Resultado da regra pura de classificação por ORIGEM (src/domain/dado-pessoal.ts). */
 export type ClassificacaoOrigem = {
   conectorId: string;
   fonte: string;
@@ -9,29 +18,34 @@ export type ClassificacaoOrigem = {
   versaoRegra: 1;
 };
 
+/** Ferramenta descoberta na sonda (tools/list), com readOnlyHint capturado ali (ADR-013). */
 export type CapacidadeConector = {
-  id: string;
-  rotulo: string;
-};
-
-export type ConectorCatalogo = {
-  id: string;
   nome: string;
-  resumo: string;
-  capacidades: readonly CapacidadeConector[];
-  /** Sugestão de tela, nunca substitui a pergunta no ato da concessão (ADR-002). */
-  sugestaoToca: boolean;
+  descricao: string;
+  schema: JsonSchema;
+  readOnlyHint: boolean;
 };
 
-export type ConcessaoEstado = "proposta" | "conectada" | "revogada";
-
-export type Concessao = {
-  tenantId: string;
+/**
+ * Conector = servidor MCP registrado pela pessoa. Nasce desabilitado; env fica cifrado no servidor
+ * (valor `true` = placeholder "mantido", recusado para chave nova). http + toca é recusado (CHECK).
+ */
+export type Conector = {
+  tenantId: TenantId;
   id: string;
-  agenteId: string;
-  conectorId: string;
-  estado: ConcessaoEstado;
+  ownerId: string;
+  visibility: Visibilidade;
+  nome: string;
+  slug: string;
+  transporte: TransporteConector;
+  comando: string | null;
+  args: string[];
+  url: string | null;
+  env: Record<string, string | true>;
   declaracao: SensibilidadeDeclarada;
-  capacidadesLigadas: string[];
-  criadoEm: number;
+  habilitado: boolean;
+  catalogo: CapacidadeConector[];
+  sondadoEm: EpochMs | null;
+  ultimaFalha: { motivo: MotivoNegacao; em: EpochMs } | null;
+  criadoEm: EpochMs;
 };

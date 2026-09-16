@@ -33,3 +33,33 @@ describe("rotina-janela", () => {
     expect(new Date(n).toISOString()).toBe("2026-09-21T10:00:00.000Z");
   });
 });
+
+describe("rotina-janela: dia do mês e mês contam (corrigido em 2026-09-16)", () => {
+  const agora = Date.parse("2026-09-16T12:00:00-03:00");
+
+  it("'dia 1 às 8h' (0 8 1 * *) cai em 1º de outubro, não amanhã", () => {
+    const n = proximaJanela({ cron: "0 8 1 * *", fusoIana: TZ, agora });
+    expect(new Date(n).toISOString()).toBe("2026-10-01T11:00:00.000Z");
+  });
+
+  it("'mês 1' (0 8 1 1 *) cai em 1º de janeiro de 2027", () => {
+    const n = proximaJanela({ cron: "0 8 1 1 *", fusoIana: TZ, agora });
+    expect(new Date(n).toISOString()).toBe("2027-01-01T11:00:00.000Z");
+  });
+
+  it("cron sem futuro (31 de fevereiro) lança cron_sem_futuro", () => {
+    let erro: unknown = null;
+    try {
+      proximaJanela({ cron: "0 8 31 2 *", fusoIana: TZ, agora });
+    } catch (e) {
+      erro = e;
+    }
+    expect(erro).toBeInstanceOf(RotinaInvalida);
+    expect((erro as RotinaInvalida).codigo).toBe("cron_sem_futuro");
+  });
+
+  it("dia do mês 32 e mês 13 são recusados na validação", () => {
+    expect(() => proximaJanela({ cron: "0 8 32 * *", fusoIana: TZ, agora })).toThrow(RotinaInvalida);
+    expect(() => proximaJanela({ cron: "0 8 * 13 *", fusoIana: TZ, agora })).toThrow(RotinaInvalida);
+  });
+});

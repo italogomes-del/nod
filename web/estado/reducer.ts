@@ -1,6 +1,12 @@
-import type { Agente, Mensagem } from "../../src/contracts/agente.ts";
-import type { Concessao, ConectorCatalogo } from "../../src/contracts/conector.ts";
+import type { Agente } from "../../src/contracts/agente.ts";
+import type { Concessao } from "../../src/contracts/concessao.ts";
+import type { Conector } from "../../src/contracts/conector.ts";
+import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { Rotina } from "../../src/contracts/rotina.ts";
+
+// Ajuste mínimo de compilação contra os contratos congelados pela L2 (2026-09-16); a L9 reescreve
+// este reducer por frames SSE. `agenteId` na mensagem é o vínculo que a tela antiga ainda usa.
+export type MensagemDaTela = Mensagem & { agenteId: string };
 
 export type Pessoa = { tenantId: string; id: string; nome: string; iniciais: string };
 
@@ -10,8 +16,8 @@ export type Snapshot = {
   agentes: Agente[];
   rotinas: Rotina[];
   concessoes: Concessao[];
-  catalogo: readonly ConectorCatalogo[];
-  mensagens: Mensagem[];
+  catalogo: readonly Conector[];
+  mensagens: MensagemDaTela[];
 };
 
 export type Estado = {
@@ -63,7 +69,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
   }
 }
 
-export function mensagensDo(estado: Estado): Mensagem[] {
+export function mensagensDo(estado: Estado): MensagemDaTela[] {
   if (!estado.snapshot || !estado.agenteAtualId) return [];
   return estado.snapshot.mensagens.filter((m) => m.agenteId === estado.agenteAtualId);
 }

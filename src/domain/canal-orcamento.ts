@@ -1,13 +1,27 @@
+import type { EstadoOrcamento } from "../contracts/sala.ts";
+
 export type DecisaoOrcamento = "permitir" | "recusar" | "resfriar";
 
-export type EstadoOrcamento = {
-  ultimosPostsAgenteIds: string[];
-  postsSemHumano: number;
-  ultimoPostEm: number;
+/** definido em 2026-09-16: três remetentes distintos em sequência = anel A→B→C (portado do room-post-budget do openmausbot). */
+export const TAMANHO_ANEL = 3;
+/** definido em 2026-09-16: 6 posts de bot sem fala humana viram decisão em "Sua vez" (core-features §2). */
+export const TETO_POSTS_SEM_HUMANO = 6;
+/** definido em 2026-09-16: 8 s entre posts de bot na mesma sala — abaixo disso é ricochete, não conversa. */
+export const INTERVALO_MIN_MS = 8_000;
+/** definido em 2026-09-16: guardar só os últimos 3 remetentes basta para detectar o anel. */
+const HISTORICO_POSTS = 3;
+
+export const ORCAMENTO_INICIAL: EstadoOrcamento = {
+  ultimosPostsAgenteIds: [],
+  postsSemHumano: 0,
+  ultimoPostEm: null,
+  ultimaFalaHumanaEm: null,
+  handoffsNaRodada: 0,
 };
 
 /**
- * Quatro regras + quebra-anel. Post de rotina é isento (E12.3).
+ * Quatro regras + quebra-anel sobre o estado PERSISTIDO na sala (GRUPO.orcamento-sala).
+ * Rotina é isenta (E12.3). O teto conta posts não respondidos desde a última fala humana.
  */
 export function avaliarOrcamento(entrada: {
   estado: EstadoOrcamento;
@@ -16,12 +30,22 @@ export function avaliarOrcamento(entrada: {
   agora: number;
 }): DecisaoOrcamento {
   if (entrada.eRotina) return "permitir";
-  const anel = [...entrada.estado.ultimosPostsAgenteIds, entrada.candidatoAgenteId];
-  if (anel.length >= 3) {
-    const last3 = anel.slice(-3);
-    if (new Set(last3).size === 3) return "recusar";
-  }
-  if (entrada.estado.postsSemHumano >= 6) return "resfriar";
-  if (entrada.agora - entrada.estado.ultimoPostEm < 8_000) return "resfriar";
+  const anel = [...entrada.estado.ultimosPostsAgenteIds, entrada.candidatoAgenteId].slice(-TAMANHO_ANEL);
+  if (anel.length === TAMANHO_ANEL && new Set(anel).size === TAMANHO_ANEL) return "recusar";
+  if (entrada.estado.postsSemHumano >= TETO_POSTS_SEM_HUMANO) return "resfriar";
+  if (entrada.estado.ultimoPostEm !== null && entrada.agora - entrada.estado.ultimoPostEm < INTERVALO_MIN_MS) return "resfriar";
   return "permitir";
+}
+
+/** Fala humana zera o teto e a rodada de handoffs (EMENDA 14); post de bot conta. Lê autor_tipo, nunca infere (ADR-023). */
+export function registrarPost(estado: EstadoOrcamento, post: { autorTipo: "pessoa" | "agente"; autorId: string; agora: number }): EstadoOrcamento {
+  if (post.autorTipo === "pessoa") {
+    return { ...estado, postsSemHumano: 0, handoffsNaRodada: 0, ultimaFalaHumanaEm: post.agora, ultimoPostEm: post.agora };
+  }
+  return {
+    ...estado,
+    ultimosPostsAgenteIds: [...estado.ultimosPostsAgenteIds, post.autorId].slice(-HISTORICO_POSTS),
+    postsSemHumano: estado.postsSemHumano + 1,
+    ultimoPostEm: post.agora,
+  };
 }

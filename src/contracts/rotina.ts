@@ -1,24 +1,48 @@
-export type RotinaEstado = "proposta" | "ativa" | "pausada";
+import type { EpochMs, TenantId } from "./ids.ts";
+import type { DesfechoRotina } from "./motivos.ts";
+import type { Executor } from "./evento.ts";
+
+export type EstadoRotina = "ativa" | "pausada";
 
 export type Rotina = {
-  tenantId: string;
+  tenantId: TenantId;
   id: string;
   agenteId: string;
-  /** Expressão cron de 5 campos. Tudo é cron, inclusive "todo dia às 8h" (ADR-011). */
+  conversaId: string;
+  ownerId: string;
+  /** cron de 5 campos; quem avalia é o servidor (ADR-011). */
   cron: string;
-  /** Fuso IANA nomeado. Persistência recusa offset numérico. */
+  /** Fuso IANA nomeado; offset numérico recusado no domínio e no CHECK. */
   fusoIana: string;
   instrucao: string;
-  /** Gate nasce ligado por coluna/default, não por interpretação do texto (E7.3). */
+  fonte: string;
+  entregavel: string;
+  limitesAprovacao: string;
+  politicaSemDado: string;
+  /** DEFAULT true na coluna: o gate nasce ligado por schema, nunca por texto (E7.3). */
   exigeAprovacao: boolean;
-  estado: RotinaEstado;
-  proximoDisparo: number | null;
-  criadoEm: number;
+  estado: EstadoRotina;
+  proximaExecucao: EpochMs;
+  criadoEm: EpochMs;
 };
 
+/** Trava UNIQUE (tenant_id, rotina_id, instante_agendado) e registra QUAL executor ganhou (ADR-011). */
 export type JanelaRotina = {
-  tenantId: string;
+  tenantId: TenantId;
   rotinaId: string;
-  instanteAgendado: number;
-  estado: "reivindicada" | "executada" | "passou-em-branco" | "falhou";
+  instanteAgendado: EpochMs;
+  executor: Executor;
+  machineId: string;
+  turnoId: string;
+};
+
+export type ExecucaoRotina = {
+  tenantId: TenantId;
+  id: string;
+  rotinaId: string;
+  instanteAgendado: EpochMs;
+  turnoId: string | null;
+  desfecho: DesfechoRotina;
+  motivo: string | null;
+  em: EpochMs;
 };
