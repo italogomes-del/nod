@@ -27,7 +27,7 @@
     "docker:reset": "docker compose down -v && docker compose up -d --wait",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:test": "tsx scripts/migrate.ts --banco nod_test",
-    "db:seed": "[ -f scripts/seed.ts ] || { echo 'db:seed: scripts/seed.ts ainda não existe (entra na L3); nada foi semeado' >&2; exit 1; }; tsx scripts/seed.ts",
+    "db:seed": "tsx scripts/seed.ts",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
