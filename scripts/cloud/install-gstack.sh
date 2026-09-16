@@ -11,9 +11,34 @@ BUN_INSTALL="${BUN_INSTALL:-${HOME}/.bun}"
 export BUN_INSTALL
 export PATH="${HOME}/.bun/bin:${PATH}"
 
+persistir_bun_no_path() {
+  local bun_bin="${HOME}/.bun/bin/bun"
+  local bunx_bin="${HOME}/.bun/bin/bunx"
+  [ -x "$bun_bin" ] || return 0
+
+  if [ -f "${HOME}/.bashrc" ] && ! grep -q 'BUN_INSTALL' "${HOME}/.bashrc"; then
+    printf '\nexport BUN_INSTALL="$HOME/.bun"\nexport PATH="$BUN_INSTALL/bin:$PATH"\n' >> "${HOME}/.bashrc"
+  fi
+
+  if [ -x /usr/local/bin/bun ]; then
+    return 0
+  fi
+  if [ -w /usr/local/bin ]; then
+    ln -sfn "$bun_bin" /usr/local/bin/bun
+    [ -x "$bunx_bin" ] && ln -sfn "$bunx_bin" /usr/local/bin/bunx
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -n ln -sfn "$bun_bin" /usr/local/bin/bun 2>/dev/null || \
+      echo "aviso: bun está em ${HOME}/.bun/bin; não entrou em /usr/local/bin" >&2
+    if [ -x "$bunx_bin" ]; then
+      sudo -n ln -sfn "$bunx_bin" /usr/local/bin/bunx 2>/dev/null || true
+    fi
+  fi
+}
+
 instalar_bun() {
   if command -v bun >/dev/null 2>&1; then
     echo "bun já instalado: $(command -v bun) ($(bun --version))"
+    persistir_bun_no_path
     return 0
   fi
   echo "instalando bun 1.3.10 em ${BUN_INSTALL}"
@@ -23,6 +48,7 @@ instalar_bun() {
     echo "falha: bun não ficou no PATH depois da instalação" >&2
     exit 1
   }
+  persistir_bun_no_path
 }
 
 clonar_gstack() {
