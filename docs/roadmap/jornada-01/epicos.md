@@ -1,6 +1,6 @@
 # Jornada 01 — Épicos
 
-> Quebra da [Jornada 01](jornada-01-o-bot-ganha-maos.md) em épicos. Cada épico é uma fatia de
+> Quebra da [Jornada 01](office-hours.md) em épicos. Cada épico é uma fatia de
 > capacidade entregável e testável. A ordem abaixo é de dependência, não de prioridade.
 
 ## Mapa de dependências
@@ -84,7 +84,7 @@ shell/arquivo sob aprovação — a metade de maior valor e menor risco topológ
   caminho de volta pessoa↔agente.
 - **Escopo:** desktop na nuvem no **modelo VPS** (cérebro + proxy locais, só as mãos remotas, por
   transporte iniciado do lado local); preview ao vivo; "Parar" congela as mãos em < 2 s.
-- **ADRs:** **refina ADR-028** via [Pré-ADR-030](pre-adr-030-maos-remotas-modelo-vps.md). Proíbe o
+- **ADRs:** **refina ADR-028** via [Pré-ADR-030](../pre-adr-030-maos-remotas-modelo-vps.md). Proíbe o
   modelo `boxagent` (turno inteiro remoto).
 - **Depende de:** E2, E3, E4.
 - **Pronto quando:** o bot roda a tarefa num desktop na nuvem, **consegue fazer uma pergunta à

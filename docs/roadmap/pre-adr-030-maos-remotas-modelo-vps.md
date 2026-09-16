@@ -1,6 +1,6 @@
 # Pré-ADR-030 — Mãos remotas seguem o modelo VPS: cérebro local, mãos remotas
 
-> **Status:** proposto (rascunho) · **Origem:** [Jornada 01](jornada-01-o-bot-ganha-maos.md);
+> **Status:** proposto (rascunho) · **Origem:** [Jornada 01](jornada-01/office-hours.md);
 > comparação `boxagent.ts` × `vps-computer.ts` do OpenMausBot · **Data:** 2026-09-16
 >
 > Este é um **pré-esboço**: mora no roadmap, não em `docs/adr/`, porque a decisão ainda não foi
