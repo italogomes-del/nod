@@ -8,10 +8,15 @@ function run(cmd, args, extra = {}) {
   return child;
 }
 
+const apiPort = process.env.NOD_API_PORT ?? "8787";
+const webPort = process.env.NOD_WEB_PORT ?? "5173";
+
 const api = run("npx", ["tsx", "http/server.ts"], {
-  env: { ...process.env, PORT: "8787", NOD_DATA_DIR: process.env.NOD_DATA_DIR ?? "./data" },
+  env: { ...process.env, PORT: apiPort, NOD_DATA_DIR: process.env.NOD_DATA_DIR ?? "./data" },
 });
-const web = run("npx", ["vite", "--host", "0.0.0.0", "--port", "5173"]);
+const web = run("npx", ["vite", "--host", "0.0.0.0", "--port", webPort], {
+  env: { ...process.env, NOD_API_PORT: apiPort },
+});
 
 function stop() {
   api.kill();
