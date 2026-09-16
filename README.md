@@ -4,7 +4,14 @@
 
 **Ferramenta interna da Leapy.** Cada colaborador usa a LLM que já está credenciada na própria máquina — Claude Code, Cursor ou Codex. O nod pilota, nunca vê a credencial. Virar SaaS é plano próximo, e a arquitetura protege isso sem pagar o custo agora. Ver [interno primeiro](docs/internal-first.md).
 
-Repositório de artefatos de produto. **Ainda não há código.**
+Primeira versão funcional da frota pessoal (**Meus agentes**): criar um agente conversando, dizer o que ele faz, criar rotina via texto e conectar apps (Slack, Notion, ClickUp…). O resto do produto (fila global, canais, CLI do fornecedor) continua nos ADRs.
+
+```bash
+npm install
+npm run dev
+```
+
+Abre em `http://localhost:5173`. Protótipo de alta fidelidade: [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
 
 ---
 
@@ -41,14 +48,15 @@ Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e 
 | | |
 |---|---|
 | [`docs/product-spec.html`](docs/product-spec.html) | **O documento de produto.** 5 jornadas, 12 épicos, 69 histórias com critérios de aceite, mockups e diagramas, faseamento e o que se herda de cada referência. |
-| [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) | **O protótipo vigente.** Cinco telas navegáveis: a fila como tela inicial, o canal com a calha de agentes, o teste do composer, a bandeja de aprovação e o estado de repouso. |
+| [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html) | **Protótipo de alta fidelidade de Meus agentes** (cópia Grok Bot): rail de contextos, criar bot, conversa, starter. |
+| [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) | Protótipo da frota como casa: fila, canal com calha, bandeja de aprovação. |
 | [`prototypes/history/`](prototypes/history/) | As seis versões anteriores, com o registro de por que cada uma foi descartada. |
 
 ### Arquitetura
 
 | | |
 |---|---|
-| [`docs/adr/`](docs/adr/) | **18 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
+| [`docs/adr/`](docs/adr/) | **29 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
 | [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
 | [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
 | [`docs/grokbot-comparison.md`](docs/grokbot-comparison.md) | **O Grok Bot muda alguma decisão?** Não — e as seis emendas baratas que a comparação revelou, incluindo uma contradição entre o E2.4 e o ADR-013. |
@@ -86,7 +94,7 @@ Cada afirmação técnica no documento foi verificada contra o código, com cami
 
 ## Estado
 
-Especificação. Nenhuma linha de produção escrita.
+Há um pacote TypeScript único (ADR-018) com `core/`, `contracts/`, `db/`, `http/` e `web/`. A fatia **Meus agentes** já sobe localmente: persistência JSON cifrada para concessões, rotina normalizada para cron + fuso IANA, gate de aprovação ligado por padrão.
 
 O faseamento estimado é de **27 a 29 semanas** para os oito épicos originais, mais **11 a 15 semanas** para os quatro épicos de infraestrutura — com dois deles (sobreviver ao restart, credenciais por tenant) obrigatoriamente na primeira fase, porque são propriedades do fundamento e são caros de adicionar depois.
 

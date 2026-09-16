@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "preserve"
+  },
+  "include": ["web/**/*.ts", "contracts/**/*.ts"],
+  "exclude": ["web/**/*.test.ts"]
+}
