@@ -56,7 +56,7 @@ Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e 
 
 | | |
 |---|---|
-| [`docs/adr/`](docs/adr/) | **23 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
+| [`docs/adr/`](docs/adr/) | **29 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
 | [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
 | [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
 | [`docs/grokbot-comparison.md`](docs/grokbot-comparison.md) | **O Grok Bot muda alguma decisão?** Não — e as seis emendas baratas que a comparação revelou, incluindo uma contradição entre o E2.4 e o ADR-013. |
