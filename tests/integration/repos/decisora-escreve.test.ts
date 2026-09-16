@@ -15,8 +15,10 @@ const destino = (i: number) => ({ conector: "exemplo", ferramenta: "enviar_email
 
 /**
  * 0003: a perna extra da EMENDA 1 passa a ESCREVER pela policy nod_decisora (PERMISSIVE, só FOR
- * UPDATE, USING e WITH CHECK por decisor_id). Tudo sob o role nod_app: quem concede é o Postgres,
- * não um filtro na aplicação. Ana é a decisora designada de uma decisão de Marlon e nada mais.
+ * UPDATE, USING e WITH CHECK por decisor_id). Uma policy FOR UPDATE não distingue coluna, então os
+ * triggers nod_*_pernas_imutaveis fecham a lista do que quem não é a dona pode alterar (terceiro
+ * `it`). Tudo sob o role nod_app: quem concede é o Postgres, não um filtro na aplicação. Ana é a
+ * decisora designada de uma decisão de Marlon e nada mais.
  */
 describeIntegracao("decisora designada escreve (0003, policy nod_decisora)", () => {
   it("ana decide a decisão de marlon dirigida a ela, marca os itens, e NÃO decide (nem vê) a outra", async () => {
@@ -99,6 +101,55 @@ describeIntegracao("decisora designada escreve (0003, policy nod_decisora)", () 
       ]);
       const triggers = await trx<{ tgname: string }[]>`select tgname from pg_trigger where tgname in (${DECISOES.trigger}, ${DECISOES.itens.trigger}) order by tgname`;
       expect(triggers.map((t) => t.tgname)).toEqual([DECISOES.trigger, DECISOES.itens.trigger].sort());
+    });
+  });
+
+  it("a decisora só toca as colunas do ato de decidir: frase/visibility/tipo/prazo/item → P0001; reabrir vencida passa; a dona continua livre", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const paraAna = await repos.decisoes.criar({ tipo: "aprovacao", decisorId: PESSOA_ANA, agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "original" });
+      const item = (await repos.itensAprovacao.criarLote(paraAna?.id ?? "", [{ idx: 0, texto: "x", destino: destino(0), origemSensivel: false }]))[0];
+      // Uma vencida (prazo no passado, varrida pela dona) para o botão "reabrir" de 'Sua vez'.
+      const vencida = await repos.decisoes.criar({ tipo: "pergunta", decisorId: PESSOA_ANA, agenteId, conversaId, prazoDecisaoEm: agora - 1, frase: "vencida" });
+      expect((await repos.decisoes.vencerPendentes(agora)).map((d) => d.id)).toEqual([vencida?.id]);
+
+      await vincularEscopo(trx, ANA);
+      const id = paraAna?.id ?? "";
+      // Colunas da dona: a policy FOR UPDATE deixaria passar; o trigger recusa ANTES do WITH CHECK (P0001, não 42501).
+      const e = await expectRejected(trx, () => trx`update decisoes set visibility = 'equipe' where id = ${id}`, "P0001");
+      expect(e.message).toContain("quem não é a dona");
+      // A lista que o trigger anuncia é a declarada em src/db/schema/decisoes.ts (nomes idênticos aos do banco).
+      expect(e.message).toContain(DECISOES.colunasLivresDaDecisora.join(", "));
+      await expectRejected(trx, () => trx`update decisoes set frase = 'reescrita' where id = ${id}`, "P0001");
+      await expectRejected(trx, () => trx`update decisoes set tipo = 'permissao' where id = ${id}`, "P0001");
+      await expectRejected(trx, () => trx`update decisoes set prazo_decisao_em = now() + interval '30 days' where id = ${id}`, "P0001");
+      await expectRejected(trx, () => trx`update decisoes set prazo_execucao_em = now() where id = ${id}`, "P0001");
+      // Mistura: coluna livre + coluna travada no MESMO UPDATE também cai (a linha fora da lista tem que sair igual).
+      await expectRejected(trx, () => trx`update decisoes set estado = 'decidida', frase = 'junto' where id = ${id}`, "P0001");
+      // Reabrir vencida: prazo_decisao_em muda SÓ nessa transição — e por qualquer outro estado não.
+      await expectRejected(trx, () => trx`update decisoes set estado = 'reaberta', prazo_decisao_em = now() + interval '1 day' where id = ${id}`, "P0001");
+      const comoAna = criarRepos(trx, ANA);
+      expect((await comoAna.decisoes.reabrir(vencida?.id ?? "", agora + DIA))).toMatchObject({ estado: "reaberta", prazoDecisaoEm: new Date(agora + DIA).toISOString(), desfecho: null });
+      // Itens: só selecionado/marcado_por/marcado_em/texto_final/editado_por; o resto é da dona (desfecho é da execução).
+      const itemId = item?.id ?? "";
+      const ei = await expectRejected(trx, () => trx`update itens_aprovacao set visibility = 'equipe' where id = ${itemId}`, "P0001");
+      expect(ei.message).toContain(DECISOES.itens.colunasLivresDaDecisora.join(", "));
+      await expectRejected(trx, () => trx`update itens_aprovacao set texto_original = 'outro' where id = ${itemId}`, "P0001");
+      await expectRejected(trx, () => trx`update itens_aprovacao set idx = 9 where id = ${itemId}`, "P0001");
+      await expectRejected(trx, () => trx`update itens_aprovacao set destino = '{}'::jsonb where id = ${itemId}`, "P0001");
+      await expectRejected(trx, () => trx`update itens_aprovacao set origem_sensivel = true, justificativa = 'x' where id = ${itemId}`, "P0001");
+      await expectRejected(trx, () => trx`update itens_aprovacao set desfecho = 'executado' where id = ${itemId}`, "P0001");
+      expect(await comoAna.itensAprovacao.registrarDesfecho(itemId, "executado")).toBeNull();
+      expect(await comoAna.itensAprovacao.marcar(itemId, { selecionado: true, textoFinal: "editado por ana", agora })).toMatchObject({ selecionado: true, textoFinal: "editado por ana", editadoPor: PESSOA_ANA });
+      // O ato legítimo continua passando depois de todas as recusas.
+      expect((await comoAna.decisoes.decidir(id, { por: PESSOA_ANA, agora }))?.estado).toBe("decidida");
+
+      // A dona não é tocada pela trava: reescreve frase e abre à equipe como sempre pôde.
+      await vincularEscopo(trx, MARLON);
+      expect((await trx`update decisoes set frase = 'da dona', visibility = 'equipe' where id = ${id}`).count).toBe(1);
+      expect((await trx`update itens_aprovacao set texto_original = 'da dona' where id = ${itemId}`).count).toBe(1);
+      expect((await repos.decisoes.buscar(id))?.frase).toBe("da dona");
     });
   });
 });

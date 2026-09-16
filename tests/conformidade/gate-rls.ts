@@ -24,8 +24,10 @@ export const EXCECOES: Record<string, string> = {
  * nova e precisa passar por aqui. definido em 2026-09-16 (0003).
  */
 export const POLICIES_EXTRAS: Record<string, string> = {
-  "decisoes.nod_decisora": "PERMISSIVE só FOR UPDATE: a decisora designada (decisor_id) marca 'decidida'; USING e WITH CHECK pela mesma perna; INSERT/DELETE inalterados",
-  "itens_aprovacao.nod_decisora": "PERMISSIVE só FOR UPDATE: a decisora designada marca itens da decisão dirigida a ela; USING e WITH CHECK pela mesma perna",
+  "decisoes.nod_decisora":
+    "PERMISSIVE só FOR UPDATE (INSERT/DELETE inalterados), USING e WITH CHECK pela perna decisor_id. A policy concede UPDATE de QUALQUER coluna; o trigger nod_decisao_pernas_imutaveis (BEFORE UPDATE, P0001) fecha a lista para quem não é a dona: estado, desfecho, decidida_em, decidida_por, vista_em — e prazo_decisao_em só na transição vencida→reaberta",
+  "itens_aprovacao.nod_decisora":
+    "PERMISSIVE só FOR UPDATE, USING e WITH CHECK por EXISTS na decisão (decisor_id). Mesma ressalva: o trigger nod_item_aprovacao_pernas_imutaveis fecha a lista para quem não é a dona: selecionado, marcado_por, marcado_em, texto_final, editado_por",
 };
 
 export interface Tabela {

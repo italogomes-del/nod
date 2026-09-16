@@ -44,6 +44,10 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
   A perna extra só ABRE LEITURA (o WITH CHECK exige `owner_id` = pessoa); quem precisa que a perna
   também ESCREVA cria uma policy PERMISSIVE a mais, só para o comando necessário, e a registra por nome
   em `POLICIES_EXTRAS` do gate — como `nod_decisora` (0003, FOR UPDATE em decisoes/itens_aprovacao).
+  Uma policy FOR UPDATE concede UPDATE de QUALQUER coluna (medido em 2026-09-16 com os triggers da 0003
+  desligados: a decisora reescreveu frase/prazo e pôs `visibility = 'equipe'` na decisão da dona); por isso a policy vem
+  SEMPRE com um trigger BEFORE UPDATE que fecha a lista de colunas que quem não é a dona pode mudar
+  (`colunasLivresDaDecisora` em `src/db/schema/decisoes.ts`), e o motivo em `POLICIES_EXTRAS` nomeia o trigger.
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e
