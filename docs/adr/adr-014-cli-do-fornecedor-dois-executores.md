@@ -14,3 +14,11 @@ A inversão. O CLI sai do container e vai para a máquina no caminho padrão; o 
 
 A premissa que sustentava 'CLI no container' era que a Leapy pagava a conta de todos os turnos de 70 clientes. Cada pessoa já paga a própria assinatura e já está logada. Duas coisas que o código obriga a incluir e que o container não tinha: (1) augmentedPath() existe porque app aberto pelo Finder herda PATH pelado, e eles rodam o shell de login em background para capturar exports do .zshrc — isso é trabalho real que a inversão traz; (2) a linha que impede a chave da Leapy 'riding along in the parent env' de 'flip a subscription login to pay-as-you-go' é obrigatória, porque é a diferença entre o turno sair da assinatura da pessoa (custo zero) ou cair na fatura da empresa sem ninguém perceber. Os flag floors ficam mais necessários: agora são 19 versões de CLI em vez de uma pinada, e sem eles a colega que não atualiza há quatro meses tem todo turno falhando com erro de argumento.
 
+
+## Refinamento (2026-09-16, EMENDA 11)
+
+Diretório de trabalho por turno é literal: o driver usa `mkdtemp` como cwd do processo (com o `mcp.json` 0600 dentro) e apaga no `finally`; a sonda de 2026-09-16 provou que `--resume` funciona de qualquer cwd. Não existe `Agente.cwd`; `NOD_HOME` guarda só `machine-id`. Nesta rodada servidor e máquina são o mesmo processo: o regime (B) fica só como `locality` no SPI.
+
+## Gatilho de reversão
+
+Reabrir (voltar o CLI ao container no caminho padrão) se a assinatura pessoal deixar de cobrir o uso diário (custo medido por pessoa/mês acima do que a chave da empresa custaria), ou se mais de um colega por mês ficar com turnos falhando por versão de CLI abaixo dos flag floors apesar do aviso escrito.

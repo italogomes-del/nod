@@ -1,0 +1,162 @@
+import type { Confianca } from "../../contracts/mensagem.ts";
+import type { DesfechoItem } from "../../contracts/motivos.ts";
+import type { Negacao } from "../../contracts/negacao.ts";
+import type { PlanoTurno } from "../../contracts/plano-turno.ts";
+import { LONGPOLL_APROVACAO_MS } from "../../shared/constantes.ts";
+import { negacaoConectorIndisponivel, redigirNegacao } from "../mcp-proxy/negacao.ts";
+
+/**
+ * Cliente HTTP ÚNICO das rotas internas do nod (EMENDA 6, EMENDA-L9 §7): /api/interno/… com
+ * `Authorization: Bearer <token de turno>`. Usado pelo proxy MCP (src/adapters/mcp-proxy/proxy.ts) e
+ * pelo driver catcher (in-process, sem processo filho). Nunca manda `Origin` (o roteador responde
+ * 403 antes do token) e nunca manda 'remetente' no corpo: a identidade é a do token (ADR-024).
+ *
+ * Forma das rotas (tabela ROTAS em src/contracts/api.ts; handlers em rotas/interno.ts):
+ *   GET  /api/interno/plano                         → PlanoTurno do token
+ *   POST /api/interno/ferramentas/:nome {argumentos} → ResultadoChamada (ok | negacao | aguardar)
+ *   GET  /api/interno/decisoes/:id/aguardar         → {estado:'decidida', itens} | {estado:'pendente'}
+ *   POST /api/interno/negacoes                      → negação decidida LOCALMENTE pelo proxy (trilha)
+ *
+ * definido em 2026-09-16 (unificação da L9): os tipos de fio abaixo eram o stub da L5
+ * (cliente-nod-stub.ts, apagado); `chamarFerramenta` é o atalho do catcher — resolve `aguardar`
+ * e negação em texto, como o proxy faria, para o tool_result do roteiro.
+ */
+export type RespostaPlano =
+  | { ok: true; plano: PlanoTurno }
+  | { ok: false; motivo: "plano_ausente" | "servidor_fora" | "falha_tecnica"; status: number | null };
+
+/** Corpo devolvido por POST /api/interno/ferramentas/:nome. `aguardar` = decisão criada, o proxy faz long-poll. */
+export type RespostaFerramenta =
+  | { ok: true; conteudo: string; confianca: Confianca }
+  | { ok: false; negacao: Negacao }
+  | { aguardar: string };
+
+export type RespostaAguardar =
+  | { estado: "decidida"; itens: { idx: number; desfecho: DesfechoItem | null }[] }
+  | { estado: "pendente" };
+
+export type FalhaTransporte = { transporte: "servidor_fora" | "timeout" | "falha_tecnica"; status: number | null };
+
+export type ConteudoFerramenta = { conteudo: string; isError: boolean };
+
+export interface ClienteNod {
+  plano(): Promise<RespostaPlano>;
+  ferramenta(nome: string, argumentos: Record<string, unknown>): Promise<RespostaFerramenta | FalhaTransporte>;
+  aguardar(decisaoId: string, fatiaMs: number): Promise<RespostaAguardar | FalhaTransporte>;
+  /** Negação decidida LOCALMENTE pelo proxy (fora do catálogo): o servidor grava trilha e pede interrupção. */
+  negacao(n: Negacao): Promise<void>;
+  /** Atalho do catcher: ferramenta + (aguardar) + negação resolvidos em texto, isError quando negado/fora. */
+  chamarFerramenta(nome: string, argumentos: Record<string, unknown>): Promise<ConteudoFerramenta>;
+}
+
+export type OpcoesClienteNod = {
+  url: string;
+  token: string;
+  /** definido em 2026-09-16: 5 s — acima disso o servidor local está fora, não lento (ADR-029: conector_indisponivel com `desde`). */
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  agora?: () => number;
+};
+
+export const TIMEOUT_CLIENTE_NOD_MS = 5_000;
+
+function ehFalha(x: unknown): x is FalhaTransporte {
+  return typeof x === "object" && x !== null && "transporte" in x;
+}
+
+/** Predicado: a resposta é falha de TRANSPORTE (servidor fora, timeout), não uma decisão do servidor. */
+export function ehFalhaTransporte(x: RespostaFerramenta | RespostaAguardar | FalhaTransporte): x is FalhaTransporte {
+  return ehFalha(x);
+}
+
+function obj(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
+  const base = opcoes.url.replace(/\/+$/, "");
+  const f = opcoes.fetchImpl ?? fetch;
+  const timeout = opcoes.timeoutMs ?? TIMEOUT_CLIENTE_NOD_MS;
+  const agora = opcoes.agora ?? (() => Date.now());
+
+  async function chamar(metodo: "GET" | "POST", caminho: string, corpo?: unknown, timeoutMs = timeout): Promise<{ status: number; json: unknown } | FalhaTransporte> {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await f(`${base}${caminho}`, {
+        method: metodo,
+        headers: { authorization: `Bearer ${opcoes.token}`, "content-type": "application/json" },
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+        signal: ctrl.signal,
+      });
+      const texto = await r.text();
+      let json: unknown = null;
+      try {
+        json = texto === "" ? null : JSON.parse(texto);
+      } catch {
+        json = texto;
+      }
+      return { status: r.status, json };
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return { transporte: "timeout", status: null };
+      return { transporte: "servidor_fora", status: null };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  const cliente: ClienteNod = {
+    async plano() {
+      const r = await chamar("GET", "/api/interno/plano");
+      if (ehFalha(r)) return { ok: false, motivo: "servidor_fora", status: null };
+      if (r.status === 200 && obj(r.json)) return { ok: true, plano: r.json as PlanoTurno };
+      if (r.status === 401 || r.status === 404) return { ok: false, motivo: "plano_ausente", status: r.status };
+      return { ok: false, motivo: "falha_tecnica", status: r.status };
+    },
+
+    async ferramenta(nome, argumentos) {
+      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos });
+      if (ehFalha(r)) return r;
+      const c = obj(r.json);
+      if (r.status === 200 && c) {
+        if ("ok" in c || "aguardar" in c) return r.json as RespostaFerramenta;
+        // Servidor de teste sem chamar-ferramenta: {conteudo, isError} cru vira resposta ok (confiança do chamador).
+        if (typeof c["conteudo"] === "string") return c["isError"] === true ? { ok: true, conteudo: `erro: ${c["conteudo"]}`, confianca: "confiavel" } : { ok: true, conteudo: c["conteudo"], confianca: "confiavel" };
+      }
+      // 401/403/404/5xx: o corpo é o JSON seguro do servidor (código fechado, ADR-002), nunca err.message.
+      return { transporte: "falha_tecnica", status: r.status };
+    },
+
+    async aguardar(decisaoId, fatiaMs) {
+      const r = await chamar("GET", `/api/interno/decisoes/${encodeURIComponent(decisaoId)}/aguardar`, undefined, fatiaMs + timeout);
+      if (ehFalha(r)) return r;
+      if (r.status === 200 && obj(r.json)) return r.json as RespostaAguardar;
+      return { transporte: "falha_tecnica", status: r.status };
+    },
+
+    async negacao(n) {
+      await chamar("POST", "/api/interno/negacoes", n);
+    },
+
+    async chamarFerramenta(nome, argumentos) {
+      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos });
+      if (ehFalha(r)) {
+        const n = negacaoConectorIndisponivel(nome, agora(), r.transporte === "timeout" ? "timeout_transporte" : "conector_indisponivel");
+        return { conteudo: redigirNegacao(n, agora()), isError: true };
+      }
+      const c = obj(r.json);
+      if (r.status < 200 || r.status >= 300 || !c) {
+        return { conteudo: typeof r.json === "string" ? r.json : JSON.stringify(r.json), isError: true };
+      }
+      if ("aguardar" in c && typeof c["aguardar"] === "string") {
+        const a = await cliente.aguardar(c["aguardar"], LONGPOLL_APROVACAO_MS);
+        if (!ehFalha(a) && a.estado === "decidida") return { conteudo: JSON.stringify({ estado: "decidida", itens: a.itens }), isError: false };
+        return { conteudo: JSON.stringify({ estado: "pendente", decisao_id: c["aguardar"], instrucao: "encerre o turno; a decisão retoma depois" }), isError: false };
+      }
+      if (c["ok"] === false && obj(c["negacao"])) return { conteudo: redigirNegacao(c["negacao"] as Negacao, agora()), isError: true };
+      if (typeof c["conteudo"] === "string") return { conteudo: c["conteudo"], isError: c["isError"] === true };
+      return { conteudo: JSON.stringify(r.json), isError: false };
+    },
+  };
+  return cliente;
+}

@@ -1,383 +1,466 @@
-import { agenteAtual, estadoInicial, mensagensDo, reduzir, type Estado, type Snapshot } from "./estado/reducer.ts";
-import { api } from "./lib/api.ts";
-import type { Agente, Mensagem } from "../contracts/agente.ts";
-import type { Rotina } from "../contracts/rotina.ts";
-import type { Concessao } from "../contracts/conector.ts";
+import type { Escopo } from "../src/shared/types.ts";
+import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
+import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
+import { avatarAgente, botao, esc, esquecerRegiao, regiao } from "./lib/render.ts";
+import { renderConectores } from "./telas/conectores.ts";
+import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
+import { renderFrota, textoInventario } from "./telas/frota.ts";
+import { renderMemoria } from "./telas/memoria.ts";
+import { renderPerfil } from "./telas/perfil.ts";
+import { renderRotinas } from "./telas/rotinas.ts";
+import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
+import { renderSuaVez } from "./telas/sua-vez.ts";
 
+/**
+ * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
+ * render por regiões". A web DECIDE e pede por REST; nunca executa (ADR-020). Nenhuma decisão do produto
+ * exige o app aberto: sem executor a tela continua respondendo (web-sem-app).
+ */
 let estado: Estado = estadoInicial;
-const app = document.getElementById("app")!;
-const toastEl = document.getElementById("toast")!;
+let api: Api | null = null;
+let live: LiveEvents | null = null;
+let composerDe: string | null = null;
+let reidratando = false;
 
-function dispatch(acao: Parameters<typeof reduzir>[1]): void {
+function dispatch(acao: Acao): void {
   estado = reduzir(estado, acao);
   render();
+  void reidratar();
 }
 
-let toastTimer = 0;
-function toast(text: string): void {
-  toastEl.textContent = text;
-  toastEl.hidden = false;
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => {
-    toastEl.hidden = true;
-  }, 2400);
+function erroDe(e: unknown): { codigo: string; mensagem: string } {
+  if (e instanceof ErroApi) return { codigo: e.codigo, mensagem: e.message };
+  return { codigo: "falha_interna", mensagem: "falha ao falar com o servidor" };
 }
 
-function esc(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function initials(name: string): string {
-  return name
-    .split(" ")
-    .map((p) => p[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
-function icon(agente: Agente): string {
-  return `<span class="icon ${agente.cor} ${agente.forma}">${esc(initials(agente.nome))}</span>`;
-}
-
-async function hidratar(s: Snapshot): Promise<void> {
-  dispatch({ tipo: "hidratar", snapshot: s });
-}
-
-async function boot(): Promise<void> {
+/** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
+async function agir(fn: () => Promise<void>): Promise<void> {
+  dispatch({ tipo: "ocupado", valor: true });
   try {
-    await hidratar(await api.frota());
+    await fn();
+    dispatch({ tipo: "ocupado", valor: false });
   } catch (e) {
-    dispatch({ tipo: "erro", texto: (e as Error).message });
+    dispatch({ tipo: "erro", erro: erroDe(e) });
   }
 }
 
-async function criar(): Promise<void> {
-  dispatch({ tipo: "enviando", valor: true });
-  const s = await api.criarAgente();
-  const novo = s.agentes[0];
-  await hidratar(s);
-  if (novo) dispatch({ tipo: "selecionar", id: novo.id });
-  toast("Novo Bot criado. Diga o que ele faz.");
+// ---------------------------------------------------------------------------------------------
+// Reidratação: o reducer diz O QUE mudou; aqui busca-se por REST e despacha o hidratar.
+
+async function buscar(q: Invalidacao): Promise<Acao | null> {
+  if (!api) return null;
+  const agora = Date.now();
+  if (q === "frota") return { tipo: "hidratar-frota", frota: await api.frota() };
+  if (q === "inventario") return { tipo: "hidratar-inventario", inventario: await api.inventario() };
+  if (q === "sua-vez") return { tipo: "hidratar-sua-vez", suaVez: await api.suaVez() };
+  if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
+  if (q === "conectores") return { tipo: "hidratar-conectores", conectores: (await api.conectores()).conectores };
+  if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
+  if (q.startsWith("conversa:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
+  if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
+  if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), concessoes: (await api.concessoes(q.slice(11))).concessoes };
+  if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
+  return null;
 }
 
-async function enviar(texto: string): Promise<void> {
-  const a = agenteAtual(estado);
-  if (!a || !texto.trim()) return;
-  dispatch({ tipo: "enviando", valor: true });
+async function reidratar(): Promise<void> {
+  if (!api || reidratando) return;
+  const pendentes = [...new Set([...estado.invalidacoes, ...invalidacoesDaTela(estado)])];
+  if (pendentes.length === 0) return;
+  reidratando = true;
   try {
-    await hidratar(await api.enviar(a.id, texto.trim()));
-  } catch (e) {
-    dispatch({ tipo: "erro", texto: (e as Error).message });
+    // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
+    const relevantes = pendentes.filter((q) => relevante(q));
+    const tratadas: Invalidacao[] = [];
+    for (const q of relevantes) {
+      try {
+        const acao = await buscar(q);
+        tratadas.push(q);
+        if (acao) estado = reduzir(estado, acao);
+      } catch (e) {
+        if (e instanceof ErroApi && e.status === 404) tratadas.push(q);
+        else estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
+      }
+    }
+    estado = reduzir(estado, { tipo: "invalidacoes-tratadas", quais: tratadas });
+    render();
+  } finally {
+    reidratando = false;
   }
+  if (estado.invalidacoes.some((q) => relevante(q))) void reidratar();
 }
+
+function relevante(q: Invalidacao): boolean {
+  const t = estado.tela;
+  if (q === "frota" || q === "inventario" || q === "sua-vez" || q === "salas") return true;
+  if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
+  if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil";
+  if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
+  if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
+  if (q.startsWith("concessoes:")) return (t.tipo === "perfil" || t.tipo === "conversa") && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
+  if (q.startsWith("execucoes:")) return t.tipo === "rotinas";
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Render por regiões: rail | sidebar | cabeçalho | timeline/tela | composer | rodapé.
 
 function renderRail(): string {
-  return `<aside class="rail" aria-label="Contextos">
-    <button class="r-btn active" data-act="home" aria-label="Meus agentes">MW</button>
-    <span class="r-cap">FROTA</span>
-    <span class="r-sep"></span>
-    <button class="r-btn" data-act="emp" aria-label="Leapy" title="Área de empresa é opcional">LE</button>
-  </aside>`;
+  const t = estado.tela.tipo;
+  const abertos = estado.suaVez?.itens.filter((i) => i.estadoColuna !== "vencido").length ?? 0;
+  const item = (tipo: Tela["tipo"], icone: string, rotulo: string, badge = 0) =>
+    `<button class="nv" data-act="navegar" data-tela="${tipo}" aria-current="${t === tipo ? "true" : "false"}"><span class="ic">${icone}</span><span class="tl">${rotulo}</span>${badge ? `<span class="b">${badge}</span>` : ""}</button>`;
+  return `${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Conectores")}
+    <div class="rail-rodape"><span class="conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></div>`;
 }
 
-function renderSidebar(e: Estado): string {
-  const agentes = e.snapshot?.agentes ?? [];
-  const rows = agentes
+function renderSidebar(): string {
+  const agentes = estado.frota?.agentes ?? [];
+  const t = estado.tela;
+  const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
+  const linhas = agentes
     .map((a) => {
-      const active = a.id === e.agenteAtualId ? " active" : "";
-      const last = e.snapshot?.mensagens.filter((m) => m.agenteId === a.id).at(-1);
-      return `<button class="row${active}" data-act="open" data-id="${esc(a.id)}">
-        ${icon(a)}
-        <span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.instrucoes || last?.texto || "Acabamos de nos conhecer.")}</span></span>
-        <span class="meta">${a.confirmado ? "" : '<span class="dot"></span>'}</span>
-      </button>`;
+      const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
+      return `<button class="sr"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}">${avatarAgente(a, "sm")}<span class="lb">${esc(a.nome)}</span>${vivo ? `<span class="pt ${vivo.estado}" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : ""}${a.fixado ? '<span class="pin">📌</span>' : ""}</button>`;
     })
     .join("");
-  return `<aside class="sidebar" data-context="private">
-    <div id="privateSidebar">
-      <div class="search-wrap">
-        <div class="search-row">
-          <label class="search"><span>⌕</span><input value="Buscar" readonly /></label>
-          <button class="create-trigger" data-act="palette" aria-label="Criar ou buscar bots">+</button>
-        </div>
-        <div class="favorites">
-          <div class="favorites-head"><span>Favoritos</span><b>${agentes.filter((a) => a.favorito).length} fixados</b></div>
-          <div class="fav-grid">${agentes
-            .filter((a) => a.favorito)
-            .map(
-              (a) =>
-                `<button class="fav" data-act="open" data-id="${esc(a.id)}">${icon(a)}<b>${esc(a.nome)}</b></button>`,
-            )
-            .join("")}</div>
-          <div class="favorites-note">Seus agentes pessoais — fora das empresas.</div>
-        </div>
-      </div>
-      <div class="list">
-        <section class="section"><h3>Meus agentes</h3>${rows || '<p class="favorites-note">Nenhum ainda. Clique em + para criar.</p>'}</section>
-      </div>
-      <div class="me"><span class="av">${esc(e.snapshot?.pessoa.iniciais ?? "MW")}</span> ${esc(e.snapshot?.pessoa.nome ?? "")}</div>
+  const salas = estado.salas.map((s) => `<button class="sr"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"><span class="g">#</span><span class="lb">${esc(s.sala.nome)}</span></button>`).join("");
+  return `<div class="sh"><b>Meus agentes</b></div>
+    <div class="ss">
+      <div class="sec"><div class="sechd">Bots · ${agentes.length}</div>${linhas || '<p class="mudo">nenhum</p>'}${botao("navegar", "+ criar bot", { classe: "sm", dados: { tela: "frota" } })}</div>
+      <div class="sec"><div class="sechd">Salas · ${estado.salas.length}</div>${salas}${botao("navegar", "+ nova sala", { classe: "sm", dados: { tela: "nova-sala" } })}</div>
     </div>
-  </aside>`;
+    <div class="me">${esc(textoInventario(estado.inventario, estado.agora))}</div>`;
 }
 
-function renderStarter(m: Mensagem): string {
-  const opts = (m.payload?.["options"] as string[][] | undefined) ?? [];
-  return `<div class="starter">
-    <div class="intro">${esc(m.texto)}</div>
-    <div class="q">
-      <h4>${esc(String(m.payload?.["title"] ?? ""))}</h4>
-      <p>${esc(String(m.payload?.["subtitle"] ?? ""))}</p>
-      <div class="choices">
-        ${opts
-          .map(
-            (o) =>
-              `<button class="choice" data-act="seed" data-seed="${esc(o[1] ?? "")}"><span class="badge">${esc(o[0] ?? "")}</span><span><b>${esc(o[1] ?? "")}</b><span>${esc(o[2] ?? "")}</span></span></button>`,
-          )
-          .join("")}
-      </div>
-      <div class="free">Ou escreva do seu jeito no campo abaixo.</div>
-    </div>
-  </div>`;
-}
-
-function renderPapel(m: Mensagem, agenteId: string): string {
-  const p = m.payload ?? {};
-  const acessos = (p["acessosPedidos"] as { nome: string }[] | undefined) ?? [];
-  const nao = (p["naoDeveFazer"] as string[] | undefined) ?? [];
-  const pendente = p["estado"] === "pendente";
-  return `<div class="card-prop">
-    <div class="hd">Proposta — nada concedido ainda</div>
-    <div class="ttl">${esc(String(p["nome"] ?? "Novo Bot"))}</div>
-    <div class="it"><b>O que faz</b>${esc(String(p["instrucoes"] ?? ""))}</div>
-    <div class="it"><b>Acesso que precisa</b>${acessos.length ? acessos.map((a) => esc(a.nome)).join(", ") : "Nenhum app ainda."}</div>
-    <div class="it"><b>O que não deve fazer</b>${nao.map((l) => `• ${esc(l)}`).join("<br>")}</div>
-    ${p["rotinaResumo"] ? `<div class="it"><b>Rotina entendida (não agendada)</b>${esc(String(p["rotinaResumo"]))}</div>` : ""}
-    ${
-      pendente
-        ? `<div class="ft">
-      <button class="btn pri" data-act="confirmar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Confirmar</button>
-      <button class="btn" data-act="recusar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Agora não</button>
-    </div>`
-        : `<div class="ft"><span style="font-size:12px;color:#7b8393">Confirmado</span></div>`
-    }
-  </div>`;
-}
-
-function renderRotina(m: Mensagem, agenteId: string): string {
-  const p = m.payload ?? {};
-  const pendente = p["estado"] === "pendente";
-  return `<div class="card-prop">
-    <div class="hd">Rotina proposta — nada agendado ainda</div>
-    <div class="ttl">${esc(String(p["cron"] ?? ""))} · ${esc(String(p["fusoIana"] ?? ""))}</div>
-    <div class="it">${esc(String(p["resumo"] ?? m.texto))}</div>
-    <div class="it"><b>Próximo disparo</b>${esc(String(p["proximo"] ?? "—"))}</div>
-    <div class="it"><b>Gate de aprovação</b>Ligado por padrão. Nada sai sem você.</div>
-    ${
-      pendente
-        ? `<div class="ft">
-      <button class="btn pri" data-act="confirmar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Confirmar rotina</button>
-      <button class="btn" data-act="recusar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Agora não</button>
-    </div>`
-        : ""
-    }
-  </div>`;
-}
-
-function renderConcessao(m: Mensagem, agenteId: string): string {
-  const p = m.payload ?? {};
-  const caps = (p["capacidades"] as { id: string; rotulo: string }[] | undefined) ?? [];
-  const pendente = p["estado"] === "pendente";
-  return `<div class="card-prop" data-card="concessao" data-id="${esc(m.id)}">
-    <div class="hd">Conectar ${esc(String(p["nome"] ?? ""))}</div>
-    <div class="ttl">${esc(String(p["resumo"] ?? ""))}</div>
-    <div class="it">
-      <b>Este conector toca dado de aprendiz?</b>
-      <div class="sens">
-        <label><input type="radio" name="sens-${esc(m.id)}" value="toca" /> Sim, toca</label>
-        <label><input type="radio" name="sens-${esc(m.id)}" value="nao-toca" /> Não toca</label>
-      </div>
-      <p class="warn">Se você não declarar, o default é TOCA — fechado por origem, nunca por texto.</p>
-    </div>
-    <div class="it">
-      <b>Capacidades (todas começam desligadas)</b>
-      <div class="caps">
-        ${caps
-          .map(
-            (c) =>
-              `<label><input type="checkbox" data-cap="${esc(c.id)}" /> ${esc(c.rotulo)}</label>`,
-          )
-          .join("")}
-      </div>
-    </div>
-    ${
-      pendente
-        ? `<div class="ft">
-      <button class="btn pri" data-act="confirmar-app" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Conectar</button>
-      <button class="btn" data-act="recusar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Agora não</button>
-    </div>`
-        : ""
-    }
-  </div>`;
-}
-
-function renderMsg(m: Mensagem, agenteId: string): string {
-  if (m.kind === "starter") return renderStarter(m);
-  if (m.kind === "proposta-papel") return renderPapel(m, agenteId);
-  if (m.kind === "proposta-rotina") return renderRotina(m, agenteId);
-  if (m.kind === "proposta-concessao") return renderConcessao(m, agenteId);
-  const who = m.autoria.tipo === "pessoa" ? "you" : "bot";
-  return `<div class="message ${who}"><div class="bubble">${esc(m.texto)}</div></div>`;
-}
-
-function renderDetalhes(e: Estado): string {
-  if (!e.detalhesAbertos) return "";
-  const a = agenteAtual(e);
-  if (!a || !e.snapshot) return "";
-  const rotinas = e.snapshot.rotinas.filter((r: Rotina) => r.agenteId === a.id);
-  const apps = e.snapshot.concessoes.filter((c: Concessao) => c.agenteId === a.id);
-  return `<aside class="details">
-    <div class="dh">Detalhes da conversa <button class="btn" data-act="fecha-detalhes">×</button></div>
-    <div class="db">
-      <h3>O que faz</h3>
-      <p>${esc(a.instrucoes || "Ainda não definido — escreva na conversa.")}</p>
-      <h3>Rotinas</h3>
-      ${
-        rotinas.length
-          ? rotinas
-              .map(
-                (r) =>
-                  `<div class="pill-app"><span>${esc(r.cron)} · ${esc(r.fusoIana)}<br><small>${esc(r.estado)} · gate ${r.exigeAprovacao ? "ligado" : "off"}</small></span></div>`,
-              )
-              .join("")
-          : "<p>Nenhuma. Diga na conversa, por exemplo: «toda segunda às 7h».</p>"
-      }
-      <h3>Apps</h3>
-      ${
-        apps.length
-          ? apps
-              .map(
-                (c) =>
-                  `<div class="pill-app"><b>${esc(c.conectorId)}</b><span>${esc(c.estado)} · ${c.capacidadesLigadas.length} ligadas · ${esc(c.declaracao)}</span></div>`,
-              )
-              .join("")
-          : "<p>Nenhum. Diga «conecta com o Slack» ou Notion.</p>"
-      }
-    </div>
-  </aside>`;
-}
-
-function renderChat(e: Estado): string {
-  const a = agenteAtual(e);
-  if (!a) {
-    return `<main class="main">
-      <header class="head"><div class="left"><span class="name">Meus agentes</span><span class="tag">privado</span></div></header>
-      <section class="chat"><div class="scroll"><div class="empty">
-        <h2>Crie seu primeiro agente</h2>
-        <p>Um campo só. Sem formulário de permissões. Você diz o que ele faz, cria a rotina falando, e conecta Slack, Notion e o resto na conversa.</p>
-        <button class="btn pri" data-act="criar">Criar novo Bot</button>
-      </div></div></section>
-    </main>`;
+function renderPrincipal(): void {
+  const t = estado.tela;
+  const erro = estado.erro ? `<div class="erro" role="alert">${esc(estado.erro.codigo)} — ${esc(estado.erro.mensagem)} ${botao("fechar-erro", "×", { classe: "sm" })}</div>` : "";
+  let cabecalho = "";
+  let corpo = "";
+  let composer: { chave: string; html: string } | null = null;
+  switch (t.tipo) {
+    case "frota":
+      corpo = renderFrota(estado);
+      break;
+    case "sua-vez":
+      corpo = renderSuaVez(estado);
+      break;
+    case "rotinas":
+      corpo = renderRotinas(estado);
+      break;
+    case "conectores":
+      corpo = renderConectores(estado);
+      break;
+    case "perfil":
+      corpo = renderPerfil(estado, t.agenteId);
+      break;
+    case "memoria":
+      corpo = renderMemoria(estado, t.agenteId);
+      break;
+    case "nova-sala":
+      corpo = renderNovaSala(estado);
+      break;
+    case "conversa":
+      cabecalho = renderCabecalhoConversa(estado, t.agenteId);
+      corpo = renderTimeline(conversaDaTela(estado), estado);
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer("Mensagem para o bot") };
+      break;
+    case "sala":
+      cabecalho = renderCabecalhoSala(estado, t.salaId);
+      corpo = renderTimeline(conversaDaTela(estado), estado);
+      composer = { chave: `sala:${t.salaId}`, html: htmlComposer("Mensagem para a sala — @Nome dirige a pergunta", nomesDosMembros(estado, t.salaId)) };
+      break;
   }
-  const msgs = mensagensDo(e);
-  return `<main class="main" data-context="private">
-    <header class="head">
-      <div class="left">${icon(a)}<span class="name">${esc(a.nome)}</span><span class="tag">privado</span></div>
-      <div class="actions">
-        <button class="btn" data-act="detalhes" aria-label="Detalhes da conversa">Detalhes</button>
-      </div>
-    </header>
-    <section class="chat">
-      <div class="scroll" id="chatScroll"><div class="timeline">${msgs.map((m) => renderMsg(m, a.id)).join("")}</div></div>
-      <div class="composer"><div class="box">
-        <textarea id="composer" rows="1" placeholder="Mensagem para o Bot"></textarea>
-        <button class="send" data-act="enviar" aria-label="Enviar">↑</button>
-      </div></div>
-    </section>
-    ${
-      e.paletteAberta
-        ? `<div class="palette" id="palette">
-      <div class="ph"><span>Para: Buscar ou criar Bots</span><button data-act="fecha-palette">×</button></div>
-      <button class="opt main" data-act="criar"><span class="mini">+</span>Criar novo Bot</button>
-      ${(e.snapshot?.agentes ?? [])
-        .map((b) => `<button class="opt" data-act="open" data-id="${esc(b.id)}">${icon(b)}${esc(b.nome)}</button>`)
-        .join("")}
-    </div>`
-        : ""
-    }
-    ${renderDetalhes(e)}
-  </main>`;
+  regiao("cabecalho", cabecalho);
+  regiao("erro", erro);
+  const timeline = document.getElementById("timeline");
+  const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
+  regiao("timeline", corpo);
+  if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.scrollHeight;
+  // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
+  if (composer?.chave !== composerDe) {
+    composerDe = composer?.chave ?? null;
+    esquecerRegiao("composer");
+    regiao("composer", composer?.html ?? "");
+    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    ta?.focus();
+  }
+  document.body.classList.toggle("ocupado", estado.ocupado);
 }
 
 function render(): void {
-  if (estado.erro && !estado.snapshot) {
-    app.innerHTML = `<div class="empty"><h2>Não subi o servidor</h2><p>${esc(estado.erro)}</p></div>`;
+  if (!estado.sessao) {
+    regiao("rail", "");
+    regiao("sidebar", "");
+    regiao("cabecalho", "");
+    regiao("timeline", `<section class="tela entrar"><h1>nod</h1><p>Sessão stub de desenvolvimento (só em 127.0.0.1): entre como uma pessoa do seed.</p>${botao("entrar", "Entrar como Marlon", { classe: "pri", dados: { pessoa: "marlon" } })} ${botao("entrar", "Entrar como Ana", { dados: { pessoa: "ana" } })}</section>`);
+    regiao("composer", "");
     return;
   }
-  app.innerHTML = `${renderRail()}${renderSidebar(estado)}${renderChat(estado)}`;
-  const scroll = document.getElementById("chatScroll");
-  if (scroll) scroll.scrollTop = scroll.scrollHeight;
-  const ta = document.getElementById("composer") as HTMLTextAreaElement | null;
-  ta?.addEventListener("input", () => {
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
+  regiao("rail", renderRail());
+  regiao("sidebar", renderSidebar());
+  renderPrincipal();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sessão, SSE e relógio.
+
+async function iniciarSessao(escopo: Escopo): Promise<void> {
+  api = criarApi(escopo);
+  dispatch({ tipo: "sessao", escopo });
+  live?.disconnect();
+  live = criarLiveEvents(api.urlEventos, {
+    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "salas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
   });
-  ta?.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey) {
-      ev.preventDefault();
-      void enviar(ta.value);
-    }
+  live.subscribe((ev) => {
+    if (ev.tipo === "frame") dispatch({ tipo: "frame", frame: ev.frame, agora: Date.now() });
+    else if (ev.tipo === "conexao") dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
+  });
+  live.connect();
+  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "salas"] });
+}
+
+async function boot(): Promise<void> {
+  dispatch({ tipo: "tick", agora: Date.now() });
+  window.setInterval(() => dispatch({ tipo: "tick", agora: Date.now() }), 15_000);
+  try {
+    await iniciarSessao(await sessaoApi.atual());
+  } catch (e) {
+    if (e instanceof ErroApi && e.status === 401) render();
+    else dispatch({ tipo: "erro", erro: erroDe(e) });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ações (delegação por data-act e data-form). A web só pede; o servidor decide.
+
+function navegar(tela: Tela): void {
+  dispatch({ tipo: "navegar", tela });
+}
+
+function conversaAtual(): { conversaId: string; salaId: string | null } | null {
+  const t = estado.tela;
+  if (t.tipo === "conversa") return { conversaId: t.conversaId, salaId: null };
+  if (t.tipo === "sala") return { conversaId: t.conversaId, salaId: t.salaId };
+  return null;
+}
+
+async function enviarComposer(): Promise<void> {
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  const alvo = conversaAtual();
+  if (!ta || !alvo || !api) return;
+  const texto = ta.value.trim();
+  if (!texto) return;
+  const a = api;
+  await agir(async () => {
+    if (alvo.salaId) await a.postarNaSala(alvo.salaId, texto);
+    else await a.enviar(alvo.conversaId, texto);
+    ta.value = "";
+    ta.style.height = "auto";
+    dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   });
 }
 
-app.addEventListener("click", (ev) => {
-  const t = (ev.target as HTMLElement).closest("[data-act]") as HTMLElement | null;
-  if (!t) return;
-  const act = t.getAttribute("data-act");
-  if (act === "palette") dispatch({ tipo: "palette", aberta: !estado.paletteAberta });
-  if (act === "fecha-palette") dispatch({ tipo: "palette", aberta: false });
-  if (act === "criar") void criar();
-  if (act === "open") dispatch({ tipo: "selecionar", id: t.getAttribute("data-id") ?? "" });
-  if (act === "detalhes") dispatch({ tipo: "detalhes", abertos: !estado.detalhesAbertos });
-  if (act === "fecha-detalhes") dispatch({ tipo: "detalhes", abertos: false });
-  if (act === "enviar") {
-    const ta = document.getElementById("composer") as HTMLTextAreaElement | null;
-    if (ta) void enviar(ta.value);
+function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; textoFinal?: string }[] {
+  const raiz = document.querySelector(`[data-decisao="${CSS.escape(decisaoId)}"]`);
+  if (!raiz) return [];
+  return [...raiz.querySelectorAll<HTMLInputElement>("input[data-item]")].map((cb) => {
+    const id = cb.getAttribute("data-item") ?? "";
+    const texto = raiz.querySelector<HTMLInputElement>(`input[data-item-texto="${CSS.escape(id)}"]`)?.value;
+    return { id, selecionado: cb.checked, ...(texto !== undefined ? { textoFinal: texto } : {}) };
+  });
+}
+
+const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
+  entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa === "ana" ? "ana" : "marlon"))),
+  navegar: (el) => {
+    const tela = el.dataset.tela as Tela["tipo"] | undefined;
+    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala") navegar({ tipo: tela });
+  },
+  "abrir-conversa": (el) => navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" }),
+  "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
+  "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
+  "ir-memoria": (el) => navegar({ tipo: "memoria", agenteId: el.dataset.id ?? "" }),
+  "fechar-erro": () => dispatch({ tipo: "erro", erro: null }),
+  "fechar-faixa": () => dispatch({ tipo: "faixa", faixa: null }),
+  enviar: () => enviarComposer(),
+  "sondar-inventario": () => agir(async () => dispatch({ tipo: "hidratar-inventario", inventario: await api!.inventario(true) })),
+  "parar-conversa": () =>
+    agir(async () => {
+      const alvo = conversaAtual();
+      if (!alvo) return;
+      dispatch({ tipo: "faixa", faixa: await api!.pararConversa(alvo.conversaId) });
+      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota"] });
+    }),
+  "parar-sala": (el) =>
+    agir(async () => {
+      dispatch({ tipo: "faixa", faixa: await api!.pararSala(el.dataset.id ?? "") });
+      const alvo = conversaAtual();
+      if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
+    }),
+  "confirmar-proposta": (el) => agir(async () => void (await api!.confirmarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota", "rotinas", "sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  "recusar-proposta": (el) => agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  fixar: (el) => agir(async () => void (await api!.fixar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
+  ocultar: (el) => agir(async () => void (await api!.ocultar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
+  duplicar: (el) =>
+    agir(async () => {
+      const r = await api!.duplicar(el.dataset.id ?? "");
+      dispatch({ tipo: "invalidar", quais: ["frota"] });
+      navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
+    }),
+  revogar: (el) => agir(async () => void (await api!.revogar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
+  "salvar-memoria": (el) =>
+    agir(async () => {
+      const li = el.closest("[data-memoria]");
+      const texto = li?.querySelector<HTMLInputElement>('[data-campo="texto"]')?.value ?? "";
+      const tipo = li?.querySelector<HTMLSelectElement>('[data-campo="tipo"]')?.value as "preferencia" | "fato" | "resumo" | undefined;
+      await api!.editarMemoria(el.dataset.agente ?? "", el.dataset.id ?? "", { texto, tipo });
+      dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] });
+    }),
+  "apagar-memoria": (el) => agir(async () => void (await api!.apagarMemoria(el.dataset.agente ?? "", el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] }))),
+  "pausar-rotina": (el) => agir(async () => void (await api!.pausarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
+  "ativar-rotina": (el) => agir(async () => void (await api!.ativarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
+  "ver-execucoes": (el) => dispatch({ tipo: "invalidar", quais: [`execucoes:${el.dataset.id ?? ""}`] }),
+  "sondar-conector": (el) => agir(async () => void (await api!.sondarConector(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["conectores", "frota"] }))),
+  "habilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", true), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),
+  "desabilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", false), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),
+  "decidir-aprovacao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "") }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
+  "decidir-aprovacao-nenhum": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "").map((m) => ({ ...m, selecionado: false })) }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota"] }))),
+  "recusar-decisao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  responder: (el) =>
+    agir(async () => {
+      const texto = document.querySelector<HTMLInputElement>(`input[data-resposta="${CSS.escape(el.dataset.id ?? "")}"]`)?.value.trim() ?? "";
+      await api!.responder(el.dataset.id ?? "", texto);
+      dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
+    }),
+  retomar: (el) =>
+    agir(async () => {
+      const texto = document.querySelector<HTMLInputElement>(`input[data-resposta="${CSS.escape(el.dataset.id ?? "")}"]`)?.value.trim();
+      await api!.retomar(el.dataset.id ?? "", texto || undefined);
+      dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
+    }),
+  reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+};
+
+const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  "criar-agente": (form) =>
+    agir(async () => {
+      const nome = (form.elements.namedItem("nome") as HTMLInputElement | null)?.value.trim() || undefined;
+      const r = await api!.criarAgente(nome);
+      form.reset();
+      dispatch({ tipo: "invalidar", quais: ["frota"] });
+      navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
+    }),
+  "editar-perfil": (form) =>
+    agir(async () => {
+      const d = new FormData(form);
+      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), modelo: String(d.get("modelo") ?? "") });
+      dispatch({ tipo: "invalidar", quais: ["frota"] });
+    }),
+  "criar-memoria": (form) =>
+    agir(async () => {
+      const d = new FormData(form);
+      await api!.criarMemoria(form.dataset.id ?? "", String(d.get("tipo") ?? "fato") as "preferencia" | "fato" | "resumo", String(d.get("texto") ?? ""));
+      form.reset();
+      dispatch({ tipo: "invalidar", quais: [`memoria:${form.dataset.id ?? ""}`] });
+    }),
+  "criar-sala": (form) =>
+    agir(async () => {
+      const d = new FormData(form);
+      const agenteIds = d.getAll("agenteIds").map(String);
+      const r = await api!.criarSala(String(d.get("nome") ?? "sala"), agenteIds);
+      dispatch({ tipo: "invalidar", quais: ["salas"] });
+      navegar({ tipo: "sala", salaId: r.ids.salaId ?? "", conversaId: r.ids.conversaId ?? "" });
+    }),
+  "registrar-conector": (form) =>
+    agir(async () => {
+      const d = new FormData(form);
+      const args = String(d.get("args") ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+      let env: Record<string, string> = {};
+      const envTexto = String(d.get("env") ?? "").trim();
+      if (envTexto) env = JSON.parse(envTexto) as Record<string, string>;
+      await api!.registrarConector({ nome: d.get("nome"), slug: d.get("slug"), transporte: d.get("transporte"), comando: String(d.get("comando") ?? "") || null, args, url: String(d.get("url") ?? "") || null, env, declaracao: d.get("declaracao") });
+      form.reset();
+      dispatch({ tipo: "invalidar", quais: ["conectores"] });
+    }),
+  conceder: (form) =>
+    agir(async () => {
+      const d = new FormData(form);
+      const agenteId = String(d.get("agenteId") ?? "");
+      await api!.conceder(agenteId, form.dataset.id ?? "", String(d.get("capacidade") ?? ""));
+      dispatch({ tipo: "invalidar", quais: [`concessoes:${agenteId}`, "frota"] });
+    }),
+};
+
+document.addEventListener("click", (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-act]");
+  if (!el || el.tagName === "BUTTON" && (el as HTMLButtonElement).type === "submit" && el.closest("form[data-form]")) return;
+  const acao = ACOES[el.dataset.act ?? ""];
+  if (acao) void acao(el);
+});
+
+document.addEventListener("submit", (ev) => {
+  const form = (ev.target as HTMLElement).closest<HTMLFormElement>("form[data-form]");
+  if (!form) return;
+  ev.preventDefault();
+  const tratar = FORMS[form.dataset.form ?? ""];
+  if (tratar) void tratar(form);
+});
+
+// Contador ao vivo da aprovação em lista e autocomplete de @menção.
+document.addEventListener("change", (ev) => {
+  const cb = ev.target as HTMLInputElement;
+  if (!cb.matches("input[data-item]")) return;
+  const raiz = cb.closest("[data-decisao]");
+  const contador = raiz?.querySelector("[data-contador]");
+  if (contador && raiz) contador.textContent = String(raiz.querySelectorAll("input[data-item]:checked").length);
+});
+
+document.addEventListener("keydown", (ev) => {
+  const ta = ev.target as HTMLTextAreaElement;
+  if (ta.id !== "composer-texto") return;
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    void enviarComposer();
   }
-  if (act === "seed") {
-    const ta = document.getElementById("composer") as HTMLTextAreaElement | null;
-    if (ta) {
-      ta.value = t.getAttribute("data-seed") ?? "";
-      ta.focus();
-    }
-  }
-  if (act === "confirmar") {
-    const agenteId = t.getAttribute("data-agente") ?? "";
-    const id = t.getAttribute("data-id") ?? "";
-    void api.confirmar(agenteId, id).then(hidratar);
-  }
-  if (act === "recusar") {
-    const agenteId = t.getAttribute("data-agente") ?? "";
-    const id = t.getAttribute("data-id") ?? "";
-    void api.recusar(agenteId, id).then(hidratar);
-  }
-  if (act === "confirmar-app") {
-    const agenteId = t.getAttribute("data-agente") ?? "";
-    const id = t.getAttribute("data-id") ?? "";
-    const card = t.closest("[data-card='concessao']");
-    const declaracao =
-      (card?.querySelector("input[type=radio]:checked") as HTMLInputElement | null)?.value ?? "nao-declarou";
-    const capacidadesLigadas = [...(card?.querySelectorAll("input[data-cap]:checked") ?? [])].map(
-      (el) => (el as HTMLInputElement).getAttribute("data-cap") ?? "",
-    );
-    void api.confirmar(agenteId, id, { declaracao, capacidadesLigadas }).then(hidratar);
-  }
-  if (act === "emp") toast("A área de empresa é opcional. Esta versão é Meus agentes.");
-  if (act === "home") dispatch({ tipo: "palette", aberta: false });
+});
+
+document.addEventListener("input", (ev) => {
+  const ta = ev.target as HTMLTextAreaElement;
+  if (ta.id !== "composer-texto") return;
+  ta.style.height = "auto";
+  ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
+  const caixa = document.getElementById("autocomplete");
+  if (!caixa) return;
+  const sugestoes = JSON.parse(ta.dataset.sugestoes ?? "[]") as string[];
+  const m = /(^|\s)@([\p{L}\d_-]*)$/u.exec(ta.value.slice(0, ta.selectionStart));
+  const lista = m ? sugestoes.filter((n) => n.toLowerCase().startsWith((m[2] ?? "").toLowerCase())) : [];
+  caixa.hidden = lista.length === 0;
+  caixa.innerHTML = lista.map((n) => `<button type="button" class="sug" data-nome="${esc(n)}">@${esc(n)}</button>`).join("");
+});
+
+document.addEventListener("mousedown", (ev) => {
+  const sug = (ev.target as HTMLElement).closest<HTMLElement>(".sug");
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (!sug || !ta) return;
+  ev.preventDefault();
+  const antes = ta.value.slice(0, ta.selectionStart).replace(/@[\p{L}\d_-]*$/u, `@${sug.dataset.nome ?? ""} `);
+  ta.value = antes + ta.value.slice(ta.selectionStart);
+  ta.selectionStart = ta.selectionEnd = antes.length;
+  const caixa = document.getElementById("autocomplete");
+  if (caixa) caixa.hidden = true;
+  ta.focus();
 });
 
 void boot();
+
+// Exposto para inspeção manual no console (nunca como API): o estado atual e o agente da tela.
+declare global {
+  interface Window {
+    nod?: { estado(): Estado; agente(): string | null };
+  }
+}
+window.nod = { estado: () => estado, agente: () => agenteDaTela(estado) };

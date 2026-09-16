@@ -1,0 +1,119 @@
+import { randomUUID } from "node:crypto";
+import { boot, type OpcoesBoot, type ServidorNod } from "../../src/adapters/http/boot.ts";
+import { cunharCookie } from "../../src/adapters/http/sessao.ts";
+import { criarDb } from "../../src/db/client.ts";
+import type { Db, Escopo } from "../../src/shared/types.ts";
+import { urlDonoDeTeste } from "./db-dono.ts";
+import { TENANT_LEAPY } from "./ids.ts";
+
+/** definido em 2026-09-16: segredo e chave FIXOS do servidor de teste — nunca os do .env (a suíte não lê credencial). */
+export const SEGREDO_DE_TESTE = "segredo-de-teste";
+export const CHAVE_DE_TESTE = "0000000000000000000000000000000000000000000000000000000000000002";
+
+export type SessaoDeTeste = { cookie: string; tenantId: string; pessoaId: string };
+
+export type ServidorCompleto = ServidorNod & {
+  db: Db;
+  dbDono: Db;
+  /** A pessoa PRÓPRIA deste servidor (linha real em `pessoas`, criada como nod_dono): a fila e os laços são dela. */
+  pessoa: SessaoDeTeste;
+  /** Cookie assinado para qualquer pessoa (só quem existe em `pessoas` é vista pelos laços). */
+  sessaoDe(escopo: Escopo): SessaoDeTeste;
+  chamar(metodo: string, caminho: string, corpo?: unknown, sessao?: SessaoDeTeste): Promise<Response>;
+  /** GET/POST já em JSON tipado pelo chamador; lança em status fora de 2xx com o corpo seguro. */
+  json<T>(metodo: string, caminho: string, corpo?: unknown, sessao?: SessaoDeTeste): Promise<T>;
+  /** Espera até `fn` devolver algo não-null (frames, laços de fundo). */
+  esperar<T>(fn: () => Promise<T | null | undefined | false>, opcoes?: { timeoutMs?: number; intervaloMs?: number; nome?: string }): Promise<T>;
+  /** Depois de `fechar()` e da limpeza do chamador: encerra os pools. */
+  desligar(): Promise<void>;
+};
+
+export type OpcoesServidorCompleto = {
+  env?: Record<string, string | undefined>;
+  intervalos?: OpcoesBoot["intervalos"];
+  /** Nome da pessoa própria (default 'Pessoa E2E'). */
+  nomePessoa?: string;
+  /** Pessoas ADICIONAIS que os laços devem enxergar (default: só a própria). */
+  pessoasExtras?: Escopo[];
+  drivers?: OpcoesBoot["drivers"];
+};
+
+/**
+ * Servidor COMPLETO (compor.ts + boot.ts) em porta 0 sobre o banco de teste, com NOD_EXECUTOR=catcher
+ * (custo zero) e laços de fundo em intervalos curtos. Não é o servidor-de-teste da L3 (EMENDA 7: aquele
+ * recebe rotas e deps de uma lane; este sobe o app inteiro). As linhas COMMITAM: a pessoa própria nasce
+ * em `pessoas` como nod_dono e quem chama limpa por id ao fim (modo concurrency, ADR-011 refinado).
+ */
+export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<ServidorCompleto> {
+  const urlTeste = process.env.DATABASE_URL_TEST;
+  if (!urlTeste) throw new Error("servidorCompleto exige DATABASE_URL_TEST");
+  // definido em 2026-09-16: 6 conexões — rota (1) + conector carregado (1) + ponte/laços (≤3) sem enfileirar sob carga.
+  const db = criarDb(urlTeste, { max: 6 });
+  const dbDono = criarDb(urlDonoDeTeste(), { max: 1 });
+  const pessoaId = randomUUID();
+  const escopo: Escopo = { tenantId: TENANT_LEAPY, pessoaId };
+  // O CI nunca roda seed (Leapy §6): o tenant de identidade nasce aqui como nod_dono (idempotente) e fica — é catálogo, não dado.
+  await dbDono`insert into tenants (id, nome) values (${TENANT_LEAPY}, 'Leapy') on conflict do nothing`;
+  await dbDono`insert into pessoas (tenant_id, id, nome, iniciais) values (${TENANT_LEAPY}, ${pessoaId}, ${o.nomePessoa ?? "Pessoa E2E"}, 'PE') on conflict do nothing`;
+  const visiveis = [escopo, ...(o.pessoasExtras ?? [])];
+
+  const env = {
+    ...process.env,
+    NOD_EXECUTOR: "catcher",
+    NOD_SESSAO_SEGREDO: SEGREDO_DE_TESTE,
+    NOD_CREDENTIAL_KEY: CHAVE_DE_TESTE,
+    NOD_HOME: process.env.NOD_HOME ?? "~/.nod",
+    NOD_MACHINE_ID: randomUUID(),
+    ...(o.env ?? {}),
+  };
+  const servidor = await boot({
+    env,
+    db,
+    dbDono,
+    porta: 0,
+    intervalos: { orquestradorMs: 50, schedulerMs: 200, leaseMs: 200, expiracaoMs: 200, outboxMs: 40, ...(o.intervalos ?? {}) },
+    listarPessoas: async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId })),
+    segredoSessao: SEGREDO_DE_TESTE,
+    drivers: o.drivers,
+  });
+
+  const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });
+  const pessoa = sessaoDe(escopo);
+  const chamar = (metodo: string, caminho: string, corpo?: unknown, sessao: SessaoDeTeste = pessoa) =>
+    fetch(`${servidor.url}/api/t/${sessao.tenantId}/${caminho.replace(/^\//, "")}`, {
+      method: metodo,
+      headers: { cookie: sessao.cookie, "content-type": "application/json" },
+      body: corpo === undefined ? undefined : JSON.stringify(corpo),
+    });
+
+  return {
+    ...servidor,
+    db,
+    dbDono,
+    pessoa,
+    sessaoDe,
+    chamar,
+    async json<T>(metodo: string, caminho: string, corpo?: unknown, sessao?: SessaoDeTeste): Promise<T> {
+      const r = await chamar(metodo, caminho, corpo, sessao);
+      const texto = await r.text();
+      if (r.status < 200 || r.status >= 300) throw new Error(`${metodo} ${caminho} → ${r.status} ${texto}`);
+      return JSON.parse(texto) as T;
+    },
+    async esperar<T>(fn: () => Promise<T | null | undefined | false>, opcoes: { timeoutMs?: number; intervaloMs?: number; nome?: string } = {}): Promise<T> {
+      const limite = Date.now() + (opcoes.timeoutMs ?? 10_000);
+      for (;;) {
+        const v = await fn();
+        if (v) return v;
+        if (Date.now() > limite) throw new Error(`esperar(${opcoes.nome ?? "condição"}) estourou ${opcoes.timeoutMs ?? 10_000} ms`);
+        await new Promise((r) => setTimeout(r, opcoes.intervaloMs ?? 50));
+      }
+    },
+    async fechar() {
+      await servidor.fechar();
+    },
+    async desligar() {
+      await db.end({ timeout: 2 });
+      await dbDono.end({ timeout: 2 });
+    },
+  };
+}

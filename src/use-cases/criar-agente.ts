@@ -1,0 +1,53 @@
+import type { Agente, DonoAgente } from "../contracts/agente.ts";
+import type { Conversa } from "../contracts/conversa.ts";
+import type { Mensagem } from "../contracts/mensagem.ts";
+import { ErroDeDominio } from "../domain/erro.ts";
+import { proximaCor, proximaForma } from "../domain/proposta-agente.ts";
+import { redigir } from "../domain/redacao.ts";
+import { autoriaPessoa, evento, MODELO_PADRAO } from "./autoria-evento.ts";
+import type { CasoDeUso } from "./tipos.ts";
+
+/** EMENDA 17: nome opcional; ausente → 'Novo agente' e o modelo propõe pelo atualizar_perfil. */
+export const NOME_INICIAL = "Novo agente";
+
+export type EntradaCriarAgente = { dono: DonoAgente; nome?: string; modelo?: string };
+export type SaidaCriarAgente = { agente: Agente; conversa: Conversa; mensagem: Mensagem };
+
+/**
+ * Criação conversacional (E1.1/E1.2/E1.3): nasce 'Novo agente' com forma/cor por round-robin,
+ * visibilidade 'equipe' quando o dono é a empresa (repositório), conversa própria e a mensagem
+ * de sistema 'agente-nasceu'. Sem acessos, sem rotina, sem memória — nada é concedido aqui.
+ */
+export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = async (deps, input) => {
+  if (input.dono !== "pessoa" && input.dono !== "empresa") throw new ErroDeDominio("entrada_invalida", { cause: "dono" });
+  if (input.nome !== undefined && typeof input.nome !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "nome" });
+  const nome = (input.nome ?? "").trim() || NOME_INICIAL;
+  const agora = deps.agora();
+
+  const existentes = await deps.repos.agentes.listar({ incluirOcultos: true });
+  const forma = proximaForma(existentes.map((a) => a.forma));
+  const cor = proximaCor(existentes.map((a) => a.cor));
+
+  const agente = await deps.repos.agentes.criar({ nome, dono: input.dono, forma, cor, modelo: input.modelo ?? MODELO_PADRAO });
+  if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "agente não criado" });
+  const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente.id, visibility: agente.visibility });
+  if (!conversa) throw new ErroDeDominio("estado_invalido", { cause: "conversa não criada" });
+
+  const autoria = autoriaPessoa(deps.escopo);
+  const mensagem = await deps.repos.mensagens.criar({
+    conversaId: conversa.id,
+    autoria,
+    kind: "sistema",
+    texto: redigir("agente-nasceu", agora),
+    confianca: "confiavel",
+  });
+  if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem não criada" });
+
+  return {
+    data: { agente, conversa, mensagem },
+    events: [
+      evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: conversa.id, dados: { agente_id: agente.id, acao: "criado", nome: agente.nome, dono: agente.dono } }),
+      evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, dados: { mensagem_id: mensagem.id, kind: "sistema" } }),
+    ],
+  };
+};

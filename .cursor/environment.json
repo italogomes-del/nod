@@ -5,7 +5,7 @@
     {
       "name": "nod-dev",
       "command": "cd /workspace && npm run dev",
-      "description": "API em :8787 e UI Vite em :5173 (Meus agentes)."
+      "description": "API em :8888 e UI Vite em :5274 (5173 e 5432 são de OUTROS projetos)."
     },
     {
       "name": "static-server",
@@ -16,11 +16,11 @@
   "ports": [
     {
       "name": "meus agentes",
-      "port": 5173
+      "port": 5274
     },
     {
       "name": "api",
-      "port": 8787
+      "port": 8888
     },
     {
       "name": "static site",

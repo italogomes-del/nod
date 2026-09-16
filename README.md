@@ -2,106 +2,83 @@
 
 > Um lugar onde agentes preparam decisões e uma pessoa decide — com registro de quem decidiu, por quê, e se havia alguém olhando.
 
-**Ferramenta interna da Leapy.** Cada colaborador usa a LLM que já está credenciada na própria máquina — Claude Code, Cursor ou Codex. O nod pilota, nunca vê a credencial. Virar SaaS é plano próximo, e a arquitetura protege isso sem pagar o custo agora. Ver [interno primeiro](docs/internal-first.md).
+**Ferramenta interna da Leapy.** Cada colaborador usa o Claude Code que já está credenciado na própria máquina; o nod pilota, nunca vê a credencial. Este README descreve **o que existe de fato** na branch `rebuild/fundacao-leapy` em 2026-09-16, como rodar, como testar, quanto custa — e o que NÃO existe.
 
-Primeira versão funcional da frota pessoal (**Meus agentes**): criar um agente conversando, dizer o que ele faz, criar rotina via texto e conectar apps (Slack, Notion, ClickUp…). O resto do produto (fila global, canais, CLI do fornecedor) continua nos ADRs.
+## Rodar amanhã de manhã
 
 ```bash
-npm install
-npm run dev
+cd ~/code/nod
+mise install && npm ci                 # Node 24.19.0 pinado em .mise.toml (nvm/asdf ganham do mise — ver AGENTS.md)
+cp .env.example .env                   # se ainda não existir; troque NOD_SESSAO_SEGREDO e NOD_CREDENTIAL_KEY
+npm run dev:setup                      # docker compose (Postgres 16 em 127.0.0.1:5434) + migrações 0001–0004 nos bancos nod e nod_test + seed
+npm run dev                            # api http://127.0.0.1:8888 + web http://127.0.0.1:5274 (5173 e 5432 são de OUTROS projetos)
 ```
 
-Abre em `http://localhost:5173`. Protótipo de alta fidelidade: [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
+Abra http://127.0.0.1:5274, clique em **Entrar como Marlon** (sessão stub de desenvolvimento, só em 127.0.0.1) e a **Frota** aparece com a Vera do seed. O executor padrão é o **catcher** (`NOD_EXECUTOR=catcher` no `.env`): zero CLI, zero custo — as respostas do "modelo" vêm de marcadores no próprio texto (`[[tool: lembrar {...}]] [[texto: ...]]`, gramática em `tests/helpers/catcher-roteiro.ts`).
 
----
+Para rodar com o Claude Code real (custa a assinatura da pessoa):
 
-## O problema
+```bash
+NOD_EXECUTOR=claude-cli npm run sonda             # ~US$ 0,01: {estado:'pronto', versao:'2.1.272'} sem email
+NOD_EXECUTOR=claude-cli npm run dev               # o boot sonda uma vez (um turno haiku) e só usa o CLI se a sonda disser 'pronto'
+```
 
-Quem opera uma equipe de agentes de IA descobre rápido que o gargalo não é a capacidade deles — é a atenção de quem decide. Doze agentes trabalhando a noite inteira produzem, de manhã, uma pilha de coisas que pararam esperando alguém dizer sim ou não.
+Contra-prova: `NOD_CLAUDE_BIN=/bin/false NOD_EXECUTOR=claude-cli npm run dev` → inventário `ausente`, a web escreve "claude ausente (…) desde HH:MM" e uma mensagem cria um turno interrompido `executor_indisponivel` com negação escrita — fail-closed renderizado (ADR-029), nunca silêncio.
 
-Hoje essa pilha está espalhada: um pedaço num chat, outro num e-mail, outro numa aba que ninguém abriu. E a pior parte não é o que está na pilha — é o que **não** está: a rotina que não rodou, o agente que ficou fora do ar, a tarefa que falhou em silêncio.
+## Testar
 
-O nod é o lugar onde essa pilha tem um dono, um relógio e um fim.
+```bash
+npm run check          # lint → typecheck (3 tsconfigs) → cerca do domínio → unit → integration → conformidade → concurrency
+npm run e2e:fumaca     # as dez jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
+npm run e2e:haiku      # scripts/e2e-aceite.sh: o mesmo roteiro com o CLI real e curl+jq; imprime o custo somado
+```
 
-## A tese
+Medido em 2026-09-16 (esta máquina, Postgres em Docker): `npm run check` = 141 arquivos, 564 testes (300 unit + 188 integration + 49 conformidade + 27 concurrency); três execuções seguidas verdes em 92 s, 88 s e 86 s (critério da EMENDA-L9 §11). `e2e:fumaca` = 10 jornadas em ~26 s. `e2e:haiku` = rodada única verde (exit 0), US$ 0,1131 somados, cabeçalho de `scripts/e2e-aceite.sh`.
 
-O produto abre numa **fila**: todas as decisões que esperam você, atravessando todas as empresas onde opera, mais antiga no topo, cada uma com quanto tempo está esperando e quanto falta para ser recusada automaticamente. Abaixo dela, escrito com o mesmo peso, **o que não aconteceu**.
+Quatro modos de teste (ADR-011 refinado): `tests/unit` (sem banco), `tests/integration` (Postgres real sob `withRollback`), `tests/conformidade` (gates que leem `pg_catalog`), `tests/concurrency` (duas conexões, commit real, limpeza própria por id — é onde o e2e mora, porque ele commita).
 
-Quando um agente termina um trabalho, ele não devolve um parágrafo para você ler na diagonal — devolve uma **lista de itens** que você marca e desmarca um a um. Tudo que toca dado de um jovem aprendiz chega desmarcado, com o agente explicando em primeira pessoa por que desmarcou.
+## O que existe
 
-Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e quem pode destravar, e não tenta de novo.
+Um pacote TypeScript (ADR-018) no esqueleto herdado da Leapy (`docs/inherited-from-leapy.md`): `src/{domain,contracts,shared,db,repositories,services,use-cases,adapters/{http,fundo,executor,mcp-proxy},obs}`, `web/`, `tests/`. Provado por teste contra o Postgres real:
 
-## Princípios
+- **Fundação (L1):** migrações SQL puras (0001–0004) com RLS por PESSOA em toda tabela — desde a 0004, quatro policies PERMISSIVE por comando (`nod_pessoa_select` abre dono/'equipe'/perna extra; `insert`/`update`/`delete` só a dona) + a RESTRICTIVE do tenant; trilha imutável por trigger + CHECK; `events` particionada por mês sem catch-all; outbox transacional; gates de conformidade lendo o catálogo; log JSON único; CI em três jobs.
+- **Contratos e domínio (L2):** nove ferramentas nod (`lembrar`, `atualizar_perfil`, `pedir_acesso`, `criar_rotina`, `pedir_aprovacao`, `pedir_a_pessoa`, `passar`, `encaminhar`, `perguntar_a_bot`), plano de turno (ADR-024), classificação de falha por estado de protocolo (ADR-009), orçamento de canal, rodada de sala, tudo puro em `src/domain`.
+- **Executor (L4):** driver `claude-cli` real (`-p` + stream-json, `--session-id`/`--resume`, `--tools ""` + `--allowedTools` do plano, `--strict-mcp-config`, mcp.json 0600 em tmpdir por turno, env com denylist, SIGTERM→SIGKILL) e driver `catcher` no mesmo SPI; sonda de três estados (ADR-019); registry sombra; laço puxar → rodar → renovar → entregar.
+- **Proxy MCP, plano, conectores, aprovação (L5):** o único servidor MCP que o CLI enxerga consome só o plano; conectores = servidores MCP registrados pela pessoa, sondados, com env cifrado no servidor; concessão por bot e por capacidade com mensagem de consentimento imutável; aprovação em **lista tipada** (item a item, sensível nasce desmarcado).
+- **Bots, conversa, fila e Parar (L6):** criação conversacional ('Novo agente' até a proposta confirmada), perfil, memória, Pin/Hide/Duplicate, fila de turnos no Postgres (SKIP LOCKED, lease, quatro estados), Parar com faixa e SIGTERM em < 2 s, retomada sempre por turno novo.
+- **Rotinas, salas, bot-a-bot (L7):** rotina por texto (cron + fuso IANA) → proposta → decisão; scheduler com janela única; gate de aprovação; salas de 2–6 bots com grant por membro, @menção, handoff/passe tipados, orçamento do canal; `perguntar_a_bot` de um salto com conteúdo não confiável.
+- **SSE, outbox, Sua vez, métricas (L8):** frames numerados por pessoa com contrato de resume, despachante do outbox, "Sua vez" sob RLS de duas pernas (vencido em cinza, reabrir), seis métricas em `/metrics`.
+- **Integração e web (L9):** `compor.ts` + `boot.ts` ligam tudo; rotas de decisão (`decidir` para sete tipos, `responder`, `retomar`) e inventário; web em vanilla TS com render por regiões e reducer por frame (`web/`); e2e com catcher e roteiro com haiku.
 
-1. **Vazio nunca significa vazio.** Todo silêncio — não executou, fora do ar, esperando há dois dias — aparece escrito.
-2. **O agente nunca devolve um parágrafo quando a resposta é uma decisão.** Lista tipada, item a item, com o botão contando ao vivo.
-3. **O teto é um limite, não uma sugestão.** Quando o agente bate no que não alcança, ele encerra o turno e nomeia o que falta. Nunca tenta outro caminho.
-4. **Autorização mora na conversa, não num painel.** Quem concede é quem estava lá, e “quem autorizou você?” se responde rolando a tela para cima.
-5. **Cor é escassa e a fila tem fim.** Azul é não lido de gente, âmbar é a bola com você, cinza é todo o resto — inclusive agente trabalhando.
+## Custo
 
----
+Dev e CI: **zero** — o catcher é o default. Cada `claude -p` real usa `--model claude-haiku-4-5-20251001 --strict-mcp-config --tools ""` e ambiente limpo; base medida em 2026-09-16: ~US$ 0,02 por turno com MCP, ~US$ 0,003 por resume, ~US$ 0,01 por sonda. O roteiro `e2e:haiku` custou **US$ 0,1131** na rodada única de 2026-09-16 (1 sonda US$ 0,0129 + 8 turnos US$ 0,1001; detalhe no cabeçalho do script) — meta era < US$ 0,50. O custo de cada turno é gravado em `gastos` (ADR-015) e aparece em `GET turnos/:id`.
 
-## O que tem aqui
+## O que NÃO existe (registrado)
 
-### Produto
+- **Ponte multi-máquina por HTTP** (ADR-021): o executor fala com o servidor pela `PonteInterna` in-process. A ponte HTTP entra depois sem trocar o driver; o lote de `eventos` da renovação viaja vazio até lá (os deltas vão direto ao barramento; `KindEvento` não ganhou `turno_progresso` — EMENDA-L9 §9, registrado).
+- **Mobile / PWA / Electron / updater** — servidor e máquina são o mesmo processo (ADR-020 invertido).
+- **Computador por bot, driver remoto, browser** (ADR-028); **skills por demonstração**; skills por instrução (nomeadas, `/`) também ficaram fora desta rodada (EMENDA 24).
+- **OAuth real / credencial de colaborador com health-check** (ADR-015 revisado): conector é MCP registrado com env cifrado só no servidor. **Procuração entre donos** tem tabela e regra fail-closed, sem rota nem UI.
+- **Sessão de verdade**: a sessão é um cookie assinado de desenvolvimento (`marlon` | `ana`) e o servidor recusa `NOD_HOST` fora de 127.0.0.1 enquanto for assim.
+- **Execução de rotina "em curso"**: `DesfechoRotina` não tem `pendente` — `rotina_execucoes` só ganha linha ao assentar; o "em curso" é a janela com `turno_id` (EMENDA-L9 §5, registrado).
+- **Executor de servidor**: `custo_servidor_mes` é 0 por construção; `gastosRepo.somarMes(agora, executor)` já filtra para o dia em que existir.
+- Deliberadamente fora (lista NÃO CONSTRUIR dos ADRs): policy só por tenant, store JSON, cache de catálogo, endpoint síncrono de decisão, heartbeat, requeue automático, regex de intenção, DELETE em teste fora de concurrency, seed no CI, SDK MCP, workspaces.
 
-| | |
-|---|---|
-| [`docs/product-spec.html`](docs/product-spec.html) | **O documento de produto.** 5 jornadas, 12 épicos, 69 histórias com critérios de aceite, mockups e diagramas, faseamento e o que se herda de cada referência. |
-| [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html) | **Protótipo de alta fidelidade de Meus agentes** (cópia Grok Bot): rail de contextos, criar bot, conversa, starter. |
-| [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) | Protótipo da frota como casa: fila, canal com calha, bandeja de aprovação. |
-| [`prototypes/history/`](prototypes/history/) | As seis versões anteriores, com o registro de por que cada uma foi descartada. |
+## Desvios registrados
 
-### Arquitetura
+- **Aprovação em lista tipada** segue a spec E4.1 (P0), não o corte "binária nesta rodada" de core-features (EMENDA 23).
+- **Nome na criação:** `POST agentes {dono, nome?}` — ausente vira "Novo agente" e o modelo propõe pelo `atualizar_perfil` (EMENDA 17). Organização/membership: fora (um tenant).
+- **Dois eixos de profundidade:** `profundidade` 0|1 de peer e `HANDOFFS_POR_RODADA = 3` — o quarto `encaminhar` na mesma rodada vira passe `teto_canal` (EMENDA 14).
+- **Anel de bots (EMENDA-L9 §6):** o domínio RECUSA o anel A→B→C no terceiro remetente distinto (negação escrita, terminal), em vez de "resfriar no quarto post" da spec E5.5 — esperar o quarto post seria deixar o anel fechar uma vez.
+- **Cron com minuto e hora fixos:** o domínio recusa `* * * * *` (Regra 9); o aceite adianta `proxima_execucao` em vez de trocar o cron.
+- **E2E commita** (laços reais, SSE, sessão), por isso mora em `tests/concurrency/e2e-catcher.test.ts` e não em `tests/integration` como o plano nomeava — é a definição do terceiro modo, e a única pasta onde limpeza por id é permitida. A `trilha` é imutável por desenho: as linhas do e2e (de uma pessoa aleatória) ficam.
+- **Ids fora de uuid:** no path → 404 (roteador); no corpo → 400 `entrada_invalida` (22P02 traduzido) — nunca 500 (EMENDA-L9 §2). **`/metrics`** responde na raiz e em `/api/metrics` (§3).
+- **Histórico da branch:** L1, L3.5, L4 e L7 têm mais de um commit (EMENDA 31) porque o loop de verificação pedia commit novo; não houve squash — o histórico conta o processo de verificação. A L9 tem um commit por passo (composição, pendências, web, e2e, docs).
 
-| | |
-|---|---|
-| [`docs/adr/`](docs/adr/) | **29 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
-| [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
-| [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
-| [`docs/grokbot-comparison.md`](docs/grokbot-comparison.md) | **O Grok Bot muda alguma decisão?** Não — e as seis emendas baratas que a comparação revelou, incluindo uma contradição entre o E2.4 e o ADR-013. |
-| [`docs/internal-first.md`](docs/internal-first.md) | **A revisão para uso interno.** O que mudou quando o executor saiu do container e foi para a máquina de cada pessoa, a ponte app↔servidor, e as três coisas impossíveis de retroagir. |
-| [`docs/distribution-and-local-execution.md`](docs/distribution-and-local-execution.md) | **Alvos de distribuição e execução local.** Por que não é monorepo, por que um app web não alcança o CLI da sua máquina, e a ordem web → PWA → app nativo. |
-| [`docs/core-features.md`](docs/core-features.md) | **As quatro features core.** Ferramentas/MCP, grupo de bots, bot-a-bot e computador do bot, comparadas entre OpenMausBot e hermes-agent. Inclui o plano de turno — o primitivo que faltava — e a ordem de implementação em 10 semanas. |
-| [`docs/inherited-from-leapy.md`](docs/inherited-from-leapy.md) | **O que herdamos do monorepo da Leapy.** 14 práticas verificadas nos arquivos, o veredito sobre pacote único *vs* workspaces, e os 8 ADRs que mudaram por causa disso. |
+## Onde ler mais
 
-Os HTML são autocontidos — abra no navegador, sem build.
-
-### As três decisões que precisam ser acertadas de primeira
-
-1. **A forma do registro de decisão** e dos identificadores que atravessam o fio. É o que o produto vende e o que a trilha imutável congela — migrá-lo depois é migrar a prova.
-2. **O que pode entrar na trilha imutável**, decidido com o jurídico *antes* do schema. A trilha é imutável por trigger e trata dado de menor sob LGPD: as duas coisas só coexistem se ela aceitar apenas enum, uuid, timestamp e numérico, com o texto humano vivendo numa tabela irmã apagável.
-3. **O modo do pooler, o tamanho do pool e a política de deploy.** Não é um ADR bonito, mas cinco decisões de quatro frentes dependem dele.
-
-## Decisões de arquitetura de navegação
-
-O produto **abre na frota**, não num canal. As empresas são lugares que você visita a partir dela — invertendo quem é anfitrião e quem é hóspede. Dois motivos:
-
-1. A aposta de que as pessoas vão conversar mais com agentes do que com outros humanos, e o agente vira centralizador de conversas.
-2. O produto precisa servir quem **não quer trocar de ferramenta de chat**. A área de espaço de trabalho é opcional; dá para adotar só a frota e manter o Slack da empresa.
-
-A **calha** de 88px à direita mostra quem precisa de você. Ela é reservada permanentemente no grid — nunca muda de largura, e por isso não tem como atrapalhar o campo de texto.
-
-## Referências estudadas
-
-O desenho saiu da leitura de dois produtos open source e da documentação de um terceiro, não de suposição:
-
-- **[Grok Bot](https://docs.x.ai/grok-bot/overview)** (xAI) — a régua de minimalismo. Seis conceitos no vocabulário inteiro. Se uma capacidade não cabe em “conversa com o agente” ou “detalhes da conversa”, ela não vira tela de primeiro nível.
-- **[OpenMausBot](https://github.com/milind-soni/OpenMausBot)** (~248k linhas TS) — a camada de agentes: normalização de múltiplos provedores num stream canônico, modos de aprovação fail-closed, e o teto de conversa que escala para a pessoa em vez de tentar de novo.
-- **[Buzz](https://github.com/block/buzz)** (~367k linhas Rust, Block) — o modelo de colaboração: agentes como membros com escopo por canal, e workflows com aprovação humana como passo de primeira classe.
-
-Cada afirmação técnica no documento foi verificada contra o código, com caminho de arquivo. Onde a documentação e o código divergiam, o código venceu.
-
-## Estado
-
-Há um pacote TypeScript único (ADR-018) com `core/`, `contracts/`, `db/`, `http/` e `web/`. A fatia **Meus agentes** já sobe localmente: persistência JSON cifrada para concessões, rotina normalizada para cron + fuso IANA, gate de aprovação ligado por padrão.
-
-O faseamento estimado é de **27 a 29 semanas** para os oito épicos originais, mais **11 a 15 semanas** para os quatro épicos de infraestrutura — com dois deles (sobreviver ao restart, credenciais por tenant) obrigatoriamente na primeira fase, porque são propriedades do fundamento e são caros de adicionar depois.
-
-## Próximos passos
-
-- [ ] **Fixar a forma do registro de decisão** e os identificadores — bloqueia a primeira migração
-- [ ] **Definir com o jurídico o que pode entrar na trilha imutável** — retenção e direito ao esquecimento antes do schema
-- [ ] Decidir modo do pooler, tamanho do pool e rolling *vs* recreate no PaaS
-- [ ] Métricas de sucesso por épico — precisa de números reais da operação
-- [ ] Validar a procuração com duas ou três pessoas antes de soltar para o time
+- [AGENTS.md](AGENTS.md): comandos, as regras que o código trava, desvios.
+- [docs/adr/](docs/adr/): 29 decisões com gatilho de reversão; refinamentos datados (0003, 0004) em ADR-003 e ADR-007.
+- [docs/product-spec.html](docs/product-spec.html), [docs/core-features.md](docs/core-features.md), [docs/internal-first.md](docs/internal-first.md), [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md), [docs/spikes/serializacao-do-turno.md](docs/spikes/serializacao-do-turno.md).
+- Protótipos: [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) (a linguagem visual da web), [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).

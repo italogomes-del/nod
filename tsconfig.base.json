@@ -13,10 +13,6 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "baseUrl": ".",
-    "paths": {
-      "contracts/*": ["contracts/*"],
-      "core/*": ["core/*"]
-    }
+    "erasableSyntaxOnly": true
   }
 }

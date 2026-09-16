@@ -1,0 +1,77 @@
+import { assertFusoIana, parseCron5, proximaJanela, RotinaInvalida } from "./rotina-janela.ts";
+
+/**
+ * Regra 9: NENHUM parser de intenção sobrevive aqui. interpretarRotinaTexto/textoTemRecorrencia
+ * foram apagados em 2026-09-16 — a rotina chega TIPADA pela ferramenta criar_rotina (o modelo
+ * interpreta; o domínio valida e normaliza). Ficam o resumo humano e o validador.
+ */
+export type RotinaNormalizada = {
+  cron: string;
+  fusoIana: string;
+  instrucao: string;
+  fonte: string;
+  entregavel: string;
+  limitesAprovacao: string;
+  politicaSemDado: string;
+  /** Gate SEMPRE ligado: não sai do texto (E7.3). */
+  exigeAprovacao: true;
+  proximaExecucao: number;
+  resumo: string;
+};
+
+const NOMES_DIA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"] as const;
+const NOMES_MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"] as const;
+
+function hhmm(hora: number, minuto: number): string {
+  return `${String(hora).padStart(2, "0")}:${String(minuto).padStart(2, "0")}`;
+}
+
+/** Resumo em português do cron, com fuso nomeado: "dias úteis às 08:00 (America/Sao_Paulo)". */
+export function resumoCron(cron: string, fusoIana: string): string {
+  const c = parseCron5(cron);
+  const horas = hhmm(c.hora, c.minuto);
+  const partes: string[] = [];
+  if (c.diasSemana === "uteis") partes.push("dias úteis");
+  else if (c.diasSemana !== "*") partes.push(`toda ${c.diasSemana.map((d) => NOMES_DIA[d] ?? String(d)).join(", ")}`);
+  if (c.diasMes !== "*") partes.push(`dia ${c.diasMes.join(", ")}`);
+  if (c.mes !== "*") partes.push(`de ${c.mes.map((m) => NOMES_MES[m - 1] ?? String(m)).join(", ")}`);
+  const quando = partes.length === 0 ? "todo dia" : partes.join(" ");
+  return `${quando} às ${horas} (${fusoIana})`;
+}
+
+function textoObrigatorio(valor: unknown, campo: string): string {
+  if (typeof valor !== "string" || valor.trim() === "") throw new RotinaInvalida("entrada_invalida", `${campo} vazio`);
+  return valor.trim();
+}
+
+/**
+ * Valida a rotina TIPADA vinda de criar_rotina e devolve a forma persistível com próxima execução.
+ * Lança fuso_invalido / cron_sem_futuro / entrada_invalida; nunca lê intenção de texto.
+ */
+export function validarRotinaNormalizada(entrada: {
+  cron: string;
+  fusoIana: string;
+  instrucao: string;
+  fonte: string;
+  entregavel: string;
+  limitesAprovacao: string;
+  politicaSemDado: string;
+  agora: number;
+}): RotinaNormalizada {
+  assertFusoIana(entrada.fusoIana);
+  const cron = textoObrigatorio(entrada.cron, "cron");
+  parseCron5(cron);
+  const proximaExecucao = proximaJanela({ cron, fusoIana: entrada.fusoIana, agora: entrada.agora });
+  return {
+    cron,
+    fusoIana: entrada.fusoIana,
+    instrucao: textoObrigatorio(entrada.instrucao, "instrucao"),
+    fonte: textoObrigatorio(entrada.fonte, "fonte"),
+    entregavel: textoObrigatorio(entrada.entregavel, "entregavel"),
+    limitesAprovacao: textoObrigatorio(entrada.limitesAprovacao, "limitesAprovacao"),
+    politicaSemDado: textoObrigatorio(entrada.politicaSemDado, "politicaSemDado"),
+    exigeAprovacao: true,
+    proximaExecucao,
+    resumo: resumoCron(cron, entrada.fusoIana),
+  };
+}

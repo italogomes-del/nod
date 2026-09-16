@@ -1,15 +1,68 @@
+# Três jobs paralelos (Leapy §9): lint+typecheck sem banco, unit sem banco, integração com Postgres.
+# O job de integração MIGRA e NÃO roda seed (Leapy §6): cada teste cria as próprias linhas.
+# CI=1 (padrão do GitHub) faz o skip de integração virar ERRO em tests/helpers/integracao.ts.
+# Actions pinadas por SHA imutável (verificados em 2026-09-16 na API do GitHub):
+#   actions/checkout v4.2.2  = 11bd71901bbe5b1630ceea73d27597364c9af683
+#   actions/setup-node v4.4.0 = 49933ea5288caeca8642d1e84afbd3f7d6820020
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, "rebuild/**"]
   pull_request:
+
 jobs:
-  check:
+  lint-typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "22"
+          node-version: "24.19.0"
+          cache: npm
       - run: npm ci
-      - run: npm run ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run fence:domain
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL_DONO: postgres://nod_dono:nod@127.0.0.1:5434/nod
+      DATABASE_URL_TEST: postgres://nod_app:nod@127.0.0.1:5434/nod_test
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+      - run: npm ci
+      # O service container não monta o init do compose: os DOIS roles e os DOIS bancos entram via psql.
+      - run: psql postgres://postgres:postgres@127.0.0.1:5434/postgres -v ON_ERROR_STOP=1 -f infra/postgres/init/01_roles.sql
+      - run: npm run db:migrate:test
+      - run: npm run test:integration
+      - run: npm run test:conformidade
+      - run: npm run test:concurrency

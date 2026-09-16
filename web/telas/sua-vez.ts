@@ -1,0 +1,91 @@
+import type { SuaVezDto } from "../../src/contracts/api.ts";
+import type { Estado } from "../estado/reducer.ts";
+import { botao, esc } from "../lib/render.ts";
+import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
+
+type Item = SuaVezDto["itens"][number];
+
+const TIPO_HUMANO: Record<Item["decisao"]["tipo"], string> = {
+  aprovacao: "aprovação em lista",
+  acesso: "pedido de acesso",
+  retomar_turno: "turno interrompido",
+  gate_rotina: "gate de rotina",
+  perfil: "perfil proposto",
+  rotina: "rotina proposta",
+  pergunta: "pergunta",
+  falta_de_dado: "falta um dado",
+  permissao: "pedido de permissão",
+};
+
+/**
+ * Item de aprovação em LISTA tipada (E4.1/E4.2): checkboxes com contador ao vivo, item de origem
+ * sensível nasce DESMARCADO com a justificativa em primeira pessoa, texto editável por item (E4.3).
+ * Marcar um sensível exige a pessoa — é ela quem está clicando (CHECK marcado_por no banco).
+ */
+function renderAprovacao(item: Item, aberta: boolean): string {
+  const itens = item.itensAprovacao;
+  const marcados = itens.filter((i) => i.selecionado).length;
+  const linhas = itens
+    .map(
+      (i) => `<li class="ap-item${i.origemSensivel ? " sensivel" : ""}">
+        <label><input type="checkbox" data-item="${esc(i.id)}" ${i.selecionado ? "checked" : ""} ${aberta ? "" : "disabled"} /> <b>${i.idx + 1}.</b> <code>${esc(i.destino.conector)}.${esc(i.destino.ferramenta)}</code></label>
+        <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" ${aberta ? "" : "disabled"} />
+        ${i.origemSensivel ? `<div class="justificativa">${esc(i.justificativa ?? "veio de um conector que toca dado de aprendiz: desmarquei; só você marca.")}</div>` : ""}
+        ${i.desfecho ? `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>` : ""}
+      </li>`,
+    )
+    .join("");
+  return `<ul class="ap-lista">${linhas}</ul>
+    ${aberta ? `<div class="acoes">${botao("decidir-aprovacao", `Aprovar <span data-contador>${marcados}</span> de ${itens.length}`, { classe: "pri", id: item.decisao.id })}${botao("decidir-aprovacao-nenhum", "Não aprovar nada", { id: item.decisao.id })}</div>` : ""}`;
+}
+
+function renderAcoes(item: Item, aberta: boolean): string {
+  const d = item.decisao;
+  if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
+  switch (d.tipo) {
+    case "aprovacao":
+    case "gate_rotina":
+      return renderAprovacao(item, true);
+    case "retomar_turno":
+      return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}</div>`;
+    case "acesso":
+    case "perfil":
+    case "rotina":
+      return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    case "pergunta":
+    case "falta_de_dado":
+    case "permissao":
+      return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="${esc(d.tipo === "falta_de_dado" ? "o dado que faltava" : "sua resposta em texto")}" />${botao("responder", "Responder e retomar", { classe: "pri", id: d.id })}</div>`;
+  }
+}
+
+function renderItem(item: Item, estado: Estado): string {
+  const d = item.decisao;
+  const aberta = item.estadoColuna !== "vencido";
+  const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · recusa automática ${emQuanto(item.recusaAutomaticaEmMs)}` : `venceu ${d.desfecho ? esc(d.desfecho.tipo.replaceAll("_", " ")) : ""}`;
+  const conversa = estado.frota?.agentes.find((a) => a.id === d.agenteId);
+  return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
+    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span><b>${esc(item.agenteNome)}</b><span class="mudo">${relogio}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
+    <div class="dec-frase">${esc(d.frase)}</div>
+    ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false) : ""}
+    ${renderAcoes(item, aberta)}
+    <div class="dec-rodape">${conversa ? botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } }) : ""}</div>
+  </li>`;
+}
+
+/**
+ * "Sua vez" por pessoa (ADR-007): mais antiga no topo, reaberta volta ao topo, vencida em cinza com
+ * reabrir e nunca suprimida; "Nada esperando por você · última decisão …" quando vazia; motor fora do
+ * ar entra como item ESCRITO (E3.3).
+ */
+export function renderSuaVez(estado: Estado): string {
+  const sv = estado.suaVez;
+  if (!sv) return `<section class="tela"><header class="tela-cab"><h1>Sua vez</h1></header><p class="mudo">carregando…</p></section>`;
+  const fora = sv.foraDoAr.map((f) => `<li class="decisao dec-fora"><span class="tag tag-cinza">fora do ar</span> ${esc(foraDoArDesde(f.nome, f.desde))}</li>`).join("");
+  const abertos = sv.itens.filter((i) => i.estadoColuna !== "vencido").length;
+  return `<section class="tela tela-sua-vez">
+    <header class="tela-cab"><h1>Sua vez${abertos ? ` · ${abertos}` : ""}</h1><span class="chip">mais antiga no topo · vencida fica em cinza</span></header>
+    ${sv.vazio && sv.foraDoAr.length === 0 ? `<p class="vazio">${esc(nadaEsperando(sv.ultimaDecisaoEm, estado.agora))}</p>` : ""}
+    <ul class="lista">${fora}${sv.itens.map((i) => renderItem(i, estado)).join("")}</ul>
+  </section>`;
+}

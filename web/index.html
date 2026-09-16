@@ -3,15 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Meus agentes — nod</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+    <title>nod</title>
     <link rel="stylesheet" href="/estilos.css" />
   </head>
   <body>
-    <div class="app" id="app"></div>
-    <div class="toast" id="toast" hidden></div>
+    <!-- Regiões fixas (web/lib/render.ts): cada uma só é regravada quando o HTML muda; o composer nunca é regravado dentro da mesma conversa. -->
+    <div class="app">
+      <nav class="rail" id="rail" aria-label="Navegação"></nav>
+      <aside class="sidebar" id="sidebar" aria-label="Bots e salas"></aside>
+      <main class="stage">
+        <header class="cabecalho" id="cabecalho"></header>
+        <div id="erro"></div>
+        <section class="timeline-wrap" id="timeline"></section>
+        <footer class="composer-wrap" id="composer"></footer>
+      </main>
+    </div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>
