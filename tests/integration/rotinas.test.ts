@@ -31,8 +31,10 @@ describeIntegracao("rotinas: proposta tipada, confirmação, fuso nomeado, pausa
       const decisao = await repos.decisoes.buscar(r.data.proposta_id);
       expect(decisao).toMatchObject({ tipo: "rotina", estado: "pendente", agenteId, conversaId });
       await repos.events.gravarComOutbox(r.events ?? []);
-      const kinds = await trx<{ kind: string }[]>`select kind from events where conversa_id = ${conversaId} order by created_at`;
-      expect(kinds.map((k) => k.kind)).toEqual(["proposta_criada", "decisao_criada"]);
+      // medido em 2026-09-16: dois eventos da MESMA transação compartilham created_at (now() é transacional),
+      // então nenhuma ordem é garantida entre eles — compara-se como CONJUNTO. Falhou 2x em 3 execuções dos 4 projetos juntos.
+      const kinds = await trx<{ kind: string }[]>`select kind from events where conversa_id = ${conversaId}`;
+      expect(kinds.map((k) => k.kind).sort()).toEqual(["decisao_criada", "proposta_criada"]);
     });
   });
 

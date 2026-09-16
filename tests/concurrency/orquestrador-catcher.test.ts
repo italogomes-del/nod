@@ -134,8 +134,12 @@ describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process):
       expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => g.custoUsd)).toEqual([0.0207631]);
       expect((await repos.catcher.listar(turno?.id ?? "")).map((r) => r.tipo)).toEqual(["tool_use"]);
       expect((await repos.conversas.buscar(criado.conversa.id))?.sessaoCli).toBe(ciclo?.resultado.sessaoCli);
-      const outbox = await trx<{ tipo: string }[]>`select tipo from events_outbox where owner_id = ${PESSOA.pessoaId} order by criado_em`;
-      expect(outbox.map((o) => o.tipo)).toEqual(["agente_atualizado", "mensagem_criada", "mensagem_criada", "turno_criado", "mensagem_criada", "turno_encerrado"]);
+      // medido em 2026-09-16: os seis eventos nascem na MESMA transação, então compartilham criado_em (now() é
+      // transacional) e events_outbox não tem coluna sequencial — nenhuma ordem é garantida entre eles. Falhou 2x em
+      // 3 execuções dos quatro projetos juntos ('mensagem_criada' antes de 'agente_atualizado'). Compara-se a
+      // MULTIPLICIDADE por tipo, que é o que o ciclo garante; a ordem de despacho é assunto do despachante.
+      const outbox = await trx<{ tipo: string }[]>`select tipo from events_outbox where owner_id = ${PESSOA.pessoaId}`;
+      expect(outbox.map((o) => o.tipo).sort()).toEqual(["agente_atualizado", "mensagem_criada", "mensagem_criada", "mensagem_criada", "turno_criado", "turno_encerrado"]);
     });
 
     await ponte.entregar({ turnoId: ciclo?.plano.turnoId ?? "", machineId, seqLocal: 1, fala: { tipo: "texto", texto: "de novo" }, resultado: ciclo?.resultado as ResultadoTurno });

@@ -43,8 +43,10 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       expect((await repos.decisoes.buscar(gate?.id ?? ""))?.estado).toBe("vencida");
       // Nenhum efeito externo: o conector falso não foi chamado.
       expect(chamadas.conectores).toEqual([]);
-      const kinds = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turnoId} order by created_at`;
-      expect(kinds.map((k) => k.kind)).toEqual(["decisao_vencida", "rotina_executou"]);
+      // medido em 2026-09-16: dois eventos da MESMA transação compartilham created_at (now() é transacional),
+      // então nenhuma ordem é garantida entre eles — compara-se como CONJUNTO. Falhou 2x em 3 execuções dos 4 projetos juntos.
+      const kinds = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turnoId}`;
+      expect(kinds.map((k) => k.kind).sort()).toEqual(["decisao_vencida", "rotina_executou"]);
 
       // Erro técnico numa outra janela é 'falhou', distinto de 'passou_em_branco'.
       const r2 = await dispararRotina(deps, { rotina: (await repos.rotinas.buscar(rotina?.id ?? ""))!, instanteAgendado: JANELA + 86_400_000, machineId: randomUUID(), executor: "catcher" });
