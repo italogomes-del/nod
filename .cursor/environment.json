@@ -1,0 +1,17 @@
+{
+  "name": "nod — docs & prototypes",
+  "install": "echo 'nod has no build step yet: the docs and prototypes are self-contained HTML served as static files. Nothing to install.'",
+  "terminals": [
+    {
+      "name": "static-server",
+      "command": "cd /workspace && python3 -m http.server 8000 --bind 0.0.0.0",
+      "description": "Serves the repository (docs/ and prototypes/) as a static site at http://localhost:8000. Open /prototypes/fleet-is-home.html for the current prototype and /docs/product-spec.html for the product spec."
+    }
+  ],
+  "ports": [
+    {
+      "name": "static site",
+      "port": 8000
+    }
+  ]
+}
