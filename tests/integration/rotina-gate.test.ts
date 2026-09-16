@@ -1,0 +1,93 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
+import { montarPlano } from "../../src/domain/plano-turno.ts";
+import type { Transacao } from "../../src/shared/types.ts";
+import { rotinaDoTurno } from "../../src/use-cases/apoio-l7.ts";
+import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
+import { depsSobre } from "../helpers/deps-l7.ts";
+import { agenteComConversa } from "../helpers/fabricas.ts";
+import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const TZ = "America/Sao_Paulo";
+const JANELA = Date.parse("2026-09-17T08:00:00-03:00");
+const AGORA = JANELA + 30_000;
+
+describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, zero efeito externo, política no plano (EMENDA 15)", () => {
+  it("gate vencido sem resposta → execução 'passou_em_branco' motivo ninguem_respondeu_o_gate, mensagem 'nada foi enviado', zero chamadas no conector falso; erro técnico → 'falhou'", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => AGORA });
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
+      const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      const turnoId = r.data.turno.id;
+      // A rotina rodou, chamou pedir_aprovacao e encerrou: o gate (tipo gate_rotina, ligado ao turno) ficou em Sua vez.
+      const tx: Transacao = (fn) => fn(trx);
+      const gate = await repos.decisoes.criar({ tipo: "gate_rotina", agenteId, conversaId, turnoId, prazoDecisaoEm: AGORA - 60_000, frase: "1 e-mail para enviar" });
+      expect((await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
+
+      const varrido = await varrerPessoa(MARLON, tx, { services: deps.services, useCases: deps.useCases, agora: () => AGORA });
+      expect(varrido.vencidas).toEqual([gate?.id]);
+      expect(varrido.passaramEmBranco).toEqual([rotina?.id]);
+      const execucoes = await repos.rotinaExecucoes.listar(rotina?.id ?? "");
+      expect(execucoes.map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["passou_em_branco", "ninguem_respondeu_o_gate", turnoId]]);
+      const mensagens = await repos.mensagens.listarDaConversa(conversaId);
+      const branco = mensagens.find((m) => m.kind === "rotina_execucao");
+      expect(branco?.texto).toContain("A rotina passou em branco: ninguém respondeu o gate. Nada foi enviado.");
+      expect(branco?.payload).toEqual({ kind: "rotina_execucao", rotinaId: rotina?.id, instanteAgendado: JANELA, desfecho: "passou_em_branco" });
+      expect(mensagens.find((m) => m.kind === "sistema")?.texto).toContain("Esta decisão venceu em");
+      expect((await repos.decisoes.buscar(gate?.id ?? ""))?.estado).toBe("vencida");
+      // Nenhum efeito externo: o conector falso não foi chamado.
+      expect(chamadas.conectores).toEqual([]);
+      const kinds = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turnoId} order by created_at`;
+      expect(kinds.map((k) => k.kind)).toEqual(["decisao_vencida", "rotina_executou"]);
+
+      // Erro técnico numa outra janela é 'falhou', distinto de 'passou_em_branco'.
+      const r2 = await dispararRotina(deps, { rotina: (await repos.rotinas.buscar(rotina?.id ?? ""))!, instanteAgendado: JANELA + 86_400_000, machineId: randomUUID(), executor: "catcher" });
+      if ("janelaDeOutro" in r2.data) throw new Error("deveria disparar");
+      const falhou = await registrarDesfechoRotina(deps, { turnoId: r2.data.turno.id, desfecho: "falhou", motivo: "erro_max_turns" });
+      expect("execucao" in falhou.data && falhou.data.execucao.desfecho).toBe("falhou");
+      // As duas execuções têm o mesmo `em` (relógio injetado): a ordem entre elas é por id, então compara-se como conjunto.
+      expect((await repos.rotinaExecucoes.listar(rotina?.id ?? "")).map((e) => e.desfecho).sort()).toEqual(["falhou", "passou_em_branco"]);
+    });
+  });
+
+  it("o plano de um turno de rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; rotinaDoTurno acha a rotina pela janela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
+      const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      const ligacao = await rotinaDoTurno(repos, r.data.turno.id);
+      expect(ligacao?.rotina.id).toBe(rotina?.id);
+      expect(ligacao?.instanteAgendado).toBe(JANELA);
+      const agente = await repos.agentes.buscar(agenteId);
+      const plano = montarPlano({
+        turno: r.data.turno,
+        agente: agente!,
+        memorias: [],
+        concessoes: [],
+        conectores: [],
+        modo: "rotina",
+        confianca: r.data.turno.entradaConfianca,
+        profundidade: 0,
+        inventario: { estado: "pronto", versao: "x", em: AGORA },
+        executor: "catcher",
+        sessaoCli: null,
+        pessoaNome: "Marlon",
+        rotina: { exigeAprovacao: ligacao?.rotina.exigeAprovacao ?? false },
+        agora: AGORA,
+      });
+      expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["lembrar", "pedir_a_pessoa", "pedir_aprovacao"]);
+      // turno de conversa comum não liga a flag
+      const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      expect(await rotinaDoTurno(repos, comum?.id ?? "")).toBeNull();
+    });
+  });
+});
