@@ -48,3 +48,10 @@ barata para o trigger e para o CHECK (CREATE/DROP), cara para o hash-chain. Adic
 
 Quando um cliente grande exigir laudo de integridade da trilha em contrato, ou no primeiro processo em que uma decisão registrada pelo nod virar prova. O caminho intermediário barato é encadear APENAS a tabela de decisões, usando a PK sequencial como ordem e verificando em lote fora do caminho quente — sem advisory lock.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Acrescentar que todo teste de imutabilidade abre SAVEPOINT antes da operação proibida, e que o helper de teste expõe isso desde o primeiro teste. No Postgres, exceção levantada por trigger deixa a transação ABORTADA: como o withRollback é UM envelope por teste, o teste 'tenta atualizar a trilha, espera erro, depois verifica que a linha original continua lá' NÃO funciona — a verificação morre com 25P02. Segundo ponto: declarar o CHECK no schema TypeScript, não só na migration, com nome IDÊNTICO nos dois lados.
+
+**Motivo.** Verifiquei o padrão real da Leapy em cep.repo.test.ts:85-105: o `rejects.toThrow()` é sempre o ÚLTIMO ato do envelope, nada é verificado depois. Eles CONTORNARAM o problema em vez de resolvê-lo, e o nod não pode contornar. Os 4 CREATE TRIGGER das 124 migrations são todos de normalização (BEFORE INSERT/UPDATE que reescreve valor), nunca de imutabilidade append-only — não há precedente para copiar. O mecanismo da transação abortada, porém, está documentado com cicatriz em jovens.repo.ts:1049, onde eles usaram transaction aninhada (que emite SAVEPOINT) para sobreviver a um 'relation does not exist'. Sobre o CHECK: db:push derrubou views em 2026-05-22 e CHECK constraints não declarados no TS em 2026-07-25.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).

@@ -53,3 +53,18 @@ cara para introduzir o core puro depois (desfazer I/O entranhado no meio de regr
 
 Quando core/ passar de ~25 arquivos (precisa de subpastas), quando um case precisar de await para decidir o próximo estado (a fronteira está no lugar errado e a decisão pertence ao servidor), ou quando aparecer um eslint-disable de regra de fronteira num PR — ou a fronteira está errada ou o PR está, e vale a conversa nas duas hipóteses.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** A decisão de pacote único está CONFIRMADA e sai reforçada — não reabrir. Mudam duas coisas. Primeira, o MECANISMO: a guarda é composta, não única. O tsconfig sem @types/node e sem lib DOM prova a ausência de Node e DOM, e isso é barato e real; mas nenhum tsconfig consegue dizer 'use-cases não importa repositories'. Essa segunda fronteira precisa de no-restricted-imports por glob de qualquer jeito, e o ADR deve nomear qual metade cada mecanismo cobre. Segunda, o ESCOPO da pureza: defina-a como propriedade do DIRETÓRIO src/domain/ com tsconfig próprio, não do pacote inteiro. Verifiquei que tsconfig.base.json da Leapy já tem lib ES2022 sem DOM para todo o monorepo, e é packages/core/tsconfig.json que DESFAZ a pureza acrescentando "types": ["node"] — o pacote chamado core não passaria no critério do próprio ADR-018. A pureza real vive só em src/domain/.
+
+**Motivo.** Os 16 blocos `files:` do eslint.config.mjs são todos globs de diretório; nenhum depende de resolução de pacote. E a fronteira que só workspaces dariam não segurou: 99 imports por caminho profundo dentro de packages/core/src furam o barril público do @leapy/db.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).
+
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Nomear quatro peças que são baratas no dia zero e impraticáveis de retroagir: (1) o factory de repositórios tipado como `Db | Tx` na PRIMEIRA linha escrita; (2) `no-console` ligado no primeiro commit; (3) proibição de DELETE FROM em teste; (4) runtime pinado por mise.
+
+**Motivo.** Cada uma tem cicatriz medida. A mais direta contra o ADR-018 é o cast: contei 352 ocorrências de `as unknown as Db` nos testes da Leapy, porque createSystemRepos(db: Db) não aceita o handle de transação. Um `as unknown as` é literalmente a brecha que desliga a garantia do compilador que o ADR-018 quer, e ela mora exatamente no código que deveria dar confiança. Custa cinco minutos hoje.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).

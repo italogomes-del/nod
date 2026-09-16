@@ -49,6 +49,7 @@ Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e 
 | [`docs/adr/`](docs/adr/) | **18 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
 | [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
 | [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
+| [`docs/inherited-from-leapy.md`](docs/inherited-from-leapy.md) | **O que herdamos do monorepo da Leapy.** 14 práticas verificadas nos arquivos, o veredito sobre pacote único *vs* workspaces, e os 8 ADRs que mudaram por causa disso. |
 
 Os HTML são autocontidos — abra no navegador, sem build.
 

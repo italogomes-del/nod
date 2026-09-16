@@ -43,3 +43,10 @@ barata para o tamanho do pool (variável de ambiente), média para o modo (troca
 
 Quando a métrica de checkout do pool mostrar espera consistente, ou quando a segunda réplica virar necessidade — aí rolling volta à mesa junto com a mudança do buffer de replay.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Incorporar duas consequências operacionais que a Leapy já pagou e que o ADR-001 não registra: com pooler em modo transação é obrigatório `prepare: false` (o pooler não suporta prepared statements), e o parâmetro que de fato importa contra esgotamento não é o tamanho do pool e sim o `idle_timeout`.
+
+**Motivo.** packages/db/src/client.ts documenta as duas com data e sintoma. Importa ao nod porque interage com o ADR-003: toda leitura escopada abre transação explícita com SET LOCAL, e sem prepared statements o parse acontece toda vez — o custo por query sobe e ninguém mediu quanto.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).

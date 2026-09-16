@@ -48,3 +48,10 @@ barata para LIGAR hoje (ALTER TABLE por tabela, sem reescrita de dados), irrever
 
 Quando EXPLAIN mostrar a policy atrapalhando plano numa consulta quente, ou quando aparecer consulta operacional legítima entre clientes. A resposta nos dois casos é role separado com policy própria ou VIEW com security_invoker — nunca desligar RLS nem introduzir SECURITY DEFINER sem entrar na lista auditada.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Confirmado e reforçado, com três refinamentos operacionais. (1) O helper único vira DUAS funções — openTenantTx e bindTenant — para resolver o conflito de propriedade do BEGIN entre o db/tx.ts e o withRollback. (2) O tenant é parâmetro obrigatório, sem default. (3) O compose cria dois roles desde o primeiro commit, e o gate de conformidade assere `rolbypassrls = false` no role da suíte.
+
+**Motivo.** Duas evidências. A negativa: a Leapy não tem RLS para isolamento e isso já a mordeu em produção — CHANGELOG 0.19.0.0 documenta 71 aprendizes fantasmas de outras contas numa coleta e um endpoint que inseria qualquer aprendiz na audiência de qualquer coleta, disparando emails cross-conta; a resposta foi construir MAIS camada de aplicação. Há ainda um TODO(rbac-follow-up) com doze repositórios sem scope, admitindo 'fail-closed por disciplina, não por construção'. A positiva, que corrige as investigações: EXISTE precedente de SET LOCAL na Leapy, e é o padrão certo. packages/db/tests/cadastro-formato-canonico.test.ts trava por teste que a marca é de TRANSAÇÃO e não de sessão, com a justificativa exata que o nod precisa: 'SET sem LOCAL vazaria para a próxima consulta da mesma conexão, e a conexão é reusada pelo pooler'. Isso reduz bastante o risco do spike.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).

@@ -43,3 +43,10 @@ cara para introduzir depois, barata para refinar. A função é pura e trocável
 
 Quando aparecer o primeiro conector cuja sensibilidade varia por CHAMADA e não por fonte. Aí a classificação deixa de ser propriedade da concessão e vira propriedade da resposta, e o lugar certo passa a ser o proxy MCP (ADR-013), que já vê a resposta.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Inverter o default: a mensagem de erro só sai para o cliente se for declarada segura. Na Leapy a `message` do DomainError vai CRUA para o browser e o detalhe técnico depende de alguém lembrar de pôr em `options.cause`.
+
+**Motivo.** Funciona lá porque alguém lembrou — há inclusive uma regra de herança deliberada de que SlackSendError NUNCA estende DomainError, justamente para não vazar a resposta do Slack. No nod isso colide com o ADR-002, que decidiu default fechado por ORIGEM precisamente para não depender de lembrar: uma mensagem interpolada com dado pessoal sai pela resposta HTTP sem passar por classificação nenhuma. E protege o ADR-004, cujo CHECK proíbe texto livre na trilha para poder apagar a prosa em separado — de nada adianta se a mesma prosa vaza pela resposta de erro.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).

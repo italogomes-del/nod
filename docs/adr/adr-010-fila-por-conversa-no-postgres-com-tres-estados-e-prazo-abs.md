@@ -48,3 +48,10 @@ barata para a tecnologia, cara para a semântica. Nascer sem o estado 'despachan
 
 Quando a contenção na tabela aparecer no perfil de latência — o que, com 70 clientes, não deve acontecer cedo. Antes disso, se rolling deploy voltar à mesa (ADR-001): a exclusão por conversa já estará no banco, que é o ponto.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Confirmado com evidência de quem tinha o fornecedor contratado, mais um refinamento que falta: a política de ABANDONO exige DUAS condições simultâneas (tentativas E idade), nunca uma só. E 'itens abandonados' entra nas sete métricas do ADR-017.
+
+**Motivo.** A Leapy PAGA Inngest e ainda assim a durabilidade mora no events_outbox do Postgres, escrito na mesma transação do domínio. Se a fila externa bastasse, a tabela não existiria. A regra de abandono é cicatriz: só o teto esvazia a fila inteira numa queda do fornecedor porque o cron roda a cada minuto sem backoff; só a idade nunca abandona a linha envenenada que falha rápido e para sempre.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).

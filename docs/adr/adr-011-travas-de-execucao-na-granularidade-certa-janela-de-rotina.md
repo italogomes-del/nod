@@ -48,3 +48,10 @@ barata para adicionar as constraints hoje (são duas UNIQUE), cara depois: exige
 
 Quando a granularidade de expiração precisar ficar abaixo de 30s, ou quando o catch-up de rotinas atrasadas começar a produzir rajadas — aí a conversa é sobre o que fazer com janelas perdidas, não sobre a trava.
 
+## Revisão — investigação do monorepo da Leapy
+
+**O que muda.** Registrar que a estratégia de testes do nod tem TRÊS modos, não dois: unitário puro, integração-sob-rollback (a esmagadora maioria) e concorrência-com-duas-conexões (poucos arquivos, com limpeza própria). Trava de reivindicação só se prova com duas transações simultâneas disputando a mesma linha, e o withRollback tem um envelope só.
+
+**Motivo.** É limite da técnica, não defeito, e precisa ser escrito para ninguém tentar espremer o teste do ADR-011 dentro do rollback e concluir erradamente que a trava funciona. A Leapy tem o precedente do modo correto em update-vaga-empresa-notice.test.ts, que abre duas transações de verdade e usa `SET LOCAL lock_timeout = '250ms'` para provar o bloqueio. Junto vem o aviso medido de nunca apertar o `max` do pool, que enfileira transações concorrentes e deixa esses testes verdes provando nada.
+
+Ver [o que o nod herda da Leapy](../inherited-from-leapy.md).
