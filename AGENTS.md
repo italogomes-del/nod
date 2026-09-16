@@ -12,9 +12,14 @@ npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS pr
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
+npm run db:seed             # scripts/seed.ts (L3): identidade e exemplos como nod_dono, idempotente por id determinístico
+npm start                   # node src/adapters/http/server.ts — Node 24 roda .ts direto; é o mesmo CMD do Dockerfile
 ```
 
 O pre-commit roda só `lint-staged` (eslint --fix nos .ts). O gate pesado é `npm run check`, antes do push.
+O hook é instalado pelo `prepare` do `npm ci`/`npm install`; confira com `ls .git/hooks/pre-commit`
+(observado em 2026-09-16: o primeiro commit da fundação saiu SEM o hook porque ninguém tinha rodado
+`npm run prepare` — um `git commit` que não imprime a linha do lint-staged é sinal de hook ausente).
 
 ## Aviso: nvm/asdf ganham do mise
 
@@ -29,6 +34,11 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
 - **Toda transação tem tenant E pessoa.** `abrirTxEscopada(db, {tenantId, pessoaId})` em produção;
   `withRollback(escopo, fn)` + `vincularEscopo` nos testes. Vazio lança `escopo_vazio`. Ler sem escopo
   falha fechado no Postgres ("unrecognized configuration parameter"), nunca devolve zero linhas.
+  `abrirTxEscopada` só aceita o POOL: passar uma transação aberta não compila e lança
+  `estado_invalido` (o SET LOCAL num SAVEPOINT sobrevive ao RELEASE — medido em 2026-09-16).
+- **`tenants`/`pessoas` são só leitura para nod_app.** Quem escreve identidade é o seed (nod_dono).
+  Teste que precisa de pessoas usa `withRollbackDono` de `tests/helpers/db-dono.ts` — e esse helper
+  nunca lê tabela escopada.
 - **Toda tabela nova passa por `nod_escopar_tabela(tbl, perna_extra)`** na migração, senão
   `tests/conformidade/rls.test.ts` acusa (lê pg_catalog; exceções têm motivo escrito em `gate-rls.ts`).
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.

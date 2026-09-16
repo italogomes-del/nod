@@ -99,7 +99,8 @@ Cada afirmação técnica no documento foi verificada contra o código, com cami
 Um pacote TypeScript único (ADR-018) no esqueleto vinculante de [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md): `src/{domain,contracts,shared,db,repositories,services,use-cases,adapters/{http,fundo,executor,mcp-proxy},obs}` e `tests/{helpers,unit,integration,conformidade,concurrency}`. O que já vale, provado por teste contra o Postgres real:
 
 - migração `0001_fundacao.sql` no eixo PESSOA (`nod_escopar_tabela` com policy PERMISSIVE por pessoa + RESTRICTIVE por tenant), trilha imutável por trigger + CHECK, `events` particionada em 12 meses sem catch-all, outbox transacional com abandono por duas condições;
-- `abrirTxEscopada`/`vincularEscopo` com tenant E pessoa obrigatórios; `withRollback` + `expectRejected` (SAVEPOINT);
+- `abrirTxEscopada`/`vincularEscopo` com tenant E pessoa obrigatórios (a fábrica só aceita o pool: escopo aninhado por SAVEPOINT vazaria após o RELEASE); `withRollback` + `expectRejected` (SAVEPOINT); `withRollbackDono` só para DDL descartável e identidade;
+- modo de concorrência com duas conexões de verdade (`tests/concurrency/`): escopo por conexão e trava do runner de migração — sem `--passWithNoTests`;
 - gates `tests/conformidade/{rls,rls-negativo,trilha,fronteiras}` lendo o catálogo e o eslint;
 - servidor `node:http` com roteador (`/api/t/:tenantId/…`, `/api/interno/…`), sessão stub por cookie assinado, erros com código fechado.
 

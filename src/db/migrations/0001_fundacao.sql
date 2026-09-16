@@ -12,7 +12,8 @@ CREATE TYPE autor_tipo AS ENUM ('pessoa', 'agente');
 -- ---------------------------------------------------------------------------------------------
 -- Identidade: SEM RLS por pessoa (exceção nomeada no gate tests/conformidade/rls.test.ts).
 -- Motivo: catálogo de identidade sem dado de aprendiz; lido para enumerar donos dos laços de fundo.
--- nod_app só lê e insere (seed/testes); nunca altera nem apaga.
+-- nod_app SÓ LÊ (GRANT SELECT): quem escreve identidade é o seed, como nod_dono. Testes que
+-- precisam de pessoas as criam como nod_dono sob rollback (tests/helpers/db-dono.ts).
 CREATE TABLE tenants (
   id uuid PRIMARY KEY,
   nome text NOT NULL
@@ -26,7 +27,7 @@ CREATE TABLE pessoas (
   PRIMARY KEY (tenant_id, id)
 );
 
-GRANT SELECT, INSERT ON tenants, pessoas TO nod_app;
+GRANT SELECT ON tenants, pessoas TO nod_app;
 
 -- ---------------------------------------------------------------------------------------------
 -- nod_escopar_tabela(tbl, perna_extra): as três colunas, ENABLE + FORCE, as duas policies, o GRANT.

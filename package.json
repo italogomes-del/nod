@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:setup": "npm run docker:up && npm run db:migrate && npm run db:migrate:test",
-    "start": "tsx src/adapters/http/server.ts",
+    "start": "node src/adapters/http/server.ts",
     "build": "tsc -p tsconfig.server.json --noEmit && vite build",
     "check": "npm run lint && npm run typecheck && npm run fence:domain && npm run test:unit && npm run test:integration && npm run test:conformidade && npm run test:concurrency",
     "test": "vitest run",
@@ -18,7 +18,7 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:conformidade": "vitest run --project conformidade",
-    "test:concurrency": "vitest run --project concurrency --passWithNoTests",
+    "test:concurrency": "vitest run --project concurrency",
     "typecheck": "tsc -p tsconfig.domain.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "eslint .",
     "fence:domain": "bash scripts/prove-domain-fence.sh",
@@ -27,6 +27,7 @@
     "docker:reset": "docker compose down -v && docker compose up -d --wait",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:test": "tsx scripts/migrate.ts --banco nod_test",
+    "db:seed": "tsx scripts/seed.ts",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {

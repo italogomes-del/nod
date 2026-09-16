@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { executarComContexto } from "../obs/contexto.ts";
-import type { Conn, Escopo, Transacao, Tx } from "../shared/types.ts";
+import type { Db, Escopo, Transacao, Tx } from "../shared/types.ts";
 
 /**
  * DUAS funções, não uma (Leapy §1 + ADR-003 revisado): withRollback e a fábrica de transação
@@ -30,20 +30,22 @@ export async function vincularEscopo(trx: Tx, escopo: Escopo): Promise<void> {
 /**
  * BEGIN → set_config tenant → set_config pessoa → correlation_id no AsyncLocalStorage → fn.
  * Devolve uma Transacao (fábrica) para injetar nos casos de uso.
+ *
+ * Só aceita o POOL (Db), nunca uma transação já aberta — e o tipo garante isso: TransactionSql
+ * não tem `begin`, então passar um Tx não compila (tests/unit/db/tx.test.ts prova com
+ * @ts-expect-error). A guarda em runtime cobre quem chega por JavaScript ou por cast.
+ * Motivo (medido em 2026-09-16 no psql): um SET LOCAL feito dentro de um SAVEPOINT PERSISTE
+ * depois do RELEASE — abrir a "tx da pessoa B" como savepoint dentro da transação de A deixaria
+ * a transação de A rodando como B. Escopo aninhado não existe: quem já tem um trx usa vincularEscopo.
  */
-function ehTransacao(conn: Conn): conn is Tx {
-  return "savepoint" in conn && typeof conn.savepoint === "function";
-}
-
-export function abrirTxEscopada(db: Conn, escopo: Escopo): Transacao {
+export function abrirTxEscopada(db: Db, escopo: Escopo): Transacao {
   exigirEscopo(escopo);
-  // Aceita Conn: dentro de um trx (withRollback passando o envelope como "db") o postgres.js só
-  // oferece savepoint — `begin` não existe no objeto da transação (medido em 2026-09-16: TypeError).
-  // O SET LOCAL num SAVEPOINT morre no ROLLBACK TO e persiste no RELEASE — aceitável para o laço de fundo sob teste.
-  const envelope: <T>(cb: (trx: Tx) => Promise<T>) => Promise<unknown> = ehTransacao(db) ? (cb) => db.savepoint(cb) : (cb) => db.begin(cb);
+  if (typeof db.begin !== "function") {
+    throw new ErroDeDominio("estado_invalido", { cause: "abrirTxEscopada recebeu uma transação aberta; use vincularEscopo" });
+  }
   return async <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => {
     const caixa: { valor?: T } = {};
-    await envelope(async (trx) => {
+    await db.begin(async (trx) => {
       await vincularEscopo(trx, escopo);
       caixa.valor = await executarComContexto(
         { tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, correlationId: randomUUID() },
