@@ -3,937 +3,1607 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Prototipo - Agentes Privados</title>
+  <title>Private Bots - Grokbot Inspired</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <style>
     :root{
-      --bg:#f5f6f8;
-      --surface:#ffffff;
-      --surface-2:#f9fafb;
-      --line:#e5e7eb;
-      --line-2:#d6dae1;
-      --ink:#14171f;
-      --ink-2:#3f4653;
-      --ink-3:#71798a;
-      --brand:#4a154b;
-      --brand-soft:#efe7f1;
-      --blue:#2c6bed;
-      --amber:#b66a08;
-      --amber-soft:#fff4e8;
-      --good:#16784b;
-      --radius:12px;
-      --shadow:0 10px 30px rgba(20, 23, 31, 0.08);
-      --font:"Inter", system-ui, -apple-system, sans-serif;
+      --bg:#f7f7f8;
+      --panel:#ffffff;
+      --panel-soft:#f3f4f6;
+      --line:#ececf0;
+      --line-2:#d7dbe2;
+      --ink:#11131a;
+      --ink-2:#394150;
+      --ink-3:#7b8393;
+      --blue:#1f67c6;
+      --blue-soft:#e8f1ff;
+      --dark:#0f1115;
+      --shadow:0 10px 30px rgba(8, 10, 14, 0.08);
+      --font:"Inter",system-ui,-apple-system,sans-serif;
     }
-
     *{box-sizing:border-box}
     body{
       margin:0;
-      background:var(--bg);
+      font:400 14px/1.45 var(--font);
       color:var(--ink);
-      font:400 14px/1.5 var(--font);
+      background:var(--bg);
       -webkit-font-smoothing:antialiased;
     }
-    button, input, textarea{font:inherit;color:inherit}
-    button{
-      border:0;
-      background:none;
-      cursor:pointer;
-    }
+    button,input,textarea{font:inherit;color:inherit}
+    button{cursor:pointer;border:0;background:none}
+    [hidden]{display:none !important}
     :focus-visible{
       outline:2px solid var(--blue);
       outline-offset:2px;
       border-radius:8px;
     }
-    [hidden]{display:none !important}
 
     .app{
       height:100dvh;
       display:grid;
-      grid-template-columns:72px 290px 1fr;
+      grid-template-columns:64px 336px 1fr;
       min-height:0;
     }
 
     .rail{
-      background:var(--brand);
-      color:#fff;
-      border-right:1px solid rgba(255,255,255,0.14);
+      background:#12141a;
+      border-right:1px solid #2a2f39;
       display:flex;
       flex-direction:column;
       align-items:center;
-      gap:10px;
-      padding:14px 0;
+      gap:9px;
+      padding:10px 0;
+      min-height:0;
     }
-    .rail .dot{
-      width:42px;
-      height:42px;
+    .rail .r-btn{
+      width:38px;
+      height:38px;
       border-radius:12px;
-      background:rgba(255,255,255,0.12);
       display:grid;
       place-items:center;
-      font-size:12px;
-      font-weight:700;
       position:relative;
+      color:#e5e8ef;
+      border:1px solid transparent;
     }
-    .rail .dot.active{
+    .rail .r-btn:hover{background:#1f232d}
+    .rail .r-btn.active{
       background:#fff;
-      color:var(--brand);
+      color:#11131a;
     }
-    .rail .dot.active::before{
+    .rail .r-btn.active::before{
       content:"";
       position:absolute;
-      left:-10px;
-      top:9px;
+      left:-11px;
+      top:8px;
       width:3px;
-      height:24px;
+      height:22px;
       border-radius:0 2px 2px 0;
       background:#fff;
     }
-    .rail .sep{
-      width:28px;
+    .rail .r-sep{
+      width:22px;
       height:1px;
-      background:rgba(255,255,255,0.2);
-      margin:4px 0;
+      background:#343946;
+      margin:3px 0 2px;
+    }
+    .rail .r-cap{
+      font-size:8.5px;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      color:#7c8393;
+      margin-top:-3px;
+      margin-bottom:3px;
     }
 
     .sidebar{
-      background:var(--surface);
-      border-right:1px solid var(--line);
       min-height:0;
+      border-right:1px solid var(--line);
+      background:var(--panel);
       display:flex;
       flex-direction:column;
     }
-    .sb-head{
-      padding:16px 16px 12px;
+
+    .search-wrap{
+      padding:10px 10px 8px;
       border-bottom:1px solid var(--line);
     }
-    .sb-head h1{
-      margin:0;
-      font-size:17px;
-      font-weight:700;
-      letter-spacing:-0.01em;
-    }
-    .sb-head p{
-      margin:4px 0 0;
-      color:var(--ink-3);
-      font-size:12.5px;
+    .search-row{
+      display:grid;
+      grid-template-columns:1fr 26px;
+      gap:8px;
+      align-items:center;
     }
     .search{
-      margin:12px 16px 0;
+      height:30px;
+      border:1px solid var(--line);
+      border-radius:8px;
+      padding:0 10px;
       display:flex;
       align-items:center;
-      gap:8px;
-      border:1px solid var(--line);
-      border-radius:10px;
-      background:var(--surface-2);
-      padding:7px 10px;
+      gap:6px;
+      background:var(--panel-soft);
       color:var(--ink-3);
     }
     .search input{
       border:0;
-      outline:none;
       background:none;
       width:100%;
+      outline:none;
       font-size:13px;
     }
-    .new{
-      margin:10px 16px 0;
+    .create-trigger{
+      width:26px;
+      height:26px;
+      border-radius:8px;
       border:1px solid var(--line-2);
-      background:#fff;
-      border-radius:10px;
-      padding:9px 10px;
-      font-weight:600;
-      text-align:center;
+      background:linear-gradient(#fff,#f9fafb);
+      color:#707789;
+      font-size:16px;
+      line-height:1;
+      display:grid;
+      place-items:center;
+      transition:border-color .16s ease, color .16s ease, box-shadow .16s ease;
     }
-    .new:hover{border-color:var(--blue);color:var(--blue)}
+    .create-trigger:hover{
+      border-color:#c5cada;
+      color:#4d5567;
+      box-shadow:0 0 0 3px rgba(31,103,198,.08);
+    }
+
+    .favorites{
+      margin-top:8px;
+      border:1px dashed transparent;
+      border-radius:10px;
+      padding:6px 4px 4px;
+      min-height:72px;
+      transition:border-color .14s ease, background .14s ease;
+    }
+    .favorites-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 4px 5px;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      color:#7b8393;
+      font-weight:600;
+    }
+    .favorites-head b{
+      font-size:10.5px;
+      color:#505a6d;
+      font-weight:700;
+      min-width:56px;
+      text-align:right;
+    }
+    .favorites-note{
+      padding:5px 5px 2px;
+      font-size:10.5px;
+      color:#7a8394;
+      min-height:18px;
+    }
+    .favorites.is-drop{
+      border-color:var(--blue);
+      background:var(--blue-soft);
+    }
+    .fav-grid{
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:6px;
+    }
+    .fav{
+      border-radius:8px;
+      padding:4px 3px;
+      text-align:center;
+      color:var(--ink-2);
+      min-height:58px;
+      user-select:none;
+    }
+    .fav:hover{background:var(--panel-soft)}
+    .fav .icon{margin:0 auto 3px}
+    .fav b{
+      display:block;
+      font-size:10.5px;
+      line-height:1.2;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .fav span{
+      font-size:9.5px;
+      color:var(--ink-3);
+    }
 
     .list{
       min-height:0;
       overflow:auto;
-      padding:10px 10px 14px;
+      padding:8px 6px 12px;
     }
-    .group{
-      margin:10px 6px 8px;
-      font-size:11px;
-      color:var(--ink-3);
-      letter-spacing:.06em;
-      text-transform:uppercase;
+    .company-head{
+      padding:12px 10px 8px;
+      border-bottom:1px solid var(--line);
+    }
+    .company-head .ttl{
       display:flex;
-      justify-content:space-between;
       align-items:center;
-    }
-    .hint{
-      font-size:10px;
-      letter-spacing:.03em;
-      text-transform:none;
-      border:1px solid var(--line);
-      padding:1px 6px;
-      border-radius:20px;
-      color:var(--ink-3);
-    }
-    .agent{
-      width:100%;
-      display:grid;
-      grid-template-columns:32px 1fr auto;
-      align-items:center;
-      gap:10px;
-      padding:8px 8px;
-      border-radius:10px;
-      color:var(--ink-2);
-    }
-    .agent:hover{background:var(--surface-2)}
-    .agent.active{
-      background:#eaf0fe;
-      color:var(--ink);
-    }
-    .shape{
-      width:32px;
-      height:32px;
-      border-radius:8px;
-      display:grid;
-      place-items:center;
-      color:#fff;
+      gap:8px;
+      margin-bottom:3px;
+      font-size:14px;
       font-weight:700;
-      font-size:12px;
+      color:#222838;
     }
-    .shape.round{border-radius:50%}
-    .s1{background:#6d56d6}
-    .s2{background:#0f766e}
-    .s3{background:#d44d95}
-    .n{
+    .company-head .sub{
+      margin:0;
+      font-size:11.5px;
+      color:#7d8698;
+    }
+    .ctx-back{
+      margin:8px 0 0;
+      width:100%;
+      border:1px solid var(--line-2);
+      border-radius:8px;
+      padding:6px 8px;
+      text-align:left;
+      font-size:12px;
+      color:#4e586c;
+      background:#fbfcfd;
+    }
+    .ctx-back:hover{border-color:#c8cfdb;background:#f4f7fc}
+    .section{
+      margin:6px 0 10px;
+      border-radius:10px;
+      border:1px solid transparent;
+      transition:border-color .14s ease, background .14s ease;
+    }
+    .section.is-drop{
+      border-color:#bfd4fa;
+      background:#f7faff;
+    }
+    .section h3{
+      margin:0;
+      padding:6px 8px;
+      font-size:11px;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      color:var(--ink-3);
+      font-weight:600;
+    }
+    .row{
+      width:100%;
+      border-radius:8px;
+      padding:7px 8px;
+      text-align:left;
+      display:grid;
+      grid-template-columns:24px 1fr auto;
+      align-items:center;
+      gap:8px;
+      color:var(--ink-2);
+      border:1px solid transparent;
+    }
+    .row:hover{background:var(--panel-soft)}
+    .row.active{
+      background:#f0f3f8;
+      border-color:#e1e6ef;
+    }
+    .txt{
       min-width:0;
       display:flex;
       flex-direction:column;
-      gap:2px;
+      gap:1px;
     }
-    .n b{
-      font-size:13.5px;
+    .txt b{
+      font-size:13px;
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
+      color:var(--ink);
     }
-    .n span{
-      font-size:12px;
+    .txt span{
+      font-size:11.5px;
       color:var(--ink-3);
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
-    }
-    .state{
-      font-size:11px;
-      font-weight:600;
-      color:var(--ink-3);
-    }
-    .state.wait{color:var(--amber)}
-    .state.work{color:var(--good)}
-
-    .stage{
-      min-height:0;
-      display:flex;
-      flex-direction:column;
-    }
-    .top{
-      min-height:58px;
-      padding:12px 20px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      border-bottom:1px solid var(--line);
-      background:var(--surface);
-      flex:none;
-    }
-    .top h2{
-      margin:0;
-      font-size:17px;
-      font-weight:700;
-      letter-spacing:-0.01em;
     }
     .meta{
+      text-align:right;
       color:var(--ink-3);
-      font-size:12.5px;
+      font-size:11px;
       display:flex;
       align-items:center;
-      gap:8px;
+      gap:6px;
     }
-    .meta .chip{
-      border:1px solid var(--line);
-      background:var(--surface-2);
-      border-radius:999px;
-      padding:3px 8px;
+    .meta .pin{
+      font-size:10px;
+      color:#667084;
+      opacity:.8;
     }
-
-    .view{
-      flex:1;
-      min-height:0;
-      overflow:auto;
-      padding:24px;
-      display:none;
-    }
-    .view.on{display:block}
-
-    .card{
-      background:var(--surface);
-      border:1px solid var(--line);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
+    .meta .dot{
+      width:6px;
+      height:6px;
+      border-radius:50%;
+      background:var(--blue);
+      display:inline-block;
     }
 
-    .journey-grid{
-      display:grid;
-      grid-template-columns:repeat(2, minmax(280px, 1fr));
-      gap:14px;
-    }
-    .journey{
-      padding:16px;
-    }
-    .journey h3{
-      margin:0 0 6px;
-      font-size:15px;
-      letter-spacing:-0.01em;
-    }
-    .journey p{
-      margin:0;
-      color:var(--ink-3);
-      font-size:13px;
-      line-height:1.6;
-    }
-    .line{
-      margin:16px 0;
-      border-top:1px solid var(--line);
-    }
-
-    .quick-actions{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      margin-top:14px;
-    }
-    .btn{
-      border:1px solid var(--line-2);
-      border-radius:9px;
-      padding:8px 12px;
-      background:#fff;
-      font-weight:500;
-      font-size:13px;
-    }
-    .btn:hover{border-color:var(--ink-3)}
-    .btn.primary{
-      background:var(--ink);
-      color:#fff;
-      border-color:var(--ink);
-    }
-    .btn.brand{
-      background:var(--brand);
-      color:#fff;
-      border-color:var(--brand);
-    }
-
-    .create{
-      max-width:880px;
-      margin:0 auto;
-      padding:20px;
-    }
-    .create h3{
-      margin:0 0 5px;
-      font-size:20px;
-      letter-spacing:-0.02em;
-    }
-    .create .sub{
-      margin:0 0 20px;
-      color:var(--ink-3);
-      font-size:14px;
-    }
-    .field{
-      margin-bottom:14px;
-    }
-    .field label{
-      display:block;
-      margin-bottom:6px;
-      font-size:12px;
-      text-transform:uppercase;
-      letter-spacing:.06em;
-      color:var(--ink-3);
-      font-weight:600;
-    }
-    .field input,.field textarea{
-      width:100%;
-      border:1px solid var(--line-2);
-      border-radius:10px;
-      background:#fff;
-      padding:11px 12px;
-      outline:none;
-    }
-    .field textarea{
-      min-height:148px;
-      resize:vertical;
-      line-height:1.6;
-    }
-    .radio{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .radio button{
-      border:1px solid var(--line-2);
-      padding:8px 10px;
-      border-radius:999px;
-      background:#fff;
-      font-size:12.5px;
-    }
-    .radio button[aria-pressed="true"]{
-      border-color:var(--blue);
-      color:var(--blue);
-      font-weight:600;
-      background:#edf3ff;
-    }
-
-    .review{
-      max-width:860px;
-      margin:0 auto;
-      padding:20px;
-    }
-    .review h3{
-      margin:0 0 8px;
-      font-size:20px;
-      letter-spacing:-0.02em;
-    }
-    .stack{
-      display:grid;
-      gap:12px;
-      margin-top:16px;
-    }
-    .panel{
-      border:1px solid var(--line);
-      border-radius:10px;
-      background:var(--surface-2);
-      padding:12px 14px;
-    }
-    .panel .k{
-      font-size:11px;
-      color:var(--ink-3);
-      letter-spacing:.06em;
-      text-transform:uppercase;
-      font-weight:700;
-      margin-bottom:6px;
-    }
-    .panel ul{
-      margin:0;
-      padding-left:18px;
-    }
-    .panel li{
-      margin-bottom:6px;
-      font-size:13.5px;
-      color:var(--ink-2);
-    }
-    .panel li:last-child{margin-bottom:0}
-    .panel.warn{
-      background:var(--amber-soft);
-      border-color:#efcfab;
-    }
-
-    .chat{
-      max-width:980px;
-      margin:0 auto;
-      display:grid;
-      grid-template-columns:1fr 340px;
-      gap:14px;
-    }
-    .thread{
-      background:var(--surface);
-      border:1px solid var(--line);
-      border-radius:var(--radius);
-      min-height:540px;
-      display:flex;
-      flex-direction:column;
-      overflow:hidden;
-    }
-    .log{
-      flex:1;
-      min-height:0;
-      overflow:auto;
-      padding:16px 18px;
-    }
-    .msg{
-      display:grid;
-      grid-template-columns:30px 1fr;
-      gap:10px;
-      margin-bottom:14px;
-    }
-    .msg .avatar{
-      width:30px;
-      height:30px;
+    .icon{
+      width:24px;
+      height:24px;
       border-radius:8px;
       display:grid;
       place-items:center;
-      font-size:11px;
+      font-size:9px;
       font-weight:700;
       color:#fff;
-      background:#5a6270;
+      flex:none;
     }
-    .msg .avatar.me{
-      border-radius:50%;
-      background:#1f2937;
+    .shape-square{border-radius:7px}
+    .shape-circle{border-radius:50%}
+    .shape-hex{
+      clip-path:polygon(25% 7%,75% 7%,100% 50%,75% 93%,25% 93%,0 50%);
+      border-radius:0;
     }
-    .msg .who{
+    .c-purple{background:#a280f5}
+    .c-black{background:#0f1115}
+    .c-pink{background:#f45db7}
+    .c-teal{background:#38c8bc}
+    .c-blue{background:#3b82f6}
+    .c-orange{background:#ff8d3a}
+    .c-green{background:#1fbf73}
+    .c-red{background:#ff5a67}
+    .c-lilac{background:#9f78ff}
+    .c-brown{background:#ad8b5f}
+
+    .me{
+      margin-top:auto;
+      border-top:1px solid var(--line);
+      padding:8px 10px;
+      font-size:12px;
+      color:#4d5567;
       display:flex;
-      align-items:baseline;
+      align-items:center;
       gap:7px;
-      margin-bottom:2px;
     }
-    .msg .who b{font-size:13.5px}
-    .msg .who time{
+    .me .av{
+      width:18px;
+      height:18px;
+      border-radius:50%;
+      background:#d1d5dc;
+      display:grid;
+      place-items:center;
+      font-size:9px;
+      color:#5a6272;
+      font-weight:700;
+    }
+
+    .main{
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      position:relative;
+      background:var(--panel);
+    }
+    .head{
+      min-height:43px;
+      border-bottom:1px solid var(--line);
+      padding:8px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      flex:none;
+    }
+    .head .left{
+      display:flex;
+      align-items:center;
+      gap:7px;
+      min-width:0;
+    }
+    .head .name{
+      font-size:13.5px;
+      font-weight:600;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .head .tag{
+      font-size:10px;
       color:var(--ink-3);
+      background:var(--panel-soft);
+      border:1px solid var(--line);
+      padding:2px 6px;
+      border-radius:999px;
+    }
+    .head .actions{
+      display:flex;
+      align-items:center;
+      gap:5px;
+      color:#9097a6;
+    }
+    .head .actions button{
+      width:20px;
+      height:20px;
+      border-radius:6px;
+      display:grid;
+      place-items:center;
+      font-size:13px;
+    }
+    .head .actions button:hover{background:var(--panel-soft)}
+
+    .chat{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      width:100%;
+    }
+    .scroll{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:12px 14px 18px;
+    }
+    .timeline{
+      max-width:880px;
+      margin:0 auto;
+      width:100%;
+    }
+    .time-sep{
+      margin:10px 0 12px;
+      text-align:center;
+      color:#9aa2b0;
       font-size:11px;
     }
-    .msg p{
-      margin:0;
-      color:var(--ink-2);
-      line-height:1.55;
+    .message{
+      display:flex;
+      margin-bottom:8px;
+      position:relative;
+      width:100%;
     }
-    .compose{
-      border-top:1px solid var(--line);
-      padding:12px;
+    .message.you{justify-content:flex-end}
+    .bubble{
+      max-width:min(76%, 740px);
+      border-radius:15px;
+      padding:9px 12px;
+      font-size:13.5px;
+      line-height:1.5;
+      box-shadow:0 1px 0 rgba(0,0,0,.04);
+    }
+    .message.bot .bubble{
+      background:#f0f2f5;
+      color:#202530;
+      border-top-left-radius:8px;
+    }
+    .message.you .bubble{
+      background:#101216;
+      color:#fff;
+      border-top-right-radius:8px;
+    }
+    .bubble-wrap{
+      position:relative;
+      max-width:min(76%, 740px);
+    }
+    .message .msg-actions{
+      position:absolute;
+      right:6px;
+      top:-16px;
+      display:flex;
+      gap:6px;
+      opacity:0;
+      pointer-events:none;
+      transform:translateY(2px);
+      transition:opacity .12s ease, transform .12s ease;
+    }
+    .message:hover .msg-actions{
+      opacity:1;
+      pointer-events:auto;
+      transform:translateY(0);
+    }
+    .msg-actions button{
+      width:32px;
+      height:30px;
+      border-radius:11px;
+      border:1px solid var(--line);
       background:#fff;
+      color:#7d8596;
+      box-shadow:0 4px 12px rgba(8, 10, 14, 0.07);
+      font-size:15px;
+      display:grid;
+      place-items:center;
     }
-    .compose .box{
-      border:1px solid var(--line-2);
-      border-radius:10px;
+    .msg-actions button:hover{
+      border-color:#cdd2dc;
+      color:#5f6779;
+    }
+
+    .starter{
+      width:min(560px, 100%);
+      background:#f2f3f5;
+      border:1px solid #e5e8ee;
+      border-radius:14px;
+      overflow:hidden;
+      margin-bottom:12px;
+    }
+    .starter .intro{
+      padding:10px 12px 8px;
+      font-size:14px;
+      color:#2f3746;
+      line-height:1.42;
+    }
+    .starter .q{
+      border-top:1px solid #e1e5eb;
+      background:#fff;
+      padding:8px;
+    }
+    .starter .q h4{
+      margin:0 0 2px;
+      font-size:13px;
+    }
+    .starter .q p{
+      margin:0 0 7px;
+      color:var(--ink-3);
+      font-size:12px;
+    }
+    .choices{
+      display:grid;
+      gap:2px;
+      border:1px solid var(--line);
+      border-radius:8px;
+      overflow:hidden;
+      background:#f9fafb;
+    }
+    .choice{
+      border:0;
+      background:#f7f8fa;
+      border-bottom:1px solid var(--line);
+      text-align:left;
+      padding:8px 10px;
+      font-size:12.5px;
+      line-height:1.35;
       display:flex;
       gap:8px;
-      padding:8px;
-      background:var(--surface-2);
+      align-items:flex-start;
     }
-    .compose textarea{
+    .choice:last-child{border-bottom:0}
+    .choice:hover{background:#edf1f7}
+    .badge{
+      width:14px;
+      height:14px;
+      border-radius:4px;
+      background:#dce2ec;
+      color:#7d8699;
+      font-size:10px;
+      display:grid;
+      place-items:center;
+      flex:none;
+      margin-top:1px;
+    }
+    .choice b{
+      display:block;
+      font-size:12.5px;
+      color:#222838;
+    }
+    .choice span{
+      color:#6e7788;
+      font-size:12px;
+    }
+    .free{
+      margin-top:6px;
+      border:1px solid var(--line);
+      border-radius:8px;
+      padding:6px 8px;
+      font-size:12.5px;
+      color:#7a8292;
+      background:#fff;
+    }
+
+    .composer{
+      border-top:1px solid var(--line);
+      padding:8px 10px 10px;
+      background:#fff;
+      flex:none;
+    }
+    .composer .box{
+      max-width:100%;
+      margin:0 auto;
+      border:1px solid var(--line-2);
+      border-radius:14px;
+      min-height:38px;
+      padding:6px 8px;
+      display:flex;
+      align-items:flex-end;
+      gap:7px;
+      background:#fff;
+    }
+    .composer textarea{
+      flex:1;
       border:0;
       outline:none;
       resize:none;
       background:none;
-      width:100%;
-      min-height:24px;
-      line-height:1.45;
+      min-height:22px;
+      max-height:170px;
+      line-height:1.44;
+      font-size:13.5px;
+      padding-top:3px;
     }
-    .compose .send{
-      align-self:flex-end;
-      border:1px solid var(--ink);
-      background:var(--ink);
+    .composer .send{
+      width:24px;
+      height:24px;
+      border-radius:50%;
+      background:#111319;
       color:#fff;
-      border-radius:8px;
-      padding:6px 11px;
+      display:grid;
+      place-items:center;
       font-size:12px;
-      font-weight:600;
+      margin-bottom:2px;
     }
 
-    .approval{
-      background:var(--surface);
+    .palette{
+      position:absolute;
+      top:8px;
+      left:12px;
+      width:min(640px, calc(100% - 24px));
+      background:#fff;
       border:1px solid var(--line);
-      border-radius:var(--radius);
-      padding:14px;
-      height:max-content;
-      position:sticky;
-      top:12px;
+      border-radius:12px;
+      box-shadow:var(--shadow);
+      z-index:40;
+      padding:8px 8px 6px;
     }
-    .approval .head{
+    .palette .ph{
+      font-size:13px;
+      color:#667082;
+      margin:2px 4px 7px;
       display:flex;
       justify-content:space-between;
       align-items:center;
-      margin-bottom:8px;
     }
-    .approval .head b{font-size:13px}
-    .approval .head span{
-      font-size:11px;
-      color:var(--amber);
-      font-weight:700;
-    }
-    .approval h4{
-      margin:0 0 10px;
+    .palette .ph button{
+      width:20px;
+      height:20px;
+      border-radius:6px;
+      color:#98a0af;
+      display:grid;
+      place-items:center;
       font-size:14px;
-      line-height:1.45;
     }
-    .items{
-      margin:0;
-      padding:0;
-      list-style:none;
-      display:grid;
+    .palette .ph button:hover{background:#f3f5f8}
+    .palette .opt{
+      width:100%;
+      border-radius:8px;
+      padding:8px;
+      display:flex;
+      align-items:center;
       gap:8px;
+      text-align:left;
+      color:#2f3543;
     }
-    .items li{
+    .palette .opt:hover{background:#f5f7fa}
+    .palette .opt.main{
       border:1px solid var(--line);
-      border-radius:9px;
-      padding:9px;
-      background:var(--surface-2);
+      margin-bottom:3px;
+      background:#fafbfc;
+    }
+    .palette .opt .mini{
+      width:14px;
+      height:14px;
+      border-radius:50%;
+      border:1px solid #c9cfdb;
+      color:#7e8797;
       display:grid;
-      grid-template-columns:18px 1fr;
-      gap:8px;
-      align-items:start;
+      place-items:center;
+      font-size:10px;
+      flex:none;
     }
-    .items input{
-      margin-top:2px;
-      width:15px;
-      height:15px;
-      accent-color:var(--ink);
-    }
-    .items b{font-size:13px}
-    .items p{
-      margin:2px 0 0;
-      color:var(--ink-3);
-      font-size:12px;
-      line-height:1.45;
+    .palette .list{
+      max-height:230px;
+      overflow:auto;
+      padding:2px 0 0;
+      margin:0;
     }
 
-    .bottom-nav{
+    .toast{
       position:fixed;
       left:50%;
+      top:14px;
       transform:translateX(-50%);
-      bottom:12px;
-      background:#fff;
       border:1px solid var(--line-2);
       border-radius:999px;
-      display:flex;
-      gap:2px;
-      padding:4px;
+      background:#fff;
+      color:#273042;
       box-shadow:var(--shadow);
-      z-index:40;
-    }
-    .bottom-nav button{
-      border-radius:999px;
-      padding:6px 11px;
+      padding:7px 12px;
       font-size:12px;
-      color:var(--ink-3);
-      white-space:nowrap;
-    }
-    .bottom-nav button[aria-pressed="true"]{
-      background:var(--ink);
-      color:#fff;
-      font-weight:600;
+      z-index:90;
     }
 
-    @media (max-width:1100px){
-      .app{grid-template-columns:64px 250px 1fr}
-      .chat{grid-template-columns:1fr}
-      .approval{position:static}
-    }
-    @media (max-width:860px){
+    @media (max-width:900px){
       .app{grid-template-columns:1fr}
       .rail,.sidebar{display:none}
-      .view{padding:16px}
-      .journey-grid{grid-template-columns:1fr}
-      .bottom-nav{
-        max-width:calc(100vw - 20px);
-        overflow:auto;
-      }
+      .main{border-left:0}
+      .palette{left:8px;top:8px;width:calc(100% - 16px)}
+      .timeline{max-width:100%}
+      .bubble{max-width:86%}
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <aside class="rail" aria-label="Workspaces">
-      <button class="dot active">MW</button>
-      <button class="dot">L</button>
-      <button class="dot">G</button>
-      <div class="sep"></div>
-      <button class="dot">+</button>
-    </aside>
+    <aside class="rail" id="contextRail" aria-label="Contextos"></aside>
 
     <aside class="sidebar">
-      <header class="sb-head">
-        <h1>Agentes privados</h1>
-        <p>Somente voce ve estas conversas.</p>
-      </header>
+      <div id="privateSidebar">
+        <div class="search-wrap">
+          <div class="search-row">
+            <label class="search" aria-label="Buscar">
+              <span>⌕</span>
+              <input id="searchInput" value="Buscar">
+            </label>
+            <button class="create-trigger" id="createBtn" aria-label="Criar ou buscar bots">+</button>
+          </div>
 
-      <div class="search">
-        <span>⌕</span>
-        <input aria-label="Buscar agente" value="buscar agente">
-      </div>
-
-      <button class="new" data-view-target="create">+ Novo agente privado</button>
-
-      <div class="list">
-        <div class="group">
-          <span>Seus agentes</span>
-          <span class="hint">3 ativos</span>
+          <div class="favorites" id="favoritesDrop" aria-label="Favoritos">
+            <div class="favorites-head"><span>Favoritos</span><b id="favCount">0 fixados</b></div>
+            <div class="fav-grid" id="favoritesGrid"></div>
+            <div class="favorites-note" id="favNote">Arraste bots para ca para fixar no topo.</div>
+          </div>
         </div>
 
-        <button class="agent active" data-view-target="chat">
-          <span class="shape s1">BI</span>
-          <span class="n">
-            <b>Bia</b>
-            <span>desenvolvimento e acompanhamento</span>
-          </span>
-          <span class="state wait">esperando voce</span>
-        </button>
+        <div class="list" id="sectionsMount"></div>
 
-        <button class="agent" data-view-target="chat">
-          <span class="shape round s2">TE</span>
-          <span class="n">
-            <b>Teo</b>
-            <span>contratos e renovacoes</span>
-          </span>
-          <span class="state work">trabalhando</span>
-        </button>
+        <div class="me"><span class="av">MW</span> Marlon Wanderlich</div>
+      </div>
 
-        <button class="agent" data-view-target="chat">
-          <span class="shape s3">LI</span>
-          <span class="n">
-            <b>Lia</b>
-            <span>triagem de mensagens e rotina</span>
-          </span>
-          <span class="state">pausado</span>
-        </button>
+      <div id="companySidebar" hidden>
+        <div class="company-head">
+          <div class="ttl">
+            <span class="icon c-purple shape-square" id="companyBadge">LE</span>
+            <span id="companyTitle">Leapy</span>
+          </div>
+          <p class="sub">Canais e conversas da empresa</p>
+          <button class="ctx-back" id="backToPrivate">← Voltar para Meus agentes</button>
+        </div>
+
+        <div class="search-wrap">
+          <label class="search" aria-label="Buscar no workspace">
+            <span>⌕</span>
+            <input id="companySearchInput" value="Buscar na empresa">
+          </label>
+        </div>
+
+        <div class="list" id="companySectionsMount"></div>
+
+        <div class="me"><span class="av">LE</span> Workspace da empresa</div>
       </div>
     </aside>
 
-    <main class="stage">
-      <header class="top">
-        <h2 id="title">Jornadas de agentes privados</h2>
-        <div class="meta">
-          <span class="chip">Alta fidelidade</span>
-          <span class="chip">HTML + CSS</span>
+    <main class="main">
+      <header class="head">
+        <div class="left">
+          <span class="icon c-pink shape-square" id="headIcon">LG</span>
+          <span class="name" id="headName">LGPD</span>
+          <span class="tag" id="headTag">privado</span>
+        </div>
+        <div class="actions">
+          <button aria-label="Compartilhar">↗</button>
+          <button aria-label="Arquivar">⌂</button>
         </div>
       </header>
 
-      <section class="view on" id="view-inbox">
-        <div class="card" style="padding:20px">
-          <h3 style="margin:0;font-size:22px;letter-spacing:-.02em">Fluxo privado, sem ruido</h3>
-          <p style="margin:6px 0 0;color:var(--ink-3);max-width:760px;font-size:14px">
-            Inspirado na familiaridade do Slack, mas reduzido ao essencial para quem cria e conversa com agentes privados:
-            menos camadas, menos campos e mais foco no dialogo.
-          </p>
-
-          <div class="line"></div>
-
-          <div class="journey-grid">
-            <article class="journey card">
-              <h3>1. Entrar na frota privada</h3>
-              <p>Voce abre e ja enxerga os seus agentes, com estado em texto claro: trabalhando, pausado ou esperando voce.</p>
-            </article>
-            <article class="journey card">
-              <h3>2. Criar por linguagem natural</h3>
-              <p>Um campo principal descreve o trabalho. Sem tela de configuracao tecnica na entrada.</p>
-            </article>
-            <article class="journey card">
-              <h3>3. Confirmar antes de nascer</h3>
-              <p>O agente devolve entendimento e limites. Voce confirma sabendo o que ele fara e o que nao fara.</p>
-            </article>
-            <article class="journey card">
-              <h3>4. Conversar em 1:1</h3>
-              <p>A conversa e direta. Quando houver decisao, ela aparece item a item para aprovar ou negar sem ambiguidade.</p>
-            </article>
-          </div>
-
-          <div class="quick-actions">
-            <button class="btn brand" data-view-target="create">Comecar criacao</button>
-            <button class="btn" data-view-target="chat">Abrir conversa de exemplo</button>
+      <section class="chat">
+        <div class="scroll" id="chatScroll">
+          <div class="timeline" id="timeline"></div>
+        </div>
+        <div class="composer">
+          <div class="box">
+            <textarea id="composer" rows="1" placeholder="Mensagem para o Bot"></textarea>
+            <button class="send" id="sendBtn" aria-label="Enviar">↑</button>
           </div>
         </div>
       </section>
 
-      <section class="view" id="view-create">
-        <div class="card create">
-          <h3>Novo agente privado</h3>
-          <p class="sub">Descreva em portugues o que voce quer delegar. O agente nasce sem acessos e sem rotinas ativas.</p>
-
-          <div class="field">
-            <label>Nome do agente</label>
-            <input value="Nina">
-          </div>
-
-          <div class="field">
-            <label>Forma do icone</label>
-            <div class="radio" role="radiogroup" aria-label="Escolha de forma">
-              <button aria-pressed="true">Quadrado</button>
-              <button aria-pressed="false">Circulo</button>
-              <button aria-pressed="false">Hexagono</button>
-              <button aria-pressed="false">Triangulo</button>
-            </div>
-          </div>
-
-          <div class="field">
-            <label>O que o agente deve fazer</label>
-            <textarea>Quero um agente para acompanhar entregas de avaliacao dos aprendizes e preparar mensagens de cobranca quando houver atraso acima de 5 dias. Sempre me pergunte antes de enviar qualquer mensagem para alguem.</textarea>
-          </div>
-
-          <div class="field">
-            <label>Dono</label>
-            <input value="Voce (agente privado)" aria-readonly="true">
-          </div>
-
-          <div class="quick-actions">
-            <button class="btn" data-view-target="inbox">Cancelar</button>
-            <button class="btn primary" data-view-target="review">Gerar rascunho do agente</button>
-          </div>
+      <div class="palette" id="palette" hidden>
+        <div class="ph">
+          <span>Para: Buscar ou criar Bots</span>
+          <button id="closePalette" aria-label="Fechar">×</button>
         </div>
-      </section>
-
-      <section class="view" id="view-review">
-        <div class="card review">
-          <h3>Revisar antes de criar</h3>
-          <p style="margin:0;color:var(--ink-3);font-size:14px">
-            A Nina entendeu sua solicitacao e resumiu o comportamento inicial. Nenhum acesso foi concedido.
-          </p>
-
-          <div class="stack">
-            <section class="panel">
-              <div class="k">O que vou fazer</div>
-              <ul>
-                <li>Monitorar atrasos de avaliacao acima de 5 dias.</li>
-                <li>Preparar proposta de mensagem para cada caso.</li>
-                <li>Esperar sua aprovacao item a item antes de enviar.</li>
-              </ul>
-            </section>
-
-            <section class="panel warn">
-              <div class="k">O que NAO vou fazer</div>
-              <ul>
-                <li>Nao enviar mensagens automaticamente.</li>
-                <li>Nao usar dados de outras empresas.</li>
-                <li>Nao criar rotina ativa sem sua confirmacao explicita.</li>
-              </ul>
-            </section>
-
-            <section class="panel">
-              <div class="k">Estado inicial</div>
-              <ul>
-                <li>Sem acessos conectados.</li>
-                <li>Nunca executou.</li>
-                <li>Dono: voce (privado).</li>
-              </ul>
-            </section>
-          </div>
-
-          <div class="quick-actions" style="margin-top:18px">
-            <button class="btn" data-view-target="create">Voltar e editar</button>
-            <button class="btn primary" data-view-target="chat">Criar agente e abrir conversa</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" id="view-chat">
-        <div class="chat">
-          <article class="thread">
-            <div class="log">
-              <div class="msg">
-                <span class="avatar me">MW</span>
-                <div>
-                  <div class="who"><b>Marlon</b><time>09:11</time></div>
-                  <p>Nina, verifica quem esta com avaliacao atrasada ha mais de 5 dias e prepara cobranca.</p>
-                </div>
-              </div>
-
-              <div class="msg">
-                <span class="avatar" style="background:#6d56d6">NI</span>
-                <div>
-                  <div class="who"><b>Nina</b><time>09:12</time></div>
-                  <p>Encontrei 3 casos. Montei as mensagens e parei antes de enviar.</p>
-                  <p>Deixei a aprovacao item a item no painel lateral.</p>
-                </div>
-              </div>
-
-              <div class="msg">
-                <span class="avatar me">MW</span>
-                <div>
-                  <div class="who"><b>Marlon</b><time>09:14</time></div>
-                  <p>Perfeito. Mantem sempre esse fluxo: rascunho primeiro, envio so com meu ok.</p>
-                </div>
-              </div>
-            </div>
-
-            <div class="compose">
-              <div class="box">
-                <textarea rows="1">Nina, no segundo item troca o tom para algo mais acolhedor.</textarea>
-                <button class="send">Enviar</button>
-              </div>
-            </div>
-          </article>
-
-          <aside class="approval">
-            <div class="head">
-              <b>Aguardando voce</b>
-              <span>expira em 22h</span>
-            </div>
-            <h4>Enviar 3 mensagens de cobranca para avaliacao em atraso</h4>
-            <ul class="items">
-              <li>
-                <input type="checkbox" checked>
-                <span>
-                  <b>Ana Clara M.</b>
-                  <p>atraso de 6 dias - mensagem pronta</p>
-                </span>
-              </li>
-              <li>
-                <input type="checkbox" checked>
-                <span>
-                  <b>Bruno S.</b>
-                  <p>atraso de 7 dias - mensagem pronta</p>
-                </span>
-              </li>
-              <li>
-                <input type="checkbox">
-                <span>
-                  <b>Thiago R.</b>
-                  <p>conta caso sensivel - revisar manualmente antes</p>
-                </span>
-              </li>
-            </ul>
-
-            <div class="quick-actions" style="margin-top:12px">
-              <button class="btn">Negar tudo</button>
-              <button class="btn primary">Aprovar os 2 selecionados</button>
-            </div>
-          </aside>
-        </div>
-      </section>
+        <button class="opt main" id="createNewOption"><span class="mini">+</span>Criar novo Bot</button>
+        <button class="opt"><span class="mini">↔</span>Criar chat em grupo</button>
+        <div class="list" id="paletteBotList"></div>
+      </div>
     </main>
   </div>
-
-  <nav class="bottom-nav" aria-label="Jornadas">
-    <button data-view="inbox" aria-pressed="true">1. Visao geral</button>
-    <button data-view="create" aria-pressed="false">2. Criacao</button>
-    <button data-view="review" aria-pressed="false">3. Confirmacao</button>
-    <button data-view="chat" aria-pressed="false">4. Conversa privada</button>
-  </nav>
+  <div class="toast" id="toast" hidden></div>
 
   <script>
     (function(){
-      var title = document.getElementById("title");
-      var names = {
-        inbox: "Jornada 1 - Visao geral de agentes privados",
-        create: "Jornada 2 - Criacao por linguagem natural",
-        review: "Jornada 3 - Confirmacao antes de criar",
-        chat: "Jornada 4 - Conversa 1:1 com agente privado"
+      var sectionsOrder = ["produto","devpool","organizadores","sem-secao"];
+      var sectionTitles = {
+        produto: "Produto e Engenharia",
+        devpool: "Dev Pool",
+        organizadores: "Organizadores",
+        "sem-secao": "Sem secao"
+      };
+      var companyGroupOrder = ["Canais","Turmas","Diretas"];
+
+      var companies = [
+        {
+          id: "co-leapy",
+          name: "Leapy",
+          abbr: "LE",
+          color: "c-purple",
+          channels: [
+            {
+              id: "ch-comite",
+              label: "comite-admissao",
+              type: "private",
+              group: "Canais",
+              preview: "Ressaca aguardando aprovacao",
+              time: "21:56",
+              unread: true,
+              messages: [
+                {from:"bot", text:"Montei a lista da turma 13 e parei antes do envio final. Posso seguir com os dois primeiros itens?"},
+                {from:"you", text:"Pode, mas tira o terceiro ate eu validar com a Ana."},
+                {from:"bot", text:"Perfeito. Ja deixei a terceira linha fora da acao."}
+              ]
+            },
+            {
+              id: "ch-dados",
+              label: "dados-na-plataforma",
+              type: "public",
+              group: "Canais",
+              preview: "QA localhost fechado",
+              time: "Ontem",
+              unread: false,
+              messages: [
+                {from:"bot", text:"Subi o novo painel de frequencia e gerei um resumo com os desvios por turma."},
+                {from:"you", text:"Boa. Publica no canal junto com os links de validação."}
+              ]
+            },
+            {
+              id: "ch-t12",
+              label: "turma-12-md1",
+              type: "turma",
+              group: "Turmas",
+              preview: "4 lembretes agendados",
+              time: "Ontem",
+              unread: false,
+              messages: [
+                {from:"bot", text:"Ja separei as pendencias de faltas da turma MD1 em dois blocos."}
+              ]
+            },
+            {
+              id: "ch-ana",
+              label: "Ana Beatriz",
+              type: "dm",
+              group: "Diretas",
+              preview: "Obrigada, faz sentido",
+              time: "18:12",
+              unread: false,
+              messages: [
+                {from:"you", text:"Consegue revisar o texto antes de eu liberar para os gestores?"},
+                {from:"bot", text:"Consigo. Entrego uma versao curta e uma versao formal daqui a pouco."}
+              ]
+            }
+          ]
+        },
+        {
+          id: "co-gamefik",
+          name: "Gamefik",
+          abbr: "GA",
+          color: "c-orange",
+          channels: [
+            {
+              id: "ch-roadmap",
+              label: "roadmap-q4",
+              type: "public",
+              group: "Canais",
+              preview: "2 epicos sem estimativa",
+              time: "Ontem",
+              unread: true,
+              messages: [
+                {from:"bot", text:"Temos dois epicos sem dono no Q4. Posso abrir rascunho de distribuicao com os squads?"},
+                {from:"you", text:"Pode sim, com uma opcao conservadora e outra agressiva."}
+              ]
+            },
+            {
+              id: "ch-financeiro",
+              label: "financeiro",
+              type: "private",
+              group: "Canais",
+              preview: "Fechamento pendente",
+              time: "Ontem",
+              unread: false,
+              messages: [
+                {from:"bot", text:"Fechamento de agosto pronto para validacao com o time financeiro."}
+              ]
+            }
+          ]
+        }
+      ];
+
+      var bots = [
+        {
+          id: "b-rs",
+          name: "Ressaca",
+          subtitle: "Feature lead",
+          preview: "Fechado.",
+          time: "Ontem",
+          section: "produto",
+          favorite: true,
+          unread: false,
+          shape: "shape-square",
+          color: "c-purple",
+          messages: [
+            {from:"bot", text:"Oi, Marlon. Ja revisei os ultimos cards e deixei os proximos passos prontos para voce."},
+            {from:"you", text:"Perfeito. Atualize tambem o plano do sprint com os bloqueios de cada squad."},
+            {from:"bot", text:"Feito. Quer que eu tambem monte um resumo de risco para enviar no canal da diretoria?"}
+          ]
+        },
+        {
+          id: "b-mr",
+          name: "Marola",
+          subtitle: "Tech lead",
+          preview: "QA localhost fechado.",
+          time: "Ontem",
+          section: "produto",
+          favorite: true,
+          unread: true,
+          shape: "shape-hex",
+          color: "c-black",
+          messages: [
+            {from:"bot", text:"A build da API passou e deixei os links dos logs separados por servico."},
+            {from:"you", text:"Manda os dois erros mais recorrentes de novo para eu repassar com o time."}
+          ]
+        },
+        {
+          id: "b-tg",
+          name: "Taga",
+          subtitle: "Slack",
+          preview: "Review em progresso.",
+          time: "Ontem",
+          section: "produto",
+          favorite: true,
+          unread: false,
+          shape: "shape-square",
+          color: "c-pink",
+          messages: [
+            {from:"bot", text:"Acabei de consolidar os comentarios pendentes no PR #415."},
+            {from:"you", text:"Boa. Marca os que impactam release de hoje como prioridade alta."}
+          ]
+        },
+        {
+          id: "b-bz",
+          name: "BugZero",
+          subtitle: "Bug triage",
+          preview: "Sem alertas novos.",
+          time: "Ontem",
+          section: "produto",
+          favorite: true,
+          unread: false,
+          shape: "shape-hex",
+          color: "c-teal",
+          messages: [
+            {from:"bot", text:"Nenhum bug bloqueante novo desde o ultimo checkpoint."}
+          ]
+        },
+        {
+          id: "b-d2",
+          name: "Dev 2",
+          subtitle: "",
+          preview: "Assign import cronograma.",
+          time: "Ontem",
+          section: "devpool",
+          favorite: false,
+          unread: false,
+          shape: "shape-circle",
+          color: "c-green",
+          messages: [
+            {from:"bot", text:"Peguei a tarefa do cronograma e ja deixei um plano de execucao em tres etapas."}
+          ]
+        },
+        {
+          id: "b-d3",
+          name: "Dev 3",
+          subtitle: "",
+          preview: "BKO v2 sem cohort id.",
+          time: "Ontem",
+          section: "devpool",
+          favorite: false,
+          unread: false,
+          shape: "shape-hex",
+          color: "c-orange",
+          messages: [
+            {from:"bot", text:"Ajustei o endpoint e removi a dependencia do cohort id para esse fluxo."}
+          ]
+        },
+        {
+          id: "b-angu",
+          name: "Angu",
+          subtitle: "Gmail",
+          preview: "Lucas pingou no Slack.",
+          time: "Ontem",
+          section: "organizadores",
+          favorite: false,
+          unread: false,
+          shape: "shape-square",
+          color: "c-blue",
+          messages: [
+            {from:"bot", text:"Li o ultimo e-mail do Lucas e montei resposta sugerida para voce aprovar."}
+          ]
+        },
+        {
+          id: "b-lgpd",
+          name: "LGPD",
+          subtitle: "",
+          preview: "Panorama de tarefas no ClickUp.",
+          time: "sexta-feira",
+          section: "sem-secao",
+          favorite: false,
+          unread: false,
+          shape: "shape-square",
+          color: "c-pink",
+          starter: {
+            intro: "Oi, Marlon. Aqui e o New Bot - acabamos de nos conhecer. Pronto pra te ajudar no que for mais util pra voce.",
+            title: "Pra que voce quer me usar?",
+            subtitle: "Pode escolher ou escrever do seu jeito.",
+            options: [
+              ["A","Tarefas do dia a dia","Lembretes, organizacao, follow-ups"],
+              ["B","Trabalho na Leapy","Produto, ClickUp, Slack, codigo..."],
+              ["C","Pesquisa e respostas","Pesquisas, comparacoes e drafts"],
+              ["D","Ainda nao sei","Me ajuda a descobrir no caminho"]
+            ]
+          },
+          messages: [
+            {from:"you", text:"Ola, voce e meu novo agente. Quero que me ajude a responder formularios da LGPD e organizar tarefas do ClickUp relacionadas a pendencias que a gente tem com empresas."},
+            {from:"bot", text:"Perfeito. Vou checar o que ja tenho acesso e mapear as tasks da LGPD pra te dar um panorama em linguagem simples."},
+            {from:"bot", text:"Cliquei no ClickUp, encontrei as tarefas abertas e ja posso montar respostas base para os formularios. Quer priorizar tarefas vencidas ou formularios?"}
+          ]
+        }
+      ];
+
+      var state = {
+        mode: "private",
+        currentCompanyId: "co-leapy",
+        currentBotId: "b-lgpd",
+        currentChannelByCompany: {
+          "co-leapy": "ch-comite",
+          "co-gamefik": "ch-roadmap"
+        },
+        dragBotId: null,
+        pointerCandidateId: null,
+        pointerStartX: 0,
+        pointerStartY: 0,
+        newBotCount: 1
       };
 
-      function go(view){
-        document.querySelectorAll(".view").forEach(function(el){
-          el.classList.toggle("on", el.id === "view-" + view);
-        });
-        document.querySelectorAll(".bottom-nav [data-view]").forEach(function(btn){
-          btn.setAttribute("aria-pressed", String(btn.dataset.view === view));
-        });
-        if (title && names[view]) title.textContent = names[view];
+      var contextRail = document.getElementById("contextRail");
+      var privateSidebar = document.getElementById("privateSidebar");
+      var companySidebar = document.getElementById("companySidebar");
+      var companyBadge = document.getElementById("companyBadge");
+      var companyTitle = document.getElementById("companyTitle");
+      var companySectionsMount = document.getElementById("companySectionsMount");
+      var sectionsMount = document.getElementById("sectionsMount");
+      var favoritesGrid = document.getElementById("favoritesGrid");
+      var favoritesDrop = document.getElementById("favoritesDrop");
+      var favCount = document.getElementById("favCount");
+      var favNote = document.getElementById("favNote");
+      var timeline = document.getElementById("timeline");
+      var palette = document.getElementById("palette");
+      var paletteBotList = document.getElementById("paletteBotList");
+      var toast = document.getElementById("toast");
+      var headName = document.getElementById("headName");
+      var headIcon = document.getElementById("headIcon");
+      var headTag = document.getElementById("headTag");
+      var chatScroll = document.getElementById("chatScroll");
+      var composer = document.getElementById("composer");
+      var createBtn = document.getElementById("createBtn");
+      var backToPrivate = document.getElementById("backToPrivate");
+
+      function initials(name){
+        return name.split(" ").map(function(part){ return part[0]; }).join("").slice(0,2).toUpperCase();
+      }
+      function formatTime(){
+        var d = new Date();
+        var h = String(d.getHours()).padStart(2,"0");
+        var m = String(d.getMinutes()).padStart(2,"0");
+        return h + ":" + m;
+      }
+      function showToast(text){
+        toast.textContent = text;
+        toast.hidden = false;
+        window.clearTimeout(showToast._timer);
+        showToast._timer = window.setTimeout(function(){ toast.hidden = true; }, 2600);
+      }
+      function getBot(id){
+        return bots.find(function(bot){ return bot.id === id; });
+      }
+      function getCompany(id){
+        return companies.find(function(company){ return company.id === id; });
+      }
+      function getChannel(companyId, channelId){
+        var company = getCompany(companyId);
+        if(!company){ return null; }
+        return company.channels.find(function(channel){ return channel.id === channelId; }) || null;
+      }
+      function getCurrentChannel(){
+        var channelId = state.currentChannelByCompany[state.currentCompanyId];
+        return getChannel(state.currentCompanyId, channelId);
+      }
+      function renderEntityIcon(color, shape, text){
+        return '<span class="icon ' + color + " " + shape + '">' + text + "</span>";
+      }
+      function renderBotIcon(bot){
+        return renderEntityIcon(bot.color, bot.shape, initials(bot.name));
+      }
+      function channelGlyph(channel){
+        if(channel.type === "private"){ return "🔒"; }
+        if(channel.type === "dm"){ return "•"; }
+        if(channel.type === "turma"){ return "🎓"; }
+        return "#";
+      }
+      function channelLabel(channel){
+        if(channel.type === "private"){ return " " + channel.label; }
+        if(channel.type === "public"){ return " " + channel.label; }
+        return channel.label;
+      }
+      function pinBot(bot){
+        if(!bot){ return; }
+        bot.favorite = true;
+        bot.time = formatTime();
+        favNote.textContent = bot.name + " foi fixado nos favoritos.";
+        showToast(bot.name + " fixado nos favoritos.");
+        renderAll();
+      }
+      function moveBotToSection(bot, targetSection){
+        if(!bot || !targetSection){ return; }
+        bot.section = targetSection;
+        bot.favorite = false;
+        bot.time = formatTime();
+        favNote.textContent = bot.name + " foi movido para " + sectionTitles[targetSection] + ".";
+        showToast(bot.name + " movido para " + sectionTitles[targetSection] + ".");
+        renderAll();
+      }
+      function openPrivate(){
+        state.mode = "private";
+        palette.hidden = true;
+        renderAll();
+      }
+      function openCompany(companyId){
+        var company = getCompany(companyId);
+        if(!company){ return; }
+        state.mode = "company";
+        state.currentCompanyId = companyId;
+        if(!state.currentChannelByCompany[companyId] && company.channels[0]){
+          state.currentChannelByCompany[companyId] = company.channels[0].id;
+        }
+        palette.hidden = true;
+        renderAll();
+      }
+      function openBot(botId){
+        state.mode = "private";
+        state.currentBotId = botId;
+        renderAll();
+      }
+      function openChannel(companyId, channelId){
+        state.mode = "company";
+        state.currentCompanyId = companyId;
+        state.currentChannelByCompany[companyId] = channelId;
+        renderAll();
       }
 
-      document.querySelectorAll("[data-view-target]").forEach(function(el){
-        el.addEventListener("click", function(){
-          go(el.getAttribute("data-view-target"));
-        });
-      });
+      function renderRail(){
+        var privateActive = state.mode === "private";
+        var privateBtn = [
+          '<button class="r-btn' + (privateActive ? " active" : "") + '" data-context-type="private" aria-label="Meus agentes">',
+          renderEntityIcon("c-lilac", "shape-circle", "MW"),
+          "</button>",
+          '<span class="r-cap">meus</span>',
+          '<span class="r-sep"></span>'
+        ].join("");
 
-      document.querySelectorAll(".bottom-nav [data-view]").forEach(function(btn){
-        btn.addEventListener("click", function(){
-          go(btn.dataset.view);
-        });
-      });
+        var companyButtons = companies.map(function(company){
+          var active = state.mode === "company" && state.currentCompanyId === company.id;
+          var unread = company.channels.some(function(channel){ return channel.unread; });
+          return [
+            '<button class="r-btn' + (active ? " active" : "") + '" data-context-type="company" data-company-id="' + company.id + '" aria-label="' + company.name + '">',
+            renderEntityIcon(company.color, "shape-square", company.abbr),
+            unread ? '<span style="position:absolute;right:2px;top:2px;width:7px;height:7px;border-radius:50%;background:#3b82f6;border:1px solid #12141a;"></span>' : "",
+            "</button>"
+          ].join("");
+        }).join("");
 
-      document.querySelectorAll(".radio button").forEach(function(btn){
-        btn.addEventListener("click", function(){
-          document.querySelectorAll(".radio button").forEach(function(other){
-            other.setAttribute("aria-pressed", "false");
+        contextRail.innerHTML = privateBtn + companyButtons + '<span class="r-sep" style="margin-top:auto;"></span><button class="r-btn" aria-label="Adicionar empresa">+</button>';
+      }
+
+      function renderFavorites(){
+        var favs = bots.filter(function(bot){ return bot.favorite; });
+        favCount.textContent = favs.length + " fixados";
+        if(!favs.length){
+          favoritesGrid.innerHTML = '<div style="grid-column:1/-1;font-size:11px;color:#7b8393;padding:10px 6px;">Arraste bots para ca e fixe seus principais.</div>';
+          return;
+        }
+        favoritesGrid.innerHTML = favs.map(function(bot){
+          return [
+            '<button class="fav" draggable="true" data-bot-id="' + bot.id + '" aria-label="Abrir ' + bot.name + '">',
+            renderBotIcon(bot),
+            "<b>" + bot.name + "</b>",
+            "<span>" + (bot.subtitle || "Bot") + "</span>",
+            "</button>"
+          ].join("");
+        }).join("");
+      }
+
+      function renderPrivateSections(){
+        sectionsMount.innerHTML = sectionsOrder.map(function(sec){
+          var items = bots.filter(function(bot){ return bot.section === sec; });
+          var rows = items.map(function(bot){
+            var active = state.mode === "private" && bot.id === state.currentBotId ? " active" : "";
+            var dot = bot.unread ? '<span class="dot"></span>' : "";
+            var pin = bot.favorite ? '<span class="pin" title="Favorito">★</span>' : "";
+            return [
+              '<button class="row' + active + '" draggable="true" data-bot-id="' + bot.id + '" aria-label="Abrir conversa com ' + bot.name + '">',
+              renderBotIcon(bot),
+              '<span class="txt"><b>' + bot.name + '</b><span>' + bot.preview + "</span></span>",
+              '<span class="meta">' + pin + '<span>' + bot.time + "</span>" + dot + "</span>",
+              "</button>"
+            ].join("");
+          }).join("");
+          if(!rows){
+            rows = '<div style="padding:6px 8px 10px;font-size:11.5px;color:#96a0b1;">Arraste bots para esta secao.</div>';
+          }
+          return '<section class="section" data-section="' + sec + '"><h3>' + sectionTitles[sec] + "</h3>" + rows + "</section>";
+        }).join("");
+      }
+
+      function renderCompanySidebar(){
+        var company = getCompany(state.currentCompanyId);
+        if(!company){ return; }
+        companyTitle.textContent = company.name;
+        companyBadge.className = "icon " + company.color + " shape-square";
+        companyBadge.textContent = company.abbr;
+
+        companySectionsMount.innerHTML = companyGroupOrder.map(function(group){
+          var items = company.channels.filter(function(channel){ return channel.group === group; });
+          var rows = items.map(function(channel){
+            var active = state.currentChannelByCompany[company.id] === channel.id ? " active" : "";
+            var unread = channel.unread ? '<span class="dot"></span>' : "";
+            return [
+              '<button class="row' + active + '" data-channel-id="' + channel.id + '" aria-label="Abrir ' + channel.label + '">',
+              renderEntityIcon(company.color, "shape-square", channelGlyph(channel)),
+              '<span class="txt"><b>' + channelLabel(channel) + '</b><span>' + channel.preview + "</span></span>",
+              '<span class="meta"><span>' + channel.time + "</span>" + unread + "</span>",
+              "</button>"
+            ].join("");
+          }).join("");
+          if(!rows){
+            rows = '<div style="padding:6px 8px 10px;font-size:11.5px;color:#96a0b1;">Sem conversas nesta secao.</div>';
+          }
+          return '<section class="section"><h3>' + group + "</h3>" + rows + "</section>";
+        }).join("");
+      }
+
+      function renderStarter(bot){
+        if(!bot.starter){ return ""; }
+        var options = bot.starter.options.map(function(opt){
+          return [
+            '<button class="choice" data-seed="' + opt[1] + '">',
+            '<span class="badge">' + opt[0] + "</span>",
+            "<span><b>" + opt[1] + "</b><span>" + opt[2] + "</span></span>",
+            "</button>"
+          ].join("");
+        }).join("");
+        return [
+          '<div class="starter">',
+          '<div class="intro">' + bot.starter.intro + "</div>",
+          '<div class="q"><h4>' + bot.starter.title + '</h4><p>' + bot.starter.subtitle + '</p>',
+          '<div class="choices">' + options + "</div>",
+          '<div class="free">Digite sua propria resposta</div>',
+          "</div></div>"
+        ].join("");
+      }
+
+      function renderMessage(msg){
+        var side = msg.from === "you" ? "you" : "bot";
+        var text = msg.text.replace(/</g, "&lt;");
+        return [
+          '<article class="message ' + side + '">',
+          '<div class="bubble-wrap">',
+          '<div class="msg-actions"><button title="Reacao">☺</button><button title="Responder">↩</button><button title="Mais">…</button></div>',
+          '<div class="bubble">' + text + "</div>",
+          "</div>",
+          "</article>"
+        ].join("");
+      }
+
+      function renderChat(){
+        if(state.mode === "private"){
+          var bot = getBot(state.currentBotId);
+          if(!bot){ return; }
+          headName.textContent = bot.name;
+          headTag.textContent = "privado";
+          headIcon.className = "icon " + bot.color + " " + bot.shape;
+          headIcon.textContent = initials(bot.name);
+          composer.placeholder = "Mensagem para " + bot.name;
+
+          var privateBody = ['<div class="time-sep">sex., 11 de set. 11:53</div>'];
+          privateBody.push(renderStarter(bot));
+          bot.messages.forEach(function(msg){ privateBody.push(renderMessage(msg)); });
+          timeline.innerHTML = privateBody.join("");
+          return;
+        }
+
+        var company = getCompany(state.currentCompanyId);
+        var channel = getCurrentChannel();
+        if(!company || !channel){ return; }
+        headName.textContent = channelLabel(channel).trim();
+        headTag.textContent = company.name;
+        headIcon.className = "icon " + company.color + " shape-square";
+        headIcon.textContent = channelGlyph(channel);
+        composer.placeholder = "Mensagem para " + channelLabel(channel).trim();
+
+        var channelBody = ['<div class="time-sep">hoje</div>'];
+        channel.messages.forEach(function(msg){ channelBody.push(renderMessage(msg)); });
+        timeline.innerHTML = channelBody.join("");
+      }
+
+      function renderPalette(){
+        paletteBotList.innerHTML = bots.map(function(bot){
+          return '<button class="opt" data-open-bot="' + bot.id + '">' + renderBotIcon(bot) + bot.name + "</button>";
+        }).join("");
+      }
+
+      function renderLayoutState(){
+        var inPrivate = state.mode === "private";
+        privateSidebar.hidden = !inPrivate;
+        companySidebar.hidden = inPrivate;
+        if(inPrivate){
+          createBtn.hidden = false;
+        } else {
+          createBtn.hidden = true;
+          palette.hidden = true;
+        }
+      }
+
+      function wireBotRows(){
+        document.querySelectorAll(".row[data-bot-id], .fav[data-bot-id]").forEach(function(el){
+          el.addEventListener("click", function(){
+            var id = el.getAttribute("data-bot-id");
+            if(id){ openBot(id); }
           });
-          btn.setAttribute("aria-pressed", "true");
+          el.addEventListener("mousedown", function(e){
+            var id = el.getAttribute("data-bot-id");
+            if(!id){ return; }
+            state.pointerCandidateId = id;
+            state.pointerStartX = e.clientX;
+            state.pointerStartY = e.clientY;
+          });
+          el.addEventListener("dragstart", function(e){
+            var id = el.getAttribute("data-bot-id");
+            if(!id){ return; }
+            state.dragBotId = id;
+            e.dataTransfer.setData("text/plain", id);
+            e.dataTransfer.effectAllowed = "move";
+          });
         });
+
+        document.querySelectorAll(".section[data-section]").forEach(function(sec){
+          sec.addEventListener("dragover", function(e){
+            e.preventDefault();
+            sec.classList.add("is-drop");
+          });
+          sec.addEventListener("dragleave", function(){
+            sec.classList.remove("is-drop");
+          });
+          sec.addEventListener("drop", function(e){
+            e.preventDefault();
+            sec.classList.remove("is-drop");
+            var id = e.dataTransfer.getData("text/plain") || state.dragBotId;
+            moveBotToSection(getBot(id), sec.getAttribute("data-section"));
+          });
+          sec.addEventListener("mouseup", function(){
+            if(!state.dragBotId){ return; }
+            moveBotToSection(getBot(state.dragBotId), sec.getAttribute("data-section"));
+          });
+        });
+      }
+
+      function wireFavoritesDrop(){
+        if(wireFavoritesDrop._bound){ return; }
+        wireFavoritesDrop._bound = true;
+
+        favoritesDrop.addEventListener("dragover", function(e){
+          e.preventDefault();
+          favoritesDrop.classList.add("is-drop");
+        });
+        favoritesDrop.addEventListener("dragleave", function(){
+          favoritesDrop.classList.remove("is-drop");
+        });
+        favoritesDrop.addEventListener("drop", function(e){
+          e.preventDefault();
+          favoritesDrop.classList.remove("is-drop");
+          var id = e.dataTransfer.getData("text/plain") || state.dragBotId;
+          pinBot(getBot(id));
+        });
+        favoritesDrop.addEventListener("mouseup", function(){
+          if(!state.dragBotId){ return; }
+          pinBot(getBot(state.dragBotId));
+        });
+      }
+
+      function wireCompanyRows(){
+        document.querySelectorAll("[data-channel-id]").forEach(function(el){
+          el.addEventListener("click", function(){
+            openChannel(state.currentCompanyId, el.getAttribute("data-channel-id"));
+          });
+        });
+      }
+
+      function autoresize(){
+        composer.style.height = "auto";
+        composer.style.height = Math.min(composer.scrollHeight, 170) + "px";
+      }
+
+      function sendMessage(seedText){
+        var text = (seedText || composer.value || "").trim();
+        if(!text){ return; }
+
+        if(state.mode === "private"){
+          var bot = getBot(state.currentBotId);
+          if(!bot){ return; }
+          bot.messages.push({from:"you", text:text});
+          composer.value = "";
+          autoresize();
+          renderChat();
+          chatScroll.scrollTop = chatScroll.scrollHeight;
+
+          window.setTimeout(function(){
+            bot.messages.push({from:"bot", text:"Entendi. Vou agir nisso agora e volto com um resumo objetivo ainda nesta conversa."});
+            renderChat();
+            chatScroll.scrollTop = chatScroll.scrollHeight;
+          }, 650);
+          return;
+        }
+
+        var channel = getCurrentChannel();
+        if(!channel){ return; }
+        channel.messages.push({from:"you", text:text});
+        composer.value = "";
+        autoresize();
+        renderChat();
+        chatScroll.scrollTop = chatScroll.scrollHeight;
+
+        window.setTimeout(function(){
+          channel.messages.push({from:"bot", text:"Recebi. Vou processar no contexto deste canal e paro para sua aprovacao antes de qualquer envio sensivel."});
+          renderChat();
+          chatScroll.scrollTop = chatScroll.scrollHeight;
+        }, 700);
+      }
+
+      function createNewBot(){
+        state.newBotCount += 1;
+        var id = "b-new-" + state.newBotCount;
+        var bot = {
+          id: id,
+          name: "Novo Bot",
+          subtitle: "",
+          preview: "Acabamos de nos conhecer.",
+          time: "agora",
+          section: "sem-secao",
+          favorite: false,
+          unread: false,
+          shape: "shape-square",
+          color: "c-red",
+          starter: {
+            intro: "Oi, Marlon. Aqui e o New Bot - acabamos de nos conhecer. Pronto pra te ajudar no que for mais util pra voce.",
+            title: "Pra que voce quer me usar?",
+            subtitle: "Pode escolher ou escrever do seu jeito.",
+            options: [
+              ["A","Tarefas do dia a dia","Lembretes, organizacao, follow-ups"],
+              ["B","Trabalho na Leapy","Produto, ClickUp, Slack, codigo..."],
+              ["C","Pesquisa e respostas","Pesquisas, comparacoes e drafts"],
+              ["D","Ainda nao sei","Me ajuda a descobrir no caminho"]
+            ]
+          },
+          messages: []
+        };
+        bots.unshift(bot);
+        state.mode = "private";
+        state.currentBotId = id;
+        palette.hidden = true;
+        renderAll();
+        composer.focus();
+      }
+
+      function renderAll(){
+        renderRail();
+        renderLayoutState();
+        if(state.mode === "private"){
+          renderFavorites();
+          renderPrivateSections();
+          renderPalette();
+          wireBotRows();
+          wireFavoritesDrop();
+        } else {
+          renderCompanySidebar();
+          wireCompanyRows();
+        }
+        renderChat();
+      }
+
+      createBtn.addEventListener("click", function(){
+        if(state.mode !== "private"){ return; }
+        palette.hidden = !palette.hidden;
       });
+      document.getElementById("closePalette").addEventListener("click", function(){
+        palette.hidden = true;
+      });
+      document.getElementById("createNewOption").addEventListener("click", function(){
+        createNewBot();
+      });
+      paletteBotList.addEventListener("click", function(e){
+        var button = e.target.closest("[data-open-bot]");
+        if(!button){ return; }
+        openBot(button.getAttribute("data-open-bot"));
+        palette.hidden = true;
+      });
+
+      timeline.addEventListener("click", function(e){
+        var button = e.target.closest(".choice");
+        if(!button){ return; }
+        composer.value = button.getAttribute("data-seed");
+        autoresize();
+        composer.focus();
+      });
+
+      composer.addEventListener("input", autoresize);
+      composer.addEventListener("keydown", function(e){
+        if(e.key === "Enter" && !e.shiftKey){
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+      document.getElementById("sendBtn").addEventListener("click", function(){
+        sendMessage();
+      });
+
+      contextRail.addEventListener("click", function(e){
+        var btn = e.target.closest("[data-context-type]");
+        if(!btn){ return; }
+        var type = btn.getAttribute("data-context-type");
+        if(type === "private"){
+          openPrivate();
+          return;
+        }
+        openCompany(btn.getAttribute("data-company-id"));
+      });
+      backToPrivate.addEventListener("click", function(){
+        openPrivate();
+      });
+
+      document.addEventListener("click", function(e){
+        if(palette.hidden){ return; }
+        if(e.target.closest("#palette") || e.target.closest("#createBtn")){ return; }
+        palette.hidden = true;
+      });
+      document.addEventListener("mousemove", function(e){
+        if(!state.pointerCandidateId){ return; }
+        var dx = Math.abs(e.clientX - state.pointerStartX);
+        var dy = Math.abs(e.clientY - state.pointerStartY);
+        if(dx + dy > 8){
+          state.dragBotId = state.pointerCandidateId;
+        }
+      });
+      document.addEventListener("mouseup", function(){
+        state.pointerCandidateId = null;
+        window.setTimeout(function(){ state.dragBotId = null; }, 0);
+      });
+
+      renderAll();
+      autoresize();
+      chatScroll.scrollTop = chatScroll.scrollHeight;
     })();
   </script>
 </body>
