@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prototipo - Agentes Privados</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <style>
+    :root{
+      --bg:#f5f6f8;
+      --surface:#ffffff;
+      --surface-2:#f9fafb;
+      --line:#e5e7eb;
+      --line-2:#d6dae1;
+      --ink:#14171f;
+      --ink-2:#3f4653;
+      --ink-3:#71798a;
+      --brand:#4a154b;
+      --brand-soft:#efe7f1;
+      --blue:#2c6bed;
+      --amber:#b66a08;
+      --amber-soft:#fff4e8;
+      --good:#16784b;
+      --radius:12px;
+      --shadow:0 10px 30px rgba(20, 23, 31, 0.08);
+      --font:"Inter", system-ui, -apple-system, sans-serif;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--ink);
+      font:400 14px/1.5 var(--font);
+      -webkit-font-smoothing:antialiased;
+    }
+    button, input, textarea{font:inherit;color:inherit}
+    button{
+      border:0;
+      background:none;
+      cursor:pointer;
+    }
+    :focus-visible{
+      outline:2px solid var(--blue);
+      outline-offset:2px;
+      border-radius:8px;
+    }
+    [hidden]{display:none !important}
+
+    .app{
+      height:100dvh;
+      display:grid;
+      grid-template-columns:72px 290px 1fr;
+      min-height:0;
+    }
+
+    .rail{
+      background:var(--brand);
+      color:#fff;
+      border-right:1px solid rgba(255,255,255,0.14);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:10px;
+      padding:14px 0;
+    }
+    .rail .dot{
+      width:42px;
+      height:42px;
+      border-radius:12px;
+      background:rgba(255,255,255,0.12);
+      display:grid;
+      place-items:center;
+      font-size:12px;
+      font-weight:700;
+      position:relative;
+    }
+    .rail .dot.active{
+      background:#fff;
+      color:var(--brand);
+    }
+    .rail .dot.active::before{
+      content:"";
+      position:absolute;
+      left:-10px;
+      top:9px;
+      width:3px;
+      height:24px;
+      border-radius:0 2px 2px 0;
+      background:#fff;
+    }
+    .rail .sep{
+      width:28px;
+      height:1px;
+      background:rgba(255,255,255,0.2);
+      margin:4px 0;
+    }
+
+    .sidebar{
+      background:var(--surface);
+      border-right:1px solid var(--line);
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+    }
+    .sb-head{
+      padding:16px 16px 12px;
+      border-bottom:1px solid var(--line);
+    }
+    .sb-head h1{
+      margin:0;
+      font-size:17px;
+      font-weight:700;
+      letter-spacing:-0.01em;
+    }
+    .sb-head p{
+      margin:4px 0 0;
+      color:var(--ink-3);
+      font-size:12.5px;
+    }
+    .search{
+      margin:12px 16px 0;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:var(--surface-2);
+      padding:7px 10px;
+      color:var(--ink-3);
+    }
+    .search input{
+      border:0;
+      outline:none;
+      background:none;
+      width:100%;
+      font-size:13px;
+    }
+    .new{
+      margin:10px 16px 0;
+      border:1px solid var(--line-2);
+      background:#fff;
+      border-radius:10px;
+      padding:9px 10px;
+      font-weight:600;
+      text-align:center;
+    }
+    .new:hover{border-color:var(--blue);color:var(--blue)}
+
+    .list{
+      min-height:0;
+      overflow:auto;
+      padding:10px 10px 14px;
+    }
+    .group{
+      margin:10px 6px 8px;
+      font-size:11px;
+      color:var(--ink-3);
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .hint{
+      font-size:10px;
+      letter-spacing:.03em;
+      text-transform:none;
+      border:1px solid var(--line);
+      padding:1px 6px;
+      border-radius:20px;
+      color:var(--ink-3);
+    }
+    .agent{
+      width:100%;
+      display:grid;
+      grid-template-columns:32px 1fr auto;
+      align-items:center;
+      gap:10px;
+      padding:8px 8px;
+      border-radius:10px;
+      color:var(--ink-2);
+    }
+    .agent:hover{background:var(--surface-2)}
+    .agent.active{
+      background:#eaf0fe;
+      color:var(--ink);
+    }
+    .shape{
+      width:32px;
+      height:32px;
+      border-radius:8px;
+      display:grid;
+      place-items:center;
+      color:#fff;
+      font-weight:700;
+      font-size:12px;
+    }
+    .shape.round{border-radius:50%}
+    .s1{background:#6d56d6}
+    .s2{background:#0f766e}
+    .s3{background:#d44d95}
+    .n{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .n b{
+      font-size:13.5px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .n span{
+      font-size:12px;
+      color:var(--ink-3);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .state{
+      font-size:11px;
+      font-weight:600;
+      color:var(--ink-3);
+    }
+    .state.wait{color:var(--amber)}
+    .state.work{color:var(--good)}
+
+    .stage{
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+    }
+    .top{
+      min-height:58px;
+      padding:12px 20px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      background:var(--surface);
+      flex:none;
+    }
+    .top h2{
+      margin:0;
+      font-size:17px;
+      font-weight:700;
+      letter-spacing:-0.01em;
+    }
+    .meta{
+      color:var(--ink-3);
+      font-size:12.5px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .meta .chip{
+      border:1px solid var(--line);
+      background:var(--surface-2);
+      border-radius:999px;
+      padding:3px 8px;
+    }
+
+    .view{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:24px;
+      display:none;
+    }
+    .view.on{display:block}
+
+    .card{
+      background:var(--surface);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+    }
+
+    .journey-grid{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(280px, 1fr));
+      gap:14px;
+    }
+    .journey{
+      padding:16px;
+    }
+    .journey h3{
+      margin:0 0 6px;
+      font-size:15px;
+      letter-spacing:-0.01em;
+    }
+    .journey p{
+      margin:0;
+      color:var(--ink-3);
+      font-size:13px;
+      line-height:1.6;
+    }
+    .line{
+      margin:16px 0;
+      border-top:1px solid var(--line);
+    }
+
+    .quick-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    .btn{
+      border:1px solid var(--line-2);
+      border-radius:9px;
+      padding:8px 12px;
+      background:#fff;
+      font-weight:500;
+      font-size:13px;
+    }
+    .btn:hover{border-color:var(--ink-3)}
+    .btn.primary{
+      background:var(--ink);
+      color:#fff;
+      border-color:var(--ink);
+    }
+    .btn.brand{
+      background:var(--brand);
+      color:#fff;
+      border-color:var(--brand);
+    }
+
+    .create{
+      max-width:880px;
+      margin:0 auto;
+      padding:20px;
+    }
+    .create h3{
+      margin:0 0 5px;
+      font-size:20px;
+      letter-spacing:-0.02em;
+    }
+    .create .sub{
+      margin:0 0 20px;
+      color:var(--ink-3);
+      font-size:14px;
+    }
+    .field{
+      margin-bottom:14px;
+    }
+    .field label{
+      display:block;
+      margin-bottom:6px;
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.06em;
+      color:var(--ink-3);
+      font-weight:600;
+    }
+    .field input,.field textarea{
+      width:100%;
+      border:1px solid var(--line-2);
+      border-radius:10px;
+      background:#fff;
+      padding:11px 12px;
+      outline:none;
+    }
+    .field textarea{
+      min-height:148px;
+      resize:vertical;
+      line-height:1.6;
+    }
+    .radio{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .radio button{
+      border:1px solid var(--line-2);
+      padding:8px 10px;
+      border-radius:999px;
+      background:#fff;
+      font-size:12.5px;
+    }
+    .radio button[aria-pressed="true"]{
+      border-color:var(--blue);
+      color:var(--blue);
+      font-weight:600;
+      background:#edf3ff;
+    }
+
+    .review{
+      max-width:860px;
+      margin:0 auto;
+      padding:20px;
+    }
+    .review h3{
+      margin:0 0 8px;
+      font-size:20px;
+      letter-spacing:-0.02em;
+    }
+    .stack{
+      display:grid;
+      gap:12px;
+      margin-top:16px;
+    }
+    .panel{
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:var(--surface-2);
+      padding:12px 14px;
+    }
+    .panel .k{
+      font-size:11px;
+      color:var(--ink-3);
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      font-weight:700;
+      margin-bottom:6px;
+    }
+    .panel ul{
+      margin:0;
+      padding-left:18px;
+    }
+    .panel li{
+      margin-bottom:6px;
+      font-size:13.5px;
+      color:var(--ink-2);
+    }
+    .panel li:last-child{margin-bottom:0}
+    .panel.warn{
+      background:var(--amber-soft);
+      border-color:#efcfab;
+    }
+
+    .chat{
+      max-width:980px;
+      margin:0 auto;
+      display:grid;
+      grid-template-columns:1fr 340px;
+      gap:14px;
+    }
+    .thread{
+      background:var(--surface);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      min-height:540px;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+    .log{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:16px 18px;
+    }
+    .msg{
+      display:grid;
+      grid-template-columns:30px 1fr;
+      gap:10px;
+      margin-bottom:14px;
+    }
+    .msg .avatar{
+      width:30px;
+      height:30px;
+      border-radius:8px;
+      display:grid;
+      place-items:center;
+      font-size:11px;
+      font-weight:700;
+      color:#fff;
+      background:#5a6270;
+    }
+    .msg .avatar.me{
+      border-radius:50%;
+      background:#1f2937;
+    }
+    .msg .who{
+      display:flex;
+      align-items:baseline;
+      gap:7px;
+      margin-bottom:2px;
+    }
+    .msg .who b{font-size:13.5px}
+    .msg .who time{
+      color:var(--ink-3);
+      font-size:11px;
+    }
+    .msg p{
+      margin:0;
+      color:var(--ink-2);
+      line-height:1.55;
+    }
+    .compose{
+      border-top:1px solid var(--line);
+      padding:12px;
+      background:#fff;
+    }
+    .compose .box{
+      border:1px solid var(--line-2);
+      border-radius:10px;
+      display:flex;
+      gap:8px;
+      padding:8px;
+      background:var(--surface-2);
+    }
+    .compose textarea{
+      border:0;
+      outline:none;
+      resize:none;
+      background:none;
+      width:100%;
+      min-height:24px;
+      line-height:1.45;
+    }
+    .compose .send{
+      align-self:flex-end;
+      border:1px solid var(--ink);
+      background:var(--ink);
+      color:#fff;
+      border-radius:8px;
+      padding:6px 11px;
+      font-size:12px;
+      font-weight:600;
+    }
+
+    .approval{
+      background:var(--surface);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      padding:14px;
+      height:max-content;
+      position:sticky;
+      top:12px;
+    }
+    .approval .head{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+    }
+    .approval .head b{font-size:13px}
+    .approval .head span{
+      font-size:11px;
+      color:var(--amber);
+      font-weight:700;
+    }
+    .approval h4{
+      margin:0 0 10px;
+      font-size:14px;
+      line-height:1.45;
+    }
+    .items{
+      margin:0;
+      padding:0;
+      list-style:none;
+      display:grid;
+      gap:8px;
+    }
+    .items li{
+      border:1px solid var(--line);
+      border-radius:9px;
+      padding:9px;
+      background:var(--surface-2);
+      display:grid;
+      grid-template-columns:18px 1fr;
+      gap:8px;
+      align-items:start;
+    }
+    .items input{
+      margin-top:2px;
+      width:15px;
+      height:15px;
+      accent-color:var(--ink);
+    }
+    .items b{font-size:13px}
+    .items p{
+      margin:2px 0 0;
+      color:var(--ink-3);
+      font-size:12px;
+      line-height:1.45;
+    }
+
+    .bottom-nav{
+      position:fixed;
+      left:50%;
+      transform:translateX(-50%);
+      bottom:12px;
+      background:#fff;
+      border:1px solid var(--line-2);
+      border-radius:999px;
+      display:flex;
+      gap:2px;
+      padding:4px;
+      box-shadow:var(--shadow);
+      z-index:40;
+    }
+    .bottom-nav button{
+      border-radius:999px;
+      padding:6px 11px;
+      font-size:12px;
+      color:var(--ink-3);
+      white-space:nowrap;
+    }
+    .bottom-nav button[aria-pressed="true"]{
+      background:var(--ink);
+      color:#fff;
+      font-weight:600;
+    }
+
+    @media (max-width:1100px){
+      .app{grid-template-columns:64px 250px 1fr}
+      .chat{grid-template-columns:1fr}
+      .approval{position:static}
+    }
+    @media (max-width:860px){
+      .app{grid-template-columns:1fr}
+      .rail,.sidebar{display:none}
+      .view{padding:16px}
+      .journey-grid{grid-template-columns:1fr}
+      .bottom-nav{
+        max-width:calc(100vw - 20px);
+        overflow:auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail" aria-label="Workspaces">
+      <button class="dot active">MW</button>
+      <button class="dot">L</button>
+      <button class="dot">G</button>
+      <div class="sep"></div>
+      <button class="dot">+</button>
+    </aside>
+
+    <aside class="sidebar">
+      <header class="sb-head">
+        <h1>Agentes privados</h1>
+        <p>Somente voce ve estas conversas.</p>
+      </header>
+
+      <div class="search">
+        <span>⌕</span>
+        <input aria-label="Buscar agente" value="buscar agente">
+      </div>
+
+      <button class="new" data-view-target="create">+ Novo agente privado</button>
+
+      <div class="list">
+        <div class="group">
+          <span>Seus agentes</span>
+          <span class="hint">3 ativos</span>
+        </div>
+
+        <button class="agent active" data-view-target="chat">
+          <span class="shape s1">BI</span>
+          <span class="n">
+            <b>Bia</b>
+            <span>desenvolvimento e acompanhamento</span>
+          </span>
+          <span class="state wait">esperando voce</span>
+        </button>
+
+        <button class="agent" data-view-target="chat">
+          <span class="shape round s2">TE</span>
+          <span class="n">
+            <b>Teo</b>
+            <span>contratos e renovacoes</span>
+          </span>
+          <span class="state work">trabalhando</span>
+        </button>
+
+        <button class="agent" data-view-target="chat">
+          <span class="shape s3">LI</span>
+          <span class="n">
+            <b>Lia</b>
+            <span>triagem de mensagens e rotina</span>
+          </span>
+          <span class="state">pausado</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <header class="top">
+        <h2 id="title">Jornadas de agentes privados</h2>
+        <div class="meta">
+          <span class="chip">Alta fidelidade</span>
+          <span class="chip">HTML + CSS</span>
+        </div>
+      </header>
+
+      <section class="view on" id="view-inbox">
+        <div class="card" style="padding:20px">
+          <h3 style="margin:0;font-size:22px;letter-spacing:-.02em">Fluxo privado, sem ruido</h3>
+          <p style="margin:6px 0 0;color:var(--ink-3);max-width:760px;font-size:14px">
+            Inspirado na familiaridade do Slack, mas reduzido ao essencial para quem cria e conversa com agentes privados:
+            menos camadas, menos campos e mais foco no dialogo.
+          </p>
+
+          <div class="line"></div>
+
+          <div class="journey-grid">
+            <article class="journey card">
+              <h3>1. Entrar na frota privada</h3>
+              <p>Voce abre e ja enxerga os seus agentes, com estado em texto claro: trabalhando, pausado ou esperando voce.</p>
+            </article>
+            <article class="journey card">
+              <h3>2. Criar por linguagem natural</h3>
+              <p>Um campo principal descreve o trabalho. Sem tela de configuracao tecnica na entrada.</p>
+            </article>
+            <article class="journey card">
+              <h3>3. Confirmar antes de nascer</h3>
+              <p>O agente devolve entendimento e limites. Voce confirma sabendo o que ele fara e o que nao fara.</p>
+            </article>
+            <article class="journey card">
+              <h3>4. Conversar em 1:1</h3>
+              <p>A conversa e direta. Quando houver decisao, ela aparece item a item para aprovar ou negar sem ambiguidade.</p>
+            </article>
+          </div>
+
+          <div class="quick-actions">
+            <button class="btn brand" data-view-target="create">Comecar criacao</button>
+            <button class="btn" data-view-target="chat">Abrir conversa de exemplo</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-create">
+        <div class="card create">
+          <h3>Novo agente privado</h3>
+          <p class="sub">Descreva em portugues o que voce quer delegar. O agente nasce sem acessos e sem rotinas ativas.</p>
+
+          <div class="field">
+            <label>Nome do agente</label>
+            <input value="Nina">
+          </div>
+
+          <div class="field">
+            <label>Forma do icone</label>
+            <div class="radio" role="radiogroup" aria-label="Escolha de forma">
+              <button aria-pressed="true">Quadrado</button>
+              <button aria-pressed="false">Circulo</button>
+              <button aria-pressed="false">Hexagono</button>
+              <button aria-pressed="false">Triangulo</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>O que o agente deve fazer</label>
+            <textarea>Quero um agente para acompanhar entregas de avaliacao dos aprendizes e preparar mensagens de cobranca quando houver atraso acima de 5 dias. Sempre me pergunte antes de enviar qualquer mensagem para alguem.</textarea>
+          </div>
+
+          <div class="field">
+            <label>Dono</label>
+            <input value="Voce (agente privado)" aria-readonly="true">
+          </div>
+
+          <div class="quick-actions">
+            <button class="btn" data-view-target="inbox">Cancelar</button>
+            <button class="btn primary" data-view-target="review">Gerar rascunho do agente</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-review">
+        <div class="card review">
+          <h3>Revisar antes de criar</h3>
+          <p style="margin:0;color:var(--ink-3);font-size:14px">
+            A Nina entendeu sua solicitacao e resumiu o comportamento inicial. Nenhum acesso foi concedido.
+          </p>
+
+          <div class="stack">
+            <section class="panel">
+              <div class="k">O que vou fazer</div>
+              <ul>
+                <li>Monitorar atrasos de avaliacao acima de 5 dias.</li>
+                <li>Preparar proposta de mensagem para cada caso.</li>
+                <li>Esperar sua aprovacao item a item antes de enviar.</li>
+              </ul>
+            </section>
+
+            <section class="panel warn">
+              <div class="k">O que NAO vou fazer</div>
+              <ul>
+                <li>Nao enviar mensagens automaticamente.</li>
+                <li>Nao usar dados de outras empresas.</li>
+                <li>Nao criar rotina ativa sem sua confirmacao explicita.</li>
+              </ul>
+            </section>
+
+            <section class="panel">
+              <div class="k">Estado inicial</div>
+              <ul>
+                <li>Sem acessos conectados.</li>
+                <li>Nunca executou.</li>
+                <li>Dono: voce (privado).</li>
+              </ul>
+            </section>
+          </div>
+
+          <div class="quick-actions" style="margin-top:18px">
+            <button class="btn" data-view-target="create">Voltar e editar</button>
+            <button class="btn primary" data-view-target="chat">Criar agente e abrir conversa</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-chat">
+        <div class="chat">
+          <article class="thread">
+            <div class="log">
+              <div class="msg">
+                <span class="avatar me">MW</span>
+                <div>
+                  <div class="who"><b>Marlon</b><time>09:11</time></div>
+                  <p>Nina, verifica quem esta com avaliacao atrasada ha mais de 5 dias e prepara cobranca.</p>
+                </div>
+              </div>
+
+              <div class="msg">
+                <span class="avatar" style="background:#6d56d6">NI</span>
+                <div>
+                  <div class="who"><b>Nina</b><time>09:12</time></div>
+                  <p>Encontrei 3 casos. Montei as mensagens e parei antes de enviar.</p>
+                  <p>Deixei a aprovacao item a item no painel lateral.</p>
+                </div>
+              </div>
+
+              <div class="msg">
+                <span class="avatar me">MW</span>
+                <div>
+                  <div class="who"><b>Marlon</b><time>09:14</time></div>
+                  <p>Perfeito. Mantem sempre esse fluxo: rascunho primeiro, envio so com meu ok.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="compose">
+              <div class="box">
+                <textarea rows="1">Nina, no segundo item troca o tom para algo mais acolhedor.</textarea>
+                <button class="send">Enviar</button>
+              </div>
+            </div>
+          </article>
+
+          <aside class="approval">
+            <div class="head">
+              <b>Aguardando voce</b>
+              <span>expira em 22h</span>
+            </div>
+            <h4>Enviar 3 mensagens de cobranca para avaliacao em atraso</h4>
+            <ul class="items">
+              <li>
+                <input type="checkbox" checked>
+                <span>
+                  <b>Ana Clara M.</b>
+                  <p>atraso de 6 dias - mensagem pronta</p>
+                </span>
+              </li>
+              <li>
+                <input type="checkbox" checked>
+                <span>
+                  <b>Bruno S.</b>
+                  <p>atraso de 7 dias - mensagem pronta</p>
+                </span>
+              </li>
+              <li>
+                <input type="checkbox">
+                <span>
+                  <b>Thiago R.</b>
+                  <p>conta caso sensivel - revisar manualmente antes</p>
+                </span>
+              </li>
+            </ul>
+
+            <div class="quick-actions" style="margin-top:12px">
+              <button class="btn">Negar tudo</button>
+              <button class="btn primary">Aprovar os 2 selecionados</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Jornadas">
+    <button data-view="inbox" aria-pressed="true">1. Visao geral</button>
+    <button data-view="create" aria-pressed="false">2. Criacao</button>
+    <button data-view="review" aria-pressed="false">3. Confirmacao</button>
+    <button data-view="chat" aria-pressed="false">4. Conversa privada</button>
+  </nav>
+
+  <script>
+    (function(){
+      var title = document.getElementById("title");
+      var names = {
+        inbox: "Jornada 1 - Visao geral de agentes privados",
+        create: "Jornada 2 - Criacao por linguagem natural",
+        review: "Jornada 3 - Confirmacao antes de criar",
+        chat: "Jornada 4 - Conversa 1:1 com agente privado"
+      };
+
+      function go(view){
+        document.querySelectorAll(".view").forEach(function(el){
+          el.classList.toggle("on", el.id === "view-" + view);
+        });
+        document.querySelectorAll(".bottom-nav [data-view]").forEach(function(btn){
+          btn.setAttribute("aria-pressed", String(btn.dataset.view === view));
+        });
+        if (title && names[view]) title.textContent = names[view];
+      }
+
+      document.querySelectorAll("[data-view-target]").forEach(function(el){
+        el.addEventListener("click", function(){
+          go(el.getAttribute("data-view-target"));
+        });
+      });
+
+      document.querySelectorAll(".bottom-nav [data-view]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          go(btn.dataset.view);
+        });
+      });
+
+      document.querySelectorAll(".radio button").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          document.querySelectorAll(".radio button").forEach(function(other){
+            other.setAttribute("aria-pressed", "false");
+          });
+          btn.setAttribute("aria-pressed", "true");
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
