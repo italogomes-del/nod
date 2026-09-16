@@ -7,7 +7,7 @@ import type { Agente } from "../contracts/agente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
-import type { IdentidadeSemTurno, TokenTurno } from "../services/token-turno.ts";
+import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 import { conectorPublico } from "./registrar-conector.ts";
@@ -28,9 +28,6 @@ export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conve
   if (turno.origem === "sala" || conversa?.tipo === "sala") return "sala";
   return agente.confirmado ? "conversa" : "criacao";
 }
-
-/** Assinatura concreta do token: aceita a identidade (funções com menos parâmetros são atribuíveis, então o contrato genérico também entra). */
-type CunharComIdentidade = (turnoId: string, identidade: IdentidadeSemTurno) => string;
 
 function guardarPlanoSeSuportado(tokens: Services["tokenTurno"], plano: PlanoTurno): void {
   const concreto = tokens as Partial<Pick<TokenTurno, "guardarPlano">>;
@@ -89,8 +86,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     agora,
   });
 
-  const cunhar: CunharComIdentidade = deps.services.tokenTurno.cunhar.bind(deps.services.tokenTurno);
-  const tokenDeTurno = cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
+  const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
   const plano: PlanoTurno = { ...parcial, machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
 

@@ -43,6 +43,13 @@ export interface DepsRoteador {
 }
 
 const PREFIXO_TENANT = /^\/api\/t\/([^/]+)(\/.*)?$/;
+/**
+ * definido em 2026-09-16 (EMENDA-L9 §2): todo grupo de path chamado `id` ou `mid` é um identificador de
+ * linha (uuid); fora do formato, a rota não existe (404) — nunca 22P02 do Postgres virando 500.
+ * Grupos com outro nome (`nome` de ferramenta) não passam por aqui.
+ */
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GRUPOS_UUID = new Set(["id", "mid"]);
 const PREFIXO_INTERNO = /^\/api\/interno(\/.*)$/;
 const PREFIXO_PUBLICO = /^\/api(\/.*)$/;
 
@@ -64,7 +71,11 @@ function casar(rotas: Rota[], metodo: string, caminho: string, filtro: (r: Rota)
     const m = rota.padrao.exec(caminho);
     if (!m) continue;
     const params: Record<string, string> = {};
-    for (const [k, v] of Object.entries(m.groups ?? {})) params[k] = decodeURIComponent(v);
+    for (const [k, v] of Object.entries(m.groups ?? {})) {
+      const valor = decodeURIComponent(v);
+      if (GRUPOS_UUID.has(k) && !UUID.test(valor)) return null;
+      params[k] = valor;
+    }
     return { rota, params };
   }
   return null;

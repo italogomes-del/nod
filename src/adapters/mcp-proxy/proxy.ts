@@ -6,7 +6,7 @@ import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { LONGPOLL_APROVACAO_MS, ORCAMENTO_RESULTADO_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import { ferramentaDoPlano, ferramentasMcp, validadeDoPlano } from "./catalogo.ts";
-import { criarClienteNod, ehFalhaTransporte, type ClienteNod } from "./cliente-nod-stub.ts";
+import { criarClienteNod, ehFalhaTransporte, type ClienteNod } from "../executor/cliente-nod.ts";
 import { PROTOCOLO_MCP } from "./cliente-mcp.ts";
 import { cortar } from "./corte.ts";
 import { CODIGO, erro, interpretar, resposta, type IdJsonRpc } from "./jsonrpc.ts";
@@ -204,6 +204,7 @@ export async function main(env: Readonly<Record<string, string | undefined>> = p
     ferramenta: async () => ({ transporte: "falha_tecnica", status: null }),
     aguardar: async () => ({ transporte: "falha_tecnica", status: null }),
     negacao: async () => undefined,
+    chamarFerramenta: async () => ({ conteudo: "plano_ausente", isError: true }),
   };
   const cliente = url && token ? criarClienteNod({ url, token }) : semToken;
   const proxy = criarProxy({ cliente, agora: () => Date.now(), diagnostico: diagnosticoEmArquivo(env.NOD_PROXY_LOG) });

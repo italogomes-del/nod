@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import type { IdentidadeDeTurno, ServicesNod } from "../contracts/servicos.ts";
+import type { IdentidadeSemTurno, ServicesNod } from "../contracts/servicos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { PLANO_VALIDADE_MS } from "../domain/plano-turno.ts";
 import type { Relogio } from "../shared/types.ts";
@@ -15,10 +15,10 @@ import type { Relogio } from "../shared/types.ts";
  * SEM BANCO (EMENDA 3): reinício do servidor perde os tokens — o turno em curso cai em plano_ausente
  * e o varredor de lease assenta (ADR-010), nunca reenvia.
  */
-export type IdentidadeSemTurno = Omit<IdentidadeDeTurno, "turnoId">;
+export type { IdentidadeSemTurno };
 
 export type TokenTurno = ServicesNod<unknown>["tokenTurno"] & {
-  /** Assinatura CONCRETA: a identidade entra no cunhar (o contrato genérico só leva turnoId; ver PENDENCIA-CONTRATO.md). */
+  /** A identidade é opcional só quando `identidadeDe` foi injetado (resolvida pelo turno); o contrato a exige. */
   cunhar(turnoId: string, identidade?: IdentidadeSemTurno): string;
   guardarPlano(plano: PlanoTurno): void;
   planoDe(turnoId: string): PlanoTurno | null;

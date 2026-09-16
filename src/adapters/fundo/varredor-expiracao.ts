@@ -2,6 +2,7 @@ import type { Decisao } from "../../contracts/decisao.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
+import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
@@ -12,7 +13,7 @@ import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 /** definido em 2026-09-16: 30 s — a spec aceita "em ≤30s" para o vencimento aparecer (fluxo SUA VEZ E EXPIRAÇÃO). */
 export const INTERVALO_VARREDOR_MS = 30_000;
 
-export type OpcoesVarredor = { services: Services; useCases: UseCasesNod; agora: Relogio };
+export type OpcoesVarredor = { services: Services; useCases: UseCasesNod; agora: Relogio; metricas?: Metricas };
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[] };
 
 const DESFECHO_HUMANO: Record<string, string> = {
@@ -39,6 +40,10 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
       resultado.vencidas.push(d.id);
       if (!(await repos.decisoes.marcarVarrida(d.id, "vencida"))) continue;
       const tipoDesfecho = d.desfecho?.tipo ?? "expirou_sem_ninguem_ver";
+      // ADR-017 #2: uma expiração por decisão vencida, rotulada pela causa que o repo devolveu (pendência L8 §4).
+      if (tipoDesfecho === "expirou_sem_ninguem_ver" || tipoDesfecho === "expirou_com_alguem_ciente") {
+        (opcoes.metricas ?? registroPadrao).incrementar({ metrica: "expiracao", causa: tipoDesfecho, tenant_id: escopo.tenantId });
+      }
       const autoria = autoriaPessoa(escopo.pessoaId, "regra:varredor-expiracao");
       await repos.mensagens.criar({
         conversaId: d.conversaId,

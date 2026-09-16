@@ -30,6 +30,12 @@ export type OpcoesLaco = {
   aoDelta?: (plano: PlanoTurno, texto: string) => void;
   /** Cada EventoStream interpretado, para quem persiste (catcher_registros, trilha) sem passar pela ponte. */
   aoEvento?: (plano: PlanoTurno, ev: EventoStream) => void;
+  /**
+   * definido em 2026-09-16 (composição L9): o adapter do turno é registrado no interruptor ANTES de rodar
+   * (Parar → SIGTERM em < 2 s, E5.4) e solto ao terminar; sem isto Parar só chegaria pela renovação de lease.
+   */
+  aoIniciarTurno?: (plano: PlanoTurno, adapter: Adapter) => void;
+  aoTerminarTurno?: (plano: PlanoTurno) => void;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
 };
@@ -123,6 +129,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       }
       const adapter = registro.instance.adapter(plano);
       adapterAtual = adapter;
+      o.aoIniciarTurno?.(plano, adapter);
       if (parado) await adapter.interromper();
       const resultado = await adapter.rodarTurno({
         async sinal(s) {
@@ -145,6 +152,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       clearInterval(batida);
       adapterAtual = null;
       turnoAtual = null;
+      o.aoTerminarTurno?.(plano);
     }
   }
 

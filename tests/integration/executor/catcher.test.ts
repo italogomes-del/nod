@@ -113,12 +113,14 @@ describe("driver catcher + cliente-nod contra rota interna real", { timeout: TIM
     expect(resultado.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: true });
     expect(espiao.sinais.slice(0, 2)).toEqual(["attempted", "promptSubmitted"]);
     expect(espiao.deltas).toEqual(["pensando"]);
-    expect(espiao.eventos.map((e) => e.tipo)).toEqual(["init", "delta", "tool_use", "tool_result", "result"]);
+    expect(espiao.eventos.filter((e) => e.tipo !== "catcher").map((e) => e.tipo)).toEqual(["init", "delta", "tool_use", "tool_result", "result"]);
+    // Cada passo também sai pelo SPI como EventoStream 'catcher' (pendência L4 §1 resolvida no contrato pela L9).
+    expect(espiao.eventos.filter((e) => e.tipo === "catcher").map((e) => (e.tipo === "catcher" ? e.subtipo : ""))).toEqual(["plano_recebido", "tool_use", "tool_result", "resultado"]);
     const toolResult = espiao.eventos.find((e) => e.tipo === "tool_result");
     expect(toolResult).toMatchObject({ isError: false, texto: "ok:lembrar" });
 
     expect(chamadas).toHaveLength(1);
-    expect(chamadas[0]).toMatchObject({ nome: "lembrar", corpo: { args: { tipo: "fato", texto: "a Ana prefere manhã" } }, turnoId: "turno-catcher-1", agenteId: "a1", escopo: { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }, origin: undefined });
+    expect(chamadas[0]).toMatchObject({ nome: "lembrar", corpo: { argumentos: { tipo: "fato", texto: "a Ana prefere manhã" } }, turnoId: "turno-catcher-1", agenteId: "a1", escopo: { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }, origin: undefined });
 
     expect(registros.map((r) => r.tipo)).toEqual(["plano_recebido", "tool_use", "tool_result", "resultado"]);
     for (const r of registros) {
@@ -187,14 +189,19 @@ describe("driver catcher + cliente-nod contra rota interna real", { timeout: TIM
     expect(resultado.texto).toBe("fixo");
   });
 
-  it("cliente-nod: token errado → 401 (isError); Origin nunca é enviado; plano() devolve o corpo da rota interna", async () => {
+  it("cliente-nod: token errado → 401 (isError); Origin nunca é enviado; plano() devolve o plano da rota interna (contrato de fio unificado, EMENDA-L9 §7)", async () => {
     const bom = criarClienteNod({ url: srv.url, token: TOKEN });
-    expect(await bom.plano()).toEqual({ status: 200, corpo: { turnoId: "turno-catcher-1" } });
+    expect(await bom.plano()).toMatchObject({ ok: true, plano: { turnoId: "turno-catcher-1" } });
     expect(await bom.chamarFerramenta("lembrar", { a: 1 })).toEqual({ conteudo: "ok:lembrar", isError: false });
     const ruim = criarClienteNod({ url: `${srv.url}/`, token: "token-ruim" });
     const r = await ruim.chamarFerramenta("lembrar", {});
     expect(r.isError).toBe(true);
     expect(r.conteudo).toContain("nao_permitido");
-    expect((await ruim.plano()).status).toBe(401);
+    expect(await ruim.plano()).toEqual({ ok: false, motivo: "plano_ausente", status: 401 });
+    // servidor fora: falha de transporte vira negação renderizada (ADR-029), nunca exceção nem {} silencioso
+    const fora = criarClienteNod({ url: "http://127.0.0.1:1", token: TOKEN, timeoutMs: 500 });
+    const semServidor = await fora.chamarFerramenta("lembrar", {});
+    expect(semServidor.isError).toBe(true);
+    expect(semServidor.conteudo).toContain("indisponível");
   });
 });

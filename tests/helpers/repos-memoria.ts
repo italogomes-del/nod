@@ -383,6 +383,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     turnos: {
+      async buscarTravado(id: string) {
+        return doTenant(b.turnos).find((t) => t.id === id) ?? null;
+      },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,

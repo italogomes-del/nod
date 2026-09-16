@@ -21,6 +21,7 @@ export type RegistroCatcher = { turnoId: string; tipo: string; dados: Record<str
 export type OpcoesCatcher = {
   /** URL do nod para as chamadas de ferramenta; ausente = tool_use responde "não executada". */
   urlNod?: string;
+  /** Espião opcional (testes): cada passo também sai por `sinks.evento({ tipo: 'catcher' })`, que é o canal que o servidor persiste. */
   aoRegistrar?: (r: RegistroCatcher) => void;
   /** Atraso entre eventos (testes de interrupção no meio do streaming). */
   atrasoMs?: number;
@@ -47,12 +48,18 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
 
         adapter(plano: PlanoTurno): Adapter {
           let interrompido = false;
-          const registrar = (tipo: string, dados: Record<string, unknown>) => o.aoRegistrar?.({ turnoId: plano.turnoId, tipo, dados });
+          let sinksDoTurno: { evento(e: EventoStream): void } | null = null;
+          // definido em 2026-09-16 (L9, pendência L4 §1): o passo vai pelo SPI (EventoStream 'catcher'); o servidor liga aoEvento → catcher_registros.
+          const registrar = (tipo: string, dados: Record<string, unknown>) => {
+            sinksDoTurno?.evento({ tipo: "catcher", subtipo: tipo, dados });
+            o.aoRegistrar?.({ turnoId: plano.turnoId, tipo, dados });
+          };
           const ferramentas = plano.catalogo.ferramentas.map((f) => f.nomeMcp);
           const cliente = o.urlNod ? (o.clienteNod ?? criarClienteNod)({ url: o.urlNod, token: plano.tokenDeTurno }) : null;
 
           return {
             async rodarTurno(sinks): Promise<ResultadoTurno> {
+              sinksDoTurno = sinks;
               await sinks.sinal("attempted");
               const roteiro = roteiroFixo ?? roteiroPadrao({ prompt: plano.entrada.texto, ferramentas });
               const sessaoCli = plano.entrada.sessaoCli ?? randomUUID();

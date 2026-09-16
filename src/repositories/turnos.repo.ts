@@ -119,6 +119,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * Leitura com trava de linha (FOR UPDATE) para quem vai ASSENTAR o turno. medido em 2026-09-16 (e2e da L9):
+     * Parar e a entrega do laço correm em transações paralelas — a entrega lia `parar_solicitado_em` NULL
+     * (leitura sem trava, READ COMMITTED) e só esperava o commit de Parar no UPDATE seguinte, assentando
+     * 'sem_progresso' em vez de 'parado_pela_pessoa'. Com a trava, a leitura espera o commit e vê o pedido.
+     */
+    async buscarTravado(id: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from turnos where tenant_id = ${escopo.tenantId} and id = ${id} for update`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /**
      * Reivindicação por UPDATE condicional + FOR UPDATE SKIP LOCKED numa tx curta (ADR-010).
      * EMENDA 12: turno de conversa/sala/retomada passa na frente de rotina enfileirada.
      * EMENDA 13 (agente serial): NOT EXISTS 'despachando' na MESMA CONVERSA e NOT EXISTS

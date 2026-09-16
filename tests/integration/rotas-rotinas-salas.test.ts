@@ -78,7 +78,7 @@ describeIntegracao("rotas de rotinas e salas (tabela ROTAS, L7): códigos da tab
     });
   });
 
-  it("ids fora do formato uuid e agenteId ausente → 400 entrada_invalida em toda rota da L7, nunca 500", async () => {
+  it("ids fora do formato uuid: no CORPO → 400 entrada_invalida; no PATH → 404 (roteador, EMENDA-L9 §2); agenteId ausente → 400; nunca 500", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
       const { agenteId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
@@ -88,19 +88,21 @@ describeIntegracao("rotas de rotinas e salas (tabela ROTAS, L7): códigos da tab
       expect(semAgente.status).toBe(400);
       expect(await semAgente.json()).toEqual(esperado);
       expect((await srv.chamar(sessao, "POST", "rotinas", { ...corpo, agenteId: "abc" })).status).toBe(400);
-      for (const [metodo, caminho, c] of [
-        ["POST", "rotinas/abc/pausar", undefined],
-        ["POST", "rotinas/abc/ativar", undefined],
-        ["GET", "rotinas/abc/execucoes", undefined],
-        ["POST", "salas", { nome: "x", agenteIds: ["abc", agenteId] }],
-        ["POST", "salas/abc/membros", { agenteId }],
-        ["POST", "salas/00000000-0000-4000-8000-000000000000/membros", { agenteId: "abc" }],
-        ["POST", "salas/abc/mensagens", { texto: "oi" }],
-        ["POST", "salas/abc/parar", undefined],
+      // definido em 2026-09-16 (L9): id de PATH fora do formato é rota inexistente (404, roteador); id de CORPO é entrada inválida (400).
+      for (const [metodo, caminho, c, status] of [
+        ["POST", "rotinas/abc/pausar", undefined, 404],
+        ["POST", "rotinas/abc/ativar", undefined, 404],
+        ["GET", "rotinas/abc/execucoes", undefined, 404],
+        ["POST", "salas", { nome: "x", agenteIds: ["abc", agenteId] }, 400],
+        ["POST", "salas/abc/membros", { agenteId }, 404],
+        ["POST", "salas/00000000-0000-4000-8000-000000000000/membros", { agenteId: "abc" }, 400],
+        ["POST", "salas/abc/mensagens", { texto: "oi" }, 404],
+        ["POST", "salas/abc/parar", undefined, 404],
       ] as const) {
         const r = await srv.chamar(sessao, metodo, caminho, c);
-        expect([metodo, caminho, r.status]).toEqual([metodo, caminho, 400]);
-        expect(await r.json()).toEqual(esperado);
+        expect([metodo, caminho, r.status]).toEqual([metodo, caminho, status]);
+        if (status === 400) expect(await r.json()).toEqual(esperado);
+        else expect(((await r.json()) as { codigo: string }).codigo).toBe("nao_encontrado");
       }
       trxAtual = null;
     });

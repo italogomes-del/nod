@@ -22,8 +22,10 @@ export function moldurarResposta(alvoNome: string, texto: string): string {
 export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }, SaidaEntregaPeer> = async (deps, input) => {
   const tarefa = exigir(await deps.repos.turnos.buscar(input.tarefaId), "nao_encontrado", "tarefa");
   if (tarefa.origem !== "peer") return { data: { ignorado: "nao_e_tarefa_peer" } };
+  // A pergunta é a mensagem de TEXTO de outro agente ligada à tarefa; a resposta peer_ask (kind próprio, ligada
+  // à continuação) nunca conta como pergunta — senão a continuação responderia a si mesma em laço.
   const pergunta = (await deps.repos.mensagens.listarDaConversa(tarefa.conversaId, 500)).find(
-    (m) => m.turnoId === tarefa.id && m.autoria.autor_tipo === "agente" && m.autoria.autor_id !== tarefa.agenteId,
+    (m) => m.turnoId === tarefa.id && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.autoria.autor_id !== tarefa.agenteId,
   );
   if (!pergunta) return { data: { ignorado: "nao_e_tarefa_peer" } };
   const remetenteId = pergunta.autoria.autor_id;
@@ -32,15 +34,8 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
   const conversaRemetente = exigir(await deps.repos.conversas.buscarPropriaDoAgente(remetente.id), "nao_encontrado", "conversa do remetente");
   const agora = deps.agora();
   const autoria = autoriaAgente(alvo.id, deps.escopo.pessoaId, remetente.id);
-  const mensagem = await deps.repos.mensagens.criar({
-    conversaId: conversaRemetente.id,
-    autoria,
-    kind: "peer_ask",
-    texto: input.texto,
-    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id },
-    confianca: "nao_confiavel",
-  });
-  if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });
+  // definido em 2026-09-16 (L9): a continuação nasce ANTES da mensagem peer_ask para a mensagem apontar
+  // (turno_id) para o turno que ela dispara — a web e o e2e acham a continuação pela própria mensagem.
   const continuacao = await deps.repos.turnos.enfileirar({
     conversaId: conversaRemetente.id,
     agenteId: remetente.id,
@@ -52,6 +47,16 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
     modelo: remetente.modelo,
   });
   if (!continuacao) throw new ErroDeDominio("estado_invalido", { cause: "turno de continuação não criado" });
+  const mensagem = await deps.repos.mensagens.criar({
+    conversaId: conversaRemetente.id,
+    turnoId: continuacao.id,
+    autoria,
+    kind: "peer_ask",
+    texto: input.texto,
+    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id },
+    confianca: "nao_confiavel",
+  });
+  if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });
   return {
     data: { mensagem, continuacao, remetenteAgenteId: remetente.id },
     events: [

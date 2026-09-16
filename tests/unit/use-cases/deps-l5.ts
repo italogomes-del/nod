@@ -35,7 +35,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
   const services: Services = {
     relogio: agora,
     tokenTurno: criarTokenTurno({ agora }),
-    planos: { emitir: async () => { throw new Error("planos.emitir não é usado nos unitários"); } },
+    planos: { emitir: async () => { throw new Error("planos.emitir não é usado nos unitários"); }, buscar: () => null },
     rotinas: { ativar: async () => { throw new Error("rotinas.ativar é da L7"); } },
     conectores: {
       async chamar(conectorId, tool, args) {

@@ -73,7 +73,7 @@ export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { token
   return {
     relogio: agora,
     tokenTurno,
-    planos: { emitir: async () => { throw new Error("planos.emitir: compor com emitirPlanoTurno no teste que precisar"); } },
+    planos: { emitir: async () => { throw new Error("planos.emitir: compor com emitirPlanoTurno no teste que precisar"); }, buscar: (turnoId) => tokenTurno.planoDe(turnoId) },
     rotinas: { ativar: async () => { throw new Error("rotinas.ativar é da L7"); } },
     conectores: opcoes.conectores ?? {
       async chamar(conectorId, tool, args) {

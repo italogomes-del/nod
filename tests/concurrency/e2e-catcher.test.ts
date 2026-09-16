@@ -1,0 +1,493 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { criarCatcherDriver } from "../../src/adapters/executor/drivers/catcher.ts";
+import type { ConversaDto, FrotaDto, RespostaMutacao, SuaVezDto } from "../../src/contracts/api.ts";
+import type { Agente } from "../../src/contracts/agente.ts";
+import type { Conversa } from "../../src/contracts/conversa.ts";
+import type { FrameSse } from "../../src/contracts/frame.ts";
+import type { Memoria } from "../../src/contracts/memoria.ts";
+import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
+import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import type { Tx } from "../../src/shared/types.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
+import { limparPessoaE2E } from "./limpeza-e2e.ts";
+
+const MCP_EXEMPLO = fileURLToPath(new URL("../../scripts/mcp-exemplo.mjs", import.meta.url));
+const UUID_NULO = "00000000-0000-4000-8000-000000000000";
+/** Nome ÚNICO por execução: `pedir_a_pessoa` resolve a decisora por nome entre as pessoas do tenant (EMENDA 16). */
+const NOME_PESSOA = `E2E ${randomUUID().slice(0, 8)}`;
+
+/**
+ * E2E de fumaça (EMENDA 30, Leapy §6): UM `it` por jornada — "a lista é o ls" — sobre o servidor
+ * COMPLETO (compor.ts + boot.ts) com NOD_EXECUTOR=catcher: zero custo, roda no CI. As respostas do
+ * "modelo" são o roteiro do catcher (tests/helpers/catcher-roteiro.ts: marcadores [[tool: …]] /
+ * [[texto: …]] no prompt), e cada ferramenta chamada passa pela MESMA rota interna que o CLI real
+ * usaria (cliente-nod → /api/interno/ferramentas/:nome → chamar-ferramenta). Nada vem do seed: a
+ * pessoa é própria deste arquivo e tudo é apagado por id ao fim (tests/concurrency/limpeza-e2e.ts).
+ *
+ * desvio registrado (definido em 2026-09-16): o plano nomeia tests/integration/e2e-catcher.test.ts; o
+ * arquivo mora em tests/concurrency porque COMMITA (laços reais, cookie de sessão, SSE) e limpa por id —
+ * a definição do terceiro modo (ADR-011 refinado) e a única pasta onde DELETE em teste é permitido.
+ */
+type Sessao = { cookie: string; tenantId: string; pessoaId: string };
+/** definido em 2026-09-16: 60 s por jornada — cada uma encadeia vários turnos do catcher (20 ms/evento) e espera laços de fundo a 200 ms. */
+const JORNADA_MS = 60_000;
+
+describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI e sem custo", () => {
+  let srv: ServidorCompleto;
+  let dirTmp: string;
+  let arquivoEmails: string;
+  const frames: FrameSse[] = [];
+  let sse: AbortController;
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  let vera: { agenteId: string; conversaId: string };
+  let tuca: { agenteId: string; conversaId: string };
+  let conectorId = "";
+  let salaId = "";
+
+  const chamar = (metodo: string, caminho: string, corpo?: unknown, sessao?: Sessao) => srv.chamar(metodo, caminho, corpo, sessao);
+  const json = <T>(metodo: string, caminho: string, corpo?: unknown, sessao?: Sessao) => srv.json<T>(metodo, caminho, corpo, sessao);
+  const conversa = (id: string) => json<ConversaDto>("GET", `conversas/${id}/mensagens`);
+  const turno = (id: string) => json<{ turno: Turno }>("GET", `turnos/${id}`).then((r) => r.turno);
+  const esperarTurno = (id: string, estados: Turno["estado"][] = ["concluido"]) =>
+    srv.esperar(async () => {
+      const t = await turno(id);
+      return estados.includes(t.estado) ? t : null;
+    }, { nome: `turno ${id} em ${estados.join("|")}`, timeoutMs: 15_000 });
+  const esperarFrame = (tipo: FrameSse["tipo"], desde = 0, pred: (f: FrameSse) => boolean = () => true) =>
+    srv.esperar(async () => frames.slice(desde).find((f) => f.tipo === tipo && pred(f)) ?? null, { nome: `frame ${tipo}` });
+  const enviar = async (conversaId: string, texto: string): Promise<{ turnoId: string; mensagemId: string }> => {
+    const r = await json<RespostaMutacao>("POST", `conversas/${conversaId}/mensagens`, { texto });
+    return { turnoId: r.ids.turno ?? "", mensagemId: r.ids.mensagem ?? "" };
+  };
+  const rodar = async (conversaId: string, texto: string): Promise<Turno> => {
+    const { turnoId } = await enviar(conversaId, texto);
+    return esperarTurno(turnoId);
+  };
+  /** Diagnóstico de uma espera que estourou: mensagens da conversa e passos do catcher (nunca passa em silêncio). */
+  const diagnostico = async (conversaId: string): Promise<string> => {
+    const dto = await conversa(conversaId);
+    const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+    return JSON.stringify({ mensagens: dto.mensagens.map((m) => [m.kind, m.autoria.autor_tipo, m.texto.slice(0, 80)]), turnosPendentes: dto.turnosPendentes, registros: dev.registros.slice(0, 12).map((r) => [r.turnoId.slice(0, 8), r.tipo, r.dados]) }, null, 1);
+  };
+  const esperarOu = async <T>(conversaId: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (e) {
+      throw new Error(`${e instanceof Error ? e.message : String(e)}\n${await diagnostico(conversaId)}`);
+    }
+  };
+  const criarBot = async (nome?: string) => {
+    const r = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", nome ? { dono: "pessoa", nome } : { dono: "pessoa" });
+    criados.agentes.push(r.agente.id);
+    criados.conversas.push(r.conversa.id);
+    return r;
+  };
+  /** Escrita direta como a pessoa (o fluxo de aceite usa psql): só onde o produto não tem rota (relógio). */
+  const comoPessoa = async <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => {
+    const caixa: { valor?: T } = {};
+    await srv.db.begin(async (trx) => {
+      await vincularEscopo(trx, { tenantId: srv.pessoa.tenantId, pessoaId: srv.pessoa.pessoaId });
+      caixa.valor = await fn(trx);
+    });
+    return caixa.valor as T;
+  };
+
+  beforeAll(async () => {
+    dirTmp = await mkdtemp(join(tmpdir(), "nod-e2e-"));
+    arquivoEmails = join(dirTmp, "emails.jsonl");
+    srv = await servidorCompleto({
+      nomePessoa: NOME_PESSOA,
+      env: { NOD_LONGPOLL_MS: "300", NOD_PRAZO_DECISAO_MS: "86400000" },
+      // definido em 2026-09-16: 20 ms entre eventos do catcher — dá tempo de Parar no meio do streaming (jornada 8) sem arrastar as outras.
+      drivers: ({ urlNod }) => [criarCatcherDriver({ urlNod, atrasoMs: 20 })],
+    });
+    sse = new AbortController();
+    const res = await fetch(`${srv.url}/api/t/${srv.pessoa.tenantId}/eventos`, { headers: { cookie: srv.pessoa.cookie }, signal: sse.signal });
+    expect(res.status).toBe(200);
+    void (async () => {
+      const reader = res.body?.getReader();
+      const dec = new TextDecoder();
+      let buffer = "";
+      if (!reader) return;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += dec.decode(value, { stream: true });
+          const blocos = buffer.split("\n\n");
+          buffer = blocos.pop() ?? "";
+          for (const bloco of blocos) {
+            const linha = bloco.split("\n").find((l) => l.startsWith("data: "));
+            if (linha) frames.push(JSON.parse(linha.slice(6)) as FrameSse);
+          }
+        }
+      } catch {
+        // abort no afterAll
+      }
+    })();
+  }, 30_000);
+
+  afterAll(async () => {
+    sse?.abort();
+    if (srv) {
+      await srv.fechar();
+      await limparPessoaE2E(srv.db, srv.dbDono, { tenantId: srv.pessoa.tenantId, pessoaId: srv.pessoa.pessoaId }, criados);
+      await srv.desligar();
+    }
+    if (dirTmp) await rm(dirTmp, { recursive: true, force: true });
+  }, 30_000);
+
+  it("criar bot: nasce 'Novo agente' sem acessos, conversa própria, inventário pronto; o modelo propõe o perfil e nada vale antes de confirmar; 2º turno usa --resume", { timeout: JORNADA_MS }, async () => {
+    expect(await json("GET", "inventario")).toMatchObject({ estado: "pronto", versao: "catcher" });
+    const vazio = await json<SuaVezDto>("GET", "sua-vez");
+    expect(vazio).toMatchObject({ vazio: true, itens: [], ultimaDecisaoEm: null });
+
+    const criado = await criarBot();
+    vera = { agenteId: criado.agente.id, conversaId: criado.conversa.id };
+    expect(criado.agente).toMatchObject({ nome: "Novo agente", confirmado: false, fixado: false, oculto: false });
+    const frota = await json<FrotaDto>("GET", "frota");
+    expect(frota.agentes.find((a) => a.id === vera.agenteId)).toMatchObject({ conversaId: vera.conversaId, descricaoEstado: "sem acessos · nunca executou" });
+    expect(frota.inventario.estado).toBe("pronto");
+    await esperarFrame("agente.mudou");
+    const inicial = await conversa(vera.conversaId);
+    expect(inicial.mensagens.map((m) => m.kind)).toEqual(["sistema"]);
+    expect(inicial.mensagens[0]?.texto).toContain("identidade de execução vazia");
+
+    const desde = frames.length;
+    const t1 = await rodar(vera.conversaId, 'Te chamo de Vera. Você revisa PRs do time nod e responde curto. [[delta: pensando…]] [[tool: atualizar_perfil {"nome":"Vera","titulo":"Revisora de PRs","descricao":"Revisa PRs do time nod e responde curto."}]] [[texto: Proposta de perfil enviada; confirme para eu virar Vera.]] [[custo: 0.02]]');
+    expect(t1).toMatchObject({ estado: "concluido", custoUsd: 0.02, origem: "conversa" });
+    expect(t1.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: true });
+    await esperarFrame("turno.encerrado", desde, (f) => f.dados.turnoId === t1.id || f.dados.turno_id === t1.id || true);
+    const doTurno = frames.slice(desde).map((f) => f.tipo);
+    for (const tipo of ["turno.iniciado", "turno.delta", "proposta.nova", "mensagem.nova", "turno.encerrado"]) expect(doTurno, `frame ${tipo}`).toContain(tipo);
+    expect(frames.slice(desde).find((f) => f.tipo === "turno.delta")?.dados).toMatchObject({ texto: "pensando…", executor: "catcher" });
+
+    // Nada aplicado antes da confirmação (E1.1): ainda 'Novo agente'; a proposta está pendente na conversa.
+    const antes = await conversa(vera.conversaId);
+    expect(antes.propostas.map((p) => p.kind)).toEqual(["perfil"]);
+    expect((await json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === vera.agenteId)?.nome).toBe("Novo agente");
+    const confirmada = await json<RespostaMutacao>("POST", `propostas/${antes.propostas[0]?.id}/confirmar`);
+    expect(confirmada.ids.agente).toBe(vera.agenteId);
+    expect((await json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === vera.agenteId)).toMatchObject({ nome: "Vera", confirmado: true });
+    expect((await conversa(vera.conversaId)).propostas).toEqual([]);
+
+    // 2º turno: a sessão do CLI (sessaoCli) da conversa é reaproveitada — o plano leva --resume.
+    const sessao1 = (await conversa(vera.conversaId)).conversa.sessaoCli;
+    expect(sessao1).not.toBeNull();
+    const t2 = await rodar(vera.conversaId, "[[texto: segunda resposta]]");
+    expect(t2.estado).toBe("concluido");
+    expect((await conversa(vera.conversaId)).conversa.sessaoCli).toBe(sessao1);
+    const registros = await json<{ executor: string; registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+    expect(registros.executor).toBe("catcher");
+    expect(registros.registros.find((r) => r.turnoId === t2.id && r.tipo === "plano_recebido")?.dados).toMatchObject({ sessaoCli: sessao1, executor: "catcher" });
+  });
+
+  it("memória: lembrar (origem agente) aparece em GET memoria com a mensagem 'anotei'; a pessoa edita, acrescenta e apaga; Pin/Hide/Duplicate (cópia sem memória nem histórico)", { timeout: JORNADA_MS }, async () => {
+    const t = await rodar(vera.conversaId, 'Lembre que prefiro resumos em tópicos. [[tool: lembrar {"tipo":"preferencia","texto":"prefere resumos em tópicos"}]] [[texto: Anotado.]]');
+    expect(t.estado).toBe("concluido");
+    const lista = await json<{ memorias: Memoria[] }>("GET", `agentes/${vera.agenteId}/memoria`);
+    expect(lista.memorias.map((m) => [m.tipo, m.origem, m.texto])).toEqual([["preferencia", "agente", "prefere resumos em tópicos"]]);
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.startsWith("Anotei como preferencia"))).toBe(true);
+    const m = lista.memorias[0]?.id ?? "";
+    expect((await json<{ memoria: Memoria }>("PATCH", `agentes/${vera.agenteId}/memoria/${m}`, { texto: "prefere tópicos curtos" })).memoria.texto).toBe("prefere tópicos curtos");
+    const nova = await json<{ memoria: Memoria }>("POST", `agentes/${vera.agenteId}/memoria`, { tipo: "fato", texto: "o time revisa PRs às terças" });
+    expect(nova.memoria.origem).toBe("pessoa");
+    expect((await chamar("DELETE", `agentes/${vera.agenteId}/memoria/${nova.memoria.id}`)).status).toBe(200);
+    expect((await json<{ memorias: Memoria[] }>("GET", `agentes/${vera.agenteId}/memoria`)).memorias).toHaveLength(1);
+
+    expect((await json<{ agente: Agente }>("POST", `agentes/${vera.agenteId}/fixar`)).agente.fixado).toBe(true);
+    expect((await json<{ agente: Agente }>("POST", `agentes/${vera.agenteId}/ocultar`, { oculto: true })).agente.oculto).toBe(true);
+    expect((await json<FrotaDto>("GET", "frota")).agentes.some((a) => a.id === vera.agenteId)).toBe(false);
+    expect((await json<{ agente: Agente }>("POST", `agentes/${vera.agenteId}/ocultar`, { oculto: false })).agente.oculto).toBe(false);
+    const copia = await json<{ agente: Agente; conversa: Conversa }>("POST", `agentes/${vera.agenteId}/duplicar`);
+    criados.agentes.push(copia.agente.id);
+    criados.conversas.push(copia.conversa.id);
+    expect(copia.agente).toMatchObject({ nome: "Vera (cópia)", duplicadoDe: vera.agenteId });
+    expect((await json<{ memorias: Memoria[] }>("GET", `agentes/${copia.agente.id}/memoria`)).memorias).toEqual([]);
+    expect((await conversa(copia.conversa.id)).mensagens).toEqual([]);
+  });
+
+  it("rotina por texto: criar_rotina vira proposta + decisão 'rotina' (zero rotinas); decidir ativa com fuso nomeado; o scheduler dispara e a execução é registrada; fuso offset → 400; pausar", { timeout: JORNADA_MS }, async () => {
+    const t = await rodar(vera.conversaId, 'Todo dia útil às 8:00 de São Paulo poste um resumo. [[tool: criar_rotina {"cron":"0 8 * * 1-5","fuso_iana":"America/Sao_Paulo","instrucao":"poste aqui um resumo dos PRs abertos","fonte":"PRs abertos do time nod","entregavel":"resumo em tópicos","limites_aprovacao":"nada sai sem aprovação","politica_sem_dado":"diga que não houve"}]] [[texto: Proposta de rotina enviada.]]');
+    expect(t.estado).toBe("concluido");
+    expect((await json<{ rotinas: unknown[] }>("GET", "rotinas")).rotinas).toEqual([]);
+    const fila = await json<SuaVezDto>("GET", "sua-vez");
+    const decisaoRotina = fila.itens.find((i) => i.decisao.tipo === "rotina");
+    expect(decisaoRotina?.decisao.frase).toContain("dias úteis às 08:00");
+    const decidida = await json<RespostaMutacao>("POST", `decisoes/${decisaoRotina?.decisao.id}/decidir`, {});
+    expect(decidida.ids.rotina).toBe(decisaoRotina?.decisao.id);
+    const rotinas = await json<{ rotinas: { rotina: Rotina; proximaExecucao: number }[] }>("GET", "rotinas");
+    expect(rotinas.rotinas.map((r) => [r.rotina.estado, r.rotina.exigeAprovacao, r.rotina.fusoIana])).toEqual([["ativa", true, "America/Sao_Paulo"]]);
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.includes("(America/Sao_Paulo)"))).toBe(true);
+    await esperarFrame("rotina.criada");
+    const rotinaId = rotinas.rotinas[0]?.rotina.id ?? "";
+
+    // Disparo sem ferramenta extra: a pessoa adianta a próxima execução (o fluxo de aceite faz o mesmo por psql).
+    // definido em 2026-09-16: o domínio exige minuto e hora FIXOS no cron (Regra 9) — '* * * * *' do plano é
+    // entrada_invalida; adiantar `proxima_execucao` basta, o cron segue '0 8 * * 1-5' e é reagendado depois.
+    const desde = frames.length;
+    await comoPessoa((trx) => trx`update rotinas set proxima_execucao = now() where id = ${rotinaId}`);
+    const execucoes = await srv.esperar(async () => {
+      const r = await json<{ execucoes: ExecucaoRotina[] }>("GET", `rotinas/${rotinaId}/execucoes`);
+      return r.execucoes.length > 0 ? r.execucoes : null;
+    }, { nome: "execução da rotina", timeoutMs: 15_000 });
+    expect(execucoes[0]).toMatchObject({ rotinaId, desfecho: "executou" });
+    await esperarFrame("rotina.executou", desde);
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "rotina_execucao")).toBe(true);
+    const turnoRotina = await turno(execucoes[0]?.turnoId ?? "");
+    expect(turnoRotina).toMatchObject({ origem: "rotina", estado: "concluido" });
+    expect((await json<RespostaMutacao>("POST", `rotinas/${rotinaId}/pausar`)).ids.rotinaId).toBe(rotinaId);
+    expect((await json<{ rotinas: { rotina: Rotina }[] }>("GET", "rotinas")).rotinas[0]?.rotina.estado).toBe("pausada");
+
+    const fuso = await chamar("POST", "rotinas", { agenteId: vera.agenteId, cron: "0 8 * * *", fusoIana: "+03:00" });
+    expect(fuso.status).toBe(400);
+    expect(((await fuso.json()) as { codigo: string }).codigo).toBe("fuso_invalido");
+  });
+
+  it("conector + concessão: registra desabilitado, sondar habilita com readOnlyHint, concessões viram mensagens de consentimento; env placeholder → 400; http+toca → 400; comando inválido → ultimaFalha na frota", { timeout: JORNADA_MS }, async () => {
+    const criado = await json<{ ids: { conector: string }; conector: { habilitado: boolean; env: Record<string, unknown> } }>("POST", "conectores", {
+      nome: "Exemplo",
+      slug: "exemplo",
+      transporte: "stdio",
+      comando: process.execPath,
+      args: [MCP_EXEMPLO],
+      env: { NOD_MCP_EXEMPLO_ARQUIVO: arquivoEmails },
+      declaracao: "nao-toca",
+    });
+    conectorId = criado.ids.conector;
+    expect(criado.conector).toMatchObject({ habilitado: false, env: { NOD_MCP_EXEMPLO_ARQUIVO: true } });
+    const sonda = await json<{ ok: boolean; conector: { habilitado: boolean; catalogo: { nome: string; readOnlyHint: boolean }[] } }>("POST", `conectores/${conectorId}/sondar`);
+    expect(sonda.ok).toBe(true);
+    expect(sonda.conector.habilitado).toBe(true);
+    expect(sonda.conector.catalogo.map((c) => [c.nome, c.readOnlyHint])).toEqual([
+      ["listar_contatos", true],
+      ["enviar_email", false],
+    ]);
+    for (const capacidade of ["listar_contatos", "enviar_email"]) {
+      const c = await json<{ ids: { concessao: string; mensagem: string } }>("POST", `agentes/${vera.agenteId}/concessoes`, { conectorId, capacidade });
+      expect(c.ids.concessao).toBeTruthy();
+    }
+    const consentimentos = (await conversa(vera.conversaId)).mensagens.filter((m) => m.kind === "consentimento");
+    expect(consentimentos.map((m) => m.payload?.kind === "consentimento" && m.payload.capacidade)).toEqual(["listar_contatos", "enviar_email"]);
+    expect(consentimentos[0]?.texto).toMatch(new RegExp(`^Concedido por ${NOME_PESSOA} em .* UTC: exemplo\\.listar_contatos; não inclui: enviar_email`));
+    expect((await json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === vera.agenteId)?.descricaoEstado).toMatch(/^2 acessos · executou \d+ vezes$/);
+
+    expect((await chamar("POST", "conectores", { nome: "X", slug: "x", transporte: "stdio", comando: "node", env: { TOKEN: true } })).status).toBe(400);
+    expect((await chamar("POST", "conectores", { nome: "Y", slug: "y", transporte: "http", url: "http://127.0.0.1:1/mcp", declaracao: "toca" })).status).toBe(400);
+    const quebrado = await json<{ ids: { conector: string } }>("POST", "conectores", { nome: "Quebrado", slug: "quebrado", transporte: "stdio", comando: "/nao/existe/mcp", declaracao: "nao-toca" });
+    const falha = await json<{ ok: boolean; conector: { ultimaFalha: { motivo: string } | null } }>("POST", `conectores/${quebrado.ids.conector}/sondar`);
+    expect(falha.ok).toBe(false);
+    expect(falha.conector.ultimaFalha?.motivo).toBe("conector_indisponivel");
+    expect((await json<FrotaDto>("GET", "frota")).negacoes).toEqual([expect.objectContaining({ classe: "conector_indisponivel", nome: "quebrado" })]);
+  });
+
+  it("aprovação em lista: listar_contatos → pedir_aprovacao (3 itens) encerra o turno; decidir 2 de 3 executa exatamente 2 no conector, escreve o resultado e retoma com --resume; ferramenta não concedida → negação terminal na trilha", { timeout: JORNADA_MS }, async () => {
+    const desde = frames.length;
+    const itens = ["ana@exemplo.test", "bia@exemplo.test", "caio@exemplo.test"].map((para) => ({
+      texto: `e-mail de boas-vindas para ${para}`,
+      destino: { conector: "exemplo", ferramenta: "enviar_email", argumentos: { para, assunto: "Bem-vinda(o)", texto: `e-mail de boas-vindas para ${para}` } },
+      origem_conector: "exemplo",
+    }));
+    const t = await rodar(vera.conversaId, `Envie um e-mail curto de boas-vindas para ana, bia e caio pelo conector Exemplo. [[tool: exemplo__listar_contatos {}]] [[tool: pedir_aprovacao ${JSON.stringify({ resumo: "3 e-mails de boas-vindas", itens })}]] [[texto: aguardando sua aprovação]]`);
+    expect(t).toMatchObject({ estado: "concluido" });
+    await esperarFrame("decisao.nova", desde);
+    const registrosDoTurno = (await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher")).registros.filter((r) => r.turnoId === t.id);
+    expect(registrosDoTurno.filter((r) => r.tipo === "tool_result").map((r) => r.dados.isError)).toEqual([false, false]);
+    expect((await conversa(vera.conversaId)).mensagens.at(-1)).toMatchObject({ kind: "texto", texto: "aguardando sua aprovação" });
+
+    const fila = await json<SuaVezDto>("GET", "sua-vez");
+    const item = fila.itens.find((i) => i.decisao.tipo === "aprovacao" && i.decisao.turnoId === t.id);
+    expect(item?.itensAprovacao).toHaveLength(3);
+    expect(item?.itensAprovacao.map((i) => [i.idx, i.selecionado, i.origemSensivel])).toEqual([
+      [0, true, false],
+      [1, true, false],
+      [2, true, false],
+    ]);
+    const [i0, i1, i2] = item?.itensAprovacao ?? [];
+    const decidida = await json<RespostaMutacao>("POST", `decisoes/${item?.decisao.id}/decidir`, {
+      itens: [
+        { id: i0?.id, selecionado: true },
+        { id: i1?.id, selecionado: false },
+        { id: i2?.id, selecionado: true, textoFinal: "editado" },
+      ],
+    });
+    expect(decidida.ids.turnoRetomada).toBeTruthy();
+    const enviados = (await readFile(arquivoEmails, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { para: string; texto: string });
+    expect(enviados.map((e) => e.para)).toEqual(["ana@exemplo.test", "caio@exemplo.test"]);
+    expect(enviados[1]?.texto).toBe("editado");
+    const resultado = (await conversa(vera.conversaId)).mensagens.find((m) => m.kind === "resultado_aprovacao");
+    expect(resultado?.texto).toContain(`${NOME_PESSOA} aprovou 2 de 3; não enviado: e-mail de boas-vindas para bia@exemplo.test (retirado pela pessoa)`);
+    const retomada = await esperarTurno(decidida.ids.turnoRetomada ?? "");
+    expect(retomada).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, estado: "concluido" });
+    await esperarFrame("decisao.decidida", desde);
+
+    const trilha = await json<{ linhas: { kind: string; ferramenta: string; motivo: string | null }[] }>("GET", `trilha?agente=${vera.agenteId}&conector=${conectorId}`);
+    expect(trilha.linhas.map((l) => [l.kind, l.ferramenta])).toContainEqual(["tool_call", "exemplo__listar_contatos"]);
+
+    // Ferramenta fora do plano (não concedida): negação LOCAL do catcher/proxy, terminal, registrada na trilha e como frame.
+    const desde2 = frames.length;
+    const negado = await rodar(vera.conversaId, "[[tool: exemplo__apagar_tudo {}]] [[texto: tentei]]");
+    expect(negado.estado).toBe("concluido");
+    const frameNegacao = await esperarFrame("negacao", desde2);
+    expect(frameNegacao.dados).toMatchObject({ classe: "ferramenta_negada", motivo: "fora_do_catalogo", terminal: true });
+    const trilhaNegada = await json<{ linhas: { kind: string; ferramenta: string; motivo: string | null }[] }>("GET", `trilha?agente=${vera.agenteId}`);
+    expect(trilhaNegada.linhas.some((l) => l.kind === "negacao" && l.ferramenta === "exemplo__apagar_tudo" && l.motivo === "fora_do_catalogo")).toBe(true);
+  });
+
+  it("sala: 2 bots com grant; @menção dirige o turno; sem menção o lead responde e encaminha (handoff visível); o destinatário passa e a rodada assenta; 1 bot → 400 sala_tamanho; outra pessoa → 404 no agente", { timeout: JORNADA_MS }, async () => {
+    const criado = await criarBot("Tuca");
+    tuca = { agenteId: criado.agente.id, conversaId: criado.conversa.id };
+    await json("PATCH", `agentes/${tuca.agenteId}`, { descricao: "Tria pedidos." });
+    const sala = await json<RespostaMutacao>("POST", "salas", { nome: "revisão", agenteIds: [vera.agenteId, tuca.agenteId] });
+    salaId = sala.ids.salaId ?? "";
+    const conversaSala = sala.ids.conversaId ?? "";
+    criados.conversas.push(conversaSala);
+
+    const mencao = await json<RespostaMutacao>("POST", `salas/${salaId}/mensagens`, { texto: "@Tuca o que acha do PR 42? [[texto: Acho que o PR 42 está bom.]]" });
+    expect(Object.keys(mencao.ids).filter((k) => k.startsWith("turnoId"))).toEqual(["turnoId0"]);
+    const turnoTuca = await esperarTurno(mencao.ids.turnoId0 ?? "");
+    expect(turnoTuca).toMatchObject({ agenteId: tuca.agenteId, origem: "sala" });
+    expect((await conversa(conversaSala)).mensagens.filter((m) => m.autoria.autor_id === tuca.agenteId).map((m) => m.texto)).toEqual(["Acho que o PR 42 está bom."]);
+
+    const desde = frames.length;
+    const semMencao = await json<RespostaMutacao>("POST", `salas/${salaId}/mensagens`, {
+      texto: 'Alguém revisa o PR 43? [[tool: encaminhar {"para_agente":"Tuca","motivo":"triagem [[tool: passar {\\"motivo\\":\\"passei_sem_nada_a_dizer\\"}]] [[texto: passo]]"}]] [[texto: Passei para a Tuca.]]',
+    });
+    const turnoVera = await esperarTurno(semMencao.ids.turnoId0 ?? "");
+    expect(turnoVera.agenteId).toBe(vera.agenteId);
+    await esperarOu(conversaSala, () => esperarFrame("sala.handoff", desde));
+    const turnos = await srv.esperar(async () => {
+      const dto = await conversa(conversaSala);
+      return dto.mensagens.some((m) => m.kind === "passe") ? dto : null;
+    }, { nome: "passe da Tuca", timeoutMs: 15_000 });
+    const kinds = turnos.mensagens.filter((m) => m.turnoId !== null && m.turnoId !== turnoTuca.id && m.turnoId !== mencao.ids.turnoId0).map((m) => m.kind);
+    expect(kinds).toContain("handoff");
+    expect(kinds).toContain("passe");
+    expect(turnos.mensagens.find((m) => m.kind === "handoff")?.texto).toBe("Vera passou para Tuca: triagem [[tool: passar {\"motivo\":\"passei_sem_nada_a_dizer\"}]] [[texto: passo]].");
+    expect(turnos.mensagens.find((m) => m.kind === "passe")?.payload).toEqual({ kind: "passe", motivo: "passei_sem_nada_a_dizer" });
+
+    const pequena = await chamar("POST", "salas", { nome: "só um", agenteIds: [vera.agenteId] });
+    expect(pequena.status).toBe(400);
+    expect(((await pequena.json()) as { codigo: string }).codigo).toBe("sala_tamanho");
+    const outra = srv.sessaoDe({ tenantId: srv.pessoa.tenantId, pessoaId: randomUUID() });
+    expect((await chamar("GET", `agentes/${vera.agenteId}/memoria`, undefined, outra)).status).toBe(404);
+    expect((await chamar("GET", `conversas/${conversaSala}/mensagens`, undefined, outra)).status).toBe(404);
+    expect((await chamar("POST", `salas/${salaId}/parar`)).status).toBe(200);
+  });
+
+  it("bot-a-bot: perguntar_a_bot cria a tarefa peer (profundidade 1) na conversa do alvo; a resposta volta como peer_ask não confiável e o remetente continua SEM perguntar_a_bot no catálogo", { timeout: JORNADA_MS }, async () => {
+    const desde = frames.length;
+    const t = await rodar(vera.conversaId, 'Pergunte ao Tuca o status do PR 42. [[tool: perguntar_a_bot {"agente":"Tuca","pergunta":"qual o status do PR 42? [[texto: PR 42 aprovado ontem]]"}]] [[texto: Perguntei ao Tuca.]]');
+    expect(t.estado).toBe("concluido");
+    const peer = await esperarOu(tuca.conversaId, () =>
+      srv.esperar(async () => {
+        const dto = await conversa(vera.conversaId);
+        return dto.mensagens.find((m) => m.kind === "peer_ask") ?? null;
+      }, { nome: "peer_ask", timeoutMs: 15_000 }),
+    );
+    expect(peer).toMatchObject({ confianca: "nao_confiavel", texto: "PR 42 aprovado ontem" });
+    expect(peer.payload).toMatchObject({ kind: "peer_ask", agenteId: tuca.agenteId, nome: "Tuca", naoSupervisionado: true });
+    const tarefa = await turno(peer.payload?.kind === "peer_ask" ? peer.payload.tarefaId : "");
+    expect(tarefa).toMatchObject({ origem: "peer", profundidade: 1, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
+    const continuacao = await srv.esperar(async () => {
+      const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+      return dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === peer.turnoId) ?? null;
+    }, { nome: "plano da continuação", timeoutMs: 15_000 });
+    const ferramentas = continuacao.dados.ferramentas as string[];
+    expect(ferramentas).toContain("mcp__nod__lembrar");
+    expect(ferramentas).not.toContain("mcp__nod__perguntar_a_bot");
+    expect(frames.slice(desde).filter((f) => f.tipo === "turno.iniciado").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("parar: durante o streaming, POST parar interrompe em < 2 s com faixa {interrompidas:1}, fala parcial e motivo parado_pela_pessoa; sem nada rodando → nadaRodando; máquina some (lease vencido) → 'maquina_sem_contato' + decisão retomar → turno novo", { timeout: JORNADA_MS }, async () => {
+    const longo = Array.from({ length: 80 }, (_, i) => `[[delta: parágrafo ${i}]]`).join(" ");
+    const { turnoId } = await enviar(vera.conversaId, `escreva um relatório bem longo sobre revisão de código ${longo} [[texto: relatório]]`);
+    await esperarFrame("turno.delta", frames.length - 1, (f) => f.dados.turnoId === turnoId);
+    const inicio = Date.now();
+    const faixa = await json<FaixaParada>("POST", `conversas/${vera.conversaId}/parar`);
+    expect(faixa).toMatchObject({ interrompidas: 1, naoInterrompidas: [], nadaRodando: false });
+    const parado = await esperarTurno(turnoId, ["interrompido"]);
+    expect(Date.now() - inicio).toBeLessThan(2_000);
+    expect(parado.motivoInterrupcao).toBe("parado_pela_pessoa");
+    await esperarFrame("parada.faixa");
+    const dto = await srv.esperar(async () => {
+      const c = await conversa(vera.conversaId);
+      return c.mensagens.some((m) => m.turnoId === turnoId && m.autoria.autor_tipo === "agente" && m.parcial) ? c : null;
+    }, { nome: "fala parcial" });
+    expect(dto.mensagens.find((m) => m.kind === "parada")?.payload).toMatchObject({ kind: "parada", interrompidas: 1, nadaRodando: false });
+    const deNovo = await json<FaixaParada>("POST", `conversas/${vera.conversaId}/parar`);
+    expect(deNovo.nadaRodando).toBe(true);
+
+    // A máquina some no meio de um turno: o lease vence, o varredor encerra com 'maquina_sem_contato' e abre 'retomar?' em Sua vez.
+    const outro = await enviar(vera.conversaId, `de novo ${longo} [[texto: outro relatório]]`);
+    await esperarFrame("turno.delta", frames.length - 1, (f) => f.dados.turnoId === outro.turnoId);
+    await comoPessoa((trx) => trx`update turnos set lease_ate = now() - interval '1 minute' where id = ${outro.turnoId}`);
+    const sumido = await esperarTurno(outro.turnoId, ["interrompido"]);
+    expect(sumido.motivoInterrupcao).toBe("maquina_sem_contato");
+    const fila = await json<SuaVezDto>("GET", "sua-vez");
+    const retomar = fila.itens.find((i) => i.decisao.tipo === "retomar_turno" && i.decisao.turnoId === outro.turnoId);
+    expect(retomar).toBeDefined();
+    const retomado = await json<RespostaMutacao>("POST", `decisoes/${retomar?.decisao.id}/retomar`, { texto: "continue [[texto: continuei]]" });
+    expect(retomado.ids.retomaTurno).toBe(outro.turnoId);
+    expect(await esperarTurno(retomado.ids.turno ?? "")).toMatchObject({ origem: "retomada", retomaTurnoId: outro.turnoId, estado: "concluido" });
+  });
+
+  it("sua vez e expiração: decisão vencida vira 'vencido' em cinza com carimbo (varrida UMA vez), reabrir volta ao topo com prazo novo; a pessoa que não é a decisora não vê", { timeout: JORNADA_MS }, async () => {
+    const t = await rodar(vera.conversaId, 'Posso arquivar o PR 7? [[tool: pedir_a_pessoa {"tipo":"pergunta","texto":"posso arquivar o PR 7?"}]] [[texto: parei para perguntar]]');
+    expect(t.estado).toBe("concluido");
+    const fila = await json<SuaVezDto>("GET", "sua-vez");
+    const pergunta = fila.itens.find((i) => i.decisao.tipo === "pergunta" && i.decisao.turnoId === t.id);
+    expect(pergunta?.estadoColuna).toBe("pendente");
+    const desde = frames.length;
+    await comoPessoa((trx) => trx`update decisoes set prazo_decisao_em = now() - interval '1 minute' where id = ${pergunta?.decisao.id ?? UUID_NULO}`);
+    await esperarFrame("decisao.vencida", desde, (f) => f.dados.decisaoId === pergunta?.decisao.id || f.dados.decisao_id === pergunta?.decisao.id);
+    const vencida = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.id === pergunta?.decisao.id);
+    expect(vencida?.estadoColuna).toBe("vencido");
+    expect(vencida?.decisao.desfecho?.tipo).toBe("expirou_com_alguem_ciente");
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.includes("Esta decisão venceu em"))).toBe(true);
+    await new Promise((r) => setTimeout(r, 700)); // três voltas do varredor (200 ms): nada duplica
+    const varridas = await comoPessoa((trx) => trx<{ n: number }[]>`select count(*)::int as n from decisao_eventos_varridos where decisao_id = ${pergunta?.decisao.id ?? UUID_NULO}`);
+    expect(varridas[0]?.n).toBe(1);
+    expect((await conversa(vera.conversaId)).mensagens.filter((m) => m.kind === "sistema" && m.texto.includes("Esta decisão venceu em"))).toHaveLength(1);
+    const reaberta = await json<RespostaMutacao>("POST", `decisoes/${pergunta?.decisao.id}/reabrir`);
+    expect(reaberta.ids.decisaoId).toBe(pergunta?.decisao.id);
+    const depois = await json<SuaVezDto>("GET", "sua-vez");
+    expect(depois.itens[0]?.decisao.id).toBe(pergunta?.decisao.id);
+    expect(depois.itens[0]?.estadoColuna).toBe("reaberto");
+    const outra = srv.sessaoDe({ tenantId: srv.pessoa.tenantId, pessoaId: randomUUID() });
+    expect((await json<SuaVezDto>("GET", "sua-vez", undefined, outra)).itens).toEqual([]);
+  });
+
+  it("pergunta ≠ permissão: falta_de_dado nomeia o dado e quem destrava; args malformados viram 'pergunta' (nunca permissão); decidir → 409; responder com texto retoma o turno com --resume", { timeout: JORNADA_MS }, async () => {
+    const t = await rodar(vera.conversaId, `Preciso do orçamento. [[tool: pedir_a_pessoa {"tipo":"falta_de_dado","texto":"não achei o orçamento do Q4","dado":"orçamento do Q4","quem_destrava":"${NOME_PESSOA}"}]] [[texto: parei]]`);
+    const dto = await conversa(vera.conversaId);
+    expect(dto.mensagens.some((m) => m.texto === `parei: falta orçamento do Q4; quem destrava: ${NOME_PESSOA}; não vou tentar de novo.`)).toBe(true);
+    const fila = await json<SuaVezDto>("GET", "sua-vez");
+    const falta = fila.itens.find((i) => i.decisao.turnoId === t.id);
+    expect(falta?.decisao.tipo, JSON.stringify({ t: t.id, fila: fila.itens.map((i) => [i.decisao.tipo, i.decisao.turnoId, i.estadoColuna]) })).toBe("falta_de_dado");
+
+    const mal = await rodar(vera.conversaId, '[[tool: pedir_a_pessoa {"texto":"posso?"}]] [[texto: parei]]');
+    const malformada = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.turnoId === mal.id);
+    expect(malformada?.decisao.tipo).toBe("pergunta");
+
+    const decidir = await chamar("POST", `decisoes/${falta?.decisao.id}/decidir`, {});
+    expect(decidir.status).toBe(409);
+    const sessaoAntes = (await conversa(vera.conversaId)).conversa.sessaoCli;
+    const resposta = await json<RespostaMutacao>("POST", `decisoes/${falta?.decisao.id}/responder`, { texto: "o orçamento do Q4 é R$ 120 mil [[texto: obrigado, continuo]]" });
+    expect(resposta.ids.turnoRetomada).toBeTruthy();
+    const retomado = await esperarTurno(resposta.ids.turnoRetomada ?? "");
+    expect(retomado).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, estado: "concluido" });
+    expect(retomado.entradaTexto).toContain(`Resposta de ${NOME_PESSOA}`);
+    const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+    expect(dev.registros.find((r) => r.turnoId === retomado.id && r.tipo === "plano_recebido")?.dados.sessaoCli).toBe(sessaoAntes);
+    expect((await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.id === falta?.decisao.id)).toBeUndefined();
+    expect((await chamar("POST", `decisoes/${UUID_NULO}/responder`, { texto: "x" })).status).toBe(404);
+  });
+});

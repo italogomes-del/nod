@@ -84,6 +84,7 @@ export function servicosDeTeste(reposDe: (trx: Tx) => Repos, escopo: Escopo, opc
         });
         return { ...plano, tokenDeTurno: `tok-${turnoId}`, machineId };
       },
+      buscar: () => null,
     },
     rotinas: { ativar: opcoes.ativarRotina ?? naoImplementado("rotinas.ativar (L7)") },
     conectores: {

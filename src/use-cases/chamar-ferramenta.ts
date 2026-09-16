@@ -9,7 +9,7 @@ import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { nomeParaTrilha, registrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
-/** Corpo devolvido por POST /api/interno/ferramentas/:nome (o proxy consome; cliente-nod-stub.ts espelha). */
+/** Corpo devolvido por POST /api/interno/ferramentas/:nome (o proxy consome; src/adapters/executor/cliente-nod.ts espelha). */
 export type ResultadoChamada =
   | { ok: true; conteudo: string; confianca: Confianca }
   | { ok: false; negacao: Negacao }

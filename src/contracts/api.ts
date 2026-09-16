@@ -1,5 +1,5 @@
 import type { Agente } from "./agente.ts";
-import type { Conversa } from "./conversa.ts";
+import type { Conversa, Proposta } from "./conversa.ts";
 import type { Decisao, ItemFila } from "./decisao.ts";
 import type { EpochMs, IsoUtc } from "./ids.ts";
 import type { Inventario } from "./inventario.ts";
@@ -30,6 +30,8 @@ export type ConversaDto = {
   conversa: Conversa;
   mensagens: Mensagem[];
   turnosPendentes: TurnoPendenteDto[];
+  /** Propostas PENDENTES da conversa (E1.1): o cartão da web nasce daqui, nunca de um kind de Mensagem (definido em 2026-09-16, L9). */
+  propostas: Proposta[];
 };
 
 export type SuaVezDto = {
@@ -100,4 +102,9 @@ export const ROTAS = [
   { metodo: "GET", caminho: "/api/interno/plano", lane: "L5" },
   { metodo: "POST", caminho: "/api/interno/ferramentas/:nome", lane: "L5" },
   { metodo: "GET", caminho: "/api/interno/decisoes/:id/aguardar", lane: "L5" },
+  /** Negação decidida LOCALMENTE pelo proxy (ADR-013): o servidor grava a trilha e pede a interrupção (pendência L5 §3). */
+  { metodo: "POST", caminho: "/api/interno/negacoes", lane: "L5" },
+  /** Acréscimos da L6 (definido em 2026-09-16): estado do turno para a web/e2e e retomada direta por turno, sem decisão. */
+  { metodo: "GET", caminho: "turnos/:id", lane: "L6" },
+  { metodo: "POST", caminho: "turnos/:id/retomar", lane: "L6" },
 ] as const satisfies readonly EntradaRota[];

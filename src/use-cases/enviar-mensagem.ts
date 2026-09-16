@@ -104,9 +104,10 @@ export async function mensagemExecutorIndisponivel(
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
-  const [mensagens, turnosPendentes] = await Promise.all([
+  const [mensagens, turnosPendentes, propostas] = await Promise.all([
     deps.repos.mensagens.listarDaConversa(conversa.id, input.limite),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
+    deps.repos.propostas.pendentesDaConversa(conversa.id),
   ]);
-  return { data: { conversa, mensagens, turnosPendentes } };
+  return { data: { conversa, mensagens, turnosPendentes, propostas } };
 };

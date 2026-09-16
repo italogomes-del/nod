@@ -9,6 +9,8 @@ import type { Rotina } from "./rotina.ts";
 
 /** Identidade derivada do token de turno — o remetente nunca vem do texto (ADR-024). */
 export type IdentidadeDeTurno = { turnoId: string; tenantId: string; pessoaId: string; agenteId: string };
+/** O que `cunhar` recebe: a identidade menos o turno (que é o primeiro argumento). */
+export type IdentidadeSemTurno = Omit<IdentidadeDeTurno, "turnoId">;
 
 export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | { ok: false; motivo: MotivoNegacao };
 
@@ -21,11 +23,16 @@ export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | {
 export interface ServicesNod<Trx> {
   relogio: () => number;
   tokenTurno: {
-    cunhar(turnoId: string): string;
+    /** definido em 2026-09-16 (L9, pendência L5 §2): cunhar RECEBE a identidade — `autorizar` a devolve, logo ela entra aqui. */
+    cunhar(turnoId: string, identidade: IdentidadeSemTurno): string;
     autorizar(token: string): IdentidadeDeTurno | null;
     revogar(turnoId: string): void;
   };
-  planos: { emitir(trx: Trx, turnoId: string, machineId: string): Promise<PlanoTurno> };
+  planos: {
+    emitir(trx: Trx, turnoId: string, machineId: string): Promise<PlanoTurno>;
+    /** O plano emitido para um turno vivo (GET /api/interno/plano); null sem token/plano. */
+    buscar(turnoId: string): PlanoTurno | null;
+  };
   rotinas: { ativar(trx: Trx, propostaId: string): Promise<Rotina> };
   conectores: {
     chamar(conectorId: string, tool: string, args: Record<string, unknown>): Promise<{ conteudo: string; isError: boolean }>;

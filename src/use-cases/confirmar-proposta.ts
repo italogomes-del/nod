@@ -44,7 +44,10 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);
+    // definido em 2026-09-16 (L9): a decisão 'acesso' nasce com o MESMO id da proposta — mesma convenção da
+    // decisão 'rotina' (criar-rotina.ts) — para POST decisoes/:id/decidir achar o payload e chamar `conceder`.
     decisao = await deps.repos.decisoes.criar({
+      id: proposta.id,
       tipo: "acesso",
       agenteId: proposta.agenteId,
       conversaId: proposta.conversaId,

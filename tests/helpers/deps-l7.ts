@@ -34,7 +34,7 @@ export function servicesFalsos(depsSobre: (trx: Tx) => Deps, agora: () => number
       autorizar: () => null,
       revogar: () => undefined,
     },
-    planos: { emitir: naoImplementado("planos.emitir") },
+    planos: { emitir: naoImplementado("planos.emitir"), buscar: () => null },
     rotinas: servicoRotinas(depsSobre),
     conectores: {
       async chamar(conectorId, tool) {

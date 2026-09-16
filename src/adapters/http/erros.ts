@@ -32,11 +32,22 @@ export interface ErroDto {
   correlation_id?: string | null;
 }
 
+/**
+ * definido em 2026-09-16 (EMENDA-L9 §2): um id de CORPO fora do formato uuid chega ao Postgres como
+ * 22P02 (invalid_text_representation). É entrada inválida da pessoa, não falha interna — vira 400 com o
+ * código fechado; a mensagem do driver (que ecoa o valor) nunca sai.
+ */
+const SQLSTATE_TEXTO_INVALIDO = "22P02";
+
 export function responderErro(res: ServerResponse, err: unknown): void {
   if (ehErroDeDominio(err)) {
     const { status, mensagem } = TABELA[err.codigo];
     const corpo: ErroDto = { codigo: err.codigo, mensagem };
     json(res, status, corpo);
+    return;
+  }
+  if (typeof err === "object" && err !== null && (err as { code?: unknown }).code === SQLSTATE_TEXTO_INVALIDO) {
+    json(res, 400, { codigo: "entrada_invalida", mensagem: TABELA.entrada_invalida.mensagem });
     return;
   }
   const correlationId = contextoAtual()?.correlationId ?? null;

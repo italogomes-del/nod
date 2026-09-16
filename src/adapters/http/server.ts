@@ -3,12 +3,17 @@ import { pathToFileURL } from "node:url";
 import { log } from "../../obs/log.ts";
 import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
+import { responderMetricas } from "./rotas/metricas.ts";
 import { rotaSaude } from "./rotas/saude.ts";
 import { criarSessao } from "./sessao.ts";
 
 /**
- * Servidor reduzido da fundação: roteador + saúde + sessão stub + estático. A composição das
- * rotas das lanes (compor.ts/boot.ts) é da L9. Sem framework: node:http puro.
+ * Servidor: roteador + saúde + sessão stub + estático + as rotas compostas (compor.ts), subidas
+ * por boot.ts quando este arquivo é o main. Sem framework: node:http puro.
+ *
+ * `GET /metrics` na RAIZ — definido em 2026-09-16 (EMENDA-L9 §3, opção a): o Prometheus raspa
+ * `/metrics` por convenção e o roteador só casa públicas sob `/api`; a resposta é montada aqui,
+ * antes do roteador, e a Rota da L8 continua servindo `/api/metrics`. A tabela ROTAS fica com "/metrics".
  */
 export interface OpcoesServidor {
   rotas?: Rota[];
@@ -25,7 +30,13 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
     autorizarTokenTurno: opcoes.autorizarTokenTurno,
     fallback: criarEstatico(opcoes.staticDir ?? process.env.NOD_STATIC_DIR),
   });
-  return createServer(roteador);
+  return createServer((req, res) => {
+    if (req.method === "GET" && (req.url === "/metrics" || req.url?.startsWith("/metrics?"))) {
+      responderMetricas(res);
+      return;
+    }
+    roteador(req, res);
+  });
 }
 
 export function listen(
@@ -60,5 +71,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch {
     // sem .env: variáveis vêm do ambiente
   }
-  void listen();
+  // Import tardio: boot.ts importa `listen` daqui; o ciclo só existiria com import estático.
+  const { boot } = await import("./boot.ts");
+  const servidor = await boot();
+  const encerrar = (sinal: string) => {
+    log("info", "sinal_recebido", { sinal });
+    servidor.fechar().then(() => process.exit(0), () => process.exit(1));
+  };
+  process.once("SIGINT", () => encerrar("SIGINT"));
+  process.once("SIGTERM", () => encerrar("SIGTERM"));
 }

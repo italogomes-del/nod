@@ -7,6 +7,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
+import { postarNaSala } from "./postar-na-sala.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type EntradaAssentarTurno = Entrega & { executor?: Executor };
@@ -42,7 +43,8 @@ export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm">, resul
 export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> = async (deps, entrega) => {
   const primeira = await deps.repos.turnos.registrarEntrega(entrega.turnoId, entrega.seqLocal);
   if (!primeira) return { data: { turno: null, mensagem: null, duplicada: true, tardia: false } };
-  const turno = await deps.repos.turnos.buscar(entrega.turnoId);
+  // Trava de linha: Parar (parar_solicitado_em) pode estar commitando em paralelo; a leitura espera por ele (ADR-009: quem decide o motivo é o servidor).
+  const turno = await deps.repos.turnos.buscarTravado(entrega.turnoId);
   if (!turno) throw new ErroDeDominio("nao_encontrado");
   if (turno.machineId !== null && turno.machineId !== entrega.machineId) throw new ErroDeDominio("nao_permitido", { cause: "entrega de outra máquina" });
 
@@ -68,6 +70,14 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       confianca: turno.entradaConfianca,
       parcial: interrompido,
     });
+  } else if (entrega.fala.texto.trim() !== "" && turno.origem === "sala" && !tardia) {
+    // definido em 2026-09-16 (pendência L7 §4): a fala de um bot numa sala entra por postarNaSala para os
+    // responders (menção) e o orçamento do canal rodarem na MESMA tx — nunca por mensagens.criar direto.
+    const conversa = await deps.repos.conversas.buscar(turno.conversaId);
+    if (!conversa?.salaId) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala sem sala" });
+    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: entrega.fala.texto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
+    mensagem = post.data.mensagem;
+    events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
   } else if (entrega.fala.texto.trim() !== "") {
     mensagem = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,

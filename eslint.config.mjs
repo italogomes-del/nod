@@ -20,7 +20,7 @@ const fronteira = (files, padroes, mensagem, opcoes = {}) => ({
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "prototypes/**", "docs/**", "web/public/**"],
+    ignores: ["dist/**", "node_modules/**", "prototypes/**", "docs/**", "web/public/**", ".claude/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

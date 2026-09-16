@@ -23,13 +23,46 @@ export type PassoRoteiro =
 
 export type Roteiro = { passos: PassoRoteiro[] };
 
-const MARCADOR = /\[\[(delta|tool|texto|custo|falha):\s*([\s\S]*?)\]\]/g;
+const ABERTURA = /^\[\[(delta|tool|texto|custo|falha):/;
+
+/**
+ * Marcadores com `[[`/`]]` BALANCEADOS (definido em 2026-09-16, L9): um marcador pode carregar outro
+ * dentro do próprio JSON — `[[tool: encaminhar {"motivo":"… [[tool: passar {…}]] …"}]]` — para o texto
+ * que vira o PROMPT do próximo turno (handoff, pergunta a outro bot) levar o roteiro daquele turno.
+ * Sem isto o primeiro `]]` interno fechava o marcador externo e o JSON chegava truncado (args_invalidos).
+ */
+function* marcadores(prompt: string): Generator<{ tipo: string; corpo: string }> {
+  let i = 0;
+  while (i < prompt.length) {
+    const inicio = prompt.indexOf("[[", i);
+    if (inicio === -1) return;
+    const m = ABERTURA.exec(prompt.slice(inicio));
+    if (!m) {
+      i = inicio + 2;
+      continue;
+    }
+    let profundidade = 1;
+    let j = inicio + 2;
+    while (j < prompt.length && profundidade > 0) {
+      if (prompt.startsWith("[[", j)) {
+        profundidade += 1;
+        j += 2;
+      } else if (prompt.startsWith("]]", j)) {
+        profundidade -= 1;
+        j += 2;
+      } else j += 1;
+    }
+    if (profundidade !== 0) return;
+    yield { tipo: m[1] ?? "", corpo: prompt.slice(inicio + m[0].length, j - 2) };
+    i = j;
+  }
+}
 
 export function interpretarRoteiro(prompt: string): Roteiro {
   const passos: PassoRoteiro[] = [];
-  for (const m of prompt.matchAll(MARCADOR)) {
-    const tipo = m[1];
-    const corpo = (m[2] ?? "").trim();
+  for (const m of marcadores(prompt)) {
+    const tipo = m.tipo;
+    const corpo = m.corpo.trim();
     if (tipo === "delta") passos.push({ tipo: "delta", texto: corpo });
     else if (tipo === "texto") passos.push({ tipo: "texto", texto: corpo });
     else if (tipo === "custo") passos.push({ tipo: "custo", custoUsd: Number(corpo) || 0 });

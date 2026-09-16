@@ -1,4 +1,4 @@
-import type { Executor } from "../../contracts/evento.ts";
+import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
@@ -6,7 +6,7 @@ import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
-import { assentarTurno } from "../../use-cases/assentar-turno.ts";
+import { assentarTurno, type SaidaAssentarTurno } from "../../use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
@@ -23,6 +23,12 @@ export type DepsPonte = {
   listarPessoas?: () => Promise<Pick<Pessoa, "tenantId" | "id">[]>;
   /** Depois de entregar: soltar o processo do interruptor (criarInterruptor().esquecer). */
   esquecerTurno?: (turnoId: string) => void;
+  /**
+   * definido em 2026-09-16 (composição L9): roda na MESMA tx logo depois de assentarTurno, com as Deps e
+   * a saída, e devolve eventos a gravar — é onde a rotina registra desfecho (registrarDesfechoRotina) e o
+   * turno peer entrega a resposta (entregarRespostaPeer), sem a ponte importar casos de uso da L7.
+   */
+  depoisDeAssentar?: (deps: Deps, p: { entrega: Entrega; saida: SaidaAssentarTurno }) => Promise<RuntimeEvent[]>;
 };
 
 export type PonteInternaNod = PonteInterna & {
@@ -107,7 +113,9 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
           const r = await assentarTurno(d, { ...e, executor });
-          if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+          const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
+          const events = [...(r.events ?? []), ...extras];
+          if (events.length) await d.repos.events.gravarComOutbox(events);
         });
       } finally {
         escopos.delete(e.turnoId);
