@@ -30,3 +30,9 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-021](adr-021-a-ponte-de-execucao-o-app-local-puxa-o-servidor-nunca-di.md) | A ponte de execução: o app local puxa, o servidor nunca disca | novo |
 | [ADR-022](adr-022-a-localidade-do-turno-e-resolvida-por-regra-declarativa.md) | A localidade do turno é resolvida por regra declarativa, nunca escolhida pelo agente | novo |
 | [ADR-023](adr-023-autoria-composta-todo-evento-carrega-quem-escreveu-e-sob.md) | Autoria composta: todo evento carrega quem escreveu e sob procuração de quem | novo |
+| [ADR-024](adr-024-o-plano-de-turno-e-o-primitivo-do-nod-emitido-pelo-servi.md) | O plano de turno é o primitivo do nod, emitido pelo servidor e consumido pelo proxy | novo |
+| [ADR-025](adr-025-quem-pede-e-quem-paga-sao-dois-campos-distintos-da-autor.md) | Quem pede e quem paga são dois campos distintos da autoria composta | novo |
+| [ADR-026](adr-026-a-marca-de-nao-confiavel-e-propriedade-do-conteudo-carre.md) | A marca de não-confiável é propriedade do conteúdo, carregada no envelope | novo |
+| [ADR-027](adr-027-sala-de-conversa-tem-visibilidade-propria-membership-e-g.md) | Sala de conversa tem visibilidade própria; membership é grant, não herança | novo |
+| [ADR-028](adr-028-a-fronteira-do-proxy-e-a-fronteira-dos-mecanismos-de-pro.md) | A fronteira do proxy é a fronteira dos mecanismos de produto | novo |
+| [ADR-029](adr-029-fail-closed-exige-estado-renderizado-nao-negacao-seca.md) | Fail-closed exige estado renderizado, não negação seca | novo |
