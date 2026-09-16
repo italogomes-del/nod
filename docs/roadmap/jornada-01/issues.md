@@ -46,6 +46,8 @@ flowchart LR
 
 ### E1.0 — [Issue] Decidir: onde mora a identidade de quem loga, e o regime do token de máquina
 
+Linear: LEA-7
+
 Não é User Story — o entregável é decisão registrada (ADR), não código.
 
 - **Contexto/porquê:** duas incógnitas travam o resto do épico. (a) `pessoas` é só-leitura para
@@ -61,6 +63,8 @@ Não é User Story — o entregável é decisão registrada (ADR), não código.
 
 ### E1.1 — [Issue] Semear e-mail `@leapy.com.br` na identidade (`pessoas.email`)
 
+Linear: LEA-8
+
 Enabler de dados/DB — sem valor de usuário isolado.
 
 - **Contexto/porquê:** pré-requisito do mapeamento de E1.2. Adiciona coluna `email` em `pessoas`,
@@ -75,6 +79,8 @@ Enabler de dados/DB — sem valor de usuário isolado.
 - **Depende de:** E1.0 (decisão do modelo de mapeamento).
 
 ### E1.2 — [US] Entrar no nod com minha conta Google da Leapy
+
+Linear: LEA-9
 
 > Como colaborador da Leapy, quero entrar no nod pelo navegador com minha conta Google Workspace
 > (`@leapy.com.br`), para que minha sessão e minha autoria sejam realmente minhas — não o stub
@@ -94,6 +100,8 @@ Enabler de dados/DB — sem valor de usuário isolado.
 
 ### E1.3 — [US] Emitir um token de máquina depois de logar
 
+Linear: LEA-10
+
 > Como colaborador já logado no navegador, quero emitir um token de máquina, para que meu computador
 > se autentique no servidor sem eu colar segredo em arquivo.
 
@@ -112,6 +120,8 @@ Enabler de dados/DB — sem valor de usuário isolado.
 
 ### E1.4 — [US] Guardar o token de máquina no Keychain do meu computador *(condicional)*
 
+Linear: LEA-13
+
 > Como colaborador, quero que meu app local guarde o token de máquina no Keychain, para não ter o
 > segredo em texto plano.
 
@@ -126,6 +136,8 @@ Enabler de dados/DB — sem valor de usuário isolado.
 
 ### E1.5 — [Issue] Liberar `NOD_HOST` fora de 127.0.0.1 quando a sessão for real
 
+Linear: LEA-11
+
 Enabler de infra.
 
 - **Contexto/porquê:** `src/adapters/http/servidor.ts` lança para host não-loopback "enquanto a sessão
@@ -137,6 +149,8 @@ Enabler de infra.
 - **Depende de:** E1.2.
 
 ### E1.6 — [Issue] Remover o stub `marlon|ana` (fecha o épico)
+
+Linear: LEA-12
 
 Limpeza / flip do "Pronto quando".
 
