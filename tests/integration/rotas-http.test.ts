@@ -27,6 +27,9 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
   beforeAll(async () => {
     app = comporApp({ db, env: { NOD_EXECUTOR: "catcher", NOD_CREDENTIAL_KEY: "0".repeat(63) + "3" }, listarPessoas: async () => [] });
     srv = await servidorDeTeste(app.rotas, { autorizarTokenTurno: app.tokens.autorizar });
+    // a ordem do boot: listen → registry (ADR-012: sombra com motivo escrito). Sem isto o inventário esperaria o registry até o prazo.
+    const sombra = { estado: "sombra", motivo: "teste de rotas sem driver" } as const;
+    app.ligarRegistry({ catcher: sombra, "claude-cli": sombra });
     marlon = await srv.entrar("marlon");
   });
   afterAll(async () => {

@@ -6,6 +6,7 @@ import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { log } from "../../../obs/log.ts";
 import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
@@ -130,10 +131,15 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
 
       return {
         async sondar(): Promise<Inventario> {
+          // medido em 2026-09-16 (e2e:haiku, primeira rodada): NOD_HOME/turnos ainda não existia na sonda do boot e o
+          // mkdtemp falhava com ENOENT — o driver ia para a sombra com "create_falhou". O diretório nasce aqui também.
+          await mkdir(cfg.cwdBase, { recursive: true });
           const s = await sondarDetalhado(cfg.bin, cfg.env, lig.modeloSonda ?? MODELO_SONDA_PADRAO, { home, cwdBase: cfg.cwdBase });
           binario = s.binario;
           flagsNoHelp = s.flagsNoHelp;
           if ("versao" in s.inventario && s.inventario.versao) versao = s.inventario.versao;
+          // O turno de sonda custa (assinatura da pessoa): o custo sai no log para o roteiro de aceite somar (L9).
+          log("info", "sonda_claude_cli", { estado: s.inventario.estado, motivo: "motivo" in s.inventario ? s.inventario.motivo : null, custo_usd: s.custoUsd });
           return s.inventario;
         },
 

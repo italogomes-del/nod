@@ -130,6 +130,12 @@ export function comporApp(o: OpcoesCompor): App {
   const chave = chaveDe(env.NOD_CREDENTIAL_KEY ?? "chave-de-desenvolvimento-sem-valor");
   let registryLigado: Registry | null = null;
   let inventarioInicial: Inventario | null = null;
+  // medido em 2026-09-16 (e2e:haiku): GET inventario entre o listen e a sonda do boot cacheava 'ausente: servidor ainda
+  // sem registry' por 5 min. A sonda agora ESPERA o registry ser ligado em vez de responder um estado provisório.
+  let ligarRegistryResolvido: () => void = () => undefined;
+  const registryPronto = new Promise<void>((r) => {
+    ligarRegistryResolvido = r;
+  });
 
   const barramento = criarBarramento();
   const interruptor = criarInterruptor();
@@ -225,12 +231,27 @@ export function comporApp(o: OpcoesCompor): App {
   // sonda do claude-cli custa um turno real); a persistência é por pessoa em inventario_motores.
   let sondaCompartilhada: { em: number; promessa: Promise<Inventario> } | null = null;
   const TTL_SONDA_MS = 300_000;
+  // definido em 2026-09-16: quem chega antes do registry espera até PRAZO_REGISTRY_MS (a sonda do boot custa um
+  // turno real e leva segundos); vencido o prazo responde 'ausente' SEM cachear, para a próxima chamada tentar de
+  // novo. Um app composto e nunca ligado (só em teste) responde em vez de pendurar o pedido.
+  const PRAZO_REGISTRY_MS = 15_000;
   async function sondarMaquina(): Promise<Inventario> {
+    if (!registryLigado) {
+      let prazo: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        registryPronto,
+        new Promise<void>((r) => {
+          prazo = setTimeout(r, PRAZO_REGISTRY_MS);
+        }),
+      ]);
+      if (prazo) clearTimeout(prazo);
+      if (!registryLigado) return { estado: "ausente", motivo: "servidor ainda sem registry", em: relogio() };
+    }
     const agora = relogio();
     if (sondaCompartilhada && agora - sondaCompartilhada.em < TTL_SONDA_MS) return sondaCompartilhada.promessa;
     const registro = registryLigado?.[idDriver];
     const promessa: Promise<Inventario> = !registro
-      ? Promise.resolve({ estado: "ausente", motivo: "servidor ainda sem registry", em: agora })
+      ? Promise.resolve({ estado: "ausente", motivo: "driver não registrado", em: agora })
       : registro.estado === "sombra"
         ? Promise.resolve({ estado: "ausente", motivo: registro.motivo, em: agora })
         : registro.instance.sondar();
@@ -318,6 +339,7 @@ export function comporApp(o: OpcoesCompor): App {
       registryLigado = registry;
       inventarioInicial = inicial ?? null;
       sondaCompartilhada = null;
+      ligarRegistryResolvido();
     },
     registry: () => registryLigado,
     iniciarLaco: iniciar,
