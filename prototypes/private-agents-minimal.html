@@ -22,13 +22,25 @@
       --dark:#0f1115;
       --shadow:0 10px 30px rgba(8, 10, 14, 0.08);
       --font:"Inter",system-ui,-apple-system,sans-serif;
+      --ctx-private-a:#e7f0ff;
+      --ctx-private-b:#f9fbff;
+      --ctx-leapy-a:#efe5ff;
+      --ctx-leapy-b:#fbf9ff;
+      --ctx-gamefik-a:#ffe9d8;
+      --ctx-gamefik-b:#fffaf6;
+      --list-private-a:rgba(72,121,228,.22);
+      --list-private-b:rgba(255,255,255,.74);
+      --list-leapy-a:rgba(133,88,216,.22);
+      --list-leapy-b:rgba(255,255,255,.74);
+      --list-gamefik-a:rgba(241,133,57,.22);
+      --list-gamefik-b:rgba(255,255,255,.74);
     }
     *{box-sizing:border-box}
     body{
       margin:0;
       font:400 14px/1.45 var(--font);
       color:var(--ink);
-      background:var(--bg);
+      background:radial-gradient(1200px 380px at 10% -20%, #f5f7ff 0%, var(--bg) 55%);
       -webkit-font-smoothing:antialiased;
     }
     button,input,textarea{font:inherit;color:inherit}
@@ -66,11 +78,17 @@
       position:relative;
       color:#e5e8ef;
       border:1px solid transparent;
+      transition:background-color .16s ease, transform .16s ease, box-shadow .16s ease, border-color .16s ease;
     }
-    .rail .r-btn:hover{background:#1f232d}
+    .rail .r-btn:hover{
+      background:#1f232d;
+      transform:translateY(-1px);
+      border-color:#2f3644;
+    }
     .rail .r-btn.active{
       background:#fff;
       color:#11131a;
+      box-shadow:0 8px 18px rgba(0,0,0,.22);
     }
     .rail .r-btn.active::before{
       content:"";
@@ -96,13 +114,61 @@
       margin-top:-3px;
       margin-bottom:3px;
     }
+    .rail .r-badge{
+      position:absolute;
+      right:-3px;
+      top:-3px;
+      min-width:16px;
+      height:16px;
+      padding:0 4px;
+      border-radius:999px;
+      background:#2563eb;
+      color:#fff;
+      font-size:10px;
+      font-weight:700;
+      display:grid;
+      place-items:center;
+      border:2px solid #12141a;
+    }
 
     .sidebar{
       min-height:0;
       border-right:1px solid var(--line);
-      background:var(--panel);
+      background:linear-gradient(180deg,var(--ctx-grad-a,#f6f8ff),var(--ctx-grad-b,#ffffff));
       display:flex;
       flex-direction:column;
+      transition:background .25s ease;
+      position:relative;
+    }
+    .sidebar[data-context="private"]{
+      --ctx-grad-a:var(--ctx-private-a);
+      --ctx-grad-b:var(--ctx-private-b);
+      --list-grad-a:var(--list-private-a);
+      --list-grad-b:var(--list-private-b);
+    }
+    .sidebar[data-context="leapy"]{
+      --ctx-grad-a:var(--ctx-leapy-a);
+      --ctx-grad-b:var(--ctx-leapy-b);
+      --list-grad-a:var(--list-leapy-a);
+      --list-grad-b:var(--list-leapy-b);
+    }
+    .sidebar[data-context="gamefik"]{
+      --ctx-grad-a:var(--ctx-gamefik-a);
+      --ctx-grad-b:var(--ctx-gamefik-b);
+      --list-grad-a:var(--list-gamefik-a);
+      --list-grad-b:var(--list-gamefik-b);
+    }
+    .sidebar[data-context="private"] #privateSidebar,
+    .sidebar[data-context="private"] #companySidebar{
+      background:linear-gradient(180deg,rgba(91,137,230,.12),rgba(255,255,255,0) 38%);
+    }
+    .sidebar[data-context="leapy"] #privateSidebar,
+    .sidebar[data-context="leapy"] #companySidebar{
+      background:linear-gradient(180deg,rgba(141,102,219,.12),rgba(255,255,255,0) 38%);
+    }
+    .sidebar[data-context="gamefik"] #privateSidebar,
+    .sidebar[data-context="gamefik"] #companySidebar{
+      background:linear-gradient(180deg,rgba(245,140,63,.14),rgba(255,255,255,0) 38%);
     }
 
     .search-wrap{
@@ -220,6 +286,11 @@
       min-height:0;
       overflow:auto;
       padding:8px 6px 12px;
+      margin:6px 8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.68);
+      background:linear-gradient(180deg,var(--list-grad-a,rgba(255,255,255,.5)),var(--list-grad-b,rgba(255,255,255,.8)));
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.45);
     }
     .company-head{
       padding:12px 10px 8px;
@@ -384,6 +455,14 @@
       flex-direction:column;
       position:relative;
       background:var(--panel);
+      margin:6px;
+      border:1px solid var(--line);
+      border-top-left-radius:18px;
+      border-bottom-left-radius:18px;
+      border-top-right-radius:10px;
+      border-bottom-right-radius:10px;
+      overflow:hidden;
+      box-shadow:var(--shadow);
     }
     .head{
       min-height:43px;
@@ -415,6 +494,21 @@
       padding:2px 6px;
       border-radius:999px;
     }
+    .main[data-context="private"] .head .tag{
+      border-color:#d6e4ff;
+      background:#eef4ff;
+      color:#355da6;
+    }
+    .main[data-context="leapy"] .head .tag{
+      border-color:#e1d6ff;
+      background:#f4efff;
+      color:#5b3da3;
+    }
+    .main[data-context="gamefik"] .head .tag{
+      border-color:#ffd9be;
+      background:#fff2e8;
+      color:#9d4b11;
+    }
     .head .actions{
       display:flex;
       align-items:center;
@@ -437,6 +531,7 @@
       display:flex;
       flex-direction:column;
       width:100%;
+      background:#fff;
     }
     .scroll{
       flex:1;
@@ -723,6 +818,11 @@
       .app{grid-template-columns:1fr}
       .rail,.sidebar{display:none}
       .main{border-left:0}
+      .main{
+        margin:0;
+        border:0;
+        border-radius:0;
+      }
       .palette{left:8px;top:8px;width:calc(100% - 16px)}
       .timeline{max-width:100%}
       .bubble{max-width:86%}
@@ -1080,6 +1180,8 @@
       };
 
       var contextRail = document.getElementById("contextRail");
+      var sidebarEl = document.querySelector(".sidebar");
+      var mainPanel = document.querySelector(".main");
       var privateSidebar = document.getElementById("privateSidebar");
       var companySidebar = document.getElementById("companySidebar");
       var companyBadge = document.getElementById("companyBadge");
@@ -1131,6 +1233,11 @@
       function getCurrentChannel(){
         var channelId = state.currentChannelByCompany[state.currentCompanyId];
         return getChannel(state.currentCompanyId, channelId);
+      }
+      function getContextThemeKey(){
+        if(state.mode === "private"){ return "private"; }
+        if(state.currentCompanyId === "co-gamefik"){ return "gamefik"; }
+        return "leapy";
       }
       function renderEntityIcon(color, shape, text){
         return '<span class="icon ' + color + " " + shape + '">' + text + "</span>";
@@ -1196,9 +1303,11 @@
 
       function renderRail(){
         var privateActive = state.mode === "private";
+        var privateUnread = bots.filter(function(bot){ return bot.unread; }).length;
         var privateBtn = [
           '<button class="r-btn' + (privateActive ? " active" : "") + '" data-context-type="private" aria-label="Meus agentes">',
           renderEntityIcon("c-lilac", "shape-circle", "MW"),
+          privateUnread ? '<span class="r-badge">' + privateUnread + "</span>" : "",
           "</button>",
           '<span class="r-cap">meus</span>',
           '<span class="r-sep"></span>'
@@ -1206,11 +1315,11 @@
 
         var companyButtons = companies.map(function(company){
           var active = state.mode === "company" && state.currentCompanyId === company.id;
-          var unread = company.channels.some(function(channel){ return channel.unread; });
+          var unreadCount = company.channels.filter(function(channel){ return channel.unread; }).length;
           return [
             '<button class="r-btn' + (active ? " active" : "") + '" data-context-type="company" data-company-id="' + company.id + '" aria-label="' + company.name + '">',
             renderEntityIcon(company.color, "shape-square", company.abbr),
-            unread ? '<span style="position:absolute;right:2px;top:2px;width:7px;height:7px;border-radius:50%;background:#3b82f6;border:1px solid #12141a;"></span>' : "",
+            unreadCount ? '<span class="r-badge">' + unreadCount + "</span>" : "",
             "</button>"
           ].join("");
         }).join("");
@@ -1357,6 +1466,9 @@
 
       function renderLayoutState(){
         var inPrivate = state.mode === "private";
+        var ctxKey = getContextThemeKey();
+        sidebarEl.setAttribute("data-context", ctxKey);
+        mainPanel.setAttribute("data-context", ctxKey);
         privateSidebar.hidden = !inPrivate;
         companySidebar.hidden = inPrivate;
         if(inPrivate){
