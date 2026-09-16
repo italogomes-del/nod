@@ -5,7 +5,7 @@ import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
-import { registrarDesfechoRotina } from "../../use-cases/disparar-rotina.ts";
+import { registrarDesfechoRotina, TIPOS_GATE_ROTINA } from "../../use-cases/disparar-rotina.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -24,7 +24,7 @@ const DESFECHO_HUMANO: Record<string, string> = {
  * Varredura de UMA pessoa (E7.4, ADR-007/011): vencerPendentes escreve 'vencida' com o desfecho
  * que diz se alguém VIU (vista_em) → marcarVarrida(id, 'vencida') ON CONFLICT — só quem inseriu
  * escreve a mensagem com carimbo na conversa de origem e o evento (rodar duas vezes = uma
- * mensagem). Gate de rotina vencido → execução 'passou_em_branco' com motivo tipado
+ * mensagem). Gate de rotina vencido (gate_rotina ou aprovacao ligada ao turno da rotina) → execução 'passou_em_branco' com motivo tipado
  * 'ninguem_respondeu_o_gate' e a frase "nada foi enviado" (E7.5), zero efeito externo. O atraso
  * (agora − prazo) vai ao log: é como se observa um varredor que ficou parado (E7.4.3).
  */
@@ -50,7 +50,9 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
       });
       resultado.mensagens += 1;
       const events = [evento(deps, "decisao_vencida", autoria, { decisaoId: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atrasoMs: agora - Date.parse(d.prazoDecisaoEm) }, { conversaId: d.conversaId, turnoId: d.turnoId })];
-      if (d.tipo === "gate_rotina" && d.turnoId) {
+      // Gate de rotina = gate_rotina OU aprovacao ligada a um turno de rotina (TIPOS_GATE_ROTINA); se o
+      // turno não é de rotina, registrarDesfechoRotina devolve 'nao_e_rotina' e nada mais acontece.
+      if (TIPOS_GATE_ROTINA.has(d.tipo) && d.turnoId) {
         const r = await registrarDesfechoRotina(deps, { turnoId: d.turnoId, desfecho: "passou_em_branco", motivo: "ninguem_respondeu_o_gate" });
         if ("execucao" in r.data) {
           resultado.passaramEmBranco.push(r.data.rotina.id);

@@ -1,4 +1,5 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { DesfechoRotina, MotivoFalha } from "../contracts/motivos.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
@@ -81,6 +82,14 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
 };
 
 export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | "ninguem_respondeu_o_gate" | null };
+
+/**
+ * definido em 2026-09-16: o gate de uma rotina é QUALQUER pedido de aprovação pendente ligado ao turno
+ * dela — tipo 'gate_rotina' (rótulo do plano) ou 'aprovacao' (o que pedirAprovacao da L5 cria hoje).
+ * Assim o caminho real (rotina roda → pedir_aprovacao → ninguém responde) chega a passou_em_branco
+ * sem depender de a L5 trocar o rótulo; a ligação é o turno_id, dado tipado, nunca a frase.
+ */
+export const TIPOS_GATE_ROTINA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(["gate_rotina", "aprovacao"]);
 export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" };
 
 /**
@@ -95,7 +104,8 @@ export const registrarDesfechoRotina: CasoDeUso<EntradaDesfecho, SaidaDesfecho> 
   if (!ligacao) return { data: { ignorado: "nao_e_rotina" } };
   const { rotina, turnoDisparado, instanteAgendado } = ligacao;
   if (input.desfecho === "executou") {
-    const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => d.tipo === "gate_rotina" && d.turnoId === turnoDisparado.id);
+    const turnosDaRotina = new Set([turnoDisparado.id, input.turnoId]);
+    const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => TIPOS_GATE_ROTINA.has(d.tipo) && d.turnoId !== null && turnosDaRotina.has(d.turnoId));
     if (gatesAbertos.length > 0) return { data: { ignorado: "aguardando_gate" } };
   }
   const agora = deps.agora();

@@ -3,6 +3,7 @@ import type { RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { criarRepos } from "../../../repositories/index.ts";
 import type { Escopo, Relogio, Transacao, Tx } from "../../../shared/types.ts";
+import { assertUuid } from "../../../use-cases/apoio-l7.ts";
 import { criarRotinaPelaPessoa } from "../../../use-cases/criar-rotina.ts";
 import { listarExecucoes, listarRotinas } from "../../../use-cases/listar-rotinas.ts";
 import { pausarRotina } from "../../../use-cases/pausar-rotina.ts";
@@ -40,6 +41,16 @@ export function texto(corpo: Record<string, unknown>, campo: string): string {
   return v;
 }
 
+/**
+ * definido em 2026-09-16: todo id que chega por path (`[^/]+` do roteador) ou por corpo passa por aqui
+ * antes de tocar o banco — um id fora do formato uuid vira 400 entrada_invalida na rota, e não o
+ * 22P02 do Postgres traduzido em 500 falha_interna. A tabela de erros.ts é fixa e não traduz sintaxe
+ * de uuid; enquanto o roteador não guarda o formato (pendência para a L9), as rotas da L7 guardam.
+ */
+export function uuid(valor: unknown, campo: string): string {
+  return assertUuid(valor, campo);
+}
+
 export function corpoObjeto(c: unknown): Record<string, unknown> {
   if (typeof c !== "object" || c === null || Array.isArray(c)) throw new ErroDeDominio("entrada_invalida", { cause: "corpo" });
   return c as Record<string, unknown>;
@@ -48,7 +59,8 @@ export function corpoObjeto(c: unknown): Record<string, unknown> {
 /**
  * Rotas de rotinas (tabela ROTAS, lane L7). POST rotinas: 400 fuso_invalido / cron_sem_futuro /
  * entrada_invalida, 429 limite_atingido, 404 agente — a tradução é da tabela fixa de erros.ts.
- * O fuso é validado ANTES dos demais campos (o e2e manda só cron + fuso e espera fuso_invalido).
+ * O fuso é validado ANTES dos demais campos (o e2e manda só cron + fuso e espera fuso_invalido);
+ * o agenteId ausente ou fora do formato é 400 entrada_invalida, nunca 500.
  */
 export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
   return [
@@ -66,6 +78,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
         const corpo = corpoObjeto(await ctx.corpo());
         const fusoIana = typeof corpo.fusoIana === "string" ? corpo.fusoIana : typeof corpo.fuso_iana === "string" ? corpo.fuso_iana : "";
         const { rotina } = await executar(deps, ctx.escopo, criarRotinaPelaPessoa, {
+          // O caso de uso confere o agenteId DEPOIS do domínio (fuso_invalido vem antes, contrato do e2e).
           agenteId: typeof corpo.agenteId === "string" ? corpo.agenteId : "",
           cron: typeof corpo.cron === "string" ? corpo.cron : "",
           fusoIana,
@@ -83,7 +96,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       metodo: "POST",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/pausar$/,
       async handler(ctx) {
-        const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: ctx.params.id ?? "", estado: "pausada" });
+        const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: uuid(ctx.params.id, "id"), estado: "pausada" });
         const resposta: RespostaMutacao = { ok: true, ids: { rotinaId: rotina.id } };
         ctx.json(200, resposta);
       },
@@ -92,7 +105,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       metodo: "POST",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/ativar$/,
       async handler(ctx) {
-        const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: ctx.params.id ?? "", estado: "ativa" });
+        const { rotina } = await executar(deps, ctx.escopo, pausarRotina, { rotinaId: uuid(ctx.params.id, "id"), estado: "ativa" });
         const resposta: RespostaMutacao = { ok: true, ids: { rotinaId: rotina.id } };
         ctx.json(200, resposta);
       },
@@ -101,7 +114,7 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       metodo: "GET",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/execucoes$/,
       async handler(ctx) {
-        ctx.json(200, await executar(deps, ctx.escopo, listarExecucoes, { rotinaId: ctx.params.id ?? "" }));
+        ctx.json(200, await executar(deps, ctx.escopo, listarExecucoes, { rotinaId: uuid(ctx.params.id, "id") }));
       },
     },
   ];

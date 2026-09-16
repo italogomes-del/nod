@@ -6,7 +6,7 @@ import type { CasoNod } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { validarRotinaNormalizada, type RotinaNormalizada } from "../domain/rotina-texto.ts";
-import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
+import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaRotina = {
@@ -22,6 +22,8 @@ export type EntradaRotina = {
 /** Valida no domínio (fuso_invalido / cron_sem_futuro / entrada_invalida) e o limite de 50 por bot (limite_atingido). */
 async function normalizarComLimite(deps: Deps, agenteId: string, entrada: EntradaRotina): Promise<RotinaNormalizada> {
   const normalizada = validarRotinaNormalizada({ ...entrada, agora: deps.agora() });
+  // Depois do domínio (o e2e manda só cron + fuso e espera fuso_invalido antes de qualquer outro campo).
+  assertUuid(agenteId, "agenteId");
   await agenteVisivel(deps.repos, agenteId);
   if (!podeCriarRotina(await deps.repos.rotinas.contarDoAgente(agenteId))) {
     throw new ErroDeDominio("limite_atingido", { cause: "rotinas por agente" });

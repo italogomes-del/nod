@@ -25,6 +25,22 @@ import type { Deps } from "./tipos.ts";
 export const PRAZO_DECISAO_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * definido em 2026-09-16: um id que não tem o formato uuid nunca chega ao Postgres — viraria 22P02
+ * (500 falha_interna, sem código na tabela fixa de erros.ts). Quem recebe id de fora (rota, corpo,
+ * argumento de ferramenta) confere aqui e lança entrada_invalida.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function ehUuid(valor: unknown): valor is string {
+  return typeof valor === "string" && UUID.test(valor);
+}
+
+export function assertUuid(valor: unknown, campo: string): string {
+  if (!ehUuid(valor)) throw new ErroDeDominio("entrada_invalida", { cause: `campo ${campo}` });
+  return valor;
+}
+
+/**
  * definido em 2026-09-16: mensagens e eventos escritos pelo SERVIDOR em nome da pessoa levam o
  * executor 'catcher', a mesma convenção de tests/helpers/fabricas.ts (executor padrão desta rodada,
  * AGENTS.md). Quando o turno vier do claude-cli, quem sabe o executor é o plano (L5/L9), e o

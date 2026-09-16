@@ -56,6 +56,31 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
     });
   });
 
+  it("o caminho real: pedir_aprovacao cria tipo 'aprovacao' ligada ao turno da rotina → conta como gate (aguardando_gate) e, vencida, vira passou_em_branco; aprovacao de turno comum não toca rotina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => AGORA });
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
+      const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      const turnoId = r.data.turno.id;
+      const gate = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId, prazoDecisaoEm: AGORA - 60_000, frase: "1 e-mail para enviar" });
+      // Uma aprovação de um turno comum, vencida no mesmo tick, não é gate de rotina.
+      const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const outra = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId: comum?.id ?? null, prazoDecisaoEm: AGORA - 60_000, frase: "2 e-mails" });
+      expect((await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
+
+      const tx: Transacao = (fn) => fn(trx);
+      const varrido = await varrerPessoa(MARLON, tx, { services: deps.services, useCases: deps.useCases, agora: () => AGORA });
+      expect(varrido.vencidas.sort()).toEqual([gate?.id, outra?.id].sort());
+      expect(varrido.passaramEmBranco).toEqual([rotina?.id]);
+      expect((await repos.rotinaExecucoes.listar(rotina?.id ?? "")).map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["passou_em_branco", "ninguem_respondeu_o_gate", turnoId]]);
+      expect(chamadas.conectores).toEqual([]);
+      // Depois de vencido o gate, um 'executou' tardio não conta mais como aguardando (o gate já não está pendente).
+      expect((await repos.decisoes.buscar(gate?.id ?? ""))?.estado).toBe("vencida");
+    });
+  });
+
   it("o plano de um turno de rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; rotinaDoTurno acha a rotina pela janela", async () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });

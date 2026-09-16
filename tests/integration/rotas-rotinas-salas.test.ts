@@ -78,6 +78,34 @@ describeIntegracao("rotas de rotinas e salas (tabela ROTAS, L7): códigos da tab
     });
   });
 
+  it("ids fora do formato uuid e agenteId ausente → 400 entrada_invalida em toda rota da L7, nunca 500", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const { agenteId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const corpo = { cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p" };
+      const esperado = { codigo: "entrada_invalida", mensagem: "entrada inválida" };
+      const semAgente = await srv.chamar(sessao, "POST", "rotinas", corpo);
+      expect(semAgente.status).toBe(400);
+      expect(await semAgente.json()).toEqual(esperado);
+      expect((await srv.chamar(sessao, "POST", "rotinas", { ...corpo, agenteId: "abc" })).status).toBe(400);
+      for (const [metodo, caminho, c] of [
+        ["POST", "rotinas/abc/pausar", undefined],
+        ["POST", "rotinas/abc/ativar", undefined],
+        ["GET", "rotinas/abc/execucoes", undefined],
+        ["POST", "salas", { nome: "x", agenteIds: ["abc", agenteId] }],
+        ["POST", "salas/abc/membros", { agenteId }],
+        ["POST", "salas/00000000-0000-4000-8000-000000000000/membros", { agenteId: "abc" }],
+        ["POST", "salas/abc/mensagens", { texto: "oi" }],
+        ["POST", "salas/abc/parar", undefined],
+      ] as const) {
+        const r = await srv.chamar(sessao, metodo, caminho, c);
+        expect([metodo, caminho, r.status]).toEqual([metodo, caminho, 400]);
+        expect(await r.json()).toEqual(esperado);
+      }
+      trxAtual = null;
+    });
+  });
+
   it("salas: POST com 1 bot → 400 sala_tamanho; 2 bots → 201; membros, mensagens (turnos por menção) e parar", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;

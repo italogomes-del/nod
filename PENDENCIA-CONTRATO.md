@@ -4,6 +4,13 @@ Lane de ordem 4: não editei `src/contracts`, `src/domain`, `src/db` nem `src/re
 Cada item abaixo diz o que faltou, onde contornei sem quebrar a fronteira, e o que a L9 (ou a lane dona)
 precisa fazer. Nenhum item bloqueia o verde desta lane.
 
+## 0. Arquivos extras da lane (fora da lista do plano, sem colisão com outra lane)
+
+- `src/use-cases/apoio-l7.ts` — apoio comum aos treze casos (autoria, eventos, carimbo, rodada, `rotinaDoTurno`,
+  `ehUuid`/`assertUuid`); `src/use-cases/servico-sala.ts` — adaptador ao contrato `Services.sala`;
+  `tests/helpers/deps-l7.ts` — `Deps`/`Services`/`UseCasesNod` falsos para os testes da lane (nenhum
+  arquivo da L3 em `tests/helpers` foi editado, EMENDA 7). A L9 pode realocar; os imports são relativos.
+
 ## 1. Ligação proposta ↔ decisão ↔ rotina (sem coluna no contrato)
 
 - **O que falta:** `Decisao` não tem `propostaId`; `Rotina` não tem `propostaId`. A decisão tipo `'rotina'` que
@@ -26,11 +33,16 @@ precisa fazer. Nenhum item bloqueia o verde desta lane.
 ## 3. Gate de rotina: quem cria a decisão `gate_rotina`
 
 - **O que falta:** o plano diz "→ decisão 'gate_rotina' com prazo", mas `pedirAprovacao` é da L5 e cria tipo
-  `'aprovacao'`. O varredor desta lane só registra `passou_em_branco` para decisões **tipo `gate_rotina`**
-  com `turnoId` do turno de rotina.
-- **Para a L5/L9:** em `pedirAprovacao`, quando `turno.origem === 'rotina'` (ou a retomada dele), criar a decisão
-  com `tipo: 'gate_rotina'` e `turnoId` do turno. Sem isso, um gate de rotina vencido vira só `decisao_vencida`
-  e a rotina nunca recebe `passou_em_branco`.
+  `'aprovacao'`.
+- **Contorno (definido em 2026-09-16):** `TIPOS_GATE_ROTINA = {gate_rotina, aprovacao}` em
+  `src/use-cases/disparar-rotina.ts`. Uma decisão pendente de qualquer um dos dois tipos **ligada ao turno da
+  rotina** (`turno_id` = turno disparado ou sua retomada) é o gate: `registrarDesfechoRotina('executou')`
+  devolve `aguardando_gate` enquanto ela está pendente, e o varredor, ao vencê-la, registra
+  `passou_em_branco` (`ninguem_respondeu_o_gate`). Uma `aprovacao` de turno comum não toca rotina
+  (`rotinaDoTurno` devolve null → `nao_e_rotina`). Provado em `tests/integration/rotina-gate.test.ts`.
+- **Para a L5/L9:** basta `pedirAprovacao` gravar `turnoId` do turno (já é o ContextoFerramenta). Trocar o
+  rótulo para `'gate_rotina'` quando `turno.origem === 'rotina'` continua desejável para a fila "Sua vez"
+  distinguir, mas não é mais necessário para o desfecho.
 
 ## 4. Assentamento de turno de rotina e de turno peer (L6 chama a L7)
 
@@ -95,3 +107,23 @@ precisa fazer. Nenhum item bloqueia o verde desta lane.
 - `postarNaSala` recusa (`nao_permitido`) quem não é a dona: os turnos são dela (máquina, cota, autoria) e a
   leitura de `sala_membros` sob a policy de outra pessoa mostra só o grant dela — o roteamento sairia errado
   em silêncio. Pessoa com grant lê; postar por ela é decisão de produto para depois (multi-máquina).
+
+## 13. Anel do orçamento do canal (domínio da L2, congelado)
+
+- **Spec E5.5:** "anel de 3 → resfriar + mensagem" no **quarto** post que fecha o anel.
+- **Domínio (`src/domain/canal-orcamento.ts`, TAMANHO_ANEL = 3):** devolve `'recusar'` (não `'resfriar'`) e recusa
+  o **terceiro** remetente distinto em sequência (A→B→C), avaliando os últimos 3 remetentes + o candidato.
+- **Contorno:** `postarNaSala` segue o domínio — grava a negação que encerra a tentativa e não cria turno
+  (`tests/integration/sala-orcamento.test.ts`). Não editei `src/domain`. A L9 decide se ajusta o domínio
+  (`resfriar` + quarto post) ou a spec.
+
+## 14. Id fora do formato uuid chega cru ao Postgres (transversal, roteador/erros.ts)
+
+- **O que falta:** o roteador casa `[^/]+` e a tabela fixa de `erros.ts` não traduz `22P02` (sintaxe de uuid):
+  qualquer rota que passe o id ao repositório devolve 500 falha_interna.
+- **Contorno:** as rotas da L7 (`rotas/rotinas.ts`, `rotas/salas.ts`) passam todo id de path e de corpo por
+  `assertUuid` (apoio-l7) → 400 entrada_invalida; `criarRotinaPelaPessoa` confere o `agenteId` DEPOIS do
+  domínio (o e2e espera `fuso_invalido` antes de qualquer outro campo). Provado em
+  `tests/integration/rotas-rotinas-salas.test.ts`.
+- **Para a L9:** guardar o formato no roteador (grupo `(?<id>uuid)`) ou traduzir `22P02` → entrada_invalida em
+  `erros.ts`, para as rotas das outras lanes.

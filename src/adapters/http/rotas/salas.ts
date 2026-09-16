@@ -7,7 +7,7 @@ import { pararSala } from "../../../use-cases/parar-sala.ts";
 import { postarNaSala } from "../../../use-cases/postar-na-sala.ts";
 import type { CasoDeUso } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
-import { corpoObjeto, executar, texto, type DepsRotasL7 } from "./rotinas.ts";
+import { corpoObjeto, executar, texto, uuid, type DepsRotasL7 } from "./rotinas.ts";
 
 export type SalaDto = { sala: Sala; membros: MembroSala[] };
 
@@ -33,8 +33,8 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       padrao: /^\/salas$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const agenteIds = Array.isArray(corpo.agenteIds) ? corpo.agenteIds.filter((x): x is string => typeof x === "string") : [];
         if (!Array.isArray(corpo.agenteIds)) throw new ErroDeDominio("entrada_invalida", { cause: "agenteIds" });
+        const agenteIds = corpo.agenteIds.map((x: unknown) => uuid(x, "agenteIds"));
         const r = await executar(deps, ctx.escopo, criarSala, { nome: typeof corpo.nome === "string" ? corpo.nome : "sala", agenteIds });
         const resposta: RespostaMutacao = { ok: true, ids: { salaId: r.sala.id, conversaId: r.conversa.id } };
         ctx.json(201, resposta);
@@ -45,7 +45,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       padrao: /^\/salas\/(?<id>[^/]+)\/membros$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const r = await executar(deps, ctx.escopo, convidarBotParaSala, { salaId: ctx.params.id ?? "", agenteId: texto(corpo, "agenteId") });
+        const r = await executar(deps, ctx.escopo, convidarBotParaSala, { salaId: uuid(ctx.params.id, "id"), agenteId: uuid(corpo.agenteId, "agenteId") });
         const resposta: RespostaMutacao = { ok: true, ids: { salaId: r.membro.salaId, agenteId: r.membro.agenteId } };
         ctx.json(200, resposta);
       },
@@ -55,7 +55,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       padrao: /^\/salas\/(?<id>[^/]+)\/mensagens$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const r = await executar(deps, ctx.escopo, postarNaSala, { salaId: ctx.params.id ?? "", texto: texto(corpo, "texto") });
+        const r = await executar(deps, ctx.escopo, postarNaSala, { salaId: uuid(ctx.params.id, "id"), texto: texto(corpo, "texto") });
         const ids: Record<string, string> = { mensagemId: r.mensagem.id };
         r.turnos.forEach((t, i) => {
           ids[`turnoId${i}`] = t.id;
@@ -69,7 +69,7 @@ export function criarRotasSalas(deps: DepsRotasL7): Rota[] {
       metodo: "POST",
       padrao: /^\/salas\/(?<id>[^/]+)\/parar$/,
       async handler(ctx) {
-        ctx.json(200, await executar(deps, ctx.escopo, pararSala, { salaId: ctx.params.id ?? "" }));
+        ctx.json(200, await executar(deps, ctx.escopo, pararSala, { salaId: uuid(ctx.params.id, "id") }));
       },
     },
   ];
