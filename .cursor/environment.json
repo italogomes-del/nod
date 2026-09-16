@@ -1,6 +1,6 @@
 {
   "name": "nod — Meus agentes",
-  "install": "npm install",
+  "install": "npm install && bash scripts/cloud/install-gstack.sh",
   "terminals": [
     {
       "name": "nod-dev",
