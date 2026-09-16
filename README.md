@@ -2,6 +2,8 @@
 
 > Um lugar onde agentes preparam decisões e uma pessoa decide — com registro de quem decidiu, por quê, e se havia alguém olhando.
 
+**Ferramenta interna da Leapy.** Cada colaborador usa a LLM que já está credenciada na própria máquina — Claude Code, Cursor ou Codex. O nod pilota, nunca vê a credencial. Virar SaaS é plano próximo, e a arquitetura protege isso sem pagar o custo agora. Ver [interno primeiro](docs/internal-first.md).
+
 Repositório de artefatos de produto. **Ainda não há código.**
 
 ---
@@ -49,6 +51,7 @@ Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e 
 | [`docs/adr/`](docs/adr/) | **18 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
 | [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
 | [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
+| [`docs/internal-first.md`](docs/internal-first.md) | **A revisão para uso interno.** O que mudou quando o executor saiu do container e foi para a máquina de cada pessoa, a ponte app↔servidor, e as três coisas impossíveis de retroagir. |
 | [`docs/distribution-and-local-execution.md`](docs/distribution-and-local-execution.md) | **Alvos de distribuição e execução local.** Por que não é monorepo, por que um app web não alcança o CLI da sua máquina, e a ordem web → PWA → app nativo. |
 | [`docs/inherited-from-leapy.md`](docs/inherited-from-leapy.md) | **O que herdamos do monorepo da Leapy.** 14 práticas verificadas nos arquivos, o veredito sobre pacote único *vs* workspaces, e os 8 ADRs que mudaram por causa disso. |
 
