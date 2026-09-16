@@ -1,0 +1,4 @@
+# Imagem separada para E11 (~30 libs Chrome). Vazia na v1 da frota pessoal.
+FROM node:22.14.0-bookworm-slim
+WORKDIR /app
+CMD ["node", "-e", "console.log('browser image placeholder')"]
