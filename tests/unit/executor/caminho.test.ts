@@ -1,14 +1,20 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { caminhoAumentado, caminhoDoShellDeLogin, DIRETORIOS_EXTRAS, expandirTil, resolverBinario } from "../../../src/adapters/executor/caminho.ts";
+import { caminhoAumentado, caminhoDoShellDeLogin, DIRETORIOS_EXTRAS, expandirTil, homeDaPessoa, resolverBinario } from "../../../src/adapters/executor/caminho.ts";
 
 describe("caminho do binário (ADR-014 invertido: PATH pelado do Finder)", () => {
   it("expandirTil troca só o ~ inicial", () => {
     expect(expandirTil("~/.local/bin", "/Users/ana")).toBe("/Users/ana/.local/bin");
     expect(expandirTil("~", "/Users/ana")).toBe("/Users/ana");
     expect(expandirTil("/opt/~/x", "/Users/ana")).toBe("/opt/~/x");
+  });
+
+  it("homeDaPessoa é a casa do passwd, não $HOME (HOME temporário não esconde o binário instalado)", () => {
+    const passwd = userInfo().homedir;
+    expect(homeDaPessoa({ HOME: "/tmp/home-temporario" })).toBe(passwd);
+    expect(homeDaPessoa({})).toBe(passwd);
   });
 
   it("caminhoAumentado acrescenta ~/.local/bin, /opt/homebrew/bin e /usr/local/bin ao PATH pelado, sem repetir", () => {

@@ -37,7 +37,15 @@ const RESULT = JSON.stringify({ type: "result", subtype: "success", is_error: fa
 
 const MODELO = "claude-haiku-4-5-20251001";
 
-describe("sonda (ADR-019) contra o binário falso", () => {
+/**
+ * definido em 2026-09-16: 30 s por teste — cada um spawna 3–4 processos node (shim + binário falso +
+ * --version/--help) e o padrão de 5 s do vitest estourava de forma intermitente sob o projeto
+ * integration inteiro. medido em 2026-09-16: até 6,4 s num teste do claude-cli-falso e 4,0 s num da
+ * sonda-falsa com o projeto integration completo em paralelo (8 execuções); 1–3 s rodando só a lane.
+ */
+const TIMEOUT_MS = 30_000;
+
+describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () => {
   let dir: string;
   let env: Record<string, string>;
   beforeAll(async () => {
@@ -57,7 +65,8 @@ describe("sonda (ADR-019) contra o binário falso", () => {
 
   it("binário que não existe → ausente (bin explícito ou fora do PATH)", async () => {
     expect(await sondar("/nao/existe/claude", env, MODELO, { relogio: () => 1 })).toEqual({ estado: "ausente", motivo: "binario_nao_encontrado", em: 1 });
-    expect(await sondar(undefined, { ...env, PATH: "/nao/existe" }, MODELO, { relogio: () => 2 })).toEqual({ estado: "ausente", motivo: "claude_fora_do_path", em: 2 });
+    // home explícito: sem ele, ~/.local/bin do PATH aumentado seria o da pessoa (onde o claude real mora)
+    expect(await sondar(undefined, { ...env, PATH: "/nao/existe" }, MODELO, { relogio: () => 2, home: dir })).toEqual({ estado: "ausente", motivo: "claude_fora_do_path", em: 2 });
   });
 
   it("CLI instalado mas deslogado (turno sai 1) → nao_autenticado com a versão e um motivo por código de saída, nunca pelo texto do stderr", async () => {

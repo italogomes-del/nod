@@ -59,7 +59,15 @@ function sinksEspiao() {
   return { sinks, sinais, eventos, deltas };
 }
 
-describe("driver catcher + cliente-nod contra rota interna real", () => {
+/**
+ * definido em 2026-09-16: 30 s por teste — cada um spawna 3–4 processos node (shim + binário falso +
+ * --version/--help) e o padrão de 5 s do vitest estourava de forma intermitente sob o projeto
+ * integration inteiro. medido em 2026-09-16: até 6,4 s num teste do claude-cli-falso e 4,0 s num da
+ * sonda-falsa com o projeto integration completo em paralelo (8 execuções); 1–3 s rodando só a lane.
+ */
+const TIMEOUT_MS = 30_000;
+
+describe("driver catcher + cliente-nod contra rota interna real", { timeout: TIMEOUT_MS }, () => {
   let srv: ServidorDeTeste;
   const chamadas: { nome: string; corpo: unknown; turnoId: string; agenteId: string; escopo: unknown; origin: string | undefined }[] = [];
   const rotas: Rota[] = [

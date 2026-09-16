@@ -136,6 +136,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
 
           return {
             async rodarTurno(sinks): Promise<ResultadoTurno> {
+              // `sinais` é marcado ANTES de cada sinal síncrono sair, para o `aoLinha` (que pode
+              // receber o init enquanto um `await sinks.sinal` ainda está pendente) não o repetir.
+              let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
               await sinks.sinal("attempted");
               const { binario: bin, versao: v } = await garantirVersao();
               const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp });
@@ -144,7 +147,6 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               await mkdir(cfg.cwdBase, { recursive: true });
               const tmpdir = await mkdtemp(join(cfg.cwdBase, "turno-"));
               const eventos: EventoStream[] = [];
-              let sinais: SinaisTurno = { ...SINAIS_ZERADOS };
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath });
                 const { args } = montarArgs({ plano, mcpJson });
@@ -173,8 +175,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 if (interromperPedido) await proc.interromper();
 
                 // ADR-009: promptSubmitted é gravado ANTES de o prompt sair para o CLI.
+                sinais = { ...sinais, promptSubmitted: true };
                 await sinks.sinal("promptSubmitted");
-                sinais = { ...sinais, promptSubmitted: true, attempted: true };
                 proc.escrever(plano.entrada.texto);
                 proc.fecharStdin();
 

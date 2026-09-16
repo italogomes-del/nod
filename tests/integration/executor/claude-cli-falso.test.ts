@@ -81,7 +81,15 @@ const valor = (args: string[], flag: string) => {
   return i === -1 ? null : (args[i + 1] ?? null);
 };
 
-describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-16)", () => {
+/**
+ * definido em 2026-09-16: 30 s por teste — cada um spawna 3–4 processos node (shim + binário falso +
+ * --version/--help) e o padrão de 5 s do vitest estourava de forma intermitente sob o projeto
+ * integration inteiro. medido em 2026-09-16: até 6,4 s num teste do claude-cli-falso e 4,0 s num da
+ * sonda-falsa com o projeto integration completo em paralelo (8 execuções); 1–3 s rodando só a lane.
+ */
+const TIMEOUT_MS = 30_000;
+
+describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-16)", { timeout: TIMEOUT_MS }, () => {
   let dir: string;
   let cfgBase: ConfigDriver;
   const lig = { urlNod: "http://127.0.0.1:65000", proxyPath: "/app/src/adapters/mcp-proxy/proxy.ts" };
@@ -91,7 +99,7 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     // env do processo servidor, com a sujeira que a denylist tem que apagar
     cfgBase = await configDosDrivers(
       { HOME: dir, PATH: process.env.PATH, ANTHROPIC_API_KEY: "sk-vazou", CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", NOD_HOME: join(dir, ".nod"), NOD_SESSAO_SEGREDO: "s" },
-      { shellDeLogin: false },
+      { shellDeLogin: false, home: dir },
     );
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
@@ -142,6 +150,8 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(resultado.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: true });
     expect(espiao.sinais[0]).toBe("attempted");
     expect(espiao.sinais.indexOf("promptSubmitted")).toBeLessThan(espiao.sinais.indexOf("producedOutput"));
+    // cada sinal sai UMA vez, mesmo quando o init chega enquanto um `sinks.sinal` ainda está pendente
+    expect(espiao.sinais).toEqual(["attempted", "promptSubmitted", "producedOutput"]);
     expect(stdinJaTinhaChegado).toBe(false);
     expect(await readFile(stdin, "utf8")).toBe(plano.entrada.texto);
     expect(espiao.deltas.join("")).toContain("SONDA_OK");

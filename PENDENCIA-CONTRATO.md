@@ -69,13 +69,17 @@ json e ficaram sem uso; os cenários equivalentes vivem como shims próprios em
 `tests/integration/executor/sonda-falsa.test.ts`. Sugestão à L3/L9: mover os knobs para o modo
 stream-json (init com `apiKeySource` configurável) ou apagá-los.
 
-## 9. `~` em NOD_CLAUDE_BIN expande contra $HOME — o critério manual "HOME temporário" precisa de caminho absoluto
+## 9. `~` na configuração do nod expande contra a casa da pessoa (passwd), não `$HOME` — decidido na L4, reversível pela L9
 
-`.env.example` traz `NOD_CLAUDE_BIN=~/.local/bin/claude`. Com `HOME=$(mktemp -d)`, o `~` expande
-para o HOME temporário e a sonda diz `ausente` (correto para o que foi pedido). O critério "CLI
-presente, sem login" foi verificado com `NOD_CLAUDE_BIN=/Users/<pessoa>/.local/bin/claude` absoluto
-→ `nao_autenticado` (`turno_de_sonda_exit_1`). Alternativa, se a L9 preferir: expandir `~` com
-`os.userInfo().homedir` (lê o passwd, ignora $HOME) — decisão de produto, não da L4.
+`.env.example` traz `NOD_CLAUDE_BIN=~/.local/bin/claude`. Na primeira versão o `~` expandia contra
+`$HOME`, e `HOME=$(mktemp -d) node scripts/sonda.ts` respondia `ausente`. definido em 2026-09-16
+(`homeDaPessoa` em `src/adapters/executor/caminho.ts`): `~` em NOD_CLAUDE_BIN / NOD_HOME /
+`~/.local/bin` do PATH aponta para a casa do passwd (`os.userInfo().homedir`), porque é onde o
+binário está instalado e isso não muda quando `$HOME` é sobrescrito; o CLI continua herdando `$HOME`
+(credenciais em ~/.claude). Resultado: com o `.env` do repo, HOME temporário → `nao_autenticado`
+(`turno_de_sonda_exit_1`, sem custo), como o critério manual pede. Sem entrada no passwd (contêiner
+mínimo) cai em `$HOME`. Os testes fixam `home` explícito nas opções (`configDosDrivers`, `sondarDetalhado`).
+Se a L9 preferir a semântica anterior (tudo segue `$HOME`), basta `homeDaPessoa` devolver `env.HOME ?? homedir()`.
 
 ## 7. `catcher.ts` importa `tests/helpers/catcher-roteiro.ts` por caminho
 

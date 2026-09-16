@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
+import { homedir, userInfo } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 
 /**
@@ -11,6 +12,23 @@ import { delimiter, isAbsolute, join } from "node:path";
 
 /** definido em 2026-09-16: onde o instalador oficial (~/.local/bin) e o Homebrew (arm64 e intel) deixam o binário. */
 export const DIRETORIOS_EXTRAS = ["~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"] as const;
+
+/**
+ * A casa da PESSOA (passwd via os.userInfo), não `$HOME`. definido em 2026-09-16: `~` na configuração
+ * do nod (NOD_CLAUDE_BIN, NOD_HOME, ~/.local/bin no PATH) aponta para onde o binário está instalado e
+ * isso não muda quando `$HOME` é sobrescrito; `$HOME` é só o ambiente que o CLI herda (credenciais em
+ * ~/.claude). Assim `HOME=$(mktemp -d) node scripts/sonda.ts` acha o CLI e responde nao_autenticado.
+ * Sem entrada no passwd (contêiner mínimo) cai em `$HOME` e depois em os.homedir().
+ */
+export function homeDaPessoa(env: Readonly<Record<string, string | undefined>>): string {
+  try {
+    const h = userInfo().homedir;
+    if (h && h.trim() !== "") return h;
+  } catch {
+    // sem entrada no passwd
+  }
+  return env.HOME ?? homedir();
+}
 
 export function expandirTil(caminho: string, home: string): string {
   if (caminho === "~") return home;

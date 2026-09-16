@@ -1,11 +1,11 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Inventario } from "../../contracts/inventario.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { interpretarLinhaStreamJson } from "../../domain/stream-json.ts";
-import { caminhoAumentado, resolverBinario } from "./caminho.ts";
+import { caminhoAumentado, homeDaPessoa, resolverBinario } from "./caminho.ts";
 import { extrairVersao, flagsListadasNoHelp } from "./flag-floors.ts";
 import { executarColetando } from "./processo.ts";
 
@@ -24,6 +24,7 @@ export type OpcoesSonda = {
   timeoutVersaoMs?: number;
   /** definido em 2026-09-16: 90 s para o turno de uma palavra — a sonda s3 com MCP levou 8,3 s; folga de 10x. */
   timeoutTurnoMs?: number;
+  /** Casa da pessoa para `~` e ~/.local/bin; default homeDaPessoa(env) (passwd, não $HOME — ver caminho.ts). */
   home?: string;
   /** Base do cwd descartável da sonda (nunca o repo — mapa-cli: o cwd decide qual CLAUDE.md o CLI lê). */
   cwdBase?: string;
@@ -81,7 +82,7 @@ export function lerTurnoDeSonda(stdout: string): { init: Extract<EventoStream, {
 }
 
 export async function sondarDetalhado(bin: string | undefined, env: Env, modelo: string, o: OpcoesSonda = {}): Promise<SondaDetalhada> {
-  const home = o.home ?? env.HOME ?? homedir();
+  const home = o.home ?? homeDaPessoa(env);
   const agora = o.relogio ?? Date.now;
   const ambiente = ambienteDaSonda(env, home);
   const binario = await resolverBinario(bin, ambiente.PATH ?? "", home);

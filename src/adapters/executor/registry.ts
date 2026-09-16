@@ -1,8 +1,7 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
-import { caminhoAumentado, caminhoDoShellDeLogin, expandirTil } from "./caminho.ts";
+import { caminhoAumentado, caminhoDoShellDeLogin, expandirTil, homeDaPessoa } from "./caminho.ts";
 import type { ConfigDriver, Driver, IdDriver, Registry } from "./spi.ts";
 
 /**
@@ -15,6 +14,7 @@ export type EnvRegistry = Readonly<Record<string, string | undefined>>;
 export type OpcoesRegistry = {
   /** Consultar o PATH do shell de login (ADR-014). default true; os testes desligam. */
   shellDeLogin?: boolean;
+  /** Casa da pessoa para expandir `~` da configuração; default homeDaPessoa(env) (passwd, não $HOME). */
   home?: string;
 };
 
@@ -32,7 +32,7 @@ export function nodHome(env: EnvRegistry, home: string): string {
 
 /** Config comum aos drivers a partir do env do processo: ambiente limpo + PATH aumentado + cwdBase. */
 export async function configDosDrivers(env: EnvRegistry, o: OpcoesRegistry = {}): Promise<ConfigDriver> {
-  const home = o.home ?? env.HOME ?? homedir();
+  const home = o.home ?? homeDaPessoa(env);
   const pathLogin = o.shellDeLogin === false ? null : await caminhoDoShellDeLogin(env.SHELL);
   const limpo = montarAmbiente("local", env);
   return {

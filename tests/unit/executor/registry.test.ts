@@ -28,7 +28,8 @@ describe("registry (ADR-012 sombra, ADR-019 gate pré-spawn)", () => {
   });
 
   it("sem NOD_CLAUDE_BIN e sem claude no PATH → sombra 'claude_fora_do_path'", async () => {
-    const registry = await criarRegistry({ HOME: home, PATH: "/nao/existe" }, [criarClaudeCliDriver(lig)], { shellDeLogin: false });
+    // home explícito: sem ele, ~/.local/bin do PATH aumentado seria o da pessoa (onde o claude real mora)
+    const registry = await criarRegistry({ HOME: home, PATH: "/nao/existe" }, [criarClaudeCliDriver(lig)], { shellDeLogin: false, home });
     expect(registry["claude-cli"]).toEqual({ estado: "sombra", motivo: "ausente: claude_fora_do_path" });
     expect(registry.catcher).toEqual({ estado: "sombra", motivo: "driver não registrado" });
   });
@@ -48,7 +49,7 @@ describe("registry (ADR-012 sombra, ADR-019 gate pré-spawn)", () => {
   it("configDosDrivers: env sem a denylist (ANTHROPIC_*, CLAUDECODE, NOD_*), PATH aumentado, cwdBase em NOD_HOME/turnos, bin com ~ expandido", async () => {
     const cfg = await configDosDrivers(
       { HOME: home, PATH: "/usr/bin", ANTHROPIC_API_KEY: "x", CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", NOD_SESSAO_SEGREDO: "s", NOD_CLAUDE_BIN: "~/bin/claude", NOD_HOME: "~/.nod-teste", LANG: "pt_BR" },
-      { shellDeLogin: false },
+      { shellDeLogin: false, home },
     );
     expect(cfg.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(cfg.env.CLAUDECODE).toBeUndefined();
