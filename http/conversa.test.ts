@@ -20,7 +20,7 @@ const chave = chaveDe("0".repeat(64));
 const agora = Date.parse("2026-09-16T12:00:00-03:00");
 
 describe("conversa — jornada Meus agentes", () => {
-  it("criar → dizer o que faz → rotina via texto → conectar Slack", () => {
+  it("criar → dizer o que faz → rotina via texto → conectar Slack e Notion", () => {
     const s = snap();
     const agente = criarAgenteNovo(s, agora);
     expect(agente.instrucoes).toBe("");
@@ -72,5 +72,19 @@ describe("conversa — jornada Meus agentes", () => {
     expect(conc?.declaracao).toBe("toca");
     expect(conc?.capacidadesLigadas).toEqual(["ler-canais"]);
     expect(s.credenciaisCifradas[conc!.id]).toMatch(/^v1:/);
+
+    tratarMensagem(s, agente, "conecta com o Notion", chave, agora + 7);
+    const notion = [...s.mensagens]
+      .reverse()
+      .find((m) => m.kind === "proposta-concessao" && m.payload?.["conectorId"] === "notion");
+    expect(notion?.payload?.["conectorId"]).toBe("notion");
+    confirmarProposta(s, agente, notion!.id, chave, agora + 8, {
+      declaracao: "toca",
+      capacidadesLigadas: ["ler-paginas"],
+    });
+    const concNotion = s.concessoes.find((c) => c.conectorId === "notion");
+    expect(concNotion?.estado).toBe("conectada");
+    expect(concNotion?.capacidadesLigadas).toEqual(["ler-paginas"]);
+    expect(s.credenciaisCifradas[concNotion!.id]).toMatch(/^v1:/);
   });
 });
