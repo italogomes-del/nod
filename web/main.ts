@@ -288,7 +288,7 @@ function renderChat(e: Estado): string {
     <header class="head">
       <div class="left">${icon(a)}<span class="name">${esc(a.nome)}</span><span class="tag">privado</span></div>
       <div class="actions">
-        <button data-act="detalhes" aria-label="Detalhes">ⓘ</button>
+        <button class="btn" data-act="detalhes" aria-label="Detalhes da conversa">Detalhes</button>
       </div>
     </header>
     <section class="chat">
