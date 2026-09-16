@@ -1,0 +1,86 @@
+import type { Decisao } from "../contracts/decisao.ts";
+import type { Executor } from "../contracts/evento.ts";
+import type { Mensagem } from "../contracts/mensagem.ts";
+import type { Turno } from "../contracts/turno.ts";
+import { ErroDeDominio } from "../domain/erro.ts";
+import { redigir } from "../domain/redacao.ts";
+import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import type { CasoDeUso } from "./tipos.ts";
+
+export type EntradaRetomarTurno = ({ decisaoId: string; turnoId?: undefined } | { turnoId: string; decisaoId?: undefined }) & {
+  texto: string;
+  prazoMs?: number;
+  executor?: Executor;
+};
+
+export type SaidaRetomarTurno = { turno: Turno; original: Turno; mensagem: Mensagem; sessaoCli: string | null; decisao: Decisao | null };
+
+/**
+ * Retomada por frase humana (E5.4, ADR-009/010): NUNCA requeue — nasce um turno NOVO origem 'retomada'
+ * apontando para o interrompido (retoma_turno_id, reenvios+1) com a frase da pessoa como entrada; a
+ * conversa guarda a sessão do CLI, e o plano do turno novo leva --resume (L5). A frase fica registrada
+ * como a informação que destravou. Se veio por decisão 'retomar_turno', a decisão é decidida aqui.
+ */
+export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = async (deps, input) => {
+  const texto = typeof input.texto === "string" ? input.texto.trim() : "";
+  if (texto === "") throw new ErroDeDominio("texto_vazio");
+  const agora = deps.agora();
+
+  let decisao: Decisao | null = null;
+  let turnoId = input.turnoId ?? null;
+  if (input.decisaoId !== undefined) {
+    decisao = await deps.repos.decisoes.buscar(input.decisaoId);
+    if (!decisao) throw new ErroDeDominio("nao_encontrado");
+    if (decisao.tipo !== "retomar_turno" || !decisao.turnoId) throw new ErroDeDominio("estado_invalido", { cause: "decisão não é de retomada" });
+    // Decisão já decidida/vencida não retoma de novo por este caminho (a pessoa ainda pode retomar pelo turno).
+    if (decisao.estado !== "pendente" && decisao.estado !== "reaberta") throw new ErroDeDominio("estado_invalido", { cause: `decisão ${decisao.estado}` });
+    turnoId = decisao.turnoId;
+  }
+  if (!turnoId) throw new ErroDeDominio("entrada_invalida", { cause: "turnoId" });
+  const original = await deps.repos.turnos.buscar(turnoId);
+  if (!original) throw new ErroDeDominio("nao_encontrado");
+  if (original.estado !== "interrompido") throw new ErroDeDominio("estado_invalido", { cause: `turno ${original.estado}` });
+  const conversa = await deps.repos.conversas.buscar(original.conversaId);
+  if (!conversa) throw new ErroDeDominio("nao_encontrado");
+
+  await deps.repos.paradas.encerrarAbertas({ conversaId: conversa.id, agora });
+  const autoria = autoriaPessoa(deps.escopo, input.executor ?? "catcher");
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel" });
+  if (!mensagem) throw new ErroDeDominio("nao_permitido");
+  const aviso = await deps.repos.mensagens.criar({
+    conversaId: conversa.id,
+    autoria,
+    kind: "sistema",
+    texto: redigir("retomada", agora, { motivo: original.motivoInterrupcao ?? "desconhecido" }),
+    confianca: "confiavel",
+  });
+
+  const turno = await deps.repos.turnos.enfileirar({
+    conversaId: conversa.id,
+    agenteId: original.agenteId,
+    origem: "retomada",
+    prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
+    profundidade: original.profundidade,
+    entradaTexto: texto,
+    entradaConfianca: "confiavel",
+    modelo: original.modelo,
+    retomaTurnoId: original.id,
+    reenvios: original.reenvios + 1,
+    executor: input.executor ?? "catcher",
+  });
+  if (!turno) throw new ErroDeDominio("nao_permitido");
+
+  const events = [
+    evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto", destravou: true } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, reenvios: turno.reenvios } }),
+  ];
+  if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
+  if (decisao) {
+    const decidida = await deps.repos.decisoes.decidir(decisao.id, { por: deps.escopo.pessoaId, agora });
+    if (decidida) {
+      decisao = decidida;
+      events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: decisao.tipo } }));
+    }
+  }
+  return { data: { turno, original, mensagem, sessaoCli: conversa.sessaoCli, decisao }, events };
+};

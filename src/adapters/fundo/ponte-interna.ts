@@ -1,0 +1,127 @@
+import type { Executor } from "../../contracts/evento.ts";
+import type { PlanoTurno } from "../../contracts/plano-turno.ts";
+import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna } from "../../contracts/ponte.ts";
+import { abrirTxEscopada } from "../../db/tx.ts";
+import { log } from "../../obs/log.ts";
+import { criarRepos } from "../../repositories/index.ts";
+import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
+import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
+import { assentarTurno } from "../../use-cases/assentar-turno.ts";
+import { despacharTurno } from "../../use-cases/despachar-turno.ts";
+import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
+
+/** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
+export const VERSAO_MINIMA_APP = "0.1.0";
+
+export type DepsPonte = {
+  services: Services;
+  useCases: UseCasesNod;
+  agora?: Relogio;
+  /** 'local' (claude-cli) ou 'catcher' — o que a máquina conectada de fato roda. */
+  executor?: Executor;
+  /** Fonte das pessoas para resolver tenant de um pessoaId; só em teste (default: tabela pessoas). */
+  listarPessoas?: () => Promise<Pick<Pessoa, "tenantId" | "id">[]>;
+  /** Depois de entregar: soltar o processo do interruptor (criarInterruptor().esquecer). */
+  esquecerTurno?: (turnoId: string) => void;
+};
+
+export type PonteInternaNod = PonteInterna & {
+  maquinasConectadas(): AnuncioMaquina[];
+  escopoDoTurno(turnoId: string): Escopo | null;
+};
+
+/**
+ * PonteInterna in-process (ADR-021, EMENDA 3): os cinco verbos falados por chamada de função, sem
+ * socket. puxar abre a tx ESCOPADA da pessoa (abrirTxEscopada) e roda despacharTurno; renovar renova o
+ * lease e grava os eventos da máquina pelo outbox; entregar assenta. O escopo de cada turno puxado fica
+ * em memória: renovar/entregar de turno desconhecido (de antes de um reinício) é fail-closed —
+ * {ativo:false} / entrega descartada com log — e o varredor de lease encerra o turno órfão.
+ */
+export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
+  const agora: Relogio = deps.agora ?? (() => Date.now());
+  const executor: Executor = deps.executor ?? "catcher";
+  const maquinas = new Map<string, AnuncioMaquina>();
+  const escopos = new Map<string, Escopo>();
+  const tenantsPorPessoa = new Map<string, string>();
+
+  async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
+    if (!tenantsPorPessoa.has(pessoaId)) {
+      const pessoas = await (deps.listarPessoas ? deps.listarPessoas() : listarTodas(db));
+      for (const p of pessoas) tenantsPorPessoa.set(p.id, p.tenantId);
+    }
+    const tenantId = tenantsPorPessoa.get(pessoaId);
+    return tenantId ? { tenantId, pessoaId } : null;
+  }
+
+  function depsDe(trx: Tx, escopo: Escopo): Deps {
+    return { repos: criarRepos(trx, escopo), services: deps.services, useCases: deps.useCases, tx: (fn) => fn(trx), escopo, agora };
+  }
+
+  return {
+    async conectar(m) {
+      maquinas.set(m.machineId, m);
+    },
+
+    async desconectar(machineId) {
+      maquinas.delete(machineId);
+    },
+
+    async puxar(pessoaId): Promise<PlanoTurno | null> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return null;
+      const maquina = maquinas.values().next().value;
+      if (!maquina) return null;
+      try {
+        return await abrirTxEscopada(db, escopo)(async (trx) => {
+          const d = depsDe(trx, escopo);
+          const r = await despacharTurno(d, { machineId: maquina.machineId, executor, inventario: maquina.inventario });
+          if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+          if (r.data.plano) escopos.set(r.data.plano.turnoId, escopo);
+          return r.data.plano;
+        });
+      } catch (e) {
+        log("erro", "ponte_puxar_falhou", { pessoa_id: pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
+        return null;
+      }
+    },
+
+    async renovar(p: PedidoRenovar) {
+      const escopo = escopos.get(p.turnoId);
+      if (!escopo) return { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP };
+      const { ativo } = await abrirTxEscopada(db, escopo)(async (trx) => {
+        const repos = criarRepos(trx, escopo);
+        const r = await repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
+        if (p.eventos.length) await repos.events.gravarComOutbox(p.eventos);
+        return r;
+      });
+      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP };
+    },
+
+    async entregar(e: Entrega) {
+      const escopo = escopos.get(e.turnoId);
+      if (!escopo) {
+        log("aviso", "ponte_entrega_sem_escopo", { turno_id: e.turnoId, machine_id: e.machineId });
+        return;
+      }
+      try {
+        await abrirTxEscopada(db, escopo)(async (trx) => {
+          const d = depsDe(trx, escopo);
+          const r = await assentarTurno(d, { ...e, executor });
+          if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+        });
+      } finally {
+        escopos.delete(e.turnoId);
+        deps.services.tokenTurno.revogar(e.turnoId);
+        deps.esquecerTurno?.(e.turnoId);
+      }
+    },
+
+    maquinasConectadas() {
+      return [...maquinas.values()];
+    },
+
+    escopoDoTurno(turnoId) {
+      return escopos.get(turnoId) ?? null;
+    },
+  };
+}
