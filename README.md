@@ -34,13 +34,29 @@ Quando ele esgota o que consegue fazer sozinho, ele **para**, diz o que falta e 
 
 ## O que tem aqui
 
+### Produto
+
 | | |
 |---|---|
 | [`docs/product-spec.html`](docs/product-spec.html) | **O documento de produto.** 5 jornadas, 12 épicos, 69 histórias com critérios de aceite, mockups e diagramas, faseamento e o que se herda de cada referência. |
 | [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) | **O protótipo vigente.** Cinco telas navegáveis: a fila como tela inicial, o canal com a calha de agentes, o teste do composer, a bandeja de aprovação e o estado de repouso. |
 | [`prototypes/history/`](prototypes/history/) | As seis versões anteriores, com o registro de por que cada uma foi descartada. |
 
-Todos os arquivos são HTML autocontido. Abra no navegador, sem build.
+### Arquitetura
+
+| | |
+|---|---|
+| [`docs/adr/`](docs/adr/) | **18 decisões de arquitetura**, uma por arquivo. Cada uma com alternativas rejeitadas, evidência de código e reversibilidade honesta. |
+| [`docs/architecture.html`](docs/architecture.html) | As mesmas decisões em formato visual, com diagrama do sistema. |
+| [`docs/skeleton.md`](docs/skeleton.md) | A árvore de pastas, as funções puras, a disciplina de código e os sete primeiros commits. |
+
+Os HTML são autocontidos — abra no navegador, sem build.
+
+### As três decisões que precisam ser acertadas de primeira
+
+1. **A forma do registro de decisão** e dos identificadores que atravessam o fio. É o que o produto vende e o que a trilha imutável congela — migrá-lo depois é migrar a prova.
+2. **O que pode entrar na trilha imutável**, decidido com o jurídico *antes* do schema. A trilha é imutável por trigger e trata dado de menor sob LGPD: as duas coisas só coexistem se ela aceitar apenas enum, uuid, timestamp e numérico, com o texto humano vivendo numa tabela irmã apagável.
+3. **O modo do pooler, o tamanho do pool e a política de deploy.** Não é um ADR bonito, mas cinco decisões de quatro frentes dependem dele.
 
 ## Decisões de arquitetura de navegação
 
@@ -69,7 +85,8 @@ O faseamento estimado é de **27 a 29 semanas** para os oito épicos originais, 
 
 ## Próximos passos
 
+- [ ] **Fixar a forma do registro de decisão** e os identificadores — bloqueia a primeira migração
+- [ ] **Definir com o jurídico o que pode entrar na trilha imutável** — retenção e direito ao esquecimento antes do schema
+- [ ] Decidir modo do pooler, tamanho do pool e rolling *vs* recreate no PaaS
 - [ ] Métricas de sucesso por épico — precisa de números reais da operação
-- [ ] Decidir: CLI no container *vs* API direta (trade-off documentado no spec)
 - [ ] Validar a procuração com duas ou três pessoas antes de soltar para o time
-- [ ] Definir retenção e direito ao esquecimento na trilha de decisões — conversa jurídica antes de virar schema

@@ -1,0 +1,38 @@
+# Decisões de arquitetura
+
+Cada arquivo é um ADR: uma decisão, o que foi rejeitado, a evidência que a sustenta, e quanto custa reverter.
+
+> Um ADR sem alternativa rejeitada é opinião disfarçada de decisão.
+
+A **reversibilidade** é o campo que mais importa. "Barata" significa que se muda numa tarde sem tocar dados de cliente; "cara" significa migração com produção rodando.
+
+## Acertar de primeira
+
+1. **A FORMA DO REGISTRO DE DECISÃO E DOS IDENTIFICADORES QUE ATRAVESSAM O FIO** — É o que o produto vende, é o que a trilha imutável congela, e migrá-lo depois é migrar a prova. Precisa estar fixado antes da primeira linha: os campos 'denials' e 'source' copiados literalmente de server/contracts.ts:114 e :174; os quatro sinais de aceitação do E9 (attempted, rejected, promptSubmitted, producedOutput) como colunas obrigatórias do contrato e não opcionais por driver, com promptSubmitted gravado em write-ahead ANTES do envio ao provedor; o identificador de decisão como par (tenant_id, id) em todo lugar que sai do servidor, inclusive na URL; e AUTORIA COMPOSTA na forma da mensagem, que nenhuma das seis frentes modelou e que o próprio documento de épicos marcou como obrigatória na primeira migração ('retrofitar reescreve toda renderização de mensagem e toda regra que pergunta foi uma pessoa?').
+2. **O QUE PODE ENTRAR NA TRILHA IMUTÁVEL, decidido junto com o jurídico e antes do schema** — A trilha é imutável por trigger e trata dado de menor sob LGPD: as duas coisas só coexistem se a trilha aceitar apenas enum, uuid, timestamp e numérico, com o texto humano — a justificativa em primeira pessoa de E4 — vivendo numa tabela irmã apagável referenciada por id. Um CHECK constraint proibindo campo de texto livre é a garantia estrutural; a frase 'não coloque dado pessoal na trilha' não é. Esta decisão bloqueia a primeira: determina quais colunas o registro pode ter.
+3. **O MODO DO POOLER DO SUPABASE, O TAMANHO DO POOL E ROLLING VERSUS RECREATE NO PAAS** — Não é um ADR bonito e é o parâmetro do qual dependem cinco decisões de quatro frentes: RLS precisa de SET LOCAL dentro de transação explícita (modo transaction do pooler); a trava de turno não pode segurar uma conexão por minutos; o buffer SSE em memória só é correto com uma instância; o job de expiração duplica com sobreposição. Quinze minutos de decisão que hoje estão implícitos e inconsistentes entre as frentes, e o incidente de sexta 19h mais provável do sistema inteiro é esgotamento de pool.
+4. **RLS LIGADA NA PRIMEIRA MIGRAÇÃO, com os cinco axiomas e o teste de conformidade contra o catálogo** — O Buzz tem prova formal de isolamento (TLA+/Tamarin) que repousa num axioma que o schema dele não satisfaz: grep por 'ROW LEVEL SECURITY' nas 44 migrations retorna zero. Ligar custa uma tarde hoje e é impossível com 70 clientes e dados de menores dentro. Inclui A-RLS-4 (SECURITY DEFINER é fronteira confiável auditada, nunca válvula de performance) e A-RLS-5 (tenant_id dentro de toda unique e FK), que nenhuma das seis frentes mencionou.
+5. **A PREMISSA DE E12 NO BRIEFING ESTÁ ERRADA** — Não existe 'teto de 6 agentes por canal' em nenhum dos 69 stories — busca literal por 'seis agentes' e '6 agentes' em out8 e out9 retorna zero. E12 decidiu o oposto no próprio uma_frase: 'o que segura bot falando com bot é orçamento do canal, NÃO profundidade'. Uma frente gastou uma ADR construindo a constraint errada e as outras cinco a trataram como premissa. O mecanismo real é orçamento de canal persistido com quebra-anel (E12.3) mais profundidade cortada por retirada de ferramenta do turno (E12.4).
+
+## Índice
+
+| | Decisão | Frente | Status | Reverter |
+|---|---|---|---|---|
+| [ADR-001](adr-001-modo-do-pooler-tamanho-do-pool-e-politica-de-deploy-decidi.md) | Modo do pooler, tamanho do pool e política de deploy decididos antes de qualquer código | Deploy | decidir-antes-da-fase-0 | barata |
+| [ADR-002](adr-002-classificacao-de-dado-pessoal-por-origem-como-funcao-pura.md) | Classificação de dado pessoal por ORIGEM, como função pura no core, com default 'toca' | Dados | decidido | cara |
+| [ADR-003](adr-003-isolamento-em-duas-camadas-rls-restritiva-com-predicado-de.md) | Isolamento em duas camadas: RLS restritiva COM predicado de aplicação, e os cinco axiomas no teste de conformidade | Dados | decidido | barata |
+| [ADR-004](adr-004-trilha-imutavel-por-trigger-sem-texto-livre-fato-tipado-na.md) | Trilha imutável por trigger, sem texto livre: fato tipado na trilha, prosa em tabela irmã apagável | Dados | decidido | barata |
+| [ADR-005](adr-005-uma-tabela-de-eventos-para-fluxo-tabelas-de-dominio-para-e.md) | Uma tabela de eventos para fluxo, tabelas de domínio para estado com regra, e o par (tenant_id, id) em todo identificador | Dados | decidido | cara |
+| [ADR-006](adr-006-particionar-events-por-tempo-com-24-meses-na-migracao-inic.md) | Particionar events por tempo com 24 meses na migração inicial e SEM partição catch-all | Dados | decidido | cara |
+| [ADR-007](adr-007-a-fila-global-le-por-pessoa-sob-rls-mostra-item-vencido-em.md) | A fila global lê por PESSOA sob RLS, mostra item vencido em cinza, e o servidor é a única fonte da verdade do tempo | Tempo real | decidido | cara |
+| [ADR-008](adr-008-busca-tsvector-portuguese-unaccent-com-allowlist-positiva.md) | Busca tsvector portuguese + unaccent com allowlist positiva, e o procedimento de rebuild escrito antes do primeiro uso | Dados | decidido | cara |
+| [ADR-009](adr-009-classificar-falha-de-turno-pelo-estado-de-protocolo-com-os.md) | Classificar falha de turno pelo estado de protocolo, com os quatro sinais como colunas write-ahead e o desfecho virando item na fila | Execução | decidido | cara |
+| [ADR-010](adr-010-fila-por-conversa-no-postgres-com-tres-estados-e-prazo-abs.md) | Fila por conversa no Postgres com três estados e prazo absoluto, sem segurar conexão do pool | Execução | decidido | barata |
+| [ADR-011](adr-011-travas-de-execucao-na-granularidade-certa-janela-de-rotina.md) | Travas de execução na granularidade certa: janela de rotina única e expiração idempotente | Execução | decidido | barata |
+| [ADR-012](adr-012-spi-de-tres-camadas-driver-instance-adapter-com-os-quatro.md) | SPI de três camadas Driver / Instance / Adapter, com os quatro sinais de aceitação obrigatórios no contrato | Execução | decidido | irreversível |
+| [ADR-013](adr-013-o-proxy-mcp-e-o-ponto-de-decisao-do-produto-monta-ferramen.md) | O proxy MCP é o ponto de decisão do produto: monta ferramentas, classifica negação, corta contexto e constrói a aprovação tipada | Execução | decidido | média |
+| [ADR-014](adr-014-cli-do-fornecedor-no-container-com-api-key-por-tenant-vers.md) | CLI do fornecedor no container com API key por tenant, versão exata pinada, teste de fumaça e imagem do browser separada | Execução | decidido | média |
+| [ADR-015](adr-015-credencial-cifrada-com-chave-unica-do-secret-manager-ambie.md) | Credencial cifrada com chave única do secret manager, ambiente do executor montado do zero, e health check de decifra no boot | Credenciais | decidido | barata |
+| [ADR-016](adr-016-sse-com-frames-numerados-buffer-de-replay-por-tenant-e-rei.md) | SSE com frames numerados, buffer de replay POR TENANT, e reidratação por snapshot com o stream como barreira | Tempo real | decidido | barata |
+| [ADR-017](adr-017-um-container-sete-metricas-ligadas-a-promessa-de-produto-e.md) | Um container, sete métricas ligadas a promessa de produto, e um alarme externo de disponibilidade | Deploy | decidido | barata |
+| [ADR-018](adr-018-core-puro-guardado-pelo-compilador-pacote-unico-esqueleto.md) | Core puro guardado pelo COMPILADOR, pacote único, esqueleto commitado antes da lógica | Código | decidido | cara |
