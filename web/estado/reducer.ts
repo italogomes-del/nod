@@ -1,79 +1,291 @@
-import type { Agente } from "../../src/contracts/agente.ts";
+import type { ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
-import type { Mensagem } from "../../src/contracts/mensagem.ts";
-import type { Rotina } from "../../src/contracts/rotina.ts";
+import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
+import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { Memoria } from "../../src/contracts/memoria.ts";
+import type { Negacao } from "../../src/contracts/negacao.ts";
+import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
+import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
+import type { FaixaParada } from "../../src/contracts/turno.ts";
+import type { Escopo } from "../../src/shared/types.ts";
+import type { EstadoConexao } from "../lib/live-events.ts";
 
-// Ajuste mínimo de compilação contra os contratos congelados pela L2 (2026-09-16); a L9 reescreve
-// este reducer por frames SSE. `agenteId` na mensagem é o vínculo que a tela antiga ainda usa.
-export type MensagemDaTela = Mensagem & { agenteId: string };
+/**
+ * Estado da web (ADR-020: a web decide, nunca executa; ADR-029: todo fail-closed vira estado
+ * escrito). O servidor é a fonte da verdade: um frame SSE (ADR-016) NÃO carrega o conteúdo — ele
+ * diz o que mudou (kind, conversaId, turnoId) e o reducer marca o que precisa ser REIDRATADO por
+ * REST (`invalidacoes`); só os deltas de turno (efêmeros) entram direto no estado. Nada aqui lê
+ * Date.now(): `agora` chega pela ação `tick`.
+ */
+export type Tela =
+  | { tipo: "frota" }
+  | { tipo: "conversa"; conversaId: string; agenteId: string }
+  | { tipo: "sala"; salaId: string; conversaId: string }
+  | { tipo: "perfil"; agenteId: string }
+  | { tipo: "memoria"; agenteId: string }
+  | { tipo: "rotinas" }
+  | { tipo: "conectores" }
+  | { tipo: "sua-vez" }
+  | { tipo: "nova-sala" };
 
-export type Pessoa = { tenantId: string; id: string; nome: string; iniciais: string };
+export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
-export type Snapshot = {
-  tenantId: string;
-  pessoa: Pessoa;
-  agentes: Agente[];
-  rotinas: Rotina[];
-  concessoes: Concessao[];
-  catalogo: readonly Conector[];
-  mensagens: MensagemDaTela[];
+export type ConversaEstado = ConversaDto & {
+  /** Texto em streaming por turno (turno.delta), descartado ao encerrar. */
+  deltas: Record<string, string>;
+  carregadaEm: number;
 };
 
+export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: number };
+
+export type Invalidacao = "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "salas" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+
 export type Estado = {
-  snapshot: Snapshot | null;
-  agenteAtualId: string | null;
-  paletteAberta: boolean;
-  detalhesAbertos: boolean;
-  enviando: boolean;
-  erro: string | null;
+  sessao: Escopo | null;
+  tela: Tela;
+  frota: FrotaDto | null;
+  inventario: Inventario | null;
+  conversas: Record<string, ConversaEstado>;
+  turnosVivos: Record<string, TurnoVivo>;
+  salas: { sala: Sala; membros: MembroSala[] }[];
+  suaVez: SuaVezDto | null;
+  rotinas: RotinaDto[];
+  execucoes: Record<string, ExecucaoRotina[]>;
+  conectores: Conector[];
+  concessoes: Record<string, Concessao[]>;
+  memorias: Record<string, Memoria[]>;
+  negacoes: NegacaoVista[];
+  faixaParada: FaixaParada | null;
+  conexao: { estado: EstadoConexao; tentativa: number; proximaEmMs: number | null };
+  /** O que a próxima volta do main precisa buscar por REST (conjunto, sem duplicata). */
+  invalidacoes: Invalidacao[];
+  agora: number;
+  erro: { codigo: string; mensagem: string } | null;
+  ocupado: boolean;
 };
 
 export type Acao =
-  | { tipo: "hidratar"; snapshot: Snapshot }
-  | { tipo: "selecionar"; id: string }
-  | { tipo: "palette"; aberta: boolean }
-  | { tipo: "detalhes"; abertos: boolean }
-  | { tipo: "enviando"; valor: boolean }
-  | { tipo: "erro"; texto: string | null };
+  | { tipo: "sessao"; escopo: Escopo | null }
+  | { tipo: "navegar"; tela: Tela }
+  | { tipo: "tick"; agora: number }
+  | { tipo: "conexao"; estado: EstadoConexao; tentativa: number; proximaEmMs: number | null }
+  | { tipo: "frame"; frame: FrameSse; agora: number }
+  | { tipo: "hidratar-frota"; frota: FrotaDto }
+  | { tipo: "hidratar-inventario"; inventario: Inventario }
+  | { tipo: "hidratar-conversa"; conversa: ConversaDto; agora: number }
+  | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
+  | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
+  | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
+  | { tipo: "hidratar-conectores"; conectores: Conector[] }
+  | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
+  | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
+  | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
+  | { tipo: "faixa"; faixa: FaixaParada | null }
+  | { tipo: "invalidar"; quais: Invalidacao[] }
+  | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
+  | { tipo: "erro"; erro: { codigo: string; mensagem: string } | null }
+  | { tipo: "ocupado"; valor: boolean };
 
 export const estadoInicial: Estado = {
-  snapshot: null,
-  agenteAtualId: null,
-  paletteAberta: false,
-  detalhesAbertos: false,
-  enviando: false,
+  sessao: null,
+  tela: { tipo: "frota" },
+  frota: null,
+  inventario: null,
+  conversas: {},
+  turnosVivos: {},
+  salas: [],
+  suaVez: null,
+  rotinas: [],
+  execucoes: {},
+  conectores: [],
+  concessoes: {},
+  memorias: {},
+  negacoes: [],
+  faixaParada: null,
+  conexao: { estado: "parado", tentativa: 0, proximaEmMs: null },
+  invalidacoes: [],
+  agora: 0,
   erro: null,
+  ocupado: false,
 };
+
+function texto(v: unknown): string | null {
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+function invalidar(estado: Estado, ...quais: (Invalidacao | null)[]): Estado {
+  const novas = quais.filter((q): q is Invalidacao => q !== null && !estado.invalidacoes.includes(q));
+  return novas.length === 0 ? estado : { ...estado, invalidacoes: [...estado.invalidacoes, ...novas] };
+}
+
+function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
+  if (!turnoId || !estado.turnosVivos[turnoId]) return estado;
+  const turnosVivos = { ...estado.turnosVivos };
+  delete turnosVivos[turnoId];
+  return { ...estado, turnosVivos };
+}
+
+function semDelta(estado: Estado, conversaId: string | null, turnoId: string | null): Estado {
+  if (!conversaId || !turnoId) return estado;
+  const c = estado.conversas[conversaId];
+  if (!c || !(turnoId in c.deltas)) return estado;
+  const deltas = { ...c.deltas };
+  delete deltas[turnoId];
+  return { ...estado, conversas: { ...estado.conversas, [conversaId]: { ...c, deltas } } };
+}
+
+/** Um handler por TipoFrame — a tabela é TOTAL: um tipo novo no contrato não compila sem entrar aqui. */
+type Handler = (estado: Estado, frame: FrameSse, agora: number) => Estado;
+
+const conv = (f: FrameSse): Invalidacao | null => {
+  const id = texto(f.dados.conversaId);
+  return id ? `conversa:${id}` : null;
+};
+
+const POR_FRAME: Record<TipoFrame, Handler> = {
+  "mensagem.nova": (e, f) => invalidar(e, conv(f)),
+  "turno.iniciado": (e, f, agora) => {
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    if (!turnoId || !conversaId) return invalidar(e, conv(f));
+    // dados.kind distingue "na fila" (turno_criado) de "rodando" (turno_despachado) — pendência L8 §5.
+    const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
+    const anterior = e.turnosVivos[turnoId];
+    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: anterior?.desde ?? agora };
+    return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f));
+  },
+  "turno.delta": (e, f) => {
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    const trecho = typeof f.dados.texto === "string" ? f.dados.texto : "";
+    if (!turnoId || !conversaId) return e;
+    const c = e.conversas[conversaId];
+    const vivo = e.turnosVivos[turnoId];
+    const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
+    if (!c) return { ...e, turnosVivos };
+    return { ...e, turnosVivos, conversas: { ...e.conversas, [conversaId]: { ...c, deltas: { ...c.deltas, [turnoId]: (c.deltas[turnoId] ?? "") + trecho } } } };
+  },
+  "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
+  "turno.interrompido": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
+  "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
+  "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
+  "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),
+  "proposta.nova": (e, f) => invalidar(e, conv(f)),
+  "rotina.criada": (e, f) => invalidar(e, "rotinas", conv(f)),
+  "rotina.executou": (e, f) => {
+    const rotinaId = texto(f.dados.rotinaId) ?? texto(f.dados.rotina_id);
+    return invalidar(e, "rotinas", conv(f), rotinaId ? `execucoes:${rotinaId}` : null);
+  },
+  "sala.handoff": (e, f) => invalidar(e, conv(f)),
+  negacao: (e, f, agora) => {
+    const classe = f.dados.classe;
+    const motivo = f.dados.motivo;
+    const nome = texto(f.dados.nome) ?? texto(f.dados.ferramenta) ?? "(sem nome)";
+    const valida = (classe === "ferramenta_negada" || classe === "conector_indisponivel" || classe === "plano_ausente") && typeof motivo === "string";
+    if (!valida) return invalidar(e, conv(f));
+    const vista: NegacaoVista = { classe, nome, motivo: motivo as Negacao["motivo"], desde: typeof f.dados.desde === "number" ? f.dados.desde : agora, terminal: f.dados.terminal === true, conversaId: texto(f.dados.conversaId), vistaEm: agora };
+    // definido em 2026-09-16: as 20 mais recentes bastam na tela; o registro completo está na trilha.
+    return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f));
+  },
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota"),
+  "agente.mudou": (e, f) => {
+    const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
+    const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
+    const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
+    return invalidar(e, "frota", conv(f), memoria, concessoes);
+  },
+  "parada.faixa": (e, f) => {
+    const faixa: FaixaParada = {
+      interrompidas: typeof f.dados.interrompidas === "number" ? f.dados.interrompidas : 0,
+      naoInterrompidas: [],
+      jaEntregues: [],
+      nadaRodando: f.dados.nada_rodando === true,
+    };
+    return invalidar({ ...e, faixaParada: faixa }, conv(f));
+  },
+  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "rotinas", "conectores", "inventario", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
+};
+
+export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Estado {
+  const handler = POR_FRAME[frame.tipo];
+  return handler ? handler(estado, frame, agora) : estado;
+}
 
 export function reduzir(estado: Estado, acao: Acao): Estado {
   switch (acao.tipo) {
-    case "hidratar": {
-      const ids = new Set(acao.snapshot.agentes.map((a) => a.id));
-      const atual =
-        estado.agenteAtualId && ids.has(estado.agenteAtualId)
-          ? estado.agenteAtualId
-          : (acao.snapshot.agentes[0]?.id ?? null);
-      return { ...estado, snapshot: acao.snapshot, agenteAtualId: atual, enviando: false, erro: null };
+    case "sessao":
+      return { ...estado, sessao: acao.escopo };
+    case "navegar":
+      return { ...estado, tela: acao.tela, erro: null, faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null };
+    case "tick":
+      return { ...estado, agora: acao.agora };
+    case "conexao":
+      return { ...estado, conexao: { estado: acao.estado, tentativa: acao.tentativa, proximaEmMs: acao.proximaEmMs } };
+    case "frame":
+      return aplicarFrame(estado, acao.frame, acao.agora);
+    case "hidratar-frota":
+      return { ...estado, frota: acao.frota, inventario: acao.frota.inventario };
+    case "hidratar-inventario":
+      return { ...estado, inventario: acao.inventario };
+    case "hidratar-conversa": {
+      const anterior = estado.conversas[acao.conversa.conversa.id];
+      const vivosDaConversa = new Set(Object.values(estado.turnosVivos).filter((t) => t.conversaId === acao.conversa.conversa.id).map((t) => t.turnoId));
+      const deltas: Record<string, string> = {};
+      for (const [turnoId, t] of Object.entries(anterior?.deltas ?? {})) if (vivosDaConversa.has(turnoId)) deltas[turnoId] = t;
+      return { ...estado, conversas: { ...estado.conversas, [acao.conversa.conversa.id]: { ...acao.conversa, deltas, carregadaEm: acao.agora } } };
     }
-    case "selecionar":
-      return { ...estado, agenteAtualId: acao.id, paletteAberta: false, detalhesAbertos: false };
-    case "palette":
-      return { ...estado, paletteAberta: acao.aberta };
-    case "detalhes":
-      return { ...estado, detalhesAbertos: acao.abertos };
-    case "enviando":
-      return { ...estado, enviando: acao.valor };
+    case "hidratar-sua-vez":
+      return { ...estado, suaVez: acao.suaVez };
+    case "hidratar-rotinas":
+      return { ...estado, rotinas: acao.rotinas };
+    case "hidratar-execucoes":
+      return { ...estado, execucoes: { ...estado.execucoes, [acao.rotinaId]: acao.execucoes } };
+    case "hidratar-conectores":
+      return { ...estado, conectores: acao.conectores };
+    case "hidratar-concessoes":
+      return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes } };
+    case "hidratar-memorias":
+      return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
+    case "hidratar-salas":
+      return { ...estado, salas: acao.salas };
+    case "faixa":
+      return { ...estado, faixaParada: acao.faixa };
+    case "invalidar":
+      return invalidar(estado, ...acao.quais);
+    case "invalidacoes-tratadas":
+      return { ...estado, invalidacoes: estado.invalidacoes.filter((q) => !acao.quais.includes(q)) };
     case "erro":
-      return { ...estado, erro: acao.texto, enviando: false };
+      return { ...estado, erro: acao.erro, ocupado: false };
+    case "ocupado":
+      return { ...estado, ocupado: acao.valor };
   }
 }
 
-export function mensagensDo(estado: Estado): MensagemDaTela[] {
-  if (!estado.snapshot || !estado.agenteAtualId) return [];
-  return estado.snapshot.mensagens.filter((m) => m.agenteId === estado.agenteAtualId);
+export function agenteDaTela(estado: Estado): string | null {
+  const t = estado.tela;
+  if (t.tipo === "conversa" || t.tipo === "perfil" || t.tipo === "memoria") return t.agenteId;
+  return null;
 }
 
-export function agenteAtual(estado: Estado): Agente | undefined {
-  return estado.snapshot?.agentes.find((a) => a.id === estado.agenteAtualId);
+export function conversaDaTela(estado: Estado): ConversaEstado | null {
+  const t = estado.tela;
+  if (t.tipo !== "conversa" && t.tipo !== "sala") return null;
+  return estado.conversas[t.conversaId] ?? null;
+}
+
+/** O que a tela atual precisa ter carregado (o main busca o que faltar). */
+export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
+  const t = estado.tela;
+  const faltas: Invalidacao[] = [];
+  if (!estado.frota) faltas.push("frota");
+  if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
+  if (t.tipo === "sala" && estado.salas.length === 0) faltas.push("salas");
+  if (t.tipo === "nova-sala" && estado.salas.length === 0) faltas.push("salas");
+  if (t.tipo === "memoria" && !estado.memorias[t.agenteId]) faltas.push(`memoria:${t.agenteId}`);
+  if ((t.tipo === "perfil" || t.tipo === "conversa") && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
+  if (t.tipo === "rotinas" && estado.rotinas.length === 0) faltas.push("rotinas");
+  if (t.tipo === "conectores" && estado.conectores.length === 0) faltas.push("conectores");
+  if (t.tipo === "sua-vez" && !estado.suaVez) faltas.push("sua-vez");
+  return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }

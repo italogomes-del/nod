@@ -48,7 +48,8 @@ describeIntegracao("outbox → barramento (despachante)", () => {
       const r = await despacharPessoa(trx, MARLON, barramento, { metricas: criarMetricas(), agora: () => AGORA });
       expect(r).toEqual({ publicados: 1, falhas: 0, abandonadosAgora: 0 });
       expect(frames).toEqual([
-        { streamId: barramento.posicao(PESSOA_MARLON).streamId, seq: 1, pessoaId: PESSOA_MARLON, tipo: "mensagem.nova", dados: { mensagem_id: "m1", conversa_id: conversaId, kind: "mensagem_criada", eventoId } },
+        // conversaId/turnoId vêm do evento (LEFT JOIN em events) para a web reidratar a conversa certa (L9).
+        { streamId: barramento.posicao(PESSOA_MARLON).streamId, seq: 1, pessoaId: PESSOA_MARLON, tipo: "mensagem.nova", dados: { mensagem_id: "m1", conversa_id: conversaId, kind: "mensagem_criada", eventoId, conversaId, turnoId: null } },
       ]);
       expect(await criarRepos(trx, MARLON).outbox.pendentes()).toEqual([]);
       expect(await despacharPessoa(trx, MARLON, barramento, { metricas: criarMetricas(), agora: () => AGORA })).toMatchObject({ publicados: 0 });

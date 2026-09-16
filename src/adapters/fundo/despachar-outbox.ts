@@ -71,7 +71,8 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
 
   for (const item of await repos.outbox.pendentes(opcoes.limite)) {
     try {
-      barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, kind: item.tipo, eventoId: item.eventoId });
+      // conversaId/turnoId do evento vão no frame: é como a web sabe qual conversa reidratar (definido em 2026-09-16, L9).
+      barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, kind: item.tipo, eventoId: item.eventoId, conversaId: item.conversaId, turnoId: item.turnoId });
       await repos.outbox.marcarEntregue(item.id);
       resultado.publicados += 1;
     } catch (e) {

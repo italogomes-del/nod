@@ -130,6 +130,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             dados: ev.dados ?? {},
             tentativas: 0,
             criadoEm: iso(createdAt),
+            conversaId: ev.conversaId ?? null,
+            turnoId: ev.turnoId ?? null,
             entregueEm: null,
             abandonadoEm: null,
             canceladoEm: null,
@@ -152,7 +154,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((o) => o.ownerId === escopo.pessoaId && o.entregueEm === null && o.abandonadoEm === null && o.canceladoEm === null)
           .sort((x, y) => Date.parse(x.criadoEm) - Date.parse(y.criadoEm))
           .slice(0, limite)
-          .map(({ id, eventoId, tipo, dados, tentativas, criadoEm }) => ({ id, eventoId, tipo, dados, tentativas, criadoEm }));
+          .map(({ id, eventoId, tipo, dados, tentativas, criadoEm }) => {
+            const ev = b.events.find((e) => e.id === eventoId);
+            return { id, eventoId, tipo, dados, tentativas, criadoEm, conversaId: ev?.conversaId ?? null, turnoId: ev?.turnoId ?? null };
+          });
       },
       async marcarEntregue(id: string) {
         const o = doTenant(b.outbox).find((x) => x.id === id && x.entregueEm === null);

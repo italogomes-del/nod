@@ -19,7 +19,7 @@ import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type EnvApp } from "./compor.ts";
-import { listen } from "./server.ts";
+import { listen } from "./servidor.ts";
 
 /**
  * Boot do servidor (ADR-006/012, EMENDA 3): partições → compor → listen → registry (claude-cli só é

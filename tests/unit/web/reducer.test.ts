@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { estadoInicial, reduzir } from "../../../web/estado/reducer.ts";
-import type { Snapshot } from "../../../web/estado/reducer.ts";
+import type { FrotaDto } from "../../../src/contracts/api.ts";
+import { conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir } from "../../../web/estado/reducer.ts";
 
-const snap: Snapshot = {
-  tenantId: "t",
-  pessoa: { tenantId: "t", id: "p", nome: "M", iniciais: "MW" },
+const frota: FrotaDto = {
   agentes: [
     {
       tenantId: "t",
@@ -23,17 +21,41 @@ const snap: Snapshot = {
       modelo: "claude-haiku-4-5-20251001",
       duplicadoDe: null,
       criadoEm: 1,
+      conversaId: "c1",
+      descricaoEstado: "sem acessos · nunca executou",
     },
   ],
-  rotinas: [],
-  concessoes: [],
-  catalogo: [],
-  mensagens: [],
+  inventario: { estado: "pronto", versao: "catcher", em: 1 },
+  negacoes: [],
 };
 
-describe("reducer", () => {
-  it("hidratar seleciona o primeiro agente se nenhum atual", () => {
-    const e = reduzir(estadoInicial, { tipo: "hidratar", snapshot: snap });
-    expect(e.agenteAtualId).toBe("a1");
+/** O reducer da web é reescrito por frames SSE (L9); a hidratação por REST continua sendo a fonte da verdade. */
+describe("reducer: hidratação e o que cada tela precisa", () => {
+  it("hidratar-frota guarda a frota e o inventário; a tela inicial é a frota", () => {
+    const e = reduzir(estadoInicial, { tipo: "hidratar-frota", frota });
+    expect(e.frota?.agentes.map((a) => a.nome)).toEqual(["LGPD"]);
+    expect(e.inventario).toEqual({ estado: "pronto", versao: "catcher", em: 1 });
+    expect(e.tela).toEqual({ tipo: "frota" });
+  });
+
+  it("invalidacoesDaTela diz o que falta buscar para a tela atual (sem repetir o que já está marcado)", () => {
+    expect(invalidacoesDaTela(estadoInicial)).toEqual(["frota"]);
+    let e = reduzir(estadoInicial, { tipo: "hidratar-frota", frota });
+    e = reduzir(e, { tipo: "navegar", tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } });
+    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1"]);
+    expect(conversaDaTela(e)).toBeNull();
+    e = reduzir(e, { tipo: "invalidar", quais: ["conversa:c1"] });
+    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1"]);
+    e = reduzir(e, { tipo: "navegar", tela: { tipo: "sua-vez" } });
+    expect(invalidacoesDaTela(e)).toEqual(["sua-vez"]);
+  });
+
+  it("sessão, conexão e tick são estado escrito (o relógio nunca é lido no reducer)", () => {
+    let e = reduzir(estadoInicial, { tipo: "sessao", escopo: { tenantId: "t", pessoaId: "p" } });
+    e = reduzir(e, { tipo: "conexao", estado: "reconectando", tentativa: 2, proximaEmMs: 2000 });
+    e = reduzir(e, { tipo: "tick", agora: 123 });
+    expect(e.sessao).toEqual({ tenantId: "t", pessoaId: "p" });
+    expect(e.conexao).toEqual({ estado: "reconectando", tentativa: 2, proximaEmMs: 2000 });
+    expect(e.agora).toBe(123);
   });
 });
