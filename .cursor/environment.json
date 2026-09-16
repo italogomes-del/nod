@@ -1,14 +1,27 @@
 {
-  "name": "nod — docs & prototypes",
-  "install": "echo 'nod has no build step yet: the docs and prototypes are self-contained HTML served as static files. Nothing to install.'",
+  "name": "nod — Meus agentes",
+  "install": "npm install",
   "terminals": [
+    {
+      "name": "nod-dev",
+      "command": "cd /workspace && npm run dev",
+      "description": "API em :8787 e UI Vite em :5173 (Meus agentes)."
+    },
     {
       "name": "static-server",
       "command": "cd /workspace && python3 -m http.server 8000 --bind 0.0.0.0",
-      "description": "Serves the repository (docs/ and prototypes/) as a static site at http://localhost:8000. Open /prototypes/fleet-is-home.html for the current prototype and /docs/product-spec.html for the product spec."
+      "description": "Docs e protótipos HTML em :8000."
     }
   ],
   "ports": [
+    {
+      "name": "meus agentes",
+      "port": 5173
+    },
+    {
+      "name": "api",
+      "port": 8787
+    },
     {
       "name": "static site",
       "port": 8000
