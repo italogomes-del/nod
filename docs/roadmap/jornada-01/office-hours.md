@@ -3,7 +3,7 @@
 > **Estado:** rascunho detalhado · **Definida em:** 2026-09-16 · **Cobre:** Ponto 1 (alcance) +
 > Ponto 2 (raio de dano) das features do OpenMausBot.
 >
-> **Quebra em épicos:** [jornada-01-epicos.md](jornada-01-epicos.md).
+> **Quebra em épicos:** [epicos.md](epicos.md). · **Quebra em issues:** [issues.md](issues.md).
 
 ## Norte / valor para o usuário
 
@@ -82,7 +82,7 @@ Esta jornada **reverte, pela porta da frente**, decisões da fundação. Cada um
 desktop na nuvem segue o modelo VPS (o caminho de volta pessoa↔agente nunca some). Se uma
 implementação fizer o agente virar `"unavailable"` para perguntas (como o `boxagent.ts:294` do OMB),
 ela está errada por construção, não por bug. O racional completo (modelo A × B, com as citações do
-código real do OMB) está em [Pré-ADR-030](pre-adr-030-maos-remotas-modelo-vps.md) — que vira o ADR
+código real do OMB) está em [Pré-ADR-030](../pre-adr-030-maos-remotas-modelo-vps.md) — que vira o ADR
 definitivo quando esta jornada for construída.
 
 ## Critérios de aceite
