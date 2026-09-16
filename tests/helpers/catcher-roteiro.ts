@@ -131,7 +131,7 @@ export function eventosDoRoteiro(
     custoUsd,
     tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 },
     numTurnos,
-    negacoesPermissao: [],
+    negacoesPermissao: [], erroCru: null,
   });
   return eventos;
 }

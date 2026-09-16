@@ -69,6 +69,8 @@ export type ResultadoTurno = {
   ferramentasChamadas: string[];
   /** result.permission_denials[].tool_name: negação de permissão NÃO é erro no CLI (s4b). */
   negacoesPermissao: string[];
+  /** Motivo cru da falha, só para diagnóstico em log (0005: antes o `erro_execucao` chegava sem causa). */
+  erroCru?: string | null;
 };
 
 /**
@@ -76,7 +78,8 @@ export type ResultadoTurno = {
  * Tipos/subtipos desconhecidos viram 'ignorado' em vez de falhar o parser.
  */
 export type EventoStream =
-  | { tipo: "init"; sessaoCli: string; ferramentas: string[]; modelo: string; versaoCli: string; apiKeySource: string }
+  /** `sessaoCli` é null só no catcher (0005): ele não abre sessão real, e o classificador não pode promover um marcador a --resume. */
+  | { tipo: "init"; sessaoCli: string | null; ferramentas: string[]; modelo: string; versaoCli: string; apiKeySource: string }
   | { tipo: "delta"; texto: string }
   | { tipo: "tool_use"; id: string; nome: string; input: unknown }
   | { tipo: "tool_result"; toolUseId: string; isError: boolean; texto: string }
@@ -90,6 +93,8 @@ export type EventoStream =
       tokens: TokensTurno;
       numTurnos: number;
       negacoesPermissao: string[];
+      /** Texto cru do CLI quando `sucesso` é false (subtype/result/error): vai ao log, nunca à pessoa (ADR-002). */
+      erroCru: string | null;
     }
   | { tipo: "rate_limit"; status: string; utilizacaoCincoHoras: number | null; utilizacaoSeteDias: number | null }
   | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido"; tipoBruto: string | null }

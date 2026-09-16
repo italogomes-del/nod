@@ -82,7 +82,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     profundidade: turno.profundidade,
     inventario,
     executor,
-    sessaoCli: conversa?.sessaoCli ?? null,
+    // 0005: --resume só para o MESMO executor que gravou a sessão; senão sessão nova (--session-id).
+    sessaoCli: conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null,
     pessoaNome: pessoa?.nome ?? "a pessoa",
     rotina,
     agora,

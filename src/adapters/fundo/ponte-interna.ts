@@ -109,6 +109,18 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         log("aviso", "ponte_entrega_sem_escopo", { turno_id: e.turnoId, machine_id: e.machineId });
         return;
       }
+      // 0005: turno que falhou vira uma linha de log COM a causa crua do CLI — antes só chegava
+      // "erro_execucao" e o diagnóstico exigia reproduzir o turno à mão (medido 2026-09-16).
+      if (e.resultado.desfecho !== "sucesso") {
+        log(e.resultado.desfecho === "falha" ? "erro" : "aviso", "turno_nao_concluiu", {
+          turno_id: e.turnoId,
+          desfecho: e.resultado.desfecho,
+          motivo: e.resultado.motivoFalha ?? e.resultado.motivoInterrupcao ?? null,
+          erro_cru: e.resultado.erroCru ?? null,
+          sessao_cli: e.resultado.sessaoCli,
+          executor,
+        });
+      }
       try {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);

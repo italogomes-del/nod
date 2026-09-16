@@ -1,5 +1,6 @@
 import type { Visibilidade } from "../contracts/agente.ts";
 import type { Conversa, TipoConversa } from "../contracts/conversa.ts";
+import type { Executor } from "../contracts/evento.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
 
@@ -12,10 +13,11 @@ interface Linha {
   agente_id: string | null;
   sala_id: string | null;
   sessao_cli: string | null;
+  sessao_executor: string | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, tipo, agente_id, sala_id, sessao_cli, criado_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, tipo, agente_id, sala_id, sessao_cli, sessao_executor, criado_em";
 
 const paraConversa = (l: Linha): Conversa => ({
   tenantId: l.tenant_id,
@@ -26,6 +28,7 @@ const paraConversa = (l: Linha): Conversa => ({
   agenteId: l.agente_id,
   salaId: l.sala_id,
   sessaoCli: l.sessao_cli,
+  sessaoExecutor: l.sessao_executor === "local" || l.sessao_executor === "catcher" ? l.sessao_executor : null,
   criadoEm: ms(l.criado_em),
 });
 
@@ -69,8 +72,9 @@ export function conversasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraConversa);
     },
 
-    async atualizarSessaoCli(id: string, sessaoCli: string | null): Promise<boolean> {
-      const r = await conn`update conversas set sessao_cli = ${sessaoCli} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    /** Grava sessão E executor juntos (0005): sessão sem dono não vale --resume. */
+    async atualizarSessaoCli(id: string, sessaoCli: string | null, sessaoExecutor: Executor | null = null): Promise<boolean> {
+      const r = await conn`update conversas set sessao_cli = ${sessaoCli}, sessao_executor = ${sessaoCli ? sessaoExecutor : null} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
     },
   };

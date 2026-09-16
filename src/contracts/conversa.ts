@@ -1,5 +1,6 @@
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Visibilidade } from "./agente.ts";
+import type { Executor } from "./evento.ts";
 
 export type TipoConversa = "propria" | "sala";
 
@@ -13,6 +14,12 @@ export type Conversa = {
   salaId: string | null;
   /** session_id do `claude -p`: 1º turno --session-id, seguintes --resume (mapa-cli). */
   sessaoCli: string | null;
+  /**
+   * Executor que criou `sessaoCli` (0005). Uma sessão só vale `--resume` para o MESMO executor:
+   * o catcher nunca cria sessão real, e uma sessão do claude-cli não existe para o catcher.
+   * Opcional no tipo para não obrigar cada literal de teste a declará-lo; ausente ⇒ desconhecido ⇒ não reaproveita.
+   */
+  sessaoExecutor?: Executor | null;
   criadoEm: EpochMs;
 };
 

@@ -122,7 +122,7 @@ describe("classificarResultado (ADR-009: estado de protocolo, nunca string de er
 
   it("result com subtype error_max_turns → falha erro_max_turns; outro erro → erro_execucao", () => {
     const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
-    const res = (subtype: string): EventoStream => ({ tipo: "result", sucesso: false, subtype, sessaoCli: "s", texto: "", custoUsd: 0.01, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [] });
+    const res = (subtype: string): EventoStream => ({ tipo: "result", sucesso: false, subtype, sessaoCli: "s", texto: "", custoUsd: 0.01, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [], erroCru: null });
     expect(classificarResultado({ eventos: [init, res("error_max_turns")], exitCode: 0, signal: null, stderr: "" })).toMatchObject({ desfecho: "falha", motivoFalha: "erro_max_turns" });
     expect(classificarResultado({ eventos: [init, res("error_during_execution")], exitCode: 1, signal: null, stderr: "" })).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao" });
   });

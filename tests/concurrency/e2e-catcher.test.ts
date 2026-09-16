@@ -178,15 +178,17 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
     expect((await json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === vera.agenteId)).toMatchObject({ nome: "Vera", confirmado: true });
     expect((await conversa(vera.conversaId)).propostas).toEqual([]);
 
-    // 2º turno: a sessão do CLI (sessaoCli) da conversa é reaproveitada — o plano leva --resume.
-    const sessao1 = (await conversa(vera.conversaId)).conversa.sessaoCli;
-    expect(sessao1).not.toBeNull();
+    // 2º turno: o catcher NÃO cria sessão do CLI (0005). Antes ele inventava um uuid e a conversa
+    // guardava; ao trocar para claude-cli o plano montava --resume de uma sessão que o Claude nunca
+    // viu (medido 2026-09-16 na conversa "Teste 1" do Marlon). O --resume real é provado em
+    // sessao-por-executor.test.ts; aqui o que vale é: sessão fica NULA e o executor é o catcher.
+    expect((await conversa(vera.conversaId)).conversa.sessaoCli).toBeNull();
     const t2 = await rodar(vera.conversaId, "[[texto: segunda resposta]]");
     expect(t2.estado).toBe("concluido");
-    expect((await conversa(vera.conversaId)).conversa.sessaoCli).toBe(sessao1);
+    expect((await conversa(vera.conversaId)).conversa.sessaoCli).toBeNull();
     const registros = await json<{ executor: string; registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
     expect(registros.executor).toBe("catcher");
-    expect(registros.registros.find((r) => r.turnoId === t2.id && r.tipo === "plano_recebido")?.dados).toMatchObject({ sessaoCli: sessao1, executor: "catcher" });
+    expect(registros.registros.find((r) => r.turnoId === t2.id && r.tipo === "plano_recebido")?.dados).toMatchObject({ sessaoCli: null, executor: "catcher" });
   });
 
   it("memória: lembrar (origem agente) aparece em GET memoria com a mensagem 'anotei'; a pessoa edita, acrescenta e apaga; Pin/Hide/Duplicate (cópia sem memória nem histórico)", { timeout: JORNADA_MS }, async () => {
@@ -486,7 +488,10 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
     expect(retomado).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, estado: "concluido" });
     expect(retomado.entradaTexto).toContain(`Resposta de ${NOME_PESSOA}`);
     const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
-    expect(dev.registros.find((r) => r.turnoId === retomado.id && r.tipo === "plano_recebido")?.dados.sessaoCli).toBe(sessaoAntes);
+    // 0005: o catcher não tem sessão para retomar — o plano da retomada leva sessaoCli nulo (a
+    // continuidade real por --resume é do claude-cli; ver sessao-por-executor.test.ts).
+    expect(sessaoAntes).toBeNull();
+    expect(dev.registros.find((r) => r.turnoId === retomado.id && r.tipo === "plano_recebido")?.dados.sessaoCli).toBeNull();
     expect((await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.id === falta?.decisao.id)).toBeUndefined();
     expect((await chamar("POST", `decisoes/${UUID_NULO}/responder`, { texto: "x" })).status).toBe(404);
   });

@@ -110,6 +110,10 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       tipo: "result",
       sucesso: subtype === "success" && o["is_error"] !== true,
       subtype,
+      erroCru:
+        subtype === "success" && o["is_error"] !== true
+          ? null
+          : [subtype, str(o["error"]), Array.isArray(o["errors"]) ? o["errors"].map(String).join("; ") : "", str(o["result"])].filter(Boolean).join(" | ").slice(0, 500) || null,
       sessaoCli: typeof o["session_id"] === "string" ? o["session_id"] : null,
       texto: str(o["result"]),
       custoUsd: num(o["total_cost_usd"]),
@@ -189,7 +193,7 @@ export function classificarResultado(entrada: {
       negacoesPermissao: result.negacoesPermissao,
     };
     if (result.sucesso) return { desfecho: "sucesso", ...base };
-    return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", ...base };
+    return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base };
   }
 
   const base = { texto: textoStream, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };

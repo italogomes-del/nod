@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, TokensTurno } from "../../../contracts/turno.ts";
@@ -62,7 +61,9 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
               sinksDoTurno = sinks;
               await sinks.sinal("attempted");
               const roteiro = roteiroFixo ?? roteiroPadrao({ prompt: plano.entrada.texto, ferramentas });
-              const sessaoCli = plano.entrada.sessaoCli ?? randomUUID();
+              // 0005: o catcher NÃO fabrica sessão do CLI — um uuid aqui virava `--resume` fantasma no claude-cli
+              // quando a pessoa trocava de executor na mesma conversa (medido 2026-09-16).
+              const sessaoCli: string | null = null;
               registrar("plano_recebido", { ferramentas, modelo: plano.entrada.modelo, sessaoCli, passos: roteiro.passos.length, executor: plano.executor });
 
               const emitidos: EventoStream[] = [];
@@ -77,7 +78,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
               };
 
               await sinks.sinal("promptSubmitted");
-              await emitir({ tipo: "init", sessaoCli, ferramentas, modelo: plano.entrada.modelo, versaoCli: "catcher", apiKeySource: "none" });
+              await emitir({ tipo: "init", sessaoCli: null, ferramentas, modelo: plano.entrada.modelo, versaoCli: "catcher", apiKeySource: "none" });
 
               let texto = "";
               let custoUsd = 0;
@@ -123,6 +124,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                   tokens: TOKENS_ZERADOS,
                   numTurnos,
                   negacoesPermissao: [],
+                  erroCru: falha,
                 });
               }
               const resultado = classificarResultado({ eventos: emitidos, exitCode: interrompido ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: interrompido });
