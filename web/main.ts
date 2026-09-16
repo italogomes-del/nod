@@ -2,7 +2,7 @@ import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
-import { avatarAgente, botao, esc, esquecerRegiao, regiao } from "./lib/render.ts";
+import { botao, esc, esquecerRegiao, iconeAgente, regiao } from "./lib/render.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
 import { renderFrota, textoInventario } from "./telas/frota.ts";
@@ -119,19 +119,46 @@ function renderSidebar(): string {
   const agentes = estado.frota?.agentes ?? [];
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
-  const linhas = agentes
-    .map((a) => {
-      const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
-      return `<button class="sr"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}">${avatarAgente(a, "sm")}<span class="lb">${esc(a.nome)}</span>${vivo ? `<span class="pt ${vivo.estado}" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : ""}${a.fixado ? '<span class="pin">📌</span>' : ""}</button>`;
-    })
+  const fixados = agentes.filter((a) => a.fixado);
+  const favoritos = fixados.length
+    ? fixados
+        .map(
+          (a) =>
+            `<button class="fav" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir ${esc(a.nome)}">${iconeAgente(a)}<b>${esc(a.nome)}</b><span>${esc(a.titulo || "bot")}</span></button>`,
+        )
+        .join("")
+    : `<div class="favorites-note">Fixe um bot para vê-lo aqui no topo.</div>`;
+
+  const linha = (a: (typeof agentes)[number]) => {
+    const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
+    const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
+    const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
+    return `<button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a)}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}</span></button>`;
+  };
+  const bots = agentes.map(linha).join("") || '<p class="mudo">nenhum bot ainda</p>';
+  const salas = estado.salas
+    .map(
+      (s) =>
+        `<button class="row"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"><span class="g">#</span><span class="txt"><b>${esc(s.sala.nome)}</b></span><span class="meta"></span></button>`,
+    )
     .join("");
-  const salas = estado.salas.map((s) => `<button class="sr"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"><span class="g">#</span><span class="lb">${esc(s.sala.nome)}</span></button>`).join("");
-  return `<div class="sh"><b>Meus agentes</b></div>
-    <div class="ss">
-      <div class="sec"><div class="sechd">Bots · ${agentes.length}</div>${linhas || '<p class="mudo">nenhum</p>'}${botao("navegar", "+ criar bot", { classe: "sm", dados: { tela: "frota" } })}</div>
-      <div class="sec"><div class="sechd">Salas · ${estado.salas.length}</div>${salas}${botao("navegar", "+ nova sala", { classe: "sm", dados: { tela: "nova-sala" } })}</div>
+
+  return `<div class="search-wrap">
+      <div class="sh"><b>Meus agentes</b></div>
+      <div class="search-row">
+        <label class="search" aria-label="Buscar"><span>⌕</span><input value="Buscar" readonly></label>
+        <button class="create-trigger" data-act="navegar" data-tela="frota" aria-label="Criar bot">+</button>
+      </div>
+      <div class="favorites">
+        <div class="favorites-head"><span>Favoritos</span><b>${fixados.length} fixados</b></div>
+        <div class="fav-grid">${favoritos}</div>
+      </div>
     </div>
-    <div class="me">${esc(textoInventario(estado.inventario, estado.agora))}</div>`;
+    <div class="list">
+      <section class="section"><h3>Bots · ${agentes.length}</h3>${bots}${botao("navegar", "+ criar bot", { classe: "sm", dados: { tela: "frota" } })}</section>
+      <section class="section"><h3>Salas · ${estado.salas.length}</h3>${salas}${botao("navegar", "+ nova sala", { classe: "sm", dados: { tela: "nova-sala" } })}</section>
+    </div>
+    <div class="me"><span class="av-me">eu</span> ${esc(textoInventario(estado.inventario, estado.agora))}</div>`;
 }
 
 function renderPrincipal(): void {
