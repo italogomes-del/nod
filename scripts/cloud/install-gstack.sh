@@ -133,6 +133,50 @@ configurar_gstack() {
   "$cfg" set proactive false
 }
 
+# gstack só imprime SPAWNED_SESSION se OPENCLAW_SESSION estiver no env do
+# processo. Export do install morre; o preâmbulo das skills (bash não
+# interativo) também não lê .bashrc. Marcador em disco + patch do preâmbulo
+# fazem o agente auto-escolher a opção (recommended).
+ativar_modo_spawned() {
+  mkdir -p "${HOME}/.gstack"
+  : > "${HOME}/.gstack/spawned"
+
+  if [ -f "${HOME}/.bashrc" ] && ! grep -q 'OPENCLAW_SESSION' "${HOME}/.bashrc"; then
+    printf '\nexport OPENCLAW_SESSION=1\n' >> "${HOME}/.bashrc"
+  fi
+  if [ -f "${HOME}/.profile" ] && ! grep -q 'OPENCLAW_SESSION' "${HOME}/.profile"; then
+    printf '\nexport OPENCLAW_SESSION=1\n' >> "${HOME}/.profile"
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    if [ -f /etc/environment ] && ! grep -q '^OPENCLAW_SESSION=' /etc/environment; then
+      echo 'OPENCLAW_SESSION=1' | sudo -n tee -a /etc/environment >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if [ ! -d "$GSTACK_DIR" ]; then
+    echo "aviso: ${GSTACK_DIR} ausente; não deu para patchar o preâmbulo spawned" >&2
+    return 0
+  fi
+  python3 - "$GSTACK_DIR" <<'PY'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+old = '[ -n "$OPENCLAW_SESSION" ] && echo "SPAWNED_SESSION: true" || true'
+new = '{ [ -n "${OPENCLAW_SESSION:-}" ] || [ -f "${HOME}/.gstack/spawned" ]; } && echo "SPAWNED_SESSION: true" || true'
+skip = {"test", "node_modules"}
+n = 0
+for path in root.rglob("SKILL.md"):
+    if skip.intersection(path.parts):
+        continue
+    text = path.read_text(encoding="utf-8")
+    if old not in text:
+        continue
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    n += 1
+print(f"spawned: patched {n} SKILL.md")
+PY
+}
+
 instalar_bun
 clonar_gstack
 
@@ -146,6 +190,7 @@ fi
 
 ligar_skills_no_cursor
 configurar_gstack
+ativar_modo_spawned
 
 if ! chromium_abre; then
   instalar_chromium_com_deps
