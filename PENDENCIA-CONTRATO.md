@@ -86,3 +86,15 @@ Se a L9 preferir a semântica anterior (tudo segue `$HOME`), basta `homeDaPessoa
 Autorizado pelo plano ("importado por caminho ou copiar"); a L3 registrou que é feio. O Dockerfile
 faz `COPY . .`, então o arquivo está na imagem. Se a L9 quiser, move `catcher-roteiro.ts` para
 `src/adapters/executor/roteiro-catcher.ts` e ajusta os dois imports (driver e `tests/helpers/driver-falso.ts`).
+
+## 10. Nada a fazer para a L9 — `sigtermParaSigkillMs` é knob interno da lane (registrado por transparência)
+
+A escalada SIGTERM→SIGKILL virou injetável: `iniciarProcesso({ sigtermParaSigkillMs })` e
+`LigacaoClaudeCli.sigtermParaSigkillMs`, ambos opcionais, ambos com default
+`SIGTERM_PARA_SIGKILL_MS` (5 s) — produção não passa nada e o comportamento não muda.
+
+**Por que existe:** o teste s6 cronometrava a interrupção contra `< 5_000`, o MESMO número que o
+código espera antes do SIGKILL. Isso não é asserção, é corrida: bastava o handshake não fechar a
+tempo para o verde virar vermelho ("expected 5020 to be less than 5000"). Um teste que mede um
+prazo precisa de um relógio que ele controle e que seja menor que o do código. A L9 não precisa
+tocar em nada; se quiser, pode remover o knob junto com o teste que o usa.

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
-import type { ConfigDriver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
+import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
 
@@ -89,6 +89,21 @@ const valor = (args: string[], flag: string) => {
  */
 const TIMEOUT_MS = 30_000;
 
+/**
+ * definido em 2026-09-16: 300 ms de escalada SIGTERM→SIGKILL no teste s6 (produção usa
+ * SIGTERM_PARA_SIGKILL_MS = 5 s). O binário falso responde ao SIGTERM entre linhas do stream
+ * (atraso de 40 ms por linha), então 300 ms já lhe dá ~7 janelas para sair sozinho.
+ */
+const ESCALADA_MS = 300;
+
+/**
+ * definido em 2026-09-16: o teste s6 afirma `gasto < ESCALADA_MS * 10` — folga deliberada sobre o
+ * caminho feliz, para o verde medir A COISA CERTA (interromper() volta quando o filho sai, sem
+ * esperar a escalada) e não a carga da máquina. medido em 2026-09-16: 7–9 ms de gasto real em 5
+ * execuções do projeto integration completo em paralelo — ~330x de folga sobre o limite de 3 s.
+ */
+const LIMITE_EM_ESCALADAS = 10;
+
 describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-16)", { timeout: TIMEOUT_MS }, () => {
   let dir: string;
   let cfgBase: ConfigDriver;
@@ -104,15 +119,17 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
-  async function instanciar(cenario: string, extraEnv: Record<string, string> = {}, extraShim: Record<string, string> = {}): Promise<{ instance: Instance; registro: string; stdin: string }> {
+  async function instanciarCom(driver: Driver, cenario: string, extraShim: Record<string, string> = {}, extraEnv: Record<string, string> = {}): Promise<{ instance: Instance; registro: string; stdin: string }> {
     const sessoes = join(dir, `sessoes-${cenario}-${Math.random().toString(36).slice(2, 8)}`);
     const bin = await shim(dir, `claude-${cenario}-${Math.random().toString(36).slice(2, 6)}`, { NOD_FALSO_CENARIO: cenario, NOD_FALSO_SESSOES: sessoes, ...extraShim });
     const registro = join(dir, `registro-${Math.random().toString(36).slice(2, 8)}.json`);
     const stdin = join(dir, `stdin-${Math.random().toString(36).slice(2, 8)}.txt`);
     const cfg: ConfigDriver = { ...cfgBase, bin, env: { ...cfgBase.env, TESTE_NOD_REGISTRO: registro, TESTE_NOD_STDIN: stdin, ...extraEnv } };
-    const instance = await criarClaudeCliDriver(lig).create(cfg);
+    const instance = await driver.create(cfg);
     return { instance, registro, stdin };
   }
+
+  const instanciar = (cenario: string, extraEnv: Record<string, string> = {}, extraShim: Record<string, string> = {}) => instanciarCom(criarClaudeCliDriver(lig), cenario, extraShim, extraEnv);
 
   function sinksEspiao(extra: Partial<SinksTurno> = {}) {
     const sinais: (keyof SinaisTurno)[] = [];
@@ -202,19 +219,30 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
   });
 
   it("s6: SIGTERM no meio do streaming → 'interrompido' sem result, sem motivo (quem sabe é o servidor), tmpdir apagado", async () => {
-    const { instance, registro } = await instanciar("s6-sigterm", {}, { NOD_FALSO_ATRASO_MS: "40" });
+    // Driver com a escalada SIGTERM→SIGKILL encurtada para ESCALADA_MS: o que este teste afirma é
+    // que interromper() NÃO espera a escalada inteira (o falso responde ao SIGTERM sozinho), e essa
+    // afirmação só é honesta contra um relógio que o teste controla — com o padrão de 5 s a
+    // asserção competia com o próprio SIGTERM_PARA_SIGKILL_MS e piscava.
+    const { instance, registro } = await instanciarCom(criarClaudeCliDriver({ ...lig, sigtermParaSigkillMs: ESCALADA_MS }), "s6-sigterm", { NOD_FALSO_ATRASO_MS: "40" });
     const adapter = instance.adapter(planoDeTeste(dir));
     const espiao = sinksEspiao();
-    const inicio = Date.now();
+    // o cronômetro começa no INSTANTE do pedido de interrupção — não na chamada de rodarTurno, que
+    // ainda carrega o prelúdio de --version/--help (segundos de spawn que nada têm a ver com o SIGTERM).
+    let inicioDaInterrupcao = 0;
     const promessa = adapter.rodarTurno({
       ...espiao.sinks,
       delta(t) {
         espiao.deltas.push(t);
-        if (espiao.deltas.length === 3) void adapter.interromper();
+        if (espiao.deltas.length === 3) {
+          inicioDaInterrupcao = Date.now();
+          void adapter.interromper();
+        }
       },
     });
     const resultado = await promessa;
-    expect(Date.now() - inicio).toBeLessThan(5_000);
+    const gasto = Date.now() - inicioDaInterrupcao;
+    expect(inicioDaInterrupcao).toBeGreaterThan(0);
+    expect(gasto).toBeLessThan(ESCALADA_MS * LIMITE_EM_ESCALADAS);
     expect(resultado.desfecho).toBe("interrompido");
     expect(resultado.motivoInterrupcao).toBeUndefined();
     expect(espiao.eventos.some((e) => e.tipo === "result")).toBe(false);

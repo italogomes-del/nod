@@ -29,6 +29,13 @@ export type LigacaoClaudeCli = {
   nodePath?: string;
   /** definido em 2026-09-16: a sonda usa o modelo mais barato (EMENDA 35). */
   modeloSonda?: string;
+  /**
+   * Espera entre SIGTERM e SIGKILL na interrupção; default SIGTERM_PARA_SIGKILL_MS (5 s).
+   * definido em 2026-09-16: existe para o teste que CRONOMETRA `interromper()` poder afirmar
+   * contra um limite que ele controla, em vez de correr contra o mesmo relógio do código.
+   * Produção não passa nada.
+   */
+  sigtermParaSigkillMs?: number;
 };
 
 export const MODELO_SONDA_PADRAO = "claude-haiku-4-5-20251001";
@@ -158,6 +165,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   args,
                   env,
                   cwd: tmpdir,
+                  sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
                   aoLinha(linha) {
                     const ev = interpretarLinhaStreamJson(linha);
                     if (ev.tipo === "ignorado") return;

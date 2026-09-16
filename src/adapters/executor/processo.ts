@@ -26,6 +26,9 @@ export type Processo = {
 /** definido em 2026-09-16: 5 s — a sonda mediu (s6.log) que o CLI sai em ~640 ms após SIGTERM; 5 s é folga de uma ordem de grandeza. */
 export const SIGTERM_PARA_SIGKILL_MS = 5_000;
 
+/** definido em 2026-09-16: 1 s depois do SIGKILL para o pipe fechar sozinho; senão é um neto órfão segurando-o. */
+const DEPOIS_DO_SIGKILL_MS = 1_000;
+
 /** definido em 2026-09-16: 64 KiB de stderr bastam para diagnóstico; o classificador nem o lê (ADR-009). */
 const STDERR_MAX_CHARS = 65_536;
 
@@ -39,7 +42,14 @@ export function iniciarProcesso(o: {
   aoLinha(linha: string): void;
   /** 'pipe' (default) para mandar o prompt; 'ignore' para a sonda com prompt como argumento. */
   stdin?: "pipe" | "ignore";
+  /**
+   * Espera entre SIGTERM e SIGKILL; default SIGTERM_PARA_SIGKILL_MS. Só testes reduzem: quem
+   * cronometra `interromper()` precisa de um relógio MENOR que o do código — afirmar contra o
+   * mesmo 5 s é corrida, não asserção (a suíte piscava com 'expected 5020 to be less than 5000').
+   */
+  sigtermParaSigkillMs?: number;
 }): Processo {
+  const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
   const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"] });
   let stderr = "";
   let resto = "";
@@ -102,11 +112,10 @@ export function iniciarProcesso(o: {
       interrompido = true;
       if (terminou || filho.pid === undefined) return;
       filho.kill("SIGTERM");
-      const fechou = await Promise.race([fim.then(() => true), dormir(SIGTERM_PARA_SIGKILL_MS).then(() => false)]);
+      const fechou = await Promise.race([fim.then(() => true), dormir(esperaAteSigkill).then(() => false)]);
       if (fechou) return;
       if (!saiu) filho.kill("SIGKILL");
-      // definido em 2026-09-16: 1 s depois do exit para o pipe fechar sozinho; senão é um neto órfão segurando-o
-      const fechouDepois = await Promise.race([fim.then(() => true), dormir(1_000).then(() => false)]);
+      const fechouDepois = await Promise.race([fim.then(() => true), dormir(DEPOIS_DO_SIGKILL_MS).then(() => false)]);
       if (!fechouDepois) fecharStdio();
       await fim;
     },
