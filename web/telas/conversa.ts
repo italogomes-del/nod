@@ -3,7 +3,7 @@ import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
-import { avatar, avatarAgente, botao, dataHora, esc, hora, paragrafos } from "../lib/render.ts";
+import { botao, dataHora, esc, iconeAgente, paragrafos } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 
@@ -46,18 +46,25 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
 }
 
-export function renderMensagem(m: Mensagem, estado: Estado): string {
-  const nomes = nomesDe(estado);
-  const agente = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
-  const nome = m.autoria.autor_tipo === "pessoa" ? (nomes[m.autoria.autor_id] ?? "pessoa") : (agente?.nome ?? "agente");
-  const av = avatar({ tipo: m.autoria.autor_tipo, nome, cor: agente?.cor, tamanho: "md" });
-  const classe = m.autoria.autor_tipo === "pessoa" ? "de-pessoa" : "de-agente";
-  return `<article class="msg ${classe} kind-${esc(m.kind)}" data-mensagem="${esc(m.id)}">
-    ${av}
-    <div class="msg-corpo">
-      <header class="msg-cab"><b>${esc(assinatura(m.autoria, nomes))}</b>${badgeExecutor(m)}<time>${hora(m.criadoEm)}</time></header>
-      ${corpoMensagem(m, estado)}
-    </div>
+/** Ações de hover do balão (protótipo): reação, responder, mais — decorativas, sem efeito ainda. */
+const ACOES_BALAO = '<div class="msg-actions"><button type="button" title="Reação">☺</button><button type="button" title="Responder">↩</button><button type="button" title="Mais">…</button></div>';
+
+/**
+ * Uma mensagem. Texto vira BALÃO (protótipo private-agents-minimal): você à direita (preto), o bot à
+ * esquerda (cinza). Os demais kinds (sistema, handoff, negação, rotina…) seguem como linhas discretas.
+ * `mostrarAutor` liga o nome do bot dentro do balão — útil em salas com vários agentes.
+ */
+export function renderMensagem(m: Mensagem, estado: Estado, mostrarAutor = false): string {
+  if (m.kind !== "texto") return corpoMensagem(m, estado);
+  const ehPessoa = m.autoria.autor_tipo === "pessoa";
+  const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
+  const sender = !ehPessoa && mostrarAutor ? `<span class="sender">${esc(agente?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</span>` : "";
+  const tags = ehPessoa
+    ? ""
+    : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
+  const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
+  return `<article class="message ${ehPessoa ? "you" : "bot"}" data-mensagem="${esc(m.id)}">
+    <div class="bubble-wrap">${ACOES_BALAO}<div class="bubble">${sender}${paragrafos(m.texto)}${metaTags}</div></div>
   </article>`;
 }
 
@@ -85,7 +92,7 @@ function renderProposta(p: Proposta, estado: Estado): string {
 function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
   const delta = c.deltas[t.turnoId];
   if (delta) {
-    return `<article class="msg de-agente streaming" data-turno="${esc(t.turnoId)}">${avatar({ tipo: "agente", nome: "…", tamanho: "md" })}<div class="msg-corpo"><header class="msg-cab"><b>respondendo</b><span class="tag tag-catcher">${esc(t.executor ?? "")}</span><time>${hora(t.desde)}</time></header><div class="msg-texto">${paragrafos(delta)}<span class="cursor">▍</span></div></div></article>`;
+    return `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(delta)}<span class="cursor">▍</span></div></div></article>`;
   }
   const pendente = c.turnosPendentes.find((p) => p.id === t.turnoId);
   if (pendente && pendente.conversaId !== c.conversa.id) {
@@ -98,8 +105,12 @@ function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): strin
 export function renderTimeline(c: ConversaEstado | null, estado: Estado): string {
   if (!c) return `<div class="mudo">carregando conversa…</div>`;
   const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id);
+  const sala = c.conversa.tipo === "sala";
+  const primeira = c.mensagens[0];
+  const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
   return `<div class="timeline">
-    ${c.mensagens.map((m) => renderMensagem(m, estado)).join("")}
+    ${sep}
+    ${c.mensagens.map((m) => renderMensagem(m, estado, sala)).join("")}
     ${c.propostas.map((p) => renderProposta(p, estado)).join("")}
     ${vivos.map((t) => renderTurnoVivo(t, c, estado)).join("")}
     ${renderFaixaParada(estado.faixaParada)}
@@ -110,7 +121,7 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
 export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
-  return `<div class="cab-esq">${a ? avatarAgente(a, "md") : ""}<span class="nome">${esc(nome)}</span><span class="tag">${esc(a?.descricaoEstado ?? "")}</span></div>
+  return `<div class="cab-esq">${a ? iconeAgente(a, "md") : ""}<span class="nome">${esc(nome)}</span><span class="tag">${esc(a?.descricaoEstado ?? "privado")}</span></div>
     <div class="cab-acoes">
       ${botao("ir-perfil", "Perfil", { id: agenteId })}
       ${botao("ir-memoria", "Memória", { id: agenteId })}

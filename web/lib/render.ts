@@ -55,6 +55,15 @@ export function avatarAgente(a: Pick<Agente, "nome" | "cor">, tamanho: "sm" | "m
   return avatar({ tipo: "agente", nome: a.nome, cor: a.cor, tamanho });
 }
 
+/**
+ * Ícone CHEIO do bot no protótipo private-agents-minimal (PR #4): quadrado/hexágono/círculo preenchido
+ * com a cor do perfil e iniciais em branco. Usado na sidebar, nos favoritos e no cabeçalho da conversa.
+ */
+export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: "" | "md" | "lg" = ""): string {
+  const t = tamanho ? ` ${tamanho}` : "";
+  return `<span class="icon ${esc(a.cor)} ${esc(a.forma)}${t}" title="${esc(a.nome)}">${esc(iniciais(a.nome))}</span>`;
+}
+
 /** 'HH:MM' no fuso da máquina da pessoa (a web só interpola; o servidor manda absoluto, ADR-007). */
 export function hora(instante: number | string): string {
   const t = typeof instante === "number" ? instante : Date.parse(instante);

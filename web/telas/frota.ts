@@ -1,6 +1,6 @@
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { avatarAgente, botao, esc, hora } from "../lib/render.ts";
+import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { renderNegacoes } from "./negacao.ts";
 
@@ -31,7 +31,7 @@ export function renderFrota(estado: Estado): string {
       const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === a.conversaId);
       const trabalhando = vivos.some((t) => t.estado === "rodando") ? `<span class="tag tag-cinza">trabalhando</span>` : vivos.length ? `<span class="tag tag-cinza">na fila</span>` : "";
       return `<button class="cartao-agente" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}">
-        ${avatarAgente(a, "lg")}
+        ${iconeAgente(a, "lg")}
         <span class="ca-txt"><b>${esc(a.nome)}${a.fixado ? " 📌" : ""}</b><span>${esc(a.titulo || a.descricao || "sem perfil confirmado")}</span><small>${esc(a.descricaoEstado)}${a.confirmado ? "" : " · perfil não confirmado"}</small></span>
         ${trabalhando}
       </button>`;
