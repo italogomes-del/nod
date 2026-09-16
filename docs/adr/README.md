@@ -36,3 +36,7 @@ A **reversibilidade** é o campo que mais importa. "Barata" significa que se mud
 | [ADR-016](adr-016-sse-com-frames-numerados-buffer-de-replay-por-tenant-e-rei.md) | SSE com frames numerados, buffer de replay POR TENANT, e reidratação por snapshot com o stream como barreira | Tempo real | decidido | barata |
 | [ADR-017](adr-017-um-container-sete-metricas-ligadas-a-promessa-de-produto-e.md) | Um container, sete métricas ligadas a promessa de produto, e um alarme externo de disponibilidade | Deploy | decidido | barata |
 | [ADR-018](adr-018-core-puro-guardado-pelo-compilador-pacote-unico-esqueleto.md) | Core puro guardado pelo COMPILADOR, pacote único, esqueleto commitado antes da lógica | Código | decidido | cara |
+
+| [ADR-019](adr-019-a-sonda-de-disponibilidade-pergunta-ao-cli-nunca-le-a-cred.md) | A sonda de disponibilidade pergunta ao CLI, nunca lê a credencial | Distribuição | decidido | — |
+| [ADR-020](adr-020-ordem-de-distribuicao-web-primeiro-pwa-em-seguida-app-nati.md) | Ordem de distribuição: web primeiro, PWA em seguida, app nativo só com gatilho | Distribuição | decidido | — |
+| [Emendas](emendas-alvos-distribuicao.md) | Três emendas curtas a ADRs existentes (não são ADRs novos) | Distribuição | decidido | — |
