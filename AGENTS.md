@@ -7,12 +7,12 @@ práticas herdadas, com evidência, em [docs/inherited-from-leapy.md](docs/inher
 
 ```bash
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
-npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres) e migra nod + nod_test
+npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use)
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
-npm run db:seed             # AINDA NÃO RODA: scripts/seed.ts entra na L3 (identidade e exemplos como nod_dono, idempotente por id determinístico); até lá sai 1 com mensagem, não com stack de módulo ausente
+npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
 npm start                   # node src/adapters/http/server.ts — Node 24 roda .ts direto; é o mesmo CMD do Dockerfile
 ```
 
@@ -41,6 +41,9 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
   nunca lê tabela escopada.
 - **Toda tabela nova passa por `nod_escopar_tabela(tbl, perna_extra)`** na migração, senão
   `tests/conformidade/rls.test.ts` acusa (lê pg_catalog; exceções têm motivo escrito em `gate-rls.ts`).
+  A perna extra só ABRE LEITURA (o WITH CHECK exige `owner_id` = pessoa); quem precisa que a perna
+  também ESCREVA cria uma policy PERMISSIVE a mais, só para o comando necessário, e a registra por nome
+  em `POLICIES_EXTRAS` do gate — como `nod_decisora` (0003, FOR UPDATE em decisoes/itens_aprovacao).
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e

@@ -18,7 +18,12 @@ export type FrotaDto = {
   negacoes: Negacao[];
 };
 
-/** EMENDA 13: turno pendente por agente ocupado é renderizável ("na fila — Vera está respondendo em #revisão"). */
+/**
+ * EMENDA 13: turno pendente por agente ocupado é renderizável ("na fila — Vera está respondendo em #revisão").
+ * `conversaId` é ONDE o bloqueio está (turnosRepo.pendentesRenderizaveis): igual à conversa lida =
+ * serialização desta própria conversa ("na fila"); diferente = o agente está ocupado noutra
+ * ("Vera está respondendo em #revisão"). A web distingue pela igualdade — definido em 2026-09-16.
+ */
 export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conversaId: string };
 
 export type ConversaDto = {

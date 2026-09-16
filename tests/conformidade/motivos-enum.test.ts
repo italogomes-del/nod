@@ -49,16 +49,19 @@ describeIntegracao("gate: enums de motivo (motivos.ts) == pg_enum", () => {
     });
   }
 
-  it("nenhuma coluna de motivo em turnos/mensagens/rotina_execucoes/trilha é texto livre sem CHECK", async () => {
+  it("nenhuma coluna de motivo em events/turnos/mensagens/rotina_execucoes/trilha é texto livre sem CHECK", async () => {
     const linhas = await db<{ table_name: string; column_name: string; udt_name: string }[]>`
       select table_name, column_name, udt_name from information_schema.columns
-      where table_schema = 'public' and table_name in ('turnos', 'mensagens', 'rotina_execucoes', 'trilha')
+      where table_schema = 'public' and table_name in ('events', 'turnos', 'mensagens', 'rotina_execucoes', 'trilha')
         and column_name in ('motivo_interrupcao', 'motivo_falha', 'locality_reason', 'desfecho', 'motivo')
       order by table_name, column_name`;
-    // Só as tabelas da 0002 (+ trilha, que já tem o CHECK na 0001). inventario_motores.motivo fica de
-    // fora de propósito: é a prosa que a sonda do CLI reporta ("binário não encontrado"), sem dado de
-    // aprendiz e sem enum possível (ADR-019). events.locality_reason (0001) é text: pendência da L9.
-    expect(linhas.length).toBeGreaterThan(3);
+    // Tabelas da 0002 + trilha (CHECK na 0001) + events (locality_reason virou motivo_localidade na
+    // 0003; as partições herdam o tipo do pai). inventario_motores.motivo fica de fora de propósito:
+    // é a prosa que a sonda do CLI reporta ("binário não encontrado"), sem dado de aprendiz e sem
+    // enum possível (ADR-019).
+    expect(linhas.map((l) => `${l.table_name}.${l.column_name}`)).toContain("events.locality_reason");
+    expect(linhas.find((l) => l.table_name === "events")?.udt_name).toBe("motivo_localidade");
+    expect(linhas.length).toBeGreaterThan(4);
     for (const l of linhas) {
       if (l.udt_name !== "text") continue;
       // As duas colunas `motivo text` (trilha, rotina_execucoes) têm CHECK ^[a-z_]+$ na migração.

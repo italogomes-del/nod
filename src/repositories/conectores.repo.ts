@@ -1,5 +1,5 @@
 import type { Visibilidade } from "../contracts/agente.ts";
-import type { CapacidadeConector, Conector, SensibilidadeDeclarada, TransporteConector } from "../contracts/conector.ts";
+import type { CapacidadeConector, ConectorGuardado, SensibilidadeDeclarada, TransporteConector } from "../contracts/conector.ts";
 import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
@@ -30,10 +30,11 @@ const COLUNAS =
 
 /**
  * O env do conector fica CIFRADO no servidor (core-features §credencial): o repositório devolve
- * `env` só com as CHAVES e o placeholder `true` (write-only), mais `envCifrado` para o servidor
- * decifrar com src/db/cifra.ts na hora de spawnar. Nada legível sai daqui.
+ * `ConectorGuardado` (src/contracts/conector.ts) — `env` só com as CHAVES e o placeholder `true`
+ * (write-only), mais `envCifrado` para o servidor decifrar com src/db/cifra.ts na hora de spawnar.
+ * Nada legível sai daqui. Reexportado para quem importava o nome deste módulo.
  */
-export type ConectorGuardado = Conector & { envCifrado: string | null };
+export type { ConectorGuardado } from "../contracts/conector.ts";
 
 function paraConector(l: Linha): ConectorGuardado {
   const env: Record<string, true> = {};

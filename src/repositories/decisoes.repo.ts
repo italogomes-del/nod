@@ -62,8 +62,15 @@ export const VENCIDAS_VISIVEIS_MS = 7 * 24 * 60 * 60 * 1000;
  * Pendências de "Sua vez" (ADR-007). Duas pernas de RLS (EMENDA 1): dono vê pela owner_id, decisor
  * pela perna extra — e a leitura de listarSuaVez roda sob a policy do role nod_app, nunca com
  * role privilegiado mais filtro na aplicação.
+ *
+ * Escrita pela DECISORA (0003): marcarVista/decidir/reabrir aceitam dona OU decisora designada —
+ * a policy nod_decisora (FOR UPDATE, USING e WITH CHECK por decisor_id) é quem concede; o filtro
+ * explícito abaixo existe para a linha 'equipe' de terceiros devolver null em vez de 42501
+ * (contrato: repositório devolve null, nunca lança). vencerPendentes e as escritas de laço
+ * continuam pela dona (paraCadaPessoa). Provado em tests/integration/repos/decisora-escreve.test.ts.
  */
 export function decisoesRepo(conn: Conn, escopo: Escopo) {
+  const donaOuDecisora = (): ReturnType<Conn> => conn`(owner_id = ${escopo.pessoaId} or decisor_id = ${escopo.pessoaId})`;
   return {
     async criar(d: NovaDecisao): Promise<Decisao | null> {
       const [l] = await conn<Linha[]>`
@@ -101,7 +108,7 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
     },
 
     async marcarVista(id: string, agora: number): Promise<boolean> {
-      const r = await conn`update decisoes set vista_em = coalesce(vista_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      const r = await conn`update decisoes set vista_em = coalesce(vista_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and ${donaOuDecisora()} and id = ${id}`;
       return r.count === 1;
     },
 
@@ -110,7 +117,7 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
       const desfecho: DesfechoDecisao = { tipo: "decidida", por: p.por, em: iso(p.agora) };
       const [l] = await conn<Linha[]>`
         update decisoes set estado = 'decidida', desfecho = ${conn.json(desfecho)}, decidida_em = ${data(p.agora)}, decidida_por = ${p.por}
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'reaberta')
+        where tenant_id = ${escopo.tenantId} and ${donaOuDecisora()} and id = ${id} and estado in ('pendente', 'reaberta')
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
     },
@@ -119,7 +126,7 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
     async reabrir(id: string, prazoDecisaoEm: number): Promise<Decisao | null> {
       const [l] = await conn<Linha[]>`
         update decisoes set estado = 'reaberta', prazo_decisao_em = ${data(prazoDecisaoEm)}, desfecho = null
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'vencida'
+        where tenant_id = ${escopo.tenantId} and ${donaOuDecisora()} and id = ${id} and estado = 'vencida'
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
     },

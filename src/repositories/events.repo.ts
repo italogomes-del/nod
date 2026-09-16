@@ -1,31 +1,13 @@
+import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 
 /**
- * Forma que a tabela `events` exige (autoria composta, ADR-023/025; localidade, ADR-022).
- * PENDÊNCIA DE CONTRATO: o `RuntimeEvent` de src/contracts/evento.ts ainda tem a forma antiga
- * (denials/source); a L2 refaz o contrato para satisfazer este tipo e a L3 troca o parâmetro.
+ * O que se GRAVA em `events` é o `RuntimeEvent` do contrato (src/contracts/evento.ts) menos o que
+ * o banco/escopo preenche: tenant_id vem do escopo, id e created_at têm DEFAULT (opcionais para o
+ * teste de partição fixar a data). `kind` é a união fechada e `autoria.locality_reason` é
+ * MotivoLocalidade — a coluna virou enum na 0003, e o tipo fecha antes do CHECK do banco.
  */
-export interface EventoGravavel {
-  id?: string;
-  kind: string;
-  createdAt?: number;
-  autoria: {
-    autor_tipo: "pessoa" | "agente";
-    autor_id: string;
-    sob_procuracao_de: string | null;
-    conta_de_execucao: string;
-    executor: string;
-    locality: string;
-    locality_reason: string;
-    machine_id: string | null;
-    decidido_por: string;
-    regra_versao: number;
-  };
-  pessoaDestinoId: string;
-  conversaId?: string | null;
-  turnoId?: string | null;
-  dados?: Record<string, string | number | boolean | null>;
-}
+export type EventoGravavel = Omit<RuntimeEvent, "tenantId" | "id" | "createdAt" | "dados"> & Partial<Pick<RuntimeEvent, "id" | "createdAt" | "dados">>;
 
 export function eventsRepo(conn: Conn, escopo: Escopo) {
   return {
@@ -36,10 +18,10 @@ export function eventsRepo(conn: Conn, escopo: Escopo) {
         const a = ev.autoria;
         const criadoEm = ev.createdAt === undefined ? null : new Date(ev.createdAt);
         const [linha] = await conn<{ id: string }[]>`
-          insert into events (tenant_id, owner_id, created_at, kind, autor_tipo, autor_id, sob_procuracao_de,
+          insert into events (tenant_id, owner_id, id, created_at, kind, autor_tipo, autor_id, sob_procuracao_de,
             conta_de_execucao, executor, locality, locality_reason, machine_id, decidido_por, regra_versao,
             pessoa_destino_id, conversa_id, turno_id, dados)
-          values (${escopo.tenantId}, ${escopo.pessoaId}, coalesce(${criadoEm}, now()), ${ev.kind}, ${a.autor_tipo}, ${a.autor_id},
+          values (${escopo.tenantId}, ${escopo.pessoaId}, coalesce(${ev.id ?? null}::uuid, gen_random_uuid()), coalesce(${criadoEm}, now()), ${ev.kind}, ${a.autor_tipo}, ${a.autor_id},
             ${a.sob_procuracao_de}, ${a.conta_de_execucao}, ${a.executor}, ${a.locality}, ${a.locality_reason},
             ${a.machine_id}, ${a.decidido_por}, ${a.regra_versao}, ${ev.pessoaDestinoId}, ${ev.conversaId ?? null},
             ${ev.turnoId ?? null}, ${conn.json(ev.dados ?? {})})

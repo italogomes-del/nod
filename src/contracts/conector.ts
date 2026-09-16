@@ -49,3 +49,11 @@ export type Conector = {
   ultimaFalha: { motivo: MotivoNegacao; em: EpochMs } | null;
   criadoEm: EpochMs;
 };
+
+/**
+ * Forma que conectoresRepo DEVOLVE (definido em 2026-09-16): o repositório não tem a chave de cifra,
+ * então `env` sai só com as chaves → `true` (placeholder "mantido") e o valor cifrado vem à parte
+ * em `envCifrado`, para o serviço decifrar com src/db/cifra.ts na hora de spawnar/mesclar
+ * placeholders (L5). Nada legível sai do banco; a web recebe `Conector`, nunca isto.
+ */
+export type ConectorGuardado = Conector & { envCifrado: string | null };

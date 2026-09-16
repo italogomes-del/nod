@@ -35,6 +35,7 @@ export interface ServicesNod<Trx> {
     registrar(turnoId: string, fn: () => Promise<void>): void;
     interromper(turnoId: string): Promise<boolean>;
   };
+  /** `tipo` é rótulo snake_case ('plano_recebido', 'tool_use'), nunca prosa: CHECK catcher_registros_tipo (^[a-z_]+$) na 0002. */
   catcher: { registrar(trx: Trx, turnoId: string, tipo: string, dados: Record<string, unknown>): Promise<void> };
   sala: {
     encaminhar(trx: Trx, p: { turnoId: string; paraAgente: string; motivo: string }): Promise<{ ok: true }>;

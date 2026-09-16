@@ -75,7 +75,11 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
       return l ? paraItem(l) : null;
     },
 
-    /** A pessoa marca/desmarca e pode editar o texto final; marcado_por é a pessoa da sessão. */
+    /**
+     * A pessoa marca/desmarca e pode editar o texto final; marcado_por é a pessoa da sessão. Dona OU
+     * decisora designada (policy nod_decisora da 0003 em itens_aprovacao); o filtro explícito devolve
+     * null para quem só lê a linha por 'equipe', em vez de deixar o 42501 subir.
+     */
     async marcar(id: string, p: { selecionado: boolean; textoFinal?: string; agora: number }): Promise<ItemAprovacao | null> {
       const [l] = await conn<Linha[]>`
         update itens_aprovacao set
@@ -84,7 +88,9 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
           marcado_em = ${data(p.agora)},
           texto_final = coalesce(${p.textoFinal ?? null}, texto_final),
           editado_por = case when ${p.textoFinal ?? null}::text is null then editado_por else ${escopo.pessoaId}::uuid end
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+        where tenant_id = ${escopo.tenantId} and id = ${id}
+          and (owner_id = ${escopo.pessoaId} or exists (
+            select 1 from decisoes d where d.tenant_id = itens_aprovacao.tenant_id and d.id = itens_aprovacao.decisao_id and d.decisor_id = ${escopo.pessoaId}))
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraItem(l) : null;
     },

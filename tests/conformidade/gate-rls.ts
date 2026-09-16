@@ -18,6 +18,16 @@ export const EXCECOES: Record<string, string> = {
   pessoas: "catálogo de identidade sem dado de aprendiz; lido para enumerar donos dos laços de fundo",
 };
 
+/**
+ * Policies ALÉM das duas da nod_escopar_tabela, aceitas por NOME (`tabela.policy`) com motivo
+ * escrito. Qualquer outra policy no catálogo é acusada: uma policy nova é superfície de acesso
+ * nova e precisa passar por aqui. definido em 2026-09-16 (0003).
+ */
+export const POLICIES_EXTRAS: Record<string, string> = {
+  "decisoes.nod_decisora": "PERMISSIVE só FOR UPDATE: a decisora designada (decisor_id) marca 'decidida'; USING e WITH CHECK pela mesma perna; INSERT/DELETE inalterados",
+  "itens_aprovacao.nod_decisora": "PERMISSIVE só FOR UPDATE: a decisora designada marca itens da decisão dirigida a ela; USING e WITH CHECK pela mesma perna",
+};
+
 export interface Tabela {
   nome: string;
   particao: boolean;
@@ -27,6 +37,8 @@ export interface Tabela {
   temTenantId: boolean;
   permissiva: boolean;
   restritiva: boolean;
+  /** Nomes de policy fora de {nod_pessoa, nod_tenant}: só passam se estiverem em POLICIES_EXTRAS. */
+  policiesExtras: string[];
   privilegiosApp: string[];
 }
 
@@ -42,6 +54,7 @@ export async function lerTabelas(conn: Conn): Promise<Tabela[]> {
       tem_tenant_id: boolean;
       permissiva: boolean;
       restritiva: boolean;
+      policies_extras: string[];
       privilegios: string[];
     }[]
   >`
@@ -53,6 +66,7 @@ export async function lerTabelas(conn: Conn): Promise<Tabela[]> {
            exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped) as tem_tenant_id,
            exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'nod_pessoa' and p.polpermissive) as permissiva,
            exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'nod_tenant' and not p.polpermissive) as restritiva,
+           array(select p.polname from pg_policy p where p.polrelid = c.oid and p.polname not in ('nod_pessoa', 'nod_tenant') order by p.polname) as policies_extras,
            array(select priv from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) priv
                  where has_table_privilege('nod_app', c.oid, priv)) as privilegios
     from pg_class c
@@ -70,6 +84,7 @@ export async function lerTabelas(conn: Conn): Promise<Tabela[]> {
     temTenantId: l.tem_tenant_id,
     permissiva: l.permissiva,
     restritiva: l.restritiva,
+    policiesExtras: l.policies_extras,
     privilegiosApp: l.privilegios,
   }));
 }
@@ -92,6 +107,9 @@ export function avaliar(tabelas: Tabela[]): string[] {
     if (!t.force) violacoes.push(`${t.nome}: sem FORCE ROW LEVEL SECURITY`);
     if (!t.permissiva) violacoes.push(`${t.nome}: sem policy PERMISSIVE nod_pessoa`);
     if (!t.restritiva) violacoes.push(`${t.nome}: sem policy RESTRICTIVE nod_tenant`);
+    for (const p of t.policiesExtras) {
+      if (!POLICIES_EXTRAS[`${t.nome}.${p}`]) violacoes.push(`${t.nome}: policy ${p} fora da lista aceita (POLICIES_EXTRAS) — superfície de acesso sem motivo escrito`);
+    }
   }
   return violacoes;
 }

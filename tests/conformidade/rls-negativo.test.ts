@@ -41,4 +41,15 @@ describeIntegracao("gate: teste negativo", () => {
       expect(avaliar(await lerTabelas(trx))).toEqual([]);
     });
   });
+
+  it("uma policy a mais, fora de POLICIES_EXTRAS, é acusada mesmo com a tabela escopada (0003)", async () => {
+    await withRollback({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }, async (trx) => {
+      await trx.unsafe(`create temp table _com_policy_extra (id uuid primary key)`);
+      await trx.unsafe(`select nod_escopar_tabela('_com_policy_extra')`);
+      await trx.unsafe(`create policy fantasma on _com_policy_extra as permissive for select to nod_app using (true)`);
+      expect(avaliar(await lerTabelas(trx))).toEqual([
+        "_com_policy_extra: policy fantasma fora da lista aceita (POLICIES_EXTRAS) — superfície de acesso sem motivo escrito",
+      ]);
+    });
+  });
 });

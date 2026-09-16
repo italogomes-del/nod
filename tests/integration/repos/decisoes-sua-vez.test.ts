@@ -33,9 +33,10 @@ describeIntegracao("decisoesRepo: Sua vez por pessoa sob RLS de duas pernas (ADR
       expect(fila[0]?.agenteNome).toBe("agente");
       expect(await comoAna.decisoes.buscar(paraMim?.id ?? "")).toBeNull();
 
-      // PENDÊNCIA (L9): a perna extra ABRE LEITURA, não escrita — a decisora que não é dona não
-      // consegue marcar 'decidida' (WITH CHECK exige owner_id = pessoa). decidir devolve null aqui.
-      expect(await comoAna.decisoes.decidir(paraAna?.id ?? "", { por: PESSOA_ANA, agora })).toBeNull();
+      // 0003: a decisora designada DECIDE (policy nod_decisora, FOR UPDATE pela perna decisor_id);
+      // a que não é dirigida a ela continua null. Prova completa em decisora-escreve.test.ts.
+      expect((await comoAna.decisoes.decidir(paraAna?.id ?? "", { por: PESSOA_ANA, agora }))?.estado).toBe("decidida");
+      expect(await comoAna.decisoes.decidir(paraMim?.id ?? "", { por: PESSOA_ANA, agora })).toBeNull();
     });
   });
 

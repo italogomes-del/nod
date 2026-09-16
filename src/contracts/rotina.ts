@@ -26,14 +26,18 @@ export type Rotina = {
   criadoEm: EpochMs;
 };
 
-/** Trava UNIQUE (tenant_id, rotina_id, instante_agendado) e registra QUAL executor ganhou (ADR-011). */
+/**
+ * Trava UNIQUE (tenant_id, rotina_id, instante_agendado) e registra QUAL executor ganhou (ADR-011).
+ * turnoId é null entre a reivindicação e o nascimento do turno na MESMA tx (rotinaJanelasRepo
+ * .vincularTurno preenche): a janela existe ANTES do turno, por desenho — definido em 2026-09-16.
+ */
 export type JanelaRotina = {
   tenantId: TenantId;
   rotinaId: string;
   instanteAgendado: EpochMs;
   executor: Executor;
   machineId: string;
-  turnoId: string;
+  turnoId: string | null;
 };
 
 export type ExecucaoRotina = {

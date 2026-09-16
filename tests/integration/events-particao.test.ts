@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import type { Autoria } from "../../src/contracts/evento.ts";
 import { eventsRepo } from "../../src/repositories/events.repo.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
@@ -8,8 +9,9 @@ import { withRollback } from "../helpers/with-rollback.ts";
 
 const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
 
-const autoria = {
-  autor_tipo: "pessoa" as const,
+// Tipada pelo contrato: locality_reason é MotivoLocalidade (coluna enum desde a 0003).
+const autoria: Autoria = {
+  autor_tipo: "pessoa",
   autor_id: PESSOA_MARLON,
   sob_procuracao_de: null,
   conta_de_execucao: PESSOA_MARLON,

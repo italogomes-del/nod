@@ -12,10 +12,10 @@ interface Linha {
   turno_id: string | null;
 }
 
-/** PENDÊNCIA DE CONTRATO: JanelaRotina.turnoId é `string`, mas a janela é reivindicada ANTES do turno nascer. */
-export type JanelaReivindicada = Omit<JanelaRotina, "turnoId"> & { turnoId: string | null };
+/** Resolvido na 0003/L3.5: JanelaRotina.turnoId já é `string | null` no contrato. Alias mantido para quem importou o nome antigo. */
+export type JanelaReivindicada = JanelaRotina;
 
-const paraJanela = (l: Linha): JanelaReivindicada => ({
+const paraJanela = (l: Linha): JanelaRotina => ({
   tenantId: l.tenant_id,
   rotinaId: l.rotina_id,
   instanteAgendado: ms(l.instante_agendado),
@@ -47,7 +47,7 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
-    async listar(rotinaId: string): Promise<JanelaReivindicada[]> {
+    async listar(rotinaId: string): Promise<JanelaRotina[]> {
       const linhas = await conn<Linha[]>`
         select tenant_id, rotina_id, instante_agendado, executor, machine_id, turno_id from rotina_janelas
         where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} order by instante_agendado`;
