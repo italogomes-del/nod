@@ -1,0 +1,91 @@
+import type { IncomingMessage } from "node:http";
+import type { FrameSse } from "../../contracts/frame.ts";
+import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts";
+import { interpretarSince, type Barramento, type Retomada, type Since } from "../../services/barramento.ts";
+import type { Ctx } from "./roteador.ts";
+
+/**
+ * Canal servidor→NAVEGADOR (ADR-016): SSE, e só nesta direção — a ponte servidor↔máquina não usa
+ * SSE. O handler do `GET /api/t/:tenantId/eventos` lê o escopo da sessão (o cookie decide a pessoa,
+ * então a sessão de ana nunca recebe frame de marlon), aplica o contrato de resume do barramento e
+ * fica inscrito até o navegador fechar. Cada conexão aberta conta em `polls_abertos` por pessoa.
+ */
+
+/** definido em 2026-09-16: retry do EventSource nativo; o cliente do nod faz o próprio backoff com jitter. */
+export const RETRY_MS = 3_000;
+/** definido em 2026-09-16: comentário `: ping` a cada 15 s mantém proxies e o Vite sem cortar a conexão ociosa. */
+export const PING_MS = 15_000;
+
+export function serializarFrame(frame: FrameSse): string {
+  return `id: ${frame.streamId}:${frame.seq}\nevent: ${frame.tipo}\ndata: ${JSON.stringify(frame)}\n\n`;
+}
+
+/** O frame `resumed` tem a forma de FrameSse (o cliente parseia tudo igual) e carrega o id da cabeça do stream. */
+export function frameDeRetomada(pessoaId: string, r: Retomada): FrameSse {
+  return { streamId: r.streamId, seq: r.seq, pessoaId, tipo: "resumed", dados: { resumed: r.resumed } };
+}
+
+/** `Last-Event-ID` (reconexão automática do EventSource) ou `?since=` (reconexão manual do cliente do nod). */
+export function lerSince(req: IncomingMessage): Since | null {
+  const cabecalho = req.headers["last-event-id"];
+  const doCabecalho = interpretarSince(Array.isArray(cabecalho) ? cabecalho[0] : cabecalho);
+  if (doCabecalho) return doCabecalho;
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  return interpretarSince(url.searchParams.get("since"));
+}
+
+export interface OpcoesSse {
+  metricas?: Metricas;
+  pingMs?: number;
+  retryMs?: number;
+}
+
+export function criarHandlerSse(barramento: Barramento, opcoes: OpcoesSse = {}): (ctx: Ctx) => Promise<void> {
+  const metricas = opcoes.metricas ?? registroPadrao;
+  const pingMs = opcoes.pingMs ?? PING_MS;
+  const retryMs = opcoes.retryMs ?? RETRY_MS;
+  const abertos = new Map<string, number>();
+
+  const contar = (tenantId: string, pessoaId: string, delta: number): void => {
+    const chave = `${tenantId}:${pessoaId}`;
+    const n = Math.max(0, (abertos.get(chave) ?? 0) + delta);
+    if (n === 0) abertos.delete(chave);
+    else abertos.set(chave, n);
+    metricas.registrar({ metrica: "polls_abertos", tenant_id: tenantId, pessoa_id: pessoaId }, n);
+  };
+
+  return async (ctx) => {
+    const { req, res, escopo } = ctx;
+    const since = lerSince(req);
+    res.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    res.write(`retry: ${retryMs}\n\n`);
+
+    const escrever = (frame: FrameSse): void => {
+      if (!res.writableEnded && !res.destroyed) res.write(serializarFrame(frame));
+    };
+
+    // retomar e inscrever são síncronos no mesmo tick: nenhum frame cabe entre os dois (sem furo, sem duplicata).
+    const retomada = barramento.retomar(escopo.pessoaId, since);
+    if (retomada.resumed) for (const f of retomada.frames) escrever(f);
+    escrever(frameDeRetomada(escopo.pessoaId, retomada));
+    const cancelar = barramento.inscrever(escopo.pessoaId, escrever);
+    contar(escopo.tenantId, escopo.pessoaId, +1);
+
+    const ping = setInterval(() => {
+      if (!res.writableEnded && !res.destroyed) res.write(": ping\n\n");
+    }, pingMs);
+    ping.unref();
+
+    // `res` 'close' numa resposta que nunca termina = a conexão caiu (aba fechada, rede, abort).
+    res.on("close", () => {
+      cancelar();
+      clearInterval(ping);
+      contar(escopo.tenantId, escopo.pessoaId, -1);
+    });
+  };
+}
