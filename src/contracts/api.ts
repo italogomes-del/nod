@@ -69,6 +69,7 @@ export const ROTAS = [
   { metodo: "POST", caminho: "propostas/:id/confirmar", lane: "L6" },
   { metodo: "POST", caminho: "propostas/:id/recusar", lane: "L6" },
   { metodo: "GET", caminho: "rotinas", lane: "L7" },
+  { metodo: "POST", caminho: "rotinas", lane: "L7" },
   { metodo: "POST", caminho: "rotinas/:id/pausar", lane: "L7" },
   { metodo: "POST", caminho: "rotinas/:id/ativar", lane: "L7" },
   { metodo: "GET", caminho: "rotinas/:id/execucoes", lane: "L7" },

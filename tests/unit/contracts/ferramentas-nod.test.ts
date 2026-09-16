@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FERRAMENTAS_NOD, NOMES_FERRAMENTAS_NOD, type JsonSchema } from "../../../src/contracts/ferramentas-nod.ts";
+import { FERRAMENTAS_NOD, NOMES_FERRAMENTAS_NOD, type JsonSchema, type NomeFerramentaNod } from "../../../src/contracts/ferramentas-nod.ts";
 import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
 
 const ESPERADAS = ["lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina", "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot"];
@@ -8,6 +8,14 @@ describe("FERRAMENTAS_NOD", () => {
   it("lista fechada com as NOVE ferramentas (EMENDA 16 inclui pedir_a_pessoa)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(9);
+  });
+
+  it("NOMES_FERRAMENTAS_NOD é literal (EMENDA 26) e cobre TODAS as chaves de FERRAMENTAS_NOD, no tipo e em runtime", () => {
+    // Se uma chave nova entrar em FERRAMENTAS_NOD sem entrar na lista, `Faltando` deixa de ser never e esta linha não compila.
+    type Faltando = Exclude<NomeFerramentaNod, (typeof NOMES_FERRAMENTAS_NOD)[number]>;
+    const cobreTudo: [Faltando] extends [never] ? true : never = true;
+    expect(cobreTudo).toBe(true);
+    expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual(Object.keys(FERRAMENTAS_NOD).sort());
   });
 
   it("nomes casam /^[a-z_]+$/ (viram mcp__nod__<nome> no CLI)", () => {

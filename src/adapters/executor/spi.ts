@@ -34,7 +34,7 @@ export type SinksTurno = {
 
 export interface Adapter {
   rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno>;
-  /** SIGTERM → 5s → SIGKILL (medido em 2026-09-16: exit 143 em ~640ms, filho MCP morre junto — s6.log). */
+  /** SIGTERM → 5s → SIGKILL. A sonda de 2026-09-16 mediu (s6.log): exit 143 em ~640ms, signal null, filho MCP morre junto. */
   interromper(): Promise<void>;
 }
 

@@ -1,4 +1,4 @@
-import type { MotivoPasse } from "../contracts/motivos.ts";
+import type { MotivoNegacao, MotivoPasse } from "../contracts/motivos.ts";
 import type { EstadoOrcamento, PoliticaSala } from "../contracts/sala.ts";
 import { quemResponde } from "./canal-responde.ts";
 
@@ -26,13 +26,15 @@ export function avaliarEncaminhar(estado: EstadoOrcamento): ResultadoEncaminhar 
   return { ok: true, estado: { ...estado, handoffsNaRodada: estado.handoffsNaRodada + 1 } };
 }
 
-export type Fala = { agenteId: string; tipo: "texto" } | { agenteId: string; tipo: "passe"; motivo: MotivoPasse };
+/** Passe negado_fail_closed carrega a causa (MotivoNegacao): só `teto_canal` conta como teto da rodada. */
+export type Fala = { agenteId: string; tipo: "texto" } | { agenteId: string; tipo: "passe"; motivo: MotivoPasse; causa?: MotivoNegacao };
 export type DesfechoRodada = "assentou" | "teto" | "ninguem_disponivel" | "em_andamento";
 
 /**
  * Assentamento por CONTAGEM no servidor, nunca por leitura do texto (GRUPO.passe-tipado):
  * assenta quando todo mundo que ESTAVA PRESENTE passou e pelo menos um estava presente;
- * 'teto' quando algum passe veio do teto do canal; 'em_andamento' enquanto alguém ainda deve falar.
+ * 'teto' quando algum passe tem causa teto_canal (avaliarEncaminhar); outro negado_fail_closed
+ * (parada, plano ausente…) assenta como passe comum; 'em_andamento' enquanto alguém ainda deve falar.
  */
 export function assentar(presentes: readonly string[], falas: readonly Fala[]): DesfechoRodada {
   if (presentes.length === 0) return "ninguem_disponivel";
@@ -42,7 +44,7 @@ export function assentar(presentes: readonly string[], falas: readonly Fala[]): 
   if (!todosPassaram) return "em_andamento";
   const houveTeto = presentes.some((id) => {
     const f = ultimaPorAgente.get(id);
-    return f?.tipo === "passe" && f.motivo === "negado_fail_closed";
+    return f?.tipo === "passe" && f.motivo === "negado_fail_closed" && f.causa === "teto_canal";
   });
   return houveTeto ? "teto" : "assentou";
 }

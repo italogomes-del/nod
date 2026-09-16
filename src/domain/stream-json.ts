@@ -142,10 +142,15 @@ export const SINAIS_ZERADOS: SinaisTurno = { attempted: false, rejected: false, 
  * Classifica pelo ESTADO DE PROTOCOLO (ADR-009), nunca pela string de erro — `stderr` entra na
  * assinatura só para o teste adversarial provar que variá-lo não muda nada (E9.1):
  *  - result presente → sucesso | falha (subtype ≠ success: erro_max_turns | erro_execucao);
- *  - sem result, com init → interrompido (SIGTERM/exit 143, s6; quem decide parado_pela_pessoa vs
- *    sem_progresso é o servidor, que sabe se pediu);
- *  - sem init, exitCode ≠ 0 → sessao_rejeitada (CLI subiu e recusou antes do init: s2c);
- *  - sem init, exitCode null e sem signal → lancamento_falhou (spawn não aconteceu).
+ *  - sem result e (o driver interrompeu OU chegou signal OU houve init) → interrompido com motivo
+ *    INDEFINIDO: quem sabe se pediu é o servidor (parado_pela_pessoa se pararSolicitadoEm existe,
+ *    senão sem_progresso). A regra é a MESMA antes e depois do init — a sonda de 2026-09-16 mediu
+ *    (s6.log) que o SIGTERM sai como exit 143 com signal null, então o exit code sozinho não diz
+ *    "interrompido" e o driver informa `interrompidoPeloDriver` quando chamou interromper();
+ *  - sem init, exitCode null e sem signal → lancamento_falhou (spawn não aconteceu);
+ *  - sem init, exitCode ≠ 0 → sessao_rejeitada: TODA recusa pré-init cai aqui (s2c foi a única
+ *    observada). CLI não autenticado é motivo do INVENTÁRIO (sonda → nao_autenticado) e barra o
+ *    turno antes do spawn (montarPlano → executor_indisponivel); este classificador não o infere.
  */
 export function classificarResultado(entrada: {
   eventos: readonly EventoStream[];
@@ -153,6 +158,8 @@ export function classificarResultado(entrada: {
   signal: string | null;
   stderr: string;
   sinais?: Partial<SinaisTurno>;
+  /** true quando o driver chamou interromper() (SIGTERM) — antes ou depois do init. */
+  interrompidoPeloDriver?: boolean;
 }): ResultadoTurno {
   let sinais: SinaisTurno = { ...SINAIS_ZERADOS, ...entrada.sinais };
   let init: Extract<EventoStream, { tipo: "init" }> | null = null;
@@ -186,11 +193,11 @@ export function classificarResultado(entrada: {
   }
 
   const base = { texto: textoStream, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };
-  if (init) return { desfecho: "interrompido", ...base, sinais };
-  if (entrada.exitCode === null && entrada.signal === null) {
+  if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
+  if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };
   }
-  if (entrada.exitCode !== null && entrada.exitCode !== 0) {
+  if (entrada.exitCode !== 0) {
     return { desfecho: "interrompido", motivoInterrupcao: "sessao_rejeitada", ...base, sinais: { ...sinais, rejected: true } };
   }
   return { desfecho: "interrompido", motivoInterrupcao: "sem_progresso", ...base, sinais };

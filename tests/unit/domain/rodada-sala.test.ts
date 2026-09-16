@@ -28,8 +28,10 @@ describe("rodada-sala", () => {
     expect(assentar(["a", "b"], [{ agenteId: "a", tipo: "texto" }, { agenteId: "b", tipo: "passe", motivo: "passei_sem_nada_a_dizer" }])).toBe("em_andamento");
   });
 
-  it("ninguém presente → ninguem_disponivel; passe por teto → teto", () => {
+  it("ninguém presente → ninguem_disponivel; passe com causa teto_canal → teto; negado_fail_closed por outra causa assenta", () => {
     expect(assentar([], [])).toBe("ninguem_disponivel");
-    expect(assentar(["a"], [{ agenteId: "a", tipo: "passe", motivo: "negado_fail_closed" }])).toBe("teto");
+    expect(assentar(["a"], [{ agenteId: "a", tipo: "passe", motivo: "negado_fail_closed", causa: "teto_canal" }])).toBe("teto");
+    expect(assentar(["a"], [{ agenteId: "a", tipo: "passe", motivo: "negado_fail_closed", causa: "parada_ativa" }])).toBe("assentou");
+    expect(assentar(["a"], [{ agenteId: "a", tipo: "passe", motivo: "negado_fail_closed" }])).toBe("assentou");
   });
 });

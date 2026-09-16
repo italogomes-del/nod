@@ -22,6 +22,27 @@ describe("src/contracts é fechado", () => {
     }
   });
 
+  it("sem lógica (EMENDA 26): nenhum export é função nem contém função; fonte sem `function`, arrow em valor ou Object.*()", async () => {
+    const contemFuncao = (v: unknown, visto = new Set<unknown>()): boolean => {
+      if (typeof v === "function") return true;
+      if (typeof v !== "object" || v === null || visto.has(v)) return false;
+      visto.add(v);
+      return Object.values(v).some((x) => contemFuncao(x, visto));
+    };
+    for (const f of arquivos) {
+      const modulo: Record<string, unknown> = await import(new URL(f, DIR).href);
+      for (const [nome, valor] of Object.entries(modulo)) expect(contemFuncao(valor), `${f} exporta lógica em ${nome}`).toBe(false);
+      const linhas = readFileSync(new URL(f, DIR), "utf8").split("\n");
+      for (const [i, l] of linhas.entries()) {
+        const onde = `${f}:${i + 1}`;
+        expect(l, `${onde} usa function`).not.toMatch(/\bfunction\b/);
+        expect(l, `${onde} chama Object.*`).not.toMatch(/\bObject\.\w+\(/);
+        // arrow em posição de VALOR: `const x = (...) =>` — arrow em `type X = (...) =>` é assinatura, não lógica
+        expect(l, `${onde} define arrow function`).not.toMatch(/\b(const|let|var)\s+\w+(\s*:\s*[^=]+)?=\s*(async\s*)?\([^)]*\)\s*(:\s*[^=]+)?=>/);
+      }
+    }
+  });
+
   it("os 22 arquivos do plano existem", () => {
     const esperados = ["ids", "evento", "agente", "memoria", "conversa", "mensagem", "turno", "plano-turno", "ponte", "rotina", "sala", "conector", "concessao", "decisao", "item-aprovacao", "frame", "negacao", "motivos", "inventario", "ferramentas-nod", "servicos", "api"];
     for (const e of esperados) expect(arquivos).toContain(`${e}.ts`);

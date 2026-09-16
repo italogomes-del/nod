@@ -1,5 +1,4 @@
-import type { MotivoPasse } from "./motivos.ts";
-import type { CodigoErro } from "./motivos.ts";
+import type { CodigoErro, MotivoPasse } from "./motivos.ts";
 
 /** Subconjunto de JSON Schema que o proxy expõe em tools/list e valida em tools/call. */
 export type JsonSchema = {
@@ -14,8 +13,6 @@ export type JsonSchema = {
   minItems?: number;
 };
 
-const texto = (description: string, minLength = 1): JsonSchema => ({ type: "string", description, minLength });
-
 /**
  * As NOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
@@ -28,7 +25,7 @@ export const FERRAMENTAS_NOD = {
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
     properties: {
       tipo: { type: "string", enum: ["preferencia", "fato", "resumo"], description: "Tipo da memória." },
-      texto: texto("O que lembrar, em uma frase."),
+      texto: { type: "string", description: "O que lembrar, em uma frase.", minLength: 1 },
     },
     required: ["tipo", "texto"],
     additionalProperties: false,
@@ -37,9 +34,9 @@ export const FERRAMENTAS_NOD = {
     type: "object",
     description: "Propõe nome, título e/ou descrição para este agente. Nada muda antes da pessoa confirmar.",
     properties: {
-      nome: texto("Nome curto do agente."),
-      titulo: texto("Título de uma linha."),
-      descricao: texto("O que o agente faz e como responde (regras duráveis)."),
+      nome: { type: "string", description: "Nome curto do agente.", minLength: 1 },
+      titulo: { type: "string", description: "Título de uma linha.", minLength: 1 },
+      descricao: { type: "string", description: "O que o agente faz e como responde (regras duráveis).", minLength: 1 },
     },
     required: [],
     additionalProperties: false,
@@ -48,7 +45,7 @@ export const FERRAMENTAS_NOD = {
     type: "object",
     description: "Pede à pessoa acesso a capacidades de um conector. Vira proposta; nada é concedido aqui.",
     properties: {
-      conector: texto("Slug do conector registrado."),
+      conector: { type: "string", description: "Slug do conector registrado.", minLength: 1 },
       capacidades: { type: "array", items: { type: "string" }, minItems: 1, description: "Nomes das ferramentas pedidas." },
       nivel: { type: "string", enum: ["leitura", "escrita"] },
       nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
@@ -60,13 +57,13 @@ export const FERRAMENTAS_NOD = {
     type: "object",
     description: "Propõe uma rotina (cron de 5 campos + fuso IANA). A pessoa confirma; o gate de aprovação nasce ligado.",
     properties: {
-      cron: texto("Expressão cron de 5 campos, ex.: '0 8 * * 1-5'."),
-      fuso_iana: texto("Fuso IANA nomeado, ex.: America/Sao_Paulo. Offset numérico é recusado."),
-      instrucao: texto("O que fazer em cada execução."),
-      fonte: texto("De onde vem o dado."),
-      entregavel: texto("O que sai ao final."),
-      limites_aprovacao: texto("O que exige aprovação antes de sair."),
-      politica_sem_dado: texto("O que fazer quando não houver dado."),
+      cron: { type: "string", description: "Expressão cron de 5 campos, ex.: '0 8 * * 1-5'.", minLength: 1 },
+      fuso_iana: { type: "string", description: "Fuso IANA nomeado, ex.: America/Sao_Paulo. Offset numérico é recusado.", minLength: 1 },
+      instrucao: { type: "string", description: "O que fazer em cada execução.", minLength: 1 },
+      fonte: { type: "string", description: "De onde vem o dado.", minLength: 1 },
+      entregavel: { type: "string", description: "O que sai ao final.", minLength: 1 },
+      limites_aprovacao: { type: "string", description: "O que exige aprovação antes de sair.", minLength: 1 },
+      politica_sem_dado: { type: "string", description: "O que fazer quando não houver dado.", minLength: 1 },
     },
     required: ["cron", "fuso_iana", "instrucao", "fonte", "entregavel", "limites_aprovacao", "politica_sem_dado"],
     additionalProperties: false,
@@ -76,25 +73,25 @@ export const FERRAMENTAS_NOD = {
     description:
       "Submete itens de efeito externo para aprovação em lista. Se voltar 'pendente', ENCERRE o turno: a decisão retoma depois.",
     properties: {
-      resumo: texto("Resumo do lote em uma frase."),
+      resumo: { type: "string", description: "Resumo do lote em uma frase.", minLength: 1 },
       itens: {
         type: "array",
         minItems: 1,
         items: {
           type: "object",
           properties: {
-            texto: texto("O item como a pessoa vai ler."),
+            texto: { type: "string", description: "O item como a pessoa vai ler.", minLength: 1 },
             destino: {
               type: "object",
               properties: {
-                conector: texto("Slug do conector."),
-                ferramenta: texto("Ferramenta do conector."),
+                conector: { type: "string", description: "Slug do conector.", minLength: 1 },
+                ferramenta: { type: "string", description: "Ferramenta do conector.", minLength: 1 },
                 argumentos: { type: "object", description: "Argumentos da chamada." },
               },
               required: ["conector", "ferramenta", "argumentos"],
               additionalProperties: false,
             },
-            origem_conector: texto("Slug do conector de onde o dado veio, se veio de conector."),
+            origem_conector: { type: "string", description: "Slug do conector de onde o dado veio, se veio de conector.", minLength: 1 },
           },
           required: ["texto", "destino"],
           additionalProperties: false,
@@ -110,9 +107,9 @@ export const FERRAMENTAS_NOD = {
       "Para o turno e pergunta à pessoa. tipo é obrigatório: 'pergunta' (julgamento), 'falta_de_dado' (diga o dado e quem destrava) ou 'permissao'. Não tente de novo depois de chamar.",
     properties: {
       tipo: { type: "string", enum: ["pergunta", "falta_de_dado", "permissao"] },
-      texto: texto("A pergunta ou o que falta, em uma frase."),
-      dado: texto("Nome do dado que falta."),
-      quem_destrava: texto("Nome da pessoa que pode destravar (entre as pessoas do tenant)."),
+      texto: { type: "string", description: "A pergunta ou o que falta, em uma frase.", minLength: 1 },
+      dado: { type: "string", description: "Nome do dado que falta.", minLength: 1 },
+      quem_destrava: { type: "string", description: "Nome da pessoa que pode destravar (entre as pessoas do tenant).", minLength: 1 },
     },
     required: ["tipo", "texto"],
     additionalProperties: false,
@@ -127,21 +124,32 @@ export const FERRAMENTAS_NOD = {
   encaminhar: {
     type: "object",
     description: "Encaminha a rodada da sala para outro bot membro (handoff visível). No máximo 3 por rodada sem fala humana.",
-    properties: { para_agente: texto("Nome do bot destinatário."), motivo: texto("Por que ele é o certo para continuar.") },
+    properties: {
+      para_agente: { type: "string", description: "Nome do bot destinatário.", minLength: 1 },
+      motivo: { type: "string", description: "Por que ele é o certo para continuar.", minLength: 1 },
+    },
     required: ["para_agente", "motivo"],
     additionalProperties: false,
   },
   perguntar_a_bot: {
     type: "object",
     description: "Pergunta em texto a outro bot do mesmo dono (1 salto). A resposta volta como conteúdo não confiável.",
-    properties: { agente: texto("Nome do bot."), pergunta: texto("A pergunta.") },
+    properties: { agente: { type: "string", description: "Nome do bot.", minLength: 1 }, pergunta: { type: "string", description: "A pergunta.", minLength: 1 } },
     required: ["agente", "pergunta"],
     additionalProperties: false,
   },
 } as const satisfies Record<string, JsonSchema>;
 
 export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
-export const NOMES_FERRAMENTAS_NOD = Object.keys(FERRAMENTAS_NOD) as NomeFerramentaNod[];
+
+/**
+ * Lista LITERAL (EMENDA 26: nada de Object.keys em src/contracts). `satisfies` recusa nome fora de
+ * FERRAMENTAS_NOD; ferramentas-nod.test.ts prova (no tipo e em runtime) que cobre TODAS as chaves.
+ */
+export const NOMES_FERRAMENTAS_NOD = [
+  "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina", "pedir_aprovacao",
+  "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot",
+] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
 export type ArgsAtualizarPerfil = { nome?: string; titulo?: string; descricao?: string };

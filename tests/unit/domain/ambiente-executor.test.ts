@@ -16,7 +16,7 @@ describe("montarAmbiente", () => {
     EDITOR: "vim",
   };
 
-  it("regime local herda o ambiente MENOS a denylist (medido em 2026-09-16: run.sh da sonda; apiKeySource='none')", () => {
+  it("regime local herda o ambiente MENOS a denylist (a sonda de 2026-09-16 mediu no run.sh: apiKeySource='none')", () => {
     const r = montarAmbiente("local", source);
     expect(r.PATH).toBe("/usr/bin");
     expect(r.HOME).toBe("/Users/x");

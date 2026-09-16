@@ -2,8 +2,8 @@ export type RegimeAmbiente = "local" | "servidor";
 
 /**
  * Regime LOCAL (ADR-015 revisado, ADR-014 invertido): o CLI é o da pessoa e resolve a própria
- * credencial pelo Keychain; o filho HERDA o ambiente menos a DENYLIST. medido em 2026-09-16:
- * o run.sh da sonda removeu exatamente estas variáveis e init.apiKeySource ficou 'none'
+ * credencial pelo Keychain; o filho HERDA o ambiente menos a DENYLIST. A sonda de 2026-09-16 mediu
+ * (run.sh): removendo exatamente estas variáveis, init.apiKeySource ficou 'none'
  * (cobrança na assinatura claude.ai); com ANTHROPIC_API_KEY herdada viraria API sem aviso.
  * NOD_.* também sai: o filho não vê segredo de sessão, URL do banco nem chave de cifra.
  */

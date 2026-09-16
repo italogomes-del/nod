@@ -83,6 +83,20 @@ describe("classificarResultado (ADR-009: estado de protocolo, nunca string de er
     expect(r.sinais).toEqual({ attempted: true, rejected: true, promptSubmitted: false, producedOutput: false });
   });
 
+  it("SIGTERM ANTES do init (driver chamou interromper(); exit 143, signal null) → interrompido com motivo indefinido, NÃO sessao_rejeitada", () => {
+    const r = classificarResultado({ eventos: [], exitCode: 143, signal: null, stderr: "", interrompidoPeloDriver: true });
+    expect(r.desfecho).toBe("interrompido");
+    expect(r.motivoInterrupcao).toBeUndefined();
+    expect(r.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: false, producedOutput: false });
+    // signal presente (SIGKILL após os 5s) segue a mesma regra, com ou sem init
+    expect(classificarResultado({ eventos: [], exitCode: null, signal: "SIGKILL", stderr: "" }).motivoInterrupcao).toBeUndefined();
+    expect(classificarResultado({ eventos: eventosDe("s6-sigterm.jsonl"), exitCode: null, signal: "SIGKILL", stderr: "" }).motivoInterrupcao).toBeUndefined();
+  });
+
+  it("sem init, exit 0 e sem signal (CLI saiu limpo sem dizer nada) → sem_progresso", () => {
+    expect(classificarResultado({ eventos: [], exitCode: 0, signal: null, stderr: "" })).toMatchObject({ desfecho: "interrompido", motivoInterrupcao: "sem_progresso" });
+  });
+
   it("spawn que não aconteceu (exitCode null, sem signal, sem eventos) → lancamento_falhou", () => {
     const r = classificarResultado({ eventos: [], exitCode: null, signal: null, stderr: "spawn ENOENT" });
     expect(r.motivoInterrupcao).toBe("lancamento_falhou");

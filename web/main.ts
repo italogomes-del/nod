@@ -5,10 +5,8 @@ import type { Rotina } from "../src/contracts/rotina.ts";
 import type { Concessao } from "../src/contracts/concessao.ts";
 
 // Ajuste mínimo de compilação contra os contratos congelados pela L2 (2026-09-16): a tela é reescrita
-// pela L9 por frames SSE. `payloadDe` lê o payload tipado como saco genérico só para renderizar.
-function payloadDe(m: Mensagem): Record<string, unknown> {
-  return (m.payload ?? {}) as Record<string, unknown>;
-}
+// pela L9 por frames SSE. Os cartões de starter/proposta saíram porque esses kinds não existem em
+// KindMensagem (propostas moram em Proposta, não em Mensagem) — sem alargar o tipo para mantê-los.
 
 let estado: Estado = estadoInicial;
 const app = document.getElementById("app")!;
@@ -131,113 +129,7 @@ function renderSidebar(e: Estado): string {
   </aside>`;
 }
 
-function renderStarter(m: Mensagem): string {
-  const pl = payloadDe(m);
-  const opts = (pl["options"] as string[][] | undefined) ?? [];
-  return `<div class="starter">
-    <div class="intro">${esc(m.texto)}</div>
-    <div class="q">
-      <h4>${esc(String(pl["title"] ?? ""))}</h4>
-      <p>${esc(String(pl["subtitle"] ?? ""))}</p>
-      <div class="choices">
-        ${opts
-          .map(
-            (o) =>
-              `<button class="choice" data-act="seed" data-seed="${esc(o[1] ?? "")}"><span class="badge">${esc(o[0] ?? "")}</span><span><b>${esc(o[1] ?? "")}</b><span>${esc(o[2] ?? "")}</span></span></button>`,
-          )
-          .join("")}
-      </div>
-      <div class="free">Ou escreva do seu jeito no campo abaixo.</div>
-    </div>
-  </div>`;
-}
-
-function renderPapel(m: Mensagem, agenteId: string): string {
-  const p = payloadDe(m);
-  const acessos = (p["acessosPedidos"] as { nome: string }[] | undefined) ?? [];
-  const nao = (p["naoDeveFazer"] as string[] | undefined) ?? [];
-  const pendente = p["estado"] === "pendente";
-  return `<div class="card-prop">
-    <div class="hd">Proposta — nada concedido ainda</div>
-    <div class="ttl">${esc(String(p["nome"] ?? "Novo Bot"))}</div>
-    <div class="it"><b>O que faz</b>${esc(String(p["instrucoes"] ?? ""))}</div>
-    <div class="it"><b>Acesso que precisa</b>${acessos.length ? acessos.map((a) => esc(a.nome)).join(", ") : "Nenhum app ainda."}</div>
-    <div class="it"><b>O que não deve fazer</b>${nao.map((l) => `• ${esc(l)}`).join("<br>")}</div>
-    ${p["rotinaResumo"] ? `<div class="it"><b>Rotina entendida (não agendada)</b>${esc(String(p["rotinaResumo"]))}</div>` : ""}
-    ${
-      pendente
-        ? `<div class="ft">
-      <button class="btn pri" data-act="confirmar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Confirmar</button>
-      <button class="btn" data-act="recusar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Agora não</button>
-    </div>`
-        : `<div class="ft"><span style="font-size:12px;color:#7b8393">Confirmado</span></div>`
-    }
-  </div>`;
-}
-
-function renderRotina(m: Mensagem, agenteId: string): string {
-  const p = payloadDe(m);
-  const pendente = p["estado"] === "pendente";
-  return `<div class="card-prop">
-    <div class="hd">Rotina proposta — nada agendado ainda</div>
-    <div class="ttl">${esc(String(p["cron"] ?? ""))} · ${esc(String(p["fusoIana"] ?? ""))}</div>
-    <div class="it">${esc(String(p["resumo"] ?? m.texto))}</div>
-    <div class="it"><b>Próximo disparo</b>${esc(String(p["proximo"] ?? "—"))}</div>
-    <div class="it"><b>Gate de aprovação</b>Ligado por padrão. Nada sai sem você.</div>
-    ${
-      pendente
-        ? `<div class="ft">
-      <button class="btn pri" data-act="confirmar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Confirmar rotina</button>
-      <button class="btn" data-act="recusar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Agora não</button>
-    </div>`
-        : ""
-    }
-  </div>`;
-}
-
-function renderConcessao(m: Mensagem, agenteId: string): string {
-  const p = payloadDe(m);
-  const caps = (p["capacidades"] as { id: string; rotulo: string }[] | undefined) ?? [];
-  const pendente = p["estado"] === "pendente";
-  return `<div class="card-prop" data-card="concessao" data-id="${esc(m.id)}">
-    <div class="hd">Conectar ${esc(String(p["nome"] ?? ""))}</div>
-    <div class="ttl">${esc(String(p["resumo"] ?? ""))}</div>
-    <div class="it">
-      <b>Este conector toca dado de aprendiz?</b>
-      <div class="sens">
-        <label><input type="radio" name="sens-${esc(m.id)}" value="toca" /> Sim, toca</label>
-        <label><input type="radio" name="sens-${esc(m.id)}" value="nao-toca" /> Não toca</label>
-      </div>
-      <p class="warn">Se você não declarar, o default é TOCA — fechado por origem, nunca por texto.</p>
-    </div>
-    <div class="it">
-      <b>Capacidades (todas começam desligadas)</b>
-      <div class="caps">
-        ${caps
-          .map(
-            (c) =>
-              `<label><input type="checkbox" data-cap="${esc(c.id)}" /> ${esc(c.rotulo)}</label>`,
-          )
-          .join("")}
-      </div>
-    </div>
-    ${
-      pendente
-        ? `<div class="ft">
-      <button class="btn pri" data-act="confirmar-app" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Conectar</button>
-      <button class="btn" data-act="recusar" data-agente="${esc(agenteId)}" data-id="${esc(m.id)}">Agora não</button>
-    </div>`
-        : ""
-    }
-  </div>`;
-}
-
-function renderMsg(m: Mensagem, agenteId: string): string {
-  const kind: string = m.kind;
-  if (kind === "starter") return renderStarter(m);
-  if (kind === "proposta-papel") return renderPapel(m, agenteId);
-  if (kind === "proposta-rotina") return renderRotina(m, agenteId);
-  if (kind === "proposta-concessao") return renderConcessao(m, agenteId);
+function renderMsg(m: Mensagem): string {
   const who = m.autoria.autor_tipo === "pessoa" ? "you" : "bot";
   return `<div class="message ${who}"><div class="bubble">${esc(m.texto)}</div></div>`;
 }
@@ -300,7 +192,7 @@ function renderChat(e: Estado): string {
       </div>
     </header>
     <section class="chat">
-      <div class="scroll" id="chatScroll"><div class="timeline">${msgs.map((m) => renderMsg(m, a.id)).join("")}</div></div>
+      <div class="scroll" id="chatScroll"><div class="timeline">${msgs.map(renderMsg).join("")}</div></div>
       <div class="composer"><div class="box">
         <textarea id="composer" rows="1" placeholder="Mensagem para o Bot"></textarea>
         <button class="send" data-act="enviar" aria-label="Enviar">↑</button>
