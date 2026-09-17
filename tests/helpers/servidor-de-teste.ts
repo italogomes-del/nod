@@ -1,5 +1,7 @@
 import type { DepsRoteador, Rota } from "../../src/adapters/http/roteador.ts";
 import { listen } from "../../src/adapters/http/server.ts";
+import { cunharCookie } from "../../src/adapters/http/sessao.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
 
 export type DepsServidorDeTeste = {
   autorizarTokenTurno?: DepsRoteador["autorizarTokenTurno"];
@@ -9,11 +11,17 @@ export type DepsServidorDeTeste = {
 export type ServidorDeTeste = {
   url: string;
   close: () => Promise<void>;
-  /** POST /api/sessao/entrar e devolve o cabeçalho cookie pronto para as rotas escopadas. */
+  /**
+   * Sessão de teste cunhada DIRETO com o segredo do servidor (a mesma receita de servidor-completo.ts):
+   * não passa por rota de login nenhuma. Definido em 2026-09-16 (E1, ADR-030): os testes de rotas,
+   * métricas e SSE não testam login, então não dependem do login de desenvolvimento.
+   */
   entrar(pessoa: "marlon" | "ana"): Promise<{ cookie: string; tenantId: string; pessoaId: string }>;
   /** fetch já com cookie e JSON; `base` é a URL escopada /api/t/:tenantId. */
   chamar(sessao: { cookie: string; tenantId: string }, metodo: string, caminho: string, corpo?: unknown): Promise<Response>;
 };
+
+const PESSOAS = { marlon: PESSOA_MARLON, ana: PESSOA_ANA } as const;
 
 /**
  * Servidor real em porta 0 (EMENDA 34) sobre o roteador da L1, recebendo as ROTAS e as DEPS da
@@ -21,9 +29,10 @@ export type ServidorDeTeste = {
  * compor.ts). Sem banco por si: quem precisa de banco injeta nas rotas.
  */
 export async function servidorDeTeste(rotas: Rota[], deps: DepsServidorDeTeste = {}): Promise<ServidorDeTeste> {
+  const segredo = deps.segredoSessao ?? "segredo-de-teste";
   const srv = await listen(0, "127.0.0.1", {
     rotas,
-    segredoSessao: deps.segredoSessao ?? "segredo-de-teste",
+    segredoSessao: segredo,
     autorizarTokenTurno: deps.autorizarTokenTurno,
   });
   const url = `http://127.0.0.1:${srv.port}`;
@@ -31,15 +40,8 @@ export async function servidorDeTeste(rotas: Rota[], deps: DepsServidorDeTeste =
     url,
     close: srv.close,
     async entrar(pessoa) {
-      const r = await fetch(`${url}/api/sessao/entrar`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pessoa }),
-      });
-      if (r.status !== 200) throw new Error(`entrar(${pessoa}) devolveu ${r.status}`);
-      const escopo = (await r.json()) as { tenantId: string; pessoaId: string };
-      const cookie = (r.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
-      return { cookie, ...escopo };
+      const escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOAS[pessoa] };
+      return { cookie: `nod_sessao=${cunharCookie(escopo, segredo)}`, ...escopo };
     },
     chamar(sessao, metodo, caminho, corpo) {
       return fetch(`${url}/api/t/${sessao.tenantId}/${caminho.replace(/^\//, "")}`, {

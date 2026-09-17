@@ -9,6 +9,7 @@ import type { eventsRepo } from "./events.repo.ts";
 import type { gastosRepo } from "./gastos.repo.ts";
 import type { inventarioRepo } from "./inventario.repo.ts";
 import type { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
+import type { maquinaTokensRepo } from "./maquina-tokens.repo.ts";
 import type { memoriasRepo } from "./memorias.repo.ts";
 import type { mensagensRepo } from "./mensagens.repo.ts";
 import type { outboxRepo } from "./outbox.repo.ts";
@@ -29,7 +30,7 @@ import type { turnosRepo } from "./turnos.repo.ts";
  * devolve T | null ou T[] — sem `throw NotFound`. Erros do banco (CHECK, UNIQUE, trigger, policy)
  * sobem como estão: quem os traduz é a borda. Única exceção deliberada: paradasRepo.ativa devolve
  * null em falha de consulta (EMENDA 10; o fail-closed mora no caso de uso).
- * `criarRepos` (index.ts) monta os 23 de uma vez; tests/helpers/repos-memoria.ts implementa o mesmo `Repos`.
+ * `criarRepos` (index.ts) monta os 24 de uma vez; tests/helpers/repos-memoria.ts implementa o mesmo `Repos`.
  */
 export type Fabrica<R> = (conn: Conn, escopo: Escopo) => R;
 
@@ -57,4 +58,5 @@ export interface Repos {
   trilha: ReturnType<typeof trilhaRepo>;
   paradas: ReturnType<typeof paradasRepo>;
   catcher: ReturnType<typeof catcherRepo>;
+  maquinaTokens: ReturnType<typeof maquinaTokensRepo>;
 }

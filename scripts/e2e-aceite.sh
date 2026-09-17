@@ -25,6 +25,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export NOD_EXECUTOR=claude-cli
+export NOD_LOGIN="${NOD_LOGIN:-stub}"
 export NOD_MODELO="${NOD_MODELO:-claude-haiku-4-5-20251001}"
 export NOD_API_PORT="${NOD_API_PORT:-8888}"
 export NOD_LONGPOLL_MS="${NOD_LONGPOLL_MS:-8000}"
@@ -85,7 +86,7 @@ npm run -s docker:up >/dev/null
 npm run -s db:migrate >/dev/null
 npm run -s db:migrate:test >/dev/null
 npm run -s db:seed >/dev/null
-ok "postgres 5434 no ar, 0001–0004 aplicadas, seed idempotente"
+ok "postgres 5434 no ar, migrações aplicadas, seed idempotente"
 
 passo "SUBIR: servidor 8888 com NOD_EXECUTOR=claude-cli (a sonda custa um turno)"
 node src/adapters/http/server.ts > "$LOG" 2>&1 &
@@ -94,7 +95,10 @@ SERVIDOR_PID=$!
 for i in $(seq 1 150); do grep -q '"evento":"nod_no_ar"' "$LOG" 2>/dev/null && break; sleep 1; done
 grep -q '"evento":"nod_no_ar"' "$LOG" || { cat "$LOG"; falha "servidor não subiu"; }
 curl -sf "$API/api/saude" | jq -e '.ok == true' >/dev/null || falha "/api/saude"
-curl -sS -c "$JAR" -X POST "$API/api/sessao/entrar" -H 'content-type: application/json' -d '{"pessoa":"marlon"}' >/dev/null
+# Login de desenvolvimento (NOD_LOGIN=stub, ADR-030): a pessoa vem do cadastro semeado, entra por id.
+PESSOA_MARLON=$(curl -sS "$API/api/sessao/modo" | jq -r '.pessoas[] | select(.nome == "Marlon") | .id')
+[ -n "$PESSOA_MARLON" ] || falha "Marlon não está no cadastro (rode npm run db:seed)"
+curl -sS -c "$JAR" -X POST "$API/api/sessao/entrar" -H 'content-type: application/json' -d "{\"pessoaId\":\"$PESSOA_MARLON\"}" >/dev/null
 T=$(curl -sS -b "$JAR" "$API/api/sessao" | jq -r .tenantId)
 P=$(curl -sS -b "$JAR" "$API/api/sessao" | jq -r .pessoaId)
 INV=$(api GET inventario)

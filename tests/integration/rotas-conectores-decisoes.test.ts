@@ -45,7 +45,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     );
     sessao = await srv.entrar("marlon");
     const repos = memoria.repos(MARLON);
-    memoria.banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M" });
+    memoria.banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
     const agente = await repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
     agenteId = agente?.id ?? "";
     conversaId = (await repos.conversas.criar({ tipo: "propria", agenteId }))?.id ?? "";

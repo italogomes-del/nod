@@ -60,6 +60,8 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
   const env = {
     ...process.env,
     NOD_EXECUTOR: "catcher",
+    // O e2e cunha o cookie direto (sessaoDe); o modo só precisa ser explícito para o boot subir (ADR-030).
+    NOD_LOGIN: "stub",
     NOD_SESSAO_SEGREDO: SEGREDO_DE_TESTE,
     NOD_CREDENTIAL_KEY: CHAVE_DE_TESTE,
     NOD_HOME: process.env.NOD_HOME ?? "~/.nod",

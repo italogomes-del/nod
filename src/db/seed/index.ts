@@ -37,6 +37,15 @@ export type ResultadoSeed = { mudancas: number };
 /** Dependências do seed: a conexão do dono (identidade) e uma fábrica de tx escopada por pessoa (exemplos). */
 export type DepsSeed = { dono: Conn; txPorPessoa: (pessoaId: string) => Transacao };
 
+/**
+ * Allowlist do login Google (ADR-030): quem não tem e-mail aqui não entra pelo Google. Sempre em
+ * minúsculas (o CHECK pessoas_email_formato da 0006 recusa caixa alta em vez de gravar dado torto).
+ * Ana fica SEM e-mail até o endereço real ser confirmado (definido em 2026-09-16): adivinhar um
+ * endereço abriria a conta de outra pessoa; null só impede o login Google dela.
+ */
+export const EMAIL_MARLON = "marlon.wanderllich@leapy.com.br";
+export const EMAIL_ANA: string | null = null;
+
 async function semearIdentidade(dono: Conn): Promise<number> {
   let n = 0;
   n += (
@@ -47,11 +56,11 @@ async function semearIdentidade(dono: Conn): Promise<number> {
   ).length;
   n += (
     await dono`
-      insert into pessoas (tenant_id, id, nome, iniciais) values
-        (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'Marlon', 'MW'),
-        (${TENANT_LEAPY}, ${PESSOA_ANA}, 'Ana', 'AN')
-      on conflict (tenant_id, id) do update set nome = excluded.nome, iniciais = excluded.iniciais
-      where (pessoas.nome, pessoas.iniciais) is distinct from (excluded.nome, excluded.iniciais)
+      insert into pessoas (tenant_id, id, nome, iniciais, email) values
+        (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'Marlon', 'MW', ${EMAIL_MARLON}),
+        (${TENANT_LEAPY}, ${PESSOA_ANA}, 'Ana', 'AN', ${EMAIL_ANA})
+      on conflict (tenant_id, id) do update set nome = excluded.nome, iniciais = excluded.iniciais, email = excluded.email
+      where (pessoas.nome, pessoas.iniciais, pessoas.email) is distinct from (excluded.nome, excluded.iniciais, excluded.email)
       returning id`
   ).length;
   return n;
