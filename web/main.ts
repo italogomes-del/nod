@@ -224,7 +224,27 @@ function renderPrincipal(): void {
   const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
   const abertos = [...document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
   const buscas = ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" }));
+  const respostas = [...document.querySelectorAll<HTMLInputElement>("[data-decisao] input")].map((el) => ({
+    decisao: el.closest<HTMLElement>("[data-decisao]")?.dataset.decisao ?? "",
+    atributo: el.hasAttribute("data-resposta") ? "data-resposta" : el.hasAttribute("data-item-texto") ? "data-item-texto" : "data-item",
+    chave: el.dataset.resposta ?? el.dataset.itemTexto ?? el.dataset.item ?? "",
+    valor: el.value, marcado: el.checked, inicial: el.defaultValue, marcadoInicial: el.defaultChecked,
+    foco: document.activeElement === el, inicio: el.selectionStart, fim: el.selectionEnd,
+  }));
   regiao("timeline", corpo);
+  for (const resposta of respostas) {
+    const el = document.querySelector<HTMLInputElement>(`[data-decisao="${CSS.escape(resposta.decisao)}"] input[${resposta.atributo}="${CSS.escape(resposta.chave)}"]`);
+    if (!el || el.disabled || el.defaultValue !== resposta.inicial || el.defaultChecked !== resposta.marcadoInicial) continue;
+    el.value = resposta.valor;
+    el.checked = resposta.marcado;
+    if (resposta.foco) {
+      el.focus({ preventScroll: true });
+      if (resposta.inicio !== null && resposta.fim !== null) el.setSelectionRange(resposta.inicio, resposta.fim);
+    }
+    const raiz = el.closest<HTMLElement>("[data-decisao]");
+    const contador = raiz?.querySelector("[data-contador]");
+    if (contador) contador.textContent = String(raiz?.querySelectorAll("input[data-item]:checked").length ?? 0);
+  }
   for (const busca of buscas) {
     const campo = document.getElementById(busca.id) as HTMLInputElement | null;
     if (campo) campo.value = busca.valor;
@@ -553,7 +573,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "desabilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", false), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),
   "decidir-aprovacao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "") }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
   "decidir-aprovacao-nenhum": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "").map((m) => ({ ...m, selecionado: false })) }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
-  "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota"] }))),
+  "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   "recusar-decisao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   responder: (el) =>
     agir(async () => {

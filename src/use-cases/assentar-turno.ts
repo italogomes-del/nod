@@ -93,7 +93,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
 
   // 0005: a sessão é do executor que a criou; o catcher não cria sessão real (devolve null).
-  if (resultado.sessaoCli) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor);
+  if (resultado.sessaoCli && turno.origem !== "rotina" && turno.origem !== "peer") await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor);
   await deps.repos.gastos.registrar({
     turnoId: turno.id,
     executor,

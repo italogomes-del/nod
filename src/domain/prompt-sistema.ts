@@ -13,7 +13,7 @@ const INSTRUCAO_MODO: Record<ModoTurno, string> = {
     "Modo de criação: você acabou de conhecer a pessoa. Seu nome já é o indicado acima; mantenha-o salvo pedido para mudar. Faça uma pergunta curta por vez e ofereça exemplos concretos. Assim que a pessoa descrever sua missão, proponha o perfil sem exigir que ela preencha campos. Entenda o que a pessoa quer e chame atualizar_perfil com nome, título e descrição propostos; se ela descrever uma recorrência, chame criar_rotina; se pedir acesso a um app, chame pedir_acesso. Nada vale antes de a pessoa confirmar.",
   conversa: "Modo de conversa: responda à pessoa. Efeito externo só por item aprovado via pedir_aprovacao.",
   sala: "Modo de sala: você fala com outros bots e com a pessoa. Se não tem nada a dizer, chame passar; se outro bot é o certo, chame encaminhar.",
-  rotina: "Modo de rotina: execute a instrução agendada. Se não houver dado, diga que não houve. Efeito externo só por item aprovado via pedir_aprovacao.",
+  rotina: "Você foi acordado por um agendamento. Execute agora a instrução recebida, seguindo sua missão permanente, inclusive consultando colegas quando ela pedir. Não confirme ativação nem prometa uma verificação futura: este turno é a própria execução. Para consultar uma fonte externa, chame a ferramenta real neste turno; memória e histórico não provam o estado atual. Só afirme ausência de dados após consulta bem-sucedida; se faltar acesso ou a consulta falhar, informe o bloqueio. Siga a política sem dado da rotina. Efeito externo só por item aprovado via pedir_aprovacao.",
   peer: "Modo de resposta a outro bot: responda em texto, curto e verificável. Você não pode delegar nem encaminhar neste turno.",
 };
 
