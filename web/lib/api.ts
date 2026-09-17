@@ -3,6 +3,7 @@ import type { ConversaDto, FrotaDto, RespostaMutacao, RotinaDto, SuaVezDto } fro
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
+import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
@@ -65,6 +66,8 @@ export function criarApi(escopo: Escopo) {
     urlEventos: `${base}/eventos`,
     frota: () => get<FrotaDto>("frota"),
     inventario: (forcar = false) => get<Inventario>(`inventario${forcar ? "?forcar=1" : ""}`),
+    executor: () => get<EstadoExecutor>("executor"),
+    trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
     enviar: (conversaId: string, texto: string) => post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, { texto }),
     pararConversa: (conversaId: string) => post<FaixaParada>(`conversas/${conversaId}/parar`),

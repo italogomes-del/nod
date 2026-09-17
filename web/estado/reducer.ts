@@ -1,6 +1,7 @@
 import type { ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
+import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
@@ -39,13 +40,15 @@ export type ConversaEstado = ConversaDto & {
 
 export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: number };
 
-export type Invalidacao = "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "salas" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+export type Invalidacao = "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
   tela: Tela;
   frota: FrotaDto | null;
   inventario: Inventario | null;
+  /** Interruptor de executor da máquina (catcher ⇄ claude-cli): estado escrito de cada opção e a última recusa. */
+  executor: EstadoExecutor | null;
   conversas: Record<string, ConversaEstado>;
   turnosVivos: Record<string, TurnoVivo>;
   salas: { sala: Sala; membros: MembroSala[] }[];
@@ -73,6 +76,7 @@ export type Acao =
   | { tipo: "frame"; frame: FrameSse; agora: number }
   | { tipo: "hidratar-frota"; frota: FrotaDto }
   | { tipo: "hidratar-inventario"; inventario: Inventario }
+  | { tipo: "hidratar-executor"; executor: EstadoExecutor }
   | { tipo: "hidratar-conversa"; conversa: ConversaDto; agora: number }
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
@@ -92,6 +96,7 @@ export const estadoInicial: Estado = {
   tela: { tipo: "frota" },
   frota: null,
   inventario: null,
+  executor: null,
   conversas: {},
   turnosVivos: {},
   salas: [],
@@ -188,7 +193,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     // definido em 2026-09-16: as 20 mais recentes bastam na tela; o registro completo está na trilha.
     return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f));
   },
-  "inventario.mudou": (e) => invalidar(e, "inventario", "frota"),
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
@@ -204,7 +209,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     };
     return invalidar({ ...e, faixaParada: faixa }, conv(f));
   },
-  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "rotinas", "conectores", "inventario", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
+  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
 export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Estado {
@@ -228,6 +233,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, frota: acao.frota, inventario: acao.frota.inventario };
     case "hidratar-inventario":
       return { ...estado, inventario: acao.inventario };
+    case "hidratar-executor":
+      return { ...estado, executor: acao.executor };
     case "hidratar-conversa": {
       const anterior = estado.conversas[acao.conversa.conversa.id];
       const vivosDaConversa = new Set(Object.values(estado.turnosVivos).filter((t) => t.conversaId === acao.conversa.conversa.id).map((t) => t.turnoId));

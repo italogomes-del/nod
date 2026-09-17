@@ -1,4 +1,5 @@
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
+import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
@@ -33,6 +34,7 @@ import { servicoSala } from "../../use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { iniciarLaco } from "../executor/laco.ts";
+import { MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
 import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.ts";
@@ -46,6 +48,7 @@ import type { DentroDeTx } from "./rotas/dentro-de-tx.ts";
 import { criarRotaDev } from "./rotas/dev.ts";
 import { criarRotaEventos } from "./rotas/eventos.ts";
 import type { DepsRotas } from "./rotas/executar-caso.ts";
+import { criarRotasExecutor } from "./rotas/executor.ts";
 import { criarRotasFrota } from "./rotas/frota.ts";
 import { rotasInternas } from "./rotas/interno.ts";
 import { criarRotaInventario } from "./rotas/inventario.ts";
@@ -72,6 +75,9 @@ import { criarRotasTurnos } from "./rotas/turnos.ts";
  */
 export type EnvApp = Readonly<Record<string, string | undefined>>;
 
+/** Liga (create + sonda) um driver ainda em sombra no registry já ligado; devolve o inventário da sonda. O boot fornece. */
+export type AtivarDriver = (id: IdDriver) => Promise<Inventario>;
+
 export type OpcoesCompor = {
   db: Db;
   env: EnvApp;
@@ -92,12 +98,15 @@ export type App = {
   tokens: TokenTurno;
   conectoresVivos: ConectoresVivos;
   inventario: ServicoInventario;
-  /** 'local' (claude-cli) ou 'catcher' — o que NOD_EXECUTOR pediu. */
-  executor: Executor;
-  idDriver: IdDriver;
+  /** Executor em uso AGORA ('local' = claude-cli; 'catcher'): nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Leia sempre na hora, nunca copie. */
+  readonly executor: Executor;
+  readonly idDriver: IdDriver;
   machineId: string;
-  /** Liga o registry sondado (boot) e o snapshot inicial da sonda. */
-  ligarRegistry(registry: Registry, inventarioInicial?: Inventario): void;
+  /** Liga o registry sondado (boot), os snapshots das sondas por driver e quem liga um driver DEPOIS do boot (interruptor). */
+  ligarRegistry(registry: Registry, inventarios?: Partial<Record<IdDriver, Inventario>>, ativar?: AtivarDriver): void;
+  /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca em tempo de execução, serializada. */
+  estadoExecutor(): EstadoExecutor;
+  trocarExecutor(id: IdExecutor): Promise<EstadoExecutor>;
   registry(): Registry | null;
   /** O laço da L4 com os sinks da composição (deltas → barramento; adapter → interruptor). */
   iniciarLaco: IniciarLaco;
@@ -122,8 +131,14 @@ function numero(v: string | undefined, padrao: number): number {
 export function comporApp(o: OpcoesCompor): App {
   const { db, env } = o;
   const relogio: Relogio = o.relogio ?? (() => Date.now());
-  const executor: Executor = env.NOD_EXECUTOR === "claude-cli" ? "local" : "catcher";
-  const idDriver: IdDriver = executor === "local" ? "claude-cli" : "catcher";
+  // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
+  // (getter/closure), nunca uma cópia — senão a troca pela interface não chega ao plano do turno seguinte.
+  let executorAtual: Executor = env.NOD_EXECUTOR === "claude-cli" ? "local" : "catcher";
+  const idDriverAtual = (): IdDriver => (executorAtual === "local" ? "claude-cli" : "catcher");
+  const IDS_DRIVER: readonly IdDriver[] = ["catcher", "claude-cli"];
+  const inventarioPorDriver: Partial<Record<IdDriver, Inventario>> = {};
+  let ativarDriver: AtivarDriver | null = null;
+  let filaDeTrocas: Promise<unknown> = Promise.resolve();
   const machineId = env.NOD_MACHINE_ID ?? "";
   const prazoDecisaoMs = numero(env.NOD_PRAZO_DECISAO_MS, 86_400_000);
   const modeloPadrao = env.NOD_MODELO ?? "claude-haiku-4-5-20251001";
@@ -182,7 +197,7 @@ export function comporApp(o: OpcoesCompor): App {
     planos: {
       async emitir(trx, turnoId, machineIdDoPlano) {
         const d = depsSobre(trx);
-        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor });
+        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -206,7 +221,7 @@ export function comporApp(o: OpcoesCompor): App {
   const ponte = criarPonteInterna(db, {
     services,
     useCases,
-    executor,
+    executor: () => executorAtual,
     agora: relogio,
     listarPessoas: o.listarPessoas,
     esquecerTurno: (id) => interruptor.esquecer(id),
@@ -249,13 +264,20 @@ export function comporApp(o: OpcoesCompor): App {
     }
     const agora = relogio();
     if (sondaCompartilhada && agora - sondaCompartilhada.em < TTL_SONDA_MS) return sondaCompartilhada.promessa;
-    const registro = registryLigado?.[idDriver];
+    const id = idDriverAtual();
+    const registro = registryLigado?.[id];
     const promessa: Promise<Inventario> = !registro
-      ? Promise.resolve({ estado: "ausente", motivo: "driver não registrado", em: agora })
+      ? Promise.resolve({ estado: "ausente", motivo: MOTIVO_NAO_REGISTRADO, em: agora })
       : registro.estado === "sombra"
         ? Promise.resolve({ estado: "ausente", motivo: registro.motivo, em: agora })
         : registro.instance.sondar();
     sondaCompartilhada = { em: agora, promessa };
+    promessa.then(
+      (inv) => {
+        inventarioPorDriver[id] = inv;
+      },
+      () => undefined,
+    );
     return promessa;
   }
   const inventario = criarInventario({
@@ -270,15 +292,107 @@ export function comporApp(o: OpcoesCompor): App {
       const tenantId = await tenantDe(pessoaId);
       if (!tenantId) return;
       const escopo = { tenantId, pessoaId };
-      await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).inventario.registrar(motorDe(executor), inv));
+      await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).inventario.registrar(motorDe(executorAtual), inv));
     },
   });
 
-  const depsRotas: DepsRotas = { abrirTx: (escopo) => abrirTxEscopada(db, escopo), services, useCases, agora: relogio, modeloPadrao, prazoDecisaoMs, executor };
+  // Interruptor de executor (definido em 2026-09-16): a troca é da MÁQUINA. Trocar para um driver em sombra
+  // tenta ligá-lo na hora (ativarDriver, fornecido pelo boot; a sonda do claude-cli custa um turno real) e só
+  // vira executor se a sonda disser 'pronto' — senão `recusa` escrita e nada muda (ADR-019 gate, ADR-029).
+  function inventarioDe(id: IdDriver): Inventario {
+    const guardado = inventarioPorDriver[id];
+    if (guardado) return guardado;
+    const registro = registryLigado?.[id];
+    const motivo = !registro
+      ? "servidor ainda sem registry"
+      : registro.estado === "pronto"
+        ? "sem sonda"
+        : registro.motivo !== MOTIVO_NAO_REGISTRADO
+          ? registro.motivo
+          : id === "claude-cli"
+            ? "ainda não sondado — trocar para ele liga o driver (custa um turno real)"
+            : "driver não disponível neste servidor";
+    return { estado: "ausente", motivo, em: relogio() };
+  }
+  /** `recusa` é da RESPOSTA da troca pedida, nunca guardada: quem só consulta (GET, outras telas) não vê a recusa de outra pessoa. */
+  function estadoExecutor(recusa: string | null = null): EstadoExecutor {
+    return { atual: idDriverAtual(), opcoes: IDS_DRIVER.map((id) => ({ id, custo: id === "catcher" ? "zero" : "real", inventario: inventarioDe(id) })), recusa };
+  }
+  function recusar(id: IdExecutor, atual: IdDriver, motivo: string): EstadoExecutor {
+    log("aviso", "executor_troca_recusada", { pedido: id, atual, motivo });
+    return estadoExecutor(`${id} em sombra: ${motivo}`);
+  }
+  async function trocar(id: IdExecutor): Promise<EstadoExecutor> {
+    const anterior = idDriverAtual();
+    if (id === anterior) return estadoExecutor();
+    const registry = registryLigado;
+    if (!registry) return estadoExecutor("servidor ainda sem registry");
+    try {
+      // 1. Sonda ANTES de virar: liga o driver em sombra (no claude-cli custa um turno) ou reaproveita a sonda recente do
+      //    driver já pronto; sonda velha (> TTL) é refeita — um driver pronto no boot pode ter sido deslogado desde então.
+      const registro = registry[id];
+      const conhecido = inventarioPorDriver[id];
+      let inv: Inventario;
+      if (registro.estado !== "pronto") {
+        if (!ativarDriver) return recusar(id, anterior, registro.motivo);
+        inv = await ativarDriver(id);
+      } else if (conhecido?.estado === "pronto" && relogio() - conhecido.em < TTL_SONDA_MS) inv = conhecido;
+      else inv = await registro.instance.sondar(); // sem sonda recente que diga 'pronto': sonda de novo (uma recusa recente não é definitiva)
+      inventarioPorDriver[id] = inv;
+      if (inv.estado !== "pronto") return recusar(id, anterior, `${inv.estado}: ${inv.motivo}`);
+      const ligado = registry[id];
+      if (ligado.estado !== "pronto") return recusar(id, anterior, ligado.motivo);
+
+      // 2. Ainda antes de virar: inventário persistido por pessoa sob o motor NOVO (é o que enviarMensagem e emitirPlanoTurno
+      //    leem no gate pré-spawn) e máquina anunciada com ele — nenhum turno nasce 'ausente' na janela da troca.
+      const novo: Executor = id === "claude-cli" ? "local" : "catcher";
+      const pessoas = await listar();
+      for (const p of pessoas) {
+        const escopo: Escopo = { tenantId: p.tenantId, pessoaId: p.id };
+        await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).inventario.registrar(motorDe(novo), inv));
+      }
+      for (const m of ponte.maquinasConectadas()) await ponte.conectar({ ...m, inventario: inv });
+
+      // 3. Vira por último. A sonda da troca vale como a sonda da máquina (uma troca custa UM turno, não N); o cache do
+      //    inventário por pessoa é invalidado e cada tela aberta recebe o aviso.
+      executorAtual = novo;
+      inventarioInicial = null;
+      sondaCompartilhada = { em: relogio(), promessa: Promise.resolve(inv) };
+      for (const p of pessoas) {
+        inventario.invalidar(p.id);
+        barramento.publicar(p.id, "inventario.mudou", { motor: id, anterior });
+      }
+      log("info", "executor_trocado", { de: anterior, para: id, inventario: inv.estado });
+      return estadoExecutor();
+    } catch (erro) {
+      // Nada virou (o executor só muda no passo 3, que não lança): estado escrito, nunca 500 mudo (ADR-029).
+      const nome = erro instanceof Error ? erro.name : "desconhecido";
+      log("erro", "executor_troca_falhou", { pedido: id, atual: anterior, erro: nome });
+      return estadoExecutor(`falha ao trocar para ${id}: ${nome}`);
+    }
+  }
+  function trocarExecutor(id: IdExecutor): Promise<EstadoExecutor> {
+    const p = filaDeTrocas.then(() => trocar(id));
+    filaDeTrocas = p.catch(() => undefined);
+    return p;
+  }
+
+  const depsRotas: DepsRotas = {
+    abrirTx: (escopo) => abrirTxEscopada(db, escopo),
+    services,
+    useCases,
+    agora: relogio,
+    modeloPadrao,
+    prazoDecisaoMs,
+    get executor() {
+      return executorAtual;
+    },
+  };
   const depsL7: DepsRotasL7 = { txPara: (escopo) => abrirTxEscopada(db, escopo), services, useCases, agora: relogio };
   const rotas: Rota[] = [
     ...criarRotasFrota(depsRotas),
     criarRotaInventario({ inventario }),
+    ...criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor }),
     ...criarRotasAgentes(depsRotas),
     ...criarRotasConversas(depsRotas),
     ...criarRotasPropostas(depsRotas),
@@ -291,10 +405,21 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
-    ...criarRotasDecisoes({ dentro, services, prazoDecisaoMs, executor }),
+    ...criarRotasDecisoes({
+      dentro,
+      services,
+      prazoDecisaoMs,
+      get executor() {
+        return executorAtual;
+      },
+    }),
     criarRotaEventos(barramento),
     criarRotaMetricas(),
-    criarRotaDev(dentro, { executor: idDriver }),
+    criarRotaDev(dentro, {
+      get executor() {
+        return idDriverAtual();
+      },
+    }),
   ];
 
   function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta", dados: Record<string, unknown>): void {
@@ -332,15 +457,26 @@ export function comporApp(o: OpcoesCompor): App {
     tokens,
     conectoresVivos,
     inventario,
-    executor,
-    idDriver,
+    get executor() {
+      return executorAtual;
+    },
+    get idDriver() {
+      return idDriverAtual();
+    },
     machineId,
-    ligarRegistry(registry, inicial) {
+    ligarRegistry(registry, inventarios, ativar) {
       registryLigado = registry;
-      inventarioInicial = inicial ?? null;
+      for (const id of IDS_DRIVER) {
+        const inv = inventarios?.[id];
+        if (inv) inventarioPorDriver[id] = inv;
+      }
+      inventarioInicial = inventarios?.[idDriverAtual()] ?? null;
+      ativarDriver = ativar ?? null;
       sondaCompartilhada = null;
       ligarRegistryResolvido();
     },
+    estadoExecutor,
+    trocarExecutor,
     registry: () => registryLigado,
     iniciarLaco: iniciar,
     aoRegistrarCatcher,

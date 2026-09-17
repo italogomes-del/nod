@@ -89,8 +89,8 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(muitas.negacoes[0]?.nome).toBe("n24");
   });
 
-  it("inventario.mudou invalida inventário e frota; agente.mudou invalida frota (+ memória quando a ação é memoria_criada, + concessões quando é concessao_criada)", () => {
-    expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota"]);
+  it("inventario.mudou invalida inventário, frota e o interruptor de executor; agente.mudou invalida frota (+ memória quando a ação é memoria_criada, + concessões quando é concessao_criada)", () => {
+    expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", `conversa:${CONVERSA}`, "memoria:a1"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", kind: "concessao_criada" }), AGORA).invalidacoes).toEqual(["frota", "concessoes:a1"]);
@@ -104,7 +104,7 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("resumed:false reidrata TUDO (replay parcial nunca é aplicado, ADR-016); resumed:true não faz nada", () => {
     const e = aplicarFrame(comConversa(), frame("resumed", { resumed: false }), AGORA);
-    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "rotinas", "conectores", "inventario", "salas", `conversa:${CONVERSA}`]);
+    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "rotinas", "conectores", "inventario", "executor", "salas", `conversa:${CONVERSA}`]);
     expect(aplicarFrame(comConversa(), frame("resumed", { resumed: true }), AGORA).invalidacoes).toEqual([]);
   });
 });
