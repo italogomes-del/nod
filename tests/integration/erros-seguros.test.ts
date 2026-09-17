@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { listen } from "../../src/adapters/http/server.ts";
 import type { Rota } from "../../src/adapters/http/roteador.ts";
+import { cunharCookie } from "../../src/adapters/http/sessao.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
 
 /** ADR-002/004 refinados: a mensagem de erro é canal de vazamento. Nunca err.message na resposta. */
@@ -24,8 +25,7 @@ describe("erros seguros", () => {
     const srv = await listen(0, "127.0.0.1", { rotas, segredoSessao: "s" });
     base = `http://127.0.0.1:${srv.port}`;
     close = srv.close;
-    const entrar = await fetch(`${base}/api/sessao/entrar`, { method: "POST", body: JSON.stringify({ pessoa: "marlon" }) });
-    jar = { cookie: (entrar.headers.get("set-cookie") ?? "").split(";")[0] ?? "" };
+    jar = { cookie: `nod_sessao=${cunharCookie({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }, "s")}` };
   });
   afterAll(() => close());
 

@@ -21,6 +21,7 @@ describe("servidor: saúde, sessão e roteador", () => {
     const srv = await listen(0, "127.0.0.1", {
       rotas: rotasDeTeste,
       segredoSessao: "segredo-de-teste",
+      sessao: { modo: "stub", pessoas: async () => [{ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon" }] },
       autorizarTokenTurno: (token) =>
         token === "token-bom" ? { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, turnoId: "t1", agenteId: "a1" } : null,
     });
@@ -38,10 +39,13 @@ describe("servidor: saúde, sessão e roteador", () => {
   it("sessão ausente → 401; tenant da URL ≠ sessão → 404; casando → o handler recebe o escopo", async () => {
     expect((await fetch(`${base}/api/t/${TENANT_LEAPY}/eco`)).status).toBe(401);
 
+    // Login de desenvolvimento (NOD_LOGIN=stub, ADR-030): a tela lista as pessoas do cadastro e entra por id.
+    const modo = await fetch(`${base}/api/sessao/modo`);
+    expect(await modo.json()).toEqual({ modo: "stub", pessoas: [{ id: PESSOA_MARLON, nome: "Marlon" }] });
     const entrar = await fetch(`${base}/api/sessao/entrar`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pessoa: "marlon" }),
+      body: JSON.stringify({ pessoaId: PESSOA_MARLON }),
     });
     expect(entrar.status).toBe(200);
     const cookie = entrar.headers.get("set-cookie") ?? "";
@@ -65,14 +69,32 @@ describe("servidor: saúde, sessão e roteador", () => {
     expect((await fetch(`${base}/api/t/${TENANT_LEAPY}/eco`, { headers: cookieForjado })).status).toBe(401);
   });
 
-  it("pessoa desconhecida ao entrar → 400 entrada_invalida sem detalhe", async () => {
-    const r = await fetch(`${base}/api/sessao/entrar`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pessoa: "intruso" }),
-    });
-    expect(r.status).toBe(400);
-    expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+  it("pessoa fora do cadastro (ou o nome antigo 'marlon') ao entrar → 400 entrada_invalida sem detalhe", async () => {
+    for (const corpo of [{ pessoaId: "00000000-0000-4000-8000-000000000000" }, { pessoa: "marlon" }]) {
+      const r = await fetch(`${base}/api/sessao/entrar`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+      expect(r.status).toBe(400);
+      expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+    }
+  });
+
+  it("stub sem ninguém no cadastro: a lista vem vazia e ninguém entra", async () => {
+    const vazio = await listen(0, "127.0.0.1", { rotas: rotasDeTeste, segredoSessao: "s", sessao: { modo: "stub" } });
+    try {
+      const u = `http://127.0.0.1:${vazio.port}`;
+      expect(await (await fetch(`${u}/api/sessao/modo`)).json()).toEqual({ modo: "stub", pessoas: [] });
+      const r = await fetch(`${u}/api/sessao/entrar`, { method: "POST", body: JSON.stringify({ pessoaId: PESSOA_MARLON }) });
+      expect(r.status).toBe(400);
+    } finally {
+      await vazio.close();
+    }
+  });
+
+  it("no modo stub as rotas do Google não existem", async () => {
+    expect((await fetch(`${base}/api/sessao/google`, { redirect: "manual" })).status).toBe(404);
   });
 
   it("rota interna: Origin → 403 antes do token; sem token → 401; com token → identidade do token", async () => {
@@ -89,7 +111,8 @@ describe("servidor: saúde, sessão e roteador", () => {
     expect(((await r.json()) as { codigo: string }).codigo).toBe("nao_encontrado");
   });
 
-  it("recusa NOD_HOST fora de 127.0.0.1 enquanto a sessão for stub", () => {
+  it("recusa NOD_HOST fora de 127.0.0.1 com o login de desenvolvimento (stub)", () => {
     expect(() => listen(0, "0.0.0.0")).toThrow(/NOD_HOST=0.0.0.0 recusado/);
+    expect(() => listen(0, "0.0.0.0", { sessao: { modo: "stub" } })).toThrow(/NOD_HOST=0.0.0.0 recusado/);
   });
 });

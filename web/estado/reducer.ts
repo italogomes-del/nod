@@ -1,4 +1,4 @@
-import type { ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
+import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
@@ -28,7 +28,8 @@ export type Tela =
   | { tipo: "rotinas" }
   | { tipo: "conectores" }
   | { tipo: "sua-vez" }
-  | { tipo: "nova-sala" };
+  | { tipo: "nova-sala" }
+  | { tipo: "chaves" };
 
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
@@ -40,7 +41,7 @@ export type ConversaEstado = ConversaDto & {
 
 export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: number };
 
-export type Invalidacao = "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+export type Invalidacao = "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -58,6 +59,13 @@ export type Estado = {
   conectores: Conector[];
   concessoes: Record<string, Concessao[]>;
   memorias: Record<string, Memoria[]>;
+  /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
+  chaves: ChaveMaquinaDto[] | null;
+  /**
+   * A chave crua recém-emitida: mostrada UMA vez e descartada ao sair da tela. Fica só na memória da
+   * aba — nunca em storage — e o servidor não tem como mostrá-la de novo.
+   */
+  chaveEmitida: ChaveEmitidaDto | null;
   negacoes: NegacaoVista[];
   faixaParada: FaixaParada | null;
   conexao: { estado: EstadoConexao; tentativa: number; proximaEmMs: number | null };
@@ -85,6 +93,8 @@ export type Acao =
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
+  | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
+  | { tipo: "chave-emitida"; emitida: ChaveEmitidaDto | null }
   | { tipo: "faixa"; faixa: FaixaParada | null }
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
@@ -106,6 +116,8 @@ export const estadoInicial: Estado = {
   conectores: [],
   concessoes: {},
   memorias: {},
+  chaves: null,
+  chaveEmitida: null,
   negacoes: [],
   faixaParada: null,
   conexao: { estado: "parado", tentativa: 0, proximaEmMs: null },
@@ -220,9 +232,16 @@ export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Es
 export function reduzir(estado: Estado, acao: Acao): Estado {
   switch (acao.tipo) {
     case "sessao":
-      return { ...estado, sessao: acao.escopo };
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, chaveEmitida: null };
     case "navegar":
-      return { ...estado, tela: acao.tela, erro: null, faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null };
+      return {
+        ...estado,
+        tela: acao.tela,
+        erro: null,
+        faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
+        // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
+        chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
+      };
     case "tick":
       return { ...estado, agora: acao.agora };
     case "conexao":
@@ -256,6 +275,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
     case "hidratar-salas":
       return { ...estado, salas: acao.salas };
+    case "hidratar-chaves":
+      return { ...estado, chaves: acao.chaves };
+    case "chave-emitida":
+      return acao.emitida ? invalidar({ ...estado, chaveEmitida: acao.emitida }, "chaves") : { ...estado, chaveEmitida: null };
     case "faixa":
       return { ...estado, faixaParada: acao.faixa };
     case "invalidar":
@@ -294,5 +317,6 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "rotinas" && estado.rotinas.length === 0) faltas.push("rotinas");
   if (t.tipo === "conectores" && estado.conectores.length === 0) faltas.push("conectores");
   if (t.tipo === "sua-vez" && !estado.suaVez) faltas.push("sua-vez");
+  if (t.tipo === "chaves" && !estado.chaves) faltas.push("chaves");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }

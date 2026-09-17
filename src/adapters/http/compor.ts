@@ -40,6 +40,7 @@ import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
 import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
+import { rotasMaquinas } from "./rotas/maquinas.ts";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
@@ -400,6 +401,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasConcessoes({ dentro }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
+    ...rotasMaquinas({ dentro }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasInternas({ dentro, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),

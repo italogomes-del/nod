@@ -4,10 +4,10 @@ import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
 import { responderMetricas } from "./rotas/metricas.ts";
 import { rotaSaude } from "./rotas/saude.ts";
-import { criarSessao } from "./sessao.ts";
+import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type OpcoesSessao } from "./sessao.ts";
 
 /**
- * Servidor: roteador + saúde + sessão stub + estático + as rotas compostas (compor.ts). Sem
+ * Servidor: roteador + saúde + sessão (google ou stub de desenvolvimento, ADR-030) + estático + as rotas compostas (compor.ts). Sem
  * framework: node:http puro. O ponto de entrada (main) é server.ts, que chama boot.ts — este módulo
  * não importa boot.ts para o ciclo boot → listen não travar o top-level await (medido em 2026-09-16:
  * "Detected unsettled top-level await" e o processo saía sem escutar).
@@ -21,10 +21,13 @@ export interface OpcoesServidor {
   segredoSessao?: string;
   staticDir?: string;
   autorizarTokenTurno?: DepsRoteador["autorizarTokenTurno"];
+  /** Modo de login (ADR-030). Default `stub`, que só escuta em loopback; o boot SEMPRE passa o do NOD_LOGIN. */
+  sessao?: OpcoesSessao;
 }
 
 export function criarServidor(opcoes: OpcoesServidor = {}) {
-  const sessao = criarSessao(opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO ?? "dev-sem-segredo");
+  const opcoesSessao = opcoes.sessao ?? { modo: "stub" };
+  const sessao = criarSessao(segredoEfetivo(opcoesSessao.modo, opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO), opcoesSessao);
   const rotas: Rota[] = [rotaSaude, ...sessao.rotas, ...(opcoes.rotas ?? [])];
   const roteador = criarRoteador(rotas, {
     resolverEscopo: sessao.resolverEscopo,
@@ -45,10 +48,8 @@ export function listen(
   host = process.env.NOD_HOST ?? "127.0.0.1",
   opcoes: OpcoesServidor = {},
 ): Promise<{ port: number; close: () => Promise<void> }> {
-  // Sessão stub por cookie só é aceitável em loopback (riscos do plano; ADR-019/021).
-  if (host !== "127.0.0.1" && host !== "localhost") {
-    throw new Error(`NOD_HOST=${host} recusado: enquanto a sessão for stub por cookie o servidor só escuta em 127.0.0.1`);
-  }
+  // ADR-030 (E1.5/E1.6): o login de desenvolvimento só escuta em loopback; o login real exige segredo forte.
+  exigirConfiguracaoSegura({ modo: opcoes.sessao?.modo ?? "stub", host, segredo: opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO });
   const server = criarServidor(opcoes);
   return new Promise((resolve) => {
     server.listen(port, host, () => {

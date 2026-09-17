@@ -59,6 +59,7 @@ export type BancoMemoria = {
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
   outbox: (ItemOutbox & { tenantId: string; ownerId: string; entregueEm: number | null; abandonadoEm: number | null; canceladoEm: number | null })[];
+  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null }[];
 };
 
 export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escopo): Repos } {
@@ -89,6 +90,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     catcher: [],
     events: [],
     outbox: [],
+    maquinaTokens: [],
   };
   return { banco, repos: (escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }) => reposSobre(banco, escopo) };
 }
@@ -1044,6 +1046,34 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .sort((x, y) => y.em - x.em)
           .slice(0, limite)
           .map(({ tenantId: _t, ...r }) => r);
+      },
+    },
+    maquinaTokens: {
+      async criar(e) {
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), nome: e.nome, prefixo: e.prefixo, hash: e.hash, criadaEm: agora(), ultimoUsoEm: null as number | null, expiraEm: null as number | null, revogadaEm: null as number | null };
+        b.maquinaTokens.push(l);
+        return { id: l.id, nome: l.nome, prefixo: l.prefixo, criadaEm: l.criadaEm, ultimoUsoEm: null, revogadaEm: null };
+      },
+      async listar() {
+        return b.maquinaTokens
+          .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId)
+          .sort((x, y) => y.criadaEm - x.criadaEm)
+          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }));
+      },
+      async revogar(id, em) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        if (!l) return false;
+        l.revogadaEm ??= em;
+        return true;
+      },
+      async buscarVivaPorHash(hash, em) {
+        // Filtra expiração como o repo real (maquina-tokens.repo.ts): duplo que ignora `em` esconde bug.
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.revogadaEm === null && (x.expiraEm === null || x.expiraEm > em) && x.hash.equals(hash));
+        return l ? { id: l.id, hash: l.hash } : null;
+      },
+      async marcarUso(id, em) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        if (l) l.ultimoUsoEm = em;
       },
     },
   } satisfies Repos;

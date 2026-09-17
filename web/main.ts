@@ -1,8 +1,10 @@
+import type { ModoSessaoDto } from "../src/contracts/api.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { botao, esc, esquecerRegiao, iconeAgente, regiao } from "./lib/render.ts";
+import { renderChaves } from "./telas/chaves.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
 import { inventarioEmUso, renderFrota, textoInventario } from "./telas/frota.ts";
@@ -22,6 +24,8 @@ let api: Api | null = null;
 let live: LiveEvents | null = null;
 let composerDe: string | null = null;
 let reidratando = false;
+/** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
+let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, recusado: false };
 
 function dispatch(acao: Acao): void {
   estado = reduzir(estado, acao);
@@ -58,6 +62,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
   if (q === "conectores") return { tipo: "hidratar-conectores", conectores: (await api.conectores()).conectores };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
+  if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q.startsWith("conversa:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), concessoes: (await api.concessoes(q.slice(11))).concessoes };
@@ -97,6 +102,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas") return true;
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil";
+  if (q === "chaves") return t.tipo === "chaves";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
   if (q.startsWith("concessoes:")) return (t.tipo === "perfil" || t.tipo === "conversa") && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
@@ -112,7 +118,7 @@ function renderRail(): string {
   const abertos = estado.suaVez?.itens.filter((i) => i.estadoColuna !== "vencido").length ?? 0;
   const item = (tipo: Tela["tipo"], icone: string, rotulo: string, badge = 0) =>
     `<button class="nv" data-act="navegar" data-tela="${tipo}" aria-current="${t === tipo ? "true" : "false"}"><span class="ic">${icone}</span><span class="tl">${rotulo}</span>${badge ? `<span class="b">${badge}</span>` : ""}</button>`;
-  return `${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Conectores")}
+  return `${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Conectores")}${item("chaves", "⚿", "Chaves")}
     <div class="rail-rodape"><span class="conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></div>`;
 }
 
@@ -190,6 +196,9 @@ function renderPrincipal(): void {
     case "nova-sala":
       corpo = renderNovaSala(estado);
       break;
+    case "chaves":
+      corpo = renderChaves(estado);
+      break;
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
@@ -218,12 +227,31 @@ function renderPrincipal(): void {
   document.body.classList.toggle("ocupado", estado.ocupado);
 }
 
+/**
+ * Entrada (ADR-030). A recusa do Google é UMA mensagem para todos os motivos — o servidor não diz se
+ * foi domínio, cadastro ou verificação, e a tela também não, para não contar quem trabalha na Leapy.
+ */
+function renderEntrada(): string {
+  const m = entrada.modo;
+  const recusa = entrada.recusado
+    ? `<p class="erro" role="alert">Não foi possível entrar com essa conta. Use a sua conta Google da Leapy (@leapy.com.br). Se ela já é da Leapy, peça para ser cadastrada no nod.</p>`
+    : "";
+  if (!m) return `<section class="tela entrar"><h1>nod</h1><p class="mudo">carregando…</p></section>`;
+  if (m.modo === "google") {
+    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google da Leapy.</p>${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a></section>`;
+  }
+  const pessoas = m.pessoas.length
+    ? m.pessoas.map((p, i) => botao("entrar", `Entrar como ${esc(p.nome)}`, { classe: i === 0 ? "pri" : undefined, dados: { pessoa: p.id } })).join(" ")
+    : '<p class="mudo">Nenhuma pessoa no cadastro. Rode <code>npm run db:seed</code>.</p>';
+  return `<section class="tela entrar"><h1>nod</h1><p>Login de desenvolvimento (só nesta máquina): entre como uma pessoa do cadastro.</p>${pessoas}</section>`;
+}
+
 function render(): void {
   if (!estado.sessao) {
     regiao("rail", "");
     regiao("sidebar", "");
     regiao("cabecalho", "");
-    regiao("timeline", `<section class="tela entrar"><h1>nod</h1><p>Sessão stub de desenvolvimento (só em 127.0.0.1): entre como uma pessoa do seed.</p>${botao("entrar", "Entrar como Marlon", { classe: "pri", dados: { pessoa: "marlon" } })} ${botao("entrar", "Entrar como Ana", { dados: { pessoa: "ana" } })}</section>`);
+    regiao("timeline", renderEntrada());
     regiao("composer", "");
     return;
   }
@@ -253,11 +281,24 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
   window.setInterval(() => dispatch({ tipo: "tick", agora: Date.now() }), 15_000);
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("entrar") === "recusado") {
+    entrada = { ...entrada, recusado: true };
+    url.searchParams.delete("entrar");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
   try {
     await iniciarSessao(await sessaoApi.atual());
   } catch (e) {
-    if (e instanceof ErroApi && e.status === 401) render();
-    else dispatch({ tipo: "erro", erro: erroDe(e) });
+    if (e instanceof ErroApi && e.status === 401) {
+      render();
+      try {
+        entrada = { ...entrada, modo: await sessaoApi.modo() };
+        render();
+      } catch (e2) {
+        dispatch({ tipo: "erro", erro: erroDe(e2) });
+      }
+    } else dispatch({ tipo: "erro", erro: erroDe(e) });
   }
 }
 
@@ -302,10 +343,10 @@ function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; tex
 }
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
-  entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa === "ana" ? "ana" : "marlon"))),
+  entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala") navegar({ tipo: tela });
+    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves") navegar({ tipo: tela });
   },
   "abrir-conversa": (el) => navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" }),
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
@@ -376,10 +417,22 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       await api!.retomar(el.dataset.id ?? "", texto || undefined);
       dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
     }),
+  "revogar-chave": (el) => {
+    if (!window.confirm(`Cancelar a chave "${el.dataset.nome ?? ""}"? O computador dela para de conseguir entrar na hora.`)) return;
+    return agir(async () => void (await api!.revogarChave(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["chaves"] })));
+  },
+  "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
   reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  "emitir-chave": (form) =>
+    agir(async () => {
+      const nome = (form.elements.namedItem("nome") as HTMLInputElement | null)?.value.trim() ?? "";
+      const emitida = await api!.emitirChave(nome);
+      form.reset();
+      dispatch({ tipo: "chave-emitida", emitida });
+    }),
   "criar-agente": (form) =>
     agir(async () => {
       const nome = (form.elements.namedItem("nome") as HTMLInputElement | null)?.value.trim() || undefined;

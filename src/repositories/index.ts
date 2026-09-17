@@ -9,6 +9,7 @@ import { eventsRepo } from "./events.repo.ts";
 import { gastosRepo } from "./gastos.repo.ts";
 import { inventarioRepo } from "./inventario.repo.ts";
 import { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
+import { maquinaTokensRepo } from "./maquina-tokens.repo.ts";
 import { memoriasRepo } from "./memorias.repo.ts";
 import { mensagensRepo } from "./mensagens.repo.ts";
 import { outboxRepo } from "./outbox.repo.ts";
@@ -24,7 +25,7 @@ import type { Repos } from "./tipos.ts";
 import { trilhaRepo } from "./trilha.repo.ts";
 import { turnosRepo } from "./turnos.repo.ts";
 
-/** Os 23 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Leapy §1). */
+/** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Leapy §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
   return {
     pessoas: pessoasRepo(conn, escopo),
@@ -50,6 +51,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     trilha: trilhaRepo(conn, escopo),
     paradas: paradasRepo(conn, escopo),
     catcher: catcherRepo(conn, escopo),
+    maquinaTokens: maquinaTokensRepo(conn, escopo),
   };
 }
 

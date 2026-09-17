@@ -1,5 +1,5 @@
 import type { Agente } from "../../src/contracts/agente.ts";
-import type { ConversaDto, FrotaDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
+import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
@@ -106,11 +106,20 @@ export function criarApi(escopo: Escopo) {
     reabrir: (id: string) => post<RespostaMutacao>(`decisoes/${id}/reabrir`),
     trilha: (q: string) => get<{ linhas: unknown[] }>(`trilha${q ? `?${q}` : ""}`),
     devCatcher: () => get<{ executor: string; registros: RegistroCatcher[] }>("dev/catcher"),
+    chaves: () => get<{ chaves: ChaveMaquinaDto[] }>("maquinas/chaves"),
+    emitirChave: (nome: string) => post<ChaveEmitidaDto>("maquinas/chaves", { nome }),
+    revogarChave: (id: string) => del<{ ok: true }>(`maquinas/chaves/${id}`),
   };
 }
 
-/** Sessão stub do servidor (ADR-019/021): GET /api/sessao devolve o escopo ou 401; entrar é dev-only. */
+/**
+ * Sessão (ADR-019/030): GET /api/sessao devolve o escopo ou 401. O modo diz como a tela de entrada se
+ * desenha: `google` é um link de navegação para /api/sessao/google (o servidor redireciona); `entrar`
+ * só existe no login de desenvolvimento (NOD_LOGIN=stub, 127.0.0.1).
+ */
 export const sessao = {
   atual: () => pedir<Escopo>("GET", "/api/sessao"),
-  entrar: (pessoa: "marlon" | "ana") => pedir<Escopo>("POST", "/api/sessao/entrar", { pessoa }),
+  modo: () => pedir<ModoSessaoDto>("GET", "/api/sessao/modo"),
+  entrar: (pessoaId: string) => pedir<Escopo>("POST", "/api/sessao/entrar", { pessoaId }),
+  urlGoogle: "/api/sessao/google",
 };

@@ -10,6 +10,18 @@ import type { Rotina } from "./rotina.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
+
+/**
+ * Como a tela de entrada deve se desenhar (ADR-030): `google` mostra o botão "Entrar com Google";
+ * `stub` (só desenvolvimento, só em 127.0.0.1) lista as pessoas do cadastro.
+ */
+export type ModoSessaoDto = { modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] };
+
+/** Chave de máquina como a dona a vê na lista (ADR-031): NUNCA traz a chave nem o hash. */
+export type ChaveMaquinaDto = { id: string; nome: string; prefixo: string; criadaEm: EpochMs; ultimoUsoEm: EpochMs | null; revogadaEm: EpochMs | null };
+
+/** Resposta da emissão: a chave crua aparece AQUI e em mais lugar nenhum. */
+export type ChaveEmitidaDto = { chave: string; dados: ChaveMaquinaDto };
 export type ErroDto = { codigo: string; mensagem: string; correlation_id?: string | null };
 
 export type FrotaDto = {
@@ -53,8 +65,13 @@ export type EntradaRota = { metodo: MetodoHttp; caminho: string; lane: "L1" | "L
  */
 export const ROTAS = [
   { metodo: "GET", caminho: "/api/saude", lane: "L1" },
+  /** Só com NOD_LOGIN=stub (desenvolvimento, loopback): entra como uma pessoa do cadastro (ADR-030). */
   { metodo: "POST", caminho: "/api/sessao/entrar", lane: "L1" },
   { metodo: "GET", caminho: "/api/sessao", lane: "L1" },
+  { metodo: "GET", caminho: "/api/sessao/modo", lane: "L1" },
+  /** Só com NOD_LOGIN=google (E1.2, ADR-030). */
+  { metodo: "GET", caminho: "/api/sessao/google", lane: "L1" },
+  { metodo: "GET", caminho: "/api/sessao/google/callback", lane: "L1" },
   { metodo: "GET", caminho: "frota", lane: "L6" },
   { metodo: "GET", caminho: "inventario", lane: "L9" },
   /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca catcher ⇄ claude-cli em tempo de execução. */
@@ -110,4 +127,8 @@ export const ROTAS = [
   /** Acréscimos da L6 (definido em 2026-09-16): estado do turno para a web/e2e e retomada direta por turno, sem decisão. */
   { metodo: "GET", caminho: "turnos/:id", lane: "L6" },
   { metodo: "POST", caminho: "turnos/:id/retomar", lane: "L6" },
+  /** Chaves de máquina (E1.3, ADR-031): emitir (a chave crua sai uma vez), listar e revogar. */
+  { metodo: "POST", caminho: "maquinas/chaves", lane: "L9" },
+  { metodo: "GET", caminho: "maquinas/chaves", lane: "L9" },
+  { metodo: "DELETE", caminho: "maquinas/chaves/:id", lane: "L9" },
 ] as const satisfies readonly EntradaRota[];

@@ -10,7 +10,7 @@ const destino = { conector: "email", ferramenta: "enviar", argumentos: { texto: 
 
 async function cenarioComDecisao(opcoes: OpcoesDepsFalsos = {}) {
   const { deps, banco, chamadas } = depsFalsos(opcoes);
-  banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M" });
+  banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const email = await deps.repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });

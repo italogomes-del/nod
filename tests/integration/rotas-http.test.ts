@@ -10,8 +10,12 @@ import { planoDeTeste } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
 const UUID = "00000000-0000-4000-8000-000000000000";
-/** Rotas que ESCREVEM sem pré-condição (parar cria a parada) ou nunca terminam (SSE): fora da varredura da tabela. */
-const FORA_DA_VARREDURA = new Set(["parar", "eventos"]);
+/**
+ * Rotas que ESCREVEM sem pré-condição (parar cria a parada; POST maquinas/chaves emite uma chave de
+ * verdade, ADR-031) ou nunca terminam (SSE): fora da varredura da tabela, que promete não commitar.
+ * As chaves têm o próprio teste em tests/concurrency/chaves-maquina-http.test.ts (mora lá porque COMMITA).
+ */
+const FORA_DA_VARREDURA = new Set(["parar", "eventos", "maquinas/chaves"]);
 
 /**
  * A forma HTTP do app composto (critério de pronto da L9): sessão ausente 401, tenant ≠ sessão 404,
