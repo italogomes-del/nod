@@ -183,6 +183,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           prompt_submitted = prompt_submitted or ${sinais.promptSubmitted ?? false},
           produced_output = produced_output or ${sinais.producedOutput ?? false}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and machine_id = ${machineId}
+          and lease_ate > ${data(agora)}
         returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo`;
       return { ativo: l?.ativo === true };
     },

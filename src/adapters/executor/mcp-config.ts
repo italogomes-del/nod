@@ -15,11 +15,12 @@ export type LigacaoMcp = {
   proxyPath: string;
   /** Node que roda o proxy; default = o mesmo deste processo. */
   nodePath?: string;
+  electronComoNode?: boolean;
 };
 
 export type McpConfig = {
   mcpServers: {
-    nod: { command: string; args: string[]; env: { NOD_URL: string; NOD_TOKEN_TURNO: string } };
+    nod: { command: string; args: string[]; env: { NOD_URL: string; NOD_TOKEN_TURNO: string; ELECTRON_RUN_AS_NODE?: string } };
   };
 };
 
@@ -31,7 +32,7 @@ export function montarMcpConfig(l: LigacaoMcp): McpConfig {
       nod: {
         command: l.nodePath ?? process.execPath,
         args: [l.proxyPath],
-        env: { NOD_URL: l.url, NOD_TOKEN_TURNO: l.tokenDeTurno },
+        env: { NOD_URL: l.url, NOD_TOKEN_TURNO: l.tokenDeTurno, ...(l.electronComoNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}) },
       },
     },
   };

@@ -137,3 +137,13 @@ usa o modelo do agente (padrão `sonnet`, configurável por `NOD_MODELO`), `--st
 de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura errada.
 
 Definido em 2026-09-17: as sondas usam `NOD_MODELO_SONDA` (default `claude-haiku-4-5-20251001`), separado do modelo dos agentes. `e2e:haiku` mantém o modelo barato explícito.
+
+## Desktop e servidor compartilhado (2026-09-17)
+
+`NOD_MODO=compartilhado` desliga registry e orquestrador locais; os Macs usam `/api/maquina/…`
+com chave escopada. O id da chave identifica o computador; o corpo não escolhe o escopo.
+`npm run desktop:build` compila Electron, preload e proxy; a cerca do bundle recusa imports de
+banco/repositórios/casos de uso/HTTP/fundo. `npm run desktop:mac` exige assinatura/notarização.
+O proxy usa o runtime do app com ELECTRON_RUN_AS_NODE somente em seu mcp.json.
+Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.mjs` testa JSON-RPC
+sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).

@@ -20,6 +20,7 @@ export interface OpcoesServidor {
   rotas?: Rota[];
   segredoSessao?: string;
   staticDir?: string;
+  autorizarMaquina?: DepsRoteador["autorizarMaquina"];
   autorizarTokenTurno?: DepsRoteador["autorizarTokenTurno"];
   /** Modo de login (ADR-030). Default `stub`, que só escuta em loopback; o boot SEMPRE passa o do NOD_LOGIN. */
   sessao?: OpcoesSessao;
@@ -32,6 +33,7 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
   const roteador = criarRoteador(rotas, {
     resolverEscopo: sessao.resolverEscopo,
     autorizarTokenTurno: opcoes.autorizarTokenTurno,
+    autorizarMaquina: opcoes.autorizarMaquina,
     fallback: criarEstatico(opcoes.staticDir ?? process.env.NOD_STATIC_DIR),
   });
   return createServer((req, res) => {

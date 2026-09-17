@@ -4,9 +4,9 @@ Este roteiro é para quem mantém o projeto. Para instalar a versão já publica
 
 ## Ponto de partida e pendências
 
-Registrado em 2026-09-17: a release `desktop-v0.1.0-preview.1` contém dois DMGs sem assinatura Apple. Seu código está na tag e na branch `codex/desktop-release-preview`; a main recebeu apenas o link de download, não a implementação desktop. **Antes da próxima release regular, integre essa implementação por PR, resolva sua compatibilidade com a main e passe os testes novamente.** Este documento não realiza essa integração.
+Registrado em 2026-09-17: a release `desktop-v0.1.0-preview.1` contém dois DMGs sem assinatura Apple. Seu código está na tag e na branch `codex/desktop-release-preview`; a main recebeu apenas o link de download, não a implementação desktop. **Antes da próxima release regular, integre essa implementação por PR, resolva sua compatibilidade com a main e passe os testes novamente.** A candidata `0.2.0-rc.1` integra essa implementação à main com as mudanças posteriores de agentes, rotinas e modelos.
 
-Os comandos desktop abaixo pressupõem essa integração. O [workflow de referência](https://github.com/marlonwlv/nod/blob/desktop-v0.1.0-preview.1/.github/workflows/desktop-release.yml) ainda precisa chegar à main. Não crie uma tag `v*` esperando um build se esse arquivo não existir no commit marcado.
+Os comandos desktop abaixo pressupõem essa integração. O [workflow integrado](../.github/workflows/desktop-release.yml) preserva as exigências de assinatura, notarização e rascunho. Não crie uma tag `v*` esperando um build se esse arquivo não existir no commit marcado.
 
 Ainda faltam servidor HTTPS de produção, credenciais Apple e aceite nativo em ambos os tipos de Mac. Um DMG gerado com sucesso não comprova que o time consegue instalar, autenticar e trabalhar.
 

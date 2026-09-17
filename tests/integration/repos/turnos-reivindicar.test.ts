@@ -92,6 +92,17 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
     });
   });
 
+  it("máquina reconectada não ressuscita lease vencido antes do varredor", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      await repos.turnos.enfileirar(base(conversaId, agenteId));
+      const agora = Date.now();
+      const t = await repos.turnos.reivindicar({ machineId: MAQUINA, agora });
+      expect(await repos.turnos.renovarLease(t!.id, MAQUINA, { promptSubmitted: true }, agora + LEASE_MS + 1)).toEqual({ ativo: false });
+      expect((await repos.turnos.buscar(t!.id))?.leaseAte).toBe(agora + LEASE_MS);
+    });
+  });
+
   it("interromper é terminal e idempotente; 'interrompido' sem motivo é recusado pelo CHECK; profundidade só 0|1", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);

@@ -29,6 +29,7 @@ export type LigacaoClaudeCli = {
   /** Caminho absoluto do proxy MCP (L5). */
   proxyPath: string;
   nodePath?: string;
+  electronComoNode?: boolean;
   /** definido em 2026-09-16: a sonda usa o modelo mais barato (EMENDA 35). */
   modeloSonda?: string;
   /**
@@ -162,7 +163,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const tmpdir = await mkdtemp(join(cfg.cwdBase, "turno-"));
               const eventos: EventoStream[] = [];
               try {
-                const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath });
+                const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
                 const { args } = montarArgs({ plano, mcpJson });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs);
 

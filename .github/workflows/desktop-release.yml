@@ -1,0 +1,99 @@
+name: desktop-release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5434:5432']
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      DATABASE_URL_DONO: postgres://nod_dono:nod@127.0.0.1:5434/nod
+      DATABASE_URL_TEST: postgres://nod_app:nod@127.0.0.1:5434/nod_test
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - run: psql postgres://postgres:postgres@127.0.0.1:5434/postgres -v ON_ERROR_STOP=1 -f infra/postgres/init/01_roles.sql
+      - run: npm run db:migrate:test
+      - run: npm run check
+      - run: npm run build
+      - run: npm run desktop:build
+  mac:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    env:
+      CSC_LINK: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: node scripts/desktop/release-preflight.mjs
+      - run: npm ci
+      - run: npm run desktop:build
+      - run: npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true
+      - name: Verificar assinatura e notarização
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          APP=$(find release -maxdepth 2 -name nod.app -type d -print -quit)
+          test -n "$APP"
+          node scripts/desktop/smoke-proxy.mjs "$APP/Contents/MacOS/nod" "$APP/Contents/Resources/app.asar.unpacked/dist/desktop/proxy.mjs"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+          shasum -a 256 release/*.dmg > "release/SHA256-${ARCH}.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nod-mac-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/SHA256-*.txt
+          if-no-files-found: error
+  draft:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: mac
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: nod-mac-*
+          path: release
+          merge-multiple: true
+      - name: Criar release em rascunho para aceite nos dois Macs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" release/*.dmg release/SHA256-*.txt --verify-tag --draft --title "nod $TAG" --notes-file desktop/release-notes.md

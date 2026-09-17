@@ -26,8 +26,8 @@ export type CtxPublico = Omit<Ctx, "escopo"> & { escopo: Escopo | null };
 export type Metodo = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export type Rota =
-  | { metodo: Metodo; padrao: RegExp; handler(ctx: Ctx): Promise<void>; interno?: true; publica?: undefined }
-  | { metodo: Metodo; padrao: RegExp; handler(ctx: CtxPublico): Promise<void>; publica: true; interno?: undefined };
+  | { metodo: Metodo; padrao: RegExp; handler(ctx: Ctx): Promise<void>; interno?: true; maquina?: true; publica?: undefined }
+  | { metodo: Metodo; padrao: RegExp; handler(ctx: CtxPublico): Promise<void>; publica: true; interno?: undefined; maquina?: undefined };
 
 /** Identidade derivada do token de turno (L5 implementa services.tokenTurno.autorizar). */
 export interface IdentidadeDeTurno extends Escopo {
@@ -38,6 +38,7 @@ export interface IdentidadeDeTurno extends Escopo {
 export interface DepsRoteador {
   resolverEscopo(req: IncomingMessage): Escopo | null;
   autorizarTokenTurno?(token: string): IdentidadeDeTurno | null;
+  autorizarMaquina?(token: string): Promise<(Escopo & { chaveId: string }) | null>;
   /** Último recurso quando nenhuma rota casa (ex.: estático). Devolve true se respondeu. */
   fallback?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
 }
@@ -87,6 +88,23 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
     const caminho = url.pathname;
     const metodo = req.method ?? "GET";
 
+    if (caminho.startsWith("/api/maquina/")) {
+      if (req.headers.origin !== undefined) {
+        json(res, 403, { codigo: "nao_permitido" });
+        return;
+      }
+      const auth = req.headers.authorization ?? "";
+      const identidade = auth.startsWith("Bearer ") ? await deps.autorizarMaquina?.(auth.slice(7)) : null;
+      if (!identidade) {
+        json(res, 401, { codigo: "nao_permitido" });
+        return;
+      }
+      const achado = casar(rotas, metodo, caminho.slice("/api/maquina".length), (r) => r.maquina === true);
+      if (!achado) { json(res, 404, { codigo: "nao_encontrado" }); return; }
+      await (achado.rota.handler as (c: CtxPublico) => Promise<void>)(montarCtx(req, res, identidade, { ...achado.params, chaveId: identidade.chaveId }));
+      return;
+    }
+
     const interno = PREFIXO_INTERNO.exec(caminho);
     if (interno) {
       if (req.headers.origin !== undefined) {
@@ -125,7 +143,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
         json(res, 404, { codigo: "nao_encontrado", mensagem: "rota não encontrada" });
         return;
       }
-      const achado = casar(rotas, metodo, escopado[2] ?? "/", (r) => !r.interno && !r.publica);
+      const achado = casar(rotas, metodo, escopado[2] ?? "/", (r) => !r.interno && !r.publica && !r.maquina);
       if (!achado) {
         json(res, 404, { codigo: "nao_encontrado", mensagem: "rota não encontrada" });
         return;
