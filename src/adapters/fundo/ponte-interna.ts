@@ -17,8 +17,8 @@ export type DepsPonte = {
   services: Services;
   useCases: UseCasesNod;
   agora?: Relogio;
-  /** 'local' (claude-cli) ou 'catcher' — o que a máquina conectada de fato roda. */
-  executor?: Executor;
+  /** 'local' (claude-cli) ou 'catcher' — o que a máquina conectada de fato roda. Função = valor VIVO (o interruptor de executor troca em tempo de execução). */
+  executor?: Executor | (() => Executor);
   /** Fonte das pessoas para resolver tenant de um pessoaId; só em teste (default: tabela pessoas). */
   listarPessoas?: () => Promise<Pick<Pessoa, "tenantId" | "id">[]>;
   /** Depois de entregar: soltar o processo do interruptor (criarInterruptor().esquecer). */
@@ -45,9 +45,11 @@ export type PonteInternaNod = PonteInterna & {
  */
 export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const agora: Relogio = deps.agora ?? (() => Date.now());
-  const executor: Executor = deps.executor ?? "catcher";
+  const executorAtual = (): Executor => (typeof deps.executor === "function" ? deps.executor() : (deps.executor ?? "catcher"));
   const maquinas = new Map<string, AnuncioMaquina>();
   const escopos = new Map<string, Escopo>();
+  /** Executor do PLANO de cada turno puxado: a entrega assenta com ele, não com o executor vigente (que pode ter sido trocado no meio). */
+  const executores = new Map<string, Executor>();
   const tenantsPorPessoa = new Map<string, string>();
 
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
@@ -80,9 +82,12 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await despacharTurno(d, { machineId: maquina.machineId, executor, inventario: maquina.inventario });
+          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
-          if (r.data.plano) escopos.set(r.data.plano.turnoId, escopo);
+          if (r.data.plano) {
+            escopos.set(r.data.plano.turnoId, escopo);
+            executores.set(r.data.plano.turnoId, r.data.plano.executor);
+          }
           return r.data.plano;
         });
       } catch (e) {
@@ -109,6 +114,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         log("aviso", "ponte_entrega_sem_escopo", { turno_id: e.turnoId, machine_id: e.machineId });
         return;
       }
+      const executor = executores.get(e.turnoId) ?? executorAtual();
       // 0005: turno que falhou vira uma linha de log COM a causa crua do CLI — antes só chegava
       // "erro_execucao" e o diagnóstico exigia reproduzir o turno à mão (medido 2026-09-16).
       if (e.resultado.desfecho !== "sucesso") {
@@ -131,6 +137,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         });
       } finally {
         escopos.delete(e.turnoId);
+        executores.delete(e.turnoId);
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
       }

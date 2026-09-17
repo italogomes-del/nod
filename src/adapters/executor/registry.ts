@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
+import { log } from "../../obs/log.ts";
 import { caminhoAumentado, caminhoDoShellDeLogin, expandirTil, homeDaPessoa } from "./caminho.ts";
-import type { ConfigDriver, Driver, IdDriver, Registry } from "./spi.ts";
+import type { ConfigDriver, Driver, IdDriver, Instance, Registry } from "./spi.ts";
 
 /**
  * Registry (ADR-012): create() que falha vira sombra com motivo escrito, nunca derruba o servidor.
@@ -16,6 +17,8 @@ export type OpcoesRegistry = {
   shellDeLogin?: boolean;
   /** Casa da pessoa para expandir `~` da configuração; default homeDaPessoa(env) (passwd, não $HOME). */
   home?: string;
+  /** Config já montada (o boot monta UMA vez e reaproveita no interruptor: consultar o shell de login custa tempo). */
+  cfg?: ConfigDriver;
 };
 
 export type RegistryDetalhado = {
@@ -47,27 +50,57 @@ function motivoDe(erro: unknown): string {
   return String(erro);
 }
 
-export async function criarRegistryDetalhado(env: EnvRegistry, drivers: readonly Driver[], o: OpcoesRegistry = {}): Promise<RegistryDetalhado> {
-  const cfg = await configDosDrivers(env, o);
-  const registry: Registry = {
-    "claude-cli": { estado: "sombra", motivo: "driver não registrado" },
-    catcher: { estado: "sombra", motivo: "driver não registrado" },
+export const MOTIVO_NAO_REGISTRADO = "driver não registrado";
+
+export function registryVazio(): Registry {
+  return {
+    "claude-cli": { estado: "sombra", motivo: MOTIVO_NAO_REGISTRADO },
+    catcher: { estado: "sombra", motivo: MOTIVO_NAO_REGISTRADO },
   };
+}
+
+/**
+ * Registra (ou re-registra) UM driver no registry, no lugar: create() → sondar(); 'pronto' entra,
+ * senão sombra com motivo escrito. Devolve o inventário da sonda (null quando create() lançou). A
+ * instância anterior, se havia, é liberada. É o que o interruptor de executor usa para ligar o
+ * claude-cli DEPOIS do boot (definido em 2026-09-16: a sonda só é paga quando a pessoa pede).
+ */
+export async function registrarDriver(registry: Registry, cfg: ConfigDriver, driver: Driver): Promise<Inventario | null> {
+  const id = driver.meta.id;
+  const anterior = registry[id];
+  let inv: Inventario | null = null;
+  try {
+    const instance = await driver.create(cfg);
+    inv = await instance.sondar();
+    if (inv.estado === "pronto") {
+      registry[id] = { estado: "pronto", driver, instance };
+    } else {
+      registry[id] = { estado: "sombra", motivo: `${inv.estado}: ${inv.motivo}` };
+      await liberar(id, instance);
+    }
+  } catch (erro) {
+    registry[id] = { estado: "sombra", motivo: `create_falhou: ${motivoDe(erro)}` };
+  }
+  // A instância anterior é liberada FORA do try: um dispose que falha não pode rebaixar o registro novo a 'create_falhou'.
+  if (anterior.estado === "pronto") await liberar(id, anterior.instance);
+  return inv;
+}
+
+async function liberar(id: IdDriver, instance: Instance): Promise<void> {
+  try {
+    await instance.dispose();
+  } catch (erro) {
+    log("aviso", "driver_dispose_falhou", { driver: id, erro: erro instanceof Error ? erro.name : "desconhecido" });
+  }
+}
+
+export async function criarRegistryDetalhado(env: EnvRegistry, drivers: readonly Driver[], o: OpcoesRegistry = {}): Promise<RegistryDetalhado> {
+  const cfg = o.cfg ?? (await configDosDrivers(env, o));
+  const registry = registryVazio();
   const inventarios: Partial<Record<IdDriver, Inventario>> = {};
   for (const driver of drivers) {
-    const id = driver.meta.id;
-    try {
-      const instance = await driver.create(cfg);
-      const inv = await instance.sondar();
-      inventarios[id] = inv;
-      if (inv.estado === "pronto") registry[id] = { estado: "pronto", driver, instance };
-      else {
-        await instance.dispose();
-        registry[id] = { estado: "sombra", motivo: `${inv.estado}: ${inv.motivo}` };
-      }
-    } catch (erro) {
-      registry[id] = { estado: "sombra", motivo: `create_falhou: ${motivoDe(erro)}` };
-    }
+    const inv = await registrarDriver(registry, cfg, driver);
+    if (inv) inventarios[driver.meta.id] = inv;
   }
   return { registry, inventarios };
 }

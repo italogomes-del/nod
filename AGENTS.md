@@ -91,6 +91,11 @@ linhas com `randomUUID` dentro do envelope; só `tests/helpers/ids.ts` (identida
 monta `Deps`) e as rotas de todas as lanes; `boot.ts` sobe partições → listen → registry (claude-cli
 só quando `NOD_EXECUTOR=claude-cli`; a sonda custa um turno) → inventário por pessoa → orquestrador →
 scheduler 30 s → varredor de lease 15 s → varredor de expiração 30 s → despachante do outbox.
+O executor da máquina é VIVO: `NOD_EXECUTOR` só dá o valor inicial e o interruptor (`GET`/`POST executor`,
+botão na Frota) troca catcher ⇄ claude-cli em tempo de execução — a troca liga o driver em sombra na hora
+(`registrarDriver`, sonda paga só quando a pessoa pede) e só acontece se a sonda disser 'pronto'. Quem
+precisa do executor lê `app.executor`/getters, nunca copia o valor (a cópia congela a troca). A escolha
+não sobrevive ao reinício (NOD_HOME guarda só `machine-id`, EMENDA 11).
 `tests/helpers/servidor-completo.ts` sobe o mesmo app em porta 0 sobre `nod_test` (commita: por isso o
 e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx escopada lança
 `escopo_vazio` — o escopo dos `Services` vem do `AsyncLocalStorage` que `abrirTxEscopada` preenche.

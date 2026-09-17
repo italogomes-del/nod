@@ -16,6 +16,8 @@ npm run dev                            # api http://127.0.0.1:8888 + web http://
 
 Abra http://127.0.0.1:5274, clique em **Entrar como Marlon** (sessão stub de desenvolvimento, só em 127.0.0.1) e a **Frota** aparece com a Vera do seed. O executor padrão é o **catcher** (`NOD_EXECUTOR=catcher` no `.env`): zero CLI, zero custo — as respostas do "modelo" vêm de marcadores no próprio texto (`[[tool: lembrar {...}]] [[texto: ...]]`, gramática em `tests/helpers/catcher-roteiro.ts`).
 
+Para alternar sem reiniciar, use o interruptor na faixa de inventário da **Frota** ("usar Claude (real)" / "usar catcher (sem custo)"): trocar para o Claude sonda o CLI na hora (custa um turno) e só acontece se a sonda disser pronto — senão a recusa aparece escrita. A escolha vale até o servidor reiniciar; `NOD_EXECUTOR` dá o valor inicial.
+
 Para rodar com o Claude Code real (custa a assinatura da pessoa):
 
 ```bash

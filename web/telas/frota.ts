@@ -1,3 +1,4 @@
+import type { IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
@@ -12,10 +13,46 @@ export function textoInventario(inv: Inventario | null, agora: number): string {
   return `claude ausente (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
 }
 
+export function rotuloExecutor(id: IdExecutor): string {
+  return id === "catcher" ? "catcher (sem custo)" : "Claude (real)";
+}
+
+/** Uma linha por opção do interruptor: o que a sonda disse, escrito (ADR-029) — "pronto" ou o motivo de não estar. */
+function estadoDaOpcao(inv: Inventario): string {
+  if (inv.estado === "pronto") return `pronto${inv.versao === "catcher" ? "" : ` (${inv.versao})`}`;
+  return `${inv.estado === "nao_autenticado" ? "não autenticado" : "ausente"} — ${inv.motivo}`;
+}
+
+/**
+ * Interruptor de executor (definido em 2026-09-16): a máquina roda OU o catcher (sem CLI, sem custo) OU o
+ * Claude real (assinatura da pessoa). Um botão por opção que não está em uso; a troca para o Claude sonda o
+ * CLI na hora e só acontece se a sonda disser 'pronto' — a recusa vem escrita, nunca um botão que "não faz nada".
+ */
+export function renderExecutor(estado: Estado): string {
+  const ex = estado.executor;
+  if (!ex) return `<div class="ex-linha"><b>Executor:</b> ainda não consultado</div>`;
+  const botoes = ex.opcoes
+    .filter((o) => o.id !== ex.atual)
+    .map((o) => botao("trocar-executor", `usar ${esc(rotuloExecutor(o.id))}`, { classe: "sm", dados: { id: o.id }, desabilitado: estado.ocupado, titulo: o.custo === "real" ? "sonda o CLI agora: custa um turno real" : "sem custo" }))
+    .join(" ");
+  const linhas = ex.opcoes.map((o) => `<span>${esc(rotuloExecutor(o.id))}: ${esc(estadoDaOpcao(o.inventario))}</span>`).join(" · ");
+  return `<div class="ex-linha"><b>Executor em uso:</b> ${esc(rotuloExecutor(ex.atual))} ${botoes}</div>
+    <div class="ex-mudo">${linhas}</div>
+    ${ex.recusa ? `<div class="ex-recusa">não troquei: ${esc(ex.recusa)}</div>` : ""}`;
+}
+
+/** A sonda do executor EM USO: o inventário da frota prefere o claude-cli mesmo com o catcher ligado, e mentiria na tela. */
+export function inventarioEmUso(estado: Estado): Inventario | null {
+  return estado.executor?.opcoes.find((o) => o.id === estado.executor?.atual)?.inventario ?? estado.inventario;
+}
+
 export function renderInventario(estado: Estado): string {
-  const inv = estado.inventario;
+  const inv = inventarioEmUso(estado);
   const classe = inv?.estado === "pronto" ? "ok" : "falha";
-  return `<div class="inventario inv-${classe}" role="status">${esc(textoInventario(inv, estado.agora))} ${botao("sondar-inventario", "sondar de novo", { classe: "sm", titulo: "custa um turno real quando o executor é o claude-cli" })}</div>`;
+  return `<div class="inventario inv-${classe}" role="status">
+    <div class="inv-linha">${esc(textoInventario(inv, estado.agora))} ${botao("sondar-inventario", "sondar de novo", { classe: "sm", titulo: "custa um turno real quando o executor é o claude-cli" })}</div>
+    ${renderExecutor(estado)}
+  </div>`;
 }
 
 /**

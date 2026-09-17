@@ -9,7 +9,7 @@ import { buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts"
 import type { Db } from "../../shared/types.ts";
 import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../executor/drivers/claude-cli.ts";
-import { criarRegistryDetalhado, executorPadrao, nodHome } from "../executor/registry.ts";
+import { configDosDrivers, criarRegistryDetalhado, executorPadrao, nodHome, registrarDriver } from "../executor/registry.ts";
 import { homeDaPessoa } from "../executor/caminho.ts";
 import type { Driver, Registry } from "../executor/spi.ts";
 import { iniciarDespachanteOutbox, type DespachanteOutbox } from "../fundo/despachar-outbox.ts";
@@ -18,7 +18,7 @@ import { garantirParticoes } from "../fundo/particoes.ts";
 import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
-import { comporApp, type App, type EnvApp } from "./compor.ts";
+import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
 import { listen } from "./servidor.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
 
@@ -108,17 +108,23 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   });
   const url = `http://127.0.0.1:${srv.port}`;
 
-  // 4. registry: catcher sempre; claude-cli SÓ quando pedido (a sonda dele custa um turno real, EMENDA 35).
-  const drivers = o.drivers
-    ? o.drivers({ urlNod: url, app })
-    : [
-        criarCatcherDriver({ urlNod: url }),
-        ...(env.NOD_EXECUTOR === "claude-cli" ? [criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, modeloSonda: env.NOD_MODELO })] : []),
-      ];
-  const { registry, inventarios } = await criarRegistryDetalhado(env, drivers);
+  // 4. registry: catcher sempre; claude-cli SÓ quando pedido (a sonda dele custa um turno real, EMENDA 35). Os outros
+  //    candidatos ficam à espera do interruptor (definido em 2026-09-16): trocar pela interface liga o driver na hora.
+  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, modeloSonda: env.NOD_MODELO })];
+  const noBoot = candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli");
+  const cfgDrivers = await configDosDrivers(env);
+  const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });
   const padrao = executorPadrao(env, registry);
   const inventario: Inventario = inventarios[app.idDriver] ?? { estado: "ausente", motivo: padrao.id ? "sem sonda" : padrao.motivo, em: agora() };
-  app.ligarRegistry(registry, inventario);
+  const ativar: AtivarDriver = async (id) => {
+    const driver = candidatos.find((d) => d.meta.id === id);
+    if (!driver) return { estado: "ausente", motivo: `driver ${id} não disponível neste servidor`, em: agora() };
+    const inv = await registrarDriver(registry, cfgDrivers, driver);
+    if (inv) return inv;
+    const registro = registry[id];
+    return { estado: "ausente", motivo: registro.estado === "sombra" ? registro.motivo : "sem sonda", em: agora() };
+  };
+  app.ligarRegistry(registry, inventarios, ativar);
   log("info", "registry_pronto", { executor_pedido: app.idDriver, executor_padrao: padrao.id, motivo: padrao.id ? null : padrao.motivo, inventario: inventario.estado });
 
   // 5. inventário persistido por pessoa (ADR-019): é o que enviarMensagem/despacharTurno leem no gate pré-spawn.
@@ -138,7 +144,21 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     intervaloMs: iv.orquestradorMs,
     listarPessoas: o.listarPessoas,
   });
-  const scheduler = iniciarScheduler(db, { machineId, executor: app.executor, services: app.services, useCases: app.useCases, agora, intervaloMs: iv.schedulerMs }, { listarPessoas: o.listarPessoas });
+  const scheduler = iniciarScheduler(
+    db,
+    {
+      machineId,
+      // valor VIVO: rotina disparada depois de uma troca pelo interruptor nasce com o executor novo.
+      get executor() {
+        return app.executor;
+      },
+      services: app.services,
+      useCases: app.useCases,
+      agora,
+      intervaloMs: iv.schedulerMs,
+    },
+    { listarPessoas: o.listarPessoas },
+  );
   const varredorLease = iniciarVarredorLease({ db, relogio: agora, intervaloMs: iv.leaseMs, opcoes: { listarPessoas: o.listarPessoas, prazoDecisaoMs: Number(env.NOD_PRAZO_DECISAO_MS) || undefined } });
   const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
   const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas });

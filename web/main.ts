@@ -7,7 +7,7 @@ import { botao, esc, esquecerRegiao, iconeAgente, regiao } from "./lib/render.ts
 import { renderChaves } from "./telas/chaves.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
-import { renderFrota, textoInventario } from "./telas/frota.ts";
+import { inventarioEmUso, renderFrota, textoInventario } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
@@ -57,6 +57,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   const agora = Date.now();
   if (q === "frota") return { tipo: "hidratar-frota", frota: await api.frota() };
   if (q === "inventario") return { tipo: "hidratar-inventario", inventario: await api.inventario() };
+  if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
   if (q === "sua-vez") return { tipo: "hidratar-sua-vez", suaVez: await api.suaVez() };
   if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
   if (q === "conectores") return { tipo: "hidratar-conectores", conectores: (await api.conectores()).conectores };
@@ -98,7 +99,7 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
-  if (q === "frota" || q === "inventario" || q === "sua-vez" || q === "salas") return true;
+  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas") return true;
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil";
   if (q === "chaves") return t.tipo === "chaves";
@@ -164,7 +165,7 @@ function renderSidebar(): string {
       <section class="section"><h3>Bots · ${agentes.length}</h3>${bots}${botao("navegar", "+ criar bot", { classe: "sm", dados: { tela: "frota" } })}</section>
       <section class="section"><h3>Salas · ${estado.salas.length}</h3>${salas}${botao("navegar", "+ nova sala", { classe: "sm", dados: { tela: "nova-sala" } })}</section>
     </div>
-    <div class="me"><span class="av-me">eu</span> ${esc(textoInventario(estado.inventario, estado.agora))}</div>`;
+    <div class="me"><span class="av-me">eu</span> ${esc(textoInventario(inventarioEmUso(estado), estado.agora))}</div>`;
 }
 
 function renderPrincipal(): void {
@@ -267,14 +268,14 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   dispatch({ tipo: "sessao", escopo });
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
-    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "salas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
+    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "executor", "salas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") dispatch({ tipo: "frame", frame: ev.frame, agora: Date.now() });
     else if (ev.tipo === "conexao") dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
   });
   live.connect();
-  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "salas"] });
+  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "salas", "executor"] });
 }
 
 async function boot(): Promise<void> {
@@ -355,6 +356,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "fechar-faixa": () => dispatch({ tipo: "faixa", faixa: null }),
   enviar: () => enviarComposer(),
   "sondar-inventario": () => agir(async () => dispatch({ tipo: "hidratar-inventario", inventario: await api!.inventario(true) })),
+  "trocar-executor": (el) =>
+    agir(async () => {
+      const estadoNovo = await api!.trocarExecutor(el.dataset.id === "claude-cli" ? "claude-cli" : "catcher");
+      dispatch({ tipo: "hidratar-executor", executor: estadoNovo });
+      dispatch({ tipo: "invalidar", quais: ["inventario", "frota"] });
+    }),
   "parar-conversa": () =>
     agir(async () => {
       const alvo = conversaAtual();
