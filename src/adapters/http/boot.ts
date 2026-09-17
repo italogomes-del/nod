@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { criarDb } from "../../db/client.ts";
 import { log } from "../../obs/log.ts";
-import { listarTodas } from "../../repositories/pessoas.repo.ts";
+import { buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts";
 import type { Db } from "../../shared/types.ts";
 import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../executor/drivers/claude-cli.ts";
@@ -20,6 +20,7 @@ import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type EnvApp } from "./compor.ts";
 import { listen } from "./servidor.ts";
+import { opcoesSessaoDoEnv } from "./sessao.ts";
 
 /**
  * Boot do servidor (ADR-006/012, EMENDA 3): partições → compor → listen → registry (claude-cli só é
@@ -79,6 +80,14 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   const db = o.db ?? (urlApp ? criarDb(urlApp) : null);
   const dbDono = o.dbDono ?? (urlDono ? criarDb(urlDono, { max: 1 }) : null);
   if (!db || !dbDono) throw new Error("boot: DATABASE_URL e DATABASE_URL_DONO são obrigatórios");
+  // Antes de qualquer efeito: sem NOD_LOGIN válido o servidor não sobe (ADR-030).
+  const sessao = opcoesSessaoDoEnv(env, {
+    pessoaPorEmail: async (email) => {
+      const p = await buscarPorEmail(db, email);
+      return p ? { tenantId: p.tenantId, pessoaId: p.id } : null;
+    },
+    pessoas: () => listarTodas(db),
+  });
   const donoEmprestado = o.dbDono !== undefined;
   const dbEmprestado = o.db !== undefined;
   const agora = () => Date.now();
@@ -95,6 +104,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
     staticDir: o.staticDir ?? env.NOD_STATIC_DIR,
     autorizarTokenTurno: app.tokens.autorizar,
+    sessao,
   });
   const url = `http://127.0.0.1:${srv.port}`;
 

@@ -25,6 +25,22 @@
 > Épico [E1](epicos.md#e1--sessão-real-pré-requisito): substituir o stub de cookie de dev por login
 > de verdade, para que opt-ins e autoria sejam reais. Completa o que ADR-019/ADR-021 já assumiam.
 
+> **Estado (2026-09-16):** E1.0, E1.1, E1.2, E1.3, E1.5 e E1.6 implementados; E1.4 adiada (não há app
+> local falando HTTP). Decisões em [ADR-030](../../adr/adr-030-identidade-de-login-allowlist-por-email-semeada-nunca-provi.md)
+> e [ADR-031](../../adr/adr-031-a-chave-de-maquina-persiste-carrega-o-proprio-escopo-e-e-rev.md).
+> **Desvios aprovados na revisão do plano:**
+> - **E1.6 não remove o stub — tranca.** O login de desenvolvimento fica, só com `NOD_LOGIN=stub`
+>   explícito e só em 127.0.0.1, listando as pessoas do cadastro (sem `marlon|ana` no código). Remover
+>   obrigaria cada dev a ter credencial Google e internet, sem ganho de segurança.
+> - **Os testes não migraram para "o caminho real"**: nunca precisaram de login. `servidorDeTeste.entrar`
+>   passou a cunhar o cookie direto, como `servidorCompleto` já fazia; o `e2e:fumaça` nunca usou o stub.
+> - **E1.3 ganhou listar e revogar** (`GET`/`DELETE maquinas/chaves`): gerar chave nova não cancela a
+>   velha, e sem revogação um notebook perdido seria um beco sem saída.
+> - **E1.3 usa `maquina_tokens` (0007), não `maquinas`**, e a chave carrega o próprio escopo (ADR-031).
+> - **E1.5 recusa segredo de sessão fraco** com `NOD_LOGIN=google` (o de exemplo do `.env.example` inclusive).
+> - **A recusa do Google é um redirect para `/?entrar=recusado`**, idêntico para todos os motivos (a
+>   issue dizia 403): a pessoa volta para uma tela com mensagem, não para um JSON cru.
+
 **Ordem por dependência:** `E1.0 → E1.1 → E1.2 → { E1.3 → E1.4 } → E1.5 → E1.6`
 
 ```mermaid

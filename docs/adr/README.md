@@ -38,3 +38,5 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-027](adr-027-sala-de-conversa-tem-visibilidade-propria-membership-e-g.md) | Sala de conversa tem visibilidade própria; membership é grant, não herança | novo |
 | [ADR-028](adr-028-a-fronteira-do-proxy-e-a-fronteira-dos-mecanismos-de-pro.md) | A fronteira do proxy é a fronteira dos mecanismos de produto | novo |
 | [ADR-029](adr-029-fail-closed-exige-estado-renderizado-nao-negacao-seca.md) | Fail-closed exige estado renderizado, não negação seca | novo |
+| [ADR-030](adr-030-identidade-de-login-allowlist-por-email-semeada-nunca-provi.md) | Identidade de login: allowlist por e-mail semeada, nunca provisionamento | novo |
+| [ADR-031](adr-031-a-chave-de-maquina-persiste-carrega-o-proprio-escopo-e-e-rev.md) | A chave de máquina persiste, carrega o próprio escopo e é revogável | novo |

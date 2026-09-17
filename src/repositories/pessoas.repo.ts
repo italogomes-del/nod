@@ -5,6 +5,8 @@ export interface Pessoa {
   id: string;
   nome: string;
   iniciais: string;
+  /** null = pessoa que não loga pelo Google (ADR-030: ausência de e-mail é recusa, não convite). */
+  email: string | null;
 }
 
 interface Linha {
@@ -12,25 +14,45 @@ interface Linha {
   id: string;
   nome: string;
   iniciais: string;
+  email: string | null;
 }
 
-const paraPessoa = (l: Linha): Pessoa => ({ tenantId: l.tenant_id, id: l.id, nome: l.nome, iniciais: l.iniciais });
+const paraPessoa = (l: Linha): Pessoa => ({ tenantId: l.tenant_id, id: l.id, nome: l.nome, iniciais: l.iniciais, email: l.email });
 
 /** Tabela SEM RLS por pessoa (catálogo de identidade): lida sem escopo pelos laços de fundo. */
 export async function listarTodas(conn: Conn): Promise<Pessoa[]> {
-  const linhas = await conn<Linha[]>`select tenant_id, id, nome, iniciais from pessoas order by tenant_id, nome`;
+  const linhas = await conn<Linha[]>`select tenant_id, id, nome, iniciais, email from pessoas order by tenant_id, nome`;
   return linhas.map(paraPessoa);
+}
+
+/**
+ * Busca de LOGIN (ADR-030): roda ANTES de existir sessão, logo SEM escopo — abrirTxEscopada exige
+ * tenantId+pessoaId e lançaria escopo_vazio. Vale pelo mesmo motivo que listarTodas: pessoas é
+ * catálogo SEM RLS e nod_app tem GRANT SELECT (0001). Recebe o pool direto, nunca um Tx escopado.
+ * Sem diferenciar caixa, pelo mesmo lower() do índice pessoas_email_unico (0006).
+ */
+export async function buscarPorEmail(conn: Conn, email: string): Promise<Pessoa | null> {
+  const alvo = email.trim().toLowerCase();
+  if (alvo === "") return null;
+  const linhas = await conn<Linha[]>`
+    select tenant_id, id, nome, iniciais, email from pessoas
+    where email is not null and lower(email) = ${alvo}
+    order by tenant_id limit 2`;
+  // Dois tenants com o mesmo e-mail seria ambíguo: recusa em vez de escolher (fail-closed).
+  if (linhas.length !== 1) return null;
+  const l = linhas[0];
+  return l ? paraPessoa(l) : null;
 }
 
 export function pessoasRepo(conn: Conn, escopo: Escopo) {
   return {
     async buscar(id: string): Promise<Pessoa | null> {
-      const linhas = await conn<Linha[]>`select tenant_id, id, nome, iniciais from pessoas where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      const linhas = await conn<Linha[]>`select tenant_id, id, nome, iniciais, email from pessoas where tenant_id = ${escopo.tenantId} and id = ${id}`;
       const l = linhas[0];
       return l ? paraPessoa(l) : null;
     },
     async listarDoTenant(): Promise<Pessoa[]> {
-      const linhas = await conn<Linha[]>`select tenant_id, id, nome, iniciais from pessoas where tenant_id = ${escopo.tenantId} order by nome`;
+      const linhas = await conn<Linha[]>`select tenant_id, id, nome, iniciais, email from pessoas where tenant_id = ${escopo.tenantId} order by nome`;
       return linhas.map(paraPessoa);
     },
   };

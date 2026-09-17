@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { AGENTE_TUCA, AGENTE_VERA, SALA_GERAL, semearCom } from "../../../src/db/seed/index.ts";
+import { AGENTE_TUCA, AGENTE_VERA, EMAIL_ANA, EMAIL_MARLON, SALA_GERAL, semearCom } from "../../../src/db/seed/index.ts";
 import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import type { Transacao } from "../../../src/shared/types.ts";
@@ -27,11 +27,16 @@ describeIntegracao("seed idempotente por id determinístico (Leapy §12)", () =>
 
         const primeira = await semearCom(deps);
         expect(primeira.mudancas).toBeGreaterThan(0);
-        const antes = await trxDono`select id, nome from pessoas where tenant_id = ${TENANT_LEAPY} order by nome`;
+        const antes = await trxDono`select id, nome, email from pessoas where tenant_id = ${TENANT_LEAPY} order by nome`;
+        // As duas do seed levam o e-mail da allowlist (ADR-030); o e2e pode ter deixado outras pessoas no tenant.
+        expect(antes.filter((p) => p.id === PESSOA_MARLON || p.id === PESSOA_ANA)).toEqual([
+          { id: PESSOA_ANA, nome: "Ana", email: EMAIL_ANA },
+          { id: PESSOA_MARLON, nome: "Marlon", email: EMAIL_MARLON },
+        ]);
 
         const segunda = await semearCom(deps);
         expect(segunda.mudancas).toBe(0);
-        expect(await trxDono`select id, nome from pessoas where tenant_id = ${TENANT_LEAPY} order by nome`).toEqual(antes);
+        expect(await trxDono`select id, nome, email from pessoas where tenant_id = ${TENANT_LEAPY} order by nome`).toEqual(antes);
 
         await vincularEscopo(trxApp, MARLON);
         const marlon = criarRepos(trxApp, MARLON);

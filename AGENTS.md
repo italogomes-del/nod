@@ -7,7 +7,7 @@ práticas herdadas, com evidência, em [docs/inherited-from-leapy.md](docs/inher
 
 ```bash
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
-npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0004) e roda o seed em nod
+npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0007) e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
 npm run e2e:fumaca          # dez jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
@@ -39,6 +39,9 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
   falha fechado no Postgres ("unrecognized configuration parameter"), nunca devolve zero linhas.
   `abrirTxEscopada` só aceita o POOL: passar uma transação aberta não compila e lança
   `estado_invalido` (o SET LOCAL num SAVEPOINT sobrevive ao RELEASE — medido em 2026-09-16).
+- **Chave de máquina carrega o próprio escopo** (ADR-031): validar busca o hash DENTRO da tx escopada
+  pelo escopo alegado (`autorizarChaveMaquina`). Busca pelo hash sem escopo nunca acha a linha (falha
+  como nod_app; volta vazia em silêncio como nod_dono). A chave crua não vai para banco, log nem listagem.
 - **`tenants`/`pessoas` são só leitura para nod_app.** Quem escreve identidade é o seed (nod_dono).
   Teste que precisa de pessoas usa `withRollbackDono` de `tests/helpers/db-dono.ts` — e esse helper
   nunca lê tabela escopada.
@@ -107,8 +110,11 @@ e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx
 - **`src/contracts/` existe além de `src/shared/types.ts`** (EMENDA 26): contém SÓ tipos e `as const`,
   sem lógica; a web importa dali só com `import type`. Gatilho de revisão: um arquivo passando de
   200 linhas.
-- **Sessão stub por cookie** assinado (HMAC) só em 127.0.0.1; o servidor recusa outro `NOD_HOST`
-  enquanto a sessão for stub (ADR-019/021).
+- **Login por `NOD_LOGIN`, obrigatório** (ADR-030; o épico E1 dizia "o stub some" — revisto em
+  2026-09-16). `google` = OAuth Workspace restrito a leapy.com.br, pode escutar fora de 127.0.0.1 e
+  RECUSA segredo de sessão curto ou o de exemplo; `stub` = login de desenvolvimento que lista as pessoas
+  do cadastro, só em 127.0.0.1. Sem `NOD_LOGIN` o servidor não sobe. Os testes nunca usam nenhum dos
+  dois: cunham o cookie com `cunharCookie` (`servidorDeTeste.entrar`, `servidorCompleto.sessaoDe`).
 
 ## Cloud Agents e gstack
 
