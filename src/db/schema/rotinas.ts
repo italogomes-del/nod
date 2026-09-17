@@ -6,7 +6,7 @@ export const ROTINAS = {
   tabela: "rotinas",
   check: {
     nome: "rotinas_fuso_iana",
-    /** Rejeita '+03:00', 'UTC-3', 'GMT+3': só nome IANA com barra. Igual ao CHECK da 0002. */
+    /** definido em 2026-09-17: a 0010 aceita UTC além dos nomes com barra; offsets continuam recusados. */
     fragmento: "'^[A-Za-z_]+/[A-Za-z_/+-]+$'",
   },
   /** DEFAULT true na coluna: o gate nasce ligado por schema, nunca por texto (E7.3). */

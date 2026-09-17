@@ -1,3 +1,4 @@
+import { renderMarketplace } from "./marketplace.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { avatarAgente, botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
@@ -31,14 +32,16 @@ export function renderConectores(estado: Estado): string {
         ${falha}
         ${catalogo}
         <div class="acoes">${botao("sondar-conector", "Sondar", { id: c.id })}${c.habilitado ? botao("desabilitar-conector", "Desabilitar", { id: c.id }) : botao("habilitar-conector", "Habilitar", { id: c.id, titulo: "exige catálogo sondado" })}</div>
+        <details><summary>Atualizar credenciais do MCP</summary><form class="form" data-form="credenciais-conector" data-id="${esc(c.id)}"><label>Novas credenciais (JSON)<textarea name="env" rows="2" required autocomplete="off" placeholder='{"Authorization":"Bearer …"}'></textarea></label><p class="mudo">Substitui as credenciais atuais. Depois de salvar, use Sondar para verificar e reativar a conexão.</p><button class="bt" type="submit">Salvar credenciais</button></form></details>
         ${conceder}
         ${concedidas ? `<ul class="lista">${concedidas}</ul>` : ""}
       </li>`;
     })
     .join("");
   return `<section class="tela tela-conectores">
-    <header class="tela-cab"><h1>Conectores</h1><span class="chip">servidores MCP registrados por você</span></header>
-    <details class="registrar"><summary>Registrar conector</summary>
+    ${renderMarketplace(estado)}
+    <h2 class="marketplace-heading">Seus MCPs e permissões</h2>
+    <details class="registrar"><summary>＋ Adicionar servidor MCP próprio</summary>
       <form class="form" data-form="registrar-conector">
         <label>Nome <input name="nome" required placeholder="Exemplo" /></label>
         <label>Slug <input name="slug" required pattern="[a-z0-9][a-z0-9-]*" placeholder="exemplo" /></label>
@@ -46,11 +49,11 @@ export function renderConectores(estado: Estado): string {
         <label>Comando (stdio) <input name="comando" placeholder="node" /></label>
         <label>Args (um por linha) <textarea name="args" rows="2" placeholder="scripts/mcp-exemplo.mjs"></textarea></label>
         <label>URL (http) <input name="url" placeholder="http://127.0.0.1:1234/mcp" /></label>
-        <label>Env (JSON; fica cifrado no servidor) <textarea name="env" rows="2" placeholder='{"TOKEN":"…"}'></textarea></label>
+        <label>Credenciais (JSON: env no stdio, headers no HTTP; cifradas) <textarea name="env" rows="2" placeholder='{"TOKEN":"…"}'></textarea></label>
         <label>Declaração <select name="declaracao"><option value="nao-toca">não toca dado de aprendiz</option><option value="toca">toca dado de aprendiz</option><option value="nao-declarou">não declaro (= toca)</option></select></label>
         <button class="bt pri" type="submit" data-act="registrar-conector">Registrar (nasce desabilitado)</button>
       </form>
     </details>
-    ${estado.conectores.length ? `<ul class="lista">${cartoes}</ul>` : '<p class="mudo">Nenhum conector. Registre um servidor MCP — o de exemplo do repositório é <code>node scripts/mcp-exemplo.mjs</code>.</p>'}
+    ${estado.conectores.length ? `<ul class="lista">${cartoes}</ul>` : '<p class="mudo">Você também pode conectar ferramentas próprias por URL ou comando local.</p>'}
   </section>`;
 }

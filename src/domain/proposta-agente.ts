@@ -27,3 +27,15 @@ export function montarNaoDeveFazer(entrada: { conectoresPedidos: readonly { nome
   }
   return linhas;
 }
+
+/** definido em 2026-09-17: nomes de boas-vindas; a pessoa pode renomear em conversa ou no perfil. */
+export function nomeDeBoasVindas(usados: readonly string[]): string {
+  const nomes = ["Frida", "Nina", "Ada", "Chico", "Cecília", "Milton", "Tarsila", "Gil", "Clarice", "Leonardo", "Elis", "Cartola"];
+  const ocupados = new Set(usados.map((n) => n.toLocaleLowerCase("pt-BR")));
+  for (let rodada = 1; ; rodada++) {
+    for (const base of nomes) {
+      const nome = rodada === 1 ? base : `${base} ${rodada}`;
+      if (!ocupados.has(nome.toLocaleLowerCase("pt-BR"))) return nome;
+    }
+  }
+}

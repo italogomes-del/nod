@@ -39,9 +39,11 @@ function tipoDe(v: unknown): string {
 
 export function errosDoSchema(schema: JsonSchema, valor: unknown, caminho = "$"): string[] {
   const erros: string[] = [];
+  if (schema.anyOf && !schema.anyOf.some((s) => errosDoSchema(s, valor, caminho).length === 0)) return [`${caminho}: nenhuma alternativa válida`];
+  if (schema.oneOf && schema.oneOf.filter((s) => errosDoSchema(s, valor, caminho).length === 0).length !== 1) return [`${caminho}: esperado uma alternativa válida`];
   const t = tipoDe(valor);
   const esperado = schema.type === "integer" ? "number" : schema.type;
-  if (t !== esperado) return [`${caminho}: esperado ${schema.type}, veio ${t}`];
+  if (schema.type && t !== esperado) return [`${caminho}: esperado ${schema.type}, veio ${t}`];
   if (schema.type === "integer" && !Number.isInteger(valor)) erros.push(`${caminho}: esperado inteiro`);
   if (schema.type === "string") {
     const s = valor as string;

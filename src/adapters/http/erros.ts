@@ -10,6 +10,9 @@ import { json } from "./util.ts";
  * para achar no log.
  */
 const TABELA: Record<CodigoErro, { status: number; mensagem: string }> = {
+  conector_indisponivel: { status: 502, mensagem: "Não foi possível acessar o serviço. Tente novamente ou refaça a conexão." },
+  integracao_nao_configurada: { status: 409, mensagem: "Configure sua chave Composio no marketplace para conectar os apps." },
+  integracao_autenticacao: { status: 403, mensagem: "O Composio recusou a autenticação. Confira a chave e as permissões do seu projeto." },
   nao_encontrado: { status: 404, mensagem: "não encontrado" },
   entrada_invalida: { status: 400, mensagem: "entrada inválida" },
   escopo_vazio: { status: 400, mensagem: "escopo ausente" },
@@ -20,7 +23,7 @@ const TABELA: Record<CodigoErro, { status: number; mensagem: string }> = {
   fuso_invalido: { status: 400, mensagem: "fuso inválido: use um nome IANA, nunca offset" },
   cron_sem_futuro: { status: 400, mensagem: "a expressão cron não tem próxima execução" },
   sala_tamanho: { status: 400, mensagem: "sala tem de 2 a 6 bots" },
-  http_toca_aprendiz: { status: 400, mensagem: "conector que toca dado de aprendiz não pode usar http" },
+  http_toca_aprendiz: { status: 400, mensagem: "Use HTTPS para conectar um serviço que acessa dados pessoais" },
   env_placeholder_chave_nova: { status: 400, mensagem: "placeholder de env só vale para chave já existente" },
   dono_imutavel: { status: 403, mensagem: "o dono do agente não muda" },
   texto_vazio: { status: 400, mensagem: "texto vazio" },

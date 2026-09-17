@@ -175,10 +175,11 @@ describe("validação pelo subconjunto JSON Schema", () => {
     expect(validarArgsNod("lembrar", { tipo: "fato", texto: "x" })).toEqual({ ok: true, args: { tipo: "fato", texto: "x" } });
     expect(validarArgsNod("lembrar", { tipo: "fato" })).toMatchObject({ ok: false, erros: ["$.texto: obrigatório"] });
     expect(validarArgsNod("lembrar", { tipo: "fato", texto: "", extra: 1 })).toMatchObject({ ok: false });
-    expect(validarArgsNod("pedir_acesso", { conector: "x", capacidades: [], nivel: "leitura", nao_pedido: [] })).toMatchObject({ ok: false, erros: ["$.capacidades: mínimo 1 itens"] });
+    expect(validarArgsNod("pedir_acesso", { conector: "x", capacidades: [], nivel: "leitura", nao_pedido: [] })).toMatchObject({ ok: true });
     expect(validarArgsNod("pedir_acesso", { conector: "x", capacidades: [1], nivel: "raiz", nao_pedido: [] })).toMatchObject({ ok: false });
     expect(validarArgsNod("pedir_aprovacao", { resumo: "r", itens: [{ texto: "t", destino: { conector: "c", ferramenta: "f", argumentos: { livre: true } } }] }).ok).toBe(true);
     expect(validarArgsNod("pedir_aprovacao", { resumo: "r", itens: [{ texto: "t", destino: { conector: "c", ferramenta: "f" } }] })).toMatchObject({ ok: false, erros: ["$.itens[0].destino.argumentos: obrigatório"] });
+    expect(errosDoSchema({ type: "array", minItems: 1, items: { type: "string" } }, [])).toEqual(["$: mínimo 1 itens"]);
     expect(errosDoSchema({ type: "integer" }, 1.5)).toEqual(["$: esperado inteiro"]);
     expect(errosDoSchema({ type: "object" }, null)).toEqual(["$: esperado object, veio null"]);
     expect(errosDoSchema({ type: "object" }, [])).toEqual(["$: esperado object, veio array"]);

@@ -52,7 +52,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const [memorias, concessoes, guardados, pessoa, visiveis] = await Promise.all([
     deps.repos.memorias.listarDoAgente(agente.id),
     deps.repos.concessoes.doAgente(agente.id),
-    deps.repos.conectores.listarHabilitados(),
+    deps.repos.conectores.listar(),
     deps.repos.pessoas.buscar(deps.escopo.pessoaId),
     deps.repos.agentes.listar(),
   ]);

@@ -50,6 +50,8 @@ export type BancoMemoria = {
   salas: Sala[];
   membros: (MembroSala & { criadoEm: number })[];
   conectores: ConectorGuardado[];
+  composioChaves: Map<string, string>;
+  composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
   procuracoes: Procuracao[];
   inventario: { tenantId: string; pessoaId: string; motor: string; inventario: Inventario }[];
@@ -81,6 +83,8 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     salas: [],
     membros: [],
     conectores: [],
+    composioChaves: new Map(),
+    composioSessoes: new Map(),
     concessoes: [],
     procuracoes: [],
     inventario: [],
@@ -824,7 +828,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    composio: {
+      async chave() { return b.composioChaves.get(escopo.tenantId + escopo.pessoaId) ?? null; },
+      async salvarChave(c) { b.composioChaves.set(escopo.tenantId + escopo.pessoaId, c); },
+      async sessao(t) { return b.composioSessoes.get(escopo.tenantId + escopo.pessoaId + t) ?? null; },
+      async salvarSessao(s) { b.composioSessoes.set(escopo.tenantId + escopo.pessoaId + s.toolkit, s); },
+    },
     conectores: {
+      async atualizarEndpoint(id, url, envCifrado, envChaves) {
+        const c = b.conectores.find((c) => c.id === id && c.ownerId === escopo.pessoaId);
+        if (!c) return null;
+        Object.assign(c, { url, envCifrado, env: Object.fromEntries(envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
+        return c;
+      },
       async criar(c) {
         const env: Record<string, true> = {};
         for (const k of c.envChaves ?? []) env[k] = true;

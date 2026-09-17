@@ -19,6 +19,7 @@ export type KindMensagem =
 
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
+  | { kind: "boas_vindas" }
   | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string }
   | { kind: "peer_pedido"; conversaOrigemId: string; turnoOrigemId: string }
   | { kind: "passe"; motivo: MotivoPasse }

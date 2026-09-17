@@ -41,6 +41,32 @@ describeIntegracao("produto v1: formulários e colaboração com servidor comple
     expect((await srv.chamar("POST", "rotinas/nao-uuid/executar")).status).toBe(404);
   });
 
+  it("cria bot interativo e confirma uma rotina de cinco minutos proposta no chat", async () => {
+    const bot = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", interativo: true });
+    expect(bot.agente.nome).not.toBe("Novo agente");
+    const inicial = await srv.json<ConversaDto>("GET", `conversas/${bot.conversa.id}/mensagens`);
+    expect(inicial.mensagens.some((m) => m.payload?.kind === "boas_vindas")).toBe(true);
+    const entrada = { cron: "*/5 * * * *", fuso_iana: "UTC", instrucao: "[[texto: Hora de postar no LinkedIn.]]", fonte: "Pedido da pessoa", entregavel: "Mensagem nesta conversa", limites_aprovacao: "Sem ações externas", politica_sem_dado: "Enviar lembrete" };
+    await srv.json("POST", `conversas/${bot.conversa.id}/mensagens`, { texto: `[[tool: criar_rotina ${JSON.stringify(entrada)}]] [[texto: Rotina proposta.]]` });
+    const conversa = await srv.esperar(async () => {
+      const c = await srv.json<ConversaDto>("GET", `conversas/${bot.conversa.id}/mensagens`);
+      return c.propostas.some((p) => p.kind === "rotina") ? c : null;
+    });
+    const proposta = conversa.propostas.find((p) => p.kind === "rotina")!;
+    const ativada = await srv.json<RespostaMutacao>("POST", `propostas/${proposta.id}/confirmar`);
+    const rotinas = await srv.json<{ rotinas: RotinaDto[] }>("GET", "rotinas");
+    const rotina = rotinas.rotinas.find((r) => r.rotina.agenteId === bot.agente.id)!.rotina;
+    expect(ativada.ids).toBeTruthy();
+    expect(rotina.cron).toBe("*/5 * * * *");
+    expect(rotina.proximaExecucao % 300_000).toBe(0);
+    await srv.json("POST", `rotinas/${rotina.id}/pausar`);
+    await srv.json("POST", `rotinas/${rotina.id}/executar`);
+    await srv.esperar(async () => {
+      const c = await srv.json<ConversaDto>("GET", `conversas/${bot.conversa.id}/mensagens`);
+      return c.mensagens.some((m) => m.texto === "Hora de postar no LinkedIn.") ? true : null;
+    });
+  });
+
   it("consulta por id dentro de uma sala mostra pedido e resposta na sala, sem contaminar o DM", async () => {
     const criar = (nome: string) => srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome, descricao: "Colabora com os colegas" });
     const a = await criar("Autora");

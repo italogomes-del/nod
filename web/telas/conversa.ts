@@ -58,7 +58,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
   const sender = `<div class="msg-autor"><b>${ehPessoa ? "Você" : esc(agente?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>`;
-  const tags = ehPessoa || m.payload?.kind === "peer_pedido"
+  const tags = ehPessoa || m.payload?.kind === "peer_pedido" || m.payload?.kind === "boas_vindas"
     ? ""
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
@@ -69,6 +69,12 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
 
 function renderProposta(p: Proposta, estado: Estado): string {
   const a = agenteDe(estado, p.agenteId);
+  if (p.payload.kind === "acesso" && p.payload.conectar) {
+    const slug = p.payload.conector;
+    const conectado = estado.conectores.some((c) => c.slug === slug && c.habilitado);
+    const nome = estado.marketplace.find((a) => a.slug === slug)?.nome ?? p.payload.conector;
+    return `<section class="connection-card"><span class="app-logo app-${esc(p.payload.conector)}">${esc(nome.slice(0, 1).toUpperCase())}</span><div><b>${conectado ? `${esc(nome)} conectado` : `Conecte o ${esc(nome)}`}</b><p>${conectado ? "Tudo pronto para continuar com seu bot." : "Para seguir com essa tarefa, preciso de acesso a este app."}</p>${conectado ? botao("retomar-conexao", "Continuar tarefa", { classe: "pri", id: p.id, dados: { slug: p.payload.conector } }) : botao("abrir-conexao", "Conectar", { classe: "pri", id: p.payload.conector })}${botao("recusar-proposta", "Agora não", { classe: "link", id: p.id })}</div></section>`;
+  }
   let itens = "";
   if (p.payload.kind === "perfil") {
     const c = p.payload;
@@ -101,15 +107,57 @@ function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): strin
   return `<div class="msg-sistema">${t.estado === "rodando" ? "trabalhando" : "na fila"} · ${esc(t.executor ?? "")} · ${haQuanto(estado.agora - t.desde)}</div>`;
 }
 
+/** definido em 2026-09-17: uma linha por turno remetente; respostas se ligam pelo tarefaId, não pelo texto. */
+export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, sala = false): string {
+  const grupos = new Map<string, Mensagem[]>();
+  const tarefas = new Map<string, string>();
+  for (const m of mensagens) {
+    if (m.payload?.kind === "handoff" && m.payload.tarefaId) tarefas.set(m.payload.tarefaId, m.turnoId ?? m.id);
+  }
+  const grupoDe = (m: Mensagem): string | undefined => {
+    if (m.payload?.kind === "handoff" && m.payload.tarefaId) return tarefas.get(m.payload.tarefaId);
+    if (m.payload?.kind === "peer_ask") return tarefas.get(m.payload.tarefaId) ?? m.payload.turnoOrigemId ?? m.id;
+    return undefined;
+  };
+  for (const m of mensagens) {
+    const k = grupoDe(m);
+    if (k) grupos.set(k, [...(grupos.get(k) ?? []), m]);
+  }
+  const mostrados = new Set<string>();
+  return mensagens.map((m) => {
+    const k = grupoDe(m);
+    if (!k) return renderMensagem(m, estado, sala);
+    if (mostrados.has(k)) return "";
+    mostrados.add(k);
+    const grupo = grupos.get(k) ?? [];
+    const participantes = [...new Set(grupo.flatMap((x) => x.payload?.kind === "handoff" ? [x.payload.para] : x.payload?.kind === "peer_ask" ? [x.payload.agenteId] : []))];
+    const avatares = participantes.map((id) => agenteDe(estado, id)).flatMap((a) => a ? [iconeAgente(a, "sm")] : []).join("");
+    const nome = participantes.length === 1 ? agenteDe(estado, participantes[0] ?? "")?.nome ?? "outro bot" : `${participantes.length} bots`;
+    return `<details class="collaboration" data-disclosure="${esc(k)}"><summary>${grupo.length} ${grupo.length === 1 ? "mensagem" : "mensagens"} com <span class="avatar-stack">${avatares}</span><span>${esc(nome)}</span><span class="chevron">⌄</span></summary><div class="collaboration-panel">${participantes.map((id) => {
+      const a = agenteDe(estado, id);
+      const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
+      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? "Pedido" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto)}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
+    }).join("")}</div></details>`;
+  }).join("");
+}
+
 export function renderTimeline(c: ConversaEstado | null, estado: Estado): string {
   if (!c) return `<div class="mudo">carregando conversa…</div>`;
   const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id);
   const sala = c.conversa.tipo === "sala";
   const primeira = c.mensagens[0];
+  const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
+  const acolhimento = agente && !agente.confirmado && c.mensagens.some((m) => m.payload?.kind === "boas_vindas") && !c.mensagens.some((m) => m.kind === "texto" && m.autoria.autor_tipo === "pessoa") ? `<section class="welcome-options"><h2>Por onde começamos?</h2><p>Escolha uma ideia ou escreva no chat.</p>${[
+    ["Tarefas do dia a dia", "Lembretes, organização e acompanhamento", "Quero ajuda com tarefas do dia a dia: lembretes e organização."],
+    ["Trabalho e projetos", "Prioridades, equipe, Slack e código", "Quero ajuda com meu trabalho e projetos."],
+    ["Pesquisa e ideias", "Explorar assuntos e encontrar respostas", "Quero ajuda com pesquisa e desenvolvimento de ideias."],
+    ["Ainda não sei", "Vamos descobrir juntos", "Ainda não sei. Me ajude a descobrir como você pode ser útil."],
+  ].map(([titulo, descricao, texto], i) => botao("escolher-missao", `<span class="option-key">${String.fromCharCode(65 + i)}</span><span><b>${titulo}</b><small>${descricao}</small></span><span>↗</span>`, { classe: "welcome-option", dados: { texto: texto ?? "" } })).join("")}</section>` : "";
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
   return `<div class="timeline">
     ${sep}
-    ${c.mensagens.map((m) => renderMensagem(m, estado, sala)).join("")}
+    ${renderMensagensAgrupadas(c.mensagens, estado, sala)}
+    ${acolhimento}
     ${c.propostas.map((p) => renderProposta(p, estado)).join("")}
     ${vivos.map((t) => renderTurnoVivo(t, c, estado)).join("")}
     ${renderFaixaParada(estado.faixaParada)}

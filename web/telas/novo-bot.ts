@@ -1,16 +1,12 @@
-import { botao } from "../lib/render.ts";
+import type { Estado } from "../estado/reducer.ts";
+import { botao, esc, iconeAgente } from "../lib/render.ts";
 
-export function renderNovoBot(): string {
-  return `<section class="tela tela-formulario">
-    <div class="eyebrow">SUA EQUIPE, DO SEU JEITO</div>
-    <header class="tela-cab"><h1>Conheça seu próximo bot</h1></header>
-    <p class="intro">Dê um nome, uma especialidade e uma missão. Ele pode conversar com você e pedir ajuda aos seus outros bots.</p>
-    <form class="form" data-form="criar-agente">
-      <label>Nome<input name="nome" placeholder="Ex.: Vera" maxlength="60" required autocomplete="off" /></label>
-      <label>Especialidade<input name="titulo" placeholder="Ex.: Engenharia e boas práticas" maxlength="120" /></label>
-      <label>O que esse bot faz?<textarea name="descricao" placeholder="Descreva a missão, como ele deve responder e quando deve consultar outros bots." rows="5" maxlength="8000" required></textarea></label>
-      <p class="mudo">O perfil fica salvo assim que você criar. A conversa usa o Claude Code instalado nesta máquina.</p>
-      <div class="acoes"><button class="bt pri" type="submit">Criar e conversar</button>${botao("navegar", "Cancelar", { dados: { tela: "frota" } })}</div>
-    </form>
-  </section>`;
+export function renderNovoBot(estado: Estado): string {
+  return `<section class="tela novo-contato"><h1>Nova conversa</h1>
+    <label class="search"><span>Para:</span><input id="busca-destinatario" placeholder="Buscar ou criar bots" aria-label="Buscar ou criar bots" autocomplete="off" /></label>
+    <div class="contact-picker">
+      ${botao("criar-rapido", "<span class=picker-icon>＋</span><span>Criar novo bot<small>Conheça seu próximo parceiro</small></span>", { classe: "picker-row" })}
+      ${botao("navegar", "<span class=picker-icon>♧</span><span>Criar chat em grupo<small>Reúna seus bots em uma sala</small></span>", { classe: "picker-row", dados: { tela: "nova-sala" } })}
+      ${(estado.frota?.agentes ?? []).map((a) => `<button class="picker-row" data-busca="${esc(a.nome.toLowerCase())}" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}">${iconeAgente(a)}<span>${esc(a.nome)}<small>${esc(a.titulo)}</small></span></button>`).join("")}
+    </div></section>`;
 }

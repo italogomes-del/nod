@@ -1,3 +1,4 @@
+import { APPS_MARKETPLACE } from "../contracts/marketplace.ts";
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
@@ -14,16 +15,17 @@ import type { Deps } from "./tipos.ts";
 export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) => {
   const agora = deps.agora();
   const conector = await deps.repos.conectores.buscarPorSlug(input.conector);
-  if (!conector) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${input.conector} não registrado` });
-  const conhecidas = new Set(conector.catalogo.map((c) => c.nome));
+  const conectar = (!conector || !conector.habilitado) && input.capacidades.length === 0 && (APPS_MARKETPLACE.some((app) => app.slug === input.conector) || !!conector);
+  if (!conector && !conectar) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${input.conector} não registrado` });
+  const conhecidas = new Set((conector?.catalogo ?? []).map((c) => c.nome));
   const desconhecidas = input.capacidades.filter((c) => !conhecidas.has(c));
-  if (input.capacidades.length === 0 || desconhecidas.length > 0) {
+  if (!conectar && (input.capacidades.length === 0 || desconhecidas.length > 0)) {
     throw new ErroDeDominio("entrada_invalida", { cause: `capacidades fora do catálogo: ${desconhecidas.join(", ")}` });
   }
   const proposta = await deps.repos.propostas.criar({
     conversaId: input.conversaId,
     agenteId: input.agenteId,
-    payload: { kind: "acesso", conector: conector.slug, capacidades: [...new Set(input.capacidades)], nivel: input.nivel, naoPedido: [...input.nao_pedido] },
+    payload: { kind: "acesso", ...(conectar ? { conectar: true as const } : {}), conector: input.conector, capacidades: [...new Set(input.capacidades)], nivel: input.nivel, naoPedido: [...input.nao_pedido] },
   });
   if (!proposta) throw new Error("proposta não criada");
   const evento: RuntimeEvent = {
@@ -35,7 +37,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     pessoaDestinoId: deps.escopo.pessoaId,
     conversaId: input.conversaId,
     turnoId: input.turnoId,
-    dados: { proposta_id: proposta.id, kind: "acesso", conector: conector.slug, capacidades: input.capacidades.length, nivel: input.nivel },
+    dados: { proposta_id: proposta.id, kind: "acesso", conector: input.conector, capacidades: input.capacidades.length, nivel: input.nivel },
   };
   return { data: { proposta_id: proposta.id }, events: [evento] };
 };

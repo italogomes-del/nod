@@ -3,7 +3,8 @@ import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
-import { botao, esc, esquecerRegiao, iconeAgente, regiao } from "./lib/render.ts";
+import { botao, esc, iconeAgente } from "./lib/render.ts";
+import { esquecerRegiao, regiao } from "./lib/regioes.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
@@ -43,6 +44,7 @@ function erroDe(e: unknown): { codigo: string; mensagem: string } {
 
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
 async function agir(fn: () => Promise<void>): Promise<void> {
+  dispatch({ tipo: "erro", erro: null });
   dispatch({ tipo: "ocupado", valor: true });
   try {
     await fn();
@@ -63,7 +65,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
   if (q === "sua-vez") return { tipo: "hidratar-sua-vez", suaVez: await api.suaVez() };
   if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
-  if (q === "conectores") return { tipo: "hidratar-conectores", conectores: (await api.conectores()).conectores };
+  if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q.startsWith("conversa:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
@@ -102,7 +104,7 @@ function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
   if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas") return true;
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
-  if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil";
+  if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return t.tipo === "chaves";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
@@ -119,7 +121,7 @@ function renderRail(): string {
   const abertos = estado.suaVez?.itens.filter((i) => i.estadoColuna !== "vencido").length ?? 0;
   const item = (tipo: Tela["tipo"], icone: string, rotulo: string, badge = 0) =>
     `<button class="nv" data-act="navegar" data-tela="${tipo}" aria-current="${t === tipo ? "true" : "false"}"><span class="ic">${icone}</span><span class="tl">${rotulo}</span>${badge ? `<span class="b">${badge}</span>` : ""}</button>`;
-  return `<button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button>${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Conectores")}${item("chaves", "⚿", "Chaves")}
+  return `<button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button>${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Marketplace")}${item("chaves", "⚿", "Chaves")}
     <div class="rail-rodape"><span class="conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></div>`;
 }
 
@@ -143,7 +145,7 @@ function renderSidebar(): string {
     .join("");
 
   return `<div class="search-wrap">
-      <div class="sh"><b>Meus agentes</b><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Criar bot">+</button></div>
+      <div class="sh"><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="criar-rapido" aria-label="Criar bot">+</button><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">⌄</button></span></div>
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
     <div class="list">
@@ -151,6 +153,7 @@ function renderSidebar(): string {
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
       <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
+    <button class="marketplace-link" data-act="navegar" data-tela="conectores"><span>▦</span> Marketplace</button>
     <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${estado.executor?.atual === "claude-cli" ? "Claude Code conectado" : "Modo de simulação"}</small></div></div>`;
 }
 
@@ -162,7 +165,7 @@ function renderPrincipal(): void {
   let composer: { chave: string; html: string } | null = null;
   switch (t.tipo) {
     case "novo-bot":
-      corpo = renderNovoBot();
+      corpo = renderNovoBot(estado);
       break;
     case "nova-rotina":
       corpo = renderNovaRotina(estado, t.agenteId);
@@ -208,8 +211,10 @@ function renderPrincipal(): void {
   regiao("erro", erro);
   const timeline = document.getElementById("timeline");
   const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
+  const abertos = [...document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
   regiao("timeline", corpo);
-  if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.scrollHeight;
+  for (const el of document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
+  if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
   if (composer?.chave !== composerDe) {
     composerDe = composer?.chave ?? null;
@@ -310,6 +315,7 @@ async function boot(): Promise<void> {
 
 function navegar(tela: Tela): void {
   dispatch({ tipo: "navegar", tela });
+  if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
 
 function conversaAtual(): { conversaId: string; salaId: string | null } | null {
@@ -354,6 +360,50 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
     if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
+  },
+  "conectar-composio": (el) => agir(async () => {
+    if (!estado.composioConfigurado) {
+      document.querySelector<HTMLInputElement>('input[name="chave"]')?.focus();
+      dispatch({ tipo: "aviso-conexao", texto: "Adicione a chave do seu Composio acima para conectar os apps." });
+      return;
+    }
+    const slug = el.dataset.id ?? "";
+    const r = await api!.conectarApp(slug);
+    dispatch({ tipo: "autorizacao-app", slug, url: r.url });
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
+  "verificar-composio": (el) => agir(async () => {
+    const r = await api!.verificarApp(el.dataset.id ?? "");
+    dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "Conexão concluída. Escolha as ferramentas que seu bot pode usar abaixo, ou volte à conversa para ele pedir o acesso necessário." : "Login ainda não concluído ou conexão indisponível. Termine a autorização na outra aba e tente novamente." });
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
+  "abrir-conexao": (el) => {
+    const t = estado.tela;
+    navegar({ tipo: "conectores", app: el.dataset.id, voltar: t.tipo === "conversa" || t.tipo === "sala" ? t : undefined });
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  },
+  "voltar-conexao": () => {
+    const t = estado.tela;
+    if (t.tipo === "conectores" && t.voltar) navegar(t.voltar);
+    else navegar({ tipo: "frota" });
+  },
+  "retomar-conexao": (el) => agir(async () => {
+    const alvo = conversaAtual();
+    if (!alvo) return;
+    await api!.recusarProposta(el.dataset.id ?? "");
+    const texto = `Conectei ${el.dataset.slug ?? "o app"}. Continue o pedido anterior usando o catálogo disponível e peça os acessos necessários.`;
+    if (alvo.salaId) await api!.postarNaSala(alvo.salaId, texto);
+    else await api!.enviar(alvo.conversaId, texto);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "conectores"] });
+  }),
+  "criar-rapido": () => agir(async () => {
+    const r = await api!.criarAgente(undefined, { interativo: true });
+    dispatch({ tipo: "invalidar", quais: ["frota"] });
+    navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
+  }),
+  "escolher-missao": (el) => {
+    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    if (ta) { ta.value = el.dataset.texto ?? ""; return enviarComposer(); }
   },
   "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
   "preencher-prompt": (el) => {
@@ -463,7 +513,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "criar-rotina": (form) => agir(async () => {
     const d = new FormData(form);
     const [hora, minuto] = String(d.get("horario")).split(":").map(Number);
-    await api!.criarRotina({ agenteId: String(d.get("agenteId")), cron: `${minuto} ${hora} * * ${d.get("frequencia")}`, fusoIana: String(d.get("fusoIana")), instrucao: String(d.get("instrucao")), fonte: String(d.get("fonte")), entregavel: String(d.get("entregavel")), limitesAprovacao: String(d.get("limitesAprovacao")), politicaSemDado: String(d.get("politicaSemDado")) });
+    await api!.criarRotina({ agenteId: String(d.get("agenteId")), cron: String(d.get("frequencia")).startsWith("intervalo:") ? `*/${String(d.get("frequencia")).split(":")[1]} * * * *` : d.get("frequencia") === "hora" ? "0 * * * *" : `${minuto} ${hora} * * ${d.get("frequencia")}`, fusoIana: String(d.get("fusoIana")), instrucao: String(d.get("instrucao")), fonte: String(d.get("fonte")), entregavel: String(d.get("entregavel")), limitesAprovacao: String(d.get("limitesAprovacao")), politicaSemDado: String(d.get("politicaSemDado")) });
     dispatch({ tipo: "invalidar", quais: ["rotinas"] });
     navegar({ tipo: "rotinas" });
   }),
@@ -488,6 +538,21 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
       dispatch({ tipo: "invalidar", quais: ["salas"] });
       navegar({ tipo: "sala", salaId: r.ids.salaId ?? "", conversaId: r.ids.conversaId ?? "" });
     }),
+  "configurar-composio": (form) => agir(async () => {
+    const d = new FormData(form);
+    await api!.configurarComposio(String(d.get("chave") ?? ""));
+    form.reset();
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
+  "credenciais-conector": (form) => agir(async () => {
+    const d = new FormData(form);
+    let env: Record<string, string>;
+    try { env = JSON.parse(String(d.get("env") ?? "{}")) as Record<string, string>; }
+    catch { dispatch({ tipo: "erro", erro: { codigo: "entrada_invalida", mensagem: "Informe as credenciais como um objeto JSON válido." } }); return; }
+    await api!.atualizarCredenciais(form.dataset.id ?? "", env);
+    form.reset();
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
   "registrar-conector": (form) =>
     agir(async () => {
       const d = new FormData(form);
@@ -526,6 +591,12 @@ document.addEventListener("submit", (ev) => {
 // Contador ao vivo da aprovação em lista e autocomplete de @menção.
 document.addEventListener("change", (ev) => {
   const cb = ev.target as HTMLInputElement;
+  if (cb.matches('select[name="frequencia"]')) {
+    const horario = cb.closest("form")?.querySelector<HTMLInputElement>('input[name="horario"]');
+    const intervalo = cb.value.startsWith("intervalo:") || cb.value === "hora";
+    if (horario) { horario.disabled = intervalo; horario.required = !intervalo; horario.closest("label")!.hidden = intervalo; }
+    return;
+  }
   if (!cb.matches("input[data-item]")) return;
   const raiz = cb.closest("[data-decisao]");
   const contador = raiz?.querySelector("[data-contador]");
@@ -544,7 +615,11 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
-  if (ta.id === "busca-bots") { filtrarBots(ta.value); return; }
+  if (ta.id === "busca-marketplace") {
+    for (const el of document.querySelectorAll<HTMLElement>("[data-app-busca]")) el.hidden = !el.dataset.appBusca?.includes(ta.value.trim().toLowerCase());
+    return;
+  }
+  if (ta.id === "busca-bots" || ta.id === "busca-destinatario") { filtrarBots(ta.value); return; }
   if (ta.id !== "composer-texto") return;
   ta.style.height = "auto";
   ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;

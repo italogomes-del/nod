@@ -87,6 +87,12 @@ export function conectoresRepo(conn: Conn, escopo: Escopo) {
       return l ? paraConector(l) : null;
     },
 
+    async atualizarEndpoint(id: string, url: string, envCifrado: string, envChaves: string[]): Promise<ConectorGuardado | null> {
+      const [l] = await conn<Linha[]>`update conectores set url = ${url}, transporte = 'http', comando = null, args = '{}', declaracao = 'toca', env_cifrado = ${envCifrado}, env_chaves = ${envChaves}::text[], habilitado = false, catalogo = '[]', sondado_em = null, ultima_falha = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraConector(l) : null;
+    },
+
     async buscar(id: string): Promise<ConectorGuardado | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from conectores where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? paraConector(l) : null;

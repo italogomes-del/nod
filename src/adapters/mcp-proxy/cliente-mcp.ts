@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { TransporteConector } from "../../contracts/conector.ts";
 import { log } from "../../obs/log.ts";
 import { CODIGO, interpretar, notificacao, requisicao, type ErroJsonRpc } from "./jsonrpc.ts";
+import { lerRespostaHttp } from "./resposta-http.ts";
 import { criarLineSplitter } from "./line-splitter.ts";
 
 /**
@@ -174,17 +175,19 @@ function transporteHttp(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
       try {
         const cabecalhos: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream", ...(cfg.env ?? {}) };
         if (sessao) cabecalhos["mcp-session-id"] = sessao;
-        const r = await f(url, { method: "POST", headers: cabecalhos, body: linha, signal: ctrl.signal });
+        cabecalhos["mcp-protocol-version"] = PROTOCOLO_MCP;
+        const r = await f(url, { method: "POST", headers: cabecalhos, redirect: "error", body: linha, signal: ctrl.signal });
         const sid = r.headers.get("mcp-session-id");
         if (sid) sessao = sid;
         if (r.status === 202 || r.status === 204) return null;
-        if (r.status >= 500 || r.status === 404) throw new ErroTransporteMcp("conector_indisponivel", `http ${r.status}`);
-        const texto = await r.text();
-        const tipo = r.headers.get("content-type") ?? "";
-        const corpo = tipo.includes("text/event-stream") ? texto.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).find((d) => d !== "") ?? "" : texto;
-        if (corpo === "") return null;
-        const m = interpretar(corpo);
-        if (m.tipo !== "resposta") throw new ErroTransporteMcp("falha_tecnica", "resposta não JSON-RPC");
+        if (!r.ok) throw new ErroTransporteMcp("conector_indisponivel", `http ${r.status}`);
+        const pedido = interpretar(linha);
+        const id = pedido.tipo === "requisicao" ? pedido.id : null;
+        const m = await lerRespostaHttp(r, id);
+        if (!m) {
+          if (id === null) return null;
+          throw new ErroTransporteMcp("falha_tecnica", "resposta não JSON-RPC");
+        }
         return { result: m.result, error: m.error };
       } catch (e) {
         if (e instanceof ErroTransporteMcp) throw e;
@@ -235,8 +238,18 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
     listar: () =>
       serializado(async () => {
         await iniciarDentro();
-        const r = (await pedir("tools/list")) as { tools?: unknown };
-        return Array.isArray(r?.tools) ? (r.tools as FerramentaDescoberta[]).filter((t) => typeof t?.name === "string") : [];
+        const ferramentas: FerramentaDescoberta[] = [];
+        const vistos = new Set<string>();
+        let cursor: string | undefined;
+        do {
+          const r = (await pedir("tools/list", cursor ? { cursor } : undefined)) as { tools?: unknown; nextCursor?: unknown };
+          if (!Array.isArray(r?.tools)) throw new ErroTransporteMcp("falha_tecnica");
+          ferramentas.push(...(r.tools as FerramentaDescoberta[]).filter((t) => typeof t?.name === "string"));
+          cursor = typeof r.nextCursor === "string" && r.nextCursor !== "" ? r.nextCursor : undefined;
+          if (cursor && (vistos.has(cursor) || vistos.size >= 20)) throw new ErroTransporteMcp("falha_tecnica");
+          if (cursor) vistos.add(cursor);
+        } while (cursor);
+        return ferramentas;
       }),
     chamar: (tool, args) =>
       serializado(async () => {

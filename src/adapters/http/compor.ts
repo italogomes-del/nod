@@ -42,6 +42,7 @@ import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
+import { rotasMarketplace } from "./rotas/marketplace.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
 import { criarRotasDecisoes } from "./rotas/decisoes.ts";
@@ -399,6 +400,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
     ...rotasConcessoes({ dentro }),
+    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     ...rotasMaquinas({ dentro }),
