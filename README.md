@@ -14,6 +14,8 @@ A [pré-release Desktop 0.1.0 — Preview 1](https://github.com/marlonwlv/nod/re
 
 Os instaladores desta pré-release **não têm assinatura Apple nem notarização** e precisam de um servidor nod acessível por HTTPS. Para montar o servidor correspondente aos DMGs, use o código da tag `desktop-v0.1.0-preview.1`. Windows ainda não é suportado nesta versão.
 
+Para mantenedores: [como preparar, validar e publicar cada versão](docs/processo-de-release.md).
+
 ## Rodar amanhã de manhã
 
 ```bash
