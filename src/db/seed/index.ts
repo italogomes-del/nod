@@ -1,3 +1,4 @@
+import { MODELO_AGENTE_PADRAO as MODELO_PADRAO } from "../../contracts/modelos.ts";
 import postgres from "postgres";
 import { criarDb } from "../client.ts";
 import { abrirTxEscopada } from "../tx.ts";
@@ -23,9 +24,6 @@ export const CONVERSA_VERA = idDeterministico("conversa:marlon:vera");
 export const CONVERSA_TUCA = idDeterministico("conversa:ana:tuca");
 export const SALA_GERAL = idDeterministico("sala:leapy:geral");
 export const CONVERSA_GERAL = idDeterministico("conversa:sala:geral");
-
-/** definido em 2026-09-16: modelo padrão dos bots de exemplo = o mesmo das sondas (custo baixo). */
-const MODELO_PADRAO = "claude-haiku-4-5-20251001";
 
 const AGENTES = [
   { id: AGENTE_VERA, dono: PESSOA_MARLON, conversaId: CONVERSA_VERA, nome: "Vera", titulo: "Revisora de PRs", descricao: "Revisa PRs do time nod e responde curto.", forma: "shape-hex", cor: "c-purple" },

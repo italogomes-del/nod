@@ -70,6 +70,12 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(segundo.args).not.toContain("--session-id");
   });
 
+  it("envia Sonnet explicitamente ao CLI, inclusive numa sessão retomada", () => {
+    const { args } = montarArgs({ plano: planoDeTeste({ modelo: "sonnet", sessaoCli: "sessao-sonnet" }), mcpJson: "m" });
+    expect(valor(args, "--model")).toBe("sonnet");
+    expect(valor(args, "--resume")).toBe("sessao-sonnet");
+  });
+
   it("sem sessaoNova injetada, o uuid é v4", () => {
     const { sessaoCli } = montarArgs({ plano: planoDeTeste(), mcpJson: "m" });
     expect(sessaoCli).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);

@@ -1,3 +1,4 @@
+import { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -39,7 +40,7 @@ export type LigacaoClaudeCli = {
   sigtermParaSigkillMs?: number;
 };
 
-export const MODELO_SONDA_PADRAO = "claude-haiku-4-5-20251001";
+export { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 
 /** As flags que montarArgs usa — é a lista conferida contra os floors. */
 export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [

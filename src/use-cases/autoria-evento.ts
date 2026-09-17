@@ -10,8 +10,7 @@ import type { Escopo } from "../shared/types.ts";
  * O caso de uso DEVOLVE eventos; quem os grava (rota, ponte, laço) chama gravarComOutbox na mesma tx.
  */
 
-/** definido em 2026-09-16: haiku é o modelo padrão de todo bot novo (custo da sonda: US$0,003–0,02 por turno, mapa-cli). */
-export const MODELO_PADRAO = "claude-haiku-4-5-20251001";
+export { MODELO_AGENTE_PADRAO as MODELO_PADRAO } from "../contracts/modelos.ts";
 
 /** definido em 2026-09-16: 24 h, espelho de NOD_PRAZO_DECISAO_MS no .env.example (relógio de DECISÃO, ADR-007). */
 export const PRAZO_DECISAO_PADRAO_MS = 86_400_000;

@@ -1,3 +1,4 @@
+import { MODELO_SONDA_PADRAO } from "../src/contracts/modelos.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,7 +54,7 @@ const segundos = (argumento("--segundos") ?? "30,90")
   .map((s) => Number.parseInt(s.trim(), 10))
   .filter((n) => Number.isFinite(n) && n > 0);
 const mcpToolTimeoutMs = argumento("--mcp-tool-timeout-ms");
-const modelo = process.env.NOD_MODELO ?? "claude-haiku-4-5-20251001";
+const modelo = process.env.NOD_MODELO_SONDA ?? MODELO_SONDA_PADRAO;
 const home = process.env.HOME ?? tmpdir();
 const ambiente = ambienteDaSonda(process.env, home);
 if (mcpToolTimeoutMs) ambiente.MCP_TOOL_TIMEOUT = mcpToolTimeoutMs;
