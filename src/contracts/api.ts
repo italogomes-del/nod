@@ -73,6 +73,10 @@ export const ROTAS = [
   { metodo: "GET", caminho: "/api/sessao/google", lane: "L1" },
   { metodo: "GET", caminho: "/api/sessao/google/callback", lane: "L1" },
   { metodo: "GET", caminho: "frota", lane: "L6" },
+  { metodo: "GET", caminho: "gestao-agentes", lane: "L6" },
+  { metodo: "PATCH", caminho: "agentes/:id/organizacao", lane: "L6" },
+  { metodo: "DELETE", caminho: "agentes/:id", lane: "L6" },
+  { metodo: "POST", caminho: "agentes/:id/restaurar", lane: "L6" },
   { metodo: "GET", caminho: "inventario", lane: "L9" },
   /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca catcher ⇄ claude-cli em tempo de execução. */
   { metodo: "GET", caminho: "executor", lane: "L9" },

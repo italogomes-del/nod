@@ -13,9 +13,9 @@ const TURNOS_CONTADOS = 1_000;
  * (contagens, nunca texto), o inventário do motor (claude-cli tem precedência sobre o catcher) e as
  * negações vivas de conectores com última falha (ADR-029: fail-closed renderizado).
  */
-export const listarFrota: CasoDeUso<{ agora?: number }, FrotaDto> = async (deps) => {
+export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, FrotaDto> = async (deps, input) => {
   const agora = deps.agora();
-  const agentes = await deps.repos.agentes.listar();
+  const agentes = await deps.repos.agentes.listar(input.gerenciar ? { incluirOcultos: true, incluirExcluidos: true } : {});
   const linhas: FrotaDto["agentes"] = [];
   for (const agente of agentes) {
     const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);

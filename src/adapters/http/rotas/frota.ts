@@ -6,6 +6,9 @@ import { criarExecutor, type DepsRotas } from "./executar-caso.ts";
 export function criarRotasFrota(d: DepsRotas): Rota[] {
   const executar = criarExecutor(d);
   return [
+    { metodo: "GET", padrao: /^\/gestao-agentes$/, async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, listarFrota, { gerenciar: true }));
+    } },
     {
       metodo: "GET",
       padrao: /^\/frota$/,

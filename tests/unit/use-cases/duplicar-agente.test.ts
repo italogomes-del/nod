@@ -7,7 +7,7 @@ import { registrarMemoria } from "../../../src/use-cases/lembrar.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
 describe("duplicarAgente (Grok Bot: Duplicate copia perfil, nunca memória nem histórico)", () => {
-  it("cópia leva nome ' (cópia)', título, descrição, dono e modelo; forma/cor novas; sem memórias nem mensagens", async () => {
+  it("cópia leva nome ' (cópia)', título, descrição, dono e modelo; avatar preservado; sem memórias nem mensagens", async () => {
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "empresa", nome: "Vera" });
     await executar(deps, editarPerfil, { agenteId: criado.agente.id, titulo: "Revisora", descricao: "Revisa PRs" });
@@ -16,8 +16,8 @@ describe("duplicarAgente (Grok Bot: Duplicate copia perfil, nunca memória nem h
 
     const { data, events } = await executar(deps, duplicarAgente, { agenteId: criado.agente.id });
     expect(data.agente).toMatchObject({ nome: "Vera (cópia)", titulo: "Revisora", descricao: "Revisa PRs", dono: "empresa", visibility: "equipe", modelo: criado.agente.modelo, duplicadoDe: criado.agente.id });
-    expect(data.agente.forma).not.toBe(criado.agente.forma);
-    expect(data.agente.cor).not.toBe(criado.agente.cor);
+    expect(data.agente.forma).toBe(criado.agente.forma);
+    expect(data.agente.cor).toBe(criado.agente.cor);
     expect(data.conversa).toMatchObject({ tipo: "propria", agenteId: data.agente.id });
     expect(data.conversa.id).not.toBe(criado.conversa.id);
     expect(await deps.repos.memorias.listarDoAgente(data.agente.id)).toEqual([]);

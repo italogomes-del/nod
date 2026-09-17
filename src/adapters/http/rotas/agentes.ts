@@ -1,4 +1,5 @@
-import type { DonoAgente } from "../../../contracts/agente.ts";
+import { gerirAgente } from "../../../use-cases/gerir-agente.ts";
+import type { DonoAgente, FormaAgente, CorAgente } from "../../../contracts/agente.ts";
 import type { TipoMemoria } from "../../../contracts/memoria.ts";
 import { criarAgente } from "../../../use-cases/criar-agente.ts";
 import { duplicarAgente } from "../../../use-cases/duplicar-agente.ts";
@@ -19,6 +20,17 @@ const ID = "(?<id>[^/]+)";
 export function criarRotasAgentes(d: DepsRotas): Rota[] {
   const executar = criarExecutor(d);
   return [
+    { metodo: "PATCH", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
+      const corpo = corpoObjeto(await ctx.corpo());
+      ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "organizar",
+        secao: corpo.secao as string | undefined, naoLido: corpo.naoLido as boolean | undefined }));
+    } },
+    { metodo: "DELETE", padrao: new RegExp(`^/agentes/${ID}$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "excluir" }));
+    } },
+    { metodo: "POST", padrao: new RegExp(`^/agentes/${ID}/restaurar$`), async handler(ctx) {
+      ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "restaurar" }));
+    } },
     {
       metodo: "POST",
       padrao: /^\/agentes$/,
@@ -39,6 +51,8 @@ export function criarRotasAgentes(d: DepsRotas): Rota[] {
           titulo: textoOpcional(corpo.titulo),
           descricao: textoOpcional(corpo.descricao),
           modelo: textoOpcional(corpo.modelo),
+          forma: corpo.forma as FormaAgente | undefined,
+          cor: corpo.cor as CorAgente | undefined,
           dono: corpo.dono,
         });
         ctx.json(200, r);

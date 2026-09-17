@@ -1,3 +1,5 @@
+import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { ModoSessaoDto } from "../src/contracts/api.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
@@ -60,6 +62,7 @@ async function agir(fn: () => Promise<void>): Promise<void> {
 async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (!api) return null;
   const agora = Date.now();
+  if (q === "gestao") return { tipo: "hidratar-gestao", gestao: await api.gestaoAgentes() };
   if (q === "frota") return { tipo: "hidratar-frota", frota: await api.frota() };
   if (q === "inventario") return { tipo: "hidratar-inventario", inventario: await api.inventario() };
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
@@ -103,6 +106,7 @@ async function reidratar(): Promise<void> {
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
   if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas") return true;
+  if (q === "gestao") return t.tipo === "gestao" || t.tipo === "perfil";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return t.tipo === "chaves";
@@ -133,9 +137,12 @@ function renderSidebar(): string {
     const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
     const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
     const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
-    return `<button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a)}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}</span></button>`;
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a)}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
-  const bots = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId).map(linha).join("") || '<p class="mudo">nenhum bot ainda</p>';
+  const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
+  const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";
+  const secoes = [...new Set(meus.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
+  const bots = grupo("Fixados", meus.filter((a) => a.fixado)) + grupo("Meus agentes", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, meus.filter((a) => !a.fixado && a.secao === s))).join("");
   const equipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId).map(linha).join("");
   const salas = estado.salas
     .map(
@@ -149,10 +156,11 @@ function renderSidebar(): string {
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
     <div class="list">
-      <section class="section"><h3>Meus agentes <span>${agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId).length}</span></h3>${bots}</section>
+      ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
       <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
+    <button class="manage-link" data-act="navegar" data-tela="gestao">Gerenciar agentes <span>Ocultos e excluídos</span></button>
     <button class="marketplace-link" data-act="navegar" data-tela="conectores"><span>▦</span> Marketplace</button>
     <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${estado.executor?.atual === "claude-cli" ? "Claude Code conectado" : "Modo de simulação"}</small></div></div>`;
 }
@@ -182,6 +190,9 @@ function renderPrincipal(): void {
     case "conectores":
       corpo = renderConectores(estado);
       break;
+    case "gestao":
+      corpo = renderGestao(estado.gestao ?? null, estado.sessao?.pessoaId);
+      break;
     case "perfil":
       corpo = renderPerfil(estado, t.agenteId);
       break;
@@ -197,7 +208,7 @@ function renderPrincipal(): void {
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(`Escreva uma mensagem para ${estado.frota?.agentes.find((a) => a.id === t.agenteId)?.nome ?? "o bot"}…`, (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome)) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(`Escreva uma mensagem para ${botGerido(t.agenteId)?.nome ?? "o bot"}…`, (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome)) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -233,7 +244,7 @@ function renderPrincipal(): void {
   // definido em 2026-09-17: hidratação do nome atualiza só o placeholder; nunca recria o textarea nem perde rascunho.
   const campoMensagem = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
   if (campoMensagem && t.tipo === "conversa") {
-    const nome = estado.frota?.agentes.find((a) => a.id === t.agenteId)?.nome ?? "o bot";
+    const nome = botGerido(t.agenteId)?.nome ?? "o bot";
     campoMensagem.placeholder = `Escreva uma mensagem para ${nome}…`;
   }
   document.body.classList.toggle("ocupado", estado.ocupado);
@@ -329,6 +340,55 @@ async function boot(): Promise<void> {
 function navegar(tela: Tela): void {
   dispatch({ tipo: "navegar", tela });
   if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
+}
+
+async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+    dispatch({ tipo: "invalidar", quais: ["frota", "gestao", "rotinas", "salas", "sua-vez"] });
+  } catch (e) { dispatch({ tipo: "erro", erro: erroDe(e) }); throw e; }
+}
+
+function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
+  const executar = (fn: () => Promise<unknown>) => void agir(async () => { await mudarGestao(fn); });
+  if (acao === "perfil") { navegar({ tipo: "perfil", agenteId: a.id }); return; }
+  if (acao === "renomear") {
+    pedirGestao("Renomear bot", `<label>Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60" /></label>`, "Salvar", async (d) => mudarGestao(() => api!.editarPerfil(a.id, { nome: String(d.get("nome")) }))); return;
+  }
+  if (acao === "mover") {
+    const secoes = [...new Set((estado.gestao?.agentes ?? estado.frota?.agentes ?? []).filter((b) => b.ownerId === estado.sessao?.pessoaId && !b.excluidoEm).map((b) => b.secao).filter(Boolean))];
+    pedirGestao("Mover para", `<p>Escolha uma seção ou escreva um novo nome. Deixe vazio para tirar da seção.</p><label>Seção<input name="secao" value="${esc(a.secao ?? "")}" maxlength="60" list="secoes-bots" placeholder="Sem seção" /></label><datalist id="secoes-bots">${secoes.map((n) => `<option value="${esc(n!)}"></option>`).join("")}</datalist>`, "Mover", async (d) => mudarGestao(() => api!.organizarAgente(a.id, { secao: String(d.get("secao")) }))); return;
+  }
+  if (acao === "duplicar") {
+    pedirGestao(`Duplicar ${a.nome}?`, "<p>A cópia mantém perfil e avatar. Rotinas começam pausadas. Histórico, memória e acessos não são copiados.</p>", "Duplicar", async () => {
+      const r = await api!.duplicar(a.id);
+      await mudarGestao(async () => r);
+      navegar({ tipo: "conversa", agenteId: r.agente.id, conversaId: r.conversa.id });
+    }); return;
+  }
+  if (acao === "excluir") {
+    pedirGestao(`Excluir ${a.nome}?`, "<p>O bot vai para Excluídos. Novos trabalhos serão bloqueados, rotinas pausadas e acessos revogados. Trabalhos em andamento receberão um pedido de interrupção; ações externas já realizadas não podem ser desfeitas.</p><p>Você pode recuperar o perfil e o histórico em Gerenciar agentes.</p>", "Excluir agente", async () => {
+      await mudarGestao(() => api!.excluirAgente(a.id)); navegar({ tipo: "gestao" });
+    }, true); return;
+  }
+  if (acao === "copiar") {
+    void navigator.clipboard.writeText(a.conversaId).then(() => pedirGestao("ID copiado", `<p>ID da conversa copiado para a área de transferência.</p><input aria-label="ID da conversa" readonly value="${esc(a.conversaId)}" />`, "Concluir", async () => {})).catch(() => pedirGestao("ID da conversa", `<p>Selecione e copie o ID abaixo.</p><input aria-label="ID da conversa" readonly value="${esc(a.conversaId)}" />`, "Concluir", async () => {})); return;
+  }
+  if (acao === "ocultar" && !a.oculto) {
+    pedirGestao("Ocultar da barra lateral?", "<p>O bot e suas rotinas continuam funcionando. Para trazê-lo de volta, abra Gerenciar agentes → Ocultos.</p>", "Ocultar", async () => {
+      await mudarGestao(() => api!.ocultar(a.id, true)); navegar({ tipo: "gestao" });
+    }); return;
+  }
+  executar(() => acao === "fixar" ? api!.fixar(a.id, !a.fixado) : acao === "nao-lido" ? api!.organizarAgente(a.id, { naoLido: !a.naoLido }) : acao === "restaurar" ? api!.restaurarAgente(a.id) : api!.ocultar(a.id, false));
+}
+
+function botGerido(id: string | undefined): BotGerido | undefined {
+  return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
+}
+
+function menuDoBot(el: HTMLElement): void {
+  const a = botGerido(el.dataset.id);
+  if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, el, (acao) => acaoDoBot(a, acao));
 }
 
 function conversaAtual(): { conversaId: string; salaId: string | null } | null {
@@ -436,8 +496,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),
-  "abrir-conversa": (el) => navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" }),
+  "abrir-conversa": (el) => {
+    const a = estado.frota?.agentes.find((a) => a.id === el.dataset.agente);
+    if (a?.naoLido && a.ownerId === estado.sessao?.pessoaId) void agir(async () => { await mudarGestao(() => api!.organizarAgente(a.id, { naoLido: false })); });
+    navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" });
+  },
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
+  "menu-agente": (el) => menuDoBot(el),
+  "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
+  "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
   "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
   "ir-memoria": (el) => navegar({ tipo: "memoria", agenteId: el.dataset.id ?? "" }),
   "fechar-erro": () => dispatch({ tipo: "erro", erro: null }),
@@ -466,13 +533,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "confirmar-proposta": (el) => agir(async () => void (await api!.confirmarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota", "rotinas", "sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   "recusar-proposta": (el) => agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   fixar: (el) => agir(async () => void (await api!.fixar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
-  ocultar: (el) => agir(async () => void (await api!.ocultar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
-  duplicar: (el) =>
-    agir(async () => {
-      const r = await api!.duplicar(el.dataset.id ?? "");
-      dispatch({ tipo: "invalidar", quais: ["frota"] });
-      navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
-    }),
+  ocultar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "ocultar"); },
+  duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },
   revogar: (el) => agir(async () => void (await api!.revogar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
   "salvar-memoria": (el) =>
     agir(async () => {
@@ -540,7 +602,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "editar-perfil": (form) =>
     agir(async () => {
       const d = new FormData(form);
-      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), modelo: String(d.get("modelo") ?? "") });
+      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), modelo: String(d.get("modelo") ?? ""), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
       dispatch({ tipo: "invalidar", quais: ["frota"] });
     }),
   "criar-memoria": (form) =>
@@ -674,3 +736,11 @@ declare global {
   }
 }
 window.nod = { estado: () => estado, agente: () => agenteDaTela(estado) };
+
+document.addEventListener("contextmenu", (ev) => {
+  const row = (ev.target as HTMLElement).closest<HTMLElement>("[data-bot-contexto]");
+  if (!row) return;
+  ev.preventDefault();
+  const botao = row.querySelector<HTMLElement>("[data-act=menu-agente]");
+  if (botao) menuDoBot(botao);
+});

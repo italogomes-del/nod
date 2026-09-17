@@ -64,7 +64,7 @@ describeIntegracao("agentes (E1.1/E1.2/E1.3, Grok Bot Pin/Hide/Duplicate) no Pos
     });
   });
 
-  it("duplicar copia o perfil com forma/cor novas e NÃO copia memória nem mensagens; fixar e ocultar", async () => {
+  it("duplicar copia o perfil com avatar preservado e NÃO copia memória nem mensagens; fixar e ocultar", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
@@ -74,7 +74,7 @@ describeIntegracao("agentes (E1.1/E1.2/E1.3, Grok Bot Pin/Hide/Duplicate) no Pos
 
       const { data: copia } = await executar(deps, duplicarAgente, { agenteId: criado.agente.id });
       expect(copia.agente).toMatchObject({ nome: "Vera (cópia)", titulo: "Revisora", duplicadoDe: criado.agente.id, dono: "pessoa" });
-      expect(copia.agente.cor).not.toBe(criado.agente.cor);
+      expect(copia.agente.cor).toBe(criado.agente.cor);
       expect(await deps.repos.memorias.listarDoAgente(copia.agente.id)).toEqual([]);
       expect(await deps.repos.mensagens.listarDaConversa(copia.conversa.id)).toEqual([]);
       expect(await deps.repos.turnos.listarDaConversa(copia.conversa.id)).toEqual([]);

@@ -22,7 +22,7 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao, politica_sem_dado, exige_aprovacao, estado, proxima_execucao, criado_em";
+  "tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao, politica_sem_dado, exige_aprovacao, case when exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.geracao_execucao = rotinas.geracao_execucao and a.excluido_em is null) then estado else 'pausada'::estado_rotina end as estado, proxima_execucao, criado_em";
 
 const paraRotina = (l: Linha): Rotina => ({
   tenantId: l.tenant_id,
@@ -80,7 +80,7 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
     },
 
     async listar(): Promise<Rotina[]> {
-      const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} order by criado_em`;
+      const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null) order by criado_em`;
       return linhas.map(paraRotina);
     },
 
@@ -99,7 +99,7 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
     async ativasVencidas(agora: number): Promise<Rotina[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from rotinas
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'ativa' and proxima_execucao <= ${data(agora)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'ativa' and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null and a.geracao_execucao = rotinas.geracao_execucao) and proxima_execucao <= ${data(agora)}
         order by proxima_execucao`;
       return linhas.map(paraRotina);
     },

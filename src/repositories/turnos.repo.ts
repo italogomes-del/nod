@@ -151,6 +151,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           where (tenant_id, id) = (
             select t.tenant_id, t.id from turnos t
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
+              and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
               and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.estado = 'despachando')
               and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.agente_id = t.agente_id and d.estado = 'despachando')
             order by (t.origem = 'rotina') asc, t.criado_em asc, t.id asc
@@ -176,13 +177,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number): Promise<{ ativo: boolean }> {
       const [l] = await conn<{ ativo: boolean }[]>`
         update turnos set
-          lease_ate = case when estado = 'despachando' and parar_solicitado_em is null then ${data(agora + LEASE_MS)} else lease_ate end,
+          lease_ate = case when estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao) then ${data(agora + LEASE_MS)} else lease_ate end,
           attempted = attempted or ${sinais.attempted ?? false},
           rejected = rejected or ${sinais.rejected ?? false},
           prompt_submitted = prompt_submitted or ${sinais.promptSubmitted ?? false},
           produced_output = produced_output or ${sinais.producedOutput ?? false}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and machine_id = ${machineId}
-        returning (estado = 'despachando' and parar_solicitado_em is null) as ativo`;
+        returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo`;
       return { ativo: l?.ativo === true };
     },
 

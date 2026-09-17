@@ -97,3 +97,8 @@ Dev e CI: **zero** — o catcher é o default. Cada `claude -p` real usa `--mode
 - [docs/adr/](docs/adr/): 32 decisões com gatilho de reversão; refinamentos datados (0003, 0004) em ADR-003 e ADR-007.
 - [docs/product-spec.html](docs/product-spec.html), [docs/core-features.md](docs/core-features.md), [docs/internal-first.md](docs/internal-first.md), [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md), [docs/spikes/serializacao-do-turno.md](docs/spikes/serializacao-do-turno.md).
 - Protótipos: [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) (referência histórica), [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
+
+Gestão completa de agentes: menu na lista e no chat, organização em seções, leitura, perfil/avatar,
+cópia, ocultos e exclusão recuperável. [Roteiro de aceite](docs/uat-gestao-agentes.md) e
+[decisão de ciclo de vida](docs/adr/adr-034-gestao-e-exclusao-recuperavel-de-agentes.md).
+`npm run uat:gestao` repete a regressão dedicada. Atualize o banco com `npm run db:migrate` antes de iniciar.

@@ -24,6 +24,7 @@ export type Tela =
   | { tipo: "frota" }
   | { tipo: "conversa"; conversaId: string; agenteId: string }
   | { tipo: "sala"; salaId: string; conversaId: string }
+  | { tipo: "gestao" }
   | { tipo: "perfil"; agenteId: string }
   | { tipo: "memoria"; agenteId: string }
   | { tipo: "rotinas" }
@@ -44,12 +45,13 @@ export type ConversaEstado = ConversaDto & {
 
 export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: number };
 
-export type Invalidacao = "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+export type Invalidacao = "gestao" | "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
   tela: Tela;
   frota: FrotaDto | null;
+  gestao?: FrotaDto | null;
   inventario: Inventario | null;
   /** Interruptor de executor da máquina (catcher ⇄ claude-cli): estado escrito de cada opção e a última recusa. */
   executor: EstadoExecutor | null;
@@ -91,6 +93,7 @@ export type Acao =
   | { tipo: "tick"; agora: number }
   | { tipo: "conexao"; estado: EstadoConexao; tentativa: number; proximaEmMs: number | null }
   | { tipo: "frame"; frame: FrameSse; agora: number }
+  | { tipo: "hidratar-gestao"; gestao: FrotaDto }
   | { tipo: "hidratar-frota"; frota: FrotaDto }
   | { tipo: "hidratar-inventario"; inventario: Inventario }
   | { tipo: "hidratar-executor"; executor: EstadoExecutor }
@@ -223,7 +226,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
     const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
-    return invalidar(e, "frota", conv(f), memoria, concessoes);
+    return invalidar(e, "frota", "gestao", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
   },
   "parada.faixa": (e, f) => {
     const faixa: FaixaParada = {
@@ -261,6 +264,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, conexao: { estado: acao.estado, tentativa: acao.tentativa, proximaEmMs: acao.proximaEmMs } };
     case "frame":
       return aplicarFrame(estado, acao.frame, acao.agora);
+    case "hidratar-gestao":
+      return { ...estado, gestao: acao.gestao };
     case "hidratar-frota":
       return { ...estado, frota: acao.frota, inventario: acao.frota.inventario };
     case "hidratar-inventario":
@@ -325,6 +330,7 @@ export function conversaDaTela(estado: Estado): ConversaEstado | null {
 export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const t = estado.tela;
   const faltas: Invalidacao[] = [];
+  if (estado.tela.tipo === "gestao" && !estado.gestao) faltas.push("gestao");
   if (!estado.frota) faltas.push("frota");
   if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (t.tipo === "sala" && estado.salas.length === 0) faltas.push("salas");

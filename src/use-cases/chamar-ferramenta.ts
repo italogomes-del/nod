@@ -152,6 +152,7 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   };
 
   if (!plano || plano.turnoId !== input.turnoId) return negar("plano_ausente", "plano_ausente");
+  if (await deps.repos.agentes.execucaoBloqueada(input.turnoId)) return negar("parada_ativa", "ferramenta_negada");
   if (!(plano.expiraEm > agora)) return negar("plano_expirado", "plano_ausente");
 
   // Gate de parada: boolean | null — null (consulta falhou) É parada (fail-closed no caso de uso, EMENDA 10).

@@ -17,7 +17,7 @@ export function nomesDe(estado: Estado): Record<string, string> {
 }
 
 function agenteDe(estado: Estado, id: string): (Agente & { conversaId: string; descricaoEstado: string }) | undefined {
-  return estado.frota?.agentes.find((a) => a.id === id);
+  return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
 }
 
 /** Badge de executor (plano): 'catcher' ou 'rodou em <máquina>' — dado tipado da autoria, nunca texto. */
@@ -171,6 +171,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
   return `<div class="cab-esq">${a ? iconeAgente(a, "lg") : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
+      ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
       ${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
       ${botao("ir-memoria", "Memória", { id: agenteId })}
       ${botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" })}

@@ -204,6 +204,32 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     agentes: {
+      async execucaoBloqueada(turnoId) {
+        const t = doTenant(b.turnos).find((t) => t.id === turnoId);
+        return !!doTenant(b.agentes).find((a) => a.id === t?.agenteId)?.excluidoEm;
+      },
+      async organizar(id, campos) {
+        const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
+        if (!a) return null;
+        Object.assign(a, campos);
+        return a;
+      },
+      async excluir(id, em) {
+        const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
+        if (!a) return null;
+        a.excluidoEm = em;
+        a.fixado = false;
+        for (const r of doTenant(b.rotinas).filter((r) => r.agenteId === id)) r.estado = "pausada";
+        b.concessoes = b.concessoes.filter((c) => c.agenteId !== id);
+        return a;
+      },
+      async restaurar(id) {
+        const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && a.excluidoEm);
+        if (!a) return null;
+        a.excluidoEm = null;
+        a.oculto = false;
+        return a;
+      },
       async criar(a) {
         const agente: Agente = {
           tenantId: escopo.tenantId,
@@ -226,15 +252,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.agentes.push(agente);
         return agente;
       },
-      async buscar(id) {
-        return doTenant(b.agentes).find((a) => a.id === id) ?? null;
+      async buscar(id, incluirExcluidos = false) {
+        return doTenant(b.agentes).find((a) => a.id === id && (incluirExcluidos || !a.excluidoEm)) ?? null;
       },
       async buscarPorNome(nome) {
         return doTenant(b.agentes).find((a) => a.nome.toLowerCase() === nome.toLowerCase()) ?? null;
       },
       async listar(opcoes = {}) {
         return doTenant(b.agentes)
-          .filter((a) => opcoes.incluirOcultos || !a.oculto)
+          .filter((a) => (opcoes.incluirExcluidos || !a.excluidoEm) && (opcoes.incluirOcultos || !a.oculto))
           .sort((x, y) => Number(y.fixado) - Number(x.fixado) || x.criadoEm - y.criadoEm);
       },
       async atualizarPerfil(id, perfil) {
@@ -246,6 +272,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           descricao: perfil.descricao ?? a.descricao,
           confirmado: perfil.confirmado ?? a.confirmado,
           modelo: perfil.modelo ?? a.modelo,
+          forma: perfil.forma ?? a.forma,
+          cor: perfil.cor ?? a.cor,
         });
         return a;
       },

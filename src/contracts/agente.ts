@@ -33,5 +33,8 @@ export type Agente = {
   modelo: string;
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;
+  secao?: string;
+  naoLido?: boolean;
+  excluidoEm?: EpochMs | null;
   criadoEm: EpochMs;
 };

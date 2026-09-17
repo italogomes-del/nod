@@ -1,4 +1,4 @@
-import type { Agente } from "../../src/contracts/agente.ts";
+import type { Agente, FormaAgente, CorAgente } from "../../src/contracts/agente.ts";
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
@@ -66,6 +66,10 @@ export function criarApi(escopo: Escopo) {
     escopo,
     urlEventos: `${base}/eventos`,
     frota: () => get<FrotaDto>("frota"),
+    gestaoAgentes: () => get<FrotaDto>("gestao-agentes"),
+    organizarAgente: (id: string, campos: { secao?: string; naoLido?: boolean }) => patch<{ agente: Agente }>(`agentes/${id}/organizacao`, campos),
+    excluirAgente: (id: string) => del<{ agente: Agente }>(`agentes/${id}`),
+    restaurarAgente: (id: string) => post<{ agente: Agente }>(`agentes/${id}/restaurar`),
     inventario: (forcar = false) => get<Inventario>(`inventario${forcar ? "?forcar=1" : ""}`),
     executor: () => get<EstadoExecutor>("executor"),
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
@@ -75,7 +79,7 @@ export function criarApi(escopo: Escopo) {
     pararTudo: () => post<FaixaParada>("parar"),
     turno: (id: string) => get<{ turno: Turno }>(`turnos/${id}`),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
-    editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
+    editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
     fixar: (id: string, fixado?: boolean) => post<{ agente: Agente }>(`agentes/${id}/fixar`, fixado === undefined ? {} : { fixado }),
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
     duplicar: (id: string) => post<{ agente: Agente; conversa: Conversa }>(`agentes/${id}/duplicar`),
