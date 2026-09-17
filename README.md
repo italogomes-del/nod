@@ -34,12 +34,15 @@ Contra-prova: `NOD_CLAUDE_BIN=/bin/false NOD_EXECUTOR=claude-cli npm run dev` �
 ```bash
 npm run check          # lint → typecheck (3 tsconfigs) → cerca do domínio → unit → integration → conformidade → concurrency
 npm run e2e:fumaca     # as dez jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
+npm run uat:regressao  # 16 testes de apoio ao aceite: produto, MCP, revogação e isolamento Composio
 npm run e2e:haiku      # scripts/e2e-aceite.sh: o mesmo roteiro com o CLI real e curl+jq; imprime o custo somado
 ```
 
 Medido em 2026-09-16 (esta máquina, Postgres em Docker): `npm run check` = 141 arquivos, 564 testes (300 unit + 188 integration + 49 conformidade + 27 concurrency); três execuções seguidas verdes em 92 s, 88 s e 86 s (critério da EMENDA-L9 §11). `e2e:fumaca` = 10 jornadas em ~26 s. `e2e:haiku` = rodada única verde (exit 0), US$ 0,1131 somados, cabeçalho de `scripts/e2e-aceite.sh`.
 
 Quatro modos de teste (ADR-011 refinado): `tests/unit` (sem banco), `tests/integration` (Postgres real sob `withRollback`), `tests/conformidade` (gates que leem `pg_catalog`), `tests/concurrency` (duas conexões, commit real, limpeza própria por id — é onde o e2e mora, porque ele commita).
+
+O [roteiro UAT da segunda rodada](docs/uat-rodada-2.md) contém 19 casos por épico, resultados observados, defeitos corrigidos e o aceite externo ainda pendente. A regressão automatizada não substitui o login real pelo Composio nem as jornadas de linguagem natural no navegador.
 
 ## O que existe
 
