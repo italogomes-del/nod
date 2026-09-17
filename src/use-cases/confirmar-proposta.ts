@@ -18,6 +18,7 @@ export type SaidaConfirmarProposta = { proposta: Proposta; agente: Agente | null
 export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number }, SaidaConfirmarProposta> = async (deps, input) => {
   const existente = await deps.repos.propostas.buscar(input.propostaId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
+  if (existente.payload.kind === "acesso" && existente.payload.conectar) throw new ErroDeDominio("estado_invalido", { cause: "conecte pelo marketplace antes de pedir capacidades" });
   const proposta = await deps.repos.propostas.decidir(input.propostaId, "confirmada");
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
 

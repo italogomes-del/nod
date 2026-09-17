@@ -72,3 +72,16 @@ describe("criarAgente (E1.1/E1.2/E1.3, EMENDA 17)", () => {
     await esperarErro(() => fixarAgente(deps, { agenteId: "nao-existe" }), "nao_encontrado");
   });
 });
+
+it("criação rápida persiste nome distinto e boas-vindas do bot sem gastar turno nem conceder acessos", async () => {
+  const { deps, banco } = depsEmMemoria();
+  const a = (await criarAgente(deps, { dono: "pessoa", interativo: true })).data;
+  const b = (await criarAgente(deps, { dono: "pessoa", interativo: true })).data;
+  expect(a.agente.nome).toBe("Frida");
+  expect(b.agente.nome).toBe("Nina");
+  expect(a.agente.confirmado).toBe(false);
+  expect(a.mensagem).toMatchObject({ kind: "texto", payload: { kind: "boas_vindas" }, autoria: { autor_tipo: "agente", autor_id: a.agente.id } });
+  expect(a.mensagem.texto).toContain("Para que você quer minha ajuda?");
+  expect(banco.turnos).toHaveLength(0);
+  expect(banco.concessoes).toHaveLength(0);
+});

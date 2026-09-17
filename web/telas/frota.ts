@@ -74,11 +74,11 @@ export function renderFrota(estado: Estado): string {
       </button>`;
     })
     .join("");
-  const vazio = agentes.length === 0 ? `<p class="mudo">Nenhum agente ainda. Crie o primeiro: ele nasce sem nome, sem acessos e sem rotina — você diz o que ele faz na conversa.</p>` : "";
+  const vazio = agentes.length === 0 ? `<p class="mudo">Nenhum agente ainda. Crie o primeiro: ele já chega com um nome e uma mensagem de boas-vindas — você diz o que ele faz na conversa.</p>` : "";
   return `<section class="tela tela-frota">
     <header class="tela-cab"><h1>Meus agentes</h1><span class="chip">${agentes.length} bots no seu espaço</span></header>
     ${renderInventario(estado)}
-    <div class="boas-vindas"><div><div class="eyebrow">SEU ESPAÇO DE TRABALHO</div><h2>Uma equipe de bots.<br>Um lugar para fazer acontecer.</h2><p class="intro">Converse, reúna especialistas e transforme tarefas em rotinas.</p></div>${botao("navegar", "+ Criar bot", { classe: "pri", dados: { tela: "novo-bot" } })}</div>
+    <div class="boas-vindas"><div><div class="eyebrow">SEU ESPAÇO DE TRABALHO</div><h2>Uma equipe de bots.<br>Um lugar para fazer acontecer.</h2><p class="intro">Converse, reúna especialistas e transforme tarefas em rotinas.</p></div>${botao("criar-rapido", "+ Criar bot", { classe: "pri" })}</div>
         <div class="cartoes">${cartoes}${vazio}</div>
     ${renderNegacoes([...(frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")], estado.agora)}
   </section>`;

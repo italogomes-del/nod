@@ -6,6 +6,7 @@ import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
+import type { AppMarketplace } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
@@ -73,7 +74,7 @@ export function criarApi(escopo: Escopo) {
     pararConversa: (conversaId: string) => post<FaixaParada>(`conversas/${conversaId}/parar`),
     pararTudo: () => post<FaixaParada>("parar"),
     turno: (id: string) => get<{ turno: Turno }>(`turnos/${id}`),
-    criarAgente: (nome?: string, perfil?: { titulo: string; descricao: string }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
+    criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
     fixar: (id: string, fixado?: boolean) => post<{ agente: Agente }>(`agentes/${id}/fixar`, fixado === undefined ? {} : { fixado }),
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
@@ -94,7 +95,11 @@ export function criarApi(escopo: Escopo) {
     criarSala: (nome: string, agenteIds: string[]) => post<RespostaMutacao>("salas", { nome, agenteIds }),
     postarNaSala: (salaId: string, texto: string) => post<RespostaMutacao>(`salas/${salaId}/mensagens`, { texto }),
     pararSala: (salaId: string) => post<FaixaParada>(`salas/${salaId}/parar`),
-    conectores: () => get<{ conectores: Conector[] }>("conectores"),
+    conectores: () => get<{ conectores: Conector[]; marketplace: AppMarketplace[]; composioConfigurado: boolean }>("conectores"),
+    configurarComposio: (chave: string) => post<{ configurado: boolean }>("marketplace/configurar", { chave }),
+    conectarApp: (slug: string) => post<{ url: string; conectorId: string }>(`marketplace/${encodeURIComponent(slug)}/conectar`),
+    verificarApp: (slug: string) => post<{ conectado: boolean }>(`marketplace/${encodeURIComponent(slug)}/verificar`),
+    atualizarCredenciais: (id: string, env: Record<string, string>) => patch<{ conector: Conector }>(`conectores/${id}/credenciais`, { env }),
     registrarConector: (c: Record<string, unknown>) => post<{ ok: true; ids: { conector: string }; conector: Conector }>("conectores", c),
     sondarConector: (id: string) => post<{ ok: boolean; conector: Conector }>(`conectores/${id}/sondar`),
     habilitarConector: (id: string, habilitado: boolean) => post<{ conector: Conector }>(`conectores/${id}/${habilitado ? "habilitar" : "desabilitar"}`),

@@ -12,7 +12,7 @@ describe("token de turno (ADR-024: só em memória, sha256, tempo constante)", (
     const t = tokens.cunhar("t1", identidade);
     expect(t).toMatch(/^[A-Za-z0-9_-]{32}$/);
     expect(tokens.autorizar(t)).toEqual({ turnoId: "t1", ...identidade });
-    expect(tokens.autorizar(`${t.slice(0, -1)}x`)).toBeNull();
+    expect(tokens.autorizar(`${t.slice(0, -1)}${t.endsWith("x") ? "y" : "x"}`)).toBeNull();
     expect(tokens.autorizar("")).toBeNull();
     agora += 5_000;
     expect(tokens.autorizar(t)).not.toBeNull();

@@ -42,10 +42,10 @@ describe("reducer: hidratação e o que cada tela precisa", () => {
     expect(invalidacoesDaTela(estadoInicial)).toEqual(["frota"]);
     let e = reduzir(estadoInicial, { tipo: "hidratar-frota", frota });
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } });
-    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1"]);
+    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1", "conectores"]);
     expect(conversaDaTela(e)).toBeNull();
     e = reduzir(e, { tipo: "invalidar", quais: ["conversa:c1"] });
-    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1"]);
+    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1", "conectores"]);
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "sua-vez" } });
     expect(invalidacoesDaTela(e)).toEqual(["sua-vez"]);
   });

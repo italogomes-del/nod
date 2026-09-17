@@ -1,3 +1,5 @@
+import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
+import { atualizarCredenciaisConector } from "../../../use-cases/atualizar-credenciais-conector.ts";
 import type { SensibilidadeDeclarada, TransporteConector } from "../../../contracts/conector.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { habilitarConector } from "../../../use-cases/habilitar-conector.ts";
@@ -30,11 +32,21 @@ type CorpoConector = {
 export function rotasConectores(deps: DepsRotasConectores): Rota[] {
   return [
     {
+      metodo: "PATCH", padrao: /^\/conectores\/(?<id>[^/]+)\/credenciais$/,
+      async handler(ctx) {
+        const c = await ctx.corpo() as { env?: unknown } | null;
+        if (!c || typeof c !== "object") throw new ErroDeDominio("entrada_invalida");
+        const conector = await deps.dentro(ctx.escopo, (d) => executar(d, atualizarCredenciaisConector, { conectorId: ctx.params.id ?? "", env: c.env, cifrar: deps.cifrar }));
+        ctx.json(200, { conector });
+      },
+    },
+    {
       metodo: "GET",
       padrao: /^\/conectores$/,
       async handler(ctx) {
         const conectores = await deps.dentro(ctx.escopo, async (d) => (await d.repos.conectores.listar()).map(conectorPublico));
-        ctx.json(200, { conectores });
+        const composioConfigurado = await deps.dentro(ctx.escopo, async (d) => !!(await d.repos.composio.chave()));
+        ctx.json(200, { conectores, marketplace: APPS_MARKETPLACE, composioConfigurado });
       },
     },
     {

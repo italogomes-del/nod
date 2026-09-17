@@ -42,7 +42,7 @@ export function criarConectoresVivos(opcoes: OpcoesConectoresVivos): ConectoresV
     if (existente) return existente;
     const cfg = await opcoes.carregar(conectorId);
     if (!cfg) throw new ErroTransporteMcp("conector_indisponivel", "conector não carregado");
-    const env = { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
+    const env = cfg.transporte === "http" ? { ...(cfg.env ?? {}) } : { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
     const c = criarClienteMcp({ nome: cfg.nome, transporte: cfg.transporte, comando: cfg.comando ?? null, args: cfg.args ?? [], url: cfg.url ?? null, env, timeoutMs: timeout, fetchImpl: opcoes.fetchImpl });
     clientes.set(conectorId, c);
     return c;

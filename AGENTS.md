@@ -7,7 +7,7 @@ práticas herdadas, com evidência, em [docs/inherited-from-leapy.md](docs/inher
 
 ```bash
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
-npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0007) e roda o seed em nod
+npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0010) e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
 npm run e2e:fumaca          # dez jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
@@ -75,7 +75,7 @@ feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar 
   'parado_pela_pessoa' (medido em 2026-09-16 no e2e).
 - **A web só faz `import type` de `src/`** (eslint) e nunca executa nada: pede por REST, recebe frames
   SSE que dizem O QUE mudou (kind, conversaId, turnoId) e reidrata por REST (`web/estado/reducer.ts`).
-  O composer nunca é regravado dentro da mesma conversa (`web/lib/render.ts`).
+  O composer nunca é regravado dentro da mesma conversa (`web/lib/regioes.ts`).
 
 ## Quatro modos de teste
 
@@ -106,8 +106,8 @@ e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx
   `tests/integration` como o plano nomeava; a `trilha` é imutável e as linhas do e2e (de uma pessoa
   aleatória por execução) ficam em `nod_test`.
 - **`/metrics`** responde na raiz (server) e em `/api/metrics` (rota da L8) — EMENDA-L9 §3.
-- **Cron com minuto e hora fixos** (Regra 9): `* * * * *` é `entrada_invalida`; o aceite adianta
-  `proxima_execucao`.
+- **Cron com intervalos** (ADR-033): minuto/hora aceitam fixos, listas, `*` e passos como `*/5`.
+  UTC também é persistível (0010); a janela continua canônica e deduplicada.
 
 - **Docker compose com um serviço só** (desvio do §5 da Leapy, EMENDA 25): o catcher do nod não é um
   serviço como o Mailpit — é um driver in-process do executor (`NOD_EXECUTOR=catcher`), porque o que se

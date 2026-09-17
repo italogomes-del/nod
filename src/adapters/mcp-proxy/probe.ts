@@ -29,13 +29,19 @@ export type OpcoesSonda = {
   fetchImpl?: typeof fetch;
 };
 
-const TIPOS: readonly JsonSchema["type"][] = ["object", "string", "number", "integer", "boolean", "array"];
+const TIPOS: readonly JsonSchema["type"][] = ["object", "string", "number", "integer", "boolean", "array", "null"];
 
 /** Reduz o inputSchema do conector ao subconjunto JsonSchema do nod (o que o proxy expõe e valida). */
 export function paraJsonSchema(entrada: unknown): JsonSchema {
   const e = (typeof entrada === "object" && entrada !== null ? entrada : {}) as Record<string, unknown>;
   const tipo = TIPOS.find((t) => t === e.type) ?? "object";
-  const saida: JsonSchema = { type: tipo };
+  const saida: JsonSchema = Array.isArray(e.anyOf) || Array.isArray(e.oneOf) ? {} : { type: tipo };
+  if (Array.isArray(e.anyOf)) saida.anyOf = e.anyOf.map(paraJsonSchema);
+  if (Array.isArray(e.oneOf)) saida.oneOf = e.oneOf.map(paraJsonSchema);
+  if (Array.isArray(e.type)) {
+    delete saida.type;
+    saida.anyOf = e.type.map((type) => paraJsonSchema({ ...e, type }));
+  }
   if (typeof e.description === "string") saida.description = e.description;
   if (typeof e.properties === "object" && e.properties !== null) {
     const props: Record<string, JsonSchema> = {};
@@ -62,7 +68,7 @@ export function paraCapacidade(t: FerramentaDescoberta): CapacidadeConector {
 }
 
 export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {}): Promise<ResultadoSonda> {
-  const env = { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
+  const env = cfg.transporte === "http" ? { ...(cfg.env ?? {}) } : { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
   const cliente = criarClienteMcp({
     nome: cfg.nome,
     transporte: cfg.transporte,
@@ -75,7 +81,11 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
   });
   try {
     const ferramentas = await cliente.listar();
-    return { ok: true, ferramentas: ferramentas.map(paraCapacidade) };
+    const composio = cfg.transporte === "http" && cfg.url && ["app.composio.dev", "backend.composio.dev"].includes(new URL(cfg.url).hostname);
+    // definido em 2026-09-17: só ferramentas concretas por capacidade; meta-executores burlariam a aprovação do destino.
+    const concretas = composio ? ferramentas.filter((t) => !t.name.startsWith("COMPOSIO_")) : ferramentas;
+    if (concretas.length === 0) return { ok: false, motivo: "conector_indisponivel" };
+    return { ok: true, ferramentas: concretas.map(paraCapacidade) };
   } catch (e) {
     const motivo = e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica";
     log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo, erro: e instanceof Error ? e.name : "desconhecido" });

@@ -1,4 +1,5 @@
 import type { Conector, ConectorGuardado, SensibilidadeDeclarada, TransporteConector } from "../contracts/conector.ts";
+import { validarCredenciais } from "../domain/credenciais-conector.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -41,18 +42,16 @@ export const registrarConector: CasoDeUso<EntradaRegistrarConector, Conector> = 
   if (!DECLARACOES.includes(declaracao)) throw new ErroDeDominio("entrada_invalida", { cause: "declaracao" });
   if (input.transporte === "stdio" && (typeof input.comando !== "string" || input.comando.trim() === "")) throw new ErroDeDominio("entrada_invalida", { cause: "stdio exige comando" });
   if (input.transporte === "http" && (typeof input.url !== "string" || !/^https?:\/\//.test(input.url))) throw new ErroDeDominio("entrada_invalida", { cause: "http exige url" });
-  if (input.transporte === "http" && declaracao !== "nao-toca") throw new ErroDeDominio("http_toca_aprendiz");
+  if (input.transporte === "http" && declaracao !== "nao-toca" && !input.url?.startsWith("https://")) throw new ErroDeDominio("http_toca_aprendiz");
   const args = input.args ?? [];
   if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) throw new ErroDeDominio("entrada_invalida", { cause: "args" });
 
-  const env = input.env ?? {};
-  if (typeof env !== "object" || env === null || Array.isArray(env)) throw new ErroDeDominio("entrada_invalida", { cause: "env" });
-  const legivel: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (v === true) throw new ErroDeDominio("env_placeholder_chave_nova", { cause: k });
-    if (typeof v !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new ErroDeDominio("entrada_invalida", { cause: `env.${k}` });
-    legivel[k] = v;
+  if (input.transporte === "http") {
+    let url: URL;
+    try { url = new URL(input.url ?? ""); } catch { throw new ErroDeDominio("entrada_invalida"); }
+    if (url.username || url.password || url.hash || (url.protocol === "http:" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) throw new ErroDeDominio("entrada_invalida");
   }
+  const legivel = validarCredenciais(input.env ?? {}, input.transporte);
   const envChaves = Object.keys(legivel).sort();
   const envCifrado = envChaves.length === 0 ? null : input.cifrar(JSON.stringify(legivel));
 

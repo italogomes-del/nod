@@ -31,8 +31,8 @@ export function assertFusoIana(fusoIana: string): void {
 }
 
 export type CampoCron = {
-  minuto: number;
-  hora: number;
+  minuto: number[];
+  hora: number[];
   diasMes: "*" | number[];
   mes: "*" | number[];
   diasSemana: "*" | number[] | "uteis";
@@ -51,15 +51,25 @@ function listaOuAsterisco(campo: string, min: number, max: number, rotulo: strin
   return valores as number[];
 }
 
-/** Só valida/normaliza dado tipado (Regra 9): cron de 5 campos com minuto/hora fixos, listas em dia/mês/semana. */
+/** definido em 2026-09-17: passo cron é ancorado no relógio, nunca no momento da última execução. */
+function horarios(campo: string, max: number): number[] {
+  if (campo === "*") return Array.from({ length: max + 1 }, (_, i) => i);
+  if (campo.startsWith("*/")) {
+    const passo = inteiroEntre(campo.slice(2), 1, max + 1);
+    if (passo === null) throw new RotinaInvalida("entrada_invalida", "passo cron inválido");
+    return Array.from({ length: Math.ceil((max + 1) / passo) }, (_, i) => i * passo);
+  }
+  const lista = listaOuAsterisco(campo, 0, max, "horário");
+  return lista === "*" ? [] : [...new Set(lista)].sort((a, b) => a - b);
+}
+
+/** Só valida/normaliza dado tipado (Regra 9): cron de 5 campos com horários fixos, listas, asterisco e passos em minuto/hora. */
 export function parseCron5(cron: string): CampoCron {
   const partes = cron.trim().split(/\s+/);
   if (partes.length !== 5) throw new RotinaInvalida("entrada_invalida", "a expressão precisa ter 5 campos cron");
   const [minutoS, horaS, diaMesS, mesS, diaSemS] = partes as [string, string, string, string, string];
-  const minuto = inteiroEntre(minutoS, 0, 59);
-  const hora = inteiroEntre(horaS, 0, 23);
-  if (minuto === null) throw new RotinaInvalida("entrada_invalida", "minuto cron inválido");
-  if (hora === null) throw new RotinaInvalida("entrada_invalida", "hora cron inválida");
+  const minuto = horarios(minutoS, 59);
+  const hora = horarios(horaS, 23);
   let diasSemana: CampoCron["diasSemana"];
   if (diaSemS === "1-5") diasSemana = "uteis";
   else diasSemana = listaOuAsterisco(diaSemS, 0, 6, "dia da semana");
@@ -74,8 +84,8 @@ export function parseCron5(cron: string): CampoCron {
 
 type PartesZona = { y: number; mo: number; d: number; h: number; mi: number; w: number };
 
-function partesNoFuso(agora: number, fusoIana: string): PartesZona {
-  const fmt = new Intl.DateTimeFormat("en-US", {
+function formatador(fusoIana: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: fusoIana,
     hourCycle: "h23",
     year: "numeric",
@@ -85,6 +95,9 @@ function partesNoFuso(agora: number, fusoIana: string): PartesZona {
     minute: "2-digit",
     weekday: "short",
   });
+}
+
+function partesNoFuso(agora: number, fmt: Intl.DateTimeFormat): PartesZona {
   const parts = fmt.formatToParts(new Date(agora));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   const week: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -99,20 +112,12 @@ function partesNoFuso(agora: number, fusoIana: string): PartesZona {
   };
 }
 
-function instanteNoFuso(p: { y: number; mo: number; d: number; h: number; mi: number }, fusoIana: string): number {
-  const naive = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, 0);
-  const asIf = partesNoFuso(naive, fusoIana);
-  const naiveThere = Date.UTC(asIf.y, asIf.mo - 1, asIf.d, asIf.h, asIf.mi, 0);
-  const shift = naive - naiveThere;
-  return naive + shift;
-}
-
 /**
  * Corrigido em 2026-09-16: a versão anterior ignorava diasMes e mes (mapa-codigo achado 5),
  * então "0 8 1 * *" disparava todo dia. Agora os cinco campos contam.
  */
 function casa(cron: CampoCron, p: PartesZona): boolean {
-  if (p.mi !== cron.minuto || p.h !== cron.hora) return false;
+  if (!cron.minuto.includes(p.mi) || !cron.hora.includes(p.h)) return false;
   if (cron.diasMes !== "*" && !cron.diasMes.includes(p.d)) return false;
   if (cron.mes !== "*" && !cron.mes.includes(p.mo)) return false;
   if (cron.diasSemana === "uteis") return p.w >= 1 && p.w <= 5;
@@ -131,15 +136,16 @@ export function proximaJanela(entrada: { cron: string; fusoIana: string; agora: 
   assertFusoIana(entrada.fusoIana);
   const cron = parseCron5(entrada.cron);
   const teto = entrada.agora + TETO_BUSCA_DIAS * 24 * 60 * 60 * 1000;
-  let cursor = entrada.agora;
-  const p0 = partesNoFuso(cursor, entrada.fusoIana);
-  cursor = instanteNoFuso({ y: p0.y, mo: p0.mo, d: p0.d, h: cron.hora, mi: cron.minuto }, entrada.fusoIana);
-  if (cursor <= entrada.agora) cursor += 24 * 60 * 60 * 1000;
+  const fmt = formatador(entrada.fusoIana);
+  let cursor = Math.floor(entrada.agora / 60_000) * 60_000 + 60_000;
   while (cursor < teto) {
-    const p = partesNoFuso(cursor, entrada.fusoIana);
-    const cand = instanteNoFuso({ y: p.y, mo: p.mo, d: p.d, h: cron.hora, mi: cron.minuto }, entrada.fusoIana);
-    if (cand > entrada.agora && casa(cron, partesNoFuso(cand, entrada.fusoIana))) return cand;
-    cursor += 24 * 60 * 60 * 1000;
+    const p = partesNoFuso(cursor, fmt);
+    if (casa(cron, p)) return cursor;
+    const diaValido = (cron.diasMes === "*" || cron.diasMes.includes(p.d)) &&
+      (cron.mes === "*" || cron.mes.includes(p.mo)) &&
+      (cron.diasSemana === "*" || (cron.diasSemana === "uteis" ? p.w >= 1 && p.w <= 5 : cron.diasSemana.includes(p.w)));
+    // definido em 2026-09-17: avança em UTC; horas inexistentes são puladas e horas repetidas têm instantes distintos.
+    cursor += (!diaValido || !cron.hora.includes(p.h) ? 60 - p.mi : 1) * 60_000;
   }
   throw new RotinaInvalida("cron_sem_futuro", "essa periodicidade não tem execução futura em 400 dias");
 }

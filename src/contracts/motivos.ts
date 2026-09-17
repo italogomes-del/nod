@@ -62,5 +62,8 @@ export const CODIGOS_ERRO = [
   "env_placeholder_chave_nova",
   "dono_imutavel",
   "texto_vazio",
+  "conector_indisponivel",
+  "integracao_nao_configurada",
+  "integracao_autenticacao",
 ] as const;
 export type CodigoErro = (typeof CODIGOS_ERRO)[number];

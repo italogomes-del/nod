@@ -42,6 +42,7 @@ export type PayloadPropostaRotina = {
 export type PayloadPropostaAcesso = {
   kind: "acesso";
   conector: string;
+  conectar?: true;
   capacidades: string[];
   nivel: "leitura" | "escrita";
   naoPedido: string[];

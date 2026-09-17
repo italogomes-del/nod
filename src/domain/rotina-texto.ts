@@ -29,14 +29,19 @@ function hhmm(hora: number, minuto: number): string {
 /** Resumo em português do cron, com fuso nomeado: "dias úteis às 08:00 (America/Sao_Paulo)". */
 export function resumoCron(cron: string, fusoIana: string): string {
   const c = parseCron5(cron);
-  const horas = hhmm(c.hora, c.minuto);
+  const [minuto, hora] = cron.trim().split(/\s+/);
+  let horario: string;
+  if (hora === "*" && (minuto === "*" || minuto?.startsWith("*/"))) horario = `a cada ${minuto === "*" ? 1 : Number(minuto?.slice(2))} min`;
+  else if (hora?.startsWith("*/") && c.minuto.length === 1) horario = `a cada ${Number(hora.slice(2))} horas, no minuto ${c.minuto[0]}`;
+  else if (hora === "*" && c.minuto.length === 1) horario = `a cada hora, no minuto ${c.minuto[0]}`;
+  else horario = `às ${c.hora.flatMap((h) => c.minuto.map((m) => hhmm(h, m))).join(", ")}`;
   const partes: string[] = [];
   if (c.diasSemana === "uteis") partes.push("dias úteis");
   else if (c.diasSemana !== "*") partes.push(`toda ${c.diasSemana.map((d) => NOMES_DIA[d] ?? String(d)).join(", ")}`);
   if (c.diasMes !== "*") partes.push(`dia ${c.diasMes.join(", ")}`);
   if (c.mes !== "*") partes.push(`de ${c.mes.map((m) => NOMES_MES[m - 1] ?? String(m)).join(", ")}`);
   const quando = partes.length === 0 ? "todo dia" : partes.join(" ");
-  return `${quando} às ${horas} (${fusoIana})`;
+  return `${quando} ${horario} (${fusoIana})`;
 }
 
 function textoObrigatorio(valor: unknown, campo: string): string {

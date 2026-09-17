@@ -9,9 +9,11 @@ Base: main `1f071ed`, após integrar o PR #16 e confirmar zero PRs abertos.
 2. Abra http://127.0.0.1:5274 e entre como uma pessoa do cadastro.
 3. Na Frota, escolha **usar Claude (real)**. A sonda precisa confirmar o CLI instalado/autenticado.
    O modo **catcher** é uma simulação para testes e não responde como um modelo real.
-4. Clique **+ Criar bot**. Informe nome, especialidade e instruções. Ele já nasce pronto.
+4. Clique **+ Criar bot**. Ele nasce com nome e abre o chat com opções de missão. Escolha uma
+   opção ou descreva como ele deve ajudar; confirme o perfil proposto.
 5. Crie um segundo bot com outra especialidade. Peça ao primeiro que consulte esse colega.
-   O pedido aparece no chat, a resposta chega e o primeiro bot continua a tarefa.
+   A troca aparece recolhida com a contagem e os participantes; clique para ver os detalhes.
+   A resposta chega e o primeiro bot continua a tarefa.
 6. Abra **Nova sala**, escolha de dois a seis bots e envie um objetivo compartilhado. `@Nome`
    direciona uma mensagem; o bot pode passar a vez ou pedir contribuição.
 7. Em **Rotinas → Nova rotina**, informe instrução, frequência, horário e fuso. **Testar agora**
@@ -54,3 +56,32 @@ não uma comprovação de cobrança adicional por API. O roteiro `e2e:haiku` nã
 
 Gate final em 17/09/2026: `npm run check` e `npm run build` passaram. São 630 testes: 335 unitários,
 206 de integração, 49 de conformidade e 40 de concorrência, em 154 arquivos.
+
+## Segunda rodada: Marketplace e criação conversacional
+
+A partir da base `e246e61` (PR #17 integrado), o `+` cria um bot com nome e boas-vindas.
+O botão ao lado abre o menu para buscar agentes ou criar grupos. A troca entre bots ocupa
+uma linha expansível com contagem e participantes.
+
+No **Marketplace**, salve a chave do seu projeto Composio em **Salvar e verificar**. Escolha
+um app, clique **Conectar**, abra **Entrar no app**, conclua a autorização e clique **Verificar
+conexão**. De volta ao chat, o bot pode pedir acesso às ferramentas específicas necessárias.
+A chave não deve ser colada no chat. MCPs próprios continuam na seção abaixo do catálogo;
+URLs remotas precisam de HTTPS, e credenciais HTTP são cabeçalhos (ex.: Authorization).
+
+O pedido “me lembre de postar no LinkedIn aqui no chat a cada 5 minutos” agora produz uma
+proposta confirmável. Pela interface, também há intervalos de 5, 15, 30 minutos e uma hora.
+A migração 0010 permite persistir UTC, corrigindo a confirmação dessas propostas.
+
+O login real de cada app requer a conta e autorização do usuário; testes de contrato do
+Composio usam respostas simuladas. Ver [ADR-033](adr/adr-033-criacao-conversacional-marketplace-intervalos.md).
+
+Aceite manual da segunda rodada em 17/09/2026, com Claude Code real: criação instantânea de
+Nina, opção de missão no chat, proposta e confirmação de perfil, proposta e ativação de rotina
+`*/5 * * * *` em UTC, entrega automática às 13:00 de São Paulo e pausa após a entrega.
+O pedido para conectar Slack gerou o card no chat e abriu o Marketplace com retorno à conversa.
+Nenhuma mensagem foi enviada ao Slack. Busca do catálogo, menu de conversas, expansão da troca
+Lume/Cora e ocultação de horário fixo ao escolher intervalo foram conferidos no navegador.
+
+Gate da segunda rodada: `npm run check` e `npm run build` passaram. São 652 testes: 354 unitários,
+208 de integração, 49 de conformidade e 41 de concorrência, em 159 arquivos.

@@ -63,3 +63,24 @@ describe("rotina-janela: dia do mês e mês contam (corrigido em 2026-09-16)", (
     expect(() => proximaJanela({ cron: "0 8 * 13 *", fusoIana: TZ, agora })).toThrow(RotinaInvalida);
   });
 });
+
+describe("intervalos de rotina (ADR-033)", () => {
+  it.each([
+    ["*/5 * * * *", "2026-09-17T12:09:43Z", "2026-09-17T12:10:00.000Z"],
+    ["*/5 * * * *", "2026-09-17T12:10:00Z", "2026-09-17T12:15:00.000Z"],
+    ["*/5 * * * *", "2026-09-17T23:59:59Z", "2026-09-18T00:00:00.000Z"],
+    ["0 */2 * * *", "2026-09-17T12:01:00Z", "2026-09-17T14:00:00.000Z"],
+    ["* * * * *", "2026-09-17T12:00:01Z", "2026-09-17T12:01:00.000Z"],
+    ["*/5 * * * 1-5", "2026-09-18T23:58:00Z", "2026-09-21T00:00:00.000Z"],
+  ])("%s depois de %s → %s", (cron, agora, esperado) => {
+    expect(new Date(proximaJanela({ cron, agora: Date.parse(agora), fusoIana: "UTC" })).toISOString()).toBe(esperado);
+  });
+  it("pula hora inexistente no início do DST e preserva os dois instantes da hora repetida", () => {
+    const fusoIana = "America/New_York";
+    expect(new Date(proximaJanela({ cron: "30 2 * * *", agora: Date.parse("2026-03-08T05:00Z"), fusoIana })).toISOString()).toBe("2026-03-09T06:30:00.000Z");
+    expect(new Date(proximaJanela({ cron: "30 1 * * *", agora: Date.parse("2026-11-01T05:30Z"), fusoIana })).toISOString()).toBe("2026-11-01T06:30:00.000Z");
+  });
+  it.each(["*/0 * * * *", "*/-5 * * * *", "*/61 * * * *", "0 */25 * * *", "*/abc * * * *"])("recusa passo inválido: %s", (cron) => {
+    expect(() => proximaJanela({ cron, agora: Date.now(), fusoIana: TZ })).toThrow(RotinaInvalida);
+  });
+});

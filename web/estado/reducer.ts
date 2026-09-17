@@ -4,6 +4,7 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { AppMarketplace } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
@@ -28,7 +29,7 @@ export type Tela =
   | { tipo: "rotinas" }
   | { tipo: "nova-rotina"; agenteId?: string }
   | { tipo: "novo-bot" }
-  | { tipo: "conectores" }
+  | { tipo: "conectores"; app?: string; voltar?: { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sala"; salaId: string; conversaId: string } }
   | { tipo: "sua-vez" }
   | { tipo: "nova-sala" }
   | { tipo: "chaves" };
@@ -59,6 +60,10 @@ export type Estado = {
   rotinas: RotinaDto[];
   execucoes: Record<string, ExecucaoRotina[]>;
   conectores: Conector[];
+  marketplace: AppMarketplace[];
+  composioConfigurado: boolean;
+  autorizacaoApp: { slug: string; url: string } | null;
+  avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
   memorias: Record<string, Memoria[]>;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
@@ -79,6 +84,8 @@ export type Estado = {
 };
 
 export type Acao =
+  | { tipo: "autorizacao-app"; slug: string; url: string }
+  | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
   | { tipo: "tick"; agora: number }
@@ -91,7 +98,7 @@ export type Acao =
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
   | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
-  | { tipo: "hidratar-conectores"; conectores: Conector[] }
+  | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppMarketplace[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
@@ -116,6 +123,10 @@ export const estadoInicial: Estado = {
   rotinas: [],
   execucoes: {},
   conectores: [],
+  marketplace: [],
+  composioConfigurado: false,
+  autorizacaoApp: null,
+  avisoConexao: null,
   concessoes: {},
   memorias: {},
   chaves: null,
@@ -269,8 +280,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, rotinas: acao.rotinas };
     case "hidratar-execucoes":
       return { ...estado, execucoes: { ...estado.execucoes, [acao.rotinaId]: acao.execucoes } };
+    case "autorizacao-app":
+      return { ...estado, autorizacaoApp: { slug: acao.slug, url: acao.url }, avisoConexao: null };
+    case "aviso-conexao":
+      return { ...estado, avisoConexao: acao.texto };
     case "hidratar-conectores":
-      return { ...estado, conectores: acao.conectores };
+      return { ...estado, conectores: acao.conectores, marketplace: acao.marketplace ?? estado.marketplace, composioConfigurado: acao.composioConfigurado ?? estado.composioConfigurado };
     case "hidratar-concessoes":
       return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes } };
     case "hidratar-memorias":
@@ -317,7 +332,7 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "memoria" && !estado.memorias[t.agenteId]) faltas.push(`memoria:${t.agenteId}`);
   if ((t.tipo === "perfil" || t.tipo === "conversa") && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
   if (t.tipo === "rotinas" && estado.rotinas.length === 0) faltas.push("rotinas");
-  if (t.tipo === "conectores" && estado.conectores.length === 0) faltas.push("conectores");
+  if ((t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala") && estado.marketplace.length === 0) faltas.push("conectores");
   if (t.tipo === "sua-vez" && !estado.suaVez) faltas.push("sua-vez");
   if (t.tipo === "chaves" && !estado.chaves) faltas.push("chaves");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));

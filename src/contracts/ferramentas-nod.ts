@@ -1,17 +1,7 @@
 import type { CodigoErro, MotivoPasse } from "./motivos.ts";
 
-/** Subconjunto de JSON Schema que o proxy expõe em tools/list e valida em tools/call. */
-export type JsonSchema = {
-  type: "object" | "string" | "number" | "integer" | "boolean" | "array";
-  description?: string;
-  properties?: Record<string, JsonSchema>;
-  required?: readonly string[];
-  additionalProperties?: boolean;
-  enum?: readonly string[];
-  items?: JsonSchema;
-  minLength?: number;
-  minItems?: number;
-};
+import type { JsonSchema } from "./json-schema.ts";
+export type { JsonSchema } from "./json-schema.ts";
 
 /**
  * As NOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa). Lista FECHADA: cada nome tem um
@@ -45,8 +35,8 @@ export const FERRAMENTAS_NOD = {
     type: "object",
     description: "Pede à pessoa acesso a capacidades de um conector. Vira proposta; nada é concedido aqui.",
     properties: {
-      conector: { type: "string", description: "Slug do conector registrado.", minLength: 1 },
-      capacidades: { type: "array", items: { type: "string" }, minItems: 1, description: "Nomes das ferramentas pedidas." },
+      conector: { type: "string", description: "Slug do conector registrado ou do marketplace.", minLength: 1 },
+      capacidades: { type: "array", items: { type: "string" }, description: "Nomes exatos das ferramentas do catálogo. Para sugerir conexão ainda ausente, envie [] sem inventar capacidades." },
       nivel: { type: "string", enum: ["leitura", "escrita"] },
       nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
     },

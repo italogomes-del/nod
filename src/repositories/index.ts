@@ -1,3 +1,4 @@
+import { composioRepo } from "./composio.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { agentesRepo } from "./agentes.repo.ts";
 import { catcherRepo } from "./catcher.repo.ts";
@@ -43,6 +44,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     rotinaJanelas: rotinaJanelasRepo(conn, escopo),
     rotinaExecucoes: rotinaExecucoesRepo(conn, escopo),
     salas: salasRepo(conn, escopo),
+    composio: composioRepo(conn, escopo),
     conectores: conectoresRepo(conn, escopo),
     concessoes: concessoesRepo(conn, escopo),
     procuracoes: procuracoesRepo(conn, escopo),

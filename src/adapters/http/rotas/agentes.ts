@@ -24,7 +24,7 @@ export function criarRotasAgentes(d: DepsRotas): Rota[] {
       padrao: /^\/agentes$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const r = await executar(ctx.escopo, criarAgente, { dono: corpo.dono as DonoAgente, nome: textoOpcional(corpo.nome), titulo: textoOpcional(corpo.titulo), descricao: textoOpcional(corpo.descricao), modelo: d.modeloPadrao });
+        const r = await executar(ctx.escopo, criarAgente, { dono: corpo.dono as DonoAgente, interativo: corpo.interativo === true, nome: textoOpcional(corpo.nome), titulo: textoOpcional(corpo.titulo), descricao: textoOpcional(corpo.descricao), modelo: d.modeloPadrao });
         ctx.json(201, r);
       },
     },
