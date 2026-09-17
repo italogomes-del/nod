@@ -39,6 +39,9 @@ import { MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
 import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.ts";
+import { autorizarChaveMaquina } from "./autorizar-chave-maquina.ts";
+import { segredoEfetivo } from "./sessao.ts";
+import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
@@ -105,6 +108,8 @@ export type App = {
   readonly executor: Executor;
   readonly idDriver: IdDriver;
   machineId: string;
+  compartilhado: boolean;
+  autorizarMaquina(token: string): ReturnType<typeof autorizarChaveMaquina>;
   /** Liga o registry sondado (boot), os snapshots das sondas por driver e quem liga um driver DEPOIS do boot (interruptor). */
   ligarRegistry(registry: Registry, inventarios?: Partial<Record<IdDriver, Inventario>>, ativar?: AtivarDriver): void;
   /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca em tempo de execução, serializada. */
@@ -133,10 +138,11 @@ function numero(v: string | undefined, padrao: number): number {
 
 export function comporApp(o: OpcoesCompor): App {
   const { db, env } = o;
+  const compartilhado = env.NOD_MODO === "compartilhado";
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
   // (getter/closure), nunca uma cópia — senão a troca pela interface não chega ao plano do turno seguinte.
-  let executorAtual: Executor = env.NOD_EXECUTOR === "claude-cli" ? "local" : "catcher";
+  let executorAtual: Executor = compartilhado || env.NOD_EXECUTOR === "claude-cli" ? "local" : "catcher";
   const idDriverAtual = (): IdDriver => (executorAtual === "local" ? "claude-cli" : "catcher");
   const IDS_DRIVER: readonly IdDriver[] = ["catcher", "claude-cli"];
   const inventarioPorDriver: Partial<Record<IdDriver, Inventario>> = {};
@@ -200,7 +206,7 @@ export function comporApp(o: OpcoesCompor): App {
     planos: {
       async emitir(trx, turnoId, machineIdDoPlano) {
         const d = depsSobre(trx);
-        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual });
+        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -221,7 +227,7 @@ export function comporApp(o: OpcoesCompor): App {
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
-  const ponte = criarPonteInterna(db, {
+  const depsPonte: Parameters<typeof criarPonteInterna>[1] = {
     services,
     useCases,
     executor: () => executorAtual,
@@ -243,7 +249,25 @@ export function comporApp(o: OpcoesCompor): App {
       }
       return events;
     },
+  };
+
+  const ponte = criarPonteInterna(db, depsPonte);
+  const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
+  const ponteHttp = criarPonteHttpServidor({
+    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }] }),
+    persistir: (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }),
+    autorizar: autorizarMaquina,
+    segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
+    seguro: env.NOD_LOGIN === "google",
+    agora: relogio,
+    delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
+    longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
   });
+
+  const varredorMaquinas = compartilhado ? setInterval(() => {
+    void ponteHttp.varrer().catch(() => log("aviso", "presenca_maquinas_falhou", {}));
+  }, 15_000) : null;
+  varredorMaquinas?.unref();
 
   // Inventário por pessoa (ADR-019): a sonda é da MÁQUINA (uma por TTL, compartilhada entre pessoas — cada
   // sonda do claude-cli custa um turno real); a persistência é por pessoa em inventario_motores.
@@ -285,7 +309,9 @@ export function comporApp(o: OpcoesCompor): App {
   }
   const inventario = criarInventario({
     relogio,
-    sondar: async () => {
+    ttlMs: compartilhado ? 0 : undefined,
+    sondar: async (pessoaId) => {
+      if (compartilhado) return ponteHttp.inventario(pessoaId);
       if (inventarioInicial && relogio() - inventarioInicial.em < TTL_SONDA_MS && !sondaCompartilhada) {
         sondaCompartilhada = { em: inventarioInicial.em, promessa: Promise.resolve(inventarioInicial) };
       }
@@ -395,7 +421,12 @@ export function comporApp(o: OpcoesCompor): App {
   const rotas: Rota[] = [
     ...criarRotasFrota(depsRotas),
     criarRotaInventario({ inventario }),
-    ...criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor }),
+    ...(compartilhado ? [
+      ...ponteHttp.rotas,
+      { metodo: "GET", padrao: /^\/executor$/, async handler(ctx) {
+        ctx.json(200, { atual: "claude-cli", opcoes: [{ id: "claude-cli", custo: "real", inventario: await inventario.obter(ctx.escopo.pessoaId) }], recusa: null });
+      } } satisfies Rota,
+    ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasAgentes(depsRotas),
     ...criarRotasConversas(depsRotas),
     ...criarRotasPropostas(depsRotas),
@@ -469,6 +500,8 @@ export function comporApp(o: OpcoesCompor): App {
       return idDriverAtual();
     },
     machineId,
+    compartilhado,
+    autorizarMaquina,
     ligarRegistry(registry, inventarios, ativar) {
       registryLigado = registry;
       for (const id of IDS_DRIVER) {
@@ -487,6 +520,7 @@ export function comporApp(o: OpcoesCompor): App {
     aoRegistrarCatcher,
     tenantDe,
     async fechar() {
+      if (varredorMaquinas) clearInterval(varredorMaquinas);
       await conectoresVivos.fechar();
     },
   };

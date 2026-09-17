@@ -1,0 +1,17 @@
+import { setTimeout, clearTimeout } from "node:timers";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+const [executavel, proxy] = process.argv.slice(2);
+if (!executavel || !proxy) throw new Error("Uso: node scripts/desktop/smoke-proxy.mjs <executavel> <proxy>");
+const p = spawn(resolve(executavel), [resolve(proxy)], { env: { PATH: process.env.PATH, HOME: process.env.HOME, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+let saida = "", erro = "";
+p.stdout.on("data", (v) => { saida += v; });
+p.stderr.on("data", (v) => { erro += v; });
+const timer = setTimeout(() => p.kill("SIGKILL"), 10_000);
+p.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "1" } } }) + "\n");
+const codigo = await new Promise((r, j) => { p.once("error", j); p.once("exit", r); });
+clearTimeout(timer);
+if (codigo !== 0) throw new Error(`Proxy empacotado falhou (${codigo}): ${erro.slice(0, 1000)}`);
+const respostas = saida.trim().split("\n").map((l) => JSON.parse(l));
+if (respostas.length !== 1 || respostas[0].id !== 1 || !respostas[0].result?.protocolVersion) throw new Error("Proxy deve responder exatamente uma vez ao initialize");
+process.stdout.write("Proxy MCP empacotado: initialize passou, sem Node externo nem CLI real.\n");

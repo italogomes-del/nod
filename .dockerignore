@@ -6,3 +6,5 @@ coverage
 .vite
 *.log
 prototypes
+
+release

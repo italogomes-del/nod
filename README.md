@@ -16,6 +16,8 @@ Os instaladores desta pré-release **não têm assinatura Apple nem notarizaçã
 
 Para mantenedores: [como preparar, validar e publicar cada versão](docs/processo-de-release.md).
 
+O código desktop está integrado nesta versão. Consulte também o [guia do código atual](docs/release-desktop.md).
+
 ## Rodar amanhã de manhã
 
 ```bash
@@ -73,8 +75,8 @@ Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (conf
 
 ## O que NÃO existe (registrado)
 
-- **Ponte multi-máquina por HTTP** (ADR-021): o executor fala com o servidor pela `PonteInterna` in-process. A ponte HTTP entra depois sem trocar o driver; o lote de `eventos` da renovação viaja vazio até lá (os deltas vão direto ao barramento; `KindEvento` não ganhou `turno_progresso` — EMENDA-L9 §9, registrado).
-- **Mobile / PWA / Electron / updater** — servidor e máquina são o mesmo processo (ADR-020 invertido).
+- **Escala com múltiplas réplicas de servidor**: a ponte HTTP existe em `NOD_MODO=compartilhado`, mas tokens de turno e conexões continuam em memória; use uma instância.
+- **Mobile / PWA / updater automático** — o desktop Electron verifica versão mínima, sem atualização automática. Windows ainda não foi validado.
 - **Computador por bot, driver remoto, browser** (ADR-028); **skills por demonstração**; skills por instrução (nomeadas, `/`) também ficaram fora desta rodada (EMENDA 24).
 - **OAuth real / credencial de colaborador com health-check** (ADR-015 revisado): conector é MCP registrado com env cifrado só no servidor. **Procuração entre donos** tem tabela e regra fail-closed, sem rota nem UI.
 - **Cadastro autônomo**: o login Google usa allowlist previamente cadastrada (ADR-030). Para desenvolvimento local, `NOD_LOGIN=stub` usa cookie assinado e recusa `NOD_HOST` fora de 127.0.0.1.

@@ -22,3 +22,19 @@ O executor fala pela interface `PonteInterna` in-process (mesmo processo que o s
 ## Gatilho de reversão
 
 Reabrir (canal push, túnel ou relay) só se uma máquina precisar ser alcançada quando NÃO está puxando — hoje isso não existe por desenho: presença é o poll. Se o long-poll de 20 s virar custo mensurável de conexão no PaaS (ADR-001), ajustar o teto, não a direção.
+
+## Ponte HTTP em 2026-09-17
+
+`NOD_MODO=compartilhado` usa `/api/maquina/` para os cinco verbos e a obtenção de sessão do app.
+A autorização usa a chave escopada do ADR-031, a cada requisição e durante o long-poll; o id
+da chave identifica o computador. O servidor rejeita eventos de domínio fornecidos pela máquina:
+a renovação aceita os quatro sinais e um delta de texto limitado, publicado pelo próprio servidor.
+
+Refinamento: o app renova a cada 1 s enquanto executa para observar Parar por polling. Falha de
+renovação interrompe o executor. Lease vencido não pode ser renovado nem antes de o varredor passar.
+O inventário reflete os Macs conectados, e o servidor não inicia executor. O modo de desenvolvimento
+in-process permanece. Usa-se uma instância do servidor enquanto conexões e tokens vivem em memória.
+
+Para evitar `--resume` de uma sessão existente só em outro computador, o modo compartilhado
+reconstrói o contexto a partir do histórico do servidor. Afinidade de sessão por máquina fica para
+outra etapa. Assinatura e disponibilização: [guia da release](../release-desktop.md).

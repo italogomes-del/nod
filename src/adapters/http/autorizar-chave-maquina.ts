@@ -16,8 +16,8 @@ export type IdentidadeDeMaquina = Escopo & { chaveId: string };
  * "unrecognized configuration parameter", como nod_dono volta VAZIO em silêncio (medido em 2026-09-16);
  * um teste rodando como dono passaria sem provar nada.
  *
- * Ligar isto às rotas /api/interno multi-máquina (ponte HTTP do ADR-021) fica para a jornada que traz
- * o app local falando HTTP; hoje a função existe, é testada e ainda não autoriza rota nenhuma.
+ * definido em 2026-09-17: o roteador aplica esta autorização a /api/maquina em modo compartilhado,
+ * depois de recusar Origin e antes de ler o corpo da requisição.
  */
 export async function autorizarChaveMaquina(db: Db, chave: unknown, agora: number): Promise<IdentidadeDeMaquina | null> {
   const escopo = escopoAlegado(chave);

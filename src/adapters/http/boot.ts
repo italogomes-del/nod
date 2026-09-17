@@ -104,6 +104,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
     staticDir: o.staticDir ?? env.NOD_STATIC_DIR,
     autorizarTokenTurno: app.tokens.autorizar,
+    autorizarMaquina: app.compartilhado ? app.autorizarMaquina : undefined,
     sessao,
   });
   const url = `http://127.0.0.1:${srv.port}`;
@@ -111,8 +112,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   // 4. registry: catcher sempre; claude-cli SÓ quando pedido (a sonda dele custa um turno real, EMENDA 35). Os outros
   //    candidatos ficam à espera do interruptor (definido em 2026-09-16): trocar pela interface liga o driver na hora.
   const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, modeloSonda: env.NOD_MODELO_SONDA })];
-  const noBoot = candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli");
-  const cfgDrivers = await configDosDrivers(env);
+  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli");
+  const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });
   const padrao = executorPadrao(env, registry);
   const inventario: Inventario = inventarios[app.idDriver] ?? { estado: "ausente", motivo: padrao.id ? "sem sonda" : padrao.motivo, em: agora() };
@@ -133,7 +134,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 6. laços de fundo, todos por paraCadaPessoa (EMENDA 3).
   const iv = o.intervalos ?? {};
-  const orquestrador: Orquestrador = await iniciarOrquestrador({
+  const orquestrador: Pick<Orquestrador, "parar"> = app.compartilhado ? { parar: async () => undefined } : await iniciarOrquestrador({
     db,
     registry,
     machineId,
