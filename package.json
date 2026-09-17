@@ -32,7 +32,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:test": "tsx scripts/migrate.ts --banco nod_test",
     "db:seed": "tsx scripts/seed.ts",
-    "prepare": "simple-git-hooks"
+    "prepare": "simple-git-hooks",
+    "uat:regressao": "vitest run --project concurrency tests/concurrency/produto-v1.test.ts tests/concurrency/e2e-catcher.test.ts && vitest run --project integration tests/integration/marketplace.test.ts tests/integration/composio-rls.test.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "if command -v mise >/dev/null 2>&1; then mise exec -- npx lint-staged; else npx lint-staged; fi"

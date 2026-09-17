@@ -212,7 +212,14 @@ function renderPrincipal(): void {
   const timeline = document.getElementById("timeline");
   const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
   const abertos = [...document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
+  const buscas = ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" }));
   regiao("timeline", corpo);
+  for (const busca of buscas) {
+    const campo = document.getElementById(busca.id) as HTMLInputElement | null;
+    if (campo) campo.value = busca.valor;
+  }
+  filtrarBots((document.getElementById("busca-destinatario") as HTMLInputElement | null)?.value ?? "", ".contact-picker");
+  filtrarApps((document.getElementById("busca-marketplace") as HTMLInputElement | null)?.value ?? "");
   for (const el of document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
   if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
@@ -222,6 +229,12 @@ function renderPrincipal(): void {
     regiao("composer", composer?.html ?? "");
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     ta?.focus();
+  }
+  // definido em 2026-09-17: hidratação do nome atualiza só o placeholder; nunca recria o textarea nem perde rascunho.
+  const campoMensagem = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (campoMensagem && t.tipo === "conversa") {
+    const nome = estado.frota?.agentes.find((a) => a.id === t.agenteId)?.nome ?? "o bot";
+    campoMensagem.placeholder = `Escreva uma mensagem para ${nome}…`;
   }
   document.body.classList.toggle("ocupado", estado.ocupado);
 }
@@ -351,8 +364,15 @@ function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; tex
   });
 }
 
-function filtrarBots(texto: string): void {
-  for (const el of document.querySelectorAll<HTMLElement>("[data-busca]")) el.hidden = !el.dataset.busca?.includes(texto.trim().toLowerCase());
+function filtrarApps(texto: string): void {
+  const cards = [...document.querySelectorAll<HTMLElement>("[data-app-busca]")];
+  for (const el of cards) el.hidden = !el.dataset.appBusca?.includes(texto.trim().toLowerCase());
+  const vazio = document.getElementById("marketplace-vazio");
+  if (vazio) vazio.hidden = cards.some((el) => !el.hidden);
+}
+
+function filtrarBots(texto: string, raiz = "#sidebar"): void {
+  for (const el of document.querySelectorAll<HTMLElement>(`${raiz} [data-busca]`)) el.hidden = !el.dataset.busca?.includes(texto.trim().toLowerCase());
 }
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
@@ -363,8 +383,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "conectar-composio": (el) => agir(async () => {
     if (!estado.composioConfigurado) {
-      document.querySelector<HTMLInputElement>('input[name="chave"]')?.focus();
       dispatch({ tipo: "aviso-conexao", texto: "Adicione a chave do seu Composio acima para conectar os apps." });
+      document.querySelector<HTMLInputElement>('input[name="chave"]')?.focus();
       return;
     }
     const slug = el.dataset.id ?? "";
@@ -616,10 +636,10 @@ document.addEventListener("keydown", (ev) => {
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id === "busca-marketplace") {
-    for (const el of document.querySelectorAll<HTMLElement>("[data-app-busca]")) el.hidden = !el.dataset.appBusca?.includes(ta.value.trim().toLowerCase());
+    filtrarApps(ta.value);
     return;
   }
-  if (ta.id === "busca-bots" || ta.id === "busca-destinatario") { filtrarBots(ta.value); return; }
+  if (ta.id === "busca-bots" || ta.id === "busca-destinatario") { filtrarBots(ta.value, ta.id === "busca-bots" ? "#sidebar" : ".contact-picker"); return; }
   if (ta.id !== "composer-texto") return;
   ta.style.height = "auto";
   ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
