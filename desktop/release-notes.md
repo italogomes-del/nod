@@ -11,8 +11,8 @@ Integração do desktop macOS com a main atual, Sonnet como padrão dos agentes,
 ## Registro de distribuição
 
 Versão/tag: 0.2.0-rc.1 / v0.2.0-rc.1.
-SHA, PR e Actions: preencher com o commit candidato aprovado.
-Gate/builds desta versão: em validação; não reutilizar contagens da preview.
+SHA, PR e Actions: registrados no rascunho da release após o merge do candidato.
+Validação local desta versão em 17/09/2026: npm ci, gate completo (684 testes: 371 unitários, 217 integração, 49 conformidade, 47 concorrência), build web e desktop aprovados. Banco exclusivo inicialmente vazio, migrações 0001–0012. Pacote Intel local e smoke do proxy aprovados, sem assinatura; não equivalem ao aceite dos DMGs.
 DMGs e hashes: pendentes de build assinado em runners nativos Intel e ARM.
 Assinatura/notarização: secrets Apple ausentes em 17/09/2026; controles mantidos obrigatórios.
 Aceite Intel: pendente (pessoa, Mac, macOS e resultado).

@@ -12,7 +12,7 @@ Integra o desktop à main atual, incluindo gestão e exclusão recuperável de a
 
 Servidor compatível: código da tag `v0.2.0-rc.1`, protocolo de máquina 1, migrações 0001–0012. A URL HTTPS de produção ainda não foi informada. Não use o snapshot da preview anterior como servidor desta candidata. Permanece a versão mínima de cliente 0.1.0; não houve aumento forçado dessa versão mínima.
 
-O gate e os builds desta candidata serão registrados nas notas da release. Assinatura/notarização, aceite nativo Intel/ARM e atualização a partir da preview estão pendentes. Não se reutilizam as contagens nem os instaladores da versão anterior como evidência desta versão. A criação autônoma de tarefas ClickUp por um agente destinatário não está aprovada nos UATs.
+Medido em 2026-09-17, nesta candidata: `npm ci`, `npm run check` (684 testes: 371 unitários, 217 integração, 49 conformidade, 47 concorrência), `npm run build` e `npm run desktop:build` passaram. O banco exclusivo `nod_release_20260917` partiu vazio e recebeu as migrações 0001–0012. `desktop:pack` gerou um pacote local Intel e o proxy MCP respondeu ao initialize usando seu runtime, sem Node externo nem Claude real. O pacote de verificação não tem assinatura e não é um instalador aceito para distribuição. Assinatura/notarização, aceite nativo Intel/ARM e atualização a partir da preview estão pendentes. Não se reutilizam as contagens nem os instaladores da versão anterior como evidência desta versão. A criação autônoma de tarefas ClickUp por um agente destinatário não está aprovada nos UATs.
 
 ## Preparar o servidor
 
@@ -24,6 +24,10 @@ O gate e os builds desta candidata serão registrados nas notas da release. Assi
 6. O proxy precisa aceitar SSE sem buffering e requisições de pelo menos 35 segundos. Use uma instância do servidor nesta versão: tokens de turno, conexões de máquinas e barramento são mantidos em memória. Não escale réplicas sem implementar coordenação correspondente.
 
 No modo compartilhado não há sonda nem execução Claude no servidor. `NOD_EXECUTOR` não habilita um executor local nesse modo. Os conectores MCP continuam no servidor, como antes; ferramentas locais do Mac não são expostas por esta release.
+
+## Requisitos do Mac
+
+Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM64. O suporte a Monterey foi removido somente no Electron 44 ([nota oficial](https://www.electronjs.org/blog/electron-44-0)); esta candidata mantém Electron 43. O requisito do runtime não substitui o aceite do Nod nas duas arquiteturas.
 
 ## Primeira abertura no Mac
 
