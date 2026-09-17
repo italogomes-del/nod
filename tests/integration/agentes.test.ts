@@ -31,6 +31,18 @@ describeIntegracao("agentes (E1.1/E1.2/E1.3, Grok Bot Pin/Hide/Duplicate) no Pos
     });
   });
 
+  it("troca de modelo persiste Sonnet e descarta a sessão Haiku na mesma transação", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data } = await executar(deps, criarAgente, { dono: "pessoa", modelo: "claude-haiku-4-5-20251001" });
+      await deps.repos.conversas.atualizarSessaoCli(data.conversa.id, "haiku-anterior", "local");
+      await executar(deps, editarPerfil, { agenteId: data.agente.id, modelo: "sonnet" });
+      expect((await deps.repos.conversas.buscar(data.conversa.id))?.sessaoCli).toBeNull();
+      const enviado = await executar(deps, enviarMensagem, { conversaId: data.conversa.id, texto: "oi" });
+      expect(enviado.data.turno.modelo).toBe("sonnet");
+    });
+  });
+
   it("dono é imutável: pelo caso de uso (dono_imutavel) e pelo banco (trigger P0001)", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);

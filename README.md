@@ -69,7 +69,7 @@ Um pacote TypeScript (ADR-018) no esqueleto herdado da Leapy (`docs/inherited-fr
 
 ## Custo
 
-Dev e CI: **zero** — o catcher é o default. Cada `claude -p` real usa `--model claude-haiku-4-5-20251001 --strict-mcp-config --tools ""` e ambiente limpo; base medida em 2026-09-16: ~US$ 0,02 por turno com MCP, ~US$ 0,003 por resume, ~US$ 0,01 por sonda. O roteiro `e2e:haiku` custou **US$ 0,1131** na rodada única de 2026-09-16 (1 sonda US$ 0,0129 + 8 turnos US$ 0,1001; detalhe no cabeçalho do script) — meta era < US$ 0,50. O custo de cada turno é gravado em `gastos` (ADR-015) e aparece em `GET turnos/:id`.
+Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (configurável por `NOD_MODELO`); sondas usam Haiku (`NOD_MODELO_SONDA`). Todo turno mantém `--strict-mcp-config --tools ""` e ambiente limpo. Custos históricos medidos com **Haiku**, não estimativas de Sonnet, em 2026-09-16: ~US$ 0,02 por turno com MCP, ~US$ 0,003 por resume, ~US$ 0,01 por sonda. O roteiro `e2e:haiku` custou **US$ 0,1131** na rodada única de 2026-09-16 (1 sonda US$ 0,0129 + 8 turnos US$ 0,1001; detalhe no cabeçalho do script) — meta era < US$ 0,50. O custo de cada turno é gravado em `gastos` (ADR-015) e aparece em `GET turnos/:id`.
 
 ## O que NÃO existe (registrado)
 

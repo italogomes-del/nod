@@ -1,3 +1,4 @@
+import { MODELO_AGENTE_PADRAO } from "../contracts/modelos.ts";
 import { randomUUID } from "node:crypto";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
@@ -147,7 +148,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       profundidade: 0,
       entradaTexto,
       entradaConfianca: "confiavel",
-      modelo: original?.modelo ?? "claude-haiku-4-5-20251001",
+      modelo: original?.modelo ?? MODELO_AGENTE_PADRAO,
       retomaTurnoId: decisao.turnoId,
     });
     turnoRetomadaId = turno?.id ?? null;

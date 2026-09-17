@@ -1,3 +1,4 @@
+import { MODELO_AGENTE_PADRAO } from "../../contracts/modelos.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
@@ -143,7 +144,7 @@ export function comporApp(o: OpcoesCompor): App {
   let filaDeTrocas: Promise<unknown> = Promise.resolve();
   const machineId = env.NOD_MACHINE_ID ?? "";
   const prazoDecisaoMs = numero(env.NOD_PRAZO_DECISAO_MS, 86_400_000);
-  const modeloPadrao = env.NOD_MODELO ?? "claude-haiku-4-5-20251001";
+  const modeloPadrao = env.NOD_MODELO ?? MODELO_AGENTE_PADRAO;
   const chave = chaveDe(env.NOD_CREDENTIAL_KEY ?? "chave-de-desenvolvimento-sem-valor");
   let registryLigado: Registry | null = null;
   let inventarioInicial: Inventario | null = null;

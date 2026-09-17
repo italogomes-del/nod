@@ -1,9 +1,10 @@
+import { MODELO_SONDA_PADRAO } from "../src/contracts/modelos.ts";
 import { sondarDetalhado } from "../src/adapters/executor/sonda.ts";
 import { log } from "../src/obs/log.ts";
 
 /**
  * Sonda manual (ADR-019): `node scripts/sonda.ts` (ou `npx tsx scripts/sonda.ts`).
- * Lê NOD_CLAUDE_BIN (ausente = claude no PATH aumentado) e NOD_MODELO (default haiku, EMENDA 35),
+ * Lê NOD_CLAUDE_BIN (ausente = claude no PATH aumentado) e NOD_MODELO_SONDA (default haiku, EMENDA 35),
  * roda `claude --version` + UM turno real de uma palavra com ambiente limpo (custa a assinatura da
  * pessoa: US$0,003–0,02 medido em 2026-09-16) e imprime o Inventario. Saída 0 = pronto, 1 = outro.
  *
@@ -17,7 +18,7 @@ try {
   // sem .env: variáveis vêm do ambiente
 }
 
-const modelo = process.env.NOD_MODELO ?? "claude-haiku-4-5-20251001";
+const modelo = process.env.NOD_MODELO_SONDA ?? MODELO_SONDA_PADRAO;
 const inicio = Date.now();
 const s = await sondarDetalhado(process.env.NOD_CLAUDE_BIN, process.env, modelo);
 const inv = s.inventario;

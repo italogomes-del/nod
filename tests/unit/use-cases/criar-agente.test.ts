@@ -18,6 +18,7 @@ describe("criarAgente (E1.1/E1.2/E1.3, EMENDA 17)", () => {
     const { deps, banco } = depsEmMemoria();
     const { data, events } = await executar(deps, criarAgente, { dono: "pessoa" });
     expect(data.agente.nome).toBe(NOME_INICIAL);
+    expect(data.agente.modelo).toBe("sonnet");
     expect(data.agente).toMatchObject({ dono: "pessoa", visibility: "privado", confirmado: false, fixado: false, oculto: false });
     expect(data.conversa).toMatchObject({ tipo: "propria", agenteId: data.agente.id });
     expect(data.mensagem.kind).toBe("sistema");
@@ -85,3 +86,16 @@ it("criação rápida persiste nome distinto e boas-vindas do bot sem gastar tur
   expect(banco.turnos).toHaveLength(0);
   expect(banco.concessoes).toHaveLength(0);
 });
+
+ it("modelo explícito é preservado; trocar para Sonnet limpa a sessão antiga sem apagar mensagens", async () => {
+  const { deps } = depsEmMemoria();
+  const { data } = await executar(deps, criarAgente, { dono: "pessoa", modelo: "claude-haiku-4-5-20251001" });
+  expect(data.agente.modelo).toBe("claude-haiku-4-5-20251001");
+  await deps.repos.conversas.atualizarSessaoCli(data.conversa.id, "sessao-haiku", "local");
+  await editarPerfil(deps, { agenteId: data.agente.id, titulo: "Triagem" });
+  expect((await deps.repos.conversas.buscar(data.conversa.id))?.sessaoCli).toBe("sessao-haiku");
+  await editarPerfil(deps, { agenteId: data.agente.id, modelo: "sonnet" });
+  expect((await deps.repos.agentes.buscar(data.agente.id))?.modelo).toBe("sonnet");
+  expect((await deps.repos.conversas.buscar(data.conversa.id))?.sessaoCli).toBeNull();
+  expect(await deps.repos.mensagens.listarDaConversa(data.conversa.id)).toHaveLength(1);
+ });

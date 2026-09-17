@@ -41,9 +41,15 @@ export const editarPerfil: CasoDeUso<EntradaEditarPerfil, { agente: Agente }> = 
 
   const existente = await deps.repos.agentes.buscar(input.agenteId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
+  const modeloMudou = perfil.modelo !== undefined && perfil.modelo !== existente.modelo;
   const agente = await deps.repos.agentes.atualizarPerfil(input.agenteId, { ...perfil, ...(perfil.descricao !== undefined || perfil.titulo !== undefined ? { confirmado: true } : {}) });
   // Visível (equipe) mas de outra pessoa: o repositório devolve null em vez de 42501.
   if (!agente) throw new ErroDeDominio("nao_permitido");
+
+  if (modeloMudou) {
+    const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
+    if (conversa) await deps.repos.conversas.atualizarSessaoCli(conversa.id, null);
+  }
 
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);

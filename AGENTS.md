@@ -132,6 +132,8 @@ Para trocar a versão: `GSTACK_REF=<sha-ou-tag> bash scripts/cloud/install-gstac
 ## Executor e custo
 
 Dev local não exige CLI nem chave: `NOD_EXECUTOR=catcher` é o padrão. Qualquer `claude -p` real
-usa `--model claude-haiku-4-5-20251001 --strict-mcp-config --tools ""` e ambiente limpo
+usa o modelo do agente (padrão `sonnet`, configurável por `NOD_MODELO`), `--strict-mcp-config --tools ""` e ambiente limpo
 (denylist `^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|ANTHROPIC_.*)$`) — sem isso o custo
 de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura errada.
+
+Definido em 2026-09-17: as sondas usam `NOD_MODELO_SONDA` (default `claude-haiku-4-5-20251001`), separado do modelo dos agentes. `e2e:haiku` mantém o modelo barato explícito.
