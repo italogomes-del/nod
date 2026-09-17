@@ -49,11 +49,12 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   if (!agente) throw new ErroDeDominio("nao_encontrado", { cause: "agente" });
   const conversa = await deps.repos.conversas.buscar(turno.conversaId);
-  const [memorias, concessoes, guardados, pessoa] = await Promise.all([
+  const [memorias, concessoes, guardados, pessoa, visiveis] = await Promise.all([
     deps.repos.memorias.listarDoAgente(agente.id),
     deps.repos.concessoes.doAgente(agente.id),
     deps.repos.conectores.listarHabilitados(),
     deps.repos.pessoas.buscar(deps.escopo.pessoaId),
+    deps.repos.agentes.listar(),
   ]);
   const conectores = guardados.map(conectorPublico);
 
@@ -62,6 +63,13 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const inventario: Inventario = executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   const modo = modoDoTurno(turno, conversa, agente);
+  const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, 50);
+  const resposta = mensagens.find((m) => m.turnoId === turno.id && m.payload?.kind === "peer_ask");
+  const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
+  const original = origemId ? await deps.repos.turnos.buscar(origemId) : null;
+  const sessaoCli = conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const historico = !sessaoCli ? mensagens.slice(-20).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
   let rotina: { exigeAprovacao: boolean } | null = null;
   if (turno.origem === "rotina") {
     // A janela reivindicada liga o turno à rotina (rotinaJanelas.buscarPorTurno, 0004 — pendência L5 §6 resolvida).
@@ -83,8 +91,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     inventario,
     executor,
     // 0005: --resume só para o MESMO executor que gravou a sessão; senão sessão nova (--session-id).
-    sessaoCli: conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null,
+    sessaoCli,
+    contextoConversa,
     pessoaNome: pessoa?.nome ?? "a pessoa",
+    colegas: visiveis.filter((a) => a.id !== agente.id && a.ownerId === agente.ownerId && a.confirmado && !a.oculto),
     rotina,
     agora,
   });

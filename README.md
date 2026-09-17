@@ -1,8 +1,10 @@
 # nod
 
+**Primeira versão de produto (17/09/2026):** bots como contatos, criação com perfil, colaboração visível, salas e rotinas por prompt ou formulário. [Guia para experimentar](docs/primeira-versao.md). O executor real é o Claude Code instalado na máquina, usando sua assinatura.
+
 > Um lugar onde agentes preparam decisões e uma pessoa decide — com registro de quem decidiu, por quê, e se havia alguém olhando.
 
-**Ferramenta interna da Leapy.** Cada colaborador usa o Claude Code que já está credenciado na própria máquina; o nod pilota, nunca vê a credencial. Este README descreve **o que existe de fato** na branch `rebuild/fundacao-leapy` em 2026-09-16, como rodar, como testar, quanto custa — e o que NÃO existe.
+**Ferramenta interna da Leapy.** Cada colaborador usa o Claude Code que já está credenciado na própria máquina; o nod pilota, nunca vê a credencial. Este README descreve a versão de 2026-09-17, como rodar e testar; medições históricas mantêm suas datas.
 
 ## Rodar amanhã de manhã
 
@@ -10,8 +12,8 @@
 cd ~/code/nod
 mise install && npm ci                 # Node 24.19.0 pinado em .mise.toml (nvm/asdf ganham do mise — ver AGENTS.md)
 cp .env.example .env                   # se ainda não existir; troque NOD_SESSAO_SEGREDO e NOD_CREDENTIAL_KEY
-npm run dev:setup                      # docker compose (Postgres 16 em 127.0.0.1:5434) + migrações 0001–0004 nos bancos nod e nod_test + seed
-npm run dev                            # api http://127.0.0.1:8888 + web http://127.0.0.1:5274 (5173 e 5432 são de OUTROS projetos)
+npm run dev:setup                      # docker compose (Postgres 16 em 127.0.0.1:5434) + migrações nos bancos nod e nod_test + seed
+NOD_LOGIN=stub npm run dev             # api http://127.0.0.1:8888 + web http://127.0.0.1:5274 (5173 e 5432 são de OUTROS projetos)
 ```
 
 Abra http://127.0.0.1:5274, clique em **Entrar como Marlon** (sessão stub de desenvolvimento, só em 127.0.0.1) e a **Frota** aparece com a Vera do seed. O executor padrão é o **catcher** (`NOD_EXECUTOR=catcher` no `.env`): zero CLI, zero custo — as respostas do "modelo" vêm de marcadores no próprio texto (`[[tool: lembrar {...}]] [[texto: ...]]`, gramática em `tests/helpers/catcher-roteiro.ts`).
@@ -47,8 +49,8 @@ Um pacote TypeScript (ADR-018) no esqueleto herdado da Leapy (`docs/inherited-fr
 - **Contratos e domínio (L2):** nove ferramentas nod (`lembrar`, `atualizar_perfil`, `pedir_acesso`, `criar_rotina`, `pedir_aprovacao`, `pedir_a_pessoa`, `passar`, `encaminhar`, `perguntar_a_bot`), plano de turno (ADR-024), classificação de falha por estado de protocolo (ADR-009), orçamento de canal, rodada de sala, tudo puro em `src/domain`.
 - **Executor (L4):** driver `claude-cli` real (`-p` + stream-json, `--session-id`/`--resume`, `--tools ""` + `--allowedTools` do plano, `--strict-mcp-config`, mcp.json 0600 em tmpdir por turno, env com denylist, SIGTERM→SIGKILL) e driver `catcher` no mesmo SPI; sonda de três estados (ADR-019); registry sombra; laço puxar → rodar → renovar → entregar.
 - **Proxy MCP, plano, conectores, aprovação (L5):** o único servidor MCP que o CLI enxerga consome só o plano; conectores = servidores MCP registrados pela pessoa, sondados, com env cifrado no servidor; concessão por bot e por capacidade com mensagem de consentimento imutável; aprovação em **lista tipada** (item a item, sensível nasce desmarcado).
-- **Bots, conversa, fila e Parar (L6):** criação conversacional ('Novo agente' até a proposta confirmada), perfil, memória, Pin/Hide/Duplicate, fila de turnos no Postgres (SKIP LOCKED, lease, quatro estados), Parar com faixa e SIGTERM em < 2 s, retomada sempre por turno novo.
-- **Rotinas, salas, bot-a-bot (L7):** rotina por texto (cron + fuso IANA) → proposta → decisão; scheduler com janela única; gate de aprovação; salas de 2–6 bots com grant por membro, @menção, handoff/passe tipados, orçamento do canal; `perguntar_a_bot` de um salto com conteúdo não confiável.
+- **Bots, conversa, fila e Parar (L6):** criação com perfil confirmado pelo formulário ou conversacional ('Novo agente' até a proposta confirmada), perfil, memória, Pin/Hide/Duplicate, fila de turnos no Postgres (SKIP LOCKED, lease, quatro estados), Parar com faixa e SIGTERM em < 2 s, retomada sempre por turno novo.
+- **Rotinas, salas, bot-a-bot (L7):** rotina por formulário ou texto (cron + fuso IANA) → proposta → decisão; teste imediato, pausa e histórico; scheduler com janela única; gate de aprovação; salas de 2–6 bots com grant por membro, @menção, handoff/passe tipados, orçamento do canal; `perguntar_a_bot` de um salto com conteúdo não confiável.
 - **SSE, outbox, Sua vez, métricas (L8):** frames numerados por pessoa com contrato de resume, despachante do outbox, "Sua vez" sob RLS de duas pernas (vencido em cinza, reabrir), seis métricas em `/metrics`.
 - **Integração e web (L9):** `compor.ts` + `boot.ts` ligam tudo; rotas de decisão (`decidir` para sete tipos, `responder`, `retomar`) e inventário; web em vanilla TS com render por regiões e reducer por frame (`web/`); e2e com catcher e roteiro com haiku.
 
@@ -62,7 +64,7 @@ Dev e CI: **zero** — o catcher é o default. Cada `claude -p` real usa `--mode
 - **Mobile / PWA / Electron / updater** — servidor e máquina são o mesmo processo (ADR-020 invertido).
 - **Computador por bot, driver remoto, browser** (ADR-028); **skills por demonstração**; skills por instrução (nomeadas, `/`) também ficaram fora desta rodada (EMENDA 24).
 - **OAuth real / credencial de colaborador com health-check** (ADR-015 revisado): conector é MCP registrado com env cifrado só no servidor. **Procuração entre donos** tem tabela e regra fail-closed, sem rota nem UI.
-- **Sessão de verdade**: a sessão é um cookie assinado de desenvolvimento (`marlon` | `ana`) e o servidor recusa `NOD_HOST` fora de 127.0.0.1 enquanto for assim.
+- **Cadastro autônomo**: o login Google usa allowlist previamente cadastrada (ADR-030). Para desenvolvimento local, `NOD_LOGIN=stub` usa cookie assinado e recusa `NOD_HOST` fora de 127.0.0.1.
 - **Execução de rotina "em curso"**: `DesfechoRotina` não tem `pendente` — `rotina_execucoes` só ganha linha ao assentar; o "em curso" é a janela com `turno_id` (EMENDA-L9 §5, registrado).
 - **Executor de servidor**: `custo_servidor_mes` é 0 por construção; `gastosRepo.somarMes(agora, executor)` já filtra para o dia em que existir.
 - Deliberadamente fora (lista NÃO CONSTRUIR dos ADRs): policy só por tenant, store JSON, cache de catálogo, endpoint síncrono de decisão, heartbeat, requeue automático, regex de intenção, DELETE em teste fora de concurrency, seed no CI, SDK MCP, workspaces.
@@ -70,7 +72,7 @@ Dev e CI: **zero** — o catcher é o default. Cada `claude -p` real usa `--mode
 ## Desvios registrados
 
 - **Aprovação em lista tipada** segue a spec E4.1 (P0), não o corte "binária nesta rodada" de core-features (EMENDA 23).
-- **Nome na criação:** `POST agentes {dono, nome?}` — ausente vira "Novo agente" e o modelo propõe pelo `atualizar_perfil` (EMENDA 17). Organização/membership: fora (um tenant).
+- **Perfil na criação:** `POST agentes {dono, nome?, titulo?, descricao?}` — nome e descrição confirmam o perfil diretamente (ADR-032); sem eles, o modelo propõe pelo `atualizar_perfil` (EMENDA 17). Organização/membership: fora (um tenant).
 - **Dois eixos de profundidade:** `profundidade` 0|1 de peer e `HANDOFFS_POR_RODADA = 3` — o quarto `encaminhar` na mesma rodada vira passe `teto_canal` (EMENDA 14).
 - **Anel de bots (EMENDA-L9 §6):** o domínio RECUSA o anel A→B→C no terceiro remetente distinto (negação escrita, terminal), em vez de "resfriar no quarto post" da spec E5.5 — esperar o quarto post seria deixar o anel fechar uma vez.
 - **Cron com minuto e hora fixos:** o domínio recusa `* * * * *` (Regra 9); o aceite adianta `proxima_execucao` em vez de trocar o cron.
@@ -81,6 +83,6 @@ Dev e CI: **zero** — o catcher é o default. Cada `claude -p` real usa `--mode
 ## Onde ler mais
 
 - [AGENTS.md](AGENTS.md): comandos, as regras que o código trava, desvios.
-- [docs/adr/](docs/adr/): 29 decisões com gatilho de reversão; refinamentos datados (0003, 0004) em ADR-003 e ADR-007.
+- [docs/adr/](docs/adr/): 32 decisões com gatilho de reversão; refinamentos datados (0003, 0004) em ADR-003 e ADR-007.
 - [docs/product-spec.html](docs/product-spec.html), [docs/core-features.md](docs/core-features.md), [docs/internal-first.md](docs/internal-first.md), [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md), [docs/spikes/serializacao-do-turno.md](docs/spikes/serializacao-do-turno.md).
-- Protótipos: [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) (a linguagem visual da web), [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
+- Protótipos: [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) (referência histórica), [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).

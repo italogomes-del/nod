@@ -3,8 +3,9 @@ import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
-import { botao, dataHora, esc, iconeAgente, paragrafos } from "../lib/render.ts";
+import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
+import { textoFormatado } from "../lib/texto-formatado.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
@@ -33,7 +34,8 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "handoff") {
     const de = agenteDe(estado, p.de)?.nome ?? "agente";
     const para = agenteDe(estado, p.para)?.nome ?? "agente";
-    return `<div class="msg-handoff">↪ <b>${esc(de)}</b> passou para <b>${esc(para)}</b>: ${esc(p.motivo)}</div>`;
+    const alvo = agenteDe(estado, p.para);
+    return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? "pedido de colaboração" : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
   }
   if (p?.kind === "passe") return `<div class="msg-passe">⏭ ${paragrafos(m.texto)} <span class="tag tag-cinza">${esc(p.motivo.replaceAll("_", " "))}</span></div>`;
   if (p?.kind === "consentimento") return `<div class="msg-consentimento">🔏 ${paragrafos(m.texto)}<small>não inclui: ${esc(p.naoInclui.length ? p.naoInclui.join("; ") : "nada mais deste conector")}</small></div>`;
@@ -41,30 +43,27 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "resultado_aprovacao") return `<div class="msg-resultado">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
   if (p?.kind === "parada") return `<div class="msg-parada">■ ${paragrafos(m.texto)}</div>`;
-  if (p?.kind === "peer_ask") return `<div class="msg-peer"><span class="tag tag-ambar">resposta de ${esc(p.nome)} · bot não supervisionado · conteúdo não confiável</span>${paragrafos(m.texto)}</div>`;
+  if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>Resposta de ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto)}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
 }
-
-/** Ações de hover do balão (protótipo): reação, responder, mais — decorativas, sem efeito ainda. */
-const ACOES_BALAO = '<div class="msg-actions"><button type="button" title="Reação">☺</button><button type="button" title="Responder">↩</button><button type="button" title="Mais">…</button></div>';
 
 /**
  * Uma mensagem. Texto vira BALÃO (protótipo private-agents-minimal): você à direita (preto), o bot à
  * esquerda (cinza). Os demais kinds (sistema, handoff, negação, rotina…) seguem como linhas discretas.
  * `mostrarAutor` liga o nome do bot dentro do balão — útil em salas com vários agentes.
  */
-export function renderMensagem(m: Mensagem, estado: Estado, mostrarAutor = false): string {
+export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
   if (m.kind !== "texto") return corpoMensagem(m, estado);
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
-  const sender = !ehPessoa && mostrarAutor ? `<span class="sender">${esc(agente?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</span>` : "";
-  const tags = ehPessoa
+  const sender = `<div class="msg-autor"><b>${ehPessoa ? "Você" : esc(agente?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>`;
+  const tags = ehPessoa || m.payload?.kind === "peer_pedido"
     ? ""
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
   return `<article class="message ${ehPessoa ? "you" : "bot"}" data-mensagem="${esc(m.id)}">
-    <div class="bubble-wrap">${ACOES_BALAO}<div class="bubble">${sender}${paragrafos(m.texto)}${metaTags}</div></div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${sender}<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div></div>
   </article>`;
 }
 
@@ -121,9 +120,10 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
 export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
-  return `<div class="cab-esq">${a ? iconeAgente(a, "md") : ""}<span class="nome">${esc(nome)}</span><span class="tag">${esc(a?.descricaoEstado ?? "privado")}</span></div>
+  const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg") : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
-      ${botao("ir-perfil", "Perfil", { id: agenteId })}
+      ${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
       ${botao("ir-memoria", "Memória", { id: agenteId })}
       ${botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" })}
     </div>`;
@@ -132,6 +132,6 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
 /** Composer criado UMA vez por conversa (main.ts não o regrava): textarea + enviar. */
 export function htmlComposer(placeholder: string, sugestoes: readonly string[] = []): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
-  return `<div class="composer"><div class="box">${lista}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea><button class="send" data-act="enviar" aria-label="Enviar">↑</button></div>
+  return `<div class="composer"><div class="box">${lista}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea><button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota">Enter envia · Shift+Enter quebra linha${sugestoes.length ? " · @ menciona um bot" : ""}</p></div>`;
 }

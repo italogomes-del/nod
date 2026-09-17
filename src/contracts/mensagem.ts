@@ -19,14 +19,15 @@ export type KindMensagem =
 
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
-  | { kind: "handoff"; de: string; para: string; motivo: string }
+  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string }
+  | { kind: "peer_pedido"; conversaOrigemId: string; turnoOrigemId: string }
   | { kind: "passe"; motivo: MotivoPasse }
   | { kind: "consentimento"; conectorId: string; slug: string; capacidade: string; naoInclui: string[] }
   | { kind: "rotina_execucao"; rotinaId: string; instanteAgendado: EpochMs; desfecho: DesfechoRotina }
   | { kind: "resultado_aprovacao"; decisaoId: string; itens: { idx: number; desfecho: DesfechoItem }[] }
   | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
-  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string };
+  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string };
 
 export type Mensagem = {
   tenantId: TenantId;

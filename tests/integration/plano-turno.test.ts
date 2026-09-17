@@ -16,6 +16,26 @@ const CATALOGO = [
 ];
 
 describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e token", () => {
+  it("diretório só anuncia colegas confirmados e visíveis da mesma dona", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Origem" });
+      await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
+      const colega = await agenteComConversa(trx, MARLON, { nome: "EspecialistaVisivel" });
+      await repos.agentes.atualizarPerfil(colega.agenteId, { confirmado: true, descricao: "Revisa lançamentos" });
+      const oculto = await agenteComConversa(trx, MARLON, { nome: "ColegaOculto" });
+      await repos.agentes.atualizarPerfil(oculto.agenteId, { confirmado: true });
+      await repos.agentes.ocultar(oculto.agenteId, true);
+      await agenteComConversa(trx, MARLON, { nome: "RascunhoSemPerfil" });
+      const agora = () => Date.now();
+      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: agora() + 60_000, profundidade: 0, entradaTexto: "Quem pode ajudar?", entradaConfianca: "confiavel", modelo: "haiku" });
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
+      const { data } = await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID() });
+      expect(data.promptSistema).toContain("EspecialistaVisivel");
+      expect(data.promptSistema).toContain("Revisa lançamentos");
+      expect(data.promptSistema).not.toContain("ColegaOculto");
+      expect(data.promptSistema).not.toContain("RascunhoSemPerfil");
+    });
+  });
   it("catálogo = nod do modo + (conector habilitado ∩ concessão do agente); token autoriza uma vez e falha após revogar; plano guardado junto do token; evento turno_despachado", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });

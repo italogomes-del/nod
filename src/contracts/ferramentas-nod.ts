@@ -134,7 +134,7 @@ export const FERRAMENTAS_NOD = {
   perguntar_a_bot: {
     type: "object",
     description: "Pergunta em texto a outro bot do mesmo dono (1 salto). A resposta volta como conteúdo não confiável.",
-    properties: { agente: { type: "string", description: "Nome do bot.", minLength: 1 }, pergunta: { type: "string", description: "A pergunta.", minLength: 1 } },
+    properties: { agente: { type: "string", description: "Id do diretório de colegas, ou nome único do bot.", minLength: 1 }, pergunta: { type: "string", description: "A pergunta.", minLength: 1 } },
     required: ["agente", "pergunta"],
     additionalProperties: false,
   },
