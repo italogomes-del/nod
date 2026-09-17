@@ -80,6 +80,21 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
     });
   });
 
+  it("rotina e colega recebem sessão nova; conversa mantém sua sessão interativa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
+      const sessao = randomUUID();
+      await repos.conversas.atualizarSessaoCli(conversaId, sessao, "catcher");
+      for (const origem of ["conversa", "rotina", "peer"] as const) {
+        const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem, prazoEm: agora() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "verificar", entradaConfianca: "confiavel", modelo: "m" });
+        const plano = (await emitirPlanoTurno(deps, { turnoId: turno?.id ?? "", machineId: "m", executor: "catcher" })).data;
+        expect(plano.entrada.sessaoCli).toBe(origem === "conversa" ? sessao : null);
+      }
+    });
+  });
+
   it("profundidade 1 vira modo peer: sem perguntar_a_bot nem encaminhar (E12.4); rotina sem gate identificável liga efeitoExternoSoPorAprovacao (fail-closed)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
@@ -97,7 +112,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const rotina = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "rotina", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
       const planoRotina = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
       expect(planoRotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa"]);
+      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot"]);
 
       // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004): sem janela o gate fica ligado.
       const r = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", exigeAprovacao: false, proximaExecucao: agora() + 1000 });

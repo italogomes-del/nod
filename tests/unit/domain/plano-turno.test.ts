@@ -61,13 +61,24 @@ describe("montarPlano", () => {
     expect(p.decididoPor).toBe("regra:reducao_por_confianca");
   });
 
-  it("modos: criacao propõe perfil/rotina/acesso; rotina só lembra, pede aprovação e pede à pessoa; sala tem passar/encaminhar", () => {
+  it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega; sala tem passar/encaminhar", () => {
     expect(nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"))).toEqual(["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"]);
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot"]);
     const sala = nomes(montarPlano({ ...base, modo: "sala" }));
     expect(sala).toContain("passar");
     expect(sala).toContain("encaminhar");
     expect(sala).toContain("pedir_a_pessoa");
+  });
+
+  it("agente acordado por rotina pode consultar colega sem transferir escrita nem permitir outro salto", () => {
+    const rotina = montarPlano({ ...base, modo: "rotina", turno: { ...turno, origem: "rotina" }, confianca: "nao_confiavel", rotina: { exigeAprovacao: true } });
+    expect(nomes(rotina)).toContain("perguntar_a_bot");
+    expect(nomes(rotina)).toContain("exemplo__listar_contatos");
+    expect(nomes(rotina)).not.toContain("exemplo__enviar_email");
+    expect(rotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+    const colega = montarPlano({ ...base, modo: "peer", profundidade: 1, confianca: "nao_confiavel" });
+    expect(nomes(colega)).not.toContain("perguntar_a_bot");
+    expect(nomes(colega)).not.toContain("exemplo__enviar_email");
   });
 
   it("EMENDA 15: origem rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; conversa não", () => {

@@ -81,6 +81,22 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
     });
   });
 
+  it("assentar rotina ou colega não substitui a sessão interativa salva", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await deps.repos.conversas.atualizarSessaoCli(criado.conversa.id, "sessao-interativa", "local");
+      for (const origem of ["rotina", "peer"] as const) {
+        const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "teste", entradaConfianca: "nao_confiavel", modelo: criado.agente.modelo });
+        const maquina = randomUUID();
+        const plano = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano;
+        expect(plano?.turnoId).toBe(turno?.id);
+        await executar(deps, assentarTurno, { turnoId: turno?.id ?? "", machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: sucesso("feito", { sessaoCli: "sessao-de-fundo" }) });
+        expect((await deps.repos.conversas.buscar(criado.conversa.id))?.sessaoCli).toBe("sessao-interativa");
+      }
+    });
+  });
+
   it("entrega é idempotente por (turno, seq_local): repetir não grava mensagem nem gasto de novo", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);

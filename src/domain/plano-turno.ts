@@ -18,7 +18,7 @@ import { montarPromptSistema } from "./prompt-sistema.ts";
 
 /**
  * Ferramentas nod por modo (definido em 2026-09-16): criação propõe perfil/rotina/acesso; conversa
- * e sala têm o kit completo; rotina só lembra e pede aprovação (E7.3); peer é texto-só, sem
+ * e sala têm o kit completo; rotina permite consulta a colega (definido em 2026-09-17); peer é texto-só, sem
  * salto (E12.4). pedir_a_pessoa (EMENDA 16) entra onde há pessoa para destravar: conversa, sala e
  * rotina — não em criação (o modelo pergunta em texto) nem em peer (o remetente é outro bot).
  */
@@ -26,7 +26,7 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   criacao: ["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"],
   conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_a_pessoa"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot"],
   peer: ["lembrar"],
 };
 

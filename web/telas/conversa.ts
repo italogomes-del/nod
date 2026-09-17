@@ -7,6 +7,7 @@ import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/rend
 import { haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
+import { renderDecisoesDaConversa } from "./sua-vez.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -38,7 +39,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? "pedido de colaboração" : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
   }
   if (p?.kind === "passe") return `<div class="msg-passe">⏭ ${paragrafos(m.texto)} <span class="tag tag-cinza">${esc(p.motivo.replaceAll("_", " "))}</span></div>`;
-  if (p?.kind === "consentimento") return `<div class="msg-consentimento">🔏 ${paragrafos(m.texto)}<small>não inclui: ${esc(p.naoInclui.length ? p.naoInclui.join("; ") : "nada mais deste conector")}</small></div>`;
+  if (p?.kind === "consentimento") return `<div class="msg-consentimento"><b>Acesso permitido · ${esc(p.slug)}</b><div>${esc(p.capacidade)}</div><details data-disclosure="consentimento-${esc(m.id)}"><summary>Ver registro de autorização</summary>${paragrafos(m.texto)}</details></div>`;
   if (p?.kind === "rotina_execucao") return `<div class="msg-rotina msg-rotina-${esc(p.desfecho)}">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "resultado_aprovacao") return `<div class="msg-resultado">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
@@ -90,7 +91,8 @@ function renderProposta(p: Proposta, estado: Estado): string {
     <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
     <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : "Acesso a conector"}</div>
     ${itens}
-    <div class="ft">${botao("confirmar-proposta", "Confirmar", { classe: "pri", id: p.id })}${botao("recusar-proposta", "Deixar de lado", { id: p.id })}</div>
+    ${p.payload.kind === "acesso" ? '<div class="it">Revise o pedido. A autorização final aparecerá aqui na conversa.</div>' : ""}
+    <div class="ft">${botao("confirmar-proposta", p.payload.kind === "acesso" ? "Revisar acesso" : "Confirmar", { classe: "pri", id: p.id })}${botao("recusar-proposta", "Deixar de lado", { id: p.id })}</div>
   </div>`;
 }
 
@@ -159,6 +161,7 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
     ${renderMensagensAgrupadas(c.mensagens, estado, sala)}
     ${acolhimento}
     ${c.propostas.map((p) => renderProposta(p, estado)).join("")}
+    ${renderDecisoesDaConversa(estado, c.conversa.id, new Set(c.propostas.map((p) => p.id)))}
     ${vivos.map((t) => renderTurnoVivo(t, c, estado)).join("")}
     ${renderFaixaParada(estado.faixaParada)}
   </div>`;
@@ -169,7 +172,8 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg") : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
+  const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg") : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
       ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
       ${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}

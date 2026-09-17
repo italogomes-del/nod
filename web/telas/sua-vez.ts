@@ -49,6 +49,7 @@ function renderAcoes(item: Item, aberta: boolean): string {
     case "retomar_turno":
       return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}</div>`;
     case "acesso":
+      return `<div class="acoes">${botao("decidir-proposta", "Permitir acesso", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Não permitir", { id: d.id })}</div>`;
     case "perfil":
     case "rotina":
       return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
@@ -59,7 +60,7 @@ function renderAcoes(item: Item, aberta: boolean): string {
   }
 }
 
-function renderItem(item: Item, estado: Estado): string {
+function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
   const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · recusa automática ${emQuanto(item.recusaAutomaticaEmMs)}` : `venceu ${d.desfecho ? esc(d.desfecho.tipo.replaceAll("_", " ")) : ""}`;
@@ -69,8 +70,15 @@ function renderItem(item: Item, estado: Estado): string {
     <div class="dec-frase">${esc(d.frase)}</div>
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false) : ""}
     ${renderAcoes(item, aberta)}
-    <div class="dec-rodape">${conversa ? botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } }) : ""}</div>
+    ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}
   </li>`;
+}
+
+export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): string {
+  const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? [];
+  if (!itens.length) return "";
+  const pendentes = itens.some((item) => item.estadoColuna !== "vencido");
+  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa"><h2>${pendentes ? "Preciso da sua decisão para continuar" : "Pedidos vencidos"}</h2><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${itens.map((item) => renderItem(item, estado, true)).join("")}</ul></section>`;
 }
 
 /**

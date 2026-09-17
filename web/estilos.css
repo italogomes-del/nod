@@ -252,6 +252,13 @@ body.ocupado { cursor: progress; }
 
 /* sua vez */
 .decisao { border-left: 4px solid var(--amber) !important; }
+.decisoes-chat { width: min(640px, 100%); align-self: flex-start; margin: 12px 0; }
+.decisoes-chat h2 { font-size: 16px; margin: 0 0 6px; }
+.decisoes-chat > p { color: var(--ink-3); font-size: 13px; margin: 0 0 12px; }
+.decisoes-chat .dec-frase { overflow-wrap: anywhere; }
+.decisoes-chat .acoes { flex-wrap: wrap; }
+.msg-consentimento details { margin-top: 6px; overflow-wrap: anywhere; }
+.msg-consentimento summary { cursor: pointer; color: var(--ink-3); }
 .dec-vencido { border-left-color: var(--ink-4) !important; color: var(--ink-3); background: var(--panel-soft) !important; }
 .dec-reaberto { border-left-color: var(--amber) !important; }
 .dec-fora { border-left-color: var(--ink-4) !important; }
