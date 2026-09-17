@@ -6,6 +6,14 @@
 
 **Ferramenta interna da Leapy.** Cada colaborador usa o Claude Code que já está credenciado na própria máquina; o nod pilota, nunca vê a credencial. Este README descreve a versão de 2026-09-17, como rodar e testar; medições históricas mantêm suas datas.
 
+## Download do app para macOS
+
+A [pré-release Desktop 0.1.0 — Preview 1](https://github.com/marlonwlv/nod/releases/tag/desktop-v0.1.0-preview.1) inclui DMGs para **Mac Intel** e **Mac com chip M**, além do guia e dos checksums.
+
+[Guia de instalação, servidor compartilhado e publicação](https://github.com/marlonwlv/nod/blob/desktop-v0.1.0-preview.1/docs/release-desktop.md).
+
+Os instaladores desta pré-release **não têm assinatura Apple nem notarização** e precisam de um servidor nod acessível por HTTPS. Para montar o servidor correspondente aos DMGs, use o código da tag `desktop-v0.1.0-preview.1`. Windows ainda não é suportado nesta versão.
+
 ## Rodar amanhã de manhã
 
 ```bash
