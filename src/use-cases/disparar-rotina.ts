@@ -12,7 +12,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
-export type EntradaDisparo = { rotina: Rotina; instanteAgendado: number; machineId: string; executor: Executor };
+export type EntradaDisparo = { rotina: Rotina; instanteAgendado: number; machineId: string; executor: Executor; preservarAgenda?: boolean };
 export type SaidaDisparo = { turno: Turno; proximaExecucao: number } | { janelaDeOutro: true };
 
 /**
@@ -72,8 +72,8 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno de rotina não criado" });
   await deps.repos.rotinaJanelas.vincularTurno({ rotinaId: rotina.id, instanteAgendado, turnoId: turno.id });
-  const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
-  await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
+  const proximaExecucao = input.preservarAgenda ? rotina.proximaExecucao : proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
+  if (!input.preservarAgenda) await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
   const autoria = autoriaPessoa(deps.escopo.pessoaId, "regra:scheduler-rotina");
   return {
     data: { turno, proximaExecucao },

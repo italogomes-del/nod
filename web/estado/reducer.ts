@@ -26,6 +26,8 @@ export type Tela =
   | { tipo: "perfil"; agenteId: string }
   | { tipo: "memoria"; agenteId: string }
   | { tipo: "rotinas" }
+  | { tipo: "nova-rotina"; agenteId?: string }
+  | { tipo: "novo-bot" }
   | { tipo: "conectores" }
   | { tipo: "sua-vez" }
   | { tipo: "nova-sala" }

@@ -6,6 +6,14 @@ import { listarFrota } from "../../../src/use-cases/listar-frota.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
 describe("criarAgente (E1.1/E1.2/E1.3, EMENDA 17)", () => {
+  it("perfil definido pela pessoa nasce confirmado e pronto para colaborar, sem conceder ferramentas externas", async () => {
+    const { deps, banco } = depsEmMemoria();
+    const { data } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera", titulo: "Engenharia", descricao: "Revisa código e consulta os colegas." });
+    expect(data.agente).toMatchObject({ nome: "Vera", titulo: "Engenharia", confirmado: true });
+    expect(data.mensagem.texto).toContain("está pronto");
+    expect(banco.concessoes).toEqual([]);
+    await esperarErro(() => criarAgente(deps, { dono: "pessoa", nome: "a".repeat(61) }), "entrada_invalida");
+  });
   it("nasce 'Novo agente' com conversa própria, mensagem 'agente-nasceu' e dois eventos no outbox", async () => {
     const { deps, banco } = depsEmMemoria();
     const { data, events } = await executar(deps, criarAgente, { dono: "pessoa" });

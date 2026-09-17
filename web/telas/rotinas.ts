@@ -24,6 +24,7 @@ export function renderRotinas(estado: Estado): string {
         <div class="rt-linha mudo">fonte: ${esc(r.fonte)} · entregável: ${esc(r.entregavel)} · limites: ${esc(r.limitesAprovacao)} · sem dado: ${esc(r.politicaSemDado)}</div>
         <div class="acoes">
           ${r.estado === "ativa" ? botao("pausar-rotina", "Pausar", { id: r.id }) : botao("ativar-rotina", "Ativar", { classe: "pri", id: r.id })}
+          ${botao("executar-rotina", "Testar agora", { id: r.id, dados: { agente: r.agenteId }, desabilitado: estado.ocupado })}
           ${botao("ver-execucoes", exec ? "atualizar execuções" : "últimas 20 execuções", { id: r.id })}
           ${botao("abrir-conversa", "conversa", { dados: { conversa: r.conversaId, agente: r.agenteId } })}
         </div>
@@ -32,7 +33,8 @@ export function renderRotinas(estado: Estado): string {
     })
     .join("");
   return `<section class="tela tela-rotinas">
-    <header class="tela-cab"><h1>Rotinas</h1><span class="chip">${estado.rotinas.length} · máximo 50 por bot</span></header>
+    <header class="tela-cab"><h1>Rotinas</h1><span class="chip">${estado.rotinas.length} rotinas</span>${botao("navegar", "+ Nova rotina", { classe: "pri", dados: { tela: "nova-rotina" } })}</header>
+    <p class="intro">Seu bot cuida do que se repete. O nod precisa estar aberto para executar os agendamentos.</p>
     ${estado.rotinas.length ? `<ul class="lista">${linhas}</ul>` : '<p class="mudo">Nenhuma rotina. Diga na conversa do bot, por exemplo: «todo dia útil às 8:00 de São Paulo poste aqui um resumo dos PRs abertos». O bot propõe; você confirma em Sua vez.</p>'}
   </section>`;
 }

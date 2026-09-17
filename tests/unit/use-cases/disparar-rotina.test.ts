@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { EXECUCOES_GUARDADAS } from "../../../src/shared/constantes.ts";
 import { confiancaDaFonte, dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
+import { executarRotinaAgora } from "../../../src/use-cases/executar-rotina-agora.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
 
 const TZ = "America/Sao_Paulo";
@@ -28,6 +29,17 @@ async function rotinaAtiva(d: ReturnType<typeof depsMemoria>, extra: { fonte?: s
 }
 
 describe("dispararRotina", () => {
+  it("teste manual mantém pausa e agenda e deduplica dois cliques no mesmo minuto", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    await d.deps.repos.rotinas.atualizarEstado(rotina.id, "pausada");
+    const a = await executarRotinaAgora(d.deps, { rotinaId: rotina.id, executor: "local" });
+    const b = await executarRotinaAgora(d.deps, { rotinaId: rotina.id, executor: "local" });
+    expect(a.data.turnoId).toBeTruthy();
+    expect(b.data.turnoId).toBeNull();
+    expect(d.banco.turnos).toHaveLength(1);
+    expect(await d.deps.repos.rotinas.buscar(rotina.id)).toMatchObject({ estado: "pausada", proximaExecucao: JANELA });
+  });
   it("reivindica a janela canônica, enfileira turno origem 'rotina' ligado à janela e reagenda a próxima; a mesma janela de novo é de outro processo", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const rotina = await rotinaAtiva(d);

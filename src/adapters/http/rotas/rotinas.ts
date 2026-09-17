@@ -9,6 +9,8 @@ import { listarExecucoes, listarRotinas } from "../../../use-cases/listar-rotina
 import { pausarRotina } from "../../../use-cases/pausar-rotina.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
+import { executarRotinaAgora } from "../../../use-cases/executar-rotina-agora.ts";
+import type { Executor } from "../../../contracts/evento.ts";
 
 /**
  * Dependências das rotas da L7 (rotinas e salas). `txPara` é a fábrica de transação ESCOPADA por
@@ -16,6 +18,7 @@ import type { Rota } from "../roteador.ts";
  * withRollback com vincularEscopo — por isso a rota não conhece o pool.
  */
 export type DepsRotasL7 = {
+  executor?: () => Executor;
   txPara(escopo: Escopo): Transacao;
   services: Services;
   useCases: UseCasesNod;
@@ -64,6 +67,14 @@ export function corpoObjeto(c: unknown): Record<string, unknown> {
  */
 export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
   return [
+    {
+      metodo: "POST",
+      padrao: /^\/rotinas\/(?<id>[^/]+)\/executar$/,
+      async handler(ctx) {
+        const r = await executar(deps, ctx.escopo, executarRotinaAgora, { rotinaId: uuid(ctx.params.id, "id"), executor: deps.executor?.() ?? "catcher" });
+        ctx.json(200, { ok: true, ids: { conversaId: r.conversaId, ...(r.turnoId ? { turnoId: r.turnoId } : {}) } });
+      },
+    },
     {
       metodo: "GET",
       padrao: /^\/rotinas$/,

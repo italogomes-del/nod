@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { montarPlano } from "../../../src/domain/plano-turno.ts";
 import { entregarRespostaPeer } from "../../../src/use-cases/entregar-resposta-peer.ts";
@@ -14,6 +15,20 @@ async function bot(d: ReturnType<typeof depsMemoria>, nome: string, deps = d.dep
 }
 
 describe("perguntarABot (1 salto) e entregarRespostaPeer", () => {
+  it("pedido iniciado numa sala retorna à mesma sala, com o contexto original e o fio visível", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const vera = await bot(d, "Vera");
+    await bot(d, "Tuca");
+    const sala = await d.deps.repos.conversas.criar({ tipo: "sala", salaId: randomUUID() });
+    const original = await d.deps.repos.turnos.enfileirar({ conversaId: sala!.id, agenteId: vera.id, origem: "sala", prazoEm: AGORA + 1000, profundidade: 0, entradaTexto: "Prepare o lançamento", entradaConfianca: "confiavel", modelo: "haiku" });
+    const pedido = await perguntarABot(d.deps, { ...contexto(vera.id, sala!.id), turnoId: original!.id, agente: "Tuca", pergunta: "Quais clientes avisar?" });
+    expect(d.banco.mensagens.find((m) => m.kind === "handoff")).toMatchObject({ conversaId: sala!.id, payload: { tarefaId: pedido.data.tarefa_id } });
+    const resposta = await entregarRespostaPeer(d.deps, { tarefaId: pedido.data.tarefa_id, texto: "Clientes do piloto." });
+    if (!("continuacao" in resposta.data)) throw new Error("resposta ausente");
+    expect(resposta.data.continuacao.conversaId).toBe(sala!.id);
+    expect(resposta.data.mensagem.payload).toMatchObject({ turnoOrigemId: original!.id });
+    expect(resposta.data.mensagem.conversaId).toBe(sala!.id);
+  });
   it("mesmo dono: turno no alvo origem 'peer' profundidade 1, entrada moldurada nao_confiavel, pergunta gravada na conversa do alvo; devolve tarefa_id", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const vera = await bot(d, "Vera");
@@ -25,7 +40,7 @@ describe("perguntarABot (1 salto) e entregarRespostaPeer", () => {
     expect(tarefa?.entradaTexto).toContain("qual o status do PR 42?");
     const pergunta = d.banco.mensagens.find((m) => m.conversaId === tuca.conversaId);
     expect(pergunta).toMatchObject({ turnoId: r.data.tarefa_id, kind: "texto", confianca: "nao_confiavel", autoria: { autor_tipo: "agente", autor_id: vera.id } });
-    expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada", "turno_criado"]);
   });
 
   it("outro dono sem procuração → nao_permitido; com procuração da classe → tarefa criada", async () => {

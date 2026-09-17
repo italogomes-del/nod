@@ -10,7 +10,7 @@ import type { CasoDeUso } from "./tipos.ts";
 /** EMENDA 17: nome opcional; ausente → 'Novo agente' e o modelo propõe pelo atualizar_perfil. */
 export const NOME_INICIAL = "Novo agente";
 
-export type EntradaCriarAgente = { dono: DonoAgente; nome?: string; modelo?: string };
+export type EntradaCriarAgente = { dono: DonoAgente; nome?: string; modelo?: string; titulo?: string; descricao?: string };
 export type SaidaCriarAgente = { agente: Agente; conversa: Conversa; mensagem: Mensagem };
 
 /**
@@ -22,13 +22,18 @@ export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = asyn
   if (input.dono !== "pessoa" && input.dono !== "empresa") throw new ErroDeDominio("entrada_invalida", { cause: "dono" });
   if (input.nome !== undefined && typeof input.nome !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "nome" });
   const nome = (input.nome ?? "").trim() || NOME_INICIAL;
+  if (nome.length > 60 || (input.titulo !== undefined && typeof input.titulo !== "string") || (input.descricao !== undefined && typeof input.descricao !== "string")) throw new ErroDeDominio("entrada_invalida");
+  const titulo = input.titulo?.trim() ?? "";
+  const descricao = input.descricao?.trim() ?? "";
+  if (titulo.length > 120 || descricao.length > 8000) throw new ErroDeDominio("entrada_invalida");
+  const confirmado = nome !== NOME_INICIAL && descricao !== "";
   const agora = deps.agora();
 
   const existentes = await deps.repos.agentes.listar({ incluirOcultos: true });
   const forma = proximaForma(existentes.map((a) => a.forma));
   const cor = proximaCor(existentes.map((a) => a.cor));
 
-  const agente = await deps.repos.agentes.criar({ nome, dono: input.dono, forma, cor, modelo: input.modelo ?? MODELO_PADRAO });
+  const agente = await deps.repos.agentes.criar({ nome, titulo, descricao, confirmado, dono: input.dono, forma, cor, modelo: input.modelo ?? MODELO_PADRAO });
   if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "agente não criado" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente.id, visibility: agente.visibility });
   if (!conversa) throw new ErroDeDominio("estado_invalido", { cause: "conversa não criada" });
@@ -38,7 +43,7 @@ export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = asyn
     conversaId: conversa.id,
     autoria,
     kind: "sistema",
-    texto: redigir("agente-nasceu", agora),
+    texto: confirmado ? `${nome} está pronto. O perfil que você definiu já está salvo; envie a primeira tarefa.` : redigir("agente-nasceu", agora),
     confianca: "confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem não criada" });

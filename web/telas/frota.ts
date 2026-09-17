@@ -76,13 +76,10 @@ export function renderFrota(estado: Estado): string {
     .join("");
   const vazio = agentes.length === 0 ? `<p class="mudo">Nenhum agente ainda. Crie o primeiro: ele nasce sem nome, sem acessos e sem rotina — você diz o que ele faz na conversa.</p>` : "";
   return `<section class="tela tela-frota">
-    <header class="tela-cab"><h1>Frota</h1><span class="chip">a primeira tela do seu dia</span></header>
+    <header class="tela-cab"><h1>Meus agentes</h1><span class="chip">${agentes.length} bots no seu espaço</span></header>
     ${renderInventario(estado)}
-    <form class="criar" data-form="criar-agente">
-      <input name="nome" placeholder="Nome do novo bot (opcional — o modelo propõe)" maxlength="60" />
-      <button class="bt pri" type="submit" data-act="criar-agente">Criar bot</button>
-    </form>
-    <div class="cartoes">${cartoes}${vazio}</div>
+    <div class="boas-vindas"><div><div class="eyebrow">SEU ESPAÇO DE TRABALHO</div><h2>Uma equipe de bots.<br>Um lugar para fazer acontecer.</h2><p class="intro">Converse, reúna especialistas e transforme tarefas em rotinas.</p></div>${botao("navegar", "+ Criar bot", { classe: "pri", dados: { tela: "novo-bot" } })}</div>
+        <div class="cartoes">${cartoes}${vazio}</div>
     ${renderNegacoes([...(frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")], estado.agora)}
   </section>`;
 }

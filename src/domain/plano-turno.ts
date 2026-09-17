@@ -73,6 +73,8 @@ export type EntradaPlano = {
   executor: Executor;
   sessaoCli: string | null;
   pessoaNome: string;
+  colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];
+  contextoConversa?: string;
   /** Só para origem rotina: liga efeitoExternoSoPorAprovacao (EMENDA 15). */
   rotina?: { exigeAprovacao: boolean } | null;
   agora: number;
@@ -127,7 +129,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     confiancaEntrada: entrada.confianca,
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, maxTurnos: MAX_TURNOS_CLI },
     politicaExecucao: {
       prazoMs,

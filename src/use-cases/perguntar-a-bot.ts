@@ -25,7 +25,13 @@ export function moldurarPergunta(remetenteNome: string, pergunta: string): strin
  */
 export const perguntarABot: CasoNod<Deps, "perguntar_a_bot"> = async (deps, input) => {
   const remetente = await agenteVisivel(deps.repos, input.agenteId);
-  const alvo = await deps.repos.agentes.buscarPorNome(input.agente.trim().replace(/^@/, ""));
+  const identificador = input.agente.trim().replace(/^@/, "");
+  const porId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identificador);
+  const candidatos = porId ? [] : (await deps.repos.agentes.listar()).filter((a) => a.nome.toLocaleLowerCase() === identificador.toLocaleLowerCase());
+  const proprios = candidatos.filter((a) => a.ownerId === remetente.ownerId);
+  const alvos = proprios.length ? proprios : candidatos;
+  if (!porId && alvos.length > 1) throw new ErroDeDominio("entrada_invalida", { cause: "nome ambíguo: use o id do diretório" });
+  const alvo = porId ? await deps.repos.agentes.buscar(identificador) : alvos[0];
   if (!alvo) throw new ErroDeDominio("nao_encontrado", { cause: "bot alvo" });
   if (alvo.id === remetente.id) throw new ErroDeDominio("entrada_invalida", { cause: "perguntar a si mesmo" });
   const pergunta = input.pergunta.trim();
@@ -56,11 +62,22 @@ export const perguntarABot: CasoNod<Deps, "perguntar_a_bot"> = async (deps, inpu
     autoria,
     kind: "texto",
     texto: pergunta,
+    payload: { kind: "peer_pedido", conversaOrigemId: input.conversaId, turnoOrigemId: input.turnoId },
+    confianca: "nao_confiavel",
+  });
+  const pedido = await deps.repos.mensagens.criar({
+    conversaId: input.conversaId,
+    turnoId: input.turnoId,
+    autoria,
+    kind: "handoff",
+    texto: `${remetente.nome} pediu ajuda a ${alvo.nome}: ${pergunta}`,
+    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pergunta, tarefaId: turno.id },
     confianca: "nao_confiavel",
   });
   return {
     data: { tarefa_id: turno.id },
     events: [
+      evento(deps, "mensagem_criada", autoria, { mensagemId: pedido?.id ?? null, kind: "handoff", tarefaId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }),
       evento(deps, "turno_criado", autoria, { turnoId: turno.id, agenteId: alvo.id, origem: "peer", profundidade: 1, remetenteAgenteId: remetente.id, mensagemId: mensagem?.id ?? null }, { conversaId: conversaAlvo.id, turnoId: turno.id }),
     ],
   };

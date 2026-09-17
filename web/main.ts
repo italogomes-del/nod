@@ -4,10 +4,13 @@ import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzi
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { botao, esc, esquecerRegiao, iconeAgente, regiao } from "./lib/render.ts";
+import { renderNovoBot } from "./telas/novo-bot.ts";
+import { renderNovaRotina } from "./telas/nova-rotina.ts";
+import { renderDetalhes } from "./telas/detalhes.ts";
 import { renderChaves } from "./telas/chaves.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
-import { inventarioEmUso, renderFrota, textoInventario } from "./telas/frota.ts";
+import { renderFrota } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
@@ -78,18 +81,16 @@ async function reidratar(): Promise<void> {
   try {
     // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
     const relevantes = pendentes.filter((q) => relevante(q));
-    const tratadas: Invalidacao[] = [];
+    // definido em 2026-09-17: consumir antes do GET preserva frames recebidos durante a busca.
+    estado = reduzir(estado, { tipo: "invalidacoes-tratadas", quais: relevantes });
     for (const q of relevantes) {
       try {
         const acao = await buscar(q);
-        tratadas.push(q);
         if (acao) estado = reduzir(estado, acao);
       } catch (e) {
-        if (e instanceof ErroApi && e.status === 404) tratadas.push(q);
-        else estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
+        if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
       }
     }
-    estado = reduzir(estado, { tipo: "invalidacoes-tratadas", quais: tratadas });
     render();
   } finally {
     reidratando = false;
@@ -118,7 +119,7 @@ function renderRail(): string {
   const abertos = estado.suaVez?.itens.filter((i) => i.estadoColuna !== "vencido").length ?? 0;
   const item = (tipo: Tela["tipo"], icone: string, rotulo: string, badge = 0) =>
     `<button class="nv" data-act="navegar" data-tela="${tipo}" aria-current="${t === tipo ? "true" : "false"}"><span class="ic">${icone}</span><span class="tl">${rotulo}</span>${badge ? `<span class="b">${badge}</span>` : ""}</button>`;
-  return `${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Conectores")}${item("chaves", "⚿", "Chaves")}
+  return `<button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button>${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Conectores")}${item("chaves", "⚿", "Chaves")}
     <div class="rail-rodape"><span class="conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></div>`;
 }
 
@@ -126,23 +127,14 @@ function renderSidebar(): string {
   const agentes = estado.frota?.agentes ?? [];
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
-  const fixados = agentes.filter((a) => a.fixado);
-  const favoritos = fixados.length
-    ? fixados
-        .map(
-          (a) =>
-            `<button class="fav" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir ${esc(a.nome)}">${iconeAgente(a)}<b>${esc(a.nome)}</b><span>${esc(a.titulo || "bot")}</span></button>`,
-        )
-        .join("")
-    : `<div class="favorites-note">Fixe um bot para vê-lo aqui no topo.</div>`;
-
   const linha = (a: (typeof agentes)[number]) => {
     const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
     const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
     const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
-    return `<button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a)}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}</span></button>`;
+    return `<button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a)}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}</span></button>`;
   };
-  const bots = agentes.map(linha).join("") || '<p class="mudo">nenhum bot ainda</p>';
+  const bots = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId).map(linha).join("") || '<p class="mudo">nenhum bot ainda</p>';
+  const equipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId).map(linha).join("");
   const salas = estado.salas
     .map(
       (s) =>
@@ -151,21 +143,15 @@ function renderSidebar(): string {
     .join("");
 
   return `<div class="search-wrap">
-      <div class="sh"><b>Meus agentes</b></div>
-      <div class="search-row">
-        <label class="search" aria-label="Buscar"><span>⌕</span><input value="Buscar" readonly></label>
-        <button class="create-trigger" data-act="navegar" data-tela="frota" aria-label="Criar bot">+</button>
-      </div>
-      <div class="favorites">
-        <div class="favorites-head"><span>Favoritos</span><b>${fixados.length} fixados</b></div>
-        <div class="fav-grid">${favoritos}</div>
-      </div>
+      <div class="sh"><b>Meus agentes</b><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Criar bot">+</button></div>
+      <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
     <div class="list">
-      <section class="section"><h3>Bots · ${agentes.length}</h3>${bots}${botao("navegar", "+ criar bot", { classe: "sm", dados: { tela: "frota" } })}</section>
-      <section class="section"><h3>Salas · ${estado.salas.length}</h3>${salas}${botao("navegar", "+ nova sala", { classe: "sm", dados: { tela: "nova-sala" } })}</section>
+      <section class="section"><h3>Meus agentes <span>${agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId).length}</span></h3>${bots}</section>
+      ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
+      <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
-    <div class="me"><span class="av-me">eu</span> ${esc(textoInventario(inventarioEmUso(estado), estado.agora))}</div>`;
+    <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${estado.executor?.atual === "claude-cli" ? "Claude Code conectado" : "Modo de simulação"}</small></div></div>`;
 }
 
 function renderPrincipal(): void {
@@ -175,6 +161,12 @@ function renderPrincipal(): void {
   let corpo = "";
   let composer: { chave: string; html: string } | null = null;
   switch (t.tipo) {
+    case "novo-bot":
+      corpo = renderNovoBot();
+      break;
+    case "nova-rotina":
+      corpo = renderNovaRotina(estado, t.agenteId);
+      break;
     case "frota":
       corpo = renderFrota(estado);
       break;
@@ -202,7 +194,7 @@ function renderPrincipal(): void {
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer("Mensagem para o bot") };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(`Escreva uma mensagem para ${estado.frota?.agentes.find((a) => a.id === t.agenteId)?.nome ?? "o bot"}…`, (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome)) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -210,6 +202,8 @@ function renderPrincipal(): void {
       composer = { chave: `sala:${t.salaId}`, html: htmlComposer("Mensagem para a sala — @Nome dirige a pergunta", nomesDosMembros(estado, t.salaId)) };
       break;
   }
+  regiao("detalhes", renderDetalhes(estado));
+  document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   regiao("cabecalho", cabecalho);
   regiao("erro", erro);
   const timeline = document.getElementById("timeline");
@@ -248,6 +242,8 @@ function renderEntrada(): string {
 
 function render(): void {
   if (!estado.sessao) {
+    document.querySelector(".app")?.classList.add("sem-sessao");
+    regiao("detalhes", "");
     regiao("rail", "");
     regiao("sidebar", "");
     regiao("cabecalho", "");
@@ -255,8 +251,15 @@ function render(): void {
     regiao("composer", "");
     return;
   }
+  document.querySelector(".app")?.classList.remove("sem-sessao");
   regiao("rail", renderRail());
+  const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
+  const valorBusca = busca?.value ?? "";
+  const focoBusca = document.activeElement === busca;
   regiao("sidebar", renderSidebar());
+  const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
+  if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus(); }
+  filtrarBots(valorBusca);
   renderPrincipal();
 }
 
@@ -268,14 +271,14 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   dispatch({ tipo: "sessao", escopo });
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
-    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "executor", "salas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
+    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "executor", "salas", "rotinas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") dispatch({ tipo: "frame", frame: ev.frame, agora: Date.now() });
     else if (ev.tipo === "conexao") dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
   });
   live.connect();
-  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "salas", "executor"] });
+  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "salas", "executor", "rotinas"] });
 }
 
 async function boot(): Promise<void> {
@@ -342,12 +345,27 @@ function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; tex
   });
 }
 
+function filtrarBots(texto: string): void {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-busca]")) el.hidden = !el.dataset.busca?.includes(texto.trim().toLowerCase());
+}
+
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves") navegar({ tipo: tela });
+    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
   },
+  "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
+  "preencher-prompt": (el) => {
+    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
+  },
+  "nova-rotina": (el) => navegar({ tipo: "nova-rotina", agenteId: el.dataset.id }),
+  "executar-rotina": (el) => agir(async () => {
+    const r = await api!.executarRotina(el.dataset.id ?? "");
+    dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`] });
+    navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
+  }),
   "abrir-conversa": (el) => navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" }),
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
@@ -436,11 +454,19 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "criar-agente": (form) =>
     agir(async () => {
       const nome = (form.elements.namedItem("nome") as HTMLInputElement | null)?.value.trim() || undefined;
-      const r = await api!.criarAgente(nome);
+      const d = new FormData(form);
+      const r = await api!.criarAgente(nome, { titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? "") });
       form.reset();
       dispatch({ tipo: "invalidar", quais: ["frota"] });
       navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
     }),
+  "criar-rotina": (form) => agir(async () => {
+    const d = new FormData(form);
+    const [hora, minuto] = String(d.get("horario")).split(":").map(Number);
+    await api!.criarRotina({ agenteId: String(d.get("agenteId")), cron: `${minuto} ${hora} * * ${d.get("frequencia")}`, fusoIana: String(d.get("fusoIana")), instrucao: String(d.get("instrucao")), fonte: String(d.get("fonte")), entregavel: String(d.get("entregavel")), limitesAprovacao: String(d.get("limitesAprovacao")), politicaSemDado: String(d.get("politicaSemDado")) });
+    dispatch({ tipo: "invalidar", quais: ["rotinas"] });
+    navegar({ tipo: "rotinas" });
+  }),
   "editar-perfil": (form) =>
     agir(async () => {
       const d = new FormData(form);
@@ -507,6 +533,7 @@ document.addEventListener("change", (ev) => {
 });
 
 document.addEventListener("keydown", (ev) => {
+  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); document.getElementById("busca-bots")?.focus(); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
   if (ev.key === "Enter" && !ev.shiftKey) {
@@ -517,6 +544,7 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
+  if (ta.id === "busca-bots") { filtrarBots(ta.value); return; }
   if (ta.id !== "composer-texto") return;
   ta.style.height = "auto";
   ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;

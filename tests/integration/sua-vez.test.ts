@@ -92,13 +92,14 @@ describeIntegracao("Sua vez (listar-sua-vez + reabrir-decisao)", () => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const criadaEm = Date.now();
       const d = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, prazoDecisaoEm: criadaEm + DIA, frase: "x" });
+      // medido em 2026-09-17: criado_em e prazo tinham bases 4 ms diferentes; a fixture usa uma origem comum.
+      await trx`update decisoes set criado_em = ${new Date(criadaEm)} where id = ${d?.id ?? ""}`;
       const [linha] = await trx<{ criado_em: Date }[]>`select criado_em from decisoes where id = ${d?.id ?? ""}`;
       const agora = (linha?.criado_em.getTime() ?? criadaEm) + 6 * H;
       const { data } = await listarSuaVez(deps(trx, MARLON, () => agora));
       const item = data.itens[0];
       expect(item?.aguardandoHaMs).toBe(6 * H);
-      expect(item?.recusaAutomaticaEmMs).toBeGreaterThan(18 * H - 2_000);
-      expect(item?.recusaAutomaticaEmMs).toBeLessThanOrEqual(18 * H);
+      expect(item?.recusaAutomaticaEmMs).toBe(18 * H);
       expect(haQuanto(item?.aguardandoHaMs ?? 0)).toBe("há 6h");
       expect(emQuanto(item?.recusaAutomaticaEmMs ?? 0)).toBe("em 18h");
     });

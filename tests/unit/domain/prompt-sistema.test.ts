@@ -8,6 +8,14 @@ const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome
 const mem = (id: string, texto: string, criadoEm: number): Memoria => ({ tenantId: "t", id, agenteId: "a", tipo: "preferencia", texto, origem: "pessoa", criadoEm });
 
 describe("montarPromptSistema", () => {
+  it("expõe os colegas como dados e explica a continuação assíncrona apenas quando pode consultar", () => {
+    const entrada = { agente, memorias: [], pessoaNome: "Marlon", modo: "conversa" as const, colegas: [{ id: "tuca", nome: "Tuca", titulo: "Atendimento", descricao: "Conhece os clientes" }] };
+    const prompt = montarPromptSistema({ ...entrada, ferramentas: [f("perguntar_a_bot")] });
+    expect(prompt).toContain('"nome":"Tuca"');
+    expect(prompt).toContain("Conhece os clientes");
+    expect(prompt).toContain("Nunca invente a resposta do colega");
+    expect(montarPromptSistema({ ...entrada, ferramentas: [] })).not.toContain('"nome":"Tuca"');
+  });
   it("é estável: mesma entrada em ordem diferente produz a mesma string (cache ephemeral_1h)", () => {
     const a = montarPromptSistema({ agente, memorias: [mem("m1", "tópicos", 1), mem("m2", "curto", 2)], ferramentas: [f("lembrar"), f("pedir_aprovacao")], pessoaNome: "Marlon", modo: "conversa" });
     const b = montarPromptSistema({ agente, memorias: [mem("m2", "curto", 2), mem("m1", "tópicos", 1)], ferramentas: [f("pedir_aprovacao"), f("lembrar")], pessoaNome: "Marlon", modo: "conversa" });

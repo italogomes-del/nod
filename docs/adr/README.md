@@ -40,3 +40,4 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-029](adr-029-fail-closed-exige-estado-renderizado-nao-negacao-seca.md) | Fail-closed exige estado renderizado, não negação seca | novo |
 | [ADR-030](adr-030-identidade-de-login-allowlist-por-email-semeada-nunca-provi.md) | Identidade de login: allowlist por e-mail semeada, nunca provisionamento | novo |
 | [ADR-031](adr-031-a-chave-de-maquina-persiste-carrega-o-proprio-escopo-e-e-rev.md) | A chave de máquina persiste, carrega o próprio escopo e é revogável | novo |
+| [ADR-032](adr-032-primeira-versao-bots-como-contatos.md) | Bots como contatos e colaboração visível | novo |

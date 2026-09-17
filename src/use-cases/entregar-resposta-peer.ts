@@ -31,7 +31,8 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
   const remetenteId = pergunta.autoria.autor_id;
   const alvo = exigir(await deps.repos.agentes.buscar(tarefa.agenteId), "nao_encontrado", "bot alvo");
   const remetente = exigir(await deps.repos.agentes.buscar(remetenteId), "nao_encontrado", "bot remetente");
-  const conversaRemetente = exigir(await deps.repos.conversas.buscarPropriaDoAgente(remetente.id), "nao_encontrado", "conversa do remetente");
+  const origem = pergunta.payload?.kind === "peer_pedido" ? pergunta.payload : null;
+  const conversaRemetente = exigir(origem ? await deps.repos.conversas.buscar(origem.conversaOrigemId) : await deps.repos.conversas.buscarPropriaDoAgente(remetente.id), "nao_encontrado", "conversa do remetente");
   const agora = deps.agora();
   const autoria = autoriaAgente(alvo.id, deps.escopo.pessoaId, remetente.id);
   // definido em 2026-09-16 (L9): a continuação nasce ANTES da mensagem peer_ask para a mensagem apontar
@@ -42,7 +43,7 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
     origem: "peer",
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 1,
-    entradaTexto: moldurarResposta(alvo.nome, input.texto),
+    entradaTexto: `${moldurarResposta(alvo.nome, input.texto)}\nConsolide a resposta para a pessoa, citando a contribuição do colega e retomando a tarefa original indicada no contexto.`,
     entradaConfianca: "nao_confiavel",
     modelo: remetente.modelo,
   });
@@ -53,7 +54,7 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
     autoria,
     kind: "peer_ask",
     texto: input.texto,
-    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id },
+    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}) },
     confianca: "nao_confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });

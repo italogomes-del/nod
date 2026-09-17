@@ -1,5 +1,7 @@
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Autoria } from "../../src/contracts/evento.ts";
+import { esc } from "./escape.ts";
+export { esc } from "./escape.ts";
 
 /**
  * Render por REGIÕES (plano L9): cada região é um nó fixo do index.html cujo innerHTML só é trocado
@@ -20,15 +22,6 @@ export function regiao(id: string, html: string): void {
 /** Zera o cache de uma região (quando o nó foi trocado por fora). */
 export function esquecerRegiao(id: string): void {
   ultimoHtml.delete(id);
-}
-
-export function esc(s: unknown): string {
-  return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 export function iniciais(nome: string): string {
@@ -56,12 +49,11 @@ export function avatarAgente(a: Pick<Agente, "nome" | "cor">, tamanho: "sm" | "m
 }
 
 /**
- * Ícone CHEIO do bot no protótipo private-agents-minimal (PR #4): quadrado/hexágono/círculo preenchido
- * com a cor do perfil e iniciais em branco. Usado na sidebar, nos favoritos e no cabeçalho da conversa.
+ * definido em 2026-09-17: rosto vetorial na forma e cor do perfil, conforme a referência visual.
  */
 export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: "" | "md" | "lg" = ""): string {
   const t = tamanho ? ` ${tamanho}` : "";
-  return `<span class="icon ${esc(a.cor)} ${esc(a.forma)}${t}" title="${esc(a.nome)}">${esc(iniciais(a.nome))}</span>`;
+  return `<span class="icon ${esc(a.cor)} ${esc(a.forma)}${t}" title="${esc(a.nome)}"><svg viewBox="0 0 40 40" aria-hidden="true"><ellipse cx="14" cy="18" rx="2.4" ry="4.6" fill="#152132"/><ellipse cx="26" cy="18" rx="2.4" ry="4.6" fill="#152132"/><path d="M17 26 Q20 29 23 26" fill="none" stroke="#152132" stroke-width="1.6" stroke-linecap="round"/><ellipse cx="12" cy="22" rx="2.6" ry="1.2" fill="white" opacity=".25"/></svg></span>`;
 }
 
 /** 'HH:MM' no fuso da máquina da pessoa (a web só interpola; o servidor manda absoluto, ADR-007). */
@@ -81,7 +73,7 @@ export function botao(act: string, rotulo: string, extra: { id?: string; classe?
   const dados = Object.entries(extra.dados ?? {})
     .map(([k, v]) => ` data-${k}="${esc(v)}"`)
     .join("");
-  return `<button class="bt ${extra.classe ?? ""}" data-act="${esc(act)}"${extra.id ? ` data-id="${esc(extra.id)}"` : ""}${dados}${extra.desabilitado ? " disabled" : ""}${extra.titulo ? ` title="${esc(extra.titulo)}"` : ""}>${rotulo}</button>`;
+  return `<button type="button" class="bt ${extra.classe ?? ""}" data-act="${esc(act)}"${extra.id ? ` data-id="${esc(extra.id)}"` : ""}${dados}${extra.desabilitado ? " disabled" : ""}${extra.titulo ? ` title="${esc(extra.titulo)}"` : ""}>${rotulo}</button>`;
 }
 
 /** Texto multilinha escapado com quebras preservadas. */

@@ -66,7 +66,8 @@ describeIntegracao("bot-a-bot (E12.4 eixo 1, ADR-025/026): tarefa_id, peer_ask n
       await trx`update procuracoes set visibility = 'equipe' where agente_beneficiario_id = ${vera.agenteId}`;
       await trx`update conversas set visibility = 'equipe' where id = ${tuca.conversaId}`;
       await vincularEscopo(trx, MARLON);
-      const r = await perguntarABot(deps, { ...contexto(vera.agenteId, vera.conversaId), agente: "Tuca", pergunta: "oi" });
+      const original = await repos.turnos.enfileirar({ conversaId: vera.conversaId, agenteId: vera.agenteId, origem: "conversa", prazoEm: AGORA + 1000, profundidade: 0, entradaTexto: "consulte Tuca", entradaConfianca: "confiavel", modelo: "m" });
+      const r = await perguntarABot(deps, { ...contexto(vera.agenteId, vera.conversaId, original!.id), agente: "Tuca", pergunta: "oi" });
       expect((await repos.turnos.buscar(r.data.tarefa_id))).toMatchObject({ agenteId: tuca.agenteId, origem: "peer", profundidade: 1, ownerId: PESSOA_MARLON });
     });
   });
