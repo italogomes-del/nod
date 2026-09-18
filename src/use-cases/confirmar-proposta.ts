@@ -42,6 +42,10 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     rotina = await deps.tx((trx) => deps.services.rotinas.ativar(trx, proposta.id));
     resumo = proposta.payload.resumo;
     events.push(evento(deps.escopo, { kind: "rotina_criada", autoria, agora, conversaId: proposta.conversaId, dados: { rotina_id: rotina.id, proposta_id: proposta.id, proxima_execucao: rotina.proximaExecucao } }));
+  } else if (proposta.payload.kind === "pasta") {
+    // Proposta de pasta se autoriza pelo botão Permitir da conversa (rota workspace), que concede a
+    // pasta escolhida e retoma o turno. Não vira decisão de acesso: não há conector nem capacidades.
+    throw new ErroDeDominio("estado_invalido", { cause: "proposta de pasta se autoriza pelo botão Permitir na conversa" });
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);

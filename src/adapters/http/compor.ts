@@ -464,7 +464,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMaquinas({ dentro }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
-    ...rotasWorkspaces(workspaces),
+    ...rotasWorkspaces(workspaces, dentro),
     ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),

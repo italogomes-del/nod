@@ -70,6 +70,7 @@ export function criarApi(escopo: Escopo) {
     pastasWorkspace: (id: string, caminho?: string) => post<{ caminho: string; pai: string; selecionavel: boolean; pastas: { nome: string; caminho: string }[] }>(`conversas/${id}/workspace/pastas`, { caminho }),
     escolherWorkspace: (id: string, pasta: string) => post(`conversas/${id}/workspace`, { pasta }),
     revogarWorkspace: (id: string) => del(`conversas/${id}/workspace`),
+    permitirPasta: (propostaId: string, pasta: string) => post(`propostas/${propostaId}/permitir-pasta`, { pasta }),
     computador: (id: string) => get<ComputadorDto>(`agentes/${encodeURIComponent(id)}/computador`),
     configurarComputador: (id: string, operacao: string) => post<{ ok: true }>(`agentes/${encodeURIComponent(id)}/computador`, { operacao }),
     acaoComputador: (id: string, acao: AcaoComputador) => post<ResultadoComputador>(`agentes/${encodeURIComponent(id)}/computador/acoes`, acao),

@@ -518,6 +518,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
   "abrir-workspace": (el) => { const a = botGerido(el.dataset.id); const c = conversaAtual(); if (a && api && a.ownerId === estado.sessao?.pessoaId && c && !c.salaId) abrirWorkspace(api, c.conversaId); },
+  // Um clique: autoriza a pasta proposta e a tarefa retoma sozinha, sem a pessoa remandar a mensagem.
+  "permitir-pasta": (el) => agir(async () => {
+    const alvo = conversaAtual();
+    if (!alvo || alvo.salaId || !el.dataset.pasta) return;
+    await api!.permitirPasta(el.dataset.id ?? "", el.dataset.pasta);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
+  }),
   "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;

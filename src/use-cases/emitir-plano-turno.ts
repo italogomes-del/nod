@@ -87,8 +87,12 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     rotina = { exigeAprovacao: daJanela ? daJanela.exigeAprovacao : true };
   }
 
+  // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
+  const workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
+
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
+    workspaceVinculado: workspaceId !== null,
     computador: Boolean(deps.services.computadores),
     turno: escolha ? { ...turno, modelo: escolha.modelo } : turno,
     agente,
@@ -109,7 +113,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     agora,
   });
 
-  parcial.workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
+  parcial.workspaceId = workspaceId;
 
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
   const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
