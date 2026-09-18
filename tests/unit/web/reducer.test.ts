@@ -39,13 +39,16 @@ describe("reducer: hidratação e o que cada tela precisa", () => {
   });
 
   it("invalidacoesDaTela diz o que falta buscar para a tela atual (sem repetir o que já está marcado)", () => {
-    expect(invalidacoesDaTela(estadoInicial)).toEqual(["frota"]);
+    // A fila entra em QUALQUER tela desde 2026-09-18: ela alimenta o badge ⚑ e a faixa de chamada da
+    // sidebar, que substituíram a entrada "Sua vez" do rail removido.
+    expect(invalidacoesDaTela(estadoInicial)).toEqual(["frota", "sua-vez"]);
     let e = reduzir(estadoInicial, { tipo: "hidratar-frota", frota });
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } });
-    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1", "conectores"]);
+    // Rotinas vêm junto com a conversa: elas moram no painel Detalhes, ao lado dela.
+    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1", "rotinas", "conectores", "sua-vez"]);
     expect(conversaDaTela(e)).toBeNull();
     e = reduzir(e, { tipo: "invalidar", quais: ["conversa:c1"] });
-    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1", "conectores"]);
+    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1", "rotinas", "conectores", "sua-vez"]);
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "sua-vez" } });
     expect(invalidacoesDaTela(e)).toEqual(["sua-vez"]);
   });

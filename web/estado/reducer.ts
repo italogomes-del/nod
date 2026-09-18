@@ -33,7 +33,9 @@ export type Tela =
   | { tipo: "conectores"; app?: string; voltar?: { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sala"; salaId: string; conversaId: string } }
   | { tipo: "sua-vez" }
   | { tipo: "nova-sala" }
-  | { tipo: "chaves" };
+  | { tipo: "chaves" }
+  /** Configuração da conta: conexão, computadores e administração (substituiu o rail em 2026-09-18). */
+  | { tipo: "espaco" };
 
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
@@ -338,9 +340,13 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "nova-sala" && estado.salas.length === 0) faltas.push("salas");
   if (t.tipo === "memoria" && !estado.memorias[t.agenteId]) faltas.push(`memoria:${t.agenteId}`);
   if ((t.tipo === "perfil" || t.tipo === "conversa") && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
-  if (t.tipo === "rotinas" && estado.rotinas.length === 0) faltas.push("rotinas");
+  // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam
+  // chegar junto com ela — não só na tela dedicada.
+  if ((t.tipo === "rotinas" || t.tipo === "conversa") && estado.rotinas.length === 0) faltas.push("rotinas");
   if ((t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala") && estado.marketplace.length === 0) faltas.push("conectores");
-  if (t.tipo === "sua-vez" && !estado.suaVez) faltas.push("sua-vez");
-  if (t.tipo === "chaves" && !estado.chaves) faltas.push("chaves");
+  // A fila alimenta o badge ⚑ da sidebar e a faixa de chamada em QUALQUER tela: sem o rail, ela é o
+  // único aviso de que há decisão parada.
+  if (!estado.suaVez) faltas.push("sua-vez");
+  if ((t.tipo === "chaves" || t.tipo === "espaco") && !estado.chaves) faltas.push("chaves");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }

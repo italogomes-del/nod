@@ -74,6 +74,40 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   </li>`;
 }
 
+/**
+ * Decisões abertas por agente (definido em 2026-09-18): o sinal que substitui a entrada "Sua vez" no
+ * rail. A fila global deixou de ser porta de entrada — quem decide é a conversa
+ * (`renderDecisoesDaConversa`), então o que falta é LEMBRAR onde há decisão parada. Vencida não conta:
+ * ela não pede ação, e um badge que nunca zera deixa de ser sinal.
+ */
+export function abertasPorAgente(estado: Estado): Map<string, number> {
+  const por = new Map<string, number>();
+  for (const item of estado.suaVez?.itens ?? []) {
+    if (item.estadoColuna === "vencido") continue;
+    por.set(item.decisao.agenteId, (por.get(item.decisao.agenteId) ?? 0) + 1);
+  }
+  return por;
+}
+
+/**
+ * Faixa de chamada no topo da sidebar: some quando não há nada aberto, nomeia UM agente quando é um
+ * só (o nome é o que faz voltar para a conversa) e conta quando são vários. Clicar leva à conversa do
+ * mais antigo — `itens` já vem ordenado pelo servidor (ADR-007), então o primeiro aberto é ele.
+ */
+export function renderChamada(estado: Estado): string {
+  const abertos = (estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido");
+  const primeiro = abertos[0];
+  if (!primeiro) return "";
+  const d = primeiro.decisao;
+  const texto =
+    abertos.length === 1
+      ? `<b>${esc(primeiro.agenteNome)}</b> precisa de você`
+      : `<b>${abertos.length} decisões</b> esperando por você`;
+  return `<button class="chamada" data-act="abrir-conversa" data-conversa="${esc(d.conversaId)}" data-agente="${esc(d.agenteId)}" aria-label="Abrir a decisão mais antiga, com ${esc(primeiro.agenteNome)}">
+    <span class="ch-ic" aria-hidden="true">⚑</span><span class="ch-txt">${texto}</span><span class="ch-seta" aria-hidden="true">→</span>
+  </button>${abertos.length > 1 ? `<button class="chamada-todas" data-act="navegar" data-tela="sua-vez">ver todas</button>` : ""}`;
+}
+
 export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): string {
   const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? [];
   if (!itens.length) return "";

@@ -57,9 +57,13 @@ export function renderInventario(estado: Estado): string {
 }
 
 /**
- * Frota (E1.1, tela inicial): cada agente com a linha 'sem acessos · nunca executou' (contagens), o
- * inventário do motor e as negações vivas por classe com relógio. Criação com UM campo (nome opcional):
- * nasce 'Novo agente' e o modelo propõe o perfil na conversa (EMENDA 17).
+ * Início (E1.1, tela inicial): boas-vindas, os agentes em cartão e as negações vivas por classe com
+ * relógio. Criação com UM campo (nome opcional): nasce 'Novo agente' e o modelo propõe o perfil na
+ * conversa (EMENDA 17).
+ *
+ * Desde 2026-09-18 ela NÃO repete o inventário do motor: conexão e harness são da conta e moram em
+ * "Seu espaço" (`renderInventario` continua exportado e é usado lá). Aqui ficou só o que a sidebar
+ * não mostra — o convite e as negações. Deixou de ser uma entrada de navegação: chega-se pela marca.
  */
 export function renderFrota(estado: Estado): string {
   const frota = estado.frota;
@@ -78,7 +82,6 @@ export function renderFrota(estado: Estado): string {
   const vazio = agentes.length === 0 ? `<p class="mudo">Nenhum agente ainda. Crie o primeiro: ele já chega com um nome e uma mensagem de boas-vindas — você diz o que ele faz na conversa.</p>` : "";
   return `<section class="tela tela-frota">
     <header class="tela-cab"><h1>Meus agentes</h1><span class="chip">${agentes.length} bots no seu espaço</span></header>
-    ${renderInventario(estado)}
     <div class="boas-vindas"><div><div class="eyebrow">SEU ESPAÇO DE TRABALHO</div><h2>Uma equipe de bots.<br>Um lugar para fazer acontecer.</h2><p class="intro">Converse, reúna especialistas e transforme tarefas em rotinas.</p></div>${botao("criar-rapido", "+ Criar bot", { classe: "pri" })}</div>
         <div class="cartoes">${cartoes}${vazio}</div>
     ${renderNegacoes([...(frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")], estado.agora)}
