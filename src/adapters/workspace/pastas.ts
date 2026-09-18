@@ -6,6 +6,7 @@ import { lerTexto, gravarTexto } from "../../../infra/computador/texto.mjs";
 import type { PedidoWorkspace, WorkspacePreparado } from "../../contracts/workspace.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { validarAcaoComputador } from "../../domain/computador.ts";
+import { buscarPastas } from "./busca-pastas.ts";
 import { criarPreparadorWorkspace } from "./preparar.ts";
 import { executarNoWorkspace } from "./terminal.ts";
 
@@ -129,6 +130,18 @@ export function criarPastas(raiz: string, imagem?: string) {
         return;
       }
       await salvar(i, { projetos, ativoId: v.ativoId === projetoId ? projetos[0]!.id : v.ativoId });
+    },
+    /**
+     * Procura no computador da pessoa as pastas que casam com o nome do projeto citado.
+     * Usa a MESMA regra da concessão, então nunca oferece pasta que escolher() recusaria.
+     */
+    async buscar(termo: string) {
+      await mkdir(raiz, { recursive: true, mode: 0o700 });
+      const privado = await realpath(raiz);
+      const casa = await realpath(homedir());
+      return buscarPastas(termo, {
+        podeAutorizar: (p) => p !== dirname(p) && p !== casa && !dentro(p, privado) && !dentro(privado, p),
+      });
     },
     async listarPastas(pasta?: string) {
       const p = await realpath(pasta ?? homedir());
