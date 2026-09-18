@@ -43,6 +43,7 @@ export type PayloadPropostaAcesso = {
   kind: "acesso";
   conector: string;
   conectar?: true;
+  turnoId?: string;
   capacidades: string[];
   nivel: "leitura" | "escrita";
   naoPedido: string[];

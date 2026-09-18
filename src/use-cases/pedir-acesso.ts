@@ -25,7 +25,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   const proposta = await deps.repos.propostas.criar({
     conversaId: input.conversaId,
     agenteId: input.agenteId,
-    payload: { kind: "acesso", ...(conectar ? { conectar: true as const } : {}), conector: input.conector, capacidades: [...new Set(input.capacidades)], nivel: input.nivel, naoPedido: [...input.nao_pedido] },
+    payload: { kind: "acesso", turnoId: input.turnoId, ...(conectar ? { conectar: true as const } : {}), conector: input.conector, capacidades: [...new Set(input.capacidades)], nivel: input.nivel, naoPedido: [...input.nao_pedido] },
   });
   if (!proposta) throw new Error("proposta não criada");
   const evento: RuntimeEvent = {
