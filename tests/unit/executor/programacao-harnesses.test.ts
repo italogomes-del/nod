@@ -15,7 +15,7 @@ it("Claude e Codex recebem todas as capacidades de programação do mesmo plano"
   const config = configMcpCodex(plano, { urlNod: "http://127.0.0.1:8888", proxyPath: "/tmp/proxy.mjs" });
   const codex = argsCodex(plano, config);
   expect(permitidas).toEqual(plano.catalogo.ferramentas.map(f => f.nomeMcp));
-  for (const nome of ["computador_terminal", "computador_arquivos", "computador_ler_arquivo", "computador_gravar_arquivo"]) {
+  for (const nome of ["computador_terminal", "computador_arquivos", "computador_ler_arquivo", "computador_gravar_arquivo", "computador_ler_texto", "computador_gravar_texto"]) {
     expect(permitidas).toContain(`mcp__nod__${nome}`);
     expect(config).toContain(JSON.stringify(nome));
   }

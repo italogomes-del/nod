@@ -81,6 +81,42 @@ O help local do Claude foi consultado sem inferência e oferece `--restricted`,
 habilitar Bash/Read/Edit irrestritos nem mudar o cwd do CLI para o projeto sem
 resolver configuração herdada, permissões, cancelamento e isolamento.
 
+Commit publicado do checkpoint 2: `c15c9b8` (push concluído).
+
+## Checkpoint 3 — texto no computador
+
+Implementadas `computador_ler_texto` e `computador_gravar_texto` pelo gateway
+existente. Leitura UTF-8 paginada (até 2 MiB por arquivo) com índice de continuação
+e revisão SHA-256; orçamento da página considera caracteres escapados no JSON
+para caber no proxy. Escrita de até 131072 caracteres exige revisão observada ou
+`novo` (criação exclusiva). A revisão é checada antes da escrita; não é um lock
+contra processos externos. Ações do gateway continuam serializadas e submetidas
+à política existente. Ferramentas binárias anteriores não foram alteradas.
+
+Arquivos principais: `infra/computador/texto.mjs`, declaração `texto.d.mts`,
+runtime, contratos/domínio e testes. O smoke existente ganhou casos de texto e
+suporte a `NOD_COMPUTADOR_IMAGEM`, para testar uma tag sem substituir a diária.
+
+Validação em 2026-09-18: `npm run check` concluiu com exit 0; 425 unitários,
+227 integração, 49 conformidade, 56 concorrência (757 testes). O teste HTTP usa
+o gateway e arquivos temporários reais, mas substitui o driver Docker; confirma
+aprovação antes de gravar e recusa da revisão antiga. A imagem exclusiva
+`nod-computador:capacidade-texto-test` foi construída com sucesso.
+
+O comando abaixo foi inicialmente bloqueado por cota da revisão automática.
+Após a pessoa adicionar créditos, foi executado e imprimiu OK em 2026-09-18:
+
+```bash
+NOD_COMPUTADOR_IMAGEM=nod-computador:capacidade-texto-test node scripts/smoke-computador.ts
+```
+
+O smoke validou dois computadores reais, texto paginado e revisão, navegador,
+terminal, mídia, persistência cifrada e isolamento. Remove seus próprios recursos
+descartáveis ao concluir. Publicar este checkpoint na mesma branch.
+Nenhum modelo pago foi chamado. A imagem diária e os containers diários não foram
+substituídos. Esse checkpoint NÃO associa pastas do Mac e NÃO resolve sozinho o
+pedido original. Não anunciar conclusão.
+
 ## Estado real e próximo trabalho
 
 O problema do usuário AINDA NÃO ESTÁ RESOLVIDO. Nenhuma pasta local está concedida

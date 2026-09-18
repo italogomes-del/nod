@@ -95,7 +95,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const modo: ModoTurno = entrada.profundidade >= 1 ? "peer" : entrada.modo;
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
-  const computador: FerramentaPlano[] = entrada.computador && modo !== "peer" && modo !== "criacao" ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo"].includes(nome), tocaAprendiz: true, schema })) : [];
+  const computador: FerramentaPlano[] = entrada.computador && modo !== "peer" && modo !== "criacao" ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
   let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores, ...computador], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
   let decididoPor: `regra:${string}` = REGRA_MONTAGEM;
   if (entrada.confianca === "nao_confiavel") {
