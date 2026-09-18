@@ -1,6 +1,7 @@
 /* Linguagem visual de prototypes/private-agents-minimal.html (protótipo de alta fidelidade do PR #4,
-   "cópia Grok Bot"): rail escuro estreito, sidebar clara com gradiente azulado (favoritos + seções de
-   bots), palco branco arredondado e flutuante, chat em BALÕES (cinza à esquerda = bot, preto à direita
+   "cópia Grok Bot"): sidebar clara com gradiente azulado (favoritos + seções de bots — desde
+   2026-09-18 a ÚNICA navegação, sem o rail de features),
+   palco branco arredondado e flutuante, chat em BALÕES (cinza à esquerda = bot, preto à direita
    = você). Cor é escassa de propósito; o ícone do bot é um quadrado/hexágono/círculo CHEIO. */
 :root {
   --bg: #f7f7f8;
@@ -34,22 +35,9 @@ input, select, textarea { font: inherit; color: inherit; }
 code { font-family: var(--fm); font-size: 12px; background: var(--panel-soft); padding: 1px 5px; border-radius: 4px; }
 body.ocupado { cursor: progress; }
 
-.app { display: grid; grid-template-columns: 64px 336px 1fr; height: 100dvh; min-height: 0; }
+.app { display: grid; grid-template-columns: 336px 1fr; height: 100dvh; min-height: 0; }
 
-/* ---- rail (navegação de features) ---- */
-.rail { background: #12141a; border-right: 1px solid #2a2f39; display: flex; flex-direction: column;
-  align-items: center; gap: 6px; padding: 10px 0; min-height: 0; }
-.nv { width: 48px; padding: 7px 0 5px; border-radius: 12px; display: flex; flex-direction: column;
-  align-items: center; gap: 3px; color: #9aa1ab; position: relative; border: 1px solid transparent;
-  transition: background-color .16s ease, transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
-.nv:hover { background: #1f232d; transform: translateY(-1px); border-color: #2f3644; }
-.nv[aria-current="true"] { background: #fff; color: #11131a; box-shadow: 0 8px 18px rgba(0, 0, 0, .22); }
-.nv .ic { font-size: 17px; line-height: 1; }
-.nv .tl { font-size: 9px; font-weight: 500; letter-spacing: .02em; }
-.nv .b { position: absolute; top: 2px; right: 5px; min-width: 16px; height: 16px; padding: 0 4px;
-  border-radius: 999px; background: #2563eb; color: #fff; font-size: 10px; font-weight: 700;
-  display: grid; place-items: center; border: 2px solid #12141a; }
-.rail-rodape { margin-top: auto; padding: 12px 0; font-size: 12px; }
+/* O rail foi removido em 2026-09-18; o ponto de conexão vive no rodapé da sidebar. */
 .conexao-aberto { color: var(--ok); } .conexao-conectando, .conexao-reconectando { color: var(--amber); }
 .conexao-parado { color: var(--ink-4); }
 
@@ -304,9 +292,7 @@ body.ocupado { cursor: progress; }
 .tela.entrar .erro { margin: 0 0 12px; }
 
 @media (max-width: 900px) {
-  .app { grid-template-columns: 56px 1fr; }
-  .sidebar { display: none; }
-  .nv .tl { display: none; } .nv { width: 44px; }
+  .app { grid-template-columns: 240px 1fr; }
   .stage { margin: 0; border: 0; border-radius: 0; }
   .timeline { max-width: 100%; }
   .bubble-wrap { max-width: 86%; }

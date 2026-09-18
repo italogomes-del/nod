@@ -1,17 +1,12 @@
 /* definido em 2026-09-17: interface de contatos e painel de detalhes conforme referência fornecida pela pessoa. */
 :root { --bg: #fcfdff; --ink: #171d2d; --ink-2: #41495c; --ink-3: #7f879e; --line: #edf0f6; --panel-soft: #f4f5f8; --blue: #2554a2; }
 body { background: #fcfdff; }
-.app { grid-template-columns: 72px 292px minmax(0, 1fr); }
-.app.com-detalhes { grid-template-columns: 72px 292px minmax(360px, 1fr) 300px; }
-.rail { background: #fafbfe; border-color: var(--line); gap: 16px; padding: 18px 0; }
-.marca { font-size: 39px; line-height: 1; font-weight: 850; color: #2eb6f1; letter-spacing: -5px; width: 46px; height: 48px; margin-bottom: 20px; text-align: center; }
+.app { grid-template-columns: 292px minmax(0, 1fr); }
+.app.com-detalhes { grid-template-columns: 292px minmax(360px, 1fr) 300px; }
+/* A marca saiu do rail para o cabeçalho da sidebar: menor, ao lado do título. */
+.marca { font-size: 27px; line-height: 1; font-weight: 850; color: #2eb6f1; letter-spacing: -3.5px;
+  padding: 0 6px 0 0; border: 0; background: none; cursor: pointer; }
 .marca span { color: #377fff; }
-.nv { color: #596175; border-radius: 14px; padding: 10px 0; gap: 5px; }
-.nv:hover { background: #eef2f9; border-color: var(--line); box-shadow: none; transform: none; }
-.nv[aria-current="true"] { background: #eaf1ff; color: #235ab3; box-shadow: none; border-color: #dce7fa; }
-.nv .ic { font-size: 23px; }
-.nv .tl { font-size: 9px; }
-.nv .b { border-color: #fafbfe; }
 .sidebar { background: #fcfdff; }
 .sidebar::before { display: none; }
 .search-wrap { padding: 24px 19px 18px; border: 0; }
@@ -131,16 +126,16 @@ body { background: #fcfdff; }
 .opcoes .opcao { display: flex; }
 .opcoes input { width: auto; }
 .sem-sessao.app { grid-template-columns: 1fr; }
-.sem-sessao .rail, .sem-sessao .sidebar, .sem-sessao .detalhes { display: none; }
+.sem-sessao .sidebar, .sem-sessao .detalhes { display: none; }
 .entrar { margin-top: 15vh; }
 @media (max-width: 1250px) {
-  .app.com-detalhes { grid-template-columns: 64px 250px minmax(0,1fr); }
-  .app { grid-template-columns: 64px 250px minmax(0,1fr); }
+  .app.com-detalhes { grid-template-columns: 250px minmax(0,1fr); }
+  .app { grid-template-columns: 250px minmax(0,1fr); }
   .com-detalhes .detalhes { display: none; }
   .search-wrap { padding: 23px 16px 18px; }
 }
 @media (max-width: 900px) {
-  .app, .app.com-detalhes { grid-template-columns: 58px 220px minmax(0,1fr); }
+  .app, .app.com-detalhes { grid-template-columns: 220px minmax(0,1fr); }
   .sidebar { display: flex; }
   .cabecalho { padding: 18px; }
   .cab-acoes { gap: 0; }
@@ -150,12 +145,16 @@ body { background: #fcfdff; }
   .presenca { display: none; }
 }
 @media (max-width: 700px) {
-  .app, .app.com-detalhes { grid-template-columns: 50px minmax(0,1fr); }
-  .sidebar { display: none; }
-  .rail { padding: 12px 0; gap: 10px; }
-  .marca { margin-bottom: 10px; }
-  .nv { width: 39px; }
-  .nv .tl { display: block; font-size: 8px; }
+  /* Sem o rail, a sidebar é a única navegação: ela encolhe, mas nunca some. */
+  .app, .app.com-detalhes { grid-template-columns: 184px minmax(0,1fr); }
+  .sidebar { display: flex; }
+  .search-wrap { padding: 14px 11px 12px; }
+  .sh { margin-bottom: 14px; }
+  .sh b { font-size: 15px; }
+  .marca { font-size: 22px; }
+  .list { padding: 0 7px; }
+  .chamada { width: calc(100% - 16px); margin: 0 8px 8px; padding: 9px 10px; }
+  .chamada-todas { margin: -2px 8px 10px; }
   .cabecalho { padding: 13px 15px; min-height: 77px; flex-wrap: wrap; }
   .cab-esq .nome { font-size: 17px; }
   .cab-esq { gap: 10px; }
@@ -255,3 +254,62 @@ body { background: #fcfdff; }
 .computador-viewport{background:#192c29;border:1px solid #bac6b4;aspect-ratio:1.6;position:relative;overflow:hidden;border-radius:0 0 9px 9px}.computador-viewport img{width:100%;height:100%;object-fit:contain;display:block;outline-offset:-3px}.computador-viewport img[hidden]{display:none}.computador-viewport img.controlavel{cursor:crosshair}.computador-vazio{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;color:#d3e1d8;font-size:18px}.computador-vazio[hidden]{display:none}.computador-vazio small{font-size:12px;color:#9eb7a9}
 .computador-input{display:flex;gap:5px;margin:12px 0 6px;font-size:11px;flex-wrap:wrap}.computador-texto{display:flex;flex:1;gap:5px}.computador-texto input{width:100%;font-size:11px!important}.computador-dica{font-size:11px;line-height:1.6;color:#76806d}.computador-desktop audio{height:34px;width:100%;margin-top:5px}.computador-lateral{font-size:12px;min-width:0}.computador-lateral details{border-bottom:1px solid #e1e5dc;padding:10px 0}.computador-lateral summary{font-size:13px;font-weight:600;cursor:pointer}.computador-lateral p{color:#77816e;font-size:11px;line-height:1.5}.computador-pasta{display:flex;gap:4px;margin:10px 0}.computador-pasta input{width:100%}.computador-upload{display:block;font-size:11px;margin:12px 0}.computador-upload input{display:block;max-width:100%;margin-top:7px;font-size:10px}.computador-arquivos{max-height:240px;overflow:auto}.computador-arquivos button{display:flex;width:100%;gap:5px;text-align:left;border:0;padding:7px 0;background:transparent;white-space:normal;word-break:break-word}.computador-arquivos small{margin-left:auto;white-space:nowrap;color:#7b8572}.computador-terminal textarea{width:100%;margin:10px 0;font-family:monospace!important;font-size:12px!important}.computador-saida{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px}.computador-atividade{list-style:none;padding:0;max-height:250px;overflow:auto}.computador-atividade li{padding:7px 0;font-size:11px;border-bottom:1px solid #e7eae2}.computador-atividade small{display:block;color:#7f8879;margin-top:4px}
 @media(max-width:950px){.computador-layout{grid-template-columns:1fr;padding:8px 12px 16px}.computador-header,.computador-toolbar{padding-left:12px;padding-right:12px}.computador-ajuda{margin-left:12px;margin-right:12px}.computador-lateral{display:grid;grid-template-columns:1fr 1fr;gap:14px}.computador-toolbar label{margin-left:0}.computador-vazio{font-size:14px}.computador-dialog{width:98vw;max-height:97vh}}
+
+/* definido em 2026-09-18: o sinal que substituiu a entrada "Sua vez" do rail. A faixa só existe
+   quando há decisão aberta; o badge ⚑ marca em QUAL conversa ela está. Quem decide é a conversa. */
+.chamada { display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); margin: 0 16px 10px;
+  padding: 11px 13px; border: 1px solid #f0d8a8; border-radius: 13px; background: #fdf6e7;
+  color: #6d5220; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.chamada:hover, .chamada:focus-visible { background: #fbefd6; border-color: #e6c886; outline: none; }
+.chamada .ch-ic { font-size: 14px; }
+.chamada .ch-txt { flex: 1; min-width: 0; }
+.chamada .ch-txt b { font-weight: 600; }
+.chamada .ch-seta { color: #b08d43; }
+.chamada-todas { display: block; margin: -4px 16px 12px; padding: 0 2px; border: 0; background: none;
+  color: #9096a7; font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
+.ch-badge { display: inline-flex; align-items: center; gap: 1px; padding: 1px 5px; border-radius: 7px;
+  background: #f5e2b6; color: #6d5220; font-size: 10px; font-weight: 600; }
+
+/* Painel do bot: rotinas e acessos com controle real, não só atalho para outra tela. */
+.detalhes .secao-titulo .cont { color: #9096a7; font-weight: 400; }
+.lista-detalhe { list-style: none; margin: 0; padding: 0; }
+.lista-detalhe > li { display: flex; align-items: center; gap: 8px; padding: 9px 0;
+  border-bottom: 1px solid #f1f3f7; }
+.lista-detalhe > li:last-child { border-bottom: 0; }
+.detalhe-rotina { flex-wrap: wrap; }
+.detalhe-rotina .dr-txt { flex: 1; min-width: 0; }
+.detalhe-rotina .dr-txt b { display: block; font-size: 12px; font-weight: 500; color: #273044;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detalhe-rotina .dr-txt small { display: block; margin-top: 3px; color: #9096a7; font-size: 11px; }
+.detalhe-rotina.rotina-pausada .dr-txt b { color: #8a91a2; }
+.detalhe-rotina .dr-acoes { display: flex; gap: 4px; }
+.acesso > div { flex: 1; min-width: 0; }
+.acesso b { display: block; font-size: 12px; font-weight: 500; color: #273044; }
+.acesso small { display: block; margin-top: 2px; color: #9096a7; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detalhes .bt.link.sm { font-size: 11px; padding: 3px 5px; }
+
+/* O rodapé "Seu espaço" virou botão (era um div): leva à configuração da conta que o rail guardava.
+   O ponto de conexão SSE veio junto do rail-rodape — é o único aviso de "eventos ao vivo" restante. */
+.me { width: 100%; box-sizing: border-box; border: 0; border-top: 1px solid var(--line);
+  background: none; font: inherit; text-align: left; cursor: pointer; align-items: center; }
+.me:hover, .me:focus-visible { background: #f5f7fb; outline: none; }
+.me[aria-current="true"] { background: #eaf1ff; }
+.me > div { flex: 1; min-width: 0; }
+.me-conexao { font-size: 11px; }
+
+/* "Seu espaço": telas de conta empilhadas em seções, sem cabeçalho próprio de cada uma. */
+.tela-espaco .espaco-secao { border-top: 1px solid var(--line); margin-top: 26px; padding-top: 20px; }
+.tela-espaco .espaco-secao:first-of-type { border-top: 0; margin-top: 8px; }
+.tela-espaco .espaco-secao > h2 { font-size: 16px; margin: 0 0 6px; }
+.tela-espaco .espaco-secao .intro { margin: 0 0 14px; }
+.tela-espaco .tela { padding: 0; }
+.tela-espaco .tela-chaves > .mudo:first-child { margin-top: 0; }
+.espaco-links { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.bt.espaco-link { padding: 13px 15px; border: 1px solid #e9ebf3; border-radius: 14px; background: #fff;
+  color: #263149; font-size: 14px; }
+.bt.espaco-link:hover { background: #f5f6fa; }
+.me-falha small { color: #c0682a; }
+.me-falha .av-me { background: #fbead8; color: #a85b22; }
+/* A marca e o título formam um par à esquerda; as ações de criar ficam na ponta direita. */
+.sh b { margin-right: auto; }

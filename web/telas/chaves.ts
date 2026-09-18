@@ -7,7 +7,7 @@ import { haQuanto } from "../lib/relogio.ts";
  * mostrada UMA vez, logo após gerar; depois só aparece o final dela ("…a1b2c3d4"). Gerar outra NÃO
  * cancela as antigas — por isso o Cancelar fica ao lado de cada uma.
  */
-export function renderChaves(estado: Estado): string {
+export function renderChaves(estado: Estado, comCabecalho = true): string {
   const emitida = estado.chaveEmitida
     ? `<div class="chave-emitida" role="status">
         <p><b>Chave do computador "${esc(estado.chaveEmitida.dados.nome)}"</b> — copie agora. Ela <b>não será mostrada de novo</b>: o nod guarda só uma impressão digital dela.</p>
@@ -32,8 +32,9 @@ export function renderChaves(estado: Estado): string {
             })
             .join("")}</ul>`;
 
+  // Dentro de "Seu espaço" o cabeçalho vem da seção que a envolve; sozinha, ela traz o próprio.
   return `<section class="tela tela-chaves">
-    <header class="tela-cab"><h1>Minhas chaves</h1></header>
+    ${comCabecalho ? "<header class=\"tela-cab\"><h1>Minhas chaves</h1></header>" : ""}
     <p class="mudo">Uma chave por computador. Perdeu ou trocou de computador? Cancele a chave dele aqui e gere outra.</p>
     ${emitida}
     <form class="form linha" data-form="emitir-chave">

@@ -16,14 +16,15 @@ import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
 import { renderChaves } from "./telas/chaves.ts";
+import { renderEspaco } from "./telas/espaco.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
-import { renderFrota } from "./telas/frota.ts";
+import { inventarioEmUso, renderFrota } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
-import { renderSuaVez } from "./telas/sua-vez.ts";
+import { abertasPorAgente, renderChamada, renderSuaVez } from "./telas/sua-vez.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -115,7 +116,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "gestao") return t.tipo === "gestao" || t.tipo === "perfil";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil" || t.tipo === "conversa" || t.tipo === "sala";
-  if (q === "chaves") return t.tipo === "chaves";
+  if (q === "chaves") return t.tipo === "chaves" || t.tipo === "espaco";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
   if (q.startsWith("concessoes:")) return (t.tipo === "perfil" || t.tipo === "conversa") && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
@@ -124,26 +125,26 @@ function relevante(q: Invalidacao): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Render por regiões: rail | sidebar | cabeçalho | timeline/tela | composer | rodapé.
-
-function renderRail(): string {
-  const t = estado.tela.tipo;
-  const abertos = estado.suaVez?.itens.filter((i) => i.estadoColuna !== "vencido").length ?? 0;
-  const item = (tipo: Tela["tipo"], icone: string, rotulo: string, badge = 0) =>
-    `<button class="nv" data-act="navegar" data-tela="${tipo}" aria-current="${t === tipo ? "true" : "false"}"><span class="ic">${icone}</span><span class="tl">${rotulo}</span>${badge ? `<span class="b">${badge}</span>` : ""}</button>`;
-  return `<button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button>${item("frota", "▦", "Frota")}${item("sua-vez", "◷", "Sua vez", abertos)}${item("rotinas", "◑", "Rotinas")}${item("conectores", "⚲", "Marketplace")}${item("chaves", "⚿", "Chaves")}
-    <div class="rail-rodape"><span class="conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></div>`;
-}
+// Render por regiões: sidebar | cabeçalho | timeline/tela | composer | rodapé.
+//
+// O rail (coluna de ícones Frota/Sua vez/Rotinas/Marketplace/Chaves) foi removido em 2026-09-18: era
+// uma SEGUNDA navegação sobre a sidebar, contra o modelo de contatos do ADR-032. Nenhuma das cinco
+// entradas era um lugar — Frota duplicava a sidebar, Sua vez já decide dentro da conversa, Rotinas e
+// Marketplace são do bot (painel Detalhes) e Chaves é da conta ("Seu espaço"). As telas continuam
+// existindo e roteáveis; o que saiu foi a entrada fixa.
 
 function renderSidebar(): string {
   const agentes = estado.frota?.agentes ?? [];
+  const abertas = abertasPorAgente(estado);
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
   const linha = (a: (typeof agentes)[number]) => {
     const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
     const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
     const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    const pedindo = abertas.get(a.id) ?? 0;
+    const flag = pedindo ? `<span class="ch-badge" title="${pedindo === 1 ? "uma decisão esperando você" : `${pedindo} decisões esperando você`}">⚑${pedindo > 1 ? pedindo : ""}</span>` : "";
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${flag}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";
@@ -160,19 +161,32 @@ function renderSidebar(): string {
   const ambiente = ambienteBanco
     ? `<div class="ambiente-banco ambiente-${esc(ambienteBanco.regime)}" role="status" title="Banco usado por esta instância do Nod"><span></span>${ambienteBanco.regime === "persistente" ? "Persistente" : ambienteBanco.regime === "efemero" ? "Efêmero" : "Banco não identificado"}${ambienteBanco.porta ? ` · DB ${ambienteBanco.porta}` : ""}</div>`
     : "";
+  // Sem o rail e sem o inventário na tela inicial, o rodapé é o ÚNICO lugar sempre visível que pode
+  // avisar que o motor não está pronto (ADR-029: falha vira estado escrito, nunca só um ícone).
+  const inv = inventarioEmUso(estado);
+  const falhaMotor = !!inv && inv.estado !== "pronto";
+  const situacaoMotor = !estado.executor
+    ? "Verificando conexão…"
+    : falhaMotor
+      ? inv.estado === "nao_autenticado"
+        ? "Sua IA não está conectada"
+        : "Sua IA não foi encontrada"
+      : estado.executor.atual === "catcher"
+        ? "Modo de simulação"
+        : "Sua IA conectada";
+  // A marca voltou do rail para cá: é o único lugar dela agora, e continua levando ao início.
   return `<div class="search-wrap">
-      <div class="sh"><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="criar-rapido" aria-label="Criar bot">+</button><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">⌄</button></span></div>
+      <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="criar-rapido" aria-label="Criar bot">+</button><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">⌄</button></span></div>
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
+    ${renderChamada(estado)}
     <div class="list">
       ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
       <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
-    <button class="manage-link" data-act="navegar" data-tela="gestao">Gerenciar agentes <span>Ocultos e excluídos</span></button>
-    <button class="marketplace-link" data-act="navegar" data-tela="conectores"><span>▦</span> Marketplace</button>
     ${ambiente}
-    <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${!estado.executor ? "Verificando conexão…" : estado.executor.atual === "catcher" ? "Modo de simulação" : "Sua IA conectada"}</small></div></div>`;
+    <button class="me${falhaMotor ? " me-falha" : ""}" data-act="navegar" data-tela="espaco" aria-current="${t.tipo === "espaco" ? "true" : "false"}" aria-label="Seu espaço: conexão, computadores e administração"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${esc(situacaoMotor)}</small></div><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></button>`;
 }
 
 function renderPrincipal(): void {
@@ -214,6 +228,9 @@ function renderPrincipal(): void {
       break;
     case "chaves":
       corpo = renderChaves(estado);
+      break;
+    case "espaco":
+      corpo = renderEspaco(estado, ambienteBanco);
       break;
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
@@ -303,7 +320,6 @@ function render(): void {
   if (!estado.sessao) {
     document.querySelector(".app")?.classList.add("sem-sessao");
     regiao("detalhes", "");
-    regiao("rail", "");
     regiao("sidebar", "");
     regiao("cabecalho", "");
     regiao("timeline", renderEntrada());
@@ -311,7 +327,6 @@ function render(): void {
     return;
   }
   document.querySelector(".app")?.classList.remove("sem-sessao");
-  regiao("rail", renderRail());
   const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
   const valorBusca = busca?.value ?? "";
   const focoBusca = document.activeElement === busca;
@@ -470,7 +485,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
+    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
   },
   "conectar-composio": (el) => agir(async () => {
     if (!estado.composioConfigurado) {
