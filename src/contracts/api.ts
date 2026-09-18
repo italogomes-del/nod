@@ -17,6 +17,8 @@ export type RespostaMutacao = { ok: true; ids: Record<string, string> };
  */
 export type ModoSessaoDto = { modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] };
 
+export type AmbienteBancoDto = { regime: "persistente" | "efemero" | "desconhecido"; porta: number | null };
+
 /** Chave de máquina como a dona a vê na lista (ADR-031): NUNCA traz a chave nem o hash. */
 export type ChaveMaquinaDto = { id: string; nome: string; prefixo: string; criadaEm: EpochMs; ultimoUsoEm: EpochMs | null; revogadaEm: EpochMs | null };
 
@@ -78,6 +80,7 @@ export const ROTAS = [
   { metodo: "DELETE", caminho: "agentes/:id", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/restaurar", lane: "L6" },
   { metodo: "GET", caminho: "inventario", lane: "L9" },
+  { metodo: "GET", caminho: "ambiente", lane: "L9" },
   /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca catcher ⇄ claude-cli em tempo de execução. */
   { metodo: "GET", caminho: "executor", lane: "L9" },
   { metodo: "POST", caminho: "executor", lane: "L9" },

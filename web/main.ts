@@ -1,6 +1,6 @@
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
-import type { ModoSessaoDto } from "../src/contracts/api.ts";
+import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
@@ -30,6 +30,7 @@ let api: Api | null = null;
 let live: LiveEvents | null = null;
 let composerDe: string | null = null;
 let reidratando = false;
+let ambienteBanco: AmbienteBancoDto | null = null;
 /** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
 let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, recusado: false };
 
@@ -151,6 +152,9 @@ function renderSidebar(): string {
     )
     .join("");
 
+  const ambiente = ambienteBanco
+    ? `<div class="ambiente-banco ambiente-${esc(ambienteBanco.regime)}" role="status" title="Banco usado por esta instância do Nod"><span></span>${ambienteBanco.regime === "persistente" ? "Persistente" : ambienteBanco.regime === "efemero" ? "Efêmero" : "Banco não identificado"}${ambienteBanco.porta ? ` · DB ${ambienteBanco.porta}` : ""}</div>`
+    : "";
   return `<div class="search-wrap">
       <div class="sh"><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="criar-rapido" aria-label="Criar bot">+</button><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">⌄</button></span></div>
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
@@ -162,6 +166,7 @@ function renderSidebar(): string {
     </div>
     <button class="manage-link" data-act="navegar" data-tela="gestao">Gerenciar agentes <span>Ocultos e excluídos</span></button>
     <button class="marketplace-link" data-act="navegar" data-tela="conectores"><span>▦</span> Marketplace</button>
+    ${ambiente}
     <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${estado.executor?.atual === "claude-cli" ? "Claude Code conectado" : "Modo de simulação"}</small></div></div>`;
 }
 
@@ -317,6 +322,7 @@ function render(): void {
 
 async function iniciarSessao(escopo: Escopo): Promise<void> {
   api = criarApi(escopo);
+  ambienteBanco = await api.ambiente();
   dispatch({ tipo: "sessao", escopo });
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {

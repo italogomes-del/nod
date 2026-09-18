@@ -3,6 +3,11 @@
 Curto no dia 1; cresce quando um agente errar de verdade. As decisões moram em [docs/adr/](docs/adr/); as
 práticas herdadas, com evidência, em [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md).
 
+Para iniciar, atualizar ou separar o Nod diário de bancos descartáveis de feature, siga
+[docs/ambiente-local-persistente.md](docs/ambiente-local-persistente.md). O banco diário usa a porta
+5434 e o volume `nod_nod_pgdata`; agentes nunca devem executar `docker:reset`, `docker compose down -v`
+ou remover esse volume sem um pedido explícito de perda total dos dados.
+
 ## Comandos
 
 ```bash

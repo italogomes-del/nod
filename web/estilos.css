@@ -143,6 +143,13 @@ body.ocupado { cursor: progress; }
 .cabecalho { flex: none; min-height: 43px; border-bottom: 1px solid var(--line); padding: 8px 14px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .cabecalho:empty { display: none; }
+.ambiente-banco { margin: 0 10px 8px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 11px; font-weight: 650; color: var(--ink-2); background: var(--panel-soft); }
+.ambiente-banco span { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #7b8494; }
+.ambiente-persistente { color: #23633a; border-color: #b9dfc5; background: #eef9f1; }
+.ambiente-persistente span { background: #2d9d55; }
+.ambiente-efemero { color: #835b16; border-color: #ecd39b; background: #fff8e8; }
+.ambiente-efemero span { background: #d59419; }
 .cab-esq { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .cab-esq .nome { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cab-esq .tag { font-size: 10px; color: var(--ink-3); background: var(--panel-soft); border: 1px solid var(--line);
