@@ -2,17 +2,17 @@
 
 A distribuição usa um servidor compartilhado e dois aplicativos macOS: `arm64` para chips M e `x64` para Intel. O Mac precisa do Claude Code instalado e autenticado. Não precisa de Node, Docker ou Postgres. O servidor guarda as conversas, permissões, decisões e rotinas; cada app puxa os trabalhos da pessoa que emitiu sua chave.
 
-## Estado em 17/09/2026
+## Preview sem assinatura — 17/09/2026
 
-Implementados: app Electron, configuração do endereço, chave cifrada com `safeStorage` (Keychain no macOS), sessão web obtida pela chave, ponte HTTP autenticada, executor local reutilizado, builds separados e workflow de assinatura/notarização. Nenhuma URL de produção foi escolhida. Nenhum certificado Developer ID válido foi encontrado na máquina de desenvolvimento. Portanto os builds locais sem assinatura são para verificação, e não uma release pronta para distribuir ao time.
+Implementados: app Electron, configuração do endereço, chave cifrada com `safeStorage` (Keychain no macOS), sessão web obtida pela chave, ponte HTTP autenticada, executor local reutilizado, builds separados e workflow de assinatura/notarização. Nenhuma URL de produção foi escolhida. Nenhum certificado Developer ID válido foi encontrado na máquina de desenvolvimento. O mantenedor autorizou publicar esta candidata como preview sem assinatura, repetindo a distribuição anterior. Não há assinatura Developer ID nem notarização Apple. O macOS pode bloquear a abertura; esta publicação não representa aceite de instalação sob Gatekeeper nem validação de uso em produção. A distribuição assinada fica para uma versão estável.
 
 ## Mudanças e validação desta candidata
 
 Integra o desktop à main atual, incluindo gestão e exclusão recuperável de agentes (migrações 0011 e 0012), decisões diretamente no chat, cooperação iniciada por agentes acordados por rotinas e Sonnet como modelo padrão. As sondas continuam em Haiku. Candidatas `-rc.N` são reconhecidas pela verificação de compatibilidade do app.
 
-Servidor compatível: código da tag `v0.2.0-rc.1`, protocolo de máquina 1, migrações 0001–0012. A URL HTTPS de produção ainda não foi informada. Não use o snapshot da preview anterior como servidor desta candidata. Permanece a versão mínima de cliente 0.1.0; não houve aumento forçado dessa versão mínima.
+Servidor compatível: código da tag `desktop-v0.2.0-rc.1`, protocolo de máquina 1, migrações 0001–0012. A URL HTTPS de produção ainda não foi informada. Não use o snapshot da preview anterior como servidor desta candidata. Permanece a versão mínima de cliente 0.1.0; não houve aumento forçado dessa versão mínima.
 
-Medido em 2026-09-17, nesta candidata: `npm ci`, `npm run check` (684 testes: 371 unitários, 217 integração, 49 conformidade, 47 concorrência), `npm run build` e `npm run desktop:build` passaram. O banco exclusivo `nod_release_20260917` partiu vazio e recebeu as migrações 0001–0012. `desktop:pack` gerou um pacote local Intel e o proxy MCP respondeu ao initialize usando seu runtime, sem Node externo nem Claude real. O pacote de verificação não tem assinatura e não é um instalador aceito para distribuição. Assinatura/notarização, aceite nativo Intel/ARM e atualização a partir da preview estão pendentes. Não se reutilizam as contagens nem os instaladores da versão anterior como evidência desta versão. A criação autônoma de tarefas ClickUp por um agente destinatário não está aprovada nos UATs.
+Medido em 2026-09-17, nesta candidata: `npm ci`, `npm run check` (684 testes: 371 unitários, 217 integração, 49 conformidade, 47 concorrência), `npm run build` e `npm run desktop:build` passaram. O banco exclusivo `nod_release_20260917` partiu vazio e recebeu as migrações 0001–0012. `desktop:pack` gerou um pacote local Intel e o proxy MCP respondeu ao initialize usando seu runtime, sem Node externo nem Claude real. A preview usa empacotamento local sem assinatura. A inspeção e o smoke do pacote não substituem o aceite de instalação em um Mac de cada arquitetura. Assinatura/notarização, aceite nativo Intel/ARM e atualização a partir da preview estão pendentes. Não se reutilizam as contagens nem os instaladores da versão anterior como evidência desta versão. A criação autônoma de tarefas ClickUp por um agente destinatário não está aprovada nos UATs.
 
 ## Preparar o servidor
 
@@ -45,6 +45,8 @@ Fechar o app encerra sua execução. Quando o computador some sem desconectar, o
 Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Instale o novo DMG sobre o app anterior, mantendo a configuração cifrada no Keychain. Valide conexão, execução, Parar e revogação de chave nas duas arquiteturas. Não há atualização automática. Esse caminho ainda depende de aceite real. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
 
 ## Gerar e publicar
+
+Para esta preview, use a tag `desktop-v0.2.0-rc.1`, dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
 
 `npm ci` usa as versões exatas de Electron e electron-builder do lockfile. `npm run desktop:build` compila app, preload e proxy e recusa dependências de servidor no bundle desktop. `npm run desktop:dev` permite HTTP somente em loopback para desenvolvimento; o app empacotado aceita só HTTPS.
 
