@@ -25,6 +25,8 @@ export type AcaoComputador =
   | { tipo: "abas"; aba?: number }
   | { tipo: "arquivos"; caminho: string }
   | { tipo: "ler_arquivo"; caminho: string }
+  | { tipo: "ler_texto"; caminho: string; inicio: number; revisao?: string }
+  | { tipo: "gravar_texto"; caminho: string; texto: string; revisao: string }
   | { tipo: "gravar_arquivo"; caminho: string; base64: string }
   | { tipo: "anexar"; caminho: string; quadro: string }
   | { tipo: "terminal"; comando: string };
@@ -44,6 +46,8 @@ export type ResultadoComputador = {
   tela?: TelaComputador;
   arquivos?: ArquivoComputador[];
   arquivo?: { nome: string; base64: string };
+  texto?: { conteudo: string; inicio: number; proximo: number | null; total: number; revisao: string };
+  revisao?: string;
   saida?: string;
   codigoSaida?: number;
   audio?: { mimeType: "audio/wav"; data: string };

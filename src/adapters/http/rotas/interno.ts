@@ -1,4 +1,5 @@
 import type { Computadores } from "../../fundo/computadores.ts";
+import type { Workspaces } from "../../fundo/workspaces.ts";
 import type { ClasseNegacao } from "../../../contracts/negacao.ts";
 import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -11,6 +12,7 @@ import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export type DepsRotasInternas = {
+  workspaces?: Workspaces;
   computadores?: Computadores;
   dentro: DentroDeTx;
   tokens: Pick<TokenTurno, "planoDe">;
@@ -59,6 +61,10 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const corpo = (await ctx.corpo()) as { argumentos?: unknown };
         const turnoId = ctx.params.turnoId ?? "";
         const plano = deps.tokens.planoDe(turnoId);
+        if (ctx.params.nome?.startsWith("workspace_") && plano && deps.workspaces) {
+          ctx.json(200, await deps.workspaces.chamar(ctx.escopo, plano, ctx.params.nome, corpo?.argumentos ?? {}));
+          return;
+        }
         if (ctx.params.nome?.startsWith("computador_") && plano && deps.computadores) {
           ctx.json(200, await deps.computadores.chamar(ctx.escopo, plano, ctx.params.nome, corpo?.argumentos ?? {}));
           return;

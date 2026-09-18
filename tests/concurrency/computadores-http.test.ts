@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { lerTexto, gravarTexto } from "../../infra/computador/texto.mjs";
 import type { AcaoComputador, ComputadorDto, DriverComputador, ResultadoComputador } from "../../src/contracts/computador.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
@@ -15,15 +19,24 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   let srv: ServidorCompleto;
   let bot: {agente:Agente;conversa:Conversa};
   let plano: PlanoTurno;
+  let raizArquivos: string;
   const efeitos: {id:string;acao:AcaoComputador}[]=[];
   const ativos=new Set<string>();
   let bloquear: (()=>Promise<void>)|undefined;
   const driver: DriverComputador={
     estado:async id=>({disponivel:true,ativo:ativos.has(id),motivo:null}),
     iniciar:async id=>{ativos.add(id);},parar:async id=>{ativos.delete(id);},
-    executar:async(id,acao)=>{efeitos.push({id,acao});await bloquear?.();return {tela:{quadro,imagem:"iVBORw0KGgo=",largura:1280,altura:800,titulo:"Teste",url:"https://example.com",texto:"Site não confiável",abas:[]}};},
+    executar:async(id,acao)=>{
+      efeitos.push({id,acao});await bloquear?.();
+      if (acao.tipo === "ler_texto" || acao.tipo === "gravar_texto") {
+        const pasta = join(raizArquivos, id); await mkdir(pasta, {recursive:true});
+        return acao.tipo === "ler_texto" ? lerTexto(join(pasta, acao.caminho), acao.inicio, acao.revisao) : gravarTexto(join(pasta, acao.caminho), acao.texto, acao.revisao);
+      }
+      return {tela:{quadro,imagem:"iVBORw0KGgo=",largura:1280,altura:800,titulo:"Teste",url:"https://example.com",texto:"Site não confiável",abas:[]}};
+    },
   };
   beforeAll(async()=>{
+    raizArquivos = await mkdtemp(join(tmpdir(), "nod-computador-http-"));
     srv=await servidorCompleto({computador:driver,env:{NOD_MODO:"compartilhado"},intervalos:{orquestradorMs:3600000,schedulerMs:3600000,expiracaoMs:3600000}});
     bot=await srv.json("POST","agentes",{dono:"pessoa",interativo:true});
   },30000);
@@ -34,7 +47,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
       plano=(await emitirPlanoTurno(d,{turnoId:t!.id,machineId:randomUUID(),executor:"catcher"})).data;
     });
   },30000);
-  afterAll(async()=>{if(srv){await srv.fechar();await limparPessoaE2E(srv.db,srv.dbDono,srv.pessoa,{agentes:[bot.agente.id],conversas:[bot.conversa.id]});await srv.desligar();}},30000);
+  afterAll(async()=>{if(srv){await srv.fechar();await limparPessoaE2E(srv.db,srv.dbDono,srv.pessoa,{agentes:[bot.agente.id],conversas:[bot.conversa.id]});await srv.desligar();}if(raizArquivos)await rm(raizArquivos,{recursive:true,force:true});},30000);
   const consultar=()=>srv.json<ComputadorDto>("GET",`agentes/${bot.agente.id}/computador`);
   const configurar=(operacao:string)=>srv.json("POST",`agentes/${bot.agente.id}/computador`,{operacao});
   const humano=(acao:AcaoComputador)=>srv.chamar("POST",`agentes/${bot.agente.id}/computador/acoes`,acao);
@@ -93,6 +106,25 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     expect(d!.estado).toBe("decidida");
     const itens:ItemAprovacao[]=await srv.app.dentro(srv.pessoa,x=>x.repos.itensAprovacao.listar(d!.id));expect(itens).toHaveLength(0);
     const tela=await (await humano({tipo:"observar"})).json() as ResultadoComputador;expect(tela.tela!.quadro).toBe(quadro);
+  });
+  it("texto passa pelo catálogo, aprovação e revisão antes de alterar arquivos reais",async()=>{
+    await configurar("supervisionado");
+    const antes=efeitos.length;
+    const r=await chamar("computador_gravar_texto",{caminho:"relatorio.txt",texto:"Primeiro relatório",revisao:"novo"});
+    expect(r).toHaveProperty("aguardar");expect(efeitos.length).toBe(antes);
+    if(!("aguardar" in r))throw new Error("aprovação ausente");
+    const itens=await srv.app.dentro(srv.pessoa,d=>d.repos.itensAprovacao.listar(r.aguardar));
+    expect((await srv.chamar("POST",`decisoes/${r.aguardar}/decidir`,{itens:[{id:itens[0]!.id,selecionado:true}]})).status).toBe(200);
+    const leitura=await chamar("computador_ler_texto",{caminho:"relatorio.txt"});
+    expect(leitura).toMatchObject({ok:true,confianca:"nao_confiavel"});
+    if(!("conteudo" in leitura))throw new Error("leitura ausente");
+    const dado=JSON.parse(leitura.conteudo) as ResultadoComputador;
+    expect(dado.texto!.conteudo).toBe("Primeiro relatório");
+    await configurar("autonomo");
+    expect(await chamar("computador_gravar_texto",{caminho:"relatorio.txt",texto:"Relatório revisado",revisao:dado.texto!.revisao})).toMatchObject({ok:true,isError:false});
+    expect(await chamar("computador_gravar_texto",{caminho:"relatorio.txt",texto:"versão antiga",revisao:dado.texto!.revisao})).toMatchObject({ok:true,isError:true});
+    const c=await consultar();
+    expect(await readFile(join(raizArquivos,c.computador.id,"relatorio.txt"),"utf8")).toBe("Relatório revisado");
   });
   it("excluir desliga processos; restaurar conserva o vínculo sem religar",async()=>{
     const c=await consultar();

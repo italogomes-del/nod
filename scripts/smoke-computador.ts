@@ -3,13 +3,28 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { criarDriverDocker } from "../src/adapters/computador/docker.ts";
-const driver = criarDriverDocker({ NOD_COMPUTADORES: "docker", NOD_CREDENTIAL_KEY: randomBytes(32).toString("hex") });
+const driver = criarDriverDocker({ NOD_COMPUTADORES: "docker", NOD_COMPUTADOR_IMAGEM: process.env.NOD_COMPUTADOR_IMAGEM, NOD_CREDENTIAL_KEY: randomBytes(32).toString("hex") });
 const ids = [randomUUID(), randomUUID()];
 await writeFile("/tmp/nod-computadores-smoke-ids.json", JSON.stringify(ids));
 try {
   for (const id of ids) await driver.iniciar(id);
   const id = ids[0]!;
   const executar = (a: Parameters<typeof driver.executar>[1]) => driver.executar(id,a);
+  const documento = "Relatório em português 🙂\n".repeat(400);
+  const criado = await executar({tipo:"gravar_texto",caminho:"relatorio.txt",texto:documento,revisao:"novo"});
+  let inicio = 0;
+  let reconstituido = "";
+  for (;;) {
+    const pagina = await executar({tipo:"ler_texto",caminho:"relatorio.txt",inicio,revisao:criado.revisao});
+    assert.ok(JSON.stringify(pagina).length < 6000);
+    reconstituido += pagina.texto!.conteudo;
+    if (pagina.texto!.proximo === null) break;
+    inicio = pagina.texto!.proximo;
+  }
+  assert.equal(reconstituido, documento);
+  await executar({tipo:"gravar_texto",caminho:"relatorio.txt",texto:"Revisado",revisao:criado.revisao!});
+  await assert.rejects(executar({tipo:"gravar_texto",caminho:"relatorio.txt",texto:"Perderia revisão",revisao:criado.revisao!}));
+  assert.equal((await executar({tipo:"ler_texto",caminho:"relatorio.txt",inicio:0})).texto!.conteudo,"Revisado");
   const html = `<!doctype html><title>Computador nod</title><body style="font:24px sans-serif;padding:40px"><h1>Computador do bot</h1><p id="cookie"></p><input id="texto" autofocus oninput="document.getElementById('eco').textContent=this.value" placeholder="Digite aqui" style="font:24px sans-serif"><p id="eco"></p><input type="file"><a href="/download.txt" download>Baixar arquivo</a><button onclick="confirm('Confirmar teste?')">Diálogo</button><script>document.cookie='teste=persiste; max-age=3600';document.getElementById('cookie').textContent=document.cookie;</script></body>`;
   await executar({tipo:"gravar_arquivo",caminho:"index.html",base64:Buffer.from(html).toString("base64")});
   await executar({tipo:"gravar_arquivo",caminho:"download.txt",base64:Buffer.from("arquivo persistente").toString("base64")});
@@ -58,7 +73,7 @@ try {
   assert.match(cookie.tela!.texto,/teste=persiste/);
   const cifrado=await executar({tipo:"terminal",comando:"python3 -c \"b=open('/home/node/cookies.enc','rb').read(); print(len(b)>28 and b'teste' not in b and b'persiste' not in b)\""});
   assert.equal(cifrado.saida!.trim(),"True");
-  process.stdout.write("OK: dois computadores, navegador público/local, screenshot, quadro, terminal, vídeo (reproduzir/pausar/volume), áudio audível, persistência cifrada e bloqueio da rede privada.\n");
+  process.stdout.write("OK: dois computadores, texto paginado com revisão, navegador público/local, screenshot, quadro, terminal, vídeo (reproduzir/pausar/volume), áudio audível, persistência cifrada e bloqueio da rede privada.\n");
 } finally {
   for (const id of ids) {
     await driver.parar(id).catch(()=>undefined);

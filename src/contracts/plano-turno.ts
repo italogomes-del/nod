@@ -14,7 +14,7 @@ export type FerramentaPlano = {
   nome: string;
   /** Nome que o CLI enxerga: mcp__nod__<nome> (--allowedTools exato, mapa-cli). */
   nomeMcp: `mcp__nod__${string}`;
-  origem: "nod" | "conector" | "computador";
+  origem: "nod" | "conector" | "computador" | "workspace";
   conectorId: string | null;
   /** Capturado na DESCOBERTA (sonda), nunca em tempo de chamada (ADR-013). */
   readOnlyHint: boolean;
@@ -42,6 +42,7 @@ export type PlanoTurno = {
   machineId: string;
   executor: Executor;
   harness?: IdHarness;
+  workspaceId?: string | null;
   superficie: "maquina_da_pessoa";
   decididoPor: `regra:${string}`;
   autoria: Autoria;

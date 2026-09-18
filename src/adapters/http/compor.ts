@@ -2,6 +2,11 @@ import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
 import { criarComputadores } from "../fundo/computadores.ts";
 import { rotasComputadores } from "./rotas/computadores.ts";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { expandirTil } from "../executor/caminho.ts";
+import { criarWorkspaces } from "../fundo/workspaces.ts";
+import { rotasWorkspaces } from "./rotas/workspaces.ts";
 import { HARNESSES } from "../../contracts/harness.ts";
 import type { CatalogoHarness } from "../../contracts/harness.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
@@ -241,6 +246,9 @@ export function comporApp(o: OpcoesCompor): App {
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
     mudou: (escopo, agenteId) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
+  // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
+  const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
+  if (workspaces) services.workspaces = workspaces;
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
   const depsPonte: Parameters<typeof criarPonteInterna>[1] = {
@@ -456,7 +464,8 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMaquinas({ dentro }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
-    ...rotasInternas({ dentro, computadores, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
+    ...rotasWorkspaces(workspaces),
+    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),

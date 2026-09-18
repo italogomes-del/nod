@@ -40,6 +40,17 @@ export function validarAcaoComputador(valor: unknown): AcaoComputador {
     case "rolar": return { tipo: a.tipo, quadro: quadro(), delta: numero("delta", -2000, 2000) };
     case "abas": return a.aba === undefined ? { tipo: a.tipo } : { tipo: a.tipo, aba: Math.floor(numero("aba", 0, 30)) };
     case "arquivos": case "ler_arquivo": return { tipo: a.tipo, caminho: caminho() };
+    case "ler_texto": {
+      const inicio = a.inicio === undefined ? 0 : numero("inicio", 0, 2_097_152);
+      const revisao = a.revisao === undefined ? undefined : texto("revisao", 64);
+      if (!Number.isInteger(inicio) || (revisao !== undefined && !/^[a-f0-9]{64}$/.test(revisao)) || (inicio > 0 && !revisao)) throw new ErroDeDominio("entrada_invalida");
+      return { tipo: a.tipo, caminho: caminho(), inicio, ...(revisao ? { revisao } : {}) };
+    }
+    case "gravar_texto": {
+      const revisao = texto("revisao", 64);
+      if (revisao !== "novo" && !/^[a-f0-9]{64}$/.test(revisao)) throw new ErroDeDominio("entrada_invalida");
+      return { tipo: a.tipo, caminho: caminho(), texto: texto("texto", 131072), revisao };
+    }
     case "gravar_arquivo": {
       const base64 = texto("base64", 699052);
       if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) throw new ErroDeDominio("entrada_invalida");
@@ -52,7 +63,7 @@ export function validarAcaoComputador(valor: unknown): AcaoComputador {
 }
 
 export function alteraComputador(a: AcaoComputador): boolean {
-  return !["observar", "arquivos", "ler_arquivo", "audio"].includes(a.tipo) && !(a.tipo === "abas" && a.aba === undefined);
+  return !["observar", "arquivos", "ler_arquivo", "ler_texto", "audio"].includes(a.tipo) && !(a.tipo === "abas" && a.aba === undefined);
 }
 
 export function resumoAcaoComputador(a: AcaoComputador): string {

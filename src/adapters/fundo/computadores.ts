@@ -130,7 +130,7 @@ export function criarComputadores(o: Opcoes) {
       const acao = validarAcaoComputador(valor);
       const r = await o.dentro(escopo, async (d) => {
         const c = await obter(d, agenteId);
-        if (!c.habilitado || (acao.tipo !== "observar" && acao.tipo !== "arquivos" && acao.tipo !== "ler_arquivo" && acao.tipo !== "audio" && c.controle !== "pessoa")) throw new ErroDeDominio("nao_permitido");
+        if (!c.habilitado || (acao.tipo !== "observar" && acao.tipo !== "arquivos" && acao.tipo !== "ler_arquivo" && acao.tipo !== "ler_texto" && acao.tipo !== "audio" && c.controle !== "pessoa")) throw new ErroDeDominio("nao_permitido");
         return reservar(d, c, acao, "pessoa");
       });
       return executar(escopo, r);
@@ -179,7 +179,7 @@ export function criarComputadores(o: Opcoes) {
         const imagem = r.tela?.imagem;
         return { ok: true, isError: r.codigoSaida !== undefined && r.codigoSaida !== 0, conteudo: JSON.stringify({ ...r, audio: undefined, ...(r.tela ? { tela: { ...r.tela, imagem: undefined } } : {}) }), confianca: "nao_confiavel", ...(r.audio ? { audio: r.audio } : {}), ...(imagem ? { imagem: { mimeType: "image/png" as const, data: imagem } } : {}) };
       } catch {
-        return { ok: true, isError: true, conteudo: JSON.stringify({ erro: "computador_indisponivel_ou_tela_alterada", instrucao: "A ação falhou. Observe a tela antes de tentar novamente; não afirme que executou." }), confianca: "confiavel" };
+        return { ok: true, isError: true, conteudo: JSON.stringify({ erro: "computador_indisponivel_ou_tela_alterada", instrucao: nome === "computador_ler_texto" || nome === "computador_gravar_texto" ? "A operação de texto falhou. Confira caminho, tamanho, UTF-8 e revisão; releia o arquivo antes de editar. Não afirme que gravou." : "A ação falhou. Observe a tela antes de tentar novamente; não afirme que executou." }), confianca: "confiavel" };
       }
     },
     async executarAprovado(p: Escopo & { agenteId: string; turnoId: string; acaoId: string }): Promise<void> {

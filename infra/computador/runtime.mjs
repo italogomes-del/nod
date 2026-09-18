@@ -8,6 +8,7 @@ import net from 'node:net';
 import process from 'node:process';
 import { Buffer } from 'node:buffer';
 import { setTimeout as delay } from 'node:timers/promises';
+import { lerTexto, gravarTexto } from './texto.mjs';
 const exec = promisify(execFile);
 const run = (bin,args,options={}) => exec(bin,args,{timeout:25000,maxBuffer:4*1024*1024,...options});
 const filhos = [];
@@ -106,6 +107,8 @@ async function acao(a) {
     return {arquivos:await Promise.all(nomes.map(async nome=>{const s=await stat(path.join(dir,nome));return {nome,caminho:path.relative('/workspace',path.join(dir,nome)),tamanho:s.size,diretorio:s.isDirectory()};}))};
   }
   if(a.tipo==='ler_arquivo') {const f=await arquivo(a.caminho);if((await stat(f)).size>524288) throw new Error('arquivo_grande');return {arquivo:{nome:path.basename(f),base64:(await readFile(f)).toString('base64')}};}
+  if(a.tipo==='ler_texto') return lerTexto(await arquivo(a.caminho),a.inicio,a.revisao);
+  if(a.tipo==='gravar_texto') return gravarTexto(await arquivo(a.caminho,true),a.texto,a.revisao);
   if(a.tipo==='gravar_arquivo') {const f=await arquivo(a.caminho,true);await writeFile(f,Buffer.from(a.base64,'base64'));return {saida:'Arquivo gravado.'};}
   if(a.tipo==='audio') {
     await run('ffmpeg',['-y','-f','pulse','-i','nod.monitor','-t',String(a.segundos),'-ac','1','-ar','16000','/tmp/audio.wav']);
