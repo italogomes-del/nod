@@ -1,5 +1,5 @@
 import type { Agente, FormaAgente, CorAgente } from "../../src/contracts/agente.ts";
-import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
+import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
@@ -71,6 +71,7 @@ export function criarApi(escopo: Escopo) {
     excluirAgente: (id: string) => del<{ agente: Agente }>(`agentes/${id}`),
     restaurarAgente: (id: string) => post<{ agente: Agente }>(`agentes/${id}/restaurar`),
     inventario: (forcar = false) => get<Inventario>(`inventario${forcar ? "?forcar=1" : ""}`),
+    ambiente: () => get<AmbienteBancoDto>("ambiente"),
     executor: () => get<EstadoExecutor>("executor"),
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),

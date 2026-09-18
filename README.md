@@ -20,6 +20,10 @@ O código desktop está integrado nesta versão. Consulte também o [guia do có
 
 ## Rodar amanhã de manhã
 
+O Postgres diário é persistente em `127.0.0.1:5434` (`nod_nod_pgdata`). Bancos descartáveis para
+features podem rodar simultaneamente em `5435`, `5436` etc.; veja o
+[guia do ambiente local persistente](docs/ambiente-local-persistente.md).
+
 ```bash
 cd ~/code/nod
 mise install && npm ci                 # Node 24.19.0 pinado em .mise.toml (nvm/asdf ganham do mise — ver AGENTS.md)
