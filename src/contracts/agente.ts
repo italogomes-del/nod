@@ -1,7 +1,10 @@
 import type { EpochMs, TenantId } from "./ids.ts";
 
-export type FormaAgente = "shape-square" | "shape-hex" | "shape-circle";
-export type CorAgente = "c-purple" | "c-black" | "c-pink" | "c-teal" | "c-blue" | "c-orange" | "c-green" | "c-red";
+export const FORMAS_AGENTE = ["shape-square", "shape-hex", "shape-circle", "shape-pebble", "shape-capsule", "shape-triangle", "shape-cloud", "shape-drop"] as const;
+export const CORES_AGENTE = ["c-red", "c-pink", "c-purple", "c-blue", "c-teal", "c-green", "c-orange", "c-black", "c-brown", "c-amber", "c-gray", "c-cream"] as const;
+
+export type FormaAgente = (typeof FORMAS_AGENTE)[number];
+export type CorAgente = (typeof CORES_AGENTE)[number];
 
 /** Imutável após a criação (trigger nod_agente_dono_imutavel na 0002; erro `dono_imutavel`). */
 export type DonoAgente = "pessoa" | "empresa";
