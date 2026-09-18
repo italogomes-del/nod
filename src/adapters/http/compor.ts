@@ -247,7 +247,7 @@ export function comporApp(o: OpcoesCompor): App {
     mudou: (escopo, agenteId) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
-  const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
+  const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
   if (workspaces) services.workspaces = workspaces;
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).

@@ -38,8 +38,11 @@ export function projetoAtivo(v: Vinculo | null): Projeto | null {
   return v?.projetos.find(p => p.id === v.ativoId) ?? null;
 }
 
-/** definido em 2026-09-18: armazenamento privado na máquina local; não é autorização por si só. */
-export function criarPastas(raiz: string, imagem?: string) {
+/**
+ * definido em 2026-09-18: armazenamento privado na máquina local; não é autorização por si só.
+ * `baseBusca` só existe para o teste apontar uma base descartável — em produção é a pasta pessoal.
+ */
+export function criarPastas(raiz: string, imagem?: string, baseBusca?: string) {
   const preparar = criarPreparadorWorkspace(join(raiz, "ambientes"));
   const registros = join(raiz, "vinculos");
   function arquivo(i: Identidade) {
@@ -140,6 +143,7 @@ export function criarPastas(raiz: string, imagem?: string) {
       const privado = await realpath(raiz);
       const casa = await realpath(homedir());
       return buscarPastas(termo, {
+        ...(baseBusca ? { base: baseBusca } : {}),
         podeAutorizar: (p) => p !== dirname(p) && p !== casa && !dentro(p, privado) && !dentro(privado, p),
       });
     },

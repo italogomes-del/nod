@@ -11,8 +11,8 @@ import { log } from "../../obs/log.ts";
 
 type Dentro = <T>(e: Escopo, fn: (d: Deps) => Promise<T>) => Promise<T>;
 /** definido em 2026-09-18: concessão local por conversa/pessoa; indisponível em servidor compartilhado. */
-export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: string; imagem?: string }) {
-  const pastas = criarPastas(o.raiz, o.imagem);
+export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: string; imagem?: string; baseBusca?: string }) {
+  const pastas = criarPastas(o.raiz, o.imagem, o.baseBusca);
   const ocupados = new Set<string>();
   const revogando = new Set<string>();
   const cancelamentos = new Map<string, AbortController>();
