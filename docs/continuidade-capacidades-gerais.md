@@ -44,6 +44,43 @@ com escalada e passaram. O custo impresso pelo teste `claude-cli-falso` vem da
 fixture; nenhum modelo pago foi executado. Testes de catálogo NÃO provam
 programação ponta a ponta.
 
+Commit publicado: `26635dc`, na branch indicada acima. O remoto foi verificado
+como `https://github.com/marlonwlv/nod.git`, privado, conta autenticada `marlonwlv`
+com permissão ADMIN. A primeira revisão de push pediu essa evidência; o push
+seguinte foi autorizado e concluído.
+
+## Checkpoint 2 — preparação de workspace (ainda sem concessão)
+
+`src/contracts/workspace.ts` e `src/adapters/workspace/preparar.ts` separam
+organização dos arquivos de harness e autorização. O chamador precisa fornecer
+uma pasta previamente autorizada na máquina correta; esse adapter NÃO concede
+acesso e ainda não está ligado à execução nem à interface.
+
+- `auto`: worktree para raiz Git com commit; pasta direta sem Git, sem commit
+  ou quando a concessão é somente uma subpasta. Nunca amplia para a pasta pai.
+- `direto` respeita a pasta original. Referência explícita vale para novo worktree.
+- Sem referência explícita, copia alterações versionadas e arquivos novos não
+  ignorados. Não copia arquivos ignorados, não transfere links não versionados
+  nem executa hooks/fsmonitor. Preparação de dependências continua pendente.
+- Manifesto privado por id mantém ambiente/edições entre chamadas; não depende
+  do harness. O padrão é resolvido uma vez, mesmo se a pasta passar a ter Git.
+- IDs não podem escapar da raiz. Home inteira e raiz do filesystem são recusadas.
+- Referência inexistente falha antes de reservar id. Outras falhas parciais
+  preservam arquivos para recuperação; ainda NÃO há retomada automática dessas
+  falhas. Não remover esses diretórios cegamente: podem conter trabalho.
+
+Dez testes com pastas/repos descartáveis cobrem esses casos. `npm run check`
+concluiu com sucesso em 2026-09-18: lint, quatro typechecks, cerca do domínio,
+416 unitários, 227 integração, 49 conformidade e 55 concorrência (747 testes).
+O teste de continuidade após primeiro commit foi reexecutado no conjunto dos
+dez testes e passou. Nenhum modelo pago foi executado.
+
+Próxima investigação: integração de capacidades nativas com limites de acesso.
+O help local do Claude foi consultado sem inferência e oferece `--restricted`,
+`--settings` e `--tools`, mas isso sozinho NÃO comprova segurança/paridade. Não
+habilitar Bash/Read/Edit irrestritos nem mudar o cwd do CLI para o projeto sem
+resolver configuração herdada, permissões, cancelamento e isolamento.
+
 ## Estado real e próximo trabalho
 
 O problema do usuário AINDA NÃO ESTÁ RESOLVIDO. Nenhuma pasta local está concedida
