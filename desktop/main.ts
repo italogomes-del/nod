@@ -1,3 +1,4 @@
+import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
 import { app, BrowserWindow, ipcMain, Menu, safeStorage, session, shell, type IpcMainInvokeEvent } from "electron";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -70,7 +71,7 @@ async function parar() {
   const anterior = laco; laco = null;
   cliente?.cancelar();
   if (anterior) await anterior.parar().catch(() => undefined);
-  for (const r of Object.values(registry ?? {})) if (r.estado === "pronto") await r.instance.dispose();
+  for (const r of Object.values(registry ?? {})) if (r?.estado === "pronto") await r.instance.dispose();
   if (cliente) await cliente.ponte.desconectar("").catch(() => undefined);
   registry = null; cliente = null;
 }
@@ -94,14 +95,15 @@ async function conectar(c: Config) {
   await web.clearStorageData();
   await web.cookies.set({ url: c.url, name: "nod_sessao", value: cookie, path: "/", httpOnly: true, secure: c.url.startsWith("https:"), sameSite: "strict" });
   await guardar(c); configuracao = c;
-  const criado = await criarRegistryDetalhado({ ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") }, [criarClaudeCliDriver({ urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), nodePath: process.execPath, electronComoNode: true })]);
+  const lig = { urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), nodePath: process.execPath, electronComoNode: true, sondaSemTurno: true };
+  const criado = await criarRegistryDetalhado({ ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") }, [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)]);
   registry = criado.registry;
-  const inv = criado.inventarios["claude-cli"] ?? { estado: "ausente" as const, motivo: "Claude indisponível", em: Date.now() };
+  const inv = Object.values(criado.inventarios).find((i) => i?.estado === "pronto") ?? criado.inventarios["claude-cli"] ?? { estado: "ausente" as const, motivo: "Conecte sua conta de IA", em: Date.now() };
   cliente = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
-  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1 });
+  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1, harnesses: criado.inventarios });
   if (inv.estado !== "pronto") {
-    mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta com o Claude Code e conecte novamente." : "Instale o Claude Code neste Mac e conecte novamente.";
-    throw new Error("claude_indisponivel");
+    mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta do Claude Code ou Codex e conecte novamente." : "Instale o Claude Code ou Codex neste Mac e conecte novamente.";
+    throw new Error("harness_indisponivel");
   }
   laco = iniciarLaco({ ponte: cliente.ponte, registry, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (_p, t) => cliente?.delta(t) });
   const anterior = janela;
@@ -125,7 +127,7 @@ else {
     void parar().finally(() => app.quit());
   });
   void app.whenReady().then(async () => {
-    Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: "nod", submenu: [{ label: "Conexão / verificar Claude", click: () => { void parar().then(mostrarSetup); } }, { role: "quit" }] }, { role: "editMenu" }, { role: "viewMenu" }]));
+    Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: "nod", submenu: [{ label: "Conexão / verificar conta de IA", click: () => { void parar().then(mostrarSetup); } }, { role: "quit" }] }, { role: "editMenu" }, { role: "viewMenu" }]));
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? "", mensagem }; });
     ipcMain.handle("nod:login", async (e, valor: unknown) => {
       validarRemetente(e);
@@ -139,7 +141,7 @@ else {
       try {
         if (!dados || typeof dados !== "object" || !("url" in dados) || !("chave" in dados) || typeof dados.chave !== "string" || dados.chave.length > 1024 || !dados.chave) throw new FalhaPonte("resposta_invalida");
         await conectar({ url: urlServidor(dados.url, !app.isPackaged), chave: dados.chave });
-      } catch (erro) { if (erro instanceof FalhaPonte) mensagem = mensagens[erro.codigo]!; else if (!mensagem) mensagem = "Não foi possível conectar. Confira o Claude e o acesso ao Keychain."; }
+      } catch (erro) { if (erro instanceof FalhaPonte) mensagem = mensagens[erro.codigo]!; else if (!mensagem) mensagem = "Não foi possível conectar. Confira sua conta de IA e o acesso ao Keychain."; }
       finally { conectando = false; }
       return { mensagem };
     });

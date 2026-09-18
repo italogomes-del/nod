@@ -40,6 +40,7 @@ export async function configDosDrivers(env: EnvRegistry, o: OpcoesRegistry = {})
   const limpo = montarAmbiente("local", env);
   return {
     bin: env.NOD_CLAUDE_BIN ? expandirTil(env.NOD_CLAUDE_BIN, home) : undefined,
+    bins: { "codex-cli": env.NOD_CODEX_BIN ? expandirTil(env.NOD_CODEX_BIN, home) : undefined },
     env: { ...limpo, PATH: caminhoAumentado(env.PATH, home, pathLogin), HOME: limpo.HOME ?? home },
     cwdBase: join(nodHome(env, home), "turnos"),
   };
@@ -63,7 +64,7 @@ export function registryVazio(): Registry {
  * Registra (ou re-registra) UM driver no registry, no lugar: create() → sondar(); 'pronto' entra,
  * senão sombra com motivo escrito. Devolve o inventário da sonda (null quando create() lançou). A
  * instância anterior, se havia, é liberada. É o que o interruptor de executor usa para ligar o
- * claude-cli DEPOIS do boot (definido em 2026-09-16: a sonda só é paga quando a pessoa pede).
+ * claude-cli DEPOIS do boot (definido em 2026-09-18: a sonda de descoberta não submete prompt).
  */
 export async function registrarDriver(registry: Registry, cfg: ConfigDriver, driver: Driver): Promise<Inventario | null> {
   const id = driver.meta.id;
@@ -82,7 +83,7 @@ export async function registrarDriver(registry: Registry, cfg: ConfigDriver, dri
     registry[id] = { estado: "sombra", motivo: `create_falhou: ${motivoDe(erro)}` };
   }
   // A instância anterior é liberada FORA do try: um dispose que falha não pode rebaixar o registro novo a 'create_falhou'.
-  if (anterior.estado === "pronto") await liberar(id, anterior.instance);
+  if (anterior?.estado === "pronto") await liberar(id, anterior.instance);
   return inv;
 }
 
@@ -118,8 +119,10 @@ export type ExecutorPadrao = { id: IdDriver } | { id: null; motivo: string };
  */
 export function executorPadrao(env: EnvRegistry, registry: Registry): ExecutorPadrao {
   const pedido = env.NOD_EXECUTOR;
-  const escolhido: IdDriver = pedido === "claude-cli" || pedido === "catcher" ? pedido : env.NODE_ENV === "production" ? "claude-cli" : "catcher";
+  const automatico = pedido === "auto" || (!pedido && env.NODE_ENV === "production");
+  const disponivel: IdDriver = registry["claude-cli"].estado === "pronto" ? "claude-cli" : registry["codex-cli"]?.estado === "pronto" ? "codex-cli" : "claude-cli";
+  const escolhido: IdDriver = automatico ? disponivel : pedido === "claude-cli" || pedido === "codex-cli" || pedido === "catcher" ? pedido : env.NODE_ENV === "production" ? "claude-cli" : "catcher";
   const registro = registry[escolhido];
-  if (registro.estado === "pronto") return { id: escolhido };
-  return { id: null, motivo: `${escolhido} em sombra: ${registro.motivo}` };
+  if (registro?.estado === "pronto") return { id: escolhido };
+  return { id: null, motivo: `${escolhido} em sombra: ${registro?.motivo ?? MOTIVO_NAO_REGISTRADO}` };
 }

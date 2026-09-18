@@ -12,7 +12,7 @@ import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
 import { escreverMcpConfig } from "../mcp-config.ts";
-import { iniciarProcesso, type Processo } from "../processo.ts";
+import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
 
@@ -32,6 +32,7 @@ export type LigacaoClaudeCli = {
   electronComoNode?: boolean;
   /** definido em 2026-09-16: a sonda usa o modelo mais barato (EMENDA 35). */
   modeloSonda?: string;
+  sondaSemTurno?: boolean;
   /**
    * Espera entre SIGTERM e SIGKILL na interrupção; default SIGTERM_PARA_SIGKILL_MS (5 s).
    * definido em 2026-09-16: existe para o teste que CRONOMETRA `interromper()` poder afirmar
@@ -133,6 +134,18 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
 
       return {
         async sondar(): Promise<Inventario> {
+          if (lig.sondaSemTurno) {
+            try {
+              const v = await garantirVersao();
+              const pisos = conferirFloors({ versao: v.versao, flags: FLAGS_DO_TURNO, flagsNoHelp });
+              if (!pisos.ok) return { estado: "ausente", motivo: "Atualize o Claude Code para continuar.", em: Date.now() };
+              const r = await executarColetando({ bin: v.binario, args: ["auth", "status"], env: envBase, cwd: home, timeoutMs: 10_000 });
+              let autenticado = false;
+              try { const status = JSON.parse(r.stdout) as { loggedIn?: boolean }; autenticado = status.loggedIn === true; } catch { /* Sem resposta estruturada, a sonda fecha o gate. */ }
+              return r.exitCode === 0 && autenticado ? { estado: "pronto", versao: v.versao, em: Date.now() } : { estado: "nao_autenticado", motivo: "Abra o Claude Code e entre na sua conta.", versao: v.versao, em: Date.now() };
+            } catch { return { estado: "ausente", motivo: "Instale ou atualize o Claude Code neste computador.", em: Date.now() }; }
+          }
+
           // medido em 2026-09-16 (e2e:haiku, primeira rodada): NOD_HOME/turnos ainda não existia na sonda do boot e o
           // mkdtemp falhava com ENOENT — o driver ia para a sombra com "create_falhou". O diretório nasce aqui também.
           await mkdir(cfg.cwdBase, { recursive: true });

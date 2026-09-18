@@ -1,4 +1,5 @@
 import type { composioRepo } from "./composio.repo.ts";
+import type { computadoresRepo } from "./computadores.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import type { agentesRepo } from "./agentes.repo.ts";
 import type { catcherRepo } from "./catcher.repo.ts";
@@ -36,6 +37,7 @@ import type { turnosRepo } from "./turnos.repo.ts";
 export type Fabrica<R> = (conn: Conn, escopo: Escopo) => R;
 
 export interface Repos {
+  computadores: ReturnType<typeof computadoresRepo>;
   composio: ReturnType<typeof composioRepo>;
   pessoas: ReturnType<typeof pessoasRepo>;
   events: ReturnType<typeof eventsRepo>;

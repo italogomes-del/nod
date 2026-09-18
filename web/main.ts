@@ -1,4 +1,6 @@
 import "./lib/mascote-elemento.ts";
+import { abrirComputador } from "./telas/computador.ts";
+import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
@@ -6,9 +8,9 @@ import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
-import { botao, esc, iconeAgente } from "./lib/render.ts";
-import { esquecerRegiao, regiao } from "./lib/regioes.ts";
+import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
+import { esquecerRegiao, regiao } from "./lib/regioes.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
@@ -169,7 +171,7 @@ function renderSidebar(): string {
     <button class="manage-link" data-act="navegar" data-tela="gestao">Gerenciar agentes <span>Ocultos e excluídos</span></button>
     <button class="marketplace-link" data-act="navegar" data-tela="conectores"><span>▦</span> Marketplace</button>
     ${ambiente}
-    <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${estado.executor?.atual === "claude-cli" ? "Claude Code conectado" : "Modo de simulação"}</small></div></div>`;
+    <div class="me"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${!estado.executor ? "Verificando conexão…" : estado.executor.atual === "catcher" ? "Modo de simulação" : "Sua IA conectada"}</small></div></div>`;
 }
 
 function renderPrincipal(): void {
@@ -513,6 +515,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (ta) { ta.value = el.dataset.texto ?? ""; return enviarComposer(); }
   },
+  "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
   "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
@@ -531,6 +534,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "menu-agente": (el) => menuDoBot(el),
+  "inteligencia": (el) => {
+    const a = botGerido(el.dataset.id);
+    if (!a || a.ownerId !== estado.sessao?.pessoaId) return;
+    pedirGestao(`Inteligência de ${a.nome}`, renderInteligencia(a, estado.executor?.harnesses, true), "Salvar escolha", async (d) => mudarGestao(() => api!.editarPerfil(a.id, escolhaInteligencia(d))));
+  },
   "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
   "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
@@ -541,7 +549,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "sondar-inventario": () => agir(async () => dispatch({ tipo: "hidratar-inventario", inventario: await api!.inventario(true) })),
   "trocar-executor": (el) =>
     agir(async () => {
-      const estadoNovo = await api!.trocarExecutor(el.dataset.id === "claude-cli" ? "claude-cli" : "catcher");
+      const estadoNovo = await api!.trocarExecutor(el.dataset.id === "codex-cli" ? "codex-cli" : el.dataset.id === "claude-cli" ? "claude-cli" : "catcher");
       dispatch({ tipo: "hidratar-executor", executor: estadoNovo });
       dispatch({ tipo: "invalidar", quais: ["inventario", "frota"] });
     }),
@@ -630,7 +638,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "editar-perfil": (form) =>
     agir(async () => {
       const d = new FormData(form);
-      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), modelo: String(d.get("modelo") ?? ""), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
+      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), ...escolhaInteligencia(d), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
       dispatch({ tipo: "invalidar", quais: ["frota"] });
     }),
   "criar-memoria": (form) =>
@@ -701,6 +709,12 @@ document.addEventListener("submit", (ev) => {
 // Contador ao vivo da aprovação em lista e autocomplete de @menção.
 document.addEventListener("change", (ev) => {
   const cb = ev.target as HTMLInputElement;
+  if (cb.matches('select[name="inteligencia"]')) {
+    const select = ev.target as HTMLSelectElement;
+    const chip = select.closest(".inteligencia-card")?.querySelector(".inteligencia-chip");
+    if (chip) chip.textContent = select.selectedOptions[0]?.textContent?.split(" · ")[0] ?? "Automático";
+    return;
+  }
   if (cb.matches('select[name="frequencia"]')) {
     const horario = cb.closest("form")?.querySelector<HTMLInputElement>('input[name="horario"]');
     const intervalo = cb.value.startsWith("intervalo:") || cb.value === "hora";
@@ -725,6 +739,15 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
+  if (ta.matches("[data-customiza-mascote]")) {
+    const form = ta.closest<HTMLFormElement>('form[data-form="editar-perfil"]');
+    const preview = form?.querySelector<HTMLElement>("[data-mascote-preview]");
+    const forma = form?.querySelector<HTMLInputElement>('input[name="forma"]:checked')?.value as FormaAgente | undefined;
+    const cor = form?.querySelector<HTMLInputElement>('input[name="cor"]:checked')?.value;
+    if (preview && forma && cor) atualizarMascote(preview, forma, cor);
+    if (forma && cor) form?.querySelectorAll<HTMLElement>("[data-gallery]").forEach(el => atualizarMascote(el, forma, cor));
+    return;
+  }
   if (ta.id === "busca-marketplace") {
     filtrarApps(ta.value);
     return;

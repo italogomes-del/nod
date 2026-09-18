@@ -21,6 +21,9 @@ export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | {
  * catcher ← L4/L3; relogio ← L9 (relogio-sistema). L9 compõe.
  */
 export interface ServicesNod<Trx> {
+  computadores?: {
+    executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
+  };
   relogio: () => number;
   tokenTurno: {
     /** definido em 2026-09-16 (L9, pendência L5 §2): cunhar RECEBE a identidade — `autorizar` a devolve, logo ela entra aqui. */

@@ -110,3 +110,5 @@ Gestão completa de agentes: menu na lista e no chat, organização em seções,
 cópia, ocultos e exclusão recuperável. [Roteiro de aceite](docs/uat-gestao-agentes.md) e
 [decisão de ciclo de vida](docs/adr/adr-034-gestao-e-exclusao-recuperavel-de-agentes.md).
 `npm run uat:gestao` repete a regressão dedicada. Atualize o banco com `npm run db:migrate` antes de iniciar.
+
+Computadores dos bots: [configuração, casos de uso e limites](docs/computadores.md).

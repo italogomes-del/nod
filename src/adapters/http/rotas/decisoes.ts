@@ -18,7 +18,7 @@ import { executar, textoDoCorpo, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export type DepsRotasDecisoes = {
   dentro: DentroDeTx;
-  services: Pick<Services, "conectores" | "rotinas">;
+  services: Pick<Services, "conectores" | "rotinas" | "computadores">;
   prazoDecisaoMs?: number;
   executor?: Executor;
 };

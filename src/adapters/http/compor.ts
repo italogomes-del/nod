@@ -1,4 +1,9 @@
-import { MODELO_AGENTE_PADRAO } from "../../contracts/modelos.ts";
+import type { DriverComputador } from "../../contracts/computador.ts";
+import { criarDriverDocker } from "../computador/docker.ts";
+import { criarComputadores } from "../fundo/computadores.ts";
+import { rotasComputadores } from "./rotas/computadores.ts";
+import { HARNESSES } from "../../contracts/harness.ts";
+import type { CatalogoHarness } from "../../contracts/harness.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
@@ -86,6 +91,7 @@ export type EnvApp = Readonly<Record<string, string | undefined>>;
 export type AtivarDriver = (id: IdDriver) => Promise<Inventario>;
 
 export type OpcoesCompor = {
+  computador?: DriverComputador;
   db: Db;
   env: EnvApp;
   relogio?: Relogio;
@@ -143,15 +149,17 @@ export function comporApp(o: OpcoesCompor): App {
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
   // (getter/closure), nunca uma cópia — senão a troca pela interface não chega ao plano do turno seguinte.
-  let executorAtual: Executor = compartilhado || env.NOD_EXECUTOR === "claude-cli" ? "local" : "catcher";
-  const idDriverAtual = (): IdDriver => (executorAtual === "local" ? "claude-cli" : "catcher");
-  const IDS_DRIVER: readonly IdDriver[] = ["catcher", "claude-cli"];
+  const automatico = env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production");
+  let driverPreferido: IdExecutor = env.NOD_EXECUTOR === "codex-cli" ? "codex-cli" : "claude-cli";
+  let executorAtual: Executor = compartilhado || automatico || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" ? "local" : "catcher";
+  const idDriverAtual = (): IdExecutor => (executorAtual === "local" ? driverPreferido : "catcher");
+  const IDS_DRIVER: readonly IdExecutor[] = ["catcher", "claude-cli", "codex-cli"];
   const inventarioPorDriver: Partial<Record<IdDriver, Inventario>> = {};
   let ativarDriver: AtivarDriver | null = null;
   let filaDeTrocas: Promise<unknown> = Promise.resolve();
   const machineId = env.NOD_MACHINE_ID ?? "";
   const prazoDecisaoMs = numero(env.NOD_PRAZO_DECISAO_MS, 86_400_000);
-  const modeloPadrao = env.NOD_MODELO ?? MODELO_AGENTE_PADRAO;
+  const modeloPadrao = env.NOD_MODELO ?? "auto";
   const chave = chaveDe(env.NOD_CREDENTIAL_KEY ?? "chave-de-desenvolvimento-sem-valor");
   let registryLigado: Registry | null = null;
   let inventarioInicial: Inventario | null = null;
@@ -207,7 +215,9 @@ export function comporApp(o: OpcoesCompor): App {
     planos: {
       async emitir(trx, turnoId, machineIdDoPlano) {
         const d = depsSobre(trx);
-        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado });
+        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado,
+          harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
+          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -226,6 +236,11 @@ export function comporApp(o: OpcoesCompor): App {
   };
 
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
+
+  const computadores = criarComputadores({ dentro, driver: o.computador ?? criarDriverDocker(env), executor: () => executorAtual,
+    cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
+    mudou: (escopo, agenteId) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId }); } });
+  if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
   const depsPonte: Parameters<typeof criarPonteInterna>[1] = {
@@ -270,12 +285,12 @@ export function comporApp(o: OpcoesCompor): App {
   }, 15_000) : null;
   varredorMaquinas?.unref();
 
-  // Inventário por pessoa (ADR-019): a sonda é da MÁQUINA (uma por TTL, compartilhada entre pessoas — cada
-  // sonda do claude-cli custa um turno real); a persistência é por pessoa em inventario_motores.
+  // Inventário por pessoa (ADR-019): a sonda é da MÁQUINA (uma por TTL, compartilhada entre pessoas);
+  // definido em 2026-09-18: descoberta consulta instalação/login sem prompt e persiste por pessoa.
   let sondaCompartilhada: { em: number; promessa: Promise<Inventario> } | null = null;
   const TTL_SONDA_MS = 300_000;
-  // definido em 2026-09-16: quem chega antes do registry espera até PRAZO_REGISTRY_MS (a sonda do boot custa um
-  // turno real e leva segundos); vencido o prazo responde 'ausente' SEM cachear, para a próxima chamada tentar de
+  // definido em 2026-09-18: quem chega antes do registry espera até PRAZO_REGISTRY_MS; vencido o prazo
+  // responde 'ausente' SEM cachear, para a próxima chamada tentar de
   // novo. Um app composto e nunca ligado (só em teste) responde em vez de pendurar o pedido.
   const PRAZO_REGISTRY_MS = 15_000;
   async function sondarMaquina(): Promise<Inventario> {
@@ -327,26 +342,25 @@ export function comporApp(o: OpcoesCompor): App {
   });
 
   // Interruptor de executor (definido em 2026-09-16): a troca é da MÁQUINA. Trocar para um driver em sombra
-  // tenta ligá-lo na hora (ativarDriver, fornecido pelo boot; a sonda do claude-cli custa um turno real) e só
+  // tenta ligá-lo na hora (ativarDriver, fornecido pelo boot; a descoberta não submete prompt) e só
   // vira executor se a sonda disser 'pronto' — senão `recusa` escrita e nada muda (ADR-019 gate, ADR-029).
   function inventarioDe(id: IdDriver): Inventario {
     const guardado = inventarioPorDriver[id];
     if (guardado) return guardado;
     const registro = registryLigado?.[id];
-    const motivo = !registro
-      ? "servidor ainda sem registry"
-      : registro.estado === "pronto"
-        ? "sem sonda"
-        : registro.motivo !== MOTIVO_NAO_REGISTRADO
-          ? registro.motivo
-          : id === "claude-cli"
-            ? "ainda não sondado — trocar para ele liga o driver (custa um turno real)"
-            : "driver não disponível neste servidor";
+    const motivo = !registryLigado ? "Verificando as conexões deste computador…"
+      : !registro || registro.estado === "sombra" && registro.motivo === MOTIVO_NAO_REGISTRADO ? "Conecte sua conta para habilitar este harness."
+      : registro.estado === "pronto" ? "Verificando conexão…" : registro.motivo;
     return { estado: "ausente", motivo, em: relogio() };
   }
   /** `recusa` é da RESPOSTA da troca pedida, nunca guardada: quem só consulta (GET, outras telas) não vê a recusa de outra pessoa. */
+  function catalogoHarness(pessoaId?: string): CatalogoHarness {
+    const remotos = compartilhado && pessoaId ? ponteHttp.harnessesDaPessoa(pessoaId) : null;
+    const opcoes = HARNESSES.map((h) => ({ ...h, inventario: remotos ? remotos[h.id] ?? { estado: "ausente" as const, motivo: "Não conectado neste computador", em: relogio() } : inventarioDe(h.id) }));
+    return { simulacao: !compartilhado && executorAtual === "catcher", padrao: opcoes.find((h) => h.id === driverPreferido && h.inventario.estado === "pronto")?.id ?? opcoes.find((h) => h.inventario.estado === "pronto")?.id ?? null, opcoes };
+  }
   function estadoExecutor(recusa: string | null = null): EstadoExecutor {
-    return { atual: idDriverAtual(), opcoes: IDS_DRIVER.map((id) => ({ id, custo: id === "catcher" ? "zero" : "real", inventario: inventarioDe(id) })), recusa };
+    return { atual: idDriverAtual(), opcoes: IDS_DRIVER.map((id) => ({ id, custo: id === "catcher" ? "zero" : "real", inventario: inventarioDe(id) })), recusa, harnesses: catalogoHarness() };
   }
   function recusar(id: IdExecutor, atual: IdDriver, motivo: string): EstadoExecutor {
     log("aviso", "executor_troca_recusada", { pedido: id, atual, motivo });
@@ -358,24 +372,24 @@ export function comporApp(o: OpcoesCompor): App {
     const registry = registryLigado;
     if (!registry) return estadoExecutor("servidor ainda sem registry");
     try {
-      // 1. Sonda ANTES de virar: liga o driver em sombra (no claude-cli custa um turno) ou reaproveita a sonda recente do
+      // 1. Sonda ANTES de virar: liga o driver em sombra ou reaproveita a consulta recente do
       //    driver já pronto; sonda velha (> TTL) é refeita — um driver pronto no boot pode ter sido deslogado desde então.
       const registro = registry[id];
       const conhecido = inventarioPorDriver[id];
       let inv: Inventario;
-      if (registro.estado !== "pronto") {
-        if (!ativarDriver) return recusar(id, anterior, registro.motivo);
+      if (!registro || registro.estado !== "pronto") {
+        if (!ativarDriver) return recusar(id, anterior, registro?.motivo ?? MOTIVO_NAO_REGISTRADO);
         inv = await ativarDriver(id);
       } else if (conhecido?.estado === "pronto" && relogio() - conhecido.em < TTL_SONDA_MS) inv = conhecido;
       else inv = await registro.instance.sondar(); // sem sonda recente que diga 'pronto': sonda de novo (uma recusa recente não é definitiva)
       inventarioPorDriver[id] = inv;
       if (inv.estado !== "pronto") return recusar(id, anterior, `${inv.estado}: ${inv.motivo}`);
       const ligado = registry[id];
-      if (ligado.estado !== "pronto") return recusar(id, anterior, ligado.motivo);
+      if (!ligado || ligado.estado !== "pronto") return recusar(id, anterior, ligado?.motivo ?? MOTIVO_NAO_REGISTRADO);
 
       // 2. Ainda antes de virar: inventário persistido por pessoa sob o motor NOVO (é o que enviarMensagem e emitirPlanoTurno
       //    leem no gate pré-spawn) e máquina anunciada com ele — nenhum turno nasce 'ausente' na janela da troca.
-      const novo: Executor = id === "claude-cli" ? "local" : "catcher";
+      const novo: Executor = id === "catcher" ? "catcher" : "local";
       const pessoas = await listar();
       for (const p of pessoas) {
         const escopo: Escopo = { tenantId: p.tenantId, pessoaId: p.id };
@@ -383,8 +397,9 @@ export function comporApp(o: OpcoesCompor): App {
       }
       for (const m of ponte.maquinasConectadas()) await ponte.conectar({ ...m, inventario: inv });
 
-      // 3. Vira por último. A sonda da troca vale como a sonda da máquina (uma troca custa UM turno, não N); o cache do
+      // 3. Vira por último. A consulta da troca vale como a consulta da máquina; o cache do
       //    inventário por pessoa é invalidado e cada tela aberta recebe o aviso.
+      driverPreferido = id;
       executorAtual = novo;
       inventarioInicial = null;
       sondaCompartilhada = { em: relogio(), promessa: Promise.resolve(inv) };
@@ -426,10 +441,11 @@ export function comporApp(o: OpcoesCompor): App {
     ...(compartilhado ? [
       ...ponteHttp.rotas,
       { metodo: "GET", padrao: /^\/executor$/, async handler(ctx) {
-        ctx.json(200, { atual: "claude-cli", opcoes: [{ id: "claude-cli", custo: "real", inventario: await inventario.obter(ctx.escopo.pessoaId) }], recusa: null });
+        const catalogo = catalogoHarness(ctx.escopo.pessoaId);
+        ctx.json(200, { atual: catalogo.padrao ?? "claude-cli", opcoes: catalogo.opcoes.filter((h) => h.integrado).map((h) => ({ id: h.id, custo: "real", inventario: h.inventario })), recusa: null, harnesses: catalogo });
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
-    ...criarRotasAgentes(depsRotas),
+    ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
     ...criarRotasConversas(depsRotas),
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
@@ -439,7 +455,8 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasTrilha({ dentro }),
     ...rotasMaquinas({ dentro }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
-    ...rotasInternas({ dentro, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
+    ...rotasComputadores(computadores),
+    ...rotasInternas({ dentro, computadores, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
@@ -506,6 +523,7 @@ export function comporApp(o: OpcoesCompor): App {
     autorizarMaquina,
     ligarRegistry(registry, inventarios, ativar) {
       registryLigado = registry;
+      if (automatico) driverPreferido = registry["claude-cli"].estado === "pronto" ? "claude-cli" : registry["codex-cli"]?.estado === "pronto" ? "codex-cli" : "claude-cli";
       for (const id of IDS_DRIVER) {
         const inv = inventarios?.[id];
         if (inv) inventarioPorDriver[id] = inv;

@@ -6,12 +6,12 @@ import type { Relogio } from "../shared/types.ts";
  * Inventário de motores por pessoa (ADR-019): cache da sonda com TTL e persistência por CALLBACK
  * injetado (EMENDA 3: src/services é sem banco — quem grava em inventario_motores é a L9 via
  * repos.inventario.registrar dentro de uma tx escopada). Sondas concorrentes da mesma pessoa
- * compartilham a mesma promessa: um turno de sonda, não N.
+ * compartilham a mesma promessa: uma consulta de estado, não N.
  */
 export type Sondador = (pessoaId: string) => Promise<Inventario>;
 export type Persistidor = (pessoaId: string, inventario: Inventario) => Promise<void>;
 
-/** definido em 2026-09-16: 5 min — cada sonda custa um turno real (US$0,003–0,02); a pessoa que acabou de logar no CLI espera no máximo isso ou clica "sondar de novo". */
+/** definido em 2026-09-18: 5 min evita repetir consultas de instalação/login; "sondar de novo" permite reconhecer um login recém-concluído. */
 export const INVENTARIO_TTL_MS = 300_000;
 
 export type ServicoInventario = {

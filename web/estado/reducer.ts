@@ -221,6 +221,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     // definido em 2026-09-16: as 20 mais recentes bastam na tela; o registro completo está na trilha.
     return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f));
   },
+  "computador.mudou": (e) => e,
   "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);

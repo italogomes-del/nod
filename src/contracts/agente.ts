@@ -1,3 +1,4 @@
+import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 
 export const FORMAS_AGENTE = ["shape-square", "shape-hex", "shape-circle", "shape-pebble", "shape-capsule", "shape-triangle", "shape-cloud", "shape-drop"] as const;
@@ -34,6 +35,7 @@ export type Agente = {
   /** Perfil confirmado pela pessoa (nada aplicado antes disso). */
   confirmado: boolean;
   modelo: string;
+  harness?: PreferenciaHarness;
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;
   secao?: string;

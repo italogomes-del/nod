@@ -1,3 +1,4 @@
+import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Confianca } from "./mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "./motivos.ts";
@@ -45,6 +46,7 @@ export type Turno = {
   entradaConfianca: Confianca;
   custoUsd: number | null;
   modelo: string;
+  harness?: PreferenciaHarness;
   criadoEm: EpochMs;
 };
 

@@ -1,3 +1,4 @@
+import type { Computadores } from "../../fundo/computadores.ts";
 import type { ClasseNegacao } from "../../../contracts/negacao.ts";
 import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -10,6 +11,7 @@ import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export type DepsRotasInternas = {
+  computadores?: Computadores;
   dentro: DentroDeTx;
   tokens: Pick<TokenTurno, "planoDe">;
   agora: Relogio;
@@ -56,6 +58,11 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { argumentos?: unknown };
         const turnoId = ctx.params.turnoId ?? "";
+        const plano = deps.tokens.planoDe(turnoId);
+        if (ctx.params.nome?.startsWith("computador_") && plano && deps.computadores) {
+          ctx.json(200, await deps.computadores.chamar(ctx.escopo, plano, ctx.params.nome, corpo?.argumentos ?? {}));
+          return;
+        }
         const resultado = await deps.dentro(ctx.escopo, (d) =>
           executar(d, chamarFerramenta, {
             turnoId,

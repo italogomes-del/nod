@@ -75,6 +75,7 @@ export const encaminhar: CasoNod<Deps, "encaminhar"> = async (deps, input) => {
     entradaTexto: `${de.nome} passou a rodada para você: ${input.motivo}`,
     entradaConfianca: "nao_confiavel",
     modelo: para.modelo,
+    harness: para.harness,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do destinatário não criado" });
   events.push(evento(deps, "sala_handoff", autoria, { de: de.id, para: para.id, salaId: sala.id, mensagemId: handoff?.id ?? null, turnoId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }));

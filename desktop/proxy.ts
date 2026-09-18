@@ -1,1 +1,1 @@
-import "../src/adapters/mcp-proxy/proxy.ts";
+export { main } from "../src/adapters/mcp-proxy/proxy.ts";

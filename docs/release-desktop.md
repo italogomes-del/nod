@@ -1,6 +1,6 @@
 # nod 0.2.0-rc.1 — guia de instalação e distribuição
 
-A distribuição usa um servidor compartilhado e dois aplicativos macOS: `arm64` para chips M e `x64` para Intel. O Mac precisa do Claude Code instalado e autenticado. Não precisa de Node, Docker ou Postgres. O servidor guarda as conversas, permissões, decisões e rotinas; cada app puxa os trabalhos da pessoa que emitiu sua chave.
+A distribuição usa um servidor compartilhado e dois aplicativos macOS: `arm64` para chips M e `x64` para Intel. O Mac precisa do Claude Code ou do Codex instalado e autenticado (ADR-036). Não precisa de Node, Docker ou Postgres. O servidor guarda as conversas, permissões, decisões e rotinas; cada app puxa os trabalhos da pessoa que emitiu sua chave.
 
 ## Preview sem assinatura — 17/09/2026
 

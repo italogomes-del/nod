@@ -29,7 +29,7 @@ function renderAprovacao(item: Item, aberta: boolean): string {
     .map(
       (i) => `<li class="ap-item${i.origemSensivel ? " sensivel" : ""}">
         <label><input type="checkbox" data-item="${esc(i.id)}" ${i.selecionado ? "checked" : ""} ${aberta ? "" : "disabled"} /> <b>${i.idx + 1}.</b> <code>${esc(i.destino.conector)}.${esc(i.destino.ferramenta)}</code></label>
-        <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" ${aberta ? "" : "disabled"} />
+        <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" ${aberta ? "" : "disabled"} ${i.destino.conector === "computador" ? 'readonly title="Ação vinculada à tela observada; para mudar, recuse e peça uma nova ação."' : ""} />
         ${i.origemSensivel ? `<div class="justificativa">${esc(i.justificativa ?? "veio de um conector que toca dado de aprendiz: desmarquei; só você marca.")}</div>` : ""}
         ${i.desfecho ? `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>` : ""}
       </li>`,

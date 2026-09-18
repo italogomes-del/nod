@@ -29,6 +29,7 @@ export type ServidorCompleto = ServidorNod & {
 };
 
 export type OpcoesServidorCompleto = {
+  computador?: OpcoesBoot["computador"];
   env?: Record<string, string | undefined>;
   intervalos?: OpcoesBoot["intervalos"];
   /** Nome da pessoa própria (default 'Pessoa E2E'). */
@@ -77,6 +78,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     listarPessoas: async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId })),
     segredoSessao: SEGREDO_DE_TESTE,
     drivers: o.drivers,
+    computador: o.computador,
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

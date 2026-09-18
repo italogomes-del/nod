@@ -57,11 +57,11 @@ describeIntegracao("gestão de agentes: ciclo de vida e organização", () => {
     await withRollback(MARLON, async (tx) => {
       const d = depsSobreTrx(tx, MARLON);
       const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "A".repeat(60), titulo: "Design", descricao: "Clareza" });
-      await editarPerfil(d, { agenteId: b.agente.id, forma: "shape-circle", cor: "c-blue", descricao: "Clareza" });
+      await editarPerfil(d, { agenteId: b.agente.id, forma: "shape-cloud", cor: "c-amber", descricao: "Clareza" });
       expect((await d.repos.agentes.buscar(b.agente.id))?.confirmado).toBe(true);
       await d.repos.rotinas.criar({ agenteId: b.agente.id, conversaId: b.conversa.id, cron: "*/5 * * * *", fusoIana: "UTC", instrucao: "UAT", fonte: "teste", entregavel: "chat", limitesAprovacao: "sem externos", politicaSemDado: "avisar", proximaExecucao: Date.now() + 300000 });
       const { data: copia } = await duplicarAgente(d, { agenteId: b.agente.id });
-      expect(copia.agente).toMatchObject({ titulo: "Design", descricao: "Clareza", forma: "shape-circle", cor: "c-blue", fixado: false, oculto: false, secao: "", naoLido: false });
+      expect(copia.agente).toMatchObject({ titulo: "Design", descricao: "Clareza", forma: "shape-cloud", cor: "c-amber", fixado: false, oculto: false, secao: "", naoLido: false });
       expect(copia.agente.nome.length).toBeLessThanOrEqual(60);
       expect(copia.conversa.id).not.toBe(b.conversa.id);
       expect(await d.repos.mensagens.listarDaConversa(copia.conversa.id)).toHaveLength(0);

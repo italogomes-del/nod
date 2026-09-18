@@ -30,8 +30,8 @@ export const INSTRUCAO_MOLDURA =
  * Envolve conteúdo não confiável quando atinge o limiar. Quem chama aplica neutralizarDelimitadores
  * ANTES, sempre — esta função repete a neutralização por segurança (idempotente).
  */
-export function envolverNaoConfiavel(texto: string, origem: string): string {
-  if (texto.length < UNTRUSTED_WRAP_MIN_CHARS) return texto;
+export function envolverNaoConfiavel(texto: string, origem: string, forcar = false): string {
+  if (!forcar && texto.length < UNTRUSTED_WRAP_MIN_CHARS) return texto;
   const corpo = neutralizarDelimitadores(texto);
   return `${INSTRUCAO_MOLDURA}\n<${TAG} origem="${nomeSeguro(origem)}">\n${corpo}\n</${TAG}>`;
 }

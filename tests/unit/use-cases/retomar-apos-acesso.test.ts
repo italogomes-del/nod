@@ -14,7 +14,7 @@ async function preparar() {
   if (!conector) throw new Error("conector");
   conector.habilitado = true;
   conector.catalogo = [{ nome: "enviar", descricao: "Enviar mensagem", schema: { type: "object" }, readOnlyHint: false }];
-  const original = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10000, profundidade: 0, entradaTexto: "mande uma msg de teste para Ingridd", entradaConfianca: "confiavel", modelo: "sonnet" });
+  const original = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10000, profundidade: 0, entradaTexto: "mande uma msg de teste para Ingridd", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
   if (!original) throw new Error("turno");
   const pedido = await pedirAcesso(deps, { turnoId: original.id, conversaId: bot.conversa.id, agenteId: bot.agente.id, conector: "slack", capacidades: ["enviar"], nivel: "escrita", nao_pedido: [] });
   const confirmado = await confirmarProposta(deps, { propostaId: pedido.data.proposta_id });
@@ -31,7 +31,7 @@ it("conceder o acesso retoma o pedido original uma única vez, sem executar o en
   expect(banco.concessoes).toHaveLength(1);
   const retomadas = banco.turnos.filter((t) => t.retomaTurnoId === original.id);
   expect(retomadas).toHaveLength(1);
-  expect(retomadas[0]).toMatchObject({ origem: "retomada", modelo: original.modelo, entradaConfianca: original.entradaConfianca });
+  expect(retomadas[0]).toMatchObject({ origem: "retomada", harness: original.harness, modelo: original.modelo, entradaConfianca: original.entradaConfianca });
   expect(retomadas[0]?.entradaTexto).toContain(original.entradaTexto);
   expect(retomadas[0]?.entradaTexto).toContain("slack: enviar");
   expect(retomadas[0]?.entradaTexto).toContain("Preserve as regras de aprovação");

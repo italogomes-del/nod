@@ -12,6 +12,7 @@ export type EntradaDespacharTurno = {
   executor?: Executor;
   /** Inventário anunciado pela máquina no conectar (ADR-021); ausente = lê o registrado; nenhum = 'ausente'. */
   inventario?: Inventario;
+  harnessesProntos?: readonly string[];
 };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
@@ -31,7 +32,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const paradaGlobal = await deps.repos.paradas.ativa(pessoaId, null);
   if (paradaGlobal !== false) return { data: { plano: null, turno: null, motivo: "parada_ativa" } };
 
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora });
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);

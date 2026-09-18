@@ -18,7 +18,7 @@ describe("criarAgente (E1.1/E1.2/E1.3, EMENDA 17)", () => {
     const { deps, banco } = depsEmMemoria();
     const { data, events } = await executar(deps, criarAgente, { dono: "pessoa" });
     expect(data.agente.nome).toBe(NOME_INICIAL);
-    expect(data.agente.modelo).toBe("sonnet");
+    expect(data.agente.modelo).toBe("auto");
     expect(data.agente).toMatchObject({ dono: "pessoa", visibility: "privado", confirmado: false, fixado: false, oculto: false });
     expect(data.conversa).toMatchObject({ tipo: "propria", agenteId: data.agente.id });
     expect(data.mensagem.kind).toBe("sistema");

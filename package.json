@@ -42,7 +42,8 @@
     "desktop:build": "tsc -p tsconfig.desktop.json --noEmit && node scripts/desktop/build.mjs",
     "desktop:dev": "npm run desktop:build && electron .",
     "desktop:mac": "node scripts/desktop/release-preflight.mjs && npm run desktop:build && electron-builder --mac --publish never --config.forceCodeSigning=true",
-    "desktop:pack": "npm run desktop:build && electron-builder --mac --dir --publish never"
+    "desktop:pack": "npm run desktop:build && electron-builder --mac --dir --publish never",
+    "computador:build": "docker build -t nod-computador:1 infra/computador"
   },
   "simple-git-hooks": {
     "pre-commit": "if command -v mise >/dev/null 2>&1; then mise exec -- npx lint-staged; else npx lint-staged; fi"

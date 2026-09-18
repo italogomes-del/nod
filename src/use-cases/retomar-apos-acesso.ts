@@ -27,6 +27,7 @@ export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta
       original.entradaTexto,
     ].join("\n"),
     entradaConfianca: original.entradaConfianca,
+    harness: original.harness,
     modelo: original.modelo,
     retomaTurnoId: original.id,
     reenvios: original.reenvios + 1,

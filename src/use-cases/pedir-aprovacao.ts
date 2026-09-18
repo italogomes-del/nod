@@ -15,11 +15,21 @@ import type { Deps } from "./tipos.ts";
  * conector registrado (o agente nunca inventa escopo, E6.2). A decisão nasce pendente para a dona;
  * o proxy faz long-poll e, sem decisão, manda o modelo encerrar o turno (a decisão retoma depois).
  */
-export const pedirAprovacao: CasoNod<Deps, "pedir_aprovacao"> = async (deps, input) => {
+const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => async (deps, input) => {
   const agora = deps.agora();
   if (!Array.isArray(input.itens) || input.itens.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "itens vazios" });
   const propostas: PropostaItem[] = [];
   for (const item of input.itens) {
+    if (item.destino.conector === "computador") {
+      if (!computador) throw new ErroDeDominio("nao_permitido");
+      const id = item.destino.argumentos?.acaoId;
+      if (typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id) || item.destino.ferramenta !== "executar") throw new ErroDeDominio("entrada_invalida");
+      const c = await deps.repos.computadores.obter(input.agenteId);
+      const a = await deps.repos.computadores.buscarAcao(id);
+      if (!c || !a || a.computadorId !== c.id || a.turnoId !== input.turnoId || a.estado !== "pendente") throw new ErroDeDominio("nao_permitido");
+      propostas.push({ texto: item.texto, destino: item.destino, origemSensivel: false });
+      continue;
+    }
     const conector = await deps.repos.conectores.buscarPorSlug(item.destino.conector);
     if (!conector) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${item.destino.conector} não registrado` });
     if (!conector.catalogo.some((c) => c.nome === item.destino.ferramenta)) {
@@ -64,3 +74,6 @@ export const pedirAprovacao: CasoNod<Deps, "pedir_aprovacao"> = async (deps, inp
   };
   return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [evento] };
 };
+
+export const pedirAprovacao = montarPedido(false);
+export const pedirAprovacaoComputador = montarPedido(true);

@@ -20,7 +20,7 @@ const SONDA_VELHA_MS = 600_000;
 
 /**
  * Interruptor de executor sobre o servidor COMPLETO (compor.ts + boot.ts): o boot com NOD_EXECUTOR=catcher
- * NÃO sonda o claude-cli (custa um turno real); a troca pela rota liga o driver na hora e só vira executor
+ * NÃO sonda o claude-cli; a troca pela rota liga o driver na hora e só vira executor
  * quando a sonda diz 'pronto' — a recusa vem escrita e o atual não muda (ADR-019 gate, ADR-029). Depois da
  * troca, o plano do turno seguinte nasce com o executor novo e o inventário persistido por pessoa segue.
  * Commita (laços reais, sessão) — por isso mora em tests/concurrency e limpa por id.
@@ -91,7 +91,7 @@ describeIntegracao("interruptor de executor: catcher ⇄ claude-cli em tempo de 
     expect(e.recusa).toBeNull();
     expect(opcao(e, "catcher")).toMatchObject({ custo: "zero", inventario: { estado: "pronto", versao: "catcher" } });
     expect(opcao(e, "claude-cli")?.custo).toBe("real");
-    expect(opcao(e, "claude-cli")?.inventario).toMatchObject({ estado: "ausente", motivo: expect.stringContaining("ainda não sondado") });
+    expect(opcao(e, "claude-cli")?.inventario).toMatchObject({ estado: "ausente", motivo: expect.stringContaining("Conecte sua conta") });
     expect(sondas).toBe(0);
 
     const invalido = await srv.chamar("POST", "executor", { id: "gpt" });

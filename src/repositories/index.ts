@@ -1,4 +1,5 @@
 import { composioRepo } from "./composio.repo.ts";
+import { computadoresRepo } from "./computadores.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { agentesRepo } from "./agentes.repo.ts";
 import { catcherRepo } from "./catcher.repo.ts";
@@ -29,6 +30,7 @@ import { turnosRepo } from "./turnos.repo.ts";
 /** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Leapy §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
   return {
+    computadores: computadoresRepo(conn, escopo),
     pessoas: pessoasRepo(conn, escopo),
     events: eventsRepo(conn, escopo),
     outbox: outboxRepo(conn, escopo),

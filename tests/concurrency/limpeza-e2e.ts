@@ -16,6 +16,7 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await vincularEscopo(trx, escopo);
     await trx`set local lock_timeout = '5s'`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from computador_acoes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from catcher_registros where owner_id = ${p}`;
     await trx`delete from itens_aprovacao where owner_id = ${p}`;
@@ -36,6 +37,7 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from conversas where owner_id = ${p}`;
     if (ids.agentes.length) await trx`delete from agentes where id in ${trx(ids.agentes)}`;
     await trx`delete from agentes where owner_id = ${p}`;
+    await trx`delete from computadores where owner_id = ${p}`;
     await trx`delete from composio_sessoes where owner_id = ${p}`;
     await trx`delete from composio_configuracoes where owner_id = ${p}`;
     await trx`delete from conectores where owner_id = ${p}`;
