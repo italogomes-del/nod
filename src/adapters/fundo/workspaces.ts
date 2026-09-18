@@ -5,7 +5,7 @@ import { ErroDeDominio } from "../../domain/erro.ts";
 import type { Escopo } from "../../shared/types.ts";
 import type { Deps } from "../../use-cases/tipos.ts";
 import { errosDoSchema, type ResultadoChamada } from "../../use-cases/chamar-ferramenta.ts";
-import { criarPastas } from "../workspace/pastas.ts";
+import { criarPastas, projetoAtivo } from "../workspace/pastas.ts";
 import { log } from "../../obs/log.ts";
 
 type Dentro = <T>(e: Escopo, fn: (d: Deps) => Promise<T>) => Promise<T>;
@@ -30,17 +30,27 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
     try { await dono(e, conversaId); return await fn(); } finally { ocupados.delete(k); }
   }
   return {
-    async id(i: Escopo & { conversaId: string }) { return (await pastas.consultar(i))?.id ?? null; },
+    /** Identidade do projeto ATIVO: é ela que o plano do turno lacra e o gateway confere. */
+    async id(i: Escopo & { conversaId: string }) { return projetoAtivo(await pastas.consultar(i))?.id ?? null; },
     async consultar(e: Escopo, conversaId: string) { await dono(e, conversaId); return pastas.consultar({ ...e, conversaId }); },
     async listar(e: Escopo, conversaId: string, caminho?: string) { await dono(e, conversaId); return pastas.listarPastas(caminho); },
     async escolher(e: Escopo, conversaId: string, pasta: string) {
       return exclusivo(e, conversaId, async () => {
-        const v = await pastas.escolher({ ...e, conversaId }, pasta);
-        log("info", "workspace_concedido", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, conversa_id: conversaId, workspace_id: v.id });
-        return v;
+        const { vinculo, projeto } = await pastas.escolher({ ...e, conversaId }, pasta);
+        log("info", "workspace_concedido", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, conversa_id: conversaId, workspace_id: projeto.id, projetos: vinculo.projetos.length });
+        return { vinculo, projeto };
       });
     },
-    async revogar(e: Escopo, conversaId: string) {
+    /** Troca entre projetos JÁ autorizados — não concede acesso novo. */
+    async trocar(e: Escopo, conversaId: string, projetoId: string) {
+      return exclusivo(e, conversaId, async () => {
+        const { vinculo, projeto } = await pastas.trocar({ ...e, conversaId }, projetoId);
+        log("info", "workspace_trocado", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, conversa_id: conversaId, workspace_id: projeto.id });
+        return { vinculo, projeto };
+      });
+    },
+    /** Sem projetoId revoga a conversa inteira; com id revoga um projeto e preserva os demais. */
+    async revogar(e: Escopo, conversaId: string, projetoId?: string) {
       await dono(e, conversaId);
       const k = `${e.tenantId}:${e.pessoaId}:${conversaId}`;
       if (revogando.has(k)) throw new ErroDeDominio("estado_invalido");
@@ -48,8 +58,8 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
       try {
         cancelamentos.get(k)?.abort();
         while (ocupados.has(k)) await new Promise<void>(r => setTimeout(r, 25));
-        await pastas.revogar({ ...e, conversaId });
-        log("info", "workspace_revogado", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, conversa_id: conversaId });
+        await pastas.revogar({ ...e, conversaId }, projetoId);
+        log("info", "workspace_revogado", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, conversa_id: conversaId, workspace_id: projetoId ?? null });
       } finally { revogando.delete(k); }
     },
     async chamar(e: Escopo, plano: PlanoTurno, nome: string, args: unknown): Promise<ResultadoChamada> {
@@ -65,7 +75,8 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
           await conferir();
           const i = { ...e, conversaId: plano.conversaId };
           const v = await pastas.consultar(i);
-          if (!v || v.id !== plano.workspaceId) return { ok: true, conteudo: JSON.stringify({ estado: "precisa_pasta", instrucao: "Use Pasta de trabalho na conversa para escolher a pasta; depois envie uma mensagem para continuar com o acesso atualizado." }), confianca: "confiavel" };
+          const ativo = projetoAtivo(v);
+          if (!v || !ativo || ativo.id !== plano.workspaceId) return { ok: true, conteudo: JSON.stringify({ estado: "precisa_pasta", instrucao: "Nenhum projeto autorizado nesta conversa. Chame workspace_propor_pasta com o nome do projeto citado pela pessoa; não descreva menus, não chute caminhos e não peça para a pessoa procurar a pasta." }), confianca: "confiavel" };
           const a = args as Record<string, unknown>;
           const controle = new AbortController();
           const k = `${e.tenantId}:${e.pessoaId}:${plano.conversaId}`;
@@ -79,9 +90,9 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
           }, 500);
           let r: unknown;
           try {
-            r = nome === "workspace_consultar" ? { pasta: v.pasta, ambiente: v.preparado, comandos: "Container isolado, sem rede; não usa serviços do Mac." } : nome === "workspace_preparar" ? await pastas.preparar(i, { modo: a.modo as ModoWorkspace, ...(typeof a.referencia === "string" ? { referencia: a.referencia } : {}) }) : await pastas.executar(i, nome, a, controle.signal);
+            r = nome === "workspace_consultar" ? { pasta: ativo.pasta, ambiente: ativo.preparado, projetos: v.projetos.map(p => ({ id: p.id, pasta: p.pasta, ativo: p.id === ativo.id })), comandos: "Container isolado, sem rede; não usa serviços do Mac." } : nome === "workspace_preparar" ? await pastas.preparar(i, { modo: a.modo as ModoWorkspace, ...(typeof a.referencia === "string" ? { referencia: a.referencia } : {}) }) : await pastas.executar(i, nome, a, controle.signal);
           } finally { clearInterval(timer); cancelamentos.delete(k); }
-          log("info", "workspace_acao", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, turno_id: plano.turnoId, workspace_id: v.id, ferramenta: nome });
+          log("info", "workspace_acao", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, turno_id: plano.turnoId, workspace_id: ativo.id, ferramenta: nome });
           return { ok: true, isError: typeof r === "object" && r !== null && "codigoSaida" in r && r.codigoSaida !== 0, conteudo: JSON.stringify(r), confianca: "nao_confiavel" };
         });
       } catch { return { ok: true, isError: true, conteudo: JSON.stringify({ erro: "workspace_indisponivel", instrucao: "A operação não foi confirmada. Confira acesso, caminho e revisão; não afirme que executou. Não procure configurações de ferramentas." }), confianca: "confiavel" }; }

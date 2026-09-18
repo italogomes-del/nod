@@ -10,11 +10,31 @@ import { criarPreparadorWorkspace } from "./preparar.ts";
 import { executarNoWorkspace } from "./terminal.ts";
 
 type Identidade = { tenantId: string; pessoaId: string; conversaId: string };
-type Vinculo = { pasta: string; id: string; preparado: WorkspacePreparado | null };
+/** Um projeto autorizado: pasta escolhida pela pessoa mais o ambiente já preparado para ela. */
+export type Projeto = { id: string; pasta: string; preparado: WorkspacePreparado | null; autorizadoEm: number; ultimoUsoEm: number };
+/**
+ * definido em 2026-09-18: o bot é uma sessão viva, então a conversa guarda VÁRIOS projetos e um
+ * ativo, não uma pasta só. Autorizar o segundo projeto não revoga o primeiro nem descarta o
+ * ambiente preparado dele. O formato antigo (uma pasta) é migrado na leitura.
+ */
+export type Vinculo = { projetos: Projeto[]; ativoId: string | null };
+type VinculoAntigo = { pasta: string; id: string; preparado: WorkspacePreparado | null };
+/** Teto por conversa: o excedente sai pelo uso mais antigo, para o registro não crescer sem fim. */
+export const MAX_PROJETOS = 20;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function dentro(raiz: string, alvo: string): boolean {
   const r = relative(raiz, alvo);
   return r === "" || (!isAbsolute(r) && r !== ".." && !r.startsWith(`..${sep}`));
+}
+/** Aceita o formato antigo de um vínculo só e devolve sempre a coleção. */
+function migrar(bruto: Vinculo | VinculoAntigo): Vinculo {
+  if ("projetos" in bruto) return bruto;
+  const agora = Date.now();
+  return { projetos: [{ id: bruto.id, pasta: bruto.pasta, preparado: bruto.preparado, autorizadoEm: agora, ultimoUsoEm: agora }], ativoId: bruto.id };
+}
+/** O projeto ativo, ou null quando a conversa ainda não tem nenhum. */
+export function projetoAtivo(v: Vinculo | null): Projeto | null {
+  return v?.projetos.find(p => p.id === v.ativoId) ?? null;
 }
 
 /** definido em 2026-09-18: armazenamento privado na máquina local; não é autorização por si só. */
@@ -26,7 +46,7 @@ export function criarPastas(raiz: string, imagem?: string) {
     return join(registros, `${i.tenantId}-${i.pessoaId}-${i.conversaId}.json`);
   }
   async function consultar(i: Identidade): Promise<Vinculo | null> {
-    try { return JSON.parse(await readFile(arquivo(i), "utf8")) as Vinculo; }
+    try { return migrar(JSON.parse(await readFile(arquivo(i), "utf8")) as Vinculo | VinculoAntigo); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }
   }
   async function salvar(i: Identidade, v: Vinculo) {
@@ -59,6 +79,7 @@ export function criarPastas(raiz: string, imagem?: string) {
   }
   return {
     consultar,
+    /** Acrescenta o projeto e o torna ativo; autorizar outro NÃO revoga os anteriores. */
     async escolher(i: Identidade, pasta: string) {
       if (!isAbsolute(pasta) || pasta.includes("\0")) throw new ErroDeDominio("entrada_invalida");
       const p = await realpath(pasta);
@@ -66,12 +87,48 @@ export function criarPastas(raiz: string, imagem?: string) {
       const privado = await realpath(raiz);
       if (p === dirname(p) || p === await realpath(homedir()) || dentro(p, privado) || dentro(privado, p)) throw new ErroDeDominio("nao_permitido");
       await readdir(p);
-      const v: Vinculo = { pasta: p, id: randomUUID(), preparado: null };
+      const agora = Date.now();
+      const atual = await consultar(i);
+      const existente = atual?.projetos.find(x => x.pasta === p);
+      if (existente) {
+        // Reautorizar a mesma pasta só a reativa: preserva o ambiente já preparado.
+        const v: Vinculo = { projetos: atual!.projetos.map(x => x.id === existente.id ? { ...x, ultimoUsoEm: agora } : x), ativoId: existente.id };
+        await salvar(i, v);
+        return { vinculo: v, projeto: { ...existente, ultimoUsoEm: agora } };
+      }
+      const novo: Projeto = { id: randomUUID(), pasta: p, preparado: null, autorizadoEm: agora, ultimoUsoEm: agora };
+      const mantidos = [...(atual?.projetos ?? []), novo]
+        .sort((a, b) => b.ultimoUsoEm - a.ultimoUsoEm)
+        .slice(0, MAX_PROJETOS);
+      const v: Vinculo = { projetos: mantidos, ativoId: novo.id };
       await salvar(i, v);
-      return v;
+      return { vinculo: v, projeto: novo };
     },
-    async revogar(i: Identidade) {
-      await unlink(arquivo(i)).catch((e: NodeJS.ErrnoException) => { if (e.code !== "ENOENT") throw e; });
+    /** Torna ativo um projeto JÁ autorizado. Não concede nada: id desconhecido é recusado. */
+    async trocar(i: Identidade, projetoId: string) {
+      const v = await consultar(i);
+      const alvo = v?.projetos.find(x => x.id === projetoId);
+      if (!v || !alvo) throw new ErroDeDominio("nao_permitido");
+      const agora = Date.now();
+      const atualizado: Vinculo = { projetos: v.projetos.map(x => x.id === projetoId ? { ...x, ultimoUsoEm: agora } : x), ativoId: projetoId };
+      await salvar(i, atualizado);
+      return { vinculo: atualizado, projeto: { ...alvo, ultimoUsoEm: agora } };
+    },
+    /** Sem projetoId remove todos; com id remove um só e mantém o resto. Nunca apaga arquivos. */
+    async revogar(i: Identidade, projetoId?: string) {
+      if (projetoId === undefined) {
+        await unlink(arquivo(i)).catch((e: NodeJS.ErrnoException) => { if (e.code !== "ENOENT") throw e; });
+        return;
+      }
+      const v = await consultar(i);
+      if (!v) return;
+      const projetos = v.projetos.filter(x => x.id !== projetoId);
+      if (projetos.length === v.projetos.length) return;
+      if (projetos.length === 0) {
+        await unlink(arquivo(i)).catch((e: NodeJS.ErrnoException) => { if (e.code !== "ENOENT") throw e; });
+        return;
+      }
+      await salvar(i, { projetos, ativoId: v.ativoId === projetoId ? projetos[0]!.id : v.ativoId });
     },
     async listarPastas(pasta?: string) {
       const p = await realpath(pasta ?? homedir());
@@ -80,20 +137,23 @@ export function criarPastas(raiz: string, imagem?: string) {
       const selecionavel = p !== dirname(p) && p !== await realpath(homedir()) && !dentro(p, privado) && !dentro(privado, p);
       return { caminho: p, pai: dirname(p), selecionavel, pastas: (await readdir(p, { withFileTypes: true })).filter(e => e.isDirectory() && !e.name.startsWith(".")).map(e => ({ nome: e.name, caminho: join(p, e.name) })).sort((a,b) => a.nome.localeCompare(b.nome)).slice(0, 200) };
     },
+    /** Prepara o ambiente do projeto ativo e guarda nele, sem tocar nos outros projetos. */
     async preparar(i: Identidade, escolha: Pick<PedidoWorkspace, "modo" | "referencia">) {
       const v = await consultar(i);
-      if (!v) throw new ErroDeDominio("nao_permitido");
-      const w = await preparar({ id: v.id, pastaAutorizada: v.pasta, ...escolha });
-      await salvar(i, { ...v, preparado: w });
+      const alvo = projetoAtivo(v);
+      if (!v || !alvo) throw new ErroDeDominio("nao_permitido");
+      const w = await preparar({ id: alvo.id, pastaAutorizada: alvo.pasta, ...escolha });
+      await salvar(i, { ...v, projetos: v.projetos.map(x => x.id === alvo.id ? { ...x, preparado: w, ultimoUsoEm: Date.now() } : x) });
       return w;
     },
     async executar(i: Identidade, nome: string, args: Record<string, unknown>, sinal = new AbortController().signal) {
       sinal.throwIfAborted();
       const v = await consultar(i);
-      if (!v) return { estado: "precisa_pasta", instrucao: "Peça à pessoa para usar Pasta de trabalho nesta conversa e escolher a pasta. Não existe acesso antes dessa escolha." };
-      const w = v.preparado ?? await this.preparar(i, { modo: "auto" });
+      const alvo = projetoAtivo(v);
+      if (!v || !alvo) return { estado: "precisa_pasta", instrucao: "Nenhum projeto autorizado nesta conversa. Chame workspace_propor_pasta com o nome do projeto citado pela pessoa; não descreva menus, não chute caminhos e não peça para a pessoa procurar a pasta." };
+      const w = alvo.preparado ?? await this.preparar(i, { modo: "auto" });
       sinal.throwIfAborted();
-      if (await realpath(w.caminho) !== w.caminho || await realpath(v.pasta) !== v.pasta) throw new ErroDeDominio("nao_permitido");
+      if (await realpath(w.caminho) !== w.caminho || await realpath(alvo.pasta) !== alvo.pasta) throw new ErroDeDominio("nao_permitido");
       if (nome === "workspace_terminal") {
         if (typeof args.comando !== "string") throw new ErroDeDominio("entrada_invalida");
         return executarNoWorkspace(w, args.comando, sinal, imagem);
