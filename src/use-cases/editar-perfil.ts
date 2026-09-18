@@ -1,4 +1,4 @@
-import type { Agente, FormaAgente, CorAgente } from "../contracts/agente.ts";
+import { CORES_AGENTE, FORMAS_AGENTE, type Agente, type FormaAgente, type CorAgente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -26,8 +26,8 @@ function campo(v: unknown, nome: string, permiteVazio: boolean): string | undefi
 /** PATCH direto pela pessoa (sem proposta): nome/título/descrição/modelo. Quem tenta mudar o dono recebe dono_imutavel. */
 export const editarPerfil: CasoDeUso<EntradaEditarPerfil, { agente: Agente }> = async (deps, input) => {
   if (input.dono !== undefined) throw new ErroDeDominio("dono_imutavel");
-  if (input.forma !== undefined && !["shape-square", "shape-hex", "shape-circle"].includes(input.forma)) throw new ErroDeDominio("entrada_invalida");
-  if (input.cor !== undefined && !["c-purple", "c-black", "c-pink", "c-teal", "c-blue", "c-orange", "c-green", "c-red"].includes(input.cor)) throw new ErroDeDominio("entrada_invalida");
+  if (input.forma !== undefined && !FORMAS_AGENTE.some((forma) => forma === input.forma)) throw new ErroDeDominio("entrada_invalida");
+  if (input.cor !== undefined && !CORES_AGENTE.some((cor) => cor === input.cor)) throw new ErroDeDominio("entrada_invalida");
   const perfil = {
     forma: input.forma,
     cor: input.cor,

@@ -1,7 +1,9 @@
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Autoria } from "../../src/contracts/evento.ts";
 import { esc } from "./escape.ts";
+import { htmlMascote, type EstadoMascote } from "./mascote.ts";
 export { esc } from "./escape.ts";
+export { atualizarMascote } from "./mascote.ts";
 
 export function iniciais(nome: string): string {
   return nome
@@ -30,9 +32,8 @@ export function avatarAgente(a: Pick<Agente, "nome" | "cor">, tamanho: "sm" | "m
 /**
  * definido em 2026-09-17: rosto vetorial na forma e cor do perfil, conforme a referência visual.
  */
-export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: "" | "sm" | "md" | "lg" = ""): string {
-  const t = tamanho ? ` ${tamanho}` : "";
-  return `<span class="icon ${esc(a.cor)} ${esc(a.forma)}${t}" title="${esc(a.nome)}"><svg viewBox="0 0 40 40" aria-hidden="true"><ellipse cx="14" cy="18" rx="2.4" ry="4.6" fill="#152132"/><ellipse cx="26" cy="18" rx="2.4" ry="4.6" fill="#152132"/><path d="M17 26 Q20 29 23 26" fill="none" stroke="#152132" stroke-width="1.6" stroke-linecap="round"/><ellipse cx="12" cy="22" rx="2.6" ry="1.2" fill="white" opacity=".25"/></svg></span>`;
+export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: "" | "sm" | "md" | "lg" | "xl" = "", estado: EstadoMascote = "disponivel", extra = ""): string {
+  return htmlMascote(a, tamanho, estado, extra);
 }
 
 /** 'HH:MM' no fuso da máquina da pessoa (a web só interpola; o servidor manda absoluto, ADR-007). */

@@ -1,3 +1,4 @@
+import "./lib/mascote-elemento.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
@@ -7,6 +8,7 @@ import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { botao, esc, iconeAgente } from "./lib/render.ts";
 import { esquecerRegiao, regiao } from "./lib/regioes.ts";
+import { estadoMascoteNaConversa } from "./lib/mascote.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
@@ -138,7 +140,7 @@ function renderSidebar(): string {
     const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
     const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
     const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a)}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";

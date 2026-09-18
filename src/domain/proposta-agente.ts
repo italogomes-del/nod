@@ -1,7 +1,7 @@
-import type { CorAgente, FormaAgente } from "../contracts/agente.ts";
+import { CORES_AGENTE, FORMAS_AGENTE, type CorAgente, type FormaAgente } from "../contracts/agente.ts";
 
-export const FORMAS: readonly FormaAgente[] = ["shape-square", "shape-hex", "shape-circle"];
-export const CORES: readonly CorAgente[] = ["c-red", "c-pink", "c-purple", "c-blue", "c-teal", "c-green", "c-orange", "c-black"];
+export const FORMAS: readonly FormaAgente[] = FORMAS_AGENTE;
+export const CORES: readonly CorAgente[] = CORES_AGENTE;
 
 /** Round-robin sem repetir enquanto houver forma livre. */
 export function proximaForma(usadas: readonly FormaAgente[]): FormaAgente {

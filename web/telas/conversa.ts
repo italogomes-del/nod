@@ -6,6 +6,7 @@ import { assinatura } from "../lib/assinatura.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
+import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import { renderDecisoesDaConversa } from "./sua-vez.ts";
 
@@ -173,7 +174,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const nome = a?.nome ?? "agente";
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
   const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg") : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
       ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
       ${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
