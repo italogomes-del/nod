@@ -67,6 +67,16 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
   return {
     /** Identidade do projeto ATIVO: é ela que o plano do turno lacra e o gateway confere. */
     async id(i: Escopo & { conversaId: string }) { return projetoAtivo(await pastas.consultar(i))?.id ?? null; },
+    /**
+     * Onde o harness abre e o que ele alcança. A pasta ativa é a preparada (worktree), quando já
+     * existe; as aprovadas são as pastas originais dos projetos que a pessoa autorizou.
+     */
+    async pastasDoHarness(i: Escopo & { conversaId: string }) {
+      const v = await pastas.consultar(i);
+      const ativo = projetoAtivo(v);
+      if (!v || !ativo) return null;
+      return { ativa: ativo.preparado?.caminho ?? ativo.pasta, aprovadas: v.projetos.map(p => p.preparado?.caminho ?? p.pasta) };
+    },
     async consultar(e: Escopo, conversaId: string) { await dono(e, conversaId); return pastas.consultar({ ...e, conversaId }); },
     async listar(e: Escopo, conversaId: string, caminho?: string) { await dono(e, conversaId); return pastas.listarPastas(caminho); },
     async escolher(e: Escopo, conversaId: string, pasta: string) {

@@ -44,7 +44,13 @@ export type LigacaoClaudeCli = {
 
 export { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 
-/** As flags que montarArgs usa — é a lista conferida contra os floors. */
+/**
+ * As flags que montarArgs usa SEMPRE — é a lista conferida contra os floors, e reprovar aqui
+ * recusa o turno. --restricted e --add-dir ficam de fora de propósito: são condicionais a existir
+ * projeto autorizado, e exigi-las aqui derrubaria todo turno num CLI mais antigo, inclusive os que
+ * não tocam em pasta nenhuma. O gate delas é o help, conferido no próprio turno (fail-closed:
+ * sem --restricted no help, o cwd continua no diretório temporário e as nativas ficam desligadas).
+ */
 export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
   "--output-format",
   "--verbose",
@@ -62,11 +68,23 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
   "--resume",
 ];
 
+/**
+ * Ferramentas nativas de arquivo liberadas quando há projeto autorizado. Bash fica fora: --restricted
+ * remove as ferramentas que rodam comando, e comando continua indo ao container isolado do nod.
+ * Medido em 2026-09-18: com --restricted, ler fora das pastas permitidas é NEGADO pelo CLI (aparece
+ * em permission_denials), por caminho relativo e absoluto, e o CLAUDE.md do projeto é ignorado.
+ */
+export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"] as const;
+
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
 export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string }): { args: string[]; sessaoCli: string } {
   const { plano } = entrada;
-  const permitidas = plano.catalogo.ferramentas.map((f) => f.nomeMcp).join(",");
+  const pastas = plano.workspacePastas ?? null;
+  // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio.
+  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...(pastas ? NATIVAS_DE_ARQUIVO : [])].join(",");
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
+  // Todos os projetos aprovados entram: o bot transita entre eles sem reautorizar (decisão de 2026-09-18).
+  const extras = (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
   const args = [
     "-p",
     "--output-format",
@@ -77,13 +95,14 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     plano.entrada.modelo,
     "--max-turns",
     String(plano.entrada.maxTurnos),
-    "--setting-sources",
-    "project",
+    // --restricted substitui --setting-sources project: ignora CLAUDE.md, skills e hooks do repo
+    // aberto, que o nod não escreveu, e confina as ferramentas de arquivo às pastas permitidas.
+    ...(pastas ? ["--restricted"] : ["--setting-sources", "project"]),
+    ...extras.flatMap((p) => ["--add-dir", p]),
     "--strict-mcp-config",
     "--mcp-config",
     entrada.mcpJson,
-    "--tools",
-    "",
+    ...(pastas ? [] : ["--tools", ""]),
     "--allowedTools",
     permitidas,
     "--permission-mode",
@@ -172,12 +191,17 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp });
               if (!floors.ok) throw new ErroDeDominio("executor_indisponivel", { cause: floors.motivo });
 
+              // Fail-closed: sem --restricted comprovado no help, não se aponta o cwd para a pasta
+              // da pessoa — antes o turno cai para o diretório temporário e as nativas desligadas.
+              const confinavel = (flagsNoHelp ?? []).includes("--restricted");
+              const pastas = confinavel ? plano.workspacePastas ?? null : null;
               await mkdir(cfg.cwdBase, { recursive: true });
               const tmpdir = await mkdtemp(join(cfg.cwdBase, "turno-"));
+              const diretorio = pastas?.ativa ?? tmpdir;
               const eventos: EventoStream[] = [];
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
-                const { args } = montarArgs({ plano, mcpJson });
+                const { args } = montarArgs({ plano: pastas ? plano : { ...plano, workspacePastas: null }, mcpJson });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs);
 
                 const pendentes: Promise<void>[] = [];
@@ -185,7 +209,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   bin,
                   args,
                   env,
-                  cwd: tmpdir,
+                  cwd: diretorio,
                   sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
                   aoLinha(linha) {
                     const ev = interpretarLinhaStreamJson(linha);
