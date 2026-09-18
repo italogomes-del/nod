@@ -24,7 +24,7 @@ describe("desktop: fronteiras HTTP", () => {
     expect((await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, eventos: [] })).ativo).toBe(false);
   });
   it("não confia no relógio nem em prosa do inventário remoto", () => {
-    expect(inventario({ estado: "ausente", em: Infinity, motivo: "segredo" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Claude não encontrado neste computador" });
+    expect(inventario({ estado: "ausente", em: Infinity, motivo: "segredo" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });
     expect(() => sinais({ attempted: "true" })).toThrow();
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
   });

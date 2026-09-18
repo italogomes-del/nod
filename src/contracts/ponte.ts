@@ -1,3 +1,4 @@
+import type { IdHarness } from "./harness.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
 import type { MotivoPasse } from "./motivos.ts";
@@ -10,6 +11,7 @@ export type AnuncioMaquina = {
   nome: string;
   inventario: Inventario;
   versaoContrato: number;
+  harnesses?: Partial<Record<IdHarness, Inventario>>;
 };
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */

@@ -9,7 +9,7 @@ document.querySelector('#login').addEventListener('click', async () => {
 });
 document.querySelector('#form').addEventListener('submit', async (e) => {
   e.preventDefault(); conectar.disabled = true;
-  estado.textContent = 'Conectando e verificando o Claude…';
+  estado.textContent = 'Conectando e encontrando sua conta de IA…';
   try { const r = await window.nod.conectar({ url: url.value, chave: chave.value.trim() }); estado.textContent = r.mensagem; }
   catch { estado.textContent = 'Não foi possível conectar. Confira o endereço e tente novamente.'; }
   finally { chave.value = ''; conectar.disabled = false; }

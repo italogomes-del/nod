@@ -1,7 +1,8 @@
+import type { CatalogoHarness } from "./harness.ts";
 import type { Inventario } from "./inventario.ts";
 
 /** Os dois executores do SPI (ADR-012/014): catcher (sem CLI, sem custo) e claude-cli (real, na assinatura da pessoa). */
-export type IdExecutor = "catcher" | "claude-cli";
+export type IdExecutor = "catcher" | "claude-cli" | "codex-cli";
 
 /** Uma opção do interruptor: o que a sonda daquele driver disse por último (ADR-019/029: estado escrito, nunca ícone). */
 export type OpcaoExecutor = { id: IdExecutor; custo: "zero" | "real"; inventario: Inventario };
@@ -10,4 +11,4 @@ export type OpcaoExecutor = { id: IdExecutor; custo: "zero" | "real"; inventario
  * Estado do interruptor de executor (definido em 2026-09-16): é da MÁQUINA (um processo, um registry),
  * não da pessoa. `recusa` é o motivo escrito quando a última troca pedida não pôde acontecer.
  */
-export type EstadoExecutor = { atual: IdExecutor; opcoes: OpcaoExecutor[]; recusa: string | null };
+export type EstadoExecutor = { atual: IdExecutor; opcoes: OpcaoExecutor[]; recusa: string | null; harnesses?: CatalogoHarness };

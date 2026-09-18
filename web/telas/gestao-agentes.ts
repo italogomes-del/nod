@@ -16,8 +16,11 @@ function dialogo(html: string, menu = false): HTMLDialogElement {
   d.id = "gestao-dialogo";
   d.className = menu ? "bot-menu" : "bot-dialogo";
   d.innerHTML = html;
+  const titulo = d.querySelector("h2");
+  if (titulo) { titulo.id = "gestao-dialogo-titulo"; d.setAttribute("aria-labelledby", titulo.id); }
+  const focoAnterior = document.activeElement;
   d.addEventListener("click", (e) => { e.stopPropagation(); if (e.target === d) d.close(); });
-  d.addEventListener("close", () => d.remove());
+  d.addEventListener("close", () => { d.remove(); if (focoAnterior instanceof HTMLElement && focoAnterior.isConnected) focoAnterior.focus(); });
   document.body.append(d);
   d.showModal();
   return d;

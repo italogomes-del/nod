@@ -23,7 +23,7 @@ export function inventario(v: unknown, agora: number): Inventario {
   const i = objeto(v);
   if (i.estado === "pronto") { exigir(texto(i.versao, 100)); return { estado: "pronto", versao: i.versao, em: agora }; }
   exigir(i.estado === "ausente" || i.estado === "nao_autenticado");
-  return { estado: i.estado, motivo: i.estado === "ausente" ? "Claude não encontrado neste computador" : "Entre no Claude neste computador", em: agora };
+  return { estado: i.estado, motivo: i.estado === "ausente" ? "Harness não encontrado neste computador" : "Entre na conta do harness neste computador", em: agora };
 }
 export function entrega(v: unknown, machineId: string): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);

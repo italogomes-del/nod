@@ -21,6 +21,7 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     forma: original.forma,
     cor: original.cor,
     modelo: original.modelo,
+    harness: original.harness,
     duplicadoDe: original.id,
     confirmado: original.confirmado,
   });

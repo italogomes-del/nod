@@ -20,5 +20,5 @@ export function renderDetalhes(estado: Estado): string {
     <section class="detalhes-secao"><div class="secao-titulo"><h3>Colabora com</h3>${botao("navegar", "Criar sala", { classe: "link", dados: { tela: "nova-sala" } })}</div>
       ${colegas.length ? colegas.slice(0, 8).map((b) => `<button class="colega" data-act="preencher-prompt" data-texto="Consulte @${esc(b.nome)} sobre: ">${iconeAgente(b)}<div><b>${esc(b.nome)}</b><small>${esc(b.titulo || "Bot da sua equipe")}</small></div></button>`).join("") : '<p class="mudo">Crie outro bot para eles trabalharem juntos.</p>'}
     </section>
-    <section class="detalhes-secao"><h3>Execução</h3><p class="mudo">${estado.executor?.atual === "claude-cli" ? "Claude Code · sua assinatura" : "Simulação · respostas de teste"}</p><p class="mudo">Computador remoto previsto para uma próxima versão.</p></section>`;
+    <section class="detalhes-secao"><h3>Execução</h3><p class="mudo">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p><p class="mudo">Use Computador na conversa para abrir a tela, entrar nos apps e acompanhar o trabalho.</p></section>`;
 }

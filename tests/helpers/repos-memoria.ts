@@ -111,6 +111,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
 
   const repos = {
+    computadores: {
+      buscarVinculo: async () => null,
+      obter: async () => null, travar: async () => null, configurar: async () => undefined,
+      ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [],
+      buscarAcao: async () => null, concluir: async () => undefined,
+      registrar: async () => { throw new Error("use o banco para testar computadores"); },
+    },
     pessoas: {
       async buscar(id: string) {
         return doTenant(b.pessoas).find((p) => p.id === id) ?? null;

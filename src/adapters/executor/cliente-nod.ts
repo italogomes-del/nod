@@ -27,7 +27,7 @@ export type RespostaPlano =
 
 /** Corpo devolvido por POST /api/interno/ferramentas/:nome. `aguardar` = decisão criada, o proxy faz long-poll. */
 export type RespostaFerramenta =
-  | { ok: true; conteudo: string; confianca: Confianca }
+  | { ok: true; conteudo: string; confianca: Confianca; isError?: boolean; imagem?: { mimeType: "image/png"; data: string }; audio?: { mimeType: "audio/wav"; data: string } }
   | { ok: false; negacao: Negacao }
   | { aguardar: string };
 
@@ -115,7 +115,7 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
     },
 
     async ferramenta(nome, argumentos) {
-      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos });
+      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, nome.startsWith("computador_") ? 240_000 : timeout);
       if (ehFalha(r)) return r;
       const c = obj(r.json);
       if (r.status === 200 && c) {
@@ -139,7 +139,7 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
     },
 
     async chamarFerramenta(nome, argumentos) {
-      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos });
+      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, nome.startsWith("computador_") ? 240_000 : timeout);
       if (ehFalha(r)) {
         const n = negacaoConectorIndisponivel(nome, agora(), r.transporte === "timeout" ? "timeout_transporte" : "conector_indisponivel");
         return { conteudo: redigirNegacao(n, agora()), isError: true };

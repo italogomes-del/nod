@@ -1,3 +1,5 @@
+import type { PreferenciaHarness } from "../../../contracts/harness.ts";
+import type { Escopo } from "../../../shared/types.ts";
 import { gerirAgente } from "../../../use-cases/gerir-agente.ts";
 import type { DonoAgente, FormaAgente, CorAgente } from "../../../contracts/agente.ts";
 import type { TipoMemoria } from "../../../contracts/memoria.ts";
@@ -17,7 +19,7 @@ const ID = "(?<id>[^/]+)";
  * (dono no corpo → 403 dono_imutavel), Pin/Hide/Duplicate e memória. Cada handler: valida a forma,
  * chama o caso de uso, responde. Mutação devolve o que criou/alterou; o estado vivo chega por SSE.
  */
-export function criarRotasAgentes(d: DepsRotas): Rota[] {
+export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Escopo, agenteId: string) => Promise<void>): Rota[] {
   const executar = criarExecutor(d);
   return [
     { metodo: "PATCH", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
@@ -26,7 +28,9 @@ export function criarRotasAgentes(d: DepsRotas): Rota[] {
         secao: corpo.secao as string | undefined, naoLido: corpo.naoLido as boolean | undefined }));
     } },
     { metodo: "DELETE", padrao: new RegExp(`^/agentes/${ID}$`), async handler(ctx) {
-      ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "excluir" }));
+      const resultado = await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "excluir" });
+      await desligarComputador?.(ctx.escopo, ctx.params.id ?? "");
+      ctx.json(200, resultado);
     } },
     { metodo: "POST", padrao: new RegExp(`^/agentes/${ID}/restaurar$`), async handler(ctx) {
       ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "restaurar" }));
@@ -36,7 +40,7 @@ export function criarRotasAgentes(d: DepsRotas): Rota[] {
       padrao: /^\/agentes$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        const r = await executar(ctx.escopo, criarAgente, { dono: corpo.dono as DonoAgente, interativo: corpo.interativo === true, nome: textoOpcional(corpo.nome), titulo: textoOpcional(corpo.titulo), descricao: textoOpcional(corpo.descricao), modelo: d.modeloPadrao });
+        const r = await executar(ctx.escopo, criarAgente, { dono: corpo.dono as DonoAgente, interativo: corpo.interativo === true, nome: textoOpcional(corpo.nome), titulo: textoOpcional(corpo.titulo), descricao: textoOpcional(corpo.descricao), modelo: textoOpcional(corpo.modelo) ?? d.modeloPadrao, harness: corpo.harness as PreferenciaHarness | undefined });
         ctx.json(201, r);
       },
     },
@@ -51,6 +55,7 @@ export function criarRotasAgentes(d: DepsRotas): Rota[] {
           titulo: textoOpcional(corpo.titulo),
           descricao: textoOpcional(corpo.descricao),
           modelo: textoOpcional(corpo.modelo),
+          harness: corpo.harness as PreferenciaHarness | undefined,
           forma: corpo.forma as FormaAgente | undefined,
           cor: corpo.cor as CorAgente | undefined,
           dono: corpo.dono,

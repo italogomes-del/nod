@@ -1,3 +1,5 @@
+import type { PreferenciaHarness } from "../contracts/harness.ts";
+import { validarInteligencia } from "../domain/harness.ts";
 import type { Agente, DonoAgente } from "../contracts/agente.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
@@ -5,13 +7,13 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { nomeDeBoasVindas, proximaCor, proximaForma } from "../domain/proposta-agente.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import { redigir } from "../domain/redacao.ts";
-import { autoriaPessoa, evento, MODELO_PADRAO } from "./autoria-evento.ts";
+import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /** EMENDA 17: nome opcional; ausente → 'Novo agente' e o modelo propõe pelo atualizar_perfil. */
 export const NOME_INICIAL = "Novo agente";
 
-export type EntradaCriarAgente = { dono: DonoAgente; interativo?: boolean; nome?: string; modelo?: string; titulo?: string; descricao?: string };
+export type EntradaCriarAgente = { dono: DonoAgente; interativo?: boolean; nome?: string; modelo?: string; harness?: PreferenciaHarness; titulo?: string; descricao?: string };
 export type SaidaCriarAgente = { agente: Agente; conversa: Conversa; mensagem: Mensagem };
 
 /**
@@ -22,6 +24,7 @@ export type SaidaCriarAgente = { agente: Agente; conversa: Conversa; mensagem: M
 export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = async (deps, input) => {
   if (input.dono !== "pessoa" && input.dono !== "empresa") throw new ErroDeDominio("entrada_invalida", { cause: "dono" });
   if (input.nome !== undefined && typeof input.nome !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "nome" });
+  validarInteligencia(input.harness ?? "auto", input.modelo ?? "auto");
   const existentes = await deps.repos.agentes.listar({ incluirOcultos: true });
   const nome = (input.nome ?? "").trim() || (input.interativo ? nomeDeBoasVindas(existentes.map((a) => a.nome)) : NOME_INICIAL);
   if (nome.length > 60 || (input.titulo !== undefined && typeof input.titulo !== "string") || (input.descricao !== undefined && typeof input.descricao !== "string")) throw new ErroDeDominio("entrada_invalida");
@@ -34,7 +37,7 @@ export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = asyn
   const forma = proximaForma(existentes.map((a) => a.forma));
   const cor = proximaCor(existentes.map((a) => a.cor));
 
-  const agente = await deps.repos.agentes.criar({ nome, titulo, descricao, confirmado, dono: input.dono, forma, cor, modelo: input.modelo ?? MODELO_PADRAO });
+  const agente = await deps.repos.agentes.criar({ nome, titulo, descricao, confirmado, dono: input.dono, forma, cor, modelo: input.modelo ?? "auto", harness: input.harness ?? "auto" });
   if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "agente não criado" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente.id, visibility: agente.visibility });
   if (!conversa) throw new ErroDeDominio("estado_invalido", { cause: "conversa não criada" });

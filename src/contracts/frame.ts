@@ -13,6 +13,7 @@ export type TipoFrame =
   | "sala.handoff"
   | "negacao"
   | "inventario.mudou"
+  | "computador.mudou"
   | "agente.mudou"
   | "parada.faixa"
   | "resumed";

@@ -15,6 +15,7 @@ import { ErroDeDominio } from "./erro.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { montarPromptSistema } from "./prompt-sistema.ts";
+import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 
 /**
  * Ferramentas nod por modo (definido em 2026-09-16): criação propõe perfil/rotina/acesso; conversa
@@ -61,6 +62,7 @@ function ferramentasDeConectores(conectores: readonly Conector[], concessoes: re
 }
 
 export type EntradaPlano = {
+  computador?: boolean;
   turno: Turno;
   agente: Agente;
   memorias: readonly Memoria[];
@@ -93,7 +95,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const modo: ModoTurno = entrada.profundidade >= 1 ? "peer" : entrada.modo;
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
-  let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
+  const computador: FerramentaPlano[] = entrada.computador && modo !== "peer" && modo !== "criacao" ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo"].includes(nome), tocaAprendiz: true, schema })) : [];
+  let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores, ...computador], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
   let decididoPor: `regra:${string}` = REGRA_MONTAGEM;
   if (entrada.confianca === "nao_confiavel") {
     ferramentas = catalogoReduzido(ferramentas);

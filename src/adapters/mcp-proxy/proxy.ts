@@ -119,9 +119,9 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
     conteudo = neutralizarDelimitadores(conteudo);
     if (r.confianca === "nao_confiavel") {
       const origem = ferramenta.origem === "conector" ? (v.plano.catalogo.servidores.find((s) => s.conectorId === ferramenta.conectorId)?.nome ?? nome) : nome;
-      conteudo = envolverNaoConfiavel(conteudo, origem);
+      conteudo = envolverNaoConfiavel(conteudo, origem, ferramenta.origem === "computador");
     }
-    return resposta(id, texto(conteudo));
+    return resposta(id, { content: [{ type: "text", text: conteudo }, ...(r.imagem ? [{ type: "image", ...r.imagem }] : []), ...(r.audio ? [{ type: "audio", ...r.audio }] : [])], ...(r.isError ? { isError: true } : {}) });
   }
 
   async function tratarDentro(linha: string): Promise<string | null> {

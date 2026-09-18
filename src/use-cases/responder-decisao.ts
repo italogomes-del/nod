@@ -61,6 +61,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
         entradaTexto: `Resposta de ${input.respondidaPor.nome} ao seu pedido (${d.tipo}: "${d.frase}"): ${input.texto}\nContinue a partir daqui; nada foi reenviado.`,
         entradaConfianca: "confiavel",
         modelo: original.modelo,
+    harness: original.harness,
         retomaTurnoId: original.id,
         reenvios: original.reenvios + 1,
         executor: input.executor ?? "catcher",

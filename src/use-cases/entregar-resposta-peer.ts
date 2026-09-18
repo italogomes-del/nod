@@ -46,6 +46,7 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
     entradaTexto: `${moldurarResposta(alvo.nome, input.texto)}\nConsolide a resposta para a pessoa, citando a contribuição do colega e retomando a tarefa original indicada no contexto.`,
     entradaConfianca: "nao_confiavel",
     modelo: remetente.modelo,
+    harness: remetente.harness,
   });
   if (!continuacao) throw new ErroDeDominio("estado_invalido", { cause: "turno de continuação não criado" });
   const mensagem = await deps.repos.mensagens.criar({

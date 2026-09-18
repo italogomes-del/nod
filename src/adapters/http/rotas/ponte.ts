@@ -1,3 +1,5 @@
+import { HARNESSES } from "../../../contracts/harness.ts";
+import type { IdHarness } from "../../../contracts/harness.ts";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
@@ -22,7 +24,7 @@ export function criarPonteHttpServidor(d: {
   longpollMs?: number;
 }) {
   const conexoes = new Map<string, Conexao>();
-  const ausente = (): Inventario => ({ estado: "ausente", motivo: "Abra o app nod e conecte o Claude no seu computador", em: d.agora() });
+  const ausente = (): Inventario => ({ estado: "ausente", motivo: "Abra o app nod e conecte sua conta de IA no seu computador", em: d.agora() });
   function atual(pessoaId: string): Inventario {
     const vivas = [...conexoes.values()].filter((c) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000);
     return vivas.find((c) => c.inv.estado === "pronto")?.inv ?? vivas[0]?.inv ?? ausente();
@@ -58,7 +60,12 @@ export function criarPonteHttpServidor(d: {
         c.plano = null;
       }
       c.inv = inventario(b.inventario, d.agora()); c.ultimo = d.agora();
-      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1 });
+      const motores: Partial<Record<IdHarness, Inventario>> = {};
+      if (b.harnesses !== undefined) {
+        const anunciados = objeto(b.harnesses);
+        for (const h of HARNESSES) if (anunciados[h.id] !== undefined && h.integrado) motores[h.id] = inventario(anunciados[h.id], d.agora());
+      }
+      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores });
       await persistir(c);
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),
@@ -116,5 +123,17 @@ export function criarPonteHttpServidor(d: {
       if (d.agora() - c.ultimo >= 90_000) conexoes.delete(id);
     }
   }
-  return { rotas, inventario: atual, varrer };
+  function harnesses(escopo: Escopo, machineId: string): Partial<Record<IdHarness, Inventario>> {
+    const c = conexoes.get(machineId);
+    if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return {};
+    return c.ponte.maquinasConectadas().find((m) => m.machineId === machineId)?.harnesses ?? { "claude-cli": c.inv };
+  }
+  function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {
+    const todos: Partial<Record<IdHarness, Inventario>> = {};
+    for (const [id, c] of conexoes) if (c.escopo.pessoaId === pessoaId) for (const [h, inv] of Object.entries(harnesses(c.escopo, id))) {
+      const key = h as IdHarness; if (todos[key]?.estado !== "pronto") todos[key] = inv;
+    }
+    return todos;
+  }
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa };
 }

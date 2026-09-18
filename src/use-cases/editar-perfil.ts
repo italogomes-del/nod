@@ -1,3 +1,5 @@
+import type { PreferenciaHarness } from "../contracts/harness.ts";
+import { validarInteligencia } from "../domain/harness.ts";
 import { CORES_AGENTE, FORMAS_AGENTE, type Agente, type FormaAgente, type CorAgente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
@@ -11,6 +13,7 @@ export type EntradaEditarPerfil = {
   titulo?: string;
   descricao?: string;
   modelo?: string;
+  harness?: PreferenciaHarness;
   /** Qualquer valor aqui é recusado: o dono é imutável (E1.2; trigger nod_agente_dono_imutavel no banco). */
   dono?: unknown;
 };
@@ -34,6 +37,7 @@ export const editarPerfil: CasoDeUso<EntradaEditarPerfil, { agente: Agente }> = 
     nome: campo(input.nome, "nome", false),
     titulo: campo(input.titulo, "titulo", true),
     descricao: campo(input.descricao, "descricao", true),
+    harness: input.harness,
     modelo: campo(input.modelo, "modelo", false),
   };
   if ((perfil.nome?.length ?? 0) > 60 || (perfil.titulo?.length ?? 0) > 120 || (perfil.descricao?.length ?? 0) > 8000) throw new ErroDeDominio("entrada_invalida");
@@ -41,7 +45,8 @@ export const editarPerfil: CasoDeUso<EntradaEditarPerfil, { agente: Agente }> = 
 
   const existente = await deps.repos.agentes.buscar(input.agenteId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
-  const modeloMudou = perfil.modelo !== undefined && perfil.modelo !== existente.modelo;
+  if (perfil.harness !== undefined || perfil.modelo !== undefined) validarInteligencia(perfil.harness ?? existente.harness ?? "auto", perfil.modelo ?? existente.modelo);
+  const modeloMudou = perfil.harness !== undefined && perfil.harness !== existente.harness || perfil.modelo !== undefined && perfil.modelo !== existente.modelo;
   const agente = await deps.repos.agentes.atualizarPerfil(input.agenteId, { ...perfil, ...(perfil.descricao !== undefined || perfil.titulo !== undefined ? { confirmado: true } : {}) });
   // Visível (equipe) mas de outra pessoa: o repositório devolve null em vez de 42501.
   if (!agente) throw new ErroDeDominio("nao_permitido");

@@ -1,3 +1,4 @@
+import { nomeInteligencia } from "./inteligencia.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
@@ -27,7 +28,7 @@ export function badgeExecutor(m: Pick<Mensagem, "autoria">): string {
   if (m.autoria.autor_tipo !== "agente") return "";
   if (m.autoria.executor === "catcher") return `<span class="tag tag-catcher" title="executor catcher: sem CLI, sem custo">catcher</span>`;
   const maquina = m.autoria.machine_id ? m.autoria.machine_id.slice(0, 8) : "esta máquina";
-  return `<span class="tag tag-cinza" title="claude-cli na máquina da pessoa">rodou em ${esc(maquina)}</span>`;
+  return `<span class="tag tag-cinza" title="harness no computador conectado">rodou em ${esc(maquina)}</span>`;
 }
 
 function corpoMensagem(m: Mensagem, estado: Estado): string {
@@ -174,10 +175,11 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const nome = a?.nome ?? "agente";
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
   const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "claude-cli" ? "Disponível" : "Simulação"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
+      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-computador", "Computador", { id: agenteId }) : ""}
       ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
-      ${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
+      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("inteligencia", `✦ ${nomeInteligencia(a, estado.executor?.harnesses)}`, { id: agenteId, classe: "inteligencia-atalho", titulo: "Inteligência do agente: modelo e harness" }) : ""}${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
       ${botao("ir-memoria", "Memória", { id: agenteId })}
       ${botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" })}
     </div>`;

@@ -20,6 +20,10 @@ O código desktop está integrado nesta versão. Consulte também o [guia do có
 
 ## Rodar amanhã de manhã
 
+O Postgres diário é persistente em `127.0.0.1:5434` (`nod_nod_pgdata`). Bancos descartáveis para
+features podem rodar simultaneamente em `5435`, `5436` etc.; veja o
+[guia do ambiente local persistente](docs/ambiente-local-persistente.md).
+
 ```bash
 cd ~/code/nod
 mise install && npm ci                 # Node 24.19.0 pinado em .mise.toml (nvm/asdf ganham do mise — ver AGENTS.md)
@@ -106,3 +110,5 @@ Gestão completa de agentes: menu na lista e no chat, organização em seções,
 cópia, ocultos e exclusão recuperável. [Roteiro de aceite](docs/uat-gestao-agentes.md) e
 [decisão de ciclo de vida](docs/adr/adr-034-gestao-e-exclusao-recuperavel-de-agentes.md).
 `npm run uat:gestao` repete a regressão dedicada. Atualize o banco com `npm run db:migrate` antes de iniciar.
+
+Computadores dos bots: [configuração, casos de uso e limites](docs/computadores.md).

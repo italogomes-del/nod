@@ -64,6 +64,7 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     entradaTexto: texto,
     entradaConfianca: "confiavel",
     modelo: original.modelo,
+    harness: original.harness,
     retomaTurnoId: original.id,
     reenvios: original.reenvios + 1,
     executor: input.executor ?? "catcher",

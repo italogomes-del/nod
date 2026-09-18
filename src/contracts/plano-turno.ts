@@ -1,3 +1,4 @@
+import type { IdHarness } from "./harness.ts";
 import type { Autoria, Executor } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Confianca } from "./mensagem.ts";
@@ -13,7 +14,7 @@ export type FerramentaPlano = {
   nome: string;
   /** Nome que o CLI enxerga: mcp__nod__<nome> (--allowedTools exato, mapa-cli). */
   nomeMcp: `mcp__nod__${string}`;
-  origem: "nod" | "conector";
+  origem: "nod" | "conector" | "computador";
   conectorId: string | null;
   /** Capturado na DESCOBERTA (sonda), nunca em tempo de chamada (ADR-013). */
   readOnlyHint: boolean;
@@ -40,6 +41,7 @@ export type PlanoTurno = {
   localidade: "local";
   machineId: string;
   executor: Executor;
+  harness?: IdHarness;
   superficie: "maquina_da_pessoa";
   decididoPor: `regra:${string}`;
   autoria: Autoria;

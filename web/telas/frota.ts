@@ -9,13 +9,13 @@ import { renderNegacoes } from "./negacao.ts";
 /** Inventário ESCRITO (ADR-019/029): estado, versão, motivo e relógio — nunca só um ícone. */
 export function textoInventario(inv: Inventario | null, agora: number): string {
   if (!inv) return "inventário ainda não sondado";
-  if (inv.estado === "pronto") return `${inv.versao === "catcher" ? "catcher (sem custo)" : `claude ${inv.versao}`} pronto desde ${hora(inv.em)}`;
-  if (inv.estado === "nao_autenticado") return `claude${inv.versao ? ` ${inv.versao}` : ""} não autenticado (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
-  return `claude ausente (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
+  if (inv.estado === "pronto") return `${inv.versao === "catcher" ? "catcher (sem custo)" : `harness ${inv.versao}`} pronto desde ${hora(inv.em)}`;
+  if (inv.estado === "nao_autenticado") return `harness${inv.versao ? ` ${inv.versao}` : ""} não autenticado (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
+  return `harness ausente (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
 }
 
 export function rotuloExecutor(id: IdExecutor): string {
-  return id === "catcher" ? "catcher (sem custo)" : "Claude (real)";
+  return id === "catcher" ? "Simulação (sem custo)" : id === "codex-cli" ? "Codex" : "Claude Code";
 }
 
 /** Uma linha por opção do interruptor: o que a sonda disse, escrito (ADR-029) — "pronto" ou o motivo de não estar. */
@@ -34,12 +34,12 @@ export function renderExecutor(estado: Estado): string {
   if (!ex) return `<div class="ex-linha"><b>Executor:</b> ainda não consultado</div>`;
   const botoes = ex.opcoes
     .filter((o) => o.id !== ex.atual)
-    .map((o) => botao("trocar-executor", `usar ${esc(rotuloExecutor(o.id))}`, { classe: "sm", dados: { id: o.id }, desabilitado: estado.ocupado, titulo: o.custo === "real" ? "sonda o CLI agora: custa um turno real" : "sem custo" }))
+    .map((o) => botao("trocar-executor", `usar ${esc(rotuloExecutor(o.id))}`, { classe: "sm", dados: { id: o.id }, desabilitado: estado.ocupado, titulo: o.custo === "real" ? "Verifica a conexão com sua conta" : "sem custo" }))
     .join(" ");
   const linhas = ex.opcoes.map((o) => `<span>${esc(rotuloExecutor(o.id))}: ${esc(estadoDaOpcao(o.inventario))}</span>`).join(" · ");
-  return `<div class="ex-linha"><b>Executor em uso:</b> ${esc(rotuloExecutor(ex.atual))} ${botoes}</div>
+  return `<details class="conexao-avancada"><summary>Configurar conexão</summary><div class="ex-linha"><b>Harness padrão:</b> ${esc(rotuloExecutor(ex.atual))} ${botoes}</div>
     <div class="ex-mudo">${linhas}</div>
-    ${ex.recusa ? `<div class="ex-recusa">não troquei: ${esc(ex.recusa)}</div>` : ""}`;
+    ${ex.recusa ? `<div class="ex-recusa">não troquei: ${esc(ex.recusa)}</div>` : ""}</details>`;
 }
 
 /** A sonda do executor EM USO: o inventário da frota prefere o claude-cli mesmo com o catcher ligado, e mentiria na tela. */
@@ -51,7 +51,7 @@ export function renderInventario(estado: Estado): string {
   const inv = inventarioEmUso(estado);
   const classe = inv?.estado === "pronto" ? "ok" : "falha";
   return `<div class="inventario inv-${classe}" role="status">
-    <div class="inv-linha">${esc(textoInventario(inv, estado.agora))} ${botao("sondar-inventario", "sondar de novo", { classe: "sm", titulo: "custa um turno real quando o executor é o claude-cli" })}</div>
+    <div class="inv-linha">${esc(textoInventario(inv, estado.agora))} ${botao("sondar-inventario", "sondar de novo", { classe: "sm", titulo: "Verifica a conexão com sua conta" })}</div>
     ${renderExecutor(estado)}
   </div>`;
 }

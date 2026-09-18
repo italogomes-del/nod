@@ -147,3 +147,38 @@ banco/repositórios/casos de uso/HTTP/fundo. `npm run desktop:mac` exige assinat
 O proxy usa o runtime do app com ELECTRON_RUN_AS_NODE somente em seu mcp.json.
 Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.mjs` testa JSON-RPC
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
+
+## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
+
+`harness` identifica o driver; `executor` continua indicando `local`/`catcher` nos eventos existentes.
+Novos agentes usam `harness=auto, modelo=auto`; perfis anteriores preservam seus modelos. A migração
+0013 adiciona a preferência a agentes e turnos. Todo novo caminho de enfileiramento deve copiar
+**harness e modelo** do agente (ou do turno original em retomadas). O plano resolve a escolha uma vez;
+quem executa usa `plano.harness`, nunca o padrão global copiado no boot.
+
+Claude Code e Codex estão integrados; Cursor e Hermes são somente entradas indisponíveis no catálogo.
+`NOD_EXECUTOR=auto` descobre contas conectadas sem turno pago; produção sem variável também usa auto.
+Desenvolvimento continua com catcher. `NOD_MODELO=auto` permite o padrão por harness; `sonnet` fixa
+Claude para os agentes criados com esse override. Boot/desktop usam sondagem de login sem inferência;
+`scripts/sonda.ts` e `e2e:haiku` continuam explicitamente separados e pagos.
+
+Codex exige flags de isolamento verificadas no help, usa apenas o proxy nod para integrações, não
+herda chaves OpenAI nem configuração de plugins/apps e não põe o token de turno no argv. Seu launcher
+0600 chama `main()` do proxy e é apagado ao encerrar. `desktop/proxy.ts` deve exportar `main` além de
+funcionar como executável direto. Valide ambos os caminhos sem modelos reais.
+
+Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila só entrega a uma máquina
+tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
+com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro
+fornecedor nem para catcher sem a pessoa escolher.
+
+## Computadores dos bots (ADR-037, 2026-09-18)
+
+`NOD_COMPUTADORES=docker` habilita o driver do servidor; `npm run computador:build` prepara a imagem.
+Computador de trabalho e máquina executora do harness são recursos diferentes. O vínculo está em
+`agentes.computador_id`; nunca derive o escopo do corpo da requisição. Ações passam pelo gateway
+com reserva confirmada antes do efeito e nova validação depois do boot, fora da transação.
+Takeover só termina por devolução explícita. Não use `--password-store=basic`: perfil usa GNOME
+Keyring e checkpoint de cookies cifrado. Preserve a chave de credenciais junto da estratégia de backup.
+`node scripts/smoke-computador.ts` usa dois ambientes descartáveis, sem modelos pagos. Limites e
+operação: [docs/computadores.md](docs/computadores.md).

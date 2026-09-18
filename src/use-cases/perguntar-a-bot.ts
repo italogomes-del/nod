@@ -53,6 +53,7 @@ export const perguntarABot: CasoNod<Deps, "perguntar_a_bot"> = async (deps, inpu
     entradaTexto: moldurarPergunta(remetente.nome, pergunta),
     entradaConfianca: "nao_confiavel",
     modelo: alvo.modelo,
+    harness: alvo.harness,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno peer não criado" });
   const autoria = autoriaAgente(remetente.id, deps.escopo.pessoaId);

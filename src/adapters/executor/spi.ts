@@ -7,13 +7,14 @@ import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/
  * O executor recebe o PLANO e os SINKS e devolve o resultado; quem grava é o servidor (ADR-018).
  * Nesta rodada há dois drivers no mesmo SPI: claude-cli (real) e catcher (default de dev/CI).
  */
-export type IdDriver = "claude-cli" | "catcher";
+export type IdDriver = "claude-cli" | "codex-cli" | "cursor-cli" | "hermes" | "catcher";
 
 export type Localidade = "local" | "servidor" | "ambos";
 
 export type ConfigDriver = {
   /** Caminho do binário; ausente = resolver no PATH aumentado (ADR-014). */
   bin?: string;
+  bins?: Partial<Record<IdDriver, string>>;
   /** Ambiente já filtrado por montarAmbiente(regime, source) — o driver não lê process.env. */
   env: Record<string, string>;
   /** Base para o mkdtemp por turno (EMENDA 11): NOD_HOME/turnos. */
@@ -52,4 +53,4 @@ export interface Driver {
 /** create() que falha vira sombra com motivo escrito, nunca derruba o servidor (ADR-012). */
 export type RegistroDriver = { estado: "pronto"; driver: Driver; instance: Instance } | { estado: "sombra"; motivo: string };
 
-export type Registry = Record<IdDriver, RegistroDriver>;
+export type Registry = Record<"claude-cli" | "catcher", RegistroDriver> & Partial<Record<IdDriver, RegistroDriver>>;

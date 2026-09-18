@@ -1,3 +1,4 @@
+import type { PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade } from "../contracts/motivos.ts";
@@ -31,11 +32,12 @@ interface Linha {
   entrada_confianca: Confianca;
   custo_usd: string | null;
   modelo: string;
+  harness?: PreferenciaHarness;
   criado_em: Date;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_confianca, custo_usd, modelo, criado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_confianca, custo_usd, modelo, harness, criado_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -60,6 +62,7 @@ function paraTurno(l: Linha): Turno {
     entradaConfianca: l.entrada_confianca,
     custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
     modelo: l.modelo,
+    harness: l.harness ?? "auto",
     criadoEm: ms(l.criado_em),
   };
 }
@@ -74,6 +77,7 @@ export type NovoTurno = {
   entradaTexto: string;
   entradaConfianca: Confianca;
   modelo: string;
+  harness?: PreferenciaHarness;
   retomaTurnoId?: string | null;
   reenvios?: number;
   executor?: "local" | "catcher";
@@ -104,9 +108,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_confianca, modelo, retoma_turno_id, reenvios, executor, locality_reason, decidido_por)
+          entrada_texto, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
-          ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${t.entradaConfianca}, ${t.modelo},
+          ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"})
         returning ${conn.unsafe(COLUNAS)}`;
@@ -143,7 +147,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * por pessoa, ADR-007); a segunda espera o commit da primeira e então enxerga o 'despachando'.
      * Pessoas diferentes não se bloqueiam. Chamado sobre um pool, abre a própria tx curta.
      */
-    async reivindicar(p: { machineId: string; agora: number }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[] }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         const [l] = await trx<Linha[]>`
@@ -151,6 +155,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           where (tenant_id, id) = (
             select t.tenant_id, t.id from turnos t
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
+              ${p.harnessesProntos === undefined ? trx`` : trx`and ((t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[]))`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
               and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.estado = 'despachando')
               and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.agente_id = t.agente_id and d.estado = 'despachando')

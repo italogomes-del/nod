@@ -16,7 +16,7 @@ export type MarcacaoItem = { id: string; selecionado: boolean; textoFinal?: stri
 export type EntradaDecidir = { decisaoId: string; itens?: MarcacaoItem[] };
 
 /** Item pronto para executar FORA da transação (conector resolvido por slug ainda dentro dela). */
-export type ItemAExecutar = { item: ItemAprovacao; conectorId: string | null };
+export type ItemAExecutar = { item: ItemAprovacao; conectorId: string | null; computador?: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string } };
 
 export type SaidaMarcarEDecidir = { decisao: Decisao; itens: ItemAprovacao[]; aExecutar: ItemAExecutar[] };
 
@@ -48,6 +48,7 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   for (const marca of input.itens ?? []) {
     const existente = await deps.repos.itensAprovacao.buscar(marca.id);
     if (!existente || existente.decisaoId !== decisao.id) throw new ErroDeDominio("entrada_invalida", { cause: `item ${marca.id} não pertence à decisão` });
+    if (existente.destino.conector === "computador" && marca.textoFinal !== undefined && marca.textoFinal !== existente.textoOriginal) throw new ErroDeDominio("entrada_invalida");
     const marcado = await deps.repos.itensAprovacao.marcar(marca.id, { selecionado: marca.selecionado, textoFinal: marca.textoFinal, agora });
     if (!marcado) throw new ErroDeDominio("nao_permitido", { cause: "item de outra pessoa" });
   }
@@ -56,6 +57,12 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
   const aExecutar: ItemAExecutar[] = [];
   for (const item of itens) {
+    if (item.destino.conector === "computador") {
+      if (decisao.ownerId !== deps.escopo.pessoaId || !decisao.turnoId || typeof item.destino.argumentos.acaoId !== "string") throw new ErroDeDominio("nao_permitido");
+      if (!item.selecionado) await deps.repos.computadores.concluir(item.destino.argumentos.acaoId, "recusada");
+      aExecutar.push({ item, conectorId: null, computador: { tenantId: decisao.tenantId, pessoaId: decisao.ownerId, agenteId: decisao.agenteId, turnoId: decisao.turnoId, acaoId: item.destino.argumentos.acaoId } });
+      continue;
+    }
     const conector = item.selecionado ? await deps.repos.conectores.buscarPorSlug(item.destino.conector) : null;
     aExecutar.push({ item, conectorId: conector?.id ?? null });
   }
@@ -86,11 +93,19 @@ export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unk
  * (E4.1); desmarcado sensível = sensivel_nao_aprovado, desmarcado comum = retirado_pela_pessoa,
  * erro ou isError do conector = falhou_na_execucao (E4.5: nunca "enviado" quando falhou).
  */
-export async function executarItens(services: Pick<Services, "conectores">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
+export async function executarItens(services: Pick<Services, "conectores" | "computadores">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
   const desfechos: DesfechoExecutado[] = [];
-  for (const { item, conectorId } of aExecutar) {
+  for (const { item, conectorId, computador } of aExecutar) {
     if (!item.selecionado) {
       desfechos.push({ itemId: item.id, desfecho: item.origemSensivel ? "sensivel_nao_aprovado" : "retirado_pela_pessoa" });
+      continue;
+    }
+    if (computador) {
+      try {
+        if (!services.computadores) throw new ErroDeDominio("estado_invalido");
+        await services.computadores.executarAprovado(computador);
+        desfechos.push({ itemId: item.id, desfecho: "executado" });
+      } catch { desfechos.push({ itemId: item.id, desfecho: "falhou_na_execucao" }); }
       continue;
     }
     if (!conectorId) {
@@ -149,6 +164,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       entradaTexto,
       entradaConfianca: "confiavel",
       modelo: original?.modelo ?? MODELO_AGENTE_PADRAO,
+      harness: original?.harness,
       retomaTurnoId: decisao.turnoId,
     });
     turnoRetomadaId = turno?.id ?? null;
@@ -219,6 +235,7 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
     entradaTexto: redigir("retomada", agora, { motivo: original.motivoInterrupcao ?? "interrupção" }),
     entradaConfianca: original.entradaConfianca,
     modelo: original.modelo,
+    harness: original.harness,
     retomaTurnoId: original.id,
     reenvios: original.reenvios + 1,
   });

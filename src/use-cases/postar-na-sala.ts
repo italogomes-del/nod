@@ -164,6 +164,7 @@ export const postarNaSala: CasoDeUso<EntradaPost, SaidaPost> = async (deps, inpu
       entradaTexto: texto,
       entradaConfianca: mensagem.confianca,
       modelo: agente.modelo,
+    harness: agente.harness,
     });
     if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala não criado" });
     turnos.push(turno);

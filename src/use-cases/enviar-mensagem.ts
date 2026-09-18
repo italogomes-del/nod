@@ -61,6 +61,7 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     entradaTexto: texto,
     entradaConfianca: "confiavel",
     modelo: agente.modelo,
+    harness: agente.harness,
     executor,
     localityReason: localidade.motivo,
     decididoPor: localidade.decididoPor,

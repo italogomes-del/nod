@@ -58,7 +58,7 @@ export function resultadoDeExcecao(erro: unknown, sinais: SinaisTurno, texto = "
 }
 
 export function driverDoPlano(plano: PlanoTurno): IdDriver {
-  return plano.executor === "catcher" ? "catcher" : "claude-cli";
+  return plano.executor === "catcher" ? "catcher" : plano.harness ?? "claude-cli";
 }
 
 export function iniciarLaco(o: OpcoesLaco): Laco {
@@ -122,8 +122,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
 
     try {
       const registro = o.registry[driverDoPlano(plano)];
-      if (registro.estado !== "pronto") {
-        log("aviso", "laco_driver_em_sombra", { turno_id: plano.turnoId, driver: driverDoPlano(plano), motivo: registro.motivo });
+      if (!registro || registro.estado !== "pronto") {
+        log("aviso", "laco_driver_em_sombra", { turno_id: plano.turnoId, driver: driverDoPlano(plano), motivo: registro?.motivo ?? "Harness não disponível neste computador" });
         await entregar({ ...resultadoDeExcecao(null, sinais), desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel" });
         return;
       }

@@ -284,4 +284,11 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     const inv = await instance.sondar();
     expect(inv).toMatchObject({ estado: "pronto", versao: "2.1.272" });
   });
+  it("descoberta automática verifica login sem submeter um prompt", async () => {
+    const { instance, registro, stdin } = await instanciarCom(criarClaudeCliDriver({ ...lig, sondaSemTurno: true }), "s3-mcp-ok");
+    expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.272" });
+    expect((JSON.parse(await readFile(registro, "utf8")) as Registro).argv).toEqual(["auth", "status"]);
+    await expect(stat(stdin)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
 });

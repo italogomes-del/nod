@@ -68,6 +68,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
     entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
     entradaConfianca: await confiancaDaFonte(deps, rotina.fonte),
     modelo: agente.modelo,
+    harness: agente.harness,
     executor: input.executor,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno de rotina não criado" });

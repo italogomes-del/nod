@@ -68,6 +68,7 @@ const TIPOS: Record<TipoFrame, true> = {
   "rotina.executou": true,
   "sala.handoff": true,
   negacao: true,
+  "computador.mudou": true,
   "inventario.mudou": true,
   "agente.mudou": true,
   "parada.faixa": true,

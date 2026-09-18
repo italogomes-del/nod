@@ -25,6 +25,11 @@ const valor = (flag) => {
   return i === -1 ? null : (args[i + 1] ?? null);
 };
 
+if (args[0] === "auth" && args[1] === "status") {
+  process.stdout.write(JSON.stringify({ loggedIn: true }) + "\n");
+  process.exit(0);
+}
+
 if (args.includes("--version")) {
   process.stdout.write(`${VERSAO} (Claude Code)\n`);
   process.exit(0);

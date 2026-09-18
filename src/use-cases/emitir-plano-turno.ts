@@ -1,3 +1,5 @@
+import type { IdHarness } from "../contracts/harness.ts";
+import { resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
@@ -18,6 +20,8 @@ export type EntradaEmitirPlano = {
   /** Ausente: 'local' quando o inventário do claude-cli está pronto, senão 'catcher' (definido em 2026-09-16: catcher é o default de dev, ADR-012/EMENDA 25). */
   executor?: Executor;
   permitirResume?: boolean;
+  harnesses?: Partial<Record<IdHarness, Inventario>>;
+  harnessPreferido?: IdHarness | null;
 };
 
 /** Motor cujo inventário decide a localidade (ADR-019/022). */
@@ -61,7 +65,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   const inventarioCli = await deps.repos.inventario.buscar(MOTOR_CLI);
   const executor: Executor = input.executor ?? (inventarioCli?.estado === "pronto" ? "local" : "catcher");
-  const inventario: Inventario = executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
+  const escolha = executor !== "catcher" && input.harnesses ? resolverHarness({ harness: turno.harness, modelo: turno.modelo,
+    prontos: (Object.keys(input.harnesses) as IdHarness[]).filter((id) => input.harnesses?.[id]?.estado === "pronto"), preferido: input.harnessPreferido }) : null;
+  const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   const modo = modoDoTurno(turno, conversa, agente);
   const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, 50);
@@ -69,7 +75,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
   const original = origemId ? await deps.repos.turnos.buscar(origemId) : null;
   // definido em 2026-09-17: rotina e trabalho de colega usam sessão nova com missão e catálogo atuais; o histórico explícito preserva contexto.
-  const sessaoCli = input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   const historico = !sessaoCli ? mensagens.slice(-20).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
   let rotina: { exigeAprovacao: boolean } | null = null;
@@ -82,7 +88,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   }
 
   const parcial = montarPlano({
-    turno,
+    computador: Boolean(deps.services.computadores),
+    turno: escolha ? { ...turno, modelo: escolha.modelo } : turno,
     agente,
     memorias,
     concessoes,
@@ -102,7 +109,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   });
 
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
-  const plano: PlanoTurno = { ...parcial, machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
+  const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
 
   const evento: RuntimeEvent = {
@@ -117,6 +124,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     dados: {
       machine_id: input.machineId,
       executor,
+      harness: escolha?.harness ?? null,
+      modelo: plano.entrada.modelo,
       modo,
       ferramentas: plano.catalogo.ferramentas.length,
       servidores: plano.catalogo.servidores.length,

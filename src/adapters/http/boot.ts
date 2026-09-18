@@ -1,3 +1,5 @@
+import type { DriverComputador } from "../../contracts/computador.ts";
+import { criarCodexCliDriver } from "../executor/drivers/codex-cli.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,6 +33,7 @@ import { opcoesSessaoDoEnv } from "./sessao.ts";
  * rotas internas pela URL do próprio servidor (porta 0 nos testes, EMENDA 34).
  */
 export type OpcoesBoot = {
+  computador?: DriverComputador;
   env?: EnvApp;
   db?: Db;
   dbDono?: Db;
@@ -98,7 +101,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   if (!donoEmprestado) await dbDono.end({ timeout: 2 });
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
-  const app = comporApp({ db, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
+  const app = comporApp({ db, computador: o.computador, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
@@ -109,23 +112,23 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   });
   const url = `http://127.0.0.1:${srv.port}`;
 
-  // 4. registry: catcher sempre; claude-cli SÓ quando pedido (a sonda dele custa um turno real, EMENDA 35). Os outros
-  //    candidatos ficam à espera do interruptor (definido em 2026-09-16): trocar pela interface liga o driver na hora.
-  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, modeloSonda: env.NOD_MODELO_SONDA })];
-  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli");
+  // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
+  //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
+  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY })];
+  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" || env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production"));
   const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });
   const padrao = executorPadrao(env, registry);
-  const inventario: Inventario = inventarios[app.idDriver] ?? { estado: "ausente", motivo: padrao.id ? "sem sonda" : padrao.motivo, em: agora() };
   const ativar: AtivarDriver = async (id) => {
     const driver = candidatos.find((d) => d.meta.id === id);
     if (!driver) return { estado: "ausente", motivo: `driver ${id} não disponível neste servidor`, em: agora() };
     const inv = await registrarDriver(registry, cfgDrivers, driver);
     if (inv) return inv;
     const registro = registry[id];
-    return { estado: "ausente", motivo: registro.estado === "sombra" ? registro.motivo : "sem sonda", em: agora() };
+    return { estado: "ausente", motivo: registro?.estado === "sombra" ? registro.motivo : "sem sonda", em: agora() };
   };
   app.ligarRegistry(registry, inventarios, ativar);
+  const inventario: Inventario = inventarios[app.idDriver] ?? { estado: "ausente", motivo: padrao.id ? "sem sonda" : padrao.motivo, em: agora() };
   log("info", "registry_pronto", { executor_pedido: app.idDriver, executor_padrao: padrao.id, motivo: padrao.id ? null : padrao.motivo, inventario: inventario.estado });
 
   // 5. inventário persistido por pessoa (ADR-019): é o que enviarMensagem/despacharTurno leem no gate pré-spawn.
@@ -183,7 +186,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       await despachante.parar();
       await orquestrador.parar();
       await app.fechar();
-      for (const r of Object.values(registry)) if (r.estado === "pronto") await r.instance.dispose();
+      for (const r of Object.values(registry)) if (r?.estado === "pronto") await r.instance.dispose();
       await srv.close();
       if (!dbEmprestado) await db.end({ timeout: 2 });
       log("info", "nod_encerrado", { machine_id: machineId });
