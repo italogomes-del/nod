@@ -4,6 +4,7 @@ import type { Decisao } from "../../../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
+import { retomarAposAcesso } from "../../../use-cases/retomar-apos-acesso.ts";
 import { conceder } from "../../../use-cases/conceder.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
@@ -115,6 +116,8 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
                 const r = await executar(deps, conceder, { agenteId: proposta.agenteId, conectorId: conector.id, capacidade, autorTipo: "pessoa" });
                 ids[`concessao_${capacidade}`] = r.concessaoId;
               }
+              const retomada = await executar(deps, retomarAposAcesso, { decisao: decidida, proposta });
+              if (retomada.turnoId) ids.turnoRetomada = retomada.turnoId;
             } else if (atual.tipo === "rotina") {
               const rotina = await deps.tx((trx) => d.services.rotinas.ativar(trx, atual.id));
               ids.rotina = rotina.id;
