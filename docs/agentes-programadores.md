@@ -69,6 +69,24 @@ arquitetural: não deve ser necessário acrescentar instruções ao núcleo para
 `tests/unit/executor/programacao-harnesses.test.ts` confere que os dois drivers
 recebem as capacidades do plano e não acrescentam capacidades ausentes.
 
-Essas alterações não implementam ainda a associação do projeto nem habilitam o
-acesso à pasta local. Os critérios acima continuam pendentes até a entrega desse
-fluxo e sua validação funcional.
+## Pasta local na conversa
+
+No servidor local com login `stub` (loopback), **Pasta de trabalho** permite escolher uma pasta uma vez para
+ler/editar arquivos e executar comandos isolados. O vínculo pertence à conversa,
+não ao harness; Claude Code e Codex recebem as mesmas capacidades pelo proxy Nod.
+Git usa worktree por padrão, enquanto `workspace_preparar` permite ao agente
+respeitar uma escolha explícita de pasta direta/referência antes da preparação.
+Remover acesso interrompe comandos e invalida os planos antigos; não apaga arquivos.
+
+Leitura/escrita não dependem de Docker. Comandos exigem Docker e a imagem criada
+por `npm run computador:build` (ou `NOD_COMPUTADOR_IMAGEM` explicitamente preparada).
+Eles rodam sem rede nem serviços/credenciais do Mac, por até 60 segundos. Não
+instalam dependências via rede; no worktree, metadados Git são somente leitura.
+Isso não equivale a executar o projeto completo do Nod contra seu Postgres local.
+Login Google/servidor compartilhado/desktop ainda não oferece associação de pastas
+do Mac. Uma sessão web remota não deve autorizar leitura do filesystem do servidor.
+
+Validação sem modelos pagos: `scripts/smoke-workspace.ts` executa arquivo, teste
+Node, Git e cancelamento com Docker real; `tests/concurrency/workspaces-http.test.ts`
+confere o gateway e continuidade entre planos dos dois harnesses. Os próximos
+passos e evidências estão em `docs/continuidade-capacidades-gerais.md`.

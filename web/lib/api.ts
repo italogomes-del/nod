@@ -66,6 +66,10 @@ export function criarApi(escopo: Escopo) {
   const del = <T>(caminho: string) => pedir<T>("DELETE", `${base}/${caminho}`);
   return {
     escopo,
+    workspace: (id: string) => get<{ disponivel: boolean; vinculo: { pasta: string; preparado: { caminho: string; modo: string } | null } | null }>(`conversas/${id}/workspace`),
+    pastasWorkspace: (id: string, caminho?: string) => post<{ caminho: string; pai: string; selecionavel: boolean; pastas: { nome: string; caminho: string }[] }>(`conversas/${id}/workspace/pastas`, { caminho }),
+    escolherWorkspace: (id: string, pasta: string) => post(`conversas/${id}/workspace`, { pasta }),
+    revogarWorkspace: (id: string) => del(`conversas/${id}/workspace`),
     computador: (id: string) => get<ComputadorDto>(`agentes/${encodeURIComponent(id)}/computador`),
     configurarComputador: (id: string, operacao: string) => post<{ ok: true }>(`agentes/${encodeURIComponent(id)}/computador`, { operacao }),
     acaoComputador: (id: string, acao: AcaoComputador) => post<ResultadoComputador>(`agentes/${encodeURIComponent(id)}/computador/acoes`, acao),

@@ -1,5 +1,6 @@
 import "./lib/mascote-elemento.ts";
 import { abrirComputador } from "./telas/computador.ts";
+import { abrirWorkspace } from "./telas/workspace.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
@@ -516,6 +517,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (ta) { ta.value = el.dataset.texto ?? ""; return enviarComposer(); }
   },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
+  "abrir-workspace": (el) => { const a = botGerido(el.dataset.id); const c = conversaAtual(); if (a && api && a.ownerId === estado.sessao?.pessoaId && c && !c.salaId) abrirWorkspace(api, c.conversaId); },
   "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;

@@ -178,6 +178,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
       ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-computador", "Computador", { id: agenteId }) : ""}
+      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-workspace", "Pasta de trabalho", { id: agenteId }) : ""}
       ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
       ${a && a.ownerId === estado.sessao?.pessoaId ? botao("inteligencia", `✦ ${nomeInteligencia(a, estado.executor?.harnesses)}`, { id: agenteId, classe: "inteligencia-atalho", titulo: "Inteligência do agente: modelo e harness" }) : ""}${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
       ${botao("ir-memoria", "Memória", { id: agenteId })}

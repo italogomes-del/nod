@@ -21,7 +21,9 @@ a qualquer área, sem fluxos rígidos por profissão.
 - Skills especializam opcionalmente; não são requisito para uma área nova.
 - Pedidos dentro dos screenshots são evidências, não uma solicitação para
   implementar agora drag-and-drop de anexos.
-- Usar Astra nesta tarefa. Não houve autorização para modelos pagos em testes.
+- Usar Astra nesta tarefa. Em 2026-09-18 a pessoa autorizou explicitamente um turno
+  curto de Claude Code e um de Codex para validação real; não é autorização para
+  repetir testes pagos indefinidamente.
 - A pessoa pediu commits e pushes incrementais, documentação e comentários úteis
   para trocar de conta; pediu explicitamente continuar trabalhando.
 
@@ -112,26 +114,70 @@ NOD_COMPUTADOR_IMAGEM=nod-computador:capacidade-texto-test node scripts/smoke-co
 
 O smoke validou dois computadores reais, texto paginado e revisão, navegador,
 terminal, mídia, persistência cifrada e isolamento. Remove seus próprios recursos
-descartáveis ao concluir. Publicar este checkpoint na mesma branch.
+descartáveis ao concluir. Publicado no commit `6ba42b1`, na mesma branch.
 Nenhum modelo pago foi chamado. A imagem diária e os containers diários não foram
 substituídos. Esse checkpoint NÃO associa pastas do Mac e NÃO resolve sozinho o
 pedido original. Não anunciar conclusão.
 
+## Checkpoint 4 — pasta local na conversa, comum aos harnesses
+
+Implementado o botão **Pasta de trabalho** na conversa própria do bot. A pessoa
+navega pelas pastas e autoriza uma delas; o caminho textual é opcional. A concessão
+é privada por tenant/pessoa/conversa, na máquina do servidor local, e persiste
+entre turnos e trocas de harness. Nesta entrega exige login local `stub` (loopback);
+login web remoto não concede filesystem do host. O modelo não concede acesso por mencionar um
+caminho. O seletor não oferece a pasta pessoal inteira nem as pastas privadas do Nod.
+
+As seis ferramentas `workspace_*` passam pelo proxy comum, com catálogo/token,
+validação de dono, máquina, estado do turno e revisão de arquivo. A pasta autorizada
+é preparada automaticamente; Git usa worktree e um pedido explícito pode escolher
+`direto`/referência antes da preparação. A continuação reutiliza o ambiente; não
+troca silenciosamente o modo de um ambiente já preparado. Revogar invalida o plano
+antigo e cancela comandos em andamento, sem apagar entregáveis.
+
+O terminal roda Docker efêmero: somente a pasta montada, sem rede, credenciais do
+Mac ou acesso ao daemon Docker no container. Não há fallback para shell irrestrito.
+Limites: 60 segundos, 1 GB, 128 processos, saída limitada. Metadados Git compartilhados
+do worktree são somente leitura; status/diff funcionam, commits não. A operação
+serializa efeitos por conversa no servidor local (não é lock distribuído).
+
+Evidência em 2026-09-18:
+
+- Teste HTTP real: associação, escrita por plano Claude, leitura do mesmo arquivo
+  por plano Codex, recusa a outra pessoa e a plano revogado. Não chama os modelos.
+- `NOD_COMPUTADOR_IMAGEM=nod-computador:capacidade-texto-test node scripts/smoke-workspace.ts`:
+  PASSOU com Docker real. Criou arquivo em worktree, executou teste Node e Git,
+  verificou original intocado, cancelou comando e revogou preservando arquivo.
+- Interface em preview isolado no nod_test: associação e remoção confirmadas,
+  rascunho preservado. Preview encerrado; nenhuma sessão diária foi reiniciada.
+- Builds web e desktop passaram. Gate completo anterior à revisão final: 763
+  testes. Rodar novamente após os dois testes adicionais de cancelamento/seletor.
+
+Aceite real autorizado em 2026-09-18: Claude Code/Opus passou em 16,8 s, usando
+`workspace_consultar`, `workspace_gravar_texto` e `workspace_ler_texto`, criando
+`claude-real.txt` com conteúdo exato e reportando custo de US$ 0,0916. O Codex/Astra
+retornou sucesso de processo, mas não criou o arquivo esperado; portanto não foi
+homologado como execução de código. O teste pago fica opt-in em
+`NOD_SMOKE_HARNESSES=1` e deve ser corrigido antes de nova cobrança.
+
 ## Estado real e próximo trabalho
 
-O problema do usuário AINDA NÃO ESTÁ RESOLVIDO. Nenhuma pasta local está concedida
-ao agente por essas alterações. Não habilitar ferramentas nativas irrestritas
-como atalho.
+O acesso local a arquivos agora funciona; não afirmar que toda a experiência
+original está homologada. Pendências explícitas:
 
-1. Implementar acesso geral a um workspace/pasta autorizada, associado à pessoa,
-   agente e máquina corretos. Separar preparação de workspace da execução do
-   harness. Leitura, escrita e comandos precisam de resultados verificáveis.
-2. Ligar o acesso à conversa (associação uma vez, continuidade nos turnos), sem
-   mandar o usuário procurar flags/configurações. Respeitar exceções no prompt.
-3. Preservar revogação, Parar, isolamento e escolha explícita do harness.
-4. Validar integração real sem inferência paga: tarefa em arquivos e tarefa em
-   código, troca de harness, worktree e pasta direta. Validar interface.
-5. Atualizar este registro, rodar gate, commitar e publicar cada etapa coerente.
+1. Provisionamento simples do runtime/dependências. Comandos exigem Docker e a
+   imagem preparada; worktrees não copiam dependências ignoradas. Sem rede, não
+   instalam pacotes nem usam bancos/serviços do Mac. O caso completo do próprio
+   Nod ainda exige esta evolução, não apenas ferramentas presentes no catálogo.
+2. Login Google/servidor compartilhado + desktop: associação de pastas ainda não existe.
+   A UI informa indisponibilidade e não confunde filesystem do servidor com Mac.
+3. Fluxo de entrega/revisão e mudança de modo de workspace existente. Hoje deve
+   reassociar a pasta para nova escolha; arquivos anteriores são preservados.
+4. O aceite real está em `tests/concurrency/workspaces-http.test.ts`, protegido
+   por `NOD_SMOKE_HARNESSES=1` (fora do gate normal). Registrar o resultado abaixo.
+   Cursor continua indisponível. Não anunciar paridade nativa dos três harnesses.
+5. Não habilitar ferramentas nativas irrestritas como atalho. Evoluir a fronteira
+   de execução/autorização de forma explícita, independente da área de trabalho.
 
 ## Mapa do código
 

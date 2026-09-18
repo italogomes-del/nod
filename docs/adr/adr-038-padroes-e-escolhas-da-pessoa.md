@@ -108,6 +108,12 @@ não substitui executar a tarefa de ponta a ponta.
 
 ## Evidência e limites da referência
 
+Implementação inicial em 2026-09-18: recurso de pasta autorizada por conversa no
+servidor local, preparação persistente independente do harness e ferramentas
+comuns de arquivos/comandos. O terminal é isolado sem rede; provisionamento de
+dependências, serviços locais e ponte de pastas do desktop seguem pendentes.
+Esses limites de entrega não substituem a direção arquitetural acima.
+
 Inspeção de código do OpenBot no commit
 `eb325300023289f17adf5a10fb38b5bb403dca82` (sem executar o produto):
 

@@ -16,6 +16,7 @@ import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { montarPromptSistema } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
+import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
 /**
  * Ferramentas nod por modo (definido em 2026-09-16): criação propõe perfil/rotina/acesso; conversa
@@ -62,6 +63,7 @@ function ferramentasDeConectores(conectores: readonly Conector[], concessoes: re
 }
 
 export type EntradaPlano = {
+  workspace?: boolean;
   computador?: boolean;
   turno: Turno;
   agente: Agente;
@@ -96,7 +98,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   const computador: FerramentaPlano[] = entrada.computador && modo !== "peer" && modo !== "criacao" ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
-  let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores, ...computador], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
+  const workspace: FerramentaPlano[] = entrada.workspace && modo === "conversa" ? Object.entries(FERRAMENTAS_WORKSPACE).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
+  let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores, ...computador, ...workspace], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
   let decididoPor: `regra:${string}` = REGRA_MONTAGEM;
   if (entrada.confianca === "nao_confiavel") {
     ferramentas = catalogoReduzido(ferramentas);

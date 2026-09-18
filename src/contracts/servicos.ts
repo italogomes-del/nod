@@ -21,6 +21,7 @@ export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | {
  * catcher ← L4/L3; relogio ← L9 (relogio-sistema). L9 compõe.
  */
 export interface ServicesNod<Trx> {
+  workspaces?: { id(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<string | null> };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
   };
