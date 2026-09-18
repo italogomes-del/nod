@@ -187,3 +187,22 @@ Takeover só termina por devolução explícita. Não use `--password-store=basi
 Keyring e checkpoint de cookies cifrado. Preserve a chave de credenciais junto da estratégia de backup.
 `node scripts/smoke-computador.ts` usa dois ambientes descartáveis, sem modelos pagos. Limites e
 operação: [docs/computadores.md](docs/computadores.md).
+
+## Repositórios de referência (2026-09-18)
+
+Procure o clone local primeiro; se não existir neste ambiente, use a URL. O clone pode faltar em
+Cloud Agent ou noutra máquina, então a URL é a fonte canônica, não o caminho.
+
+- **OpenBot (CopilotKit)** — `~/code/OpenBot`, senão https://github.com/CopilotKit/OpenBot.
+  A [ADR-038](docs/adr/adr-038-padroes-e-escolhas-da-pessoa.md) fixa o commit
+  `eb325300023289f17adf5a10fb38b5bb403dca82`, conferido em 2026-09-18: existe no histórico e os
+  quatro arquivos citados existem nele. `server/src/host-access/tools.ts` é o paralelo direto das
+  ferramentas `workspace_*`; sem pasta concedida o catálogo dele tem uma ferramenta só (linha 170),
+  a mesma conclusão a que o nod chegou por conta própria. Lá a pessoa escolhe a pasta no seletor
+  nativo (`requestFolderGrant` não recebe caminho): a descoberta automática é do nod.
+- **OpenMausBot** — `~/code/OpenMausBot`, senão https://github.com/milind-soni/OpenMausBot.
+  Referência dominante dos ADRs; a comparação viva está em
+  [docs/comparacao-openmausbot.md](docs/comparacao-openmausbot.md).
+
+`~/.openmausbot/` **não é código**: são dados de runtime do app instalado (`bots.json`,
+`messages.db`). Servem como evidência de comportamento, nunca como fonte a copiar.
