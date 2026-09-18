@@ -1,4 +1,4 @@
-# Banco descartavel para desenvolver uma feature sem tocar no banco diario.
+# definido em 2026-09-18: banco descartavel para desenvolver uma feature sem tocar no banco diario.
 # O nome do projeto Compose isola o container; NOD_PG_PORT escolhe a porta no host.
 services:
   postgres:

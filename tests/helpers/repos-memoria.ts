@@ -455,6 +455,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           entradaConfianca: t.entradaConfianca,
           custoUsd: null,
           modelo: t.modelo,
+          harness: t.harness ?? "auto",
           criadoEm: agora() + b.turnos.length / 1000,
         };
         b.turnos.push(turno);

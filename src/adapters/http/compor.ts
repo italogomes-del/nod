@@ -63,6 +63,7 @@ import { criarRotasExecutor } from "./rotas/executor.ts";
 import { criarRotasFrota } from "./rotas/frota.ts";
 import { rotasInternas } from "./rotas/interno.ts";
 import { criarRotaInventario } from "./rotas/inventario.ts";
+import { criarRotaAmbiente } from "./rotas/ambiente.ts";
 import { criarRotaMetricas } from "./rotas/metricas.ts";
 import { criarRotasPropostas } from "./rotas/propostas.ts";
 import { criarRotasRotinas, type DepsRotasL7 } from "./rotas/rotinas.ts";
@@ -436,6 +437,7 @@ export function comporApp(o: OpcoesCompor): App {
   const rotas: Rota[] = [
     ...criarRotasFrota(depsRotas),
     criarRotaInventario({ inventario }),
+    criarRotaAmbiente(env),
     ...(compartilhado ? [
       ...ponteHttp.rotas,
       { metodo: "GET", padrao: /^\/executor$/, async handler(ctx) {

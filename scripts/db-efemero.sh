@@ -35,6 +35,7 @@ case "$acao" in
     echo
     echo "Banco efemero '$nome' pronto em 127.0.0.1:$porta."
     echo "Para usar neste shell:"
+    echo "export NOD_BANCO_AMBIENTE=efemero"
     echo "export DATABASE_URL=postgres://nod_app:nod@127.0.0.1:${porta}/nod"
     echo "export DATABASE_URL_DONO=postgres://nod_dono:nod@127.0.0.1:${porta}/nod"
     echo "export DATABASE_URL_TEST=postgres://nod_app:nod@127.0.0.1:${porta}/nod_test"

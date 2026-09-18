@@ -50,6 +50,7 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     decisao = await deps.repos.decisoes.criar({
       id: proposta.id,
       tipo: "acesso",
+      turnoId: p.turnoId,
       agenteId: proposta.agenteId,
       conversaId: proposta.conversaId,
       prazoDecisaoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),

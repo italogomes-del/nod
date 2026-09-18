@@ -18,7 +18,7 @@ NOD_LOGIN=stub npm run dev
 
 3. Em `docker compose ps`, confirme `nod-postgres`, estado `healthy` e a porta
    `127.0.0.1:5434->5432`.
-4. Abra `http://127.0.0.1:5274`.
+4. Abra `http://127.0.0.1:5274` e confirme o selo verde **Persistente · DB 5434**.
 5. No fim do dia, encerre web e API com `Ctrl+C`. Pode desligar o Mac sem parar o Postgres.
 
 Se o Postgres não estiver saudável, execute `npm run docker:up` e confira novamente. Não rode
@@ -32,8 +32,9 @@ cd ~/code/nod
 npm run db:efemero:up -- nome-da-feature 5435
 ```
 
-Use as três variáveis de banco impressas pelo comando e execute essa cópia do Nod com API e web em
-portas diferentes, por exemplo `8889` e `5275`. Ao terminar:
+Use as variáveis impressas pelo comando e execute essa cópia do Nod com API e web em portas
+diferentes, por exemplo `8889` e `5275`. A interface deve mostrar o selo âmbar **Efêmero · DB 5435**.
+Ao terminar:
 
 ```bash
 npm run db:efemero:down -- nome-da-feature 5435
@@ -95,8 +96,8 @@ npm run check
 NOD_LOGIN=stub npm run dev
 ```
 
-7. Abra `http://127.0.0.1:5274` e confirme login, conversas existentes e envio de uma mensagem. Web,
-   API e banco estarão então na nova versão.
+7. Abra `http://127.0.0.1:5274` e confirme o selo **Persistente · DB 5434**, login, conversas
+   existentes e envio de uma mensagem. Web, API e banco estarão então na nova versão.
 
 Se a falha ocorrer antes das migrações, corrija a instalação ou retorne ao código anterior. Se uma
 migração já tiver sido aplicada, não faça downgrade cego: voltar a tag não reverte o schema. Pare o
@@ -152,10 +153,11 @@ Cada banco de feature usa `docker-compose.efemero.yml`, um projeto Compose próp
 npm run db:efemero:up -- acesso-novo 5435
 ```
 
-O comando imprime as três variáveis de conexão. Exporte-as no terminal da feature e escolha portas
-livres também para a API e a web:
+O comando imprime as variáveis de conexão e `NOD_BANCO_AMBIENTE=efemero`. Exporte-as no terminal da
+feature e escolha portas livres também para a API e a web:
 
 ```bash
+export NOD_BANCO_AMBIENTE=efemero
 export DATABASE_URL=postgres://nod_app:nod@127.0.0.1:5435/nod
 export DATABASE_URL_DONO=postgres://nod_dono:nod@127.0.0.1:5435/nod
 export DATABASE_URL_TEST=postgres://nod_app:nod@127.0.0.1:5435/nod_test

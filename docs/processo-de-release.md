@@ -10,6 +10,12 @@ Os comandos desktop abaixo pressupõem essa integração. O [workflow integrado]
 
 Ainda faltam servidor HTTPS de produção, credenciais Apple e aceite nativo em ambos os tipos de Mac. Um DMG gerado com sucesso não comprova que o time consegue instalar, autenticar e trabalhar.
 
+## Exceção autorizada: preview 0.2.0-rc.1
+
+Em 2026-09-17, o mantenedor pediu repetir a preview anterior e adiar a distribuição assinada até uma versão estável. Esta preview usa a tag `desktop-v0.2.0-rc.1`, pacote `0.2.0-rc.1`, DMGs Intel/ARM sem assinatura Developer ID ou notarização, guia e manifesto SHA-256. Declare nas notas o build cruzado ARM, a ausência de aceite nativo completo e o requisito de servidor HTTPS. Confira os hashes dos arquivos hospedados antes de publicar como pré-release.
+
+O prefixo `desktop-v` mantém esta distribuição manual fora do workflow assinado de tags `v*`. Não se alteram `forceCodeSigning`, hardened runtime ou notarização da configuração de distribuição estável. Para gerar somente os artefatos desta preview, aplique os overrides explícitos na linha de comando: `CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dmg --x64 --arm64 --publish never --config.mac.identity=null --config.mac.notarize=false --config.dmg.sign=false`. Os demais passos e requisitos abaixo descrevem a distribuição assinada.
+
 ## Uma vez: preparar a distribuição
 
 - Integre e revise `desktop/`, `scripts/desktop/`, `electron-builder.yml`, scripts npm, ponte HTTP e workflow. Preserve os testes e migrações mais recentes da main.
