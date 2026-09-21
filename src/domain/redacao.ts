@@ -21,7 +21,8 @@ export type ChaveRedacao =
   | "decisao-vencida"
   | "retomada"
   | "parei-falta-dado"
-  | "anotei";
+  | "anotei"
+  | "permissao-permanente";
 
 /** Textos de sistema FIXOS em português; nunca vêm do modelo. `{chave}` é preenchido com params. */
 const CATALOGO: Record<ChaveRedacao, string> = {
@@ -34,6 +35,7 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "sem-acessos-nunca-executou": "sem acessos · nunca executou",
   "turno-interrompido": "Turno interrompido: {motivo}. O que já saiu fica marcado como parcial; nada foi reenviado.",
   "parada-nada-rodando": "Nada estava rodando. Nenhum turno foi interrompido.",
+  "permissao-permanente": "{pessoa} permitiu para sempre: {ferramentas}. Vale para qualquer destino destas ferramentas, a partir do próximo turno; você pode revogar quando quiser.",
   "memoria-nao-e-fonte": "Memória do agente: não substitui fonte autoritativa. Se um dado importa, confira na origem.",
   "proposta-confirmada": "Confirmado por {pessoa}. A partir de agora vale: {resumo}.",
   "rotina-proxima-execucao": "Rotina ativa: {resumo} · próxima execução: {proxima} ({fuso}).",

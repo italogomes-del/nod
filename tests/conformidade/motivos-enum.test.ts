@@ -3,7 +3,9 @@ import {
   CODIGOS_ERRO,
   DESFECHOS_ITEM,
   DESFECHOS_ROTINA,
+  MOTIVOS_APROVACAO_MANUAL,
   MOTIVOS_FALHA,
+  MOTIVOS_INATIVIDADE_PERMISSAO,
   MOTIVOS_INTERRUPCAO,
   MOTIVOS_LOCALIDADE,
   MOTIVOS_NEGACAO,
@@ -30,6 +32,8 @@ const MOTIVOS: Record<string, readonly string[]> = {
   desfecho_rotina: DESFECHOS_ROTINA,
   motivo_sem_novidade: MOTIVOS_SEM_NOVIDADE,
   codigo_erro: CODIGOS_ERRO,
+  motivo_aprovacao_manual: MOTIVOS_APROVACAO_MANUAL,
+  motivo_inatividade_permissao: MOTIVOS_INATIVIDADE_PERMISSAO,
   categoria_relato: CATEGORIAS_RELATO,
   alcance_relato: ALCANCES_RELATO,
 };

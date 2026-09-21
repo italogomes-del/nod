@@ -32,7 +32,7 @@ export function badgeExecutor(m: Pick<Mensagem, "autoria">): string {
 }
 
 /**
- * Ações que aparecem no hover da mensagem (ADR-041). A classe `.msg-actions` já existia em
+ * Ações que aparecem no hover da mensagem (ADR-042). A classe `.msg-actions` já existia em
  * estilos.css desde a folha original, sem nenhum render — este é o primeiro botão a usá-la.
  * Fica dentro de `.bubble-wrap`, não de `.message`, e o CSS o põe na margem LATERAL do balão: o
  * `top: -16px` da regra original cobria o nome e a hora em `.msg-autor`.

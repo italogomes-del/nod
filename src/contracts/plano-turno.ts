@@ -63,6 +63,14 @@ export type PlanoTurno = {
     /** EMENDA 15: rotina com exige_aprovacao só produz efeito externo via item aprovado. */
     efeitoExternoSoPorAprovacao: boolean;
   };
+  /**
+   * definido em 2026-09-21 (ADR-042): ferramentas que a PESSOA marcou como "sempre permitir",
+   * resolvidas no PUXAR e embarcadas aqui — a avaliação é LOCAL, nunca consulta por chamada
+   * (ADR-013). Nomes no mesmo namespace de `FerramentaPlano.nome` (`${slug}__${tool}`), e sempre
+   * um SUBCONJUNTO do catálogo deste plano: a regra evita a pergunta, nunca amplia alcance.
+   * VAZIA em turno com entrada não confiável (ADR-026 + ADR-042 claim 6).
+   */
+  semprePermitir: readonly string[];
   tokenDeTurno: string;
   expiraEm: EpochMs;
 };

@@ -17,35 +17,106 @@ const TIPO_HUMANO: Record<Item["decisao"]["tipo"], string> = {
   permissao: "pedido de permissão",
 };
 
+const JUSTIFICATIVA_PADRAO = "Veio de um lugar que guarda dado de aprendiz. Deixei desmarcado — só você pode marcar.";
+
 /**
- * Item de aprovação em LISTA tipada (E4.1/E4.2): checkboxes com contador ao vivo, item de origem
- * sensível nasce DESMARCADO com a justificativa em primeira pessoa, texto editável por item (E4.3).
- * Marcar um sensível exige a pessoa — é ela quem está clicando (CHECK marcado_por no banco).
+ * "no Slack" a partir do slug do destino: `Conector.nome` é o rótulo que a PESSOA deu no registro e
+ * já está no estado da web, então a tradução é do cliente e não exige campo novo no DTO. Sem
+ * conector casado (slug some do registro, ou destino "computador"), cai no próprio slug — nunca
+ * inventa nome.
  */
-function renderAprovacao(item: Item, aberta: boolean): string {
-  const itens = item.itensAprovacao;
-  const marcados = itens.filter((i) => i.selecionado).length;
-  const linhas = itens
-    .map(
-      (i) => `<li class="ap-item${i.origemSensivel ? " sensivel" : ""}">
-        <label><input type="checkbox" data-item="${esc(i.id)}" ${i.selecionado ? "checked" : ""} ${aberta ? "" : "disabled"} /> <b>${i.idx + 1}.</b> <code>${esc(i.destino.conector)}.${esc(i.destino.ferramenta)}</code></label>
-        <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" ${aberta ? "" : "disabled"} ${i.destino.conector === "computador" ? 'readonly title="Ação vinculada à tela observada; para mudar, recuse e peça uma nova ação."' : ""} />
-        ${i.origemSensivel ? `<div class="justificativa">${esc(i.justificativa ?? "veio de um conector que toca dado de aprendiz: desmarquei; só você marca.")}</div>` : ""}
-        ${i.desfecho ? `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>` : ""}
-      </li>`,
-    )
-    .join("");
-  return `<ul class="ap-lista">${linhas}</ul>
-    ${aberta ? `<div class="acoes">${botao("decidir-aprovacao", `Aprovar <span data-contador>${marcados}</span> de ${itens.length}`, { classe: "pri", id: item.decisao.id })}${botao("decidir-aprovacao-nenhum", "Não aprovar nada", { id: item.decisao.id })}</div>` : ""}`;
+function ondeAcontece(conectores: Estado["conectores"], slug: string): string {
+  if (slug === "computador") return "no computador do bot";
+  return `no ${conectores.find((c) => c.slug === slug)?.nome ?? slug}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean): string {
+/** `slack.send_message` + os argumentos como vieram: o jargão fica atrás do disclosure, não some. */
+function detalheTecnico(i: Item["itensAprovacao"][number]): string {
+  const args = Object.entries(i.destino.argumentos ?? {});
+  return `<details class="ap-detalhe"><summary>Ver detalhes</summary>
+    <dl><dt>ferramenta</dt><dd>${esc(i.destino.conector)}.${esc(i.destino.ferramenta)}</dd>
+    ${args.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === "string" ? v : JSON.stringify(v))}</dd>`).join("")}</dl>
+    <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" aria-label="Editar o texto antes de enviar" ${i.destino.conector === "computador" ? 'readonly title="Ação vinculada à tela observada; para mudar, recuse e peça uma nova ação."' : ""} />
+  </details>`;
+}
+
+/**
+ * "Sempre permitir" (ADR-042): aprova agora e grava a regra para as próximas vezes. NUNCA some do
+ * card — quando algo impede, aparece desabilitado com o motivo, porque botão ausente é
+ * indistinguível de bug (ADR-029). Item sensível e destino 'computador' não entram na regra: o
+ * primeiro porque o CHECK do banco recusaria honrá-la, o segundo porque a aprovação é vinculada à
+ * ação cifrada (ADR-037). A regra vale para a FERRAMENTA inteira, qualquer destino — o título diz.
+ */
+function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
+  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador");
+  const nomes = [...new Set(elegiveis.map((i) => `${i.destino.conector}.${i.destino.ferramenta}`))];
+  if (nomes.length === 0) {
+    const motivo = item.itensAprovacao.some((i) => i.destino.conector === "computador")
+      ? "Ação no computador é aprovada uma a uma: ela está presa à tela que o bot observou."
+      : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
+    return botao("decidir-aprovacao-sempre", "Sempre permitir", { id: item.decisao.id, desabilitado: true, titulo: motivo });
+  }
+  const comNome = nomes.map((n) => {
+    const [slug = "", ferramenta = ""] = n.split(".");
+    const conector = conectores.find((c) => c.slug === slug)?.nome ?? slug;
+    return `${ferramenta} no ${conector}`;
+  });
+  const rotulo = nomes.length === 1 ? `Sempre permitir ${esc(nomes[0] ?? "")}` : `Sempre permitir estas ${nomes.length} ferramentas`;
+  return botao("decidir-aprovacao-sempre", rotulo, {
+    id: item.decisao.id,
+    titulo: `Vale para ${comNome.join(" e ")}, em qualquer destino, a partir do próximo turno. Você pode revogar quando quiser.`,
+  });
+}
+
+/**
+ * Aprovação em LISTA tipada (E4.1/E4.2) em DUAS densidades pelo número de itens: um item pergunta em
+ * uma frase e dispensa a lista (é o caso mais comum); vários mantêm uma linha marcável cada, que é a
+ * razão de a aprovação ser em lista. O nome técnico e os argumentos vão para um <details> — o que
+ * acrescenta contexto, já que `destino.argumentos` nunca apareceu na tela.
+ *
+ * A exceção é o item de origem sensível: ele SAI do modo enxuto, nasce DESMARCADO com a
+ * justificativa visível, e traz o contador de volta ao botão ("Pode fazer 1 de 2") — só aparece
+ * contagem quando ela carrega informação. Marcar um sensível exige a pessoa (CHECK marcado_por).
+ */
+function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conectores"]): string {
+  const itens = item.itensAprovacao;
+  const marcados = itens.filter((i) => i.selecionado).length;
+  const temSensivel = itens.some((i) => i.origemSensivel);
+  const linha = (i: Item["itensAprovacao"][number]): string => `<li class="ap-item${i.origemSensivel ? " sensivel" : ""}">
+    <label class="ap-marca"><input type="checkbox" data-item="${esc(i.id)}" ${i.selecionado ? "checked" : ""} ${aberta ? "" : "disabled"} /><span class="sr-only">Incluir: ${esc(i.textoFinal)}</span></label>
+    <div class="ap-corpo">
+      <div class="ap-oque">${esc(i.textoFinal)}</div>
+      <div class="ap-onde">${esc(ondeAcontece(conectores, i.destino.conector))}</div>
+      ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}
+      ${aberta ? detalheTecnico(i) : ""}
+      ${i.desfecho ? `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>` : ""}
+    </div>
+  </li>`;
+  // Contagem só quando ela informa: com item sensível desmarcado, "1 de 2" é a própria explicação.
+  const rotulo = temSensivel || marcados !== itens.length ? `Pode fazer <span data-contador>${marcados}</span> de ${itens.length}` : "Pode fazer";
+  const acoes = aberta
+    ? `<div class="acoes">${botao("decidir-aprovacao", rotulo, { classe: "pri", id: item.decisao.id })}${botao("decidir-aprovacao-nenhum", "Agora não", { id: item.decisao.id })}${botaoSempre(item, conectores)}</div>`
+    : "";
+  const unico = itens[0];
+  // Um item e nada sensível: a pergunta já está na frase da decisão; a lista seria uma linha só.
+  if (itens.length === 1 && unico && !unico.origemSensivel) {
+    return `<div class="ap-unico">
+      <div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
+      ${aberta ? detalheTecnico(unico) : ""}
+      ${unico.desfecho ? `<span class="tag tag-cinza">${esc(unico.desfecho.replaceAll("_", " "))}</span>` : ""}
+    </div>
+    ${aberta ? `<div class="acoes">${botao("decidir-aprovacao", "Pode fazer", { classe: "pri", id: item.decisao.id })}${botao("decidir-aprovacao-nenhum", "Agora não", { id: item.decisao.id })}${botaoSempre(item, conectores)}</div>` : ""}`;
+  }
+  return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
+}
+
+function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores"]): string {
   const d = item.decisao;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
   switch (d.tipo) {
     case "aprovacao":
     case "gate_rotina":
-      return renderAprovacao(item, true);
+      return renderAprovacao(item, true, conectores);
     case "retomar_turno":
       return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}</div>`;
     case "acesso":
@@ -68,8 +139,8 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
     <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span><b>${esc(item.agenteNome)}</b><span class="mudo">${relogio}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
     <div class="dec-frase">${esc(d.frase)}</div>
-    ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false) : ""}
-    ${renderAcoes(item, aberta)}
+    ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
+    ${renderAcoes(item, aberta, estado.conectores)}
     ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}
   </li>`;
 }

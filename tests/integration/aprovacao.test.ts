@@ -42,6 +42,14 @@ describeIntegracao("aprovação em lista tipada: pedir → decidir → executar 
       if (pedido.data.estado !== "pendente") throw new Error("esperava pendente");
       await repos.events.gravarComOutbox(pedido.events ?? []);
       const decisaoId = pedido.data.decisao_id;
+      // A classificação por origem está DESLIGADA (ADR-002, refinamento 2026-09-21): nenhum item
+      // nasce sensível. O mecanismo continua no banco, e este cenário o exercita marcando dois itens
+      // como sensíveis pela DONA — é assim que a trava e o desfecho próprio seguem provados.
+      const criados = await repos.itensAprovacao.listar(decisaoId);
+      expect(criados.every((i) => !i.origemSensivel && i.selecionado)).toBe(true);
+      for (const idx of [1, 3]) {
+        await trx`update itens_aprovacao set origem_sensivel = true, selecionado = false, justificativa = 'do CRM' where id = ${criados[idx]?.id ?? ""}`;
+      }
       const itens = await repos.itensAprovacao.listar(decisaoId);
       expect(itens.map((i) => [i.idx, i.selecionado, i.origemSensivel, i.justificativa !== null])).toEqual([
         [0, true, false, false],

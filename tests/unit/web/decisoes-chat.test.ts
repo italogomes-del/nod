@@ -41,13 +41,54 @@ describe("decisões no chat", () => {
   });
 
   it("aprovação de conteúdo sensível continua desmarcada no chat", () => {
-    const sensivel = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Olá", textoFinal: "Olá", destino: { conector: "slack", ferramenta: "send", argumentos: {} }, selecionado: false, origemSensivel: true, justificativa: "Confirme antes de enviar", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null };
+    const sensivel = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Olá", textoFinal: "Olá", destino: { conector: "slack", ferramenta: "send", argumentos: {} }, selecionado: false, origemSensivel: true, justificativa: "Confirme antes de enviar", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
     const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [sensivel] }] } };
     const html = renderTimeline(conversa, e);
     expect(html).toContain('data-item="i"');
     expect(html).not.toContain("checked");
     expect(html).toContain("Confirme antes de enviar");
     expect(html).toContain('data-contador>0</span> de 1');
+  });
+
+  it("um item só: pergunta sem lista, CTA nomeia a consequência e o jargão fica no disclosure", () => {
+    const i = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Avisar o time", textoFinal: "Avisar o time", destino: { conector: "slack", ferramenta: "send_message", argumentos: { channel: "#vendas" } }, selecionado: true, origemSensivel: false, justificativa: null, marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
+    const e: Estado = {
+      ...estado,
+      conectores: [{ tenantId: "t", id: "cx", ownerId: "p", visibility: "privado", nome: "Slack", slug: "slack", transporte: "stdio", comando: null, args: [], url: null, env: {}, declaracao: "nao-toca", habilitado: true, catalogo: [], sondadoEm: null, ultimaFalha: null, criadoEm: 0 }],
+      suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [i] }] },
+    };
+    const html = renderTimeline(conversa, e);
+    expect(html).toContain("Pode fazer");
+    expect(html).toContain("Agora não");
+    expect(html).not.toContain("Aprovar 1 de 1");
+    expect(html).not.toContain("Não aprovar nada");
+    // Item único e não sensível dispensa a lista: a pergunta já está na frase da decisão.
+    expect(html).not.toContain('class="ap-lista"');
+    // "no Slack" vem de Conector.nome, que já está no estado da web — sem campo novo no DTO.
+    expect(html).toContain("no Slack");
+    // O nome técnico e os argumentos existem, mas atrás do disclosure.
+    expect(html).toContain("Ver detalhes");
+    expect(html).toContain("slack.send_message");
+    expect(html).toContain("#vendas");
+    expect(html.indexOf("Ver detalhes")).toBeLessThan(html.indexOf("slack.send_message"));
+  });
+
+  it("dois itens mantêm a lista marcável e o contador só aparece quando informa", () => {
+    const base = { tenantId: "t", decisaoId: "d", textoOriginal: "x", selecionado: true, origemSensivel: false, justificativa: null, marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
+    const a = { ...base, id: "i1", idx: 0, textoFinal: "Avisar o time", destino: { conector: "slack", ferramenta: "send_message", argumentos: {} } };
+    const b = { ...base, id: "i2", idx: 1, textoFinal: "Arquivar a planilha", destino: { conector: "drive", ferramenta: "move_file", argumentos: {} } };
+    const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [a, b] }] } };
+    const html = renderTimeline(conversa, e);
+    expect(html).toContain('class="ap-lista"');
+    expect(html).toContain('data-item="i1"');
+    expect(html).toContain('data-item="i2"');
+    expect(html).toContain("Avisar o time");
+    expect(html).toContain("Arquivar a planilha");
+    // Tudo marcado e nada sensível: contar "2 de 2" não acrescenta nada.
+    expect(html).toContain("Pode fazer");
+    expect(html).not.toContain("data-contador");
+    // Slug sem conector casado no estado cai no próprio slug, nunca inventa nome.
+    expect(html).toContain("no drive");
   });
 
   it("preserva registro imutável de consentimento recolhido sem repetir o catálogo", () => {
@@ -58,5 +99,25 @@ describe("decisões no chat", () => {
     expect(html).toContain("Registro original &lt;auditoria&gt;");
     expect(html).toContain("Ver registro de autorização");
     expect(html).not.toContain(" open");
+  });
+
+  it("o terceiro botão nomeia a ferramenta e avisa que vale para qualquer destino", () => {
+    const i = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Avisar", textoFinal: "Avisar", destino: { conector: "slack", ferramenta: "send_message", argumentos: {} }, selecionado: true, origemSensivel: false, justificativa: null, marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
+    const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [i] }] } };
+    const html = renderTimeline(conversa, e);
+    expect(html).toContain('data-act="decidir-aprovacao-sempre"');
+    expect(html).toContain("Sempre permitir slack.send_message");
+    expect(html).toContain("em qualquer destino");
+    expect(html).not.toContain("disabled");
+  });
+
+  it("card só com item sensível mostra o botão DESABILITADO com o motivo, nunca ausente", () => {
+    const sens = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Rel", textoFinal: "Rel", destino: { conector: "slack", ferramenta: "send_message", argumentos: {} }, selecionado: false, origemSensivel: true, justificativa: "dado de aprendiz", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
+    const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [sens] }] } };
+    const html = renderTimeline(conversa, e);
+    // ADR-029: a pessoa lê por que não pode, em vez de procurar um botão que sumiu.
+    expect(html).toContain('data-act="decidir-aprovacao-sempre"');
+    expect(html).toContain("disabled");
+    expect(html).toContain("Dado de aprendiz sempre passa por você");
   });
 });

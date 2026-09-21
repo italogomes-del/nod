@@ -8,6 +8,7 @@ import { retomarAposAcesso } from "../../../use-cases/retomar-apos-acesso.ts";
 import { conceder } from "../../../use-cases/conceder.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
+import { permitirSempre } from "../../../use-cases/permitir-sempre.ts";
 import { recusarProposta } from "../../../use-cases/recusar-proposta.ts";
 import { autoriaDaPessoa } from "../../../use-cases/registrar-negacao.ts";
 import { fecharComResposta, retomarComResposta } from "../../../use-cases/responder-decisao.ts";
@@ -34,6 +35,11 @@ function marcacoes(corpo: unknown): MarcacaoItem[] | undefined {
     if (typeof o.id !== "string" || typeof o.selecionado !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "item" });
     return { id: o.id, selecionado: o.selecionado, ...(typeof o.textoFinal === "string" ? { textoFinal: o.textoFinal } : {}) };
   });
+}
+
+/** `sempre: true` no corpo = a pessoa clicou no terceiro botão junto com aprovar (ADR-042). */
+function sempre(corpo: unknown): boolean {
+  return typeof corpo === "object" && corpo !== null && (corpo as { sempre?: unknown }).sempre === true;
 }
 
 function recusada(corpo: unknown): boolean {
@@ -93,6 +99,14 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             const fase2 = await comoDona(ctx.escopo, atual, (deps) => executar(deps, assentarAprovacao, { decisaoId, desfechos }));
             if (fase2.mensagemId) ids.mensagem = fase2.mensagemId;
             if (fase2.turnoRetomadaId) ids.turnoRetomada = fase2.turnoRetomadaId;
+            // ADR-042: o mesmo clique aprova AGORA e grava a regra para as próximas vezes. Só os
+            // itens que a pessoa manteve marcados; sensível e computador ficam de fora no caso de uso.
+            if (sempre(corpo)) {
+              const marcados = fase2.itens.filter((i) => i.selecionado).map((i) => i.id);
+              const regras = await comoDona(ctx.escopo, atual, (deps) => executar(deps, permitirSempre, { decisaoId, itemIds: marcados }));
+              if (regras.criadas.length > 0) ids.regras = String(regras.criadas.length);
+              if (regras.mensagemId) ids.consentimento = regras.mensagemId;
+            }
           }
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);

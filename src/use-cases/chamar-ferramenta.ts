@@ -163,7 +163,9 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === input.nome);
   if (!ferramenta) return negar("fora_do_catalogo", "ferramenta_negada");
 
-  const ctx: ContextoFerramenta = { turnoId: input.turnoId, agenteId: input.agenteId, conversaId: plano.conversaId };
+  // O plano viaja no contexto para a regra do ADR-042 ser avaliada LOCALMENTE em pedir_aprovacao,
+  // a partir do que já foi puxado — nunca por consulta na hora da chamada (ADR-013).
+  const ctx: ContextoFerramenta = { turnoId: input.turnoId, agenteId: input.agenteId, conversaId: plano.conversaId, plano };
   const registrarChamada = (conectorId: string | null) =>
     deps.repos.trilha.registrar({ agenteId: input.agenteId, turnoId: input.turnoId, conectorId, ferramenta: nomeParaTrilha(input.nome), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA, em: agora });
 

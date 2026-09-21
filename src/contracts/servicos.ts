@@ -60,8 +60,14 @@ export interface ServicesNod<Trx> {
   barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse };
 }
 
-/** Quem chamou a ferramenta, derivado do token (nunca do corpo). */
-export type ContextoFerramenta = { turnoId: string; agenteId: string; conversaId: string };
+/**
+ * Quem chamou a ferramenta, derivado do token (nunca do corpo). `plano` é o PLANO JÁ PUXADO
+ * (ADR-013/024): a regra de aprovação automática é avaliada localmente a partir dele, nunca por
+ * consulta na hora da chamada. AUSENTE = nunca automático — o caminho do computador
+ * (adapters/fundo/computadores.ts) chama pedirAprovacaoComputador sem plano, e fail-closed é o
+ * comportamento certo ali (ADR-042 claim 1).
+ */
+export type ContextoFerramenta = { turnoId: string; agenteId: string; conversaId: string; plano?: PlanoTurno };
 
 export type SaidaCasoDeUso<O> = { data: O; events?: RuntimeEvent[] };
 
