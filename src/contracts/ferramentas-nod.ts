@@ -1,10 +1,10 @@
 import type { CodigoErro, MotivoPasse } from "./motivos.ts";
 import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
-import type { ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoListarRotinas } from "./ferramentas-rotina.ts";
+import type { ArgsAtualizarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
 
 import type { JsonSchema } from "./json-schema.ts";
 export type { JsonSchema } from "./json-schema.ts";
-export type { ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoListarRotinas, RotinaListada } from "./ferramentas-rotina.ts";
+export type { ArgsAtualizarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
  * As DOZE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; 2026-09-21 acrescenta o ciclo de
@@ -143,7 +143,7 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
  */
 export const NOMES_FERRAMENTAS_NOD = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
-  "listar_rotinas", "pausar_rotina", "reativar_rotina", "pedir_aprovacao",
+  "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "pedir_aprovacao",
   "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot",
 ] as const satisfies readonly NomeFerramentaNod[];
 
@@ -189,6 +189,8 @@ export type ContratoFerramentaNod = {
   listar_rotinas: { args: ArgsListarRotinas; resultado: ResultadoListarRotinas };
   pausar_rotina: { args: ArgsPausarRotina; resultado: ResultadoAlternarRotina };
   reativar_rotina: { args: ArgsReativarRotina; resultado: ResultadoAlternarRotina };
+  atualizar_rotina: { args: ArgsAtualizarRotina; resultado: ResultadoPropostaRotina };
+  excluir_rotina: { args: ArgsExcluirRotina; resultado: ResultadoPropostaRotina };
   pedir_aprovacao: { args: ArgsPedirAprovacao; resultado: ResultadoPedirAprovacao };
   pedir_a_pessoa: { args: ArgsPedirAPessoa; resultado: ResultadoPedirAPessoa };
   passar: { args: ArgsPassar; resultado: ResultadoOk };

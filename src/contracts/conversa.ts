@@ -23,7 +23,7 @@ export type Conversa = {
   criadoEm: EpochMs;
 };
 
-export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta";
+export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
 export type PayloadPropostaPerfil = { kind: "perfil"; nome?: string; titulo?: string; descricao?: string };
@@ -38,6 +38,34 @@ export type PayloadPropostaRotina = {
   politicaSemDado: string;
   proximaExecucao: EpochMs;
   resumo: string;
+};
+/**
+ * definido em 2026-09-21: atualizar uma rotina que já existe. Guarda só o que MUDA (campo ausente
+ * fica como está) mais o `antes` do que muda, para o card mostrar de→para e a pessoa conferir sem
+ * consultar outra tela. Como em criar_rotina, o payload já vem NORMALIZADO pelo domínio: aplicar
+ * não reinterpreta nada (E7.1).
+ */
+export type PayloadPropostaRotinaAtualizacao = {
+  kind: "rotina_atualizacao";
+  rotinaId: string;
+  cron?: string;
+  fusoIana?: string;
+  instrucao?: string;
+  fonte?: string;
+  entregavel?: string;
+  limitesAprovacao?: string;
+  politicaSemDado?: string;
+  /** Recalculado na confirmação a partir de agora; este é o previsto quando a proposta nasceu. */
+  proximaExecucao: EpochMs;
+  resumo: string;
+  antes: { resumo: string; instrucao: string };
+};
+/** Exclusão recuperável (ADR-034): o card precisa dizer QUAL rotina, então carrega o resumo. */
+export type PayloadPropostaRotinaExclusao = {
+  kind: "rotina_exclusao";
+  rotinaId: string;
+  resumo: string;
+  instrucao: string;
 };
 export type PayloadPropostaAcesso = {
   kind: "acesso";
@@ -60,7 +88,7 @@ export type PayloadPropostaPasta = {
   motivo: string;
   buscaTermo: string;
 };
-export type PayloadProposta = PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta;
+export type PayloadProposta = PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
 
 /** Proposta do modelo (ferramenta tipada) — nada é aplicado antes da confirmação da pessoa (E1.1). */
 export type Proposta = {

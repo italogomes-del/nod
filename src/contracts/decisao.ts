@@ -8,6 +8,8 @@ export type TipoDecisao =
   | "gate_rotina"
   | "perfil"
   | "rotina"
+  | "rotina_atualizacao"
+  | "rotina_exclusao"
   | "pergunta"
   | "falta_de_dado"
   | "permissao";

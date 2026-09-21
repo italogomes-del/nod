@@ -1,8 +1,10 @@
-import type { EstadoRotina } from "../contracts/rotina.ts";
-import type { CasoNod } from "../contracts/servicos.ts";
+import type { PayloadProposta, PayloadPropostaRotinaAtualizacao, PayloadPropostaRotinaExclusao } from "../contracts/conversa.ts";
+import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { EstadoRotina, Rotina } from "../contracts/rotina.ts";
+import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
-import { resumoCron } from "../domain/rotina-texto.ts";
-import { assertUuid, autoriaAgente } from "./apoio-l7.ts";
+import { resumoCron, validarAtualizacaoRotina } from "../domain/rotina-texto.ts";
+import { assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -41,10 +43,7 @@ export const listarRotinasDoAgente: CasoNod<Deps, "listar_rotinas"> = async (dep
  */
 async function alternar(deps: Deps, input: { agenteId: string; rotinaId: string }, estado: EstadoRotina) {
   try {
-    assertUuid(input.agenteId, "agenteId");
-    assertUuid(input.rotinaId, "rotina_id");
-    const atual = await deps.repos.rotinas.buscar(input.rotinaId);
-    if (!atual || atual.agenteId !== input.agenteId) throw new ErroDeDominio("nao_encontrado", { cause: "rotina de outro agente ou inexistente" });
+    const atual = await rotinaDoAgente(deps, input.agenteId, input.rotinaId);
     const jaEstava = atual.estado === estado;
     const { data } = await pausarRotina(deps, { rotinaId: input.rotinaId, estado, autoria: autoriaAgente(input.agenteId, deps.escopo.pessoaId) });
     return { data: { rotina_id: data.rotina.id, estado: data.rotina.estado, ja_estava: jaEstava, proxima_execucao: data.rotina.estado === "ativa" ? data.rotina.proximaExecucao : null } };
@@ -59,3 +58,90 @@ export const pausarRotinaPeloAgente: CasoNod<Deps, "pausar_rotina"> = (deps, inp
 
 export const reativarRotinaPeloAgente: CasoNod<Deps, "reativar_rotina"> = (deps, input) =>
   alternar(deps, { agenteId: input.agenteId, rotinaId: input.rotina_id }, "ativa");
+
+/** A rotina tem que existir, ser DESTE agente e não estar excluída. Mesmo filtro de `alternar`. */
+async function rotinaDoAgente(deps: Deps, agenteId: string, rotinaId: string): Promise<Rotina> {
+  assertUuid(agenteId, "agenteId");
+  assertUuid(rotinaId, "rotina_id");
+  const r = await deps.repos.rotinas.buscar(rotinaId);
+  if (!r || r.agenteId !== agenteId || r.excluidoEm !== null) throw new ErroDeDominio("nao_encontrado", { cause: "rotina de outro agente, excluída ou inexistente" });
+  return r;
+}
+
+/** Abre proposta + decisão com o MESMO id (a ligação entre as duas, como em criar_rotina). */
+async function propor(deps: Deps, input: ContextoFerramenta, payload: PayloadProposta, frase: string) {
+  const proposta = await deps.repos.propostas.criar({ conversaId: input.conversaId, agenteId: input.agenteId, payload });
+  if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: "proposta não criada" });
+  const decisao = await deps.repos.decisoes.criar({
+    id: proposta.id,
+    tipo: payload.kind === "rotina_exclusao" ? "rotina_exclusao" : "rotina_atualizacao",
+    agenteId: input.agenteId,
+    conversaId: input.conversaId,
+    turnoId: input.turnoId,
+    prazoDecisaoEm: deps.agora() + PRAZO_DECISAO_MS,
+    frase,
+  });
+  const autoria = autoriaAgente(input.agenteId, deps.escopo.pessoaId);
+  const events: RuntimeEvent[] = [
+    evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: payload.kind }, { conversaId: input.conversaId, turnoId: input.turnoId }),
+  ];
+  if (decisao) events.push(evento(deps, "decisao_criada", autoria, { decisaoId: decisao.id, tipo: payload.kind }, { conversaId: input.conversaId, turnoId: input.turnoId }));
+  return { proposta, events };
+}
+
+/**
+ * `atualizar_rotina`: NADA é aplicado — nasce proposta 'rotina_atualizacao' com o payload já
+ * normalizado (sobrevive a reinício sem reinterpretar, E7.1). Diferente de pausar, mudar QUANDO ou
+ * O QUE a rotina faz sozinha não é reversível em um clique, então a pessoa confirma.
+ */
+export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = async (deps, input) => {
+  try {
+    const atual = await rotinaDoAgente(deps, input.agenteId, input.rotina_id);
+    const { normalizada } = validarAtualizacaoRotina({
+      atual,
+      pedido: {
+        cron: input.cron,
+        fusoIana: input.fuso_iana,
+        instrucao: input.instrucao,
+        fonte: input.fonte,
+        entregavel: input.entregavel,
+        limitesAprovacao: input.limites_aprovacao,
+        politicaSemDado: input.politica_sem_dado,
+      },
+      agora: deps.agora(),
+    });
+    const payload: PayloadPropostaRotinaAtualizacao = {
+      kind: "rotina_atualizacao",
+      rotinaId: atual.id,
+      cron: normalizada.cron,
+      fusoIana: normalizada.fusoIana,
+      instrucao: normalizada.instrucao,
+      fonte: normalizada.fonte,
+      entregavel: normalizada.entregavel,
+      limitesAprovacao: normalizada.limitesAprovacao,
+      politicaSemDado: normalizada.politicaSemDado,
+      proximaExecucao: normalizada.proximaExecucao,
+      resumo: normalizada.resumo,
+      antes: { resumo: resumoCron(atual.cron, atual.fusoIana), instrucao: atual.instrucao },
+    };
+    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}`);
+    return { data: { proposta_id: proposta.id, resumo: normalizada.resumo }, events };
+  } catch (e) {
+    if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
+    throw e;
+  }
+};
+
+/** `excluir_rotina`: também só PROPÕE. A exclusão em si é recuperável (ADR-034). */
+export const excluirRotinaPeloAgente: CasoNod<Deps, "excluir_rotina"> = async (deps, input) => {
+  try {
+    const atual = await rotinaDoAgente(deps, input.agenteId, input.rotina_id);
+    const resumo = resumoCron(atual.cron, atual.fusoIana);
+    const payload: PayloadPropostaRotinaExclusao = { kind: "rotina_exclusao", rotinaId: atual.id, resumo, instrucao: atual.instrucao };
+    const { proposta, events } = await propor(deps, input, payload, `Exclusão de rotina proposta: ${resumo} — ${atual.instrucao}`);
+    return { data: { proposta_id: proposta.id, resumo }, events };
+  } catch (e) {
+    if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
+    throw e;
+  }
+};

@@ -35,6 +35,11 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   decisao_vencida: "decisao.vencida",
   proposta_criada: "proposta.nova",
   rotina_criada: "rotina.criada",
+  // definido em 2026-09-21: atualizar/excluir reusam o frame 'rotina.criada' porque ele só diz
+  // "a lista de rotinas mudou" — o reducer invalida e reidrata por REST (web/estado/reducer.ts).
+  // Frame novo exigiria caso novo no reducer para o mesmo efeito.
+  rotina_atualizada: "rotina.criada",
+  rotina_excluida: "rotina.criada",
   rotina_executou: "rotina.executou",
   sala_handoff: "sala.handoff",
   negacao: "negacao",

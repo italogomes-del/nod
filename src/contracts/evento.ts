@@ -37,6 +37,8 @@ export type KindEvento =
   | "decisao_vencida"
   | "proposta_criada"
   | "rotina_criada"
+  | "rotina_atualizada"
+  | "rotina_excluida"
   | "rotina_executou"
   | "sala_handoff"
   | "negacao"

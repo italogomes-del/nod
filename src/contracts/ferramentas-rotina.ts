@@ -32,6 +32,29 @@ export const FERRAMENTAS_ROTINA = {
     required: ["rotina_id"],
     additionalProperties: false,
   },
+  atualizar_rotina: {
+    type: "object",
+    description: "Propõe mudar uma rotina existente. Envie SÓ os campos que mudam; os outros ficam como estão. A pessoa confirma; nada muda antes disso.",
+    properties: {
+      rotina_id: ROTINA_ID,
+      cron: { type: "string", description: "Novo cron de 5 campos, ex.: '0 8 * * 1-5'.", minLength: 1 },
+      fuso_iana: { type: "string", description: "Novo fuso IANA nomeado. Offset numérico é recusado.", minLength: 1 },
+      instrucao: { type: "string", description: "Nova instrução de cada execução.", minLength: 1 },
+      fonte: { type: "string", description: "Nova fonte do dado.", minLength: 1 },
+      entregavel: { type: "string", description: "Novo entregável.", minLength: 1 },
+      limites_aprovacao: { type: "string", description: "Novo limite do que exige aprovação.", minLength: 1 },
+      politica_sem_dado: { type: "string", description: "Nova política para quando não houver dado.", minLength: 1 },
+    },
+    required: ["rotina_id"],
+    additionalProperties: false,
+  },
+  excluir_rotina: {
+    type: "object",
+    description: "Propõe excluir uma rotina existente. A pessoa confirma; nada é excluído antes disso. Para só interromper por um tempo, prefira pausar_rotina.",
+    properties: { rotina_id: ROTINA_ID },
+    required: ["rotina_id"],
+    additionalProperties: false,
+  },
 } as const satisfies Record<string, JsonSchema>;
 
 /** Sem argumentos: o agente só pode listar as rotinas DELE, que vêm do contexto do turno. */
@@ -44,3 +67,18 @@ export type RotinaListada = { id: string; quando: string; estado: "ativa" | "pau
 export type ResultadoListarRotinas = { rotinas: RotinaListada[] };
 /** `ja_estava` distingue "pausei agora" de "já estava pausada": o modelo não deve anunciar mudança que não houve. */
 export type ResultadoAlternarRotina = { rotina_id: string; estado: "ativa" | "pausada"; ja_estava: boolean; proxima_execucao: number | null } | { erro: CodigoErro };
+
+export type ArgsAtualizarRotina = {
+  rotina_id: string;
+  cron?: string;
+  fuso_iana?: string;
+  instrucao?: string;
+  fonte?: string;
+  entregavel?: string;
+  limites_aprovacao?: string;
+  politica_sem_dado?: string;
+};
+export type ArgsExcluirRotina = { rotina_id: string };
+
+/** Como criar_rotina: nasce PROPOSTA, nada é aplicado. O modelo não deve anunciar mudança feita. */
+export type ResultadoPropostaRotina = { proposta_id: string; resumo: string } | { erro: CodigoErro };

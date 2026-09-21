@@ -86,10 +86,12 @@ passa por `COLUNAS` — selecionar `estado` direto discorda do resto do sistema 
 
 `geracao_execucao` **não é DEFAULT de coluna**: quem carimba é o trigger `nod_agente_ativo`
 (migração 0012), sob `pg_advisory_xact_lock` por tenant/agente, e ele **levanta `agente inativo`
-(23514) se o agente estiver excluído**. Consequência para `atualizar_rotina`: se o UPDATE novo
-disparar esse trigger, editar rotina de agente excluído vira erro de banco — mapear para
-`ErroDeDominio`, nunca deixar virar 500. Conferir quais triggers a 0002 pendura no UPDATE de
-`rotinas` antes de escrever o caso.
+(23514) se o agente estiver excluído**.
+
+Conferido em 2026-09-21 na 0011: o gatilho é `BEFORE INSERT OR UPDATE OF estado ON rotinas
+FOR EACH ROW WHEN (NEW.estado = 'ativa')`. Ou seja, ele **só dispara ao nascer ou ao REATIVAR**.
+Mexer em cron/instrução e marcar `excluido_em` não passam por ele — nenhum dos dois precisa de
+tratamento especial de 23514. Quem precisa é reativar, que já existia e já passa por `pausarRotina`.
 
 **2. Leitura é do tenant; escrita é da dona.** `buscar`/`listar` são tenant-wide (a perna de
 equipe abre leitura), mas `atualizarEstado`/`reagendar` filtram `owner_id = escopo.pessoaId` e

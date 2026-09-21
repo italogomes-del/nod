@@ -5,7 +5,7 @@ import type { Repos } from "../../src/repositories/tipos.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { ativarRotina, servicoRotinas } from "../../src/use-cases/ativar-rotina.ts";
 import { criarRotina } from "../../src/use-cases/criar-rotina.ts";
-import { listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
+import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
 import { encaminhar } from "../../src/use-cases/encaminhar.ts";
 import { passar } from "../../src/use-cases/passar.ts";
 import { perguntarABot } from "../../src/use-cases/perguntar-a-bot.ts";
@@ -72,6 +72,8 @@ export function useCasesFalsos(): UseCasesNod {
     listarRotinasDoAgente,
     pausarRotinaPeloAgente,
     reativarRotinaPeloAgente,
+    atualizarRotinaPeloAgente,
+    excluirRotinaPeloAgente,
     pedirAprovacao: naoImplementado("useCases.pedirAprovacao"),
     pedirAPessoa: naoImplementado("useCases.pedirAPessoa"),
     passar,

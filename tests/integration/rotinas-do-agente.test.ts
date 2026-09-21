@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { criarRotinaPelaPessoa } from "../../src/use-cases/criar-rotina.ts";
-import { listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
+import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../src/use-cases/aplicar-proposta-rotina.ts";
+import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
 import { contexto, depsSobre, rotinaValida } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
@@ -31,10 +32,12 @@ async function rotinaAtiva(trx: Parameters<Parameters<typeof withRollback>[1]>[0
     limitesAprovacao: a.limites_aprovacao,
     politicaSemDado: a.politica_sem_dado,
   });
-  return { agenteId, conversaId, deps, repos, rotinaId: data.rotina.id };
+  // Turno REAL: decisoes tem FK para turnos, então um turnoId inventado viola a constraint.
+  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
+  return { agenteId, conversaId, deps, repos, rotinaId: data.rotina.id, turnoId: turno?.id };
 }
 
-describeIntegracao("ferramentas de ciclo de vida de rotina (listar/pausar/reativar pelo agente)", () => {
+describeIntegracao("ferramentas de ciclo de vida de rotina (listar/pausar/reativar/atualizar/excluir pelo agente)", () => {
   it("lista as rotinas do agente com id, horário legível e estado — na mesma forma do inventário do prompt", async () => {
     process.env.TZ = "UTC";
     await withRollback(MARLON, async (trx) => {
@@ -79,6 +82,65 @@ describeIntegracao("ferramentas de ciclo de vida de rotina (listar/pausar/reativ
       expect(r.data).toEqual({ erro: "nao_encontrado" });
       // e a rotina da Tuca continua ativa
       expect((await alheia.repos.rotinas.buscar(alheia.rotinaId))?.estado).toBe("ativa");
+    });
+  });
+
+  it("atualizar NÃO aplica nada: nasce proposta com o de→para, e confirmar aplica o payload normalizado", async () => {
+    process.env.TZ = "UTC";
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId, deps, repos, rotinaId, turnoId } = await rotinaAtiva(trx, "Vera");
+      const r = await atualizarRotinaPeloAgente(deps, { ...contexto(agenteId, conversaId, turnoId), rotina_id: rotinaId, cron: "0 9 * * 1-5", instrucao: "resumir só os PRs meus" });
+      if ("erro" in r.data) throw new Error(`erro inesperado: ${r.data.erro}`);
+
+      // Nada mudou ainda.
+      expect((await repos.rotinas.buscar(rotinaId))?.cron).toBe("0 8 * * 1-5");
+      const proposta = await repos.propostas.buscar(r.data.proposta_id);
+      expect(proposta).toMatchObject({ kind: "rotina_atualizacao", estado: "pendente" });
+      expect(proposta?.payload).toMatchObject({ rotinaId, cron: "0 9 * * 1-5", antes: { resumo: "dias úteis às 08:00 (America/Sao_Paulo)" } });
+      expect(await repos.decisoes.buscar(r.data.proposta_id)).toMatchObject({ tipo: "rotina_atualizacao", estado: "pendente" });
+
+      const aplicada = await aplicarAtualizacaoRotina(deps, { propostaId: r.data.proposta_id });
+      expect(aplicada.data.rotina).toMatchObject({ cron: "0 9 * * 1-5", instrucao: "resumir só os PRs meus" });
+      // campo não enviado fica como estava
+      expect(aplicada.data.rotina.fonte).toBe("PRs abertos do time nod");
+      // quinta 17/09 às 09:00 em São Paulo = 12:00Z, recalculado de AGORA
+      expect(new Date(aplicada.data.rotina.proximaExecucao).toISOString()).toBe("2026-09-17T12:00:00.000Z");
+      // idempotente: confirmar de novo não aplica duas vezes
+      expect((await aplicarAtualizacaoRotina(deps, { propostaId: r.data.proposta_id })).data.jaAplicada).toBe(true);
+    });
+  });
+
+  it("atualizar que não muda nada é entrada_invalida, em vez de gastar a confirmação da pessoa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId, deps, rotinaId, turnoId } = await rotinaAtiva(trx, "Vera");
+      const r = await atualizarRotinaPeloAgente(deps, { ...contexto(agenteId, conversaId, turnoId), rotina_id: rotinaId, cron: "0 8 * * 1-5" });
+      expect(r.data).toEqual({ erro: "entrada_invalida" });
+    });
+  });
+
+  it("excluir é recuperável: some da listagem, do teto e do tick, sem apagar linha nem trilha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId, deps, repos, rotinaId, turnoId } = await rotinaAtiva(trx, "Vera");
+      const r = await excluirRotinaPeloAgente(deps, { ...contexto(agenteId, conversaId, turnoId), rotina_id: rotinaId });
+      if ("erro" in r.data) throw new Error(`erro inesperado: ${r.data.erro}`);
+      expect(await repos.rotinas.contarDoAgente(agenteId)).toBe(1); // ainda não excluída
+
+      await aplicarExclusaoRotina(deps, { propostaId: r.data.proposta_id });
+      expect((await repos.rotinas.buscar(rotinaId))?.excluidoEm).not.toBeNull(); // a linha continua
+      expect(await repos.rotinas.listarDoAgente(agenteId)).toEqual([]);
+      expect(await repos.rotinas.contarDoAgente(agenteId)).toBe(0); // não consome o teto de 50
+      expect(await repos.rotinas.ativasVencidas(AGORA + 7 * 24 * 3600_000)).toEqual([]);
+    });
+  });
+
+  it("rotina excluída não aceita mais ferramenta nenhuma: pausar e atualizar voltam nao_encontrado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId, deps, rotinaId, turnoId } = await rotinaAtiva(trx, "Vera");
+      const r = await excluirRotinaPeloAgente(deps, { ...contexto(agenteId, conversaId, turnoId), rotina_id: rotinaId });
+      if ("erro" in r.data) throw new Error(`erro inesperado: ${r.data.erro}`);
+      await aplicarExclusaoRotina(deps, { propostaId: r.data.proposta_id });
+      expect((await pausarRotinaPeloAgente(deps, { ...contexto(agenteId, conversaId), rotina_id: rotinaId })).data).toEqual({ erro: "nao_encontrado" });
+      expect((await atualizarRotinaPeloAgente(deps, { ...contexto(agenteId, conversaId), rotina_id: rotinaId, instrucao: "outra" })).data).toEqual({ erro: "nao_encontrado" });
     });
   });
 

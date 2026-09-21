@@ -109,7 +109,7 @@ export function servicosDeTeste(reposDe: (trx: Tx) => Repos, escopo: Escopo, opc
   };
 }
 
-/** As doze ferramentas: as duas desta lane são reais; as outras lançam (nunca fingem sucesso). */
+/** As catorze ferramentas: as duas desta lane são reais; as outras lançam (nunca fingem sucesso). */
 export function useCasesDeTeste(): UseCasesNod {
   return {
     lembrar,
@@ -119,6 +119,8 @@ export function useCasesDeTeste(): UseCasesNod {
     listarRotinasDoAgente: naoImplementado("listarRotinasDoAgente (L7)"),
     pausarRotinaPeloAgente: naoImplementado("pausarRotinaPeloAgente (L7)"),
     reativarRotinaPeloAgente: naoImplementado("reativarRotinaPeloAgente (L7)"),
+    atualizarRotinaPeloAgente: naoImplementado("atualizarRotinaPeloAgente (L7)"),
+    excluirRotinaPeloAgente: naoImplementado("excluirRotinaPeloAgente (L7)"),
     pedirAprovacao: naoImplementado("pedirAprovacao (L5)"),
     pedirAPessoa: naoImplementado("pedirAPessoa (L5)"),
     passar: naoImplementado("passar (L7)"),
