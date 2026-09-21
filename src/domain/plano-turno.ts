@@ -14,7 +14,7 @@ import { conectorTocaAprendiz } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
-import { montarPromptSistema } from "./prompt-sistema.ts";
+import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
@@ -25,11 +25,19 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * resposta, por isso não entra em conversa nem em sala); peer é texto-só, sem
  * salto (E12.4). pedir_a_pessoa (EMENDA 16) entra onde há pessoa para destravar: conversa, sala e
  * rotina — não em criação (o modelo pergunta em texto) nem em peer (o remetente é outro bot).
+ *
+ * Ciclo de vida de rotina (listar/pausar/reativar, definido em 2026-09-21) só em conversa e sala,
+ * onde a pessoa está presente para pedir e conferir. FORA de propósito em:
+ * criação (o agente ainda não tem rotina: o inventário seria vazio), peer (quem fala é outro bot,
+ * e mexer em rotina por pedido de bot burlaria o corte de segundo salto do ADR-035) e rotina — este
+ * é o caso perigoso: um turno acordado por agendamento que pudesse se pausar sozinho viraria uma
+ * rotina que se desliga por conta própria, e o modo rotina já é explicitamente "a própria execução",
+ * não a hora de reconfigurar. Quem reconfigura é a pessoa, na conversa.
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
   criacao: ["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
   rotina: ["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"],
   peer: ["lembrar"],
 };
@@ -83,6 +91,8 @@ export type EntradaPlano = {
   contextoConversa?: string;
   /** Só para origem rotina: liga efeitoExternoSoPorAprovacao (EMENDA 15). */
   rotina?: { exigeAprovacao: boolean } | null;
+  /** Inventário para o modelo escolher SOBRE QUAL rotina agir; não confundir com `rotina` acima. */
+  rotinasDoAgente?: readonly RotinaNoPrompt[];
   /** Nomes `${slug}__${tool}` das regras ATIVAS da pessoa para este agente (ADR-042). */
   semprePermitir?: readonly string[];
   agora: number;
@@ -148,7 +158,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     confiancaEntrada: entrada.confianca,
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo },
     politicaExecucao: {
       prazoMs,

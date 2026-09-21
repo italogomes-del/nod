@@ -4,6 +4,7 @@ import type { Decisao } from "../../../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
+import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-cases/aplicar-proposta-rotina.ts";
 import { retomarAposAcesso } from "../../../use-cases/retomar-apos-acesso.ts";
 import { conceder } from "../../../use-cases/conceder.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
@@ -113,7 +114,7 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           return;
         }
 
-        if (atual.tipo === "acesso" || atual.tipo === "perfil" || atual.tipo === "rotina") {
+        if (atual.tipo === "acesso" || atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
           // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, confirmar-proposta.ts).
           await comoDona(ctx.escopo, atual, async (deps) => {
             const proposta = await deps.repos.propostas.buscar(atual.id);
@@ -135,6 +136,12 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             } else if (atual.tipo === "rotina") {
               const rotina = await deps.tx((trx) => d.services.rotinas.ativar(trx, atual.id));
               ids.rotina = rotina.id;
+            } else if (atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
+              // A rotina já existe e tem id próprio: a ligação é payload.rotinaId, não a igualdade
+              // de ids que 'rotina' (nascimento) usa. O caso aplica o payload JÁ normalizado (E7.1).
+              const caso = atual.tipo === "rotina_atualizacao" ? aplicarAtualizacaoRotina : aplicarExclusaoRotina;
+              const r = await executar(deps, caso, { propostaId: atual.id });
+              ids.rotina = r.rotina.id;
             } else if (proposta && proposta.estado === "pendente") {
               const r = await executar(deps, confirmarProposta, { propostaId: proposta.id, prazoMs: d.prazoDecisaoMs });
               if (r.agente) ids.agente = r.agente.id;

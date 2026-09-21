@@ -19,10 +19,11 @@ interface Linha {
   estado: EstadoRotina;
   proxima_execucao: Date;
   criado_em: Date;
+  excluido_em: Date | null;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao, politica_sem_dado, exige_aprovacao, case when exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.geracao_execucao = rotinas.geracao_execucao and a.excluido_em is null) then estado else 'pausada'::estado_rotina end as estado, proxima_execucao, criado_em";
+  "tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao, politica_sem_dado, exige_aprovacao, case when exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.geracao_execucao = rotinas.geracao_execucao and a.excluido_em is null) then estado else 'pausada'::estado_rotina end as estado, proxima_execucao, criado_em, excluido_em";
 
 const paraRotina = (l: Linha): Rotina => ({
   tenantId: l.tenant_id,
@@ -41,6 +42,7 @@ const paraRotina = (l: Linha): Rotina => ({
   estado: l.estado,
   proximaExecucao: ms(l.proxima_execucao),
   criadoEm: ms(l.criado_em),
+  excluidoEm: l.excluido_em ? ms(l.excluido_em) : null,
 });
 
 export type NovaRotina = {
@@ -80,18 +82,18 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
     },
 
     async listar(): Promise<Rotina[]> {
-      const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null) order by criado_em`;
+      const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and excluido_em is null and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null) order by criado_em`;
       return linhas.map(paraRotina);
     },
 
     async listarDoAgente(agenteId: string): Promise<Rotina[]> {
-      const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId} order by criado_em`;
+      const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId} and excluido_em is null order by criado_em`;
       return linhas.map(paraRotina);
     },
 
     /** Para podeCriarRotina (50 por bot, src/domain/rotina-limites.ts). */
     async contarDoAgente(agenteId: string): Promise<number> {
-      const [l] = await conn<{ n: number }[]>`select count(*)::int as n from rotinas where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId}`;
+      const [l] = await conn<{ n: number }[]>`select count(*)::int as n from rotinas where tenant_id = ${escopo.tenantId} and agente_id = ${agenteId} and excluido_em is null`;
       return l?.n ?? 0;
     },
 
@@ -99,13 +101,50 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
     async ativasVencidas(agora: number): Promise<Rotina[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from rotinas
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'ativa' and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null and a.geracao_execucao = rotinas.geracao_execucao) and proxima_execucao <= ${data(agora)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'ativa' and excluido_em is null and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null and a.geracao_execucao = rotinas.geracao_execucao) and proxima_execucao <= ${data(agora)}
         order by proxima_execucao`;
       return linhas.map(paraRotina);
     },
 
     async atualizarEstado(id: string, estado: EstadoRotina): Promise<Rotina | null> {
       const [l] = await conn<Linha[]>`update rotinas set estado = ${estado} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraRotina(l) : null;
+    },
+
+    /**
+     * Aplica a atualização JÁ NORMALIZADA do payload da proposta (E7.1). Campo ausente fica como
+     * está — por isso `coalesce` com null em vez de montar SQL dinâmico. Só a dona: como em
+     * atualizarEstado/reagendar, devolve null para quem não é (a perna de equipe só abre LEITURA).
+     * O trigger nod_rotina_agente_ativo é `UPDATE OF estado ... WHEN (NEW.estado = 'ativa')`
+     * (0011), então este UPDATE não passa por ele: mexer em cron/instrução de rotina de agente
+     * excluído não levanta 23514 — conferido em 2026-09-21.
+     */
+    async atualizar(id: string, campos: Partial<Pick<Rotina, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "proximaExecucao">>): Promise<Rotina | null> {
+      const [l] = await conn<Linha[]>`
+        update rotinas set
+          cron = coalesce(${campos.cron ?? null}, cron),
+          fuso_iana = coalesce(${campos.fusoIana ?? null}, fuso_iana),
+          instrucao = coalesce(${campos.instrucao ?? null}, instrucao),
+          fonte = coalesce(${campos.fonte ?? null}, fonte),
+          entregavel = coalesce(${campos.entregavel ?? null}, entregavel),
+          limites_aprovacao = coalesce(${campos.limitesAprovacao ?? null}, limites_aprovacao),
+          politica_sem_dado = coalesce(${campos.politicaSemDado ?? null}, politica_sem_dado),
+          proxima_execucao = coalesce(${campos.proximaExecucao === undefined ? null : data(campos.proximaExecucao)}, proxima_execucao)
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraRotina(l) : null;
+    },
+
+    /**
+     * Exclusão RECUPERÁVEL (ADR-034): carimba excluido_em e some das listagens, do teto e do tick.
+     * Nunca DELETE — a trilha é imutável (ADR-004) e as execuções passadas continuam existindo.
+     * Idempotente: `excluido_em is null` faz a segunda chamada devolver null sem reescrever a data.
+     */
+    async excluir(id: string, em: number): Promise<Rotina | null> {
+      const [l] = await conn<Linha[]>`
+        update rotinas set excluido_em = ${data(em)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
+        returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraRotina(l) : null;
     },
 

@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import { FERRAMENTAS_NOD, NOMES_FERRAMENTAS_NOD, type JsonSchema, type NomeFerramentaNod } from "../../../src/contracts/ferramentas-nod.ts";
 import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
 
-const ESPERADAS = ["lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina", "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot"];
+const ESPERADAS = [
+  "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
+  "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina",
+  "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot",
+];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as DEZ ferramentas (EMENDA 16 inclui pedir_a_pessoa; sem_novidade em 2026-09-21)", () => {
+  it("lista fechada com as QUINZE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });

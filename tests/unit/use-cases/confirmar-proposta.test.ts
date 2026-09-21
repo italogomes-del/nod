@@ -65,6 +65,7 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
       estado: "ativa",
       proximaExecucao: 1,
       criadoEm: 0,
+      excluidoEm: null,
       ...(propostaId ? {} : {}),
     }));
     const { deps } = depsEmMemoria(undefined, { ativarRotina: ativar });

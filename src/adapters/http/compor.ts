@@ -31,6 +31,7 @@ import { servicoRotinas } from "../../use-cases/ativar-rotina.ts";
 import { atualizarPerfil } from "../../use-cases/atualizar-perfil.ts";
 import { motorDe } from "../../use-cases/autoria-evento.ts";
 import { criarRotina } from "../../use-cases/criar-rotina.ts";
+import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../use-cases/rotinas-do-agente.ts";
 import { registrarDesfechoRotina } from "../../use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../use-cases/emitir-plano-turno.ts";
 import { encaminhar } from "../../use-cases/encaminhar.ts";
@@ -189,7 +190,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());

@@ -12,6 +12,8 @@ const TIPO_HUMANO: Record<Item["decisao"]["tipo"], string> = {
   gate_rotina: "gate de rotina",
   perfil: "perfil proposto",
   rotina: "rotina proposta",
+  rotina_atualizacao: "mudança de rotina",
+  rotina_exclusao: "exclusão de rotina",
   pergunta: "pergunta",
   falta_de_dado: "falta um dado",
   permissao: "pedido de permissão",
@@ -124,6 +126,11 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
     case "perfil":
     case "rotina":
       return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    case "rotina_atualizacao":
+      return `<div class="acoes">${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter como está", { id: d.id })}</div>`;
+    // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
+    case "rotina_exclusao":
+      return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
     case "pergunta":
     case "falta_de_dado":
     case "permissao":

@@ -80,3 +80,33 @@ export function validarRotinaNormalizada(entrada: {
     resumo: resumoCron(cron, entrada.fusoIana),
   };
 }
+
+/** Os campos que atualizar_rotina pode mudar; ausente = fica como está. */
+export type CamposRotinaAtualizaveis = Partial<Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado">>;
+
+/**
+ * Atualização PARCIAL: funde o pedido sobre a rotina atual e revalida o conjunto INTEIRO pelo
+ * mesmo validarRotinaNormalizada. Assim um cron novo com o fuso antigo (ou o contrário) é checado
+ * junto, e não há um segundo caminho de validação para divergir do primeiro.
+ * `mudou` lista os campos que de fato mudam — pedido que não muda nada é `entrada_invalida`,
+ * porque virar proposta vazia só gastaria a confirmação da pessoa.
+ */
+export function validarAtualizacaoRotina(entrada: {
+  atual: Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado">;
+  pedido: CamposRotinaAtualizaveis;
+  agora: number;
+}): { normalizada: RotinaNormalizada; mudou: (keyof CamposRotinaAtualizaveis)[] } {
+  const chaves = ["cron", "fusoIana", "instrucao", "fonte", "entregavel", "limitesAprovacao", "politicaSemDado"] as const;
+  const fundido = { ...entrada.atual };
+  const mudou: (keyof CamposRotinaAtualizaveis)[] = [];
+  for (const k of chaves) {
+    const v = entrada.pedido[k];
+    if (v === undefined) continue;
+    const limpo = textoObrigatorio(v, k);
+    if (limpo === entrada.atual[k]) continue;
+    fundido[k] = limpo;
+    mudou.push(k);
+  }
+  if (mudou.length === 0) throw new RotinaInvalida("entrada_invalida", "nenhum campo muda");
+  return { normalizada: validarRotinaNormalizada({ ...fundido, agora: entrada.agora }), mudou };
+}

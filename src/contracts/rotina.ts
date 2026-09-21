@@ -24,6 +24,11 @@ export type Rotina = {
   estado: EstadoRotina;
   proximaExecucao: EpochMs;
   criadoEm: EpochMs;
+  /**
+   * Exclusão recuperável (ADR-034, migração 0016): não-nulo some das listagens, do teto de 50 e do
+   * tick do scheduler, sem apagar linha — a trilha e as execuções passadas continuam.
+   */
+  excluidoEm: EpochMs | null;
 };
 
 /**

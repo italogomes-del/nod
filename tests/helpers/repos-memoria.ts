@@ -747,6 +747,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           estado: r.estado ?? "ativa",
           proximaExecucao: r.proximaExecucao,
           criadoEm: agora(),
+          excluidoEm: null,
         };
         b.rotinas.push(rotina);
         return rotina;
@@ -755,21 +756,34 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.rotinas).find((r) => r.id === id) ?? null;
       },
       async listar() {
-        return doTenant(b.rotinas);
+        return doTenant(b.rotinas).filter((r) => r.excluidoEm === null);
       },
       async listarDoAgente(agenteId) {
-        return doTenant(b.rotinas).filter((r) => r.agenteId === agenteId);
+        return doTenant(b.rotinas).filter((r) => r.agenteId === agenteId && r.excluidoEm === null);
       },
       async contarDoAgente(agenteId) {
-        return doTenant(b.rotinas).filter((r) => r.agenteId === agenteId).length;
+        return doTenant(b.rotinas).filter((r) => r.agenteId === agenteId && r.excluidoEm === null).length;
       },
       async ativasVencidas(em) {
-        return doTenant(b.rotinas).filter((r) => r.ownerId === escopo.pessoaId && r.estado === "ativa" && r.proximaExecucao <= em);
+        return doTenant(b.rotinas).filter((r) => r.ownerId === escopo.pessoaId && r.estado === "ativa" && r.excluidoEm === null && r.proximaExecucao <= em);
       },
       async atualizarEstado(id, estado) {
         const r = doTenant(b.rotinas).find((x) => x.id === id);
         if (!r) return null;
         r.estado = estado;
+        return r;
+      },
+      async atualizar(id, campos) {
+        // Espelha o SQL: só a dona, nunca excluída, e campo ausente fica como está.
+        const r = doTenant(b.rotinas).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.excluidoEm === null);
+        if (!r) return null;
+        for (const [k, v] of Object.entries(campos)) if (v !== undefined) Object.assign(r, { [k]: v });
+        return r;
+      },
+      async excluir(id, em) {
+        const r = doTenant(b.rotinas).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.excluidoEm === null);
+        if (!r) return null;
+        r.excluidoEm = em;
         return r;
       },
       async reagendar(id, proximaExecucao) {
