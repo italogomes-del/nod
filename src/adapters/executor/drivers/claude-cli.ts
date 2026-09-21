@@ -44,13 +44,27 @@ export type LigacaoClaudeCli = {
 
 export { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 
-/** As flags que montarArgs usa — é a lista conferida contra os floors. */
+/**
+ * Janela do `--autocompact`. definido em 2026-09-18: mesmo valor do openmausbot
+ * (`server/drivers/claude.ts:295`). Explícito em vez de "auto" — comportamento previsível entre
+ * versões. Existe porque, sem teto de passos, a tarefa longa precisa compactar em vez de estourar.
+ */
+export const JANELA_AUTOCOMPACT_TOKENS = 200_000;
+
+/**
+ * As flags que montarArgs usa — é a lista conferida contra os floors.
+ *
+ * definido em 2026-09-18: SEM `--max-turns`. O teto de 12 passos foi dimensionado em 2026-09-16
+ * para "lembrar → pedir_aprovacao → resposta" e cortava tarefa de código no meio (ler quatro
+ * arquivos já gastava metade). O que limita o turno passa a ser ATIVIDADE: o watchdog de `laco.ts`
+ * encerra o que fica mudo. `sonda.ts` continua usando `--max-turns 1`, onde o teto é o desejado,
+ * então a flag segue em FLAG_FLOORS — só não é mais exigida no turno.
+ */
 export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
   "--output-format",
   "--verbose",
   "--include-partial-messages",
   "--model",
-  "--max-turns",
   "--setting-sources",
   "--strict-mcp-config",
   "--mcp-config",
@@ -63,7 +77,7 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
 ];
 
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string }): { args: string[]; sessaoCli: string } {
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean }): { args: string[]; sessaoCli: string } {
   const { plano } = entrada;
   const permitidas = plano.catalogo.ferramentas.map((f) => f.nomeMcp).join(",");
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
@@ -75,8 +89,8 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     "--include-partial-messages",
     "--model",
     plano.entrada.modelo,
-    "--max-turns",
-    String(plano.entrada.maxTurnos),
+    // Sem teto de passos, a tarefa longa precisa de janela: compactar em vez de bater no limite.
+    ...(entrada.compactar ? ["--autocompact", String(JANELA_AUTOCOMPACT_TOKENS)] : []),
     "--setting-sources",
     "project",
     "--strict-mcp-config",
@@ -177,7 +191,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const eventos: EventoStream[] = [];
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
-                const { args } = montarArgs({ plano, mcpJson });
+                // Fail-closed: sem --autocompact no help da versão instalada, o turno roda sem ela.
+                const compactar = (flagsNoHelp ?? []).includes("--autocompact");
+                const { args } = montarArgs({ plano, mcpJson, compactar });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs);
 
                 const pendentes: Promise<void>[] = [];

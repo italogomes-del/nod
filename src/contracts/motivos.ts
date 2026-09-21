@@ -29,6 +29,10 @@ export const MOTIVOS_INTERRUPCAO = [
   "lancamento_falhou",
   "sessao_rejeitada",
   "executor_indisponivel",
+  /** definido em 2026-09-18: ficou mudo sem ferramenta pendente; o watchdog de atividade encerrou. */
+  "turno_travado",
+  /** definido em 2026-09-18: produziu trabalho e não concluiu — não confundir com sem_progresso. */
+  "trabalho_incompleto",
 ] as const;
 export type MotivoInterrupcao = (typeof MOTIVOS_INTERRUPCAO)[number];
 
