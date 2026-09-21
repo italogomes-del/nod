@@ -4,6 +4,7 @@ import type { Conn, Escopo } from "../shared/types.ts";
 import { agentesRepo } from "./agentes.repo.ts";
 import { catcherRepo } from "./catcher.repo.ts";
 import { concessoesRepo } from "./concessoes.repo.ts";
+import { permissoesPermanentesRepo } from "./permissoes-permanentes.repo.ts";
 import { conectoresRepo } from "./conectores.repo.ts";
 import { conversasRepo } from "./conversas.repo.ts";
 import { decisoesRepo } from "./decisoes.repo.ts";
@@ -51,6 +52,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     composio: composioRepo(conn, escopo),
     conectores: conectoresRepo(conn, escopo),
     concessoes: concessoesRepo(conn, escopo),
+    permissoesPermanentes: permissoesPermanentesRepo(conn, escopo),
     procuracoes: procuracoesRepo(conn, escopo),
     inventario: inventarioRepo(conn, escopo),
     gastos: gastosRepo(conn, escopo),

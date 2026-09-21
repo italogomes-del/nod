@@ -18,6 +18,12 @@ export type EstadoDecisao = "pendente" | "decidida" | "vencida" | "reaberta";
 
 export type DesfechoDecisao =
   | { tipo: "decidida"; por: string; em: IsoUtc }
+  /**
+   * ADR-042: resolvida por regra nomeada, sem pessoa. `por` NÃO existe aqui de propósito — quem
+   * decidiu é a regra, e gravar um nome de pessoa seria inferir autoria de outro campo (ADR-023).
+   * A coluna decidida_por (uuid) fica NULA; a regra e a versão vivem na autoria do evento.
+   */
+  | { tipo: "decidida_por_regra"; regra: `regra:${string}`; regraVersao: number; em: IsoUtc }
   | { tipo: "expirou_sem_ninguem_ver"; em: IsoUtc }
   | { tipo: "expirou_com_alguem_ciente"; em: IsoUtc };
 

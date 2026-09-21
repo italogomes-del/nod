@@ -1,5 +1,5 @@
 import type { DestinoItem, ItemAprovacao } from "../contracts/item-aprovacao.ts";
-import type { DesfechoItem } from "../contracts/motivos.ts";
+import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, isoOuNull, jsonb } from "./conversao.ts";
 
@@ -18,9 +18,10 @@ interface Linha {
   marcado_em: Date | null;
   editado_por: string | null;
   desfecho: DesfechoItem | null;
+  motivo_manual: MotivoAprovacaoManual | null;
 }
 
-const COLUNAS = "tenant_id, id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, marcado_por, marcado_em, editado_por, desfecho";
+const COLUNAS = "tenant_id, id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, marcado_por, marcado_em, editado_por, desfecho, motivo_manual";
 
 const paraItem = (l: Linha): ItemAprovacao => ({
   tenantId: l.tenant_id,
@@ -37,6 +38,7 @@ const paraItem = (l: Linha): ItemAprovacao => ({
   marcadoEm: isoOuNull(l.marcado_em),
   editadoPor: l.editado_por,
   desfecho: l.desfecho,
+  motivoManual: l.motivo_manual,
 });
 
 export type NovoItemAprovacao = {
@@ -47,6 +49,10 @@ export type NovoItemAprovacao = {
   /** Origem sensível NASCE desmarcada com justificativa (E4.2); marcar exige pessoa (CHECK). */
   origemSensivel: boolean;
   justificativa?: string | null;
+  /** NULO = resolvido por regra, sem perguntar (ADR-042). Preenchido = por que precisou de pessoa. */
+  motivoManual?: MotivoAprovacaoManual | null;
+  /** Item resolvido por regra nasce com desfecho; o resto nasce sem. */
+  desfecho?: DesfechoItem | null;
 };
 
 /** Aprovação em lista tipada (E4.1/E4.2). O CHECK item_sensivel_marcado_exige_pessoa vive no banco. */
@@ -56,9 +62,9 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
       const criados: ItemAprovacao[] = [];
       for (const i of itens) {
         const [l] = await conn<Linha[]>`
-          insert into itens_aprovacao (tenant_id, id, owner_id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa)
+          insert into itens_aprovacao (tenant_id, id, owner_id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, motivo_manual, desfecho)
           values (${escopo.tenantId}, ${i.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${decisaoId}, ${i.idx}, ${i.texto}, ${i.texto},
-            ${jsonb(conn, i.destino)}, ${!i.origemSensivel}, ${i.origemSensivel}, ${i.justificativa ?? null})
+            ${jsonb(conn, i.destino)}, ${!i.origemSensivel}, ${i.origemSensivel}, ${i.justificativa ?? null}, ${i.motivoManual ?? null}, ${i.desfecho ?? null})
           returning ${conn.unsafe(COLUNAS)}`;
         if (l) criados.push(paraItem(l));
       }

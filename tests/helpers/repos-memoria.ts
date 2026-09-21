@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
+import type { PermissaoPermanente } from "../../src/contracts/permissao-permanente.ts";
 import type { Concessao, Procuracao } from "../../src/contracts/concessao.ts";
 import type { Conversa, Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
@@ -54,6 +55,7 @@ export type BancoMemoria = {
   composioChaves: Map<string, string>;
   composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
+  permissoes: PermissaoPermanente[];
   procuracoes: Procuracao[];
   inventario: { tenantId: string; pessoaId: string; motor: string; inventario: Inventario }[];
   gastos: (Gasto & { tenantId: string; ownerId: string })[];
@@ -88,6 +90,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     composioChaves: new Map(),
     composioSessoes: new Map(),
     concessoes: [],
+    permissoes: [],
     procuracoes: [],
     inventario: [],
     gastos: [],
@@ -658,6 +661,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.varridos.add(chave);
         return true;
       },
+      async fecharPorRegra(id, p) {
+        const d = doTenant(b.decisoes).find((x) => x.id === id && x.estado === "pendente");
+        if (!d) return null;
+        d.estado = "decidida";
+        d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
+        d.decididaEm = p.agora;
+        return d;
+      },
+
       async ultimaDecisaoEm() {
         const ems = doTenant(b.decisoes).filter((d) => d.decisorId === escopo.pessoaId && d.decididaEm !== null).map((d) => d.decididaEm as number);
         return ems.length === 0 ? null : iso(Math.max(...ems));
@@ -682,7 +694,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             marcadoPor: null,
             marcadoEm: null,
             editadoPor: null,
-            desfecho: null,
+            desfecho: i.desfecho ?? null,
+            motivoManual: i.motivoManual ?? null,
           };
           b.itens.push(item);
           criados.push(item);
@@ -1208,6 +1221,52 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async marcarUso(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         if (l) l.ultimoUsoEm = em;
+      },
+    },
+    permissoesPermanentes: {
+      async criar(p) {
+        const ja = doTenant(b.permissoes).some((x) => x.agenteId === p.agenteId && x.conectorId === p.conectorId && x.capacidade === p.capacidade && x.inativoEm === null);
+        if (ja) return null;
+        const permissao = {
+          tenantId: escopo.tenantId,
+          id: p.id ?? randomUUID(),
+          ownerId: escopo.pessoaId,
+          agenteId: p.agenteId,
+          conectorId: p.conectorId,
+          capacidade: p.capacidade,
+          itemOrigemId: p.itemOrigemId,
+          mensagemId: p.mensagemId,
+          regraVersao: p.regraVersao,
+          criadoEm: agora(),
+          inativoEm: null,
+          inativoMotivo: null,
+        };
+        b.permissoes.push(permissao);
+        return permissao;
+      },
+      async ativasDoAgente(agenteId) {
+        return doTenant(b.permissoes).filter((p) => p.agenteId === agenteId && p.ownerId === escopo.pessoaId && p.inativoEm === null);
+      },
+      async listar(agenteId) {
+        return doTenant(b.permissoes).filter((p) => p.ownerId === escopo.pessoaId && (!agenteId || p.agenteId === agenteId));
+      },
+      async buscar(id) {
+        return doTenant(b.permissoes).find((p) => p.id === id) ?? null;
+      },
+      async desativar(id, motivo, quando) {
+        const p = doTenant(b.permissoes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.inativoEm === null);
+        if (!p) return false;
+        p.inativoEm = quando;
+        p.inativoMotivo = motivo;
+        return true;
+      },
+      async desativarPor(filtro, motivo, quando) {
+        const alvos = doTenant(b.permissoes).filter((p) => p.inativoEm === null
+          && (!filtro.agenteId || p.agenteId === filtro.agenteId)
+          && (!filtro.conectorId || p.conectorId === filtro.conectorId)
+          && (!filtro.capacidade || p.capacidade === filtro.capacidade));
+        for (const p of alvos) { p.inativoEm = quando; p.inativoMotivo = motivo; }
+        return alvos.length;
       },
     },
   } satisfies Repos;

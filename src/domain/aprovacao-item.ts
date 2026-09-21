@@ -35,5 +35,6 @@ export function montarItens(entrada: {
     marcadoEm: null,
     editadoPor: null,
     desfecho: null,
+    motivoManual: null,
   }));
 }

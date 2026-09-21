@@ -242,6 +242,11 @@ body.ocupado { cursor: progress; }
 .lista > li { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--panel); }
 .bt { border: 1px solid var(--line-2); background: var(--panel); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .bt:hover { border-color: var(--ink-3); } .bt.pri { background: var(--ink); color: #fff; border-color: var(--ink); }
+/* Botão desabilitado precisa PARECER desabilitado: sem isso "Sempre permitir" bloqueado num card
+   sensível lê como clicável, e a pessoa não entende por que nada acontece (ADR-029 em espírito —
+   o motivo está no title). Cursor e opacidade dizem o estado antes do clique. */
+.bt[disabled] { opacity: .45; cursor: not-allowed; }
+.bt[disabled]:hover { border-color: var(--line-2); }
 .bt.sm { padding: 3px 8px; font-size: 11.5px; font-weight: 400; } .bt.perigo { color: var(--red); border-color: #f3c0bb; } .bt:disabled { opacity: .4; }
 .acoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
 .form { display: grid; gap: 10px; max-width: 560px; }
@@ -281,11 +286,25 @@ body.ocupado { cursor: progress; }
 .dec-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .dec-frase { font-size: 15px; margin: 6px 0; }
 .dec-rodape { margin-top: 8px; }
+/* Aprovação em duas densidades: o que vai acontecer em português, o nome técnico atrás do
+   disclosure. Item sensível sai do modo enxuto — ver renderAprovacao em web/telas/sua-vez.ts. */
 .ap-lista { list-style: none; padding: 0; margin: 8px 0 0; }
-.ap-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
-.ap-item.sensivel { background: var(--amber-bg); border-radius: 6px; padding: 6px; }
-.ap-item .justificativa { grid-column: 1 / -1; font-size: 12.5px; color: var(--amber); font-style: italic; }
-.ap-item .texto-final { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 100%; }
+.ap-item { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 9px 0; border-top: 1px solid var(--line); }
+.ap-item:first-child { border-top: none; }
+.ap-marca { display: flex; align-items: center; padding-top: 2px; }
+.ap-item.sensivel { background: var(--amber-bg); border-radius: 8px; padding: 10px; border-top-color: transparent; }
+.ap-corpo { min-width: 0; }
+.ap-oque { font-size: 14.5px; line-height: 1.45; }
+.ap-onde { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+.ap-unico .ap-onde { margin-top: 2px; }
+.ap-item .justificativa { font-size: 12.5px; color: var(--amber); font-style: italic; margin: 5px 0 0; }
+.ap-detalhe { margin-top: 6px; }
+.ap-detalhe > summary { cursor: pointer; font-size: 12.5px; color: var(--ink-3); width: fit-content; }
+.ap-detalhe > summary:hover { color: var(--ink-2); }
+.ap-detalhe dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 8px 0 0; font-size: 12px; }
+.ap-detalhe dt { color: var(--ink-3); }
+.ap-detalhe dd { margin: 0; overflow-wrap: anywhere; }
+.ap-detalhe .texto-final { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 100%; margin-top: 8px; }
 .resposta { min-width: 280px; }
 
 /* rotinas / conectores / memória / perfil */

@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { JUSTIFICATIVA_SENSIVEL } from "../../../src/domain/aprovacao-item.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps } from "../../../src/use-cases/tipos.ts";
 import { depsFalsos } from "./deps-l5.ts";
+import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 
 async function cenario(deps: Deps) {
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const email = await deps.repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
-  await deps.repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: 1 });
+  await deps.repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [
+    { nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false },
+    // O conector DECLARA o que é só-leitura na sonda; é este valor que o ADR-042 lê.
+    { nome: "buscar", descricao: "busca", schema: { type: "object" }, readOnlyHint: true },
+  ], agora: 1 });
   const crm = await deps.repos.conectores.criar({ nome: "CRM", slug: "crm", transporte: "stdio", comando: "node", declaracao: "toca" });
   const semDeclaracao = await deps.repos.conectores.criar({ nome: "Planilha", slug: "planilha", transporte: "stdio", comando: "node", declaracao: "nao-declarou" });
   const turno = await deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: 9e12, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
@@ -17,9 +21,23 @@ async function cenario(deps: Deps) {
 }
 
 const destino = { conector: "email", ferramenta: "enviar", argumentos: { para: "x" } };
+const leitura = { conector: "email", ferramenta: "buscar", argumentos: {} };
+
+/** Plano mínimo para a regra do ADR-042: só o que decidirAprovacao lê. */
+function planoCom(nomes: string[], o: { readOnly?: string[]; semprePermitir?: string[]; confianca?: "confiavel" | "nao_confiavel"; gateRotina?: boolean } = {}): PlanoTurno {
+  return {
+    catalogo: {
+      ferramentas: nomes.map((nome) => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "conector" as const, conectorId: "c", readOnlyHint: (o.readOnly ?? []).includes(nome), tocaAprendiz: false, schema: { type: "object" as const } })),
+      servidores: [],
+    },
+    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 1, efeitoExternoSoPorAprovacao: o.gateRotina ?? false },
+    confiancaEntrada: o.confianca ?? "confiavel",
+    semprePermitir: o.semprePermitir ?? [],
+  } as unknown as PlanoTurno;
+}
 
 describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
-  it("quatro itens viram quatro linhas tipadas; os dois de origem sensível nascem desmarcados com justificativa fixa; volta pendente com instrução", async () => {
+  it("quatro itens viram quatro linhas tipadas, todas marcadas: a classificação por origem está desligada (ADR-002, refinamento 2026-09-21)", async () => {
     const { deps, banco } = depsFalsos();
     const c = await cenario(deps);
     const r = await pedirAprovacao(deps, {
@@ -41,16 +59,17 @@ describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
     const decisao = banco.decisoes.find((d) => d.id === decisaoId);
     expect(decisao).toMatchObject({ tipo: "aprovacao", estado: "pendente", frase: "enviar 4 emails", turnoId: c.turnoId, decisorId: deps.escopo.pessoaId });
     const itens = await deps.repos.itensAprovacao.listar(decisaoId);
+    // Com CLASSIFICAR_ORIGEM_SENSIVEL = false, origem_conector não marca mais nada: os 4 nascem iguais.
     expect(itens.map((i) => [i.idx, i.selecionado, i.origemSensivel, i.justificativa])).toEqual([
       [0, true, false, null],
-      [1, false, true, JUSTIFICATIVA_SENSIVEL],
+      [1, true, false, null],
       [2, true, false, null],
-      [3, false, true, JUSTIFICATIVA_SENSIVEL],
+      [3, true, false, null],
     ]);
     expect(itens[0]?.destino).toEqual(destino);
     expect(itens[0]?.textoFinal).toBe("email para a Ana");
     expect(r.events?.map((e) => e.kind)).toEqual(["decisao_criada"]);
-    expect(r.events?.[0]?.dados).toMatchObject({ itens: 4, sensiveis: 2 });
+    expect(r.events?.[0]?.dados).toMatchObject({ itens: 4, sensiveis: 0 });
   });
 
   it("destino fora do catálogo ou conector não registrado é recusado antes de virar decisão (E6.2: nunca inventa escopo)", async () => {
@@ -64,12 +83,134 @@ describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
     expect(banco.itens).toHaveLength(0);
   });
 
-  it("origem_conector desconhecida é tratada como sensível (fail-closed, ADR-002)", async () => {
+  it("origem_conector desconhecida não marca mais o item: o fail-closed do ADR-002 está desligado, não removido", async () => {
     const { deps } = depsFalsos();
     const c = await cenario(deps);
     const r = await pedirAprovacao(deps, { turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x", itens: [{ texto: "a", destino, origem_conector: "nao-existe" }] });
     if (r.data.estado !== "pendente") throw new Error("esperava pendente");
     const [item] = await deps.repos.itensAprovacao.listar(r.data.decisao_id);
-    expect(item).toMatchObject({ selecionado: false, origemSensivel: true });
+    expect(item).toMatchObject({ selecionado: true, origemSensivel: false });
+  });
+
+  it("leitura declarada pelo conector não vira card: decisão nasce FECHADA e o turno segue", async () => {
+    const { deps, banco, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "consultar",
+      itens: [{ texto: "buscar contato", destino: leitura }],
+      plano: planoCom(["email__buscar"], { readOnly: ["email__buscar"] }),
+    });
+    // O modelo recebe o resultado inline: não há {aguardar}, então o turno não morre no long-poll.
+    expect(r.data.estado).toBe("decidida");
+    if (r.data.estado !== "decidida") throw new Error("esperava decidida");
+    expect(r.data.itens).toEqual([{ idx: 0, desfecho: "executado" }]);
+    expect(chamadas).toHaveLength(1);
+    // A decisão existe (nada é suprimido, ADR-007) — ela só nunca ficou pendente.
+    expect(banco.decisoes[0]).toMatchObject({ estado: "decidida" });
+    expect(banco.decisoes[0]?.desfecho).toMatchObject({ tipo: "decidida_por_regra", regra: "regra:consulta_sem_decisao" });
+    // "precisa ficar no chat": a fala do que saiu sem perguntar.
+    const msg = banco.mensagens.find((m) => m.kind === "resultado_aprovacao");
+    expect(msg?.texto).toContain("Fiz sem perguntar");
+    // ADR-023: quem agiu continua sendo o AGENTE; a regra vai em decidido_por.
+    expect(msg?.autoria).toMatchObject({ autor_tipo: "agente", decidido_por: "regra:consulta_sem_decisao", regra_versao: 1 });
+    expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada"]);
+  });
+
+  it("escrita na regra da pessoa também dispensa o card, e a autoria nomeia a regra dela", async () => {
+    const { deps, banco } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "enviar",
+      itens: [{ texto: "email para a Ana", destino }],
+      plano: planoCom(["email__enviar"], { semprePermitir: ["email__enviar"] }),
+    });
+    expect(r.data.estado).toBe("decidida");
+    expect(banco.mensagens.find((m) => m.kind === "resultado_aprovacao")?.autoria).toMatchObject({ decidido_por: "regra:aprovacao_permanente" });
+  });
+
+  it("sem plano nunca é automático, mesmo sendo leitura (fail-closed)", async () => {
+    const { deps, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, { turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x", itens: [{ texto: "buscar", destino: leitura }] });
+    expect(r.data.estado).toBe("pendente");
+    expect(chamadas).toHaveLength(0);
+  });
+
+  it("lote misto pergunta TUDO e nada é executado antes; cada item guarda por que parou", async () => {
+    const { deps, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "os dois",
+      itens: [{ texto: "buscar contato", destino: leitura }, { texto: "email para a Ana", destino }],
+      plano: planoCom(["email__buscar", "email__enviar"], { readOnly: ["email__buscar"] }),
+    });
+    expect(r.data.estado).toBe("pendente");
+    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+    // O mundo não foi mexido pela metade: o que teria passado também esperou.
+    expect(chamadas).toHaveLength(0);
+    const itens = await deps.repos.itensAprovacao.listar(r.data.decisao_id);
+    expect(itens.map((i) => i.motivoManual)).toEqual([null, "sem_regra_permanente"]);
+  });
+
+  it("turno não confiável suspende a regra da pessoa e escreve o motivo no item (ADR-029)", async () => {
+    const { deps, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x",
+      itens: [{ texto: "email para a Ana", destino }],
+      plano: planoCom(["email__enviar"], { semprePermitir: ["email__enviar"], confianca: "nao_confiavel" }),
+    });
+    expect(r.data.estado).toBe("pendente");
+    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect(chamadas).toHaveLength(0);
+    const [item] = await deps.repos.itensAprovacao.listar(r.data.decisao_id);
+    expect(item?.motivoManual).toBe("regra_suspensa_conteudo_nao_confiavel");
+  });
+
+  it("gate de rotina segura mesmo item de leitura (ADR-037)", async () => {
+    const { deps, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x",
+      itens: [{ texto: "buscar", destino: leitura }],
+      plano: planoCom(["email__buscar"], { readOnly: ["email__buscar"], gateRotina: true }),
+    });
+    expect(r.data.estado).toBe("pendente");
+    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect(chamadas).toHaveLength(0);
+    expect((await deps.repos.itensAprovacao.listar(r.data.decisao_id))[0]?.motivoManual).toBe("gate_de_rotina");
+  });
+
+  it("item com origem declarada 'toca' passa a ser elegível à regra: é o conjunto que cresceu e fez a versão subir para 2", async () => {
+    const { deps, banco, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    const r = await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x",
+      itens: [{ texto: "buscar do CRM", destino: leitura, origem_conector: "crm" }],
+      plano: planoCom(["email__buscar"], { readOnly: ["email__buscar"], semprePermitir: ["email__buscar"] }),
+    });
+    // Antes do refinamento de 2026-09-21 este item nascia sensível e SEGURAVA o lote inteiro.
+    // Com a classificação desligada ele é um item comum: leitura declarada pelo conector resolve.
+    expect(r.data.estado).toBe("decidida");
+    expect(chamadas).toHaveLength(1);
+    const [item] = await deps.repos.itensAprovacao.listar(banco.decisoes[0]?.id ?? "");
+    expect(item).toMatchObject({ selecionado: true, origemSensivel: false, motivoManual: null });
+  });
+
+  it("nenhum conector marca mais o item, nem o declarado 'toca' nem o sem declaração", async () => {
+    // A neutralização é UMA constante no caso de uso; coluna, CHECK e a precedência do domínio
+    // permanecem de pé. Voltar atrás é trocar CLASSIFICAR_ORIGEM_SENSIVEL para true.
+    const { deps, banco } = depsFalsos();
+    const c = await cenario(deps);
+    await pedirAprovacao(deps, {
+      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x",
+      itens: [
+        { texto: "do CRM (declarado toca)", destino, origem_conector: "crm" },
+        { texto: "da planilha (não declarou)", destino, origem_conector: "planilha" },
+      ],
+    });
+    const itens = await deps.repos.itensAprovacao.listar(banco.decisoes[0]?.id ?? "");
+    expect(itens.map((i) => i.origemSensivel)).toEqual([false, false]);
+    expect(itens.every((i) => i.selecionado)).toBe(true);
   });
 });

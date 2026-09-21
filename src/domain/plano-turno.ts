@@ -93,6 +93,8 @@ export type EntradaPlano = {
   rotina?: { exigeAprovacao: boolean } | null;
   /** Inventário para o modelo escolher SOBRE QUAL rotina agir; não confundir com `rotina` acima. */
   rotinasDoAgente?: readonly RotinaNoPrompt[];
+  /** Nomes `${slug}__${tool}` das regras ATIVAS da pessoa para este agente (ADR-042). */
+  semprePermitir?: readonly string[];
   agora: number;
 };
 
@@ -163,6 +165,13 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,
       efeitoExternoSoPorAprovacao: entrada.turno.origem === "rotina" && entrada.rotina?.exigeAprovacao === true,
     },
+    /**
+     * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado e já reduzido — a regra
+     * evita a pergunta, nunca amplia alcance (ADR-038). Turno não confiável recebe lista VAZIA: o
+     * domínio também recusa por confiança, e as duas camadas são de propósito (a lista vazia é o
+     * estado, a recusa é a explicação que a pessoa lê).
+     */
+    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector")),
     expiraEm: Math.min(entrada.turno.prazoEm, entrada.agora + PLANO_VALIDADE_MS),
   };
 }

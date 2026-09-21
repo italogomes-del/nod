@@ -1,5 +1,5 @@
 import type { TenantId } from "./ids.ts";
-import type { DesfechoItem } from "./motivos.ts";
+import type { DesfechoItem, MotivoAprovacaoManual } from "./motivos.ts";
 
 export type DestinoItem = {
   conector: string;
@@ -26,4 +26,9 @@ export type ItemAprovacao = {
   marcadoEm: string | null;
   editadoPor: string | null;
   desfecho: DesfechoItem | null;
+  /**
+   * Por que este item precisou de pessoa (ADR-042/ADR-029: regra suspensa em silêncio é negação
+   * seca). NULO = resolvido por regra, sem perguntar. A pessoa lê o motivo no card.
+   */
+  motivoManual: MotivoAprovacaoManual | null;
 };

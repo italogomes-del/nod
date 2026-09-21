@@ -4,6 +4,7 @@ import type { Conn, Escopo } from "../shared/types.ts";
 import type { agentesRepo } from "./agentes.repo.ts";
 import type { catcherRepo } from "./catcher.repo.ts";
 import type { concessoesRepo } from "./concessoes.repo.ts";
+import type { permissoesPermanentesRepo } from "./permissoes-permanentes.repo.ts";
 import type { conectoresRepo } from "./conectores.repo.ts";
 import type { conversasRepo } from "./conversas.repo.ts";
 import type { decisoesRepo } from "./decisoes.repo.ts";
@@ -58,6 +59,7 @@ export interface Repos {
   salas: ReturnType<typeof salasRepo>;
   conectores: ReturnType<typeof conectoresRepo>;
   concessoes: ReturnType<typeof concessoesRepo>;
+  permissoesPermanentes: ReturnType<typeof permissoesPermanentesRepo>;
   procuracoes: ReturnType<typeof procuracoesRepo>;
   inventario: ReturnType<typeof inventarioRepo>;
   gastos: ReturnType<typeof gastosRepo>;

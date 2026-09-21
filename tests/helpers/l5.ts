@@ -48,6 +48,7 @@ export function planoDeTeste(sobrescrita: Partial<PlanoTurno> = {}): PlanoTurno 
     },
     promptSistema: "Você é Vera.",
     entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001" },
+    semprePermitir: [],
     politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8_000, efeitoExternoSoPorAprovacao: false },
     tokenDeTurno: "tok",
     expiraEm: agora + 60_000,

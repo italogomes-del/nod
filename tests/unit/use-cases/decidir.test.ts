@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { argumentosComTextoFinal, decidir } from "../../../src/use-cases/decidir.ts";
+import { JUSTIFICATIVA_SENSIVEL } from "../../../src/domain/aprovacao-item.ts";
 import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps } from "../../../src/use-cases/tipos.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
@@ -30,6 +31,14 @@ async function cenarioComDecisao(opcoes: OpcoesDepsFalsos = {}) {
     ],
   });
   if (pedido.data.estado !== "pendente") throw new Error("esperava pendente");
+  // A classificação por origem está desligada (ADR-002, refinamento 2026-09-21), então nenhum item
+  // nasce sensível. O caminho da PESSOA decidindo continua tratando item sensível de forma própria
+  // — desmarcado vira `sensivel_nao_aprovado`, não `retirado_pela_pessoa` —, e é isso que este
+  // cenário exercita: bia e dani são marcadas à mão, como se a classificação estivesse ligada.
+  const criados = await deps.repos.itensAprovacao.listar(pedido.data.decisao_id);
+  for (const alvo of [criados[1], criados[3]]) {
+    if (alvo) Object.assign(alvo, { origemSensivel: true, selecionado: false, justificativa: JUSTIFICATIVA_SENSIVEL });
+  }
   const itens = await deps.repos.itensAprovacao.listar(pedido.data.decisao_id);
   return { deps: deps as Deps, banco, chamadas, decisaoId: pedido.data.decisao_id, itens, turnoId: turno?.id ?? "", conectorId: email?.id ?? "" };
 }

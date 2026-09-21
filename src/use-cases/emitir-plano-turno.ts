@@ -55,12 +55,13 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   if (!agente) throw new ErroDeDominio("nao_encontrado", { cause: "agente" });
   const conversa = await deps.repos.conversas.buscar(turno.conversaId);
-  const [memorias, concessoes, guardados, pessoa, visiveis] = await Promise.all([
+  const [memorias, concessoes, guardados, pessoa, visiveis, permissoes] = await Promise.all([
     deps.repos.memorias.listarDoAgente(agente.id),
     deps.repos.concessoes.doAgente(agente.id),
     deps.repos.conectores.listar(),
     deps.repos.pessoas.buscar(deps.escopo.pessoaId),
     deps.repos.agentes.listar(),
+    deps.repos.permissoesPermanentes.ativasDoAgente(agente.id),
   ]);
   const conectores = guardados.map(conectorPublico);
 
@@ -121,6 +122,12 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     colegas: visiveis.filter((a) => a.id !== agente.id && a.ownerId === agente.ownerId && a.confirmado && !a.oculto),
     rotina,
     rotinasDoAgente,
+    // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
+    // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
+    semprePermitir: permissoes.flatMap((p) => {
+      const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
+      return slug ? [`${slug}__${p.capacidade}`] : [];
+    }),
     agora,
   });
 

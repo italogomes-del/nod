@@ -1,7 +1,7 @@
 # Plano — ciclo de vida de rotinas por conversa
 
 > **Andamento: COMPLETO.** A decisão final está na
-> [ADR-042](adr/adr-042-ciclo-de-vida-de-rotinas-pelo-agente.md); este documento é o rascunho de
+> [ADR-043](adr/adr-043-ciclo-de-vida-de-rotinas-pelo-agente.md); este documento é o rascunho de
 > planejamento que a antecedeu, mantido pelo registro do caminho.
 > - Passo 1 — inventário no prompt (`prompt-sistema.ts`, `plano-turno.ts`, `emitir-plano-turno.ts`).
 > - Passo 2 — `listar_rotinas`, `pausar_rotina`, `reativar_rotina` (aplicam direto).
@@ -178,7 +178,7 @@ não como tipo. Três amarras:
 ## ADR
 
 Isto emenda ADR-011, ADR-033 e ADR-034 → escrever a ADR com o gatilho de reversão antes de fechar
-a branch. **Número: 042** — a main levou a 040 (turno por atividade) e a 041 (relato de comportamento) enquanto esta branch
+a branch. **Número: 043** — a main levou a 040 (turno por atividade) e a 041 (relato de comportamento) enquanto esta branch
 estava aberta. Conferido no merge de 2026-09-21.
 
 ## Falha pré-existente no `npm run check` (não é desta branch)

@@ -47,6 +47,33 @@ export const DESFECHOS_ITEM = ["executado", "retirado_pela_pessoa", "sensivel_na
 export type DesfechoItem = (typeof DESFECHOS_ITEM)[number];
 
 /**
+ * Por que um item continuou PENDENTE em vez de ser resolvido por regra (ADR-042). NÃO é
+ * MotivoNegacao: o item não foi negado, e classificar terminal/transitória (parada-alcada.ts) não
+ * faz sentido para ele. ADR-029: regra suspensa em silêncio é negação seca — a pessoa lê o motivo.
+ */
+export const MOTIVOS_APROVACAO_MANUAL = [
+  "sem_regra_permanente",
+  "regra_suspensa_conteudo_nao_confiavel",
+  "regra_inativa",
+  "origem_sensivel",
+  "destino_computador",
+  "gate_de_rotina",
+  "fora_do_catalogo",
+  "sem_plano",
+] as const;
+export type MotivoAprovacaoManual = (typeof MOTIVOS_APROVACAO_MANUAL)[number];
+
+/** Por que uma permissão permanente parou de valer (ADR-042 claim 7). Inativa nunca é apagada. */
+export const MOTIVOS_INATIVIDADE_PERMISSAO = [
+  "revogada_pela_pessoa",
+  "concessao_revogada",
+  "conector_desabilitado",
+  "capacidade_fora_do_catalogo",
+  "agente_excluido",
+] as const;
+export type MotivoInatividadePermissao = (typeof MOTIVOS_INATIVIDADE_PERMISSAO)[number];
+
+/**
  * passou_em_branco ≠ falhou: ninguém respondeu o gate não é erro técnico (E7.3).
  * sem_novidade ≠ passou_em_branco: o agente CONSULTOU a fonte e nada mudou — a execução foi
  * completa e correta, só não rendeu notícia. É o único desfecho que não escreve no chat
