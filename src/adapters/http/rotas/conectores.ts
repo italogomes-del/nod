@@ -5,6 +5,7 @@ import { criarClienteComposio } from "../../integracoes/composio.ts";
 import { atualizarCredenciaisConector } from "../../../use-cases/atualizar-credenciais-conector.ts";
 import type { SensibilidadeDeclarada, TransporteConector } from "../../../contracts/conector.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { log } from "../../../obs/log.ts";
 import { habilitarConector } from "../../../use-cases/habilitar-conector.ts";
 import { conectorPublico, registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
@@ -81,7 +82,14 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       const apps = doProvedor.length ? mesclarCatalogo(doProvedor) : catalogoDoPiso();
       catalogoPorTenant.set(tenantId, { em: agora, apps });
       return apps;
-    } catch {
+    } catch (e) {
+      // definido em 2026-09-21: cair no piso em silêncio esconde justamente o que este caminho
+      // existe para corrigir — a grade fica plausível e o app novo continua ausente, sem rastro.
+      log("aviso", "marketplace_catalogo_do_piso", {
+        tenant_id: tenantId,
+        codigo: e instanceof ErroDeDominio ? e.codigo : "desconhecido",
+        usou_cache: !!posto,
+      });
       return posto?.apps ?? catalogoDoPiso();
     }
   }
