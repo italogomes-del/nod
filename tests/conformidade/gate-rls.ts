@@ -41,6 +41,8 @@ export const POLICIES_EXTRAS: Record<string, string> = {
     "PERMISSIVE só FOR UPDATE (INSERT/DELETE inalterados), USING e WITH CHECK pela perna decisor_id. A policy concede UPDATE de QUALQUER coluna; o trigger nod_decisao_pernas_imutaveis (BEFORE UPDATE, P0001) fecha a lista para quem não é a dona: estado, desfecho, decidida_em, decidida_por, vista_em — e prazo_decisao_em só na transição vencida→reaberta",
   "itens_aprovacao.nod_decisora":
     "PERMISSIVE só FOR UPDATE, USING e WITH CHECK por EXISTS na decisão (decisor_id). Mesma ressalva: o trigger nod_item_aprovacao_pernas_imutaveis fecha a lista para quem não é a dona: selecionado, marcado_por, marcado_em, texto_final, editado_por",
+  "composio_configuracoes.nod_equipe_update":
+    "PERMISSIVE só FOR UPDATE (INSERT/DELETE continuam da dona), USING e WITH CHECK pela perna do tenant: ADR-041 põe a chave Composio no tenant e qualquer pessoa a troca, senão quem cadastrou é a única que troca. A policy concede UPDATE de QUALQUER coluna; o trigger nod_composio_pernas_imutaveis (BEFORE UPDATE, P0001) fecha a lista para quem não é a dona: só chave_cifrada",
 };
 
 export interface Tabela {

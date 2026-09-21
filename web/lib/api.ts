@@ -9,7 +9,7 @@ import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
-import type { AppMarketplace } from "../../src/contracts/marketplace.ts";
+import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
@@ -113,7 +113,7 @@ export function criarApi(escopo: Escopo) {
     criarSala: (nome: string, agenteIds: string[]) => post<RespostaMutacao>("salas", { nome, agenteIds }),
     postarNaSala: (salaId: string, texto: string) => post<RespostaMutacao>(`salas/${salaId}/mensagens`, { texto }),
     pararSala: (salaId: string) => post<FaixaParada>(`salas/${salaId}/parar`),
-    conectores: () => get<{ conectores: Conector[]; marketplace: AppMarketplace[]; composioConfigurado: boolean }>("conectores"),
+    conectores: () => get<{ conectores: Conector[]; marketplace: AppComLogo[]; composioConfigurado: boolean }>("conectores"),
     configurarComposio: (chave: string) => post<{ configurado: boolean }>("marketplace/configurar", { chave }),
     conectarApp: (slug: string) => post<{ url: string; conectorId: string }>(`marketplace/${encodeURIComponent(slug)}/conectar`),
     verificarApp: (slug: string) => post<{ conectado: boolean }>(`marketplace/${encodeURIComponent(slug)}/verificar`),

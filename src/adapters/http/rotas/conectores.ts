@@ -1,7 +1,11 @@
-import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
+import type { ServerResponse } from "node:http";
+import type { AppComLogo } from "../../../contracts/marketplace.ts";
+import { catalogoDoPiso, mesclarCatalogo } from "../../../domain/catalogo-marketplace.ts";
+import { criarClienteComposio } from "../../integracoes/composio.ts";
 import { atualizarCredenciaisConector } from "../../../use-cases/atualizar-credenciais-conector.ts";
 import type { SensibilidadeDeclarada, TransporteConector } from "../../../contracts/conector.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { log } from "../../../obs/log.ts";
 import { habilitarConector } from "../../../use-cases/habilitar-conector.ts";
 import { conectorPublico, registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
@@ -12,7 +16,40 @@ export type DepsRotasConectores = {
   dentro: DentroDeTx;
   /** Cifra o env do conector com a chave do servidor (NOD_CREDENTIAL_KEY via src/db/cifra.ts, composto pela L9). */
   cifrar: (texto: string) => string;
+  /** Decifra a chave Composio do tenant para pedir o catálogo ao provedor (ADR-041). */
+  decifrar: (texto: string) => string;
+  fetchImpl?: typeof fetch;
 };
+
+/**
+ * definido em 2026-09-21 (ADR-041): o catálogo vem do provedor a cada abertura da tela, e uma
+ * janela curta evita repetir a chamada em cada F5 sem esconder por muito tempo o app que a pessoa
+ * acabou de criar no painel. Cache por TENANT: a chave é do tenant, o catálogo também.
+ */
+const JANELA_CATALOGO_MS = 60_000;
+const catalogoPorTenant = new Map<string, { em: number; apps: AppComLogo[] }>();
+
+/**
+ * O logo é buscado PELO SERVIDOR (ADR-041 §6): um <img> apontando para o CDN faria o browser de
+ * cada pessoa contar ao provedor quais apps o time abre. Cache longo — logo de app não muda — e
+ * teto de tamanho para um CDN trocado não virar memória do servidor.
+ */
+const JANELA_LOGO_MS = 6 * 60 * 60 * 1000;
+const TETO_LOGO_BYTES = 256 * 1024;
+const TIPOS_LOGO = new Set(["image/png", "image/jpeg", "image/svg+xml", "image/webp", "image/x-icon"]);
+const logoPorSlug = new Map<string, { em: number; bytes: Buffer; tipo: string } | { em: number; bytes: null }>();
+
+function escreverLogo(res: ServerResponse, bytes: Buffer, tipo: string): void {
+  res.writeHead(200, {
+    "content-type": tipo,
+    "content-length": String(bytes.byteLength),
+    "cache-control": "private, max-age=21600",
+    // O logo vem de terceiro: nada de script, e o browser respeita o tipo declarado.
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    "x-content-type-options": "nosniff",
+  });
+  res.end(bytes);
+}
 
 type CorpoConector = {
   nome?: unknown;
@@ -30,7 +67,63 @@ type CorpoConector = {
  * habilitar, desabilitar. A web recebe `Conector` (env só com chaves → true); nada cifrado sai.
  */
 export function rotasConectores(deps: DepsRotasConectores): Rota[] {
+  /**
+   * O catálogo do provedor, com a curadoria por cima. Falhar aqui NÃO derruba a tela: sem chave,
+   * com a chamada fora do ar ou com resposta em forma inesperada, a grade cai no piso curado —
+   * o que a pessoa perde é o app novo, não o Marketplace.
+   */
+  async function catalogo(tenantId: string, cifrada: string | null): Promise<AppComLogo[]> {
+    if (!cifrada) return catalogoDoPiso();
+    const agora = Date.now();
+    const posto = catalogoPorTenant.get(tenantId);
+    if (posto && agora - posto.em < JANELA_CATALOGO_MS) return posto.apps;
+    try {
+      const doProvedor = await criarClienteComposio(deps.decifrar(cifrada), deps.fetchImpl).catalogo();
+      const apps = doProvedor.length ? mesclarCatalogo(doProvedor) : catalogoDoPiso();
+      catalogoPorTenant.set(tenantId, { em: agora, apps });
+      return apps;
+    } catch (e) {
+      // definido em 2026-09-21: cair no piso em silêncio esconde justamente o que este caminho
+      // existe para corrigir — a grade fica plausível e o app novo continua ausente, sem rastro.
+      log("aviso", "marketplace_catalogo_do_piso", {
+        tenant_id: tenantId,
+        codigo: e instanceof ErroDeDominio ? e.codigo : "desconhecido",
+        usou_cache: !!posto,
+      });
+      return posto?.apps ?? catalogoDoPiso();
+    }
+  }
   return [
+    {
+      metodo: "GET",
+      padrao: /^\/marketplace\/(?<slug>[a-z0-9_-]{1,64})\/logo$/,
+      async handler(ctx) {
+        const slug = ctx.params.slug ?? "";
+        const posto = logoPorSlug.get(slug);
+        const fresco = posto && Date.now() - posto.em < JANELA_LOGO_MS;
+        if (fresco && posto.bytes === null) { ctx.json(404, { codigo: "nao_encontrado" }); return; }
+        if (fresco && posto.bytes) { escreverLogo(ctx.res, posto.bytes, posto.tipo); return; }
+
+        // A URL sai do catálogo já validada por urlDoProvedor (host na allowlist, https, sem porta).
+        const cifrada = await deps.dentro(ctx.escopo, (d) => d.repos.composio.chave());
+        const apps = await catalogo(ctx.escopo.tenantId, cifrada);
+        const url = apps.find((a) => a.slug === slug)?.logo;
+        if (!url) { logoPorSlug.set(slug, { em: Date.now(), bytes: null }); ctx.json(404, { codigo: "nao_encontrado" }); return; }
+        try {
+          const r = await (deps.fetchImpl ?? fetch)(url, { signal: AbortSignal.timeout(10_000), redirect: "error" });
+          const tipo = (r.headers.get("content-type") ?? "").split(";")[0]?.trim() ?? "";
+          if (!r.ok || !TIPOS_LOGO.has(tipo)) throw new ErroDeDominio("conector_indisponivel");
+          const bytes = Buffer.from(await r.arrayBuffer());
+          if (bytes.byteLength > TETO_LOGO_BYTES) throw new ErroDeDominio("conector_indisponivel");
+          logoPorSlug.set(slug, { em: Date.now(), bytes, tipo });
+          escreverLogo(ctx.res, bytes, tipo);
+        } catch {
+          // Piso: a tela desenha a inicial do nome. Marca a ausência para não repetir a busca a cada card.
+          logoPorSlug.set(slug, { em: Date.now(), bytes: null });
+          ctx.json(404, { codigo: "nao_encontrado" });
+        }
+      },
+    },
     {
       metodo: "PATCH", padrao: /^\/conectores\/(?<id>[^/]+)\/credenciais$/,
       async handler(ctx) {
@@ -45,8 +138,9 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       padrao: /^\/conectores$/,
       async handler(ctx) {
         const conectores = await deps.dentro(ctx.escopo, async (d) => (await d.repos.conectores.listar()).map(conectorPublico));
-        const composioConfigurado = await deps.dentro(ctx.escopo, async (d) => !!(await d.repos.composio.chave()));
-        ctx.json(200, { conectores, marketplace: APPS_MARKETPLACE, composioConfigurado });
+        const cifrada = await deps.dentro(ctx.escopo, (d) => d.repos.composio.chave());
+        const marketplace = await catalogo(ctx.escopo.tenantId, cifrada);
+        ctx.json(200, { conectores, marketplace, composioConfigurado: !!cifrada });
       },
     },
     {
