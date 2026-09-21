@@ -251,6 +251,26 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
     const fuso = await chamar("POST", "rotinas", { agenteId: vera.agenteId, cron: "0 8 * * *", fusoIana: "+03:00" });
     expect(fuso.status).toBe(400);
     expect(((await fuso.json()) as { codigo: string }).codigo).toBe("fuso_invalido");
+
+    // ADR-041: o agente mexe na rotina que já existe. Reativa pela ferramenta (aplica direto),
+    // depois propõe mudança e exclusão — que NÃO aplicam nada até a pessoa decidir.
+    await rodar(vera.conversaId, `Volta a rotina. [[tool: reativar_rotina {"rotina_id":"${rotinaId}"}]] [[texto: Rotina reativada.]]`);
+    expect((await json<{ rotinas: { rotina: Rotina }[] }>("GET", "rotinas")).rotinas[0]?.rotina.estado).toBe("ativa");
+
+    await rodar(vera.conversaId, `Passa para as 9h. [[tool: atualizar_rotina {"rotina_id":"${rotinaId}","cron":"0 9 * * 1-5"}]] [[texto: Mudança proposta.]]`);
+    expect((await json<{ rotinas: { rotina: Rotina }[] }>("GET", "rotinas")).rotinas[0]?.rotina.cron).toBe("0 8 * * 1-5");
+    const dAtu = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.tipo === "rotina_atualizacao");
+    expect((await json<RespostaMutacao>("POST", `decisoes/${dAtu?.decisao.id}/decidir`, {})).ids.rotina).toBe(rotinaId);
+    expect((await json<{ rotinas: { rotina: Rotina }[] }>("GET", "rotinas")).rotinas[0]?.rotina.cron).toBe("0 9 * * 1-5");
+
+    await rodar(vera.conversaId, `Pode apagar. [[tool: excluir_rotina {"rotina_id":"${rotinaId}"}]] [[texto: Exclusão proposta.]]`);
+    expect((await json<{ rotinas: unknown[] }>("GET", "rotinas")).rotinas).toHaveLength(1);
+    const dExc = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.tipo === "rotina_exclusao");
+    await json<RespostaMutacao>("POST", `decisoes/${dExc?.decisao.id}/decidir`, {});
+    // Some da listagem, mas a linha continua no banco (exclusão recuperável, ADR-034).
+    expect((await json<{ rotinas: unknown[] }>("GET", "rotinas")).rotinas).toEqual([]);
+    const [linha] = await comoPessoa((trx) => trx<{ excluido_em: Date | null }[]>`select excluido_em from rotinas where id = ${rotinaId}`);
+    expect(linha?.excluido_em).not.toBeNull();
   });
 
   it("conector + concessão: registra desabilitado, sondar habilita com readOnlyHint, concessões viram mensagens de consentimento; env placeholder → 400; http+toca → 400; comando inválido → ultimaFalha na frota", { timeout: JORNADA_MS }, async () => {
