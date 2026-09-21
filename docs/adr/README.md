@@ -43,3 +43,8 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-032](adr-032-primeira-versao-bots-como-contatos.md) | Bots como contatos e colaboração visível | novo |
 | [ADR-033](adr-033-criacao-conversacional-marketplace-intervalos.md) | Criação conversacional, Marketplace e intervalos | novo |
 | [ADR-034](adr-034-gestao-e-exclusao-recuperavel-de-agentes.md) | Gestão e exclusão recuperável de agentes | novo |
+| [ADR-035](adr-035-agendamentos-acordam-agentes.md) | Agendamentos acordam agentes | novo |
+| [ADR-036](adr-036-harnesses-e-modelos.md) | Harnesses e modelos por agente | novo |
+| [ADR-037](adr-037-computadores-por-bot.md) | Computadores por bot | novo |
+| [ADR-038](adr-038-padroes-e-escolhas-da-pessoa.md) | Padrões de produto e escolhas explícitas da pessoa | novo |
+| [ADR-040](adr-040-o-turno-e-limitado-por-atividade-nao-por-contagem-de-passos.md) | O turno é limitado por atividade, não por contagem de passos | novo |

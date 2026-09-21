@@ -14,6 +14,17 @@ import type { LigacaoClaudeCli } from "./claude-cli.ts";
 
 export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config", "--sandbox", "--skip-git-repo-check"] as const;
 
+/**
+ * definido em 2026-09-18 (ADR-040): o Codex nunca teve teto de passos, então é o Claude que se
+ * alinha a ele quando `--max-turns` sai — nada a mudar aqui. O watchdog de atividade vive em
+ * `laco.ts`, acima do SPI, e `interpretarCodex` produz os mesmos EventoStream: os dois harnesses
+ * ganham a proteção pelo contrato comum, sem código específico.
+ *
+ * LACUNA NÃO HOMOLOGADA: não há equivalente a `--autocompact` no conjunto FLAGS_CODEX sondado, e o
+ * binário não estava instalado na máquina onde a medição foi feita. Não inventar flag de janela de
+ * contexto aqui sem sondar o CLI real. Assimetria inversa a registrar: este driver já tem deadline
+ * absoluto por `prazoMs` (setTimeout → interromper), que o driver do Claude não tem.
+ */
 export function argsCodex(plano: PlanoTurno, config: string): string[] {
   return ["exec", ...FLAGS_CODEX.filter((f) => f !== "--sandbox"), "--sandbox", "read-only", "--color", "never", "--model", plano.entrada.modelo,
     "-c", `developer_instructions=${JSON.stringify(plano.promptSistema)}`,

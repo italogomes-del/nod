@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { driverDoPlano, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
 import type { Adapter, Driver, Instance, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
+import type { EventoStream, ResultadoTurno } from "../../../src/contracts/turno.ts";
 import type { Entrega, PedidoRenovar, PonteInterna } from "../../../src/contracts/ponte.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../../src/domain/stream-json.ts";
@@ -265,7 +266,7 @@ describe("watchdog de atividade", () => {
     // Muito além da janela, mas com atividade a cada passo: é trabalho, não travamento.
     for (let n = 0; n < 6; n++) {
       t += JANELA * 0.9;
-      d.emitir({ tipo: "texto", texto: `passo ${n}` });
+      d.emitir({ tipo: "delta", texto: `passo ${n}` });
       await new Promise((r) => setTimeout(r, 15));
     }
     expect(d.interrupcoes()).toBe(0);

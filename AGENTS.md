@@ -143,6 +143,15 @@ de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura 
 
 Definido em 2026-09-17: as sondas usam `NOD_MODELO_SONDA` (default `claude-haiku-4-5-20251001`), separado do modelo dos agentes. `e2e:haiku` mantém o modelo barato explícito.
 
+Definido em 2026-09-18 (ADR-040): o turno **não** passa `--max-turns` — o teto de 12 passos cortava
+tarefa de código no meio. Quem limita é o watchdog de atividade em `laco.ts`: 5 min mudo encerra,
+e `tool_use` sem `tool_result` isenta (ferramenta em andamento é silêncio legítimo), com teto de
+480s. O lease continua sendo outro relógio: prova que o processo vive, não que o agente progride.
+`--max-turns` fica em `FLAG_FLOORS` porque `sonda.ts` ainda a usa com valor 1. `--autocompact` é
+condicional como `--restricted`: fora de `FLAGS_DO_TURNO`, liberada pelo `--help` da versão
+instalada. Sem contador de passos, **um agente que erra em círculo emitindo eventos não é
+interrompido sozinho** — resta o Parar; a lacuna está registrada na ADR.
+
 ## Desktop e servidor compartilhado (2026-09-17)
 
 `NOD_MODO=compartilhado` desliga registry e orquestrador locais; os Macs usam `/api/maquina/…`
