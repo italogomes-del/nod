@@ -176,7 +176,7 @@ function renderSidebar(): string {
         : "Sua IA conectada";
   // A marca voltou do rail para cá: é o único lugar dela agora, e continua levando ao início.
   return `<div class="search-wrap">
-      <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="criar-rapido" aria-label="Criar bot">+</button><button class="create-trigger" data-act="navegar" data-tela="novo-bot" aria-label="Nova conversa">⌄</button></span></div>
+      <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
     ${renderChamada(estado)}
@@ -811,6 +811,83 @@ declare global {
   }
 }
 window.nod = { estado: () => estado, agente: () => agenteDaTela(estado) };
+
+// Segurar um gatilho por MS_SEGURAR dispara a ação de data-segurar; o clique curto
+// segue para o data-act normal. Mesma ideia do contextmenu abaixo: um gesto alternativo
+// sobre um botão que já tem um clique primário.
+// Fonte única do tempo do hold: o CSS lê --ms-segurar para a animação do anel,
+// senão os dois relógios andam separados e o anel fecha fora de hora.
+const MS_SEGURAR = 500;
+document.documentElement.style.setProperty("--ms-segurar", `${MS_SEGURAR}ms`);
+let segurando: { el: HTMLElement; timer: number; disparou: boolean } | null = null;
+
+function encerrarSegurar(): boolean | undefined {
+  if (!segurando) return;
+  clearTimeout(segurando.timer);
+  segurando.el.classList.remove("segurando");
+  const disparou = segurando.disparou;
+  segurando = null;
+  return disparou;
+}
+
+document.addEventListener("pointerdown", (ev) => {
+  if ((ev as PointerEvent).button !== 0) return;
+  const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-segurar]");
+  if (!el) return;
+  encerrarSegurar();
+  ultimoHoldDisparou = false;
+  const acao = el.dataset.segurar ?? "";
+  const alvo = { el, disparou: false } as { el: HTMLElement; timer: number; disparou: boolean };
+  alvo.timer = window.setTimeout(() => {
+    alvo.disparou = true;
+    // O sidebar é regravado por innerHTML a cada frame do SSE: o botão de agora pode não
+    // ser mais o nó em que o gesto começou. Tira a classe de quem estiver no DOM.
+    for (const n of document.querySelectorAll<HTMLElement>(".segurando")) n.classList.remove("segurando");
+    const fn = ACOES[acao];
+    if (fn) void fn(alvo.el);
+  }, MS_SEGURAR);
+  segurando = alvo;
+  el.classList.add("segurando");
+});
+
+// O click só deve navegar se o hold não completou. pointerup vem antes do click,
+// então guardamos o resultado para o listener de click consultar. O pointerdown
+// acima zera a marca: se o click não vier (o ponteiro saiu do botão antes de soltar),
+// ela não pode sobrar e engolir o clique seguinte.
+let ultimoHoldDisparou = false;
+for (const evento of ["pointerup", "pointercancel"]) {
+  document.addEventListener(evento, () => { ultimoHoldDisparou = encerrarSegurar() ?? ultimoHoldDisparou; });
+}
+
+// Arrastar para fora aborta o gesto. pointerleave não borbulha e o botão ganha pointer
+// capture implícito no pointerdown, então ouvir no document não resolve: o jeito é medir
+// a posição contra o retângulo do próprio botão.
+document.addEventListener("pointermove", (ev) => {
+  if (!segurando) return;
+  const r = segurando.el.getBoundingClientRect();
+  const dentro = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+  if (!dentro) encerrarSegurar();
+});
+
+document.addEventListener("click", (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-segurar]");
+  if (el && ultimoHoldDisparou) { ev.preventDefault(); ev.stopPropagation(); }
+  // Zera em qualquer clique, não só no do gatilho: se o próximo clique cair noutro
+  // lugar, a marca não pode ficar pendurada esperando o clique seguinte no "+".
+  ultimoHoldDisparou = false;
+}, true);
+
+// Equivalente de teclado do segurar: quem navega por teclado não consegue fazer o hold.
+document.addEventListener("keydown", (ev) => {
+  // ev.repeat: segurar a tecla repete o keydown, e sem essa guarda um toque
+  // um pouco mais longo criaria vários agentes de uma vez.
+  if (ev.repeat || !ev.shiftKey || (ev.key !== "Enter" && ev.key !== " ")) return;
+  const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-segurar]");
+  if (!el) return;
+  ev.preventDefault();
+  const acao = ACOES[el.dataset.segurar ?? ""];
+  if (acao) void acao(el);
+});
 
 document.addEventListener("contextmenu", (ev) => {
   const row = (ev.target as HTMLElement).closest<HTMLElement>("[data-bot-contexto]");
