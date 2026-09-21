@@ -40,14 +40,31 @@ describe("conceder / revogar (E6.3, E12.5)", () => {
     expect(c.banco.mensagens.find((m) => m.id === segunda.data.mensagemId)?.texto).toContain("não inclui: nada mais deste conector");
   });
 
-  it("agente não concede a agente; capacidade fora do catálogo e repetida são recusadas com código fechado", async () => {
+  it("agente não concede a agente e capacidade fora do catálogo é recusada com código fechado", async () => {
     const c = await cenario();
     await expect(conceder(c.deps, { agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "listar_contatos", autorTipo: "agente" })).rejects.toMatchObject({ codigo: "nao_permitido" });
     await expect(conceder(c.deps, { agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "apagar_tudo" })).rejects.toMatchObject({ codigo: "entrada_invalida" });
     await expect(conceder(c.deps, { agenteId: "nao-existe", conectorId: c.conectorId, capacidade: "listar_contatos" })).rejects.toMatchObject({ codigo: "nao_encontrado" });
-    await conceder(c.deps, { agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "listar_contatos" });
-    await expect(conceder(c.deps, { agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "listar_contatos" })).rejects.toMatchObject({ codigo: "estado_invalido" });
+  });
+
+  /**
+   * definido em 2026-09-21: até aqui a segunda concessão era `rejects estado_invalido`, agrupada com
+   * "fora do catálogo" como se fosse recusa. Não é: aquelas são entrada inválida e permissão, esta é
+   * uma operação JÁ satisfeita. O contrato escrito do repositório sempre foi idempotente ("conceder
+   * duas vezes não duplica") e o 409 do caso de uso travava o card de uma decisão de acesso duplicada.
+   * A invariante que o teste antigo realmente protegia — UMA concessão por capacidade — segue aqui.
+   */
+  it("conceder de novo a mesma capacidade é idempotente: devolve a concessão existente, sem segunda concessão nem segundo consentimento", async () => {
+    const c = await cenario();
+    const primeira = await conceder(c.deps, { agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "listar_contatos" });
+    const repetida = await conceder(c.deps, { agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "listar_contatos" });
+
+    expect(repetida.data.concessaoId).toBe(primeira.data.concessaoId);
+    // A mensagem citável é a ORIGINAL: nenhum consentimento novo entra na conversa própria.
+    expect(repetida.data.mensagemId).toBe(primeira.data.mensagemId);
+    expect(repetida.events ?? []).toEqual([]);
     expect(c.banco.concessoes).toHaveLength(1);
+    expect(c.banco.mensagens.filter((m) => m.kind === "consentimento")).toHaveLength(1);
   });
 
   it("revogar apaga a concessão, deixa registro escrito e mantém a mensagem de consentimento original", async () => {
