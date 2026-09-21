@@ -13,8 +13,8 @@ import { USE_CASE_POR_FERRAMENTA } from "../../src/contracts/servicos.ts";
 const FONTE = readFileSync(fileURLToPath(new URL("../../src/use-cases/chamar-ferramenta.ts", import.meta.url)), "utf8");
 
 describe("capabilities consumidas em chamar-ferramenta.ts", () => {
-  it("itera NOMES_FERRAMENTAS_NOD (9 nomes): cada um tem o seu caso na tabela DESPACHO e aponta para USE_CASE_POR_FERRAMENTA", () => {
-    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(9);
+  it("itera NOMES_FERRAMENTAS_NOD (12 nomes): cada um tem o seu caso na tabela DESPACHO e aponta para USE_CASE_POR_FERRAMENTA", () => {
+    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(12);
     for (const nome of NOMES_FERRAMENTAS_NOD) {
       const caso = new RegExp(`^\\s+${nome}: \\(deps, ctx, args\\) => deps\\.useCases\\[USE_CASE_POR_FERRAMENTA\\.${nome}\\]\\(`, "m");
       expect(FONTE, `falta o caso de ${nome} em chamar-ferramenta.ts`).toMatch(caso);

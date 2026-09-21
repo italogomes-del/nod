@@ -1,15 +1,20 @@
 import type { CodigoErro, MotivoPasse } from "./motivos.ts";
+import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
+import type { ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoListarRotinas } from "./ferramentas-rotina.ts";
 
 import type { JsonSchema } from "./json-schema.ts";
 export type { JsonSchema } from "./json-schema.ts";
+export type { ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoListarRotinas, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As NOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa). Lista FECHADA: cada nome tem um
- * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
- * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
- * `${slug}__${tool}` e não mora aqui.
+ * As DOZE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; 2026-09-21 acrescenta o ciclo de
+ * vida de rotina, cujos schemas moram em ferramentas-rotina.ts pelo gatilho de 200 linhas da
+ * EMENDA 26). Lista FECHADA: cada nome tem um case em chamar-ferramenta.ts
+ * (tests/conformidade/capabilities-consumidas, L5) e uma entrada em UseCasesNod (servicos.ts).
+ * O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é `${slug}__${tool}` e não mora aqui.
  */
 export const FERRAMENTAS_NOD = {
+  ...FERRAMENTAS_ROTINA,
   lembrar: {
     type: "object",
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
@@ -137,7 +142,8 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
  * FERRAMENTAS_NOD; ferramentas-nod.test.ts prova (no tipo e em runtime) que cobre TODAS as chaves.
  */
 export const NOMES_FERRAMENTAS_NOD = [
-  "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina", "pedir_aprovacao",
+  "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
+  "listar_rotinas", "pausar_rotina", "reativar_rotina", "pedir_aprovacao",
   "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot",
 ] as const satisfies readonly NomeFerramentaNod[];
 
@@ -180,6 +186,9 @@ export type ContratoFerramentaNod = {
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoProposta };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoProposta };
   criar_rotina: { args: ArgsCriarRotina; resultado: ResultadoCriarRotina };
+  listar_rotinas: { args: ArgsListarRotinas; resultado: ResultadoListarRotinas };
+  pausar_rotina: { args: ArgsPausarRotina; resultado: ResultadoAlternarRotina };
+  reativar_rotina: { args: ArgsReativarRotina; resultado: ResultadoAlternarRotina };
   pedir_aprovacao: { args: ArgsPedirAprovacao; resultado: ResultadoPedirAprovacao };
   pedir_a_pessoa: { args: ArgsPedirAPessoa; resultado: ResultadoPedirAPessoa };
   passar: { args: ArgsPassar; resultado: ResultadoOk };

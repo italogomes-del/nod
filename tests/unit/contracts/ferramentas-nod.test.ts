@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import { FERRAMENTAS_NOD, NOMES_FERRAMENTAS_NOD, type JsonSchema, type NomeFerramentaNod } from "../../../src/contracts/ferramentas-nod.ts";
 import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
 
-const ESPERADAS = ["lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina", "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot"];
+const ESPERADAS = [
+  "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
+  "listar_rotinas", "pausar_rotina", "reativar_rotina",
+  "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot",
+];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as NOVE ferramentas (EMENDA 16 inclui pedir_a_pessoa)", () => {
+  it("lista fechada com as DOZE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 inclui o ciclo de vida de rotina)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
-    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(9);
+    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(12);
   });
 
   it("NOMES_FERRAMENTAS_NOD é literal (EMENDA 26) e cobre TODAS as chaves de FERRAMENTAS_NOD, no tipo e em runtime", () => {
@@ -41,6 +45,6 @@ describe("FERRAMENTAS_NOD", () => {
 
   it("cada ferramenta tem um caso de uso nomeado em UseCasesNod (EMENDA 5)", () => {
     expect(Object.keys(USE_CASE_POR_FERRAMENTA).sort()).toEqual([...ESPERADAS].sort());
-    expect(new Set(Object.values(USE_CASE_POR_FERRAMENTA)).size).toBe(9);
+    expect(new Set(Object.values(USE_CASE_POR_FERRAMENTA)).size).toBe(12);
   });
 });

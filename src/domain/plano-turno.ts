@@ -23,11 +23,19 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * e sala têm o kit completo; rotina permite consulta a colega (definido em 2026-09-17); peer é texto-só, sem
  * salto (E12.4). pedir_a_pessoa (EMENDA 16) entra onde há pessoa para destravar: conversa, sala e
  * rotina — não em criação (o modelo pergunta em texto) nem em peer (o remetente é outro bot).
+ *
+ * Ciclo de vida de rotina (listar/pausar/reativar, definido em 2026-09-21) só em conversa e sala,
+ * onde a pessoa está presente para pedir e conferir. FORA de propósito em:
+ * criação (o agente ainda não tem rotina: o inventário seria vazio), peer (quem fala é outro bot,
+ * e mexer em rotina por pedido de bot burlaria o corte de segundo salto do ADR-035) e rotina — este
+ * é o caso perigoso: um turno acordado por agendamento que pudesse se pausar sozinho viraria uma
+ * rotina que se desliga por conta própria, e o modo rotina já é explicitamente "a própria execução",
+ * não a hora de reconfigurar. Quem reconfigura é a pessoa, na conversa.
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
   criacao: ["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
   rotina: ["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot"],
   peer: ["lembrar"],
 };

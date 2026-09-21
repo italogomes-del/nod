@@ -1,8 +1,14 @@
 # Plano — ciclo de vida de rotinas por conversa
 
-> **Andamento.** Passo 1 (inventário no prompt) FEITO — `prompt-sistema.ts`, `plano-turno.ts`,
-> `emitir-plano-turno.ts` e 3 testes unitários novos. Verde em lint, typecheck (4 projetos),
-> fence:domain, 474 unit e 227 integration. Falta: as 4 ferramentas, migração 0016, rotas, web.
+> **Andamento.**
+> - Passo 1 (inventário no prompt) FEITO — `prompt-sistema.ts`, `plano-turno.ts`,
+>   `emitir-plano-turno.ts`, 3 testes unitários.
+> - Passo 2 (listar/pausar/reativar) FEITO — lista fechada de 9 → 12 ferramentas,
+>   `contracts/ferramentas-rotina.ts` (novo), `use-cases/rotinas-do-agente.ts` (novo),
+>   5 testes de integração. Catálogo por modo: só conversa e sala.
+> - Verde: lint, typecheck (4 projetos), fence:domain, 474 unit, 232 integration, conformidade
+>   (menos a falha pré-existente abaixo).
+> - Falta: `atualizar_rotina` e `excluir_rotina` (proposta/decisão), migração 0016, rotas, web, ADR.
 
 Hoje o agente só sabe **criar** rotina (`criar_rotina`). Este plano dá a ele o ciclo completo:
 listar, atualizar, pausar, reativar e excluir — sempre sobre a rotina certa.
@@ -168,5 +174,14 @@ não como tipo. Três amarras:
 
 ## ADR
 
-Isto emenda ADR-011, ADR-033 e ADR-034 → escrever `docs/adr/adr-040-ciclo-de-vida-de-rotinas.md`
-com o gatilho de reversão, antes de fechar a branch.
+Isto emenda ADR-011, ADR-033 e ADR-034 → escrever a ADR com o gatilho de reversão antes de fechar
+a branch. **Número: 041, não 040** — a branch `codex/turno-por-atividade` já tomou a 040
+("O turno acaba quando o agente termina", commit 7bf838b). Conferir de novo na hora de escrever.
+
+## Falha pré-existente no `npm run check` (não é desta branch)
+
+`tests/conformidade/motivos-enum.test.ts > motivo_interrupcao` falha em `main` limpo: o
+`nod_test` compartilhado tem `turno_travado` e `trabalho_incompleto` no pg_enum, valores que
+vêm da `codex/turno-por-atividade` e não existem no `motivos.ts` daqui. Medido em 2026-09-21:
+falha idêntica com a árvore desta branch vazia (stash). Some quando aquela branch entrar na main,
+ou recriando o `nod_test`. Não mascarar: o gate está certo, o banco é que está adiante.
