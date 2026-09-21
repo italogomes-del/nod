@@ -26,11 +26,25 @@ export function renderDetalhes(estado: Estado): string {
     })
     .join("");
 
+  // definido em 2026-09-21: uma rotina pode encerrar em SILÊNCIO (desfecho sem_novidade não escreve
+  // nada na conversa). Sem este histórico aqui a pessoa não teria como saber que ela rodou — o
+  // painel é o lugar onde "rodou e não tinha nada" fica visível.
+  const historico = (r: (typeof rotinas)[number]["rotina"]) => {
+    const exec = estado.execucoes[r.id];
+    if (!exec) return botao("ver-execucoes", "Histórico", { classe: "link sm", id: r.id });
+    if (!exec.length) return '<p class="mudo sm">nunca executou</p>';
+    return `<ul class="dr-execucoes">${exec
+      .slice(0, 5)
+      .map((e) => `<li class="exec exec-${esc(e.desfecho)}">${esc(dataHora(e.em, r.fusoIana))} · ${esc(e.desfecho.replaceAll("_", " "))}</li>`)
+      .join("")}</ul>`;
+  };
+
   const linhaRotina = ({ rotina: r, proximaExecucao }: (typeof rotinas)[number]) => {
     const quando = r.estado === "pausada" ? "Pausada" : `${dataHora(proximaExecucao, r.fusoIana)} · ${interpolar(proximaExecucao, estado.agora)}`;
     return `<li class="detalhe-rotina rotina-${esc(r.estado)}">
       <div class="dr-txt"><b>${esc(r.instrucao)}</b><small>${esc(quando)}</small></div>
       <div class="dr-acoes">${r.estado === "ativa" ? botao("pausar-rotina", "Pausar", { classe: "link sm", id: r.id }) : botao("ativar-rotina", "Ativar", { classe: "link sm", id: r.id })}${botao("executar-rotina", "Testar", { classe: "link sm", id: r.id, dados: { agente: r.agenteId }, desabilitado: estado.ocupado })}</div>
+      ${historico(r)}
     </li>`;
   };
 

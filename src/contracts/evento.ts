@@ -38,6 +38,8 @@ export type KindEvento =
   | "proposta_criada"
   | "rotina_criada"
   | "rotina_executou"
+  /** O agente chamou `sem_novidade`: a rotina encerra em silêncio (nenhuma mensagem na conversa). */
+  | "rotina_sem_novidade"
   | "sala_handoff"
   | "negacao"
   | "concessao_criada"

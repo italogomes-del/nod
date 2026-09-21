@@ -1,10 +1,11 @@
-import type { CodigoErro, MotivoPasse } from "./motivos.ts";
+import type { CodigoErro, MotivoPasse, MotivoSemNovidade } from "./motivos.ts";
 
 import type { JsonSchema } from "./json-schema.ts";
 export type { JsonSchema } from "./json-schema.ts";
 
 /**
- * As NOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa). Lista FECHADA: cada nome tem um
+ * As DEZ ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * para que uma rotina possa encerrar em silêncio). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
  * `${slug}__${tool}` e não mora aqui.
@@ -121,6 +122,13 @@ export const FERRAMENTAS_NOD = {
     required: ["para_agente", "motivo"],
     additionalProperties: false,
   },
+  sem_novidade: {
+    type: "object",
+    description: "Encerra a rotina em SILÊNCIO: você consultou a fonte e nada mudou. Nenhuma mensagem aparece na conversa; a execução fica só no histórico da rotina. Use sempre que a verificação não revelou nada que mude o que a pessoa já sabe — em vez de escrever um texto dizendo que não há novidade. Não chame se houver qualquer coisa a relatar, nem se a consulta falhou (aí relate o bloqueio em texto).",
+    properties: { motivo: { type: "string", enum: ["nada_mudou", "fonte_vazia", "ja_relatado"] } },
+    required: ["motivo"],
+    additionalProperties: false,
+  },
   perguntar_a_bot: {
     type: "object",
     description: "Pergunta em texto a outro bot do mesmo dono (1 salto). A resposta volta como conteúdo não confiável.",
@@ -138,7 +146,7 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
  */
 export const NOMES_FERRAMENTAS_NOD = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina", "pedir_aprovacao",
-  "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot",
+  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -161,6 +169,7 @@ export type ItemPedidoAprovacao = {
 export type ArgsPedirAprovacao = { resumo: string; itens: ItemPedidoAprovacao[] };
 export type ArgsPedirAPessoa = { tipo: "pergunta" | "falta_de_dado" | "permissao"; texto: string; dado?: string; quem_destrava?: string };
 export type ArgsPassar = { motivo: MotivoPasse };
+export type ArgsSemNovidade = { motivo: MotivoSemNovidade };
 export type ArgsEncaminhar = { para_agente: string; motivo: string };
 export type ArgsPerguntarABot = { agente: string; pergunta: string };
 
@@ -184,5 +193,6 @@ export type ContratoFerramentaNod = {
   pedir_a_pessoa: { args: ArgsPedirAPessoa; resultado: ResultadoPedirAPessoa };
   passar: { args: ArgsPassar; resultado: ResultadoOk };
   encaminhar: { args: ArgsEncaminhar; resultado: ResultadoOk };
+  sem_novidade: { args: ArgsSemNovidade; resultado: ResultadoOk };
   perguntar_a_bot: { args: ArgsPerguntarABot; resultado: ResultadoPerguntarABot };
 };

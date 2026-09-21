@@ -8,6 +8,7 @@ import {
   MOTIVOS_LOCALIDADE,
   MOTIVOS_NEGACAO,
   MOTIVOS_PASSE,
+  MOTIVOS_SEM_NOVIDADE,
 } from "../../src/contracts/motivos.ts";
 import { ALCANCES_RELATO, CATEGORIAS_RELATO } from "../../src/contracts/relato.ts";
 import { ENUMS_DE_ESTADO } from "../../src/db/schema/agentes.ts";
@@ -27,6 +28,7 @@ const MOTIVOS: Record<string, readonly string[]> = {
   motivo_localidade: MOTIVOS_LOCALIDADE,
   desfecho_item: DESFECHOS_ITEM,
   desfecho_rotina: DESFECHOS_ROTINA,
+  motivo_sem_novidade: MOTIVOS_SEM_NOVIDADE,
   codigo_erro: CODIGOS_ERRO,
   categoria_relato: CATEGORIAS_RELATO,
   alcance_relato: ALCANCES_RELATO,

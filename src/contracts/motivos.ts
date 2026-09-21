@@ -46,9 +46,22 @@ export type MotivoLocalidade = (typeof MOTIVOS_LOCALIDADE)[number];
 export const DESFECHOS_ITEM = ["executado", "retirado_pela_pessoa", "sensivel_nao_aprovado", "falhou_na_execucao"] as const;
 export type DesfechoItem = (typeof DESFECHOS_ITEM)[number];
 
-/** passou_em_branco ≠ falhou: ninguém respondeu o gate não é erro técnico (E7.3). */
-export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "falhou"] as const;
+/**
+ * passou_em_branco ≠ falhou: ninguém respondeu o gate não é erro técnico (E7.3).
+ * sem_novidade ≠ passou_em_branco: o agente CONSULTOU a fonte e nada mudou — a execução foi
+ * completa e correta, só não rendeu notícia. É o único desfecho que não escreve no chat
+ * (definido em 2026-09-21): rotina que não tem o que dizer fica em silêncio, e a pessoa confere
+ * no histórico da rotina que ela rodou.
+ */
+export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou"] as const;
 export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
+
+/**
+ * Por que a execução não rendeu notícia. Campo TIPADO vindo da ferramenta `sem_novidade` —
+ * nunca inferido do texto do modelo (Regra 9, domain/rotina-texto.ts). Mesmo precedente do passe.
+ */
+export const MOTIVOS_SEM_NOVIDADE = ["nada_mudou", "fonte_vazia", "ja_relatado"] as const;
+export type MotivoSemNovidade = (typeof MOTIVOS_SEM_NOVIDADE)[number];
 
 /** Código FECHADO de erro de domínio: a mensagem sai de tabela fixa em src/adapters/http/erros.ts (ADR-002/004). */
 export const CODIGOS_ERRO = [

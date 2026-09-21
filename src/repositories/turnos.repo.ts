@@ -1,7 +1,7 @@
 import type { PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
-import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade } from "../contracts/motivos.ts";
+import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -24,6 +24,7 @@ interface Linha {
   prazo_em: Date;
   motivo_interrupcao: MotivoInterrupcao | null;
   motivo_falha: MotivoFalha | null;
+  sem_novidade_motivo: MotivoSemNovidade | null;
   retoma_turno_id: string | null;
   profundidade: number;
   reenvios: number;
@@ -37,7 +38,7 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_confianca, custo_usd, modelo, harness, criado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_confianca, custo_usd, modelo, harness, criado_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -54,6 +55,7 @@ function paraTurno(l: Linha): Turno {
     prazoEm: ms(l.prazo_em),
     motivoInterrupcao: l.motivo_interrupcao,
     motivoFalha: l.motivo_falha,
+    semNovidadeMotivo: l.sem_novidade_motivo,
     retomaTurnoId: l.retoma_turno_id,
     profundidade: l.profundidade === 1 ? 1 : 0,
     reenvios: l.reenvios,
@@ -197,6 +199,18 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async marcarSinal(id: string, sinal: keyof SinaisTurno): Promise<boolean> {
       const coluna = { attempted: "attempted", rejected: "rejected", promptSubmitted: "prompt_submitted", producedOutput: "produced_output" }[sinal];
       const r = await conn`update turnos set ${conn(coluna)} = true where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return r.count === 1;
+    },
+
+    /**
+     * A ferramenta `sem_novidade` pediu silêncio (definido em 2026-09-21). Só liga, nunca desliga —
+     * como marcarSinal: o agente pode chamar duas vezes, e a primeira decisão prevalece. O
+     * assentamento lê isso em buscarTravado, na mesma tx.
+     */
+    async marcarSemNovidade(id: string, motivo: MotivoSemNovidade): Promise<boolean> {
+      const r = await conn`
+        update turnos set sem_novidade_motivo = coalesce(sem_novidade_motivo, ${motivo})
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
     },
 

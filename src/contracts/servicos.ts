@@ -85,6 +85,7 @@ export interface UseCasesNod<Deps> {
   pedirAPessoa: CasoNod<Deps, "pedir_a_pessoa">;
   passar: CasoNod<Deps, "passar">;
   encaminhar: CasoNod<Deps, "encaminhar">;
+  semNovidade: CasoNod<Deps, "sem_novidade">;
   perguntarABot: CasoNod<Deps, "perguntar_a_bot">;
 }
 
@@ -98,5 +99,6 @@ export const USE_CASE_POR_FERRAMENTA = {
   pedir_a_pessoa: "pedirAPessoa",
   passar: "passar",
   encaminhar: "encaminhar",
+  sem_novidade: "semNovidade",
   perguntar_a_bot: "perguntarABot",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

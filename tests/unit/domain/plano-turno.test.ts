@@ -8,7 +8,7 @@ import { FERRAMENTAS_NOD_POR_MODO, montarPlano, type EntradaPlano } from "../../
 
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Vera", titulo: "", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
-const turno: Turno = { tenantId: "t", id: "t1", conversaId: "c1", agenteId: "a1", ownerId: "p", origem: "conversa", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 86_400_000, motivoInterrupcao: null, motivoFalha: null, retomaTurnoId: null, profundidade: 0, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "oi", entradaConfianca: "confiavel", custoUsd: null, modelo: "claude-haiku-4-5-20251001", criadoEm: agora };
+const turno: Turno = { tenantId: "t", id: "t1", conversaId: "c1", agenteId: "a1", ownerId: "p", origem: "conversa", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 86_400_000, motivoInterrupcao: null, motivoFalha: null, semNovidadeMotivo: null, retomaTurnoId: null, profundidade: 0, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "oi", entradaConfianca: "confiavel", custoUsd: null, modelo: "claude-haiku-4-5-20251001", criadoEm: agora };
 const conector: Conector = { tenantId: "t", id: "k1", ownerId: "p", visibility: "privado", nome: "Exemplo", slug: "exemplo", transporte: "stdio", comando: "node", args: [], url: null, env: {}, declaracao: "nao-toca", habilitado: true, catalogo: [
   { nome: "listar_contatos", descricao: "lista", schema: { type: "object" }, readOnlyHint: true },
   { nome: "enviar_email", descricao: "envia", schema: { type: "object" }, readOnlyHint: false },
@@ -61,13 +61,15 @@ describe("montarPlano", () => {
     expect(p.decididoPor).toBe("regra:reducao_por_confianca");
   });
 
-  it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega; sala tem passar/encaminhar", () => {
+  it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega e silêncio; sala tem passar/encaminhar", () => {
     expect(nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"))).toEqual(["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"]);
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
     const sala = nomes(montarPlano({ ...base, modo: "sala" }));
     expect(sala).toContain("passar");
     expect(sala).toContain("encaminhar");
     expect(sala).toContain("pedir_a_pessoa");
+    // sem_novidade é só de rotina: em sala/conversa alguém está esperando resposta.
+    expect(sala).not.toContain("sem_novidade");
   });
 
   it("agente acordado por rotina pode consultar colega sem transferir escrita nem permitir outro salto", () => {
