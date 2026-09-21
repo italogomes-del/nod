@@ -457,6 +457,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           prazoEm: t.prazoEm,
           motivoInterrupcao: t.interrompidoCom ?? null,
           motivoFalha: null,
+          semNovidadeMotivo: null,
           retomaTurnoId: t.retomaTurnoId ?? null,
           profundidade: t.profundidade,
           reenvios: t.reenvios ?? 0,
@@ -505,6 +506,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const t = doTenant(b.turnos).find((x) => x.id === id);
         if (!t) return false;
         t.sinais = { ...t.sinais, [sinal]: true };
+        return true;
+      },
+      async marcarSemNovidade(id, motivo) {
+        const t = doTenant(b.turnos).find((x) => x.id === id);
+        if (!t) return false;
+        // coalesce: a primeira chamada prevalece, como o UPDATE do repo real.
+        t.semNovidadeMotivo = t.semNovidadeMotivo ?? motivo;
         return true;
       },
       async assentar(id, a) {

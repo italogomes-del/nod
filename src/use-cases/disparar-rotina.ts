@@ -1,7 +1,7 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
-import type { DesfechoRotina, MotivoFalha } from "../contracts/motivos.ts";
+import type { DesfechoRotina, MotivoFalha, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
@@ -82,7 +82,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   };
 };
 
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | "ninguem_respondeu_o_gate" | null };
+export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "ninguem_respondeu_o_gate" | null };
 
 /**
  * definido em 2026-09-16: o gate de uma rotina é QUALQUER pedido de aprovação pendente ligado ao turno
@@ -104,7 +104,10 @@ export const registrarDesfechoRotina: CasoDeUso<EntradaDesfecho, SaidaDesfecho> 
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
   if (!ligacao) return { data: { ignorado: "nao_e_rotina" } };
   const { rotina, turnoDisparado, instanteAgendado } = ligacao;
-  if (input.desfecho === "executou") {
+  // 'sem_novidade' entra aqui junto com 'executou' (definido em 2026-09-21): se um gate deste turno
+  // ainda espera resposta, a execução não terminou — registrá-la como silenciosa esconderia um
+  // pedido de aprovação pendente. A rotina só encerra quando o efeito saiu.
+  if (input.desfecho === "executou" || input.desfecho === "sem_novidade") {
     const turnosDaRotina = new Set([turnoDisparado.id, input.turnoId]);
     const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => TIPOS_GATE_ROTINA.has(d.tipo) && d.turnoId !== null && turnosDaRotina.has(d.turnoId));
     if (gatesAbertos.length > 0) return { data: { ignorado: "aguardando_gate" } };
@@ -120,6 +123,17 @@ export const registrarDesfechoRotina: CasoDeUso<EntradaDesfecho, SaidaDesfecho> 
   });
   if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução não registrada" });
   const podadas = await deps.repos.rotinaExecucoes.podar(rotina.id);
+  // definido em 2026-09-21: SILÊNCIO. A execução ficou registrada acima (e aparece no histórico da
+  // rotina), mas nada é escrito na conversa — nem a fala do agente (suprimida em assentar-turno.ts)
+  // nem este marcador. Uma rotina que roda a cada 5 min e não acha novidade não deve deixar rastro
+  // no chat; quem quer conferir que ela rodou olha o histórico.
+  if (input.desfecho === "sem_novidade") {
+    const autoriaSilencio = autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
+    return {
+      data: { execucao, rotina, podadas },
+      events: [evento(deps, "rotina_executou", autoriaSilencio, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })],
+    };
+  }
   const quando = carimbo(agora, rotina.fusoIana);
   const texto =
     input.desfecho === "executou"

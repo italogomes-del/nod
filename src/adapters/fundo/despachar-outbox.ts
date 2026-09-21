@@ -41,6 +41,9 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   rotina_atualizada: "rotina.criada",
   rotina_excluida: "rotina.criada",
   rotina_executou: "rotina.executou",
+  // Mesmo frame de propósito: a execução silenciosa não escreve no chat, mas o painel de rotinas
+  // precisa saber que ela rodou para o histórico aparecer sem recarregar a página.
+  rotina_sem_novidade: "rotina.executou",
   sala_handoff: "sala.handoff",
   negacao: "negacao",
   concessao_criada: "agente.mudou",

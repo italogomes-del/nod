@@ -7,6 +7,7 @@ import { ativarRotina, servicoRotinas } from "../../src/use-cases/ativar-rotina.
 import { criarRotina } from "../../src/use-cases/criar-rotina.ts";
 import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente.ts";
 import { encaminhar } from "../../src/use-cases/encaminhar.ts";
+import { semNovidade } from "../../src/use-cases/sem-novidade.ts";
 import { passar } from "../../src/use-cases/passar.ts";
 import { perguntarABot } from "../../src/use-cases/perguntar-a-bot.ts";
 import { servicoSala } from "../../src/use-cases/servico-sala.ts";
@@ -78,6 +79,7 @@ export function useCasesFalsos(): UseCasesNod {
     pedirAPessoa: naoImplementado("useCases.pedirAPessoa"),
     passar,
     encaminhar,
+    semNovidade,
     perguntarABot,
   };
 }

@@ -125,6 +125,7 @@ export function useCasesDeTeste(): UseCasesNod {
     pedirAPessoa: naoImplementado("pedirAPessoa (L5)"),
     passar: naoImplementado("passar (L7)"),
     encaminhar: naoImplementado("encaminhar (L7)"),
+    semNovidade: naoImplementado("semNovidade (L7)"),
     perguntarABot: naoImplementado("perguntarABot (L7)"),
   };
 }

@@ -70,6 +70,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     pedirAPessoa,
     passar: async () => ({ data: { ok: true } }),
     encaminhar: async () => ({ data: { ok: true } }),
+    semNovidade: async () => ({ data: { ok: true } }),
     perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     ...opcoes.useCases,
   };

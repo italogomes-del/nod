@@ -129,7 +129,9 @@ function relevante(q: Invalidacao): boolean {
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
   if (q.startsWith("concessoes:")) return (t.tipo === "perfil" || t.tipo === "conversa") && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
-  if (q.startsWith("execucoes:")) return t.tipo === "rotinas";
+  // 2026-09-21: o painel de detalhes (tela conversa) também mostra o histórico — é onde a pessoa
+  // confere que uma rotina silenciosa (desfecho sem_novidade, que não escreve no chat) rodou.
+  if (q.startsWith("execucoes:")) return t.tipo === "rotinas" || t.tipo === "conversa";
   return true;
 }
 

@@ -5,13 +5,13 @@ import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
 const ESPERADAS = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina",
-  "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "perguntar_a_bot",
+  "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as CATORZE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 inclui o ciclo de vida de rotina)", () => {
+  it("lista fechada com as QUINZE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
-    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(14);
+    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });
 
   it("NOMES_FERRAMENTAS_NOD é literal (EMENDA 26) e cobre TODAS as chaves de FERRAMENTAS_NOD, no tipo e em runtime", () => {
@@ -45,6 +45,7 @@ describe("FERRAMENTAS_NOD", () => {
 
   it("cada ferramenta tem um caso de uso nomeado em UseCasesNod (EMENDA 5)", () => {
     expect(Object.keys(USE_CASE_POR_FERRAMENTA).sort()).toEqual([...ESPERADAS].sort());
-    expect(new Set(Object.values(USE_CASE_POR_FERRAMENTA)).size).toBe(14);
+    // Um caso de uso DISTINTO por ferramenta: duas ferramentas não compartilham implementação.
+    expect(new Set(Object.values(USE_CASE_POR_FERRAMENTA)).size).toBe(ESPERADAS.length);
   });
 });

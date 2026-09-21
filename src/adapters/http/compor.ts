@@ -38,6 +38,7 @@ import { encaminhar } from "../../use-cases/encaminhar.ts";
 import { entregarRespostaPeer } from "../../use-cases/entregar-resposta-peer.ts";
 import { lembrar } from "../../use-cases/lembrar.ts";
 import { passar } from "../../use-cases/passar.ts";
+import { semNovidade } from "../../use-cases/sem-novidade.ts";
 import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
@@ -189,7 +190,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, perguntarABot };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -265,8 +266,12 @@ export function comporApp(o: OpcoesCompor): App {
       if (!turno || saida.tardia) return [];
       const events: RuntimeEvent[] = [];
       if (turno.origem === "rotina" || turno.origem === "retomada") {
-        const desfecho = turno.estado === "concluido" ? "executou" : "falhou";
-        const r = await registrarDesfechoRotina(d, { turnoId: turno.id, desfecho, motivo: desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
+        // definido em 2026-09-21: concluído + `sem_novidade` chamado = execução completa que não
+        // rendeu notícia. Desfecho próprio para o histórico distinguir "rodou e não tinha nada" de
+        // "rodou e relatou" — e para registrarDesfechoRotina saber que não deve escrever marcador.
+        const silencioso = turno.estado === "concluido" && turno.semNovidadeMotivo !== null;
+        const desfecho = silencioso ? "sem_novidade" : turno.estado === "concluido" ? "executou" : "falhou";
+        const r = await registrarDesfechoRotina(d, { turnoId: turno.id, desfecho, motivo: silencioso ? turno.semNovidadeMotivo : desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
         if ("execucao" in r.data) events.push(...(r.events ?? []));
       }
       if (turno.origem === "peer" && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {

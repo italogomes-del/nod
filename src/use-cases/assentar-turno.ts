@@ -58,6 +58,13 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
   const desfecho = desfechoDaEntrega(turno, resultado);
   const interrompido = tardia || desfecho.estado === "interrompido";
+  // definido em 2026-09-21: o agente chamou `sem_novidade` — consultou e nada mudou, então a fala
+  // dele NÃO entra na conversa (era o flood de "nenhum update" a cada execução). Só vale onde
+  // ninguém espera resposta: turno de rotina/retomada. Em conversa ou sala a pessoa ficaria no
+  // vácuo, e por isso a ferramenta nem é oferecida nesses modos (plano-turno.ts).
+  // Um turno interrompido não é silenciado: o texto pode ser um relato parcial de bloqueio, e o
+  // silêncio só é honesto quando a execução foi completa.
+  const silencioso = turno.semNovidadeMotivo !== null && !interrompido && (turno.origem === "rotina" || turno.origem === "retomada");
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, machineId: entrega.machineId });
   const events: RuntimeEvent[] = [];
 
@@ -82,7 +89,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: entrega.fala.texto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
-  } else if (entrega.fala.texto.trim() !== "") {
+  } else if (entrega.fala.texto.trim() !== "" && !silencioso) {
     mensagem = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,

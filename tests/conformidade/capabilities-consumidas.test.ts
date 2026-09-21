@@ -13,8 +13,10 @@ import { USE_CASE_POR_FERRAMENTA } from "../../src/contracts/servicos.ts";
 const FONTE = readFileSync(fileURLToPath(new URL("../../src/use-cases/chamar-ferramenta.ts", import.meta.url)), "utf8");
 
 describe("capabilities consumidas em chamar-ferramenta.ts", () => {
-  it("itera NOMES_FERRAMENTAS_NOD (14 nomes): cada um tem o seu caso na tabela DESPACHO e aponta para USE_CASE_POR_FERRAMENTA", () => {
-    expect(NOMES_FERRAMENTAS_NOD).toHaveLength(14);
+  it("itera NOMES_FERRAMENTAS_NOD: cada um tem o seu caso na tabela DESPACHO e aponta para USE_CASE_POR_FERRAMENTA", () => {
+    // Sem contador fixo: a lista é a fonte da verdade (ferramentas-nod.test.ts prova que é fechada)
+    // e o laço abaixo é a prova real — cada nome precisa do seu caso no despacho.
+    expect(NOMES_FERRAMENTAS_NOD.length).toBeGreaterThan(0);
     for (const nome of NOMES_FERRAMENTAS_NOD) {
       const caso = new RegExp(`^\\s+${nome}: \\(deps, ctx, args\\) => deps\\.useCases\\[USE_CASE_POR_FERRAMENTA\\.${nome}\\]\\(`, "m");
       expect(FONTE, `falta o caso de ${nome} em chamar-ferramenta.ts`).toMatch(caso);

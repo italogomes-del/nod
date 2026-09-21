@@ -294,6 +294,11 @@ body.ocupado { cursor: progress; }
 .execucoes { list-style: none; padding: 0; margin: 8px 0 0; font-size: 12.5px; }
 .exec { padding: 4px 0; border-top: 1px dashed var(--line); }
 .exec-executou b { color: var(--ok); } .exec-passou_em_branco b { color: var(--amber); } .exec-falhou b { color: var(--red); }
+/* sem_novidade é o desfecho silencioso: rodou, nada mudou, nada foi escrito na conversa. Apagado
+   de propósito — está ali para consulta, não para chamar atenção. */
+.exec-sem_novidade, .exec-sem_novidade b { color: var(--ink-3); }
+.dr-execucoes { list-style: none; margin: 6px 0 0; padding: 0; font-size: 11.5px; color: var(--ink-3); }
+.dr-execucoes .exec { padding: 3px 0; }
 .catalogo { list-style: none; padding: 0; margin: 8px 0; font-size: 13px; } .catalogo li { padding: 3px 0; }
 .registrar { margin-bottom: 14px; } .registrar summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
 .memoria { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 8px; align-items: center; }

@@ -97,6 +97,7 @@ const DESPACHO: Despacho = {
   pedir_a_pessoa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.pedir_a_pessoa](deps, { ...ctx, ...args }),
   passar: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.passar](deps, { ...ctx, ...args }),
   encaminhar: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.encaminhar](deps, { ...ctx, ...args }),
+  sem_novidade: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.sem_novidade](deps, { ...ctx, ...args }),
   perguntar_a_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.perguntar_a_bot](deps, { ...ctx, ...args }),
 };
 

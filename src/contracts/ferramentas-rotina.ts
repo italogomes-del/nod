@@ -6,11 +6,27 @@ import type { JsonSchema } from "./json-schema.ts";
  * porque aquele arquivo bateu no gatilho de revisão de 200 linhas da EMENDA 26; a lista continua
  * FECHADA e única — estas entradas são espalhadas em FERRAMENTAS_NOD, não uma segunda lista.
  *
- * criar_rotina (nascimento, por proposta) continua lá: aqui é só o que age sobre rotina existente.
+ * criar_rotina (o nascimento) veio junto em 2026-09-21, quando a main trouxe sem_novidade e o
+ * arquivo de lá passou das 200 linhas de novo: TODO schema de rotina mora aqui agora.
  */
 const ROTINA_ID: JsonSchema = { type: "string", description: "Id da rotina, exatamente como veio do inventário ou de listar_rotinas.", minLength: 1 };
 
 export const FERRAMENTAS_ROTINA = {
+  criar_rotina: {
+    type: "object",
+    description: "Propõe uma rotina (cron de 5 campos + fuso IANA). A pessoa confirma; o gate de aprovação nasce ligado.",
+    properties: {
+      cron: { type: "string", description: "Expressão cron de 5 campos, ex.: '0 8 * * 1-5'.", minLength: 1 },
+      fuso_iana: { type: "string", description: "Fuso IANA nomeado, ex.: America/Sao_Paulo. Offset numérico é recusado.", minLength: 1 },
+      instrucao: { type: "string", description: "O que fazer em cada execução.", minLength: 1 },
+      fonte: { type: "string", description: "De onde vem o dado.", minLength: 1 },
+      entregavel: { type: "string", description: "O que sai ao final.", minLength: 1 },
+      limites_aprovacao: { type: "string", description: "O que exige aprovação antes de sair.", minLength: 1 },
+      politica_sem_dado: { type: "string", description: "O que fazer quando não houver dado.", minLength: 1 },
+    },
+    required: ["cron", "fuso_iana", "instrucao", "fonte", "entregavel", "limites_aprovacao", "politica_sem_dado"],
+    additionalProperties: false,
+  },
   listar_rotinas: {
     type: "object",
     description: "Lista as rotinas deste agente com id, horário, estado e instrução. Leitura: nada muda.",
@@ -57,6 +73,15 @@ export const FERRAMENTAS_ROTINA = {
   },
 } as const satisfies Record<string, JsonSchema>;
 
+export type ArgsCriarRotina = {
+  cron: string;
+  fuso_iana: string;
+  instrucao: string;
+  fonte: string;
+  entregavel: string;
+  limites_aprovacao: string;
+  politica_sem_dado: string;
+};
 /** Sem argumentos: o agente só pode listar as rotinas DELE, que vêm do contexto do turno. */
 export type ArgsListarRotinas = object;
 export type ArgsPausarRotina = { rotina_id: string };
@@ -82,3 +107,4 @@ export type ArgsExcluirRotina = { rotina_id: string };
 
 /** Como criar_rotina: nasce PROPOSTA, nada é aplicado. O modelo não deve anunciar mudança feita. */
 export type ResultadoPropostaRotina = { proposta_id: string; resumo: string } | { erro: CodigoErro };
+export type ResultadoCriarRotina = { proposta_id: string; proxima_execucao: number; resumo: string } | { erro: CodigoErro };
