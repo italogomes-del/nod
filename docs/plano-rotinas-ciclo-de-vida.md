@@ -1,14 +1,15 @@
 # Plano — ciclo de vida de rotinas por conversa
 
-> **Andamento.**
-> - Passo 1 (inventário no prompt) FEITO — `prompt-sistema.ts`, `plano-turno.ts`,
->   `emitir-plano-turno.ts`, 3 testes unitários.
-> - Passo 2 (listar/pausar/reativar) FEITO — lista fechada de 9 → 12 ferramentas,
->   `contracts/ferramentas-rotina.ts` (novo), `use-cases/rotinas-do-agente.ts` (novo),
->   5 testes de integração. Catálogo por modo: só conversa e sala.
-> - Verde: lint, typecheck (4 projetos), fence:domain, 474 unit, 232 integration, conformidade
->   (menos a falha pré-existente abaixo).
-> - Falta: `atualizar_rotina` e `excluir_rotina` (proposta/decisão), migração 0016, rotas, web, ADR.
+> **Andamento: COMPLETO.** A decisão final está na
+> [ADR-041](adr/adr-041-ciclo-de-vida-de-rotinas-pelo-agente.md); este documento é o rascunho de
+> planejamento que a antecedeu, mantido pelo registro do caminho.
+> - Passo 1 — inventário no prompt (`prompt-sistema.ts`, `plano-turno.ts`, `emitir-plano-turno.ts`).
+> - Passo 2 — `listar_rotinas`, `pausar_rotina`, `reativar_rotina` (aplicam direto).
+> - Passo 3 — `atualizar_rotina`, `excluir_rotina` (proposta/decisão), migração 0016,
+>   `aplicar-proposta-rotina.ts`, braço em `POST /decisoes/:id/decidir`, cards na web.
+> - Lista fechada de 9 → 14 ferramentas.
+> - Verde: lint, typecheck (4 projetos), fence:domain, 474 unit, 236 integration, 64 concurrency,
+>   conformidade menos a falha pré-existente abaixo.
 
 Hoje o agente só sabe **criar** rotina (`criar_rotina`). Este plano dá a ele o ciclo completo:
 listar, atualizar, pausar, reativar e excluir — sempre sobre a rotina certa.
