@@ -32,7 +32,7 @@ it("login Composio só habilita após conta ativa, confere o dono, cifra a chave
     }
     throw new Error("endpoint inesperado");
   };
-  const srv = await servidorDeTeste([...rotasMarketplace({ dentro: memoria.dentro, cifrar: cifra, decifrar: (s) => decifrar(s, chave), fetchImpl: fakeFetch }), ...rotasConectores({ dentro: memoria.dentro, cifrar: cifra })]);
+  const srv = await servidorDeTeste([...rotasMarketplace({ dentro: memoria.dentro, cifrar: cifra, decifrar: (s) => decifrar(s, chave), fetchImpl: fakeFetch }), ...rotasConectores({ dentro: memoria.dentro, cifrar: cifra, decifrar: (s) => decifrar(s, chave), fetchImpl: fakeFetch })]);
   try {
     const sessao = await srv.entrar("marlon");
     expect((await srv.chamar(sessao, "POST", "marketplace/slack/conectar")).status).toBe(409);

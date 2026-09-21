@@ -459,7 +459,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasTurnos(depsRotas),
     ...rotasConcessoes({ dentro }),
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
-    ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave) }),
+    ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     ...rotasMaquinas({ dentro }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.

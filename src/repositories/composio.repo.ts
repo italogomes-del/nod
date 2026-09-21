@@ -4,13 +4,15 @@ export type SessaoComposio = { toolkit: string; sessaoId: string; contaId: strin
 
 export function composioRepo(conn: Conn, escopo: Escopo) {
   return {
+    /** ADR-041: a chave é do TENANT — quem configurou não importa para ler. */
     async chave(): Promise<string | null> {
-      const [r] = await conn<{ chave_cifrada: string }[]>`select chave_cifrada from composio_configuracoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+      const [r] = await conn<{ chave_cifrada: string }[]>`select chave_cifrada from composio_configuracoes where tenant_id = ${escopo.tenantId}`;
       return r?.chave_cifrada ?? null;
     },
+    /** O conflito é por tenant: a segunda pessoa TROCA a chave do time (nod_equipe_update), não cria a sua. */
     async salvarChave(cifrada: string): Promise<void> {
-      await conn`insert into composio_configuracoes (tenant_id, owner_id, chave_cifrada) values (${escopo.tenantId}, ${escopo.pessoaId}, ${cifrada})
-        on conflict (tenant_id, owner_id) do update set chave_cifrada = excluded.chave_cifrada`;
+      await conn`insert into composio_configuracoes (tenant_id, owner_id, visibility, chave_cifrada) values (${escopo.tenantId}, ${escopo.pessoaId}, 'equipe', ${cifrada})
+        on conflict (tenant_id) do update set chave_cifrada = excluded.chave_cifrada`;
     },
     async sessao(toolkit: string): Promise<SessaoComposio | null> {
       const [r] = await conn<{ toolkit: string; sessao_id: string; conta_id: string; conector_id: string }[]>`select toolkit, sessao_id, conta_id, conector_id from composio_sessoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and toolkit = ${toolkit}`;

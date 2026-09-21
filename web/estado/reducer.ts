@@ -4,7 +4,7 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
-import type { AppMarketplace } from "../../src/contracts/marketplace.ts";
+import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
@@ -64,7 +64,7 @@ export type Estado = {
   rotinas: RotinaDto[];
   execucoes: Record<string, ExecucaoRotina[]>;
   conectores: Conector[];
-  marketplace: AppMarketplace[];
+  marketplace: AppComLogo[];
   composioConfigurado: boolean;
   autorizacaoApp: { slug: string; url: string } | null;
   avisoConexao: string | null;
@@ -103,7 +103,7 @@ export type Acao =
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
   | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
-  | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppMarketplace[]; composioConfigurado?: boolean }
+  | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }

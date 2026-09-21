@@ -25,6 +25,36 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch) {
   }
   return {
     validar: () => pedir("/toolkits?limit=1"),
+    /**
+     * ADR-041: o catálogo exibido é o que a pessoa configurou no painel (auth configs), não o
+     * catálogo público de toolkits. A forma do envelope e o nome do campo do logo não estão
+     * fixados no contrato do provedor, então lemos as variações conhecidas e o que não casar cai
+     * fora em silêncio — catálogo incompleto degrada para o piso curado, nunca derruba a tela.
+     */
+    async catalogo(): Promise<{ slug: string; nome: string; logo: string | null }[]> {
+      const r = await pedir("/auth_configs");
+      const itens = (r.items ?? r.data ?? r.auth_configs) as unknown;
+      if (!Array.isArray(itens)) throw new ErroDeDominio("conector_indisponivel");
+      const porSlug = new Map<string, { slug: string; nome: string; logo: string | null }>();
+      for (const it of itens) {
+        if (!it || typeof it !== "object") continue;
+        const o = it as Record<string, unknown>;
+        const tk = o.toolkit as Record<string, unknown> | string | undefined;
+        const slug = (typeof tk === "string" ? tk : typeof tk?.slug === "string" ? tk.slug : null)?.toLowerCase();
+        if (!slug || !/^[a-z0-9_-]{1,64}$/.test(slug)) continue;
+        if (o.status === "DISABLED" || o.deleted === true) continue;
+        const meta = (tk && typeof tk === "object" ? tk : {}) as Record<string, unknown>;
+        const logoBruto = meta.logo ?? (meta.meta as Record<string, unknown> | undefined)?.logo ?? o.logo;
+        let logo: string | null = null;
+        if (typeof logoBruto === "string") {
+          try { logo = urlDoProvedor(logoBruto, ["logos.composio.dev", "assets.composio.dev", "cdn.composio.dev"]).href; } catch { logo = null; }
+        }
+        const nome = typeof meta.name === "string" ? meta.name : slug;
+        if (!porSlug.has(slug)) porSlug.set(slug, { slug, nome, logo });
+        else if (logo && !porSlug.get(slug)!.logo) porSlug.get(slug)!.logo = logo;
+      }
+      return [...porSlug.values()];
+    },
     async criarSessao(userId: string, toolkit: string) {
       const r = await pedir("/tool_router/session", {
         user_id: userId, toolkits: { enable: [toolkit] }, preload: { tools: "all" },

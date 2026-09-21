@@ -36,7 +36,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
   beforeAll(async () => {
     srv = await servidorDeTeste(
       [
-        ...rotasConectores({ dentro: memoria.dentro, cifrar: (t) => `cifrado(${t})` }),
+        ...rotasConectores({ dentro: memoria.dentro, cifrar: (t) => `cifrado(${t})`, decifrar: (t) => t.replace(/^cifrado\((.*)\)$/, "$1") }),
         ...rotasConcessoes({ dentro: memoria.dentro }),
         ...rotasTrilha({ dentro: memoria.dentro }),
         ...rotasInternas({ dentro: memoria.dentro, tokens, agora, longpollMs: 300, intervaloMs: 40 }),

@@ -8,10 +8,14 @@ import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export function rotasMarketplace(op: { dentro: DentroDeTx; cifrar: (s: string) => string; decifrar: (s: string) => string; fetchImpl?: typeof fetch }): Rota[] {
   const cliente = (chave: string) => criarClienteComposio(chave, op.fetchImpl);
+  /**
+   * revisto em 2026-09-21 (ADR-041): a curadoria deixou de ser a lista do que EXISTE, então
+   * recusar por ausência nela barraria justamente o app recém-criado no painel. Quem valida é o
+   * provedor — o `criarSessao` falha para toolkit que ele não conhece. Daqui sai só o nome exibido.
+   */
   const acharApp = (slug: string) => {
-    const app = APPS_MARKETPLACE.find((a) => a.slug === slug);
-    if (!app) throw new ErroDeDominio("nao_encontrado");
-    return app;
+    if (!/^[a-z0-9_-]{1,64}$/.test(slug)) throw new ErroDeDominio("nao_encontrado");
+    return APPS_MARKETPLACE.find((a) => a.slug === slug) ?? { slug, nome: slug, descricao: "", categoria: "" };
   };
   return [
     { metodo: "POST", padrao: /^\/marketplace\/configurar$/, async handler(ctx) {
