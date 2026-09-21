@@ -19,6 +19,7 @@ import type { paradasRepo } from "./paradas.repo.ts";
 import type { pessoasRepo } from "./pessoas.repo.ts";
 import type { procuracoesRepo } from "./procuracoes.repo.ts";
 import type { propostasRepo } from "./propostas.repo.ts";
+import type { relatosRepo } from "./relatos.repo.ts";
 import type { rotinaExecucoesRepo } from "./rotina-execucoes.repo.ts";
 import type { rotinaJanelasRepo } from "./rotina-janelas.repo.ts";
 import type { rotinasRepo } from "./rotinas.repo.ts";
@@ -47,6 +48,7 @@ export interface Repos {
   conversas: ReturnType<typeof conversasRepo>;
   mensagens: ReturnType<typeof mensagensRepo>;
   propostas: ReturnType<typeof propostasRepo>;
+  relatos: ReturnType<typeof relatosRepo>;
   turnos: ReturnType<typeof turnosRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;
   itensAprovacao: ReturnType<typeof itensAprovacaoRepo>;

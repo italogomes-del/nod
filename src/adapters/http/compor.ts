@@ -59,6 +59,7 @@ import { rotasConcessoes } from "./rotas/concessoes.ts";
 import { rotasMarketplace } from "./rotas/marketplace.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
+import { criarRotasRelatos } from "./rotas/relatos.ts";
 import { criarRotasDecisoes } from "./rotas/decisoes.ts";
 import type { DentroDeTx } from "./rotas/dentro-de-tx.ts";
 import { criarRotaDev } from "./rotas/dev.ts";
@@ -455,6 +456,7 @@ export function comporApp(o: OpcoesCompor): App {
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
     ...criarRotasConversas(depsRotas),
+    ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
     ...rotasConcessoes({ dentro }),

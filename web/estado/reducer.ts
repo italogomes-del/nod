@@ -8,6 +8,7 @@ import type { AppMarketplace } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
+import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada } from "../../src/contracts/turno.ts";
 import type { Escopo } from "../../src/shared/types.ts";
@@ -34,6 +35,7 @@ export type Tela =
   | { tipo: "sua-vez" }
   | { tipo: "nova-sala" }
   | { tipo: "chaves" }
+  | { tipo: "relatos" }
   /** Configuração da conta: conexão, computadores e administração (substituiu o rail em 2026-09-18). */
   | { tipo: "espaco" };
 
@@ -47,7 +49,7 @@ export type ConversaEstado = ConversaDto & {
 
 export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: number };
 
-export type Invalidacao = "gestao" | "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+export type Invalidacao = "gestao" | "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -72,6 +74,8 @@ export type Estado = {
   memorias: Record<string, Memoria[]>;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
   chaves: ChaveMaquinaDto[] | null;
+  /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
+  relatos: Relato[] | null;
   /**
    * A chave crua recém-emitida: mostrada UMA vez e descartada ao sair da tela. Fica só na memória da
    * aba — nunca em storage — e o servidor não tem como mostrá-la de novo.
@@ -83,7 +87,7 @@ export type Estado = {
   /** O que a próxima volta do main precisa buscar por REST (conjunto, sem duplicata). */
   invalidacoes: Invalidacao[];
   agora: number;
-  erro: { codigo: string; mensagem: string } | null;
+  erro: { codigo: string; mensagem: string; correlationId?: string | null } | null;
   ocupado: boolean;
 };
 
@@ -108,11 +112,12 @@ export type Acao =
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
+  | { tipo: "hidratar-relatos"; relatos: Relato[] }
   | { tipo: "chave-emitida"; emitida: ChaveEmitidaDto | null }
   | { tipo: "faixa"; faixa: FaixaParada | null }
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
-  | { tipo: "erro"; erro: { codigo: string; mensagem: string } | null }
+  | { tipo: "erro"; erro: { codigo: string; mensagem: string; correlationId?: string | null } | null }
   | { tipo: "ocupado"; valor: boolean };
 
 export const estadoInicial: Estado = {
@@ -135,6 +140,7 @@ export const estadoInicial: Estado = {
   concessoes: {},
   memorias: {},
   chaves: null,
+  relatos: null,
   chaveEmitida: null,
   negacoes: [],
   faixaParada: null,
@@ -240,6 +246,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     };
     return invalidar({ ...e, faixaParada: faixa }, conv(f));
   },
+  // O relato é registro, não estado vivo da conversa: nada na timeline muda, então nada se invalida.
+  // A tela de relatos recarrega quando é aberta (definido em 2026-09-21).
+  "relato.criado": (e) => e,
   resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
@@ -251,7 +260,9 @@ export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Es
 export function reduzir(estado: Estado, acao: Acao): Estado {
   switch (acao.tipo) {
     case "sessao":
-      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, chaveEmitida: null };
+      // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
+      // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null };
     case "navegar":
       return {
         ...estado,
@@ -302,6 +313,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, salas: acao.salas };
     case "hidratar-chaves":
       return { ...estado, chaves: acao.chaves };
+    case "hidratar-relatos":
+      return { ...estado, relatos: acao.relatos };
     case "chave-emitida":
       return acao.emitida ? invalidar({ ...estado, chaveEmitida: acao.emitida }, "chaves") : { ...estado, chaveEmitida: null };
     case "faixa":
@@ -348,5 +361,7 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // único aviso de que há decisão parada.
   if (!estado.suaVez) faltas.push("sua-vez");
   if ((t.tipo === "chaves" || t.tipo === "espaco") && !estado.chaves) faltas.push("chaves");
+  // O frame relato.criado não invalida nada (é registro), então a tela busca quando ainda não tem.
+  if (t.tipo === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }

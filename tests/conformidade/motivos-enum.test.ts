@@ -9,6 +9,7 @@ import {
   MOTIVOS_NEGACAO,
   MOTIVOS_PASSE,
 } from "../../src/contracts/motivos.ts";
+import { ALCANCES_RELATO, CATEGORIAS_RELATO } from "../../src/contracts/relato.ts";
 import { ENUMS_DE_ESTADO } from "../../src/db/schema/agentes.ts";
 import { db } from "../helpers/db.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -27,6 +28,8 @@ const MOTIVOS: Record<string, readonly string[]> = {
   desfecho_item: DESFECHOS_ITEM,
   desfecho_rotina: DESFECHOS_ROTINA,
   codigo_erro: CODIGOS_ERRO,
+  categoria_relato: CATEGORIAS_RELATO,
+  alcance_relato: ALCANCES_RELATO,
 };
 
 async function rotulos(tipo: string): Promise<string[]> {

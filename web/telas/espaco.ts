@@ -32,6 +32,7 @@ export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?:
       <div class="espaco-links">
         ${botao("navegar", "Marketplace e conectores", { classe: "espaco-link", dados: { tela: "conectores" } })}
         ${botao("navegar", "Gerenciar agentes", { classe: "espaco-link", dados: { tela: "gestao" } })}
+        ${botao("navegar", "Relatos", { classe: "espaco-link", dados: { tela: "relatos" } })}
       </div>
       ${amb}
     </section>

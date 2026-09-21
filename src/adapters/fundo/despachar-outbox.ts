@@ -41,6 +41,7 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   concessao_criada: "agente.mudou",
   agente_atualizado: "agente.mudou",
   parada: "parada.faixa",
+  relato_criado: "relato.criado",
 };
 
 export function frameDoEvento(kind: string): TipoFrame {
