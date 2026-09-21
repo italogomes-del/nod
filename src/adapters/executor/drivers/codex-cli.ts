@@ -19,6 +19,16 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * de read-only, e `--cd` aponta a pasta ativa. NÃO HOMOLOGADO: o binário do Codex não estava
  * instalado na máquina onde o confinamento do Claude foi medido, então este caminho está coberto
  * só por teste de montagem de args. Validar com o CLI real antes de anunciar paridade.
+ *
+ * definido em 2026-09-18 (ADR-040): o Codex nunca teve teto de passos, então é o Claude que se
+ * alinha a ele quando `--max-turns` sai — nada a mudar aqui. O watchdog de atividade vive em
+ * `laco.ts`, acima do SPI, e `interpretarCodex` produz os mesmos EventoStream: os dois harnesses
+ * ganham a proteção pelo contrato comum, sem código específico.
+ *
+ * LACUNA NÃO HOMOLOGADA: não há equivalente a `--autocompact` no conjunto FLAGS_CODEX sondado, e o
+ * binário não estava instalado na máquina onde a medição foi feita. Não inventar flag de janela de
+ * contexto aqui sem sondar o CLI real. Assimetria inversa a registrar: este driver já tem deadline
+ * absoluto por `prazoMs` (setTimeout → interromper), que o driver do Claude não tem.
  */
 export function argsCodex(plano: PlanoTurno, config: string): string[] {
   const pastas = plano.workspacePastas ?? null;

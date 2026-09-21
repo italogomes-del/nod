@@ -31,6 +31,21 @@ export function badgeExecutor(m: Pick<Mensagem, "autoria">): string {
   return `<span class="tag tag-cinza" title="harness no computador conectado">rodou em ${esc(maquina)}</span>`;
 }
 
+/**
+ * Ações que aparecem no hover da mensagem (ADR-041). A classe `.msg-actions` já existia em
+ * estilos.css desde a folha original, sem nenhum render — este é o primeiro botão a usá-la.
+ * Fica dentro de `.bubble-wrap`, não de `.message`, e o CSS o põe na margem LATERAL do balão: o
+ * `top: -16px` da regra original cobria o nome e a hora em `.msg-autor`.
+ */
+function acoesDaMensagem(m: Mensagem): string {
+  // definido em 2026-09-21: besouro visto de cima — antenas, corpo oval e três pares de pernas em
+  // DIAGONAL, centrado em (12,12). Duas tentativas anteriores falharam por motivos opostos: a
+  // primeira tinha 10 subpaths e virava borrão a 15px; a segunda, simplificada demais (arco solto
+  // por cabeça e pernas horizontais coladas), lia como cadeado. A diagonal é o que faz virar perna.
+  const bug = `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M9.5 4 11 6.5m3.5-2.5L13 6.5m-1 0a5 5 0 015 5v2a5 5 0 01-10 0v-2a5 5 0 015-5zm0 2.5v11M7 10 4.5 8.5M7 13.5H4m3 3.5L4.5 18.5M17 10l2.5-1.5M17 13.5h3m-3 3.5 2.5 1.5"/></svg>`;
+  return `<div class="msg-actions">${botao("relatar-mensagem", bug, { id: m.id, titulo: "Relatar comportamento indesejado", aria: "Relatar comportamento indesejado" })}</div>`;
+}
+
 function corpoMensagem(m: Mensagem, estado: Estado): string {
   const p = m.payload;
   if (m.kind === "sistema") return `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
@@ -57,7 +72,9 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
  * `mostrarAutor` liga o nome do bot dentro do balão — útil em salas com vários agentes.
  */
 export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
-  if (m.kind !== "texto") return corpoMensagem(m, estado);
+  // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
+  // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
+  if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}</div>`;
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
   const sender = `<div class="msg-autor"><b>${ehPessoa ? "Você" : esc(agente?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>`;
@@ -66,7 +83,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
   return `<article class="message ${ehPessoa ? "you" : "bot"}" data-mensagem="${esc(m.id)}">
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${sender}<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div></div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div></div>
   </article>`;
 }
 

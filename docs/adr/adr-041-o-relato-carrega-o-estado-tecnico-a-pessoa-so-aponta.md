@@ -1,0 +1,92 @@
+# ADR-041 — O relato carrega o estado técnico; a pessoa só aponta
+
+**Status** novo · **Origem** não havia caminho para dizer "isso está errado", e o diagnóstico da falha
+morria em stdout
+
+## Decisão
+
+Relatar comportamento indesejado custa **dois cliques e nenhum dado técnico**: a pessoa aponta uma
+mensagem, escolhe uma categoria de uma união fechada e diz se anexa só aquela mensagem ou os últimos
+15 minutos. Todo o resto — sinais write-ahead do turno (ADR-009), motivo de falha e de interrupção,
+modelo, harness, executor, custo, reenvios, confiança do conteúdo, versão do app e o `correlation_id`
+do erro que ela viu — é **copiado pelo servidor** do que já estava tipado e persistido.
+
+O relato segue a forma da trilha (ADR-004): metadados tipados em `relatos`, prosa em `relato_prosa`,
+**apagável** por `nod_poda`. O trecho de conversa é snapshot, porque a conversa muda depois e o relato
+precisa registrar o que a pessoa VIU.
+
+A janela é ancorada no **id** da mensagem, nunca no instante reconstruído, e a duração é constante do
+servidor: o cliente manda o alcance, jamais o intervalo.
+
+O diagnóstico da execução que não concluiu (`erro_cru` do fornecedor, nomes das ferramentas chamadas,
+negações de permissão, sessão do CLI) passa a **persistir** em `turno_diagnosticos`, gravado pela ponte
+na mesma transação que assenta o turno, e só quando `desfecho <> 'sucesso'`.
+
+## Contexto
+
+O nod já produzia um diagnóstico excelente e o jogava fora. `erroCru` — a causa crua que o CLI devolve —
+virava uma linha de log em `ponte-interna.ts`, e log vai para stdout, que **some num Electron
+empacotado**. `ferramentasChamadas` chegava inteiro do stream e era reduzido a uma contagem no evento
+`turno_encerrado` (`assentar-turno.ts`). Quem investigasse um comportamento ruim reportado por uma
+pessoa tinha `motivo_falha = 'erro_execucao'` e mais nada.
+
+Ao mesmo tempo, não existia nenhuma superfície para a pessoa reclamar. A evidência morava na cabeça
+dela, em prosa, num canal fora do produto — e o time recebia "o bot respondeu mal" sem turno, sem
+modelo, sem sinal.
+
+## Alternativas rejeitadas
+
+### Pedir à pessoa que descreva o problema num campo de texto
+
+É o que existe em todo lugar e é o que produz relato inútil. A pessoa não sabe qual harness rodou, nem
+que o turno morreu com `sem_progresso` depois de `promptSubmitted`. Pedir prosa transfere a ela um
+trabalho que o servidor faz melhor, e ainda assim entrega menos.
+
+### Persistir o trace inteiro de todo turno
+
+Resolveria o diagnóstico com folga, mas paga custo em **todo** turno para servir um relato que é raro,
+e transforma `tool_result` (que carrega conteúdo de arquivo e de conector) em retenção permanente —
+exatamente o que o ADR-002 evita. Guardar só quando a execução falhou mantém o volume ligado ao
+problema.
+
+### Alterar `assentar-turno.ts` para gravar o diagnóstico
+
+Foi a primeira ideia e foi recusada: aquele caminho é a transação única de mensagem + turno + outbox
+(ADR-010), percorrida por todo turno bem-sucedido. A gravação entrou na ponte, ao lado do log que já
+existia, com a condição de desfecho — o fluxo de sucesso não ganhou uma linha de trabalho.
+
+### Criar a issue no Linear direto do relato
+
+A esteira existe (`docs/roadmap/criar-issue-no-linear.md`, trilha `investigação`) e é o destino natural.
+Foi adiado de propósito: sem ver o formato real dos primeiros relatos, automatizar a promoção enche o
+board de ruído. Promover continua sendo decisão humana até haver evidência.
+
+## Evidência
+
+Medido em 2026-09-21 ao escrever o teste HTTP: a janela voltava **vazia** incluindo a própria mensagem
+apontada. O Postgres grava `clock_timestamp()` com microssegundos (`18:24:28.352292`) e a conversão
+para `EpochMs` trunca em milissegundos (`.352`), de modo que `criado_em <= ${ate}` exclui a linha que
+originou o recorte. Por isso a âncora entra por `id`, e não por comparação de tempo — um teste de
+integração pegou o que a leitura do código não pegava.
+
+## Consequências
+
+- Três tabelas novas, todas sob `nod_escopar_tabela`: `relatos`, `relato_prosa`, `turno_diagnosticos`.
+- Duas delas são apagáveis por `nod_poda`, porque guardam prosa: a da pessoa e a do fornecedor.
+- `KindEvento` ganha `relato_criado` e `TipoFrame` ganha `relato.criado`. O frame **não invalida nada**:
+  relato é registro, não estado vivo da conversa.
+- O `correlation_id` do `ErroApi` passa a atravessar até o estado da web. Continua fora do que se
+  renderiza (ADR-002); serve para o relato citá-lo.
+- A versão do build entra no bundle por `define` do Vite. É rótulo de build, nunca identificador.
+- A classe `.msg-actions` existia em `estilos.css` sem nenhum render desde a folha original; o ícone de
+  relato é o primeiro botão a usá-la.
+
+## Gatilho de reversão
+
+Reabrir se (a) a categoria fechada não couber: mais de um quinto dos relatos caindo em `outro` por 30
+dias significa que a lista está errada — a resposta é corrigir as categorias, nunca abrir para texto
+livre; (b) `turno_diagnosticos` crescer além do que a poda dá conta, indicando que a condição de
+desfecho não está filtrando o suficiente; (c) a janela de 15 minutos provar-se curta ou longa demais —
+se a maioria dos relatos úteis precisar de contexto anterior à janela, a constante muda, e se ninguém
+usar o alcance `janela`, ele sai; ou (d) a promoção manual para o Linear virar gargalo, momento em que
+a integração adiada volta à mesa com o formato real dos relatos já conhecido.

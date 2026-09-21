@@ -1,5 +1,5 @@
 import type { RuntimeEvent } from "../../contracts/evento.ts";
-import { redigir } from "../../domain/redacao.ts";
+import { motivoEmPortugues, redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
@@ -30,7 +30,7 @@ export async function varrerPessoa(tx: Transacao, escopo: Escopo, agora: number,
       saida.interrompidos.push(t.id);
       await repos.mensagens.marcarParciaisDoTurno(t.id);
       const autoria = autoriaAgente({ agenteId: t.agenteId, contaDeExecucao: t.ownerId, executor: "catcher", machineId: t.machineId, decididoPor: "regra:varredor_lease" });
-      const frase = redigir("turno-interrompido", agora, { motivo: "maquina_sem_contato" });
+      const frase = redigir("turno-interrompido", agora, { motivo: motivoEmPortugues("maquina_sem_contato") });
       const decisao = await repos.decisoes.criar({
         tipo: "retomar_turno",
         agenteId: t.agenteId,

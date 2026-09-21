@@ -44,7 +44,8 @@ export type KindEvento =
   | "negacao"
   | "concessao_criada"
   | "agente_atualizado"
-  | "parada";
+  | "parada"
+  | "relato_criado";
 
 /** Dados do evento: só escalares (o CHECK da trilha e o outbox não aceitam prosa aninhada). */
 export type DadosEvento = Record<string, string | number | boolean | null>;

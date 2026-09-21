@@ -48,4 +48,6 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-037](adr-037-computadores-por-bot.md) | Computadores por bot | novo |
 | [ADR-038](adr-038-padroes-e-escolhas-da-pessoa.md) | Padrões de produto e escolhas explícitas da pessoa | novo |
 | [ADR-039](adr-039-o-produto-descobre-a-pasta-e-o-harness-trabalha-nela.md) | O produto descobre a pasta; o harness trabalha nela | novo |
-| [ADR-041](adr-041-ciclo-de-vida-de-rotinas-pelo-agente.md) | O agente cuida do ciclo de vida da rotina, não só do nascimento | emenda ADR-011, ADR-033, ADR-034 |
+| [ADR-040](adr-040-o-turno-e-limitado-por-atividade-nao-por-contagem-de-passos.md) | O turno é limitado por atividade, não por contagem de passos | novo |
+| [ADR-041](adr-041-o-relato-carrega-o-estado-tecnico-a-pessoa-so-aponta.md) | O relato carrega o estado técnico; a pessoa só aponta | novo |
+| [ADR-042](adr-042-ciclo-de-vida-de-rotinas-pelo-agente.md) | O agente cuida do ciclo de vida da rotina, não só do nascimento | emenda ADR-011, ADR-033, ADR-034 |

@@ -47,7 +47,7 @@ export function planoDeTeste(sobrescrita: Partial<PlanoTurno> = {}): PlanoTurno 
       servidores: [{ conectorId: "k1", nome: "exemplo", trust: "untrusted", transporte: "stdio" }],
     },
     promptSistema: "Você é Vera.",
-    entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001", maxTurnos: 12 },
+    entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001" },
     politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8_000, efeitoExternoSoPorAprovacao: false },
     tokenDeTurno: "tok",
     expiraEm: agora + 60_000,

@@ -148,7 +148,7 @@ describeIntegracao("pastas locais pela conversa", () => {
       try {
         expect((await instance.sondar()).estado).toBe("pronto");
         const p = await plano(caso.harness);
-        p.entrada = { ...p.entrada, texto: caso.prompt, modelo: caso.modelo, maxTurnos: 8, sessaoCli: null };
+        p.entrada = { ...p.entrada, texto: caso.prompt, modelo: caso.modelo, sessaoCli: null };
         p.catalogo.ferramentas = p.catalogo.ferramentas.filter(f => f.origem === "workspace");
         p.politicaExecucao.prazoMs = 120_000;
         const adapter = instance.adapter(p);

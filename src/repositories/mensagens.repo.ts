@@ -1,7 +1,7 @@
 import type { Autoria } from "../contracts/evento.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
-import { ms } from "./conversao.ts";
+import { data, ms } from "./conversao.ts";
 
 interface Linha {
   tenant_id: string;
@@ -96,6 +96,29 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
           select ${conn.unsafe(COLUNAS)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
           order by criado_em desc, id desc limit ${limite}
         ) recentes order by criado_em, id`;
+      return linhas.map(paraMensagem);
+    },
+
+    /**
+     * A mensagem apontada e as que a precedem dentro da janela, para o relato anexar o contexto
+     * (ADR-041). Usa o índice mensagens_por_conversa (tenant_id, conversa_id, criado_em).
+     *
+     * A âncora entra por `id`, não por comparação de tempo: o Postgres grava clock_timestamp() com
+     * microssegundos e `ms()` trunca para milissegundos, então `criado_em <= ${data(ate)}` deixaria
+     * a PRÓPRIA mensagem de fora sempre que os microssegundos não fossem zero (medido em
+     * 2026-09-21: 18:24:28.352292 no banco contra .352 reconstruído, e a janela voltava vazia).
+     * O `limite` é teto de segurança: conversa movimentada não vira dump.
+     */
+    async janelaAte(conversaId: string, ancoraId: string, desde: number, limite = 100): Promise<Mensagem[]> {
+      const linhas = await conn<Linha[]>`
+        select * from (
+          select ${conn.unsafe(COLUNAS)} from mensagens
+          where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
+            and criado_em >= ${data(desde)}
+            and (id = ${ancoraId} or criado_em <= (
+              select criado_em from mensagens where tenant_id = ${escopo.tenantId} and id = ${ancoraId}))
+          order by criado_em desc, id desc limit ${limite}
+        ) janela order by criado_em, id`;
       return linhas.map(paraMensagem);
     },
 

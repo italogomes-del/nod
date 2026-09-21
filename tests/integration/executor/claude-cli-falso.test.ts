@@ -67,7 +67,7 @@ function planoDeTeste(dir: string, parcial: Partial<PlanoTurno["entrada"]> = {})
       servidores: [],
     },
     promptSistema: "Você é a sonda do nod.",
-    entrada: { texto: `Some 17 e 25 (${dir})`, sessaoCli: null, modelo: "claude-haiku-4-5-20251001", maxTurnos: 3, ...parcial },
+    entrada: { texto: `Some 17 e 25 (${dir})`, sessaoCli: null, modelo: "claude-haiku-4-5-20251001", ...parcial },
     politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
     tokenDeTurno: "token-de-turno-teste",
     expiraEm: Date.now() + 60_000,
@@ -183,7 +183,7 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(valor(r.argv, "--tools")).toBe("");
     expect(valor(r.argv, "--allowedTools")).toBe("mcp__nod__somar");
     expect(valor(r.argv, "--permission-mode")).toBe("default");
-    expect(valor(r.argv, "--max-turns")).toBe("3");
+    expect(r.argv).not.toContain("--max-turns");
     expect(valor(r.argv, "--append-system-prompt")).toBe("Você é a sonda do nod.");
     expect(valor(r.argv, "--session-id")).toBe(resultado.sessaoCli);
     expect(r.argv).not.toContain("--resume");

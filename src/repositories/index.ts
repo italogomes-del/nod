@@ -19,6 +19,7 @@ import { paradasRepo } from "./paradas.repo.ts";
 import { pessoasRepo } from "./pessoas.repo.ts";
 import { procuracoesRepo } from "./procuracoes.repo.ts";
 import { propostasRepo } from "./propostas.repo.ts";
+import { relatosRepo } from "./relatos.repo.ts";
 import { rotinaExecucoesRepo } from "./rotina-execucoes.repo.ts";
 import { rotinaJanelasRepo } from "./rotina-janelas.repo.ts";
 import { rotinasRepo } from "./rotinas.repo.ts";
@@ -39,6 +40,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     conversas: conversasRepo(conn, escopo),
     mensagens: mensagensRepo(conn, escopo),
     propostas: propostasRepo(conn, escopo),
+    relatos: relatosRepo(conn, escopo),
     turnos: turnosRepo(conn, escopo),
     decisoes: decisoesRepo(conn, escopo),
     itensAprovacao: itensAprovacaoRepo(conn, escopo),

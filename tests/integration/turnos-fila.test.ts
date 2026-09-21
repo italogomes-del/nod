@@ -115,11 +115,18 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
     });
   });
 
-  it("interrompido sem motivo: parado_pela_pessoa se a pessoa pediu, senão sem_progresso; fala fica parcial; falha técnica guarda motivo_falha", async () => {
+  it("interrompido sem motivo: parado_pela_pessoa se a pessoa pediu, senão pelo sinal de saída; fala fica parcial; falha técnica guarda motivo_falha", async () => {
     expect(desfechoDaEntrega({ pararSolicitadoEm: 1 }, interrompido())).toEqual({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa", motivoFalha: null });
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, interrompido())).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: null });
+    const mudo = { ...interrompido(), sinais: { ...interrompido().sinais, producedOutput: false } };
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, mudo)).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: null });
     expect(desfechoDaEntrega({ pararSolicitadoEm: null }, interrompido({ motivoInterrupcao: "sessao_rejeitada" }))).toMatchObject({ motivoInterrupcao: "sessao_rejeitada" });
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, { ...sucesso(""), desfecho: "falha", motivoFalha: "erro_max_turns" })).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: "erro_max_turns" });
+    // definido em 2026-09-18 (ADR-040): quem produziu saída e não concluiu não é 'sem_progresso'.
+    // O motivo_falha continua guardando o subtipo técnico, inclusive erro_max_turns da sonda.
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, { ...sucesso(""), desfecho: "falha", motivoFalha: "erro_max_turns" })).toEqual({ estado: "interrompido", motivoInterrupcao: "trabalho_incompleto", motivoFalha: "erro_max_turns" });
+    const semSaida = { ...sucesso(""), desfecho: "falha" as const, motivoFalha: "erro_execucao" as const, sinais: { ...sucesso("").sinais, producedOutput: false } };
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, semSaida)).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: "erro_execucao" });
+    // interrompido() já vem com producedOutput: quem falou antes de morrer é trabalho incompleto.
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, interrompido())).toMatchObject({ motivoInterrupcao: "trabalho_incompleto" });
 
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
@@ -137,7 +144,8 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
         ["sistema", false],
       ]);
       expect(events.map((e) => e.kind)).toEqual(["mensagem_criada", "mensagem_criada", "turno_interrompido"]);
-      expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Turno interrompido: parado_pela_pessoa");
+      // definido em 2026-09-18: a frase traduz o motivo — a pessoa lia "erro_max_turns" cru no chat.
+      expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Turno interrompido: você pediu para parar");
     });
   });
 

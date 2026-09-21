@@ -1,6 +1,7 @@
 import "./lib/mascote-elemento.ts";
 import { abrirComputador } from "./telas/computador.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
+import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
@@ -16,6 +17,7 @@ import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
 import { renderChaves } from "./telas/chaves.ts";
+import { renderRelatos } from "./telas/relatos.ts";
 import { renderEspaco } from "./telas/espaco.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
@@ -46,8 +48,10 @@ function dispatch(acao: Acao): void {
   void reidratar();
 }
 
-function erroDe(e: unknown): { codigo: string; mensagem: string } {
-  if (e instanceof ErroApi) return { codigo: e.codigo, mensagem: e.message };
+function erroDe(e: unknown): { codigo: string; mensagem: string; correlationId?: string | null } {
+  // O correlation_id atravessa para o relato poder citá-lo (ADR-041): é o que liga o que a pessoa
+  // viu na tela à linha de log do servidor. Continua fora do que se RENDERIZA (ADR-002).
+  if (e instanceof ErroApi) return { codigo: e.codigo, mensagem: e.message, correlationId: e.correlationId };
   return { codigo: "falha_interna", mensagem: "falha ao falar com o servidor" };
 }
 
@@ -57,9 +61,12 @@ async function agir(fn: () => Promise<void>): Promise<void> {
   dispatch({ tipo: "ocupado", valor: true });
   try {
     await fn();
-    dispatch({ tipo: "ocupado", valor: false });
   } catch (e) {
     dispatch({ tipo: "erro", erro: erroDe(e) });
+  } finally {
+    // definido em 2026-09-21: 'ocupado' saía do catch ligado e travava os botões da tela até a próxima
+    // ação bem-sucedida (visto no 409 do card de acesso: "Permitir acesso" ficava inerte depois do erro).
+    dispatch({ tipo: "ocupado", valor: false });
   }
 }
 
@@ -78,6 +85,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
+  if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   if (q.startsWith("conversa:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), concessoes: (await api.concessoes(q.slice(11))).concessoes };
@@ -117,6 +125,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return t.tipo === "chaves" || t.tipo === "espaco";
+  if (q === "relatos") return t.tipo === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
   if (q.startsWith("concessoes:")) return (t.tipo === "perfil" || t.tipo === "conversa") && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
@@ -228,6 +237,9 @@ function renderPrincipal(): void {
       break;
     case "chaves":
       corpo = renderChaves(estado);
+      break;
+    case "relatos":
+      corpo = renderRelatos(estado);
       break;
     case "espaco":
       corpo = renderEspaco(estado, ambienteBanco);
@@ -482,10 +494,18 @@ function filtrarBots(texto: string, raiz = "#sidebar"): void {
 }
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
+  "relatar-mensagem": (el) => {
+    const id = el.dataset.id;
+    // definido em 2026-09-21: o correlation_id NÃO vai junto. `estado.erro` é o slot do último erro
+    // do app inteiro — pode ser de outra chamada, de vinte minutos atrás, e some quando qualquer
+    // agir() dá certo. Carimbar isso no relato mandaria quem investiga para a linha de log errada;
+    // o turno e a mensagem já ligam o relato ao que aconteceu.
+    if (id && api) abrirReportarBug(api, id, __NOD_VERSAO__, null);
+  },
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
+    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
   },
   "conectar-composio": (el) => agir(async () => {
     if (!estado.composioConfigurado) {

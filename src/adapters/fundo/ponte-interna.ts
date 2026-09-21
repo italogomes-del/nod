@@ -131,6 +131,36 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
           const r = await assentarTurno(d, { ...e, executor });
+          // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
+          // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
+          // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).
+          // Best-effort: um SAVEPOINT isola a escrita para que ela NUNCA derrube o assentamento.
+          // erro_cru vem do fornecedor sem teto de tamanho, e um timeout no insert do toast levaria
+          // junto a mensagem do agente, o gasto e o outbox — o observador não pode destruir o
+          // observado. Truncado em 8 KiB, o mesmo teto do corte de resultado do proxy.
+          if (e.resultado.desfecho !== "sucesso" && !r.data.duplicada) {
+            try {
+              await d.tx(async (t) => {
+                await t`savepoint diagnostico`;
+                try {
+                  await criarRepos(t, escopo).relatos.registrarDiagnostico({
+                    turnoId: e.turnoId,
+                    erroCru: e.resultado.erroCru ? e.resultado.erroCru.slice(0, 8000) : null,
+                    ferramentas: e.resultado.ferramentasChamadas,
+                    negacoes: e.resultado.negacoesPermissao,
+                    sessaoCli: e.resultado.sessaoCli,
+                    em: agora(),
+                  });
+                  await t`release savepoint diagnostico`;
+                } catch (err) {
+                  await t`rollback to savepoint diagnostico`;
+                  throw err;
+                }
+              });
+            } catch {
+              log("aviso", "diagnostico_nao_gravado", { turno_id: e.turnoId });
+            }
+          }
           const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
           const events = [...(r.events ?? []), ...extras];
           if (events.length) await d.repos.events.gravarComOutbox(events);

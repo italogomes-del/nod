@@ -16,6 +16,7 @@ export type TipoFrame =
   | "computador.mudou"
   | "agente.mudou"
   | "parada.faixa"
+  | "relato.criado"
   | "resumed";
 
 /**

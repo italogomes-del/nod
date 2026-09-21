@@ -1,0 +1,196 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import { JANELA_RELATO_MS } from "../../src/contracts/relato.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import { criarRepos } from "../../src/repositories/index.ts";
+import { registrarRelato } from "../../src/use-cases/registrar-relato.ts";
+import type { Deps } from "../../src/use-cases/tipos.ts";
+import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+import type { Tx } from "../../src/shared/types.ts";
+import type { Escopo } from "../../src/shared/types.ts";
+
+const escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+
+/** Deps mínimo: o caso de uso só usa repos, escopo e o relógio (é puro quanto ao resto). */
+function deps(trx: Tx, e: Escopo, agora: number): Deps {
+  return {
+    repos: criarRepos(trx, e),
+    services: {} as Deps["services"],
+    useCases: {} as Deps["useCases"],
+    tx: (fn) => fn(trx),
+    escopo: e,
+    agora: () => agora,
+  };
+}
+
+describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
+  it("copia o estado técnico do turno e guarda a prosa separada do registro", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const turno = await a.repos.turnos.enfileirar({
+        conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
+        profundidade: 0, entradaTexto: "faça a coisa", entradaConfianca: "confiavel",
+        modelo: "claude-haiku-4-5-20251001", harness: "claude-cli",
+      });
+      const assentado = await a.repos.turnos.assentar(turno!.id, {
+        estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: null,
+        sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false },
+        custoUsd: 0.0123, tokensEntrada: 10, tokensSaida: 0,
+      });
+      expect(assentado).not.toBeNull();
+
+      await a.repos.relatos.registrarDiagnostico({
+        turnoId: turno!.id, erroCru: "stream closed by provider",
+        ferramentas: ["Read", "Bash"], negacoes: ["WebFetch"], sessaoCli: "sess-1", em: agora,
+      });
+
+      const mensagem = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, turnoId: turno!.id, autoria: autoriaPessoa(PESSOA_MARLON),
+        kind: "texto", texto: "resposta ruim", confianca: "nao_confiavel", parcial: true,
+      });
+
+      const r = await registrarRelato(deps(trx, escopo, agora), {
+        mensagemId: mensagem!.id, categoria: "travou_ou_parou", alcance: "mensagem", texto: "  devia ter avisado  ",
+        versaoApp: "0.2.0-rc.1",
+      });
+
+      const m = r.data.relato.metadados;
+      expect(m.estadoTurno).toBe("interrompido");
+      expect(m.motivoInterrupcao).toBe("sem_progresso");
+      expect(m.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: false });
+      expect(m.modelo).toBe("claude-haiku-4-5-20251001");
+      expect(m.harness).toBe("claude-cli");
+      expect(m.custoUsd).toBeCloseTo(0.0123);
+      expect(m.confiancaMensagem).toBe("nao_confiavel");
+      expect(m.mensagemParcial).toBe(true);
+      expect(m.versaoApp).toBe("0.2.0-rc.1");
+      // O diagnóstico que antes só existia como linha de log agora chega ao relato.
+      expect(r.data.relato.diagnostico).toEqual({
+        erroCru: "stream closed by provider", ferramentas: ["Read", "Bash"], negacoes: ["WebFetch"], sessaoCli: "sess-1",
+      });
+
+      // O evento carrega só escalares: o texto NUNCA sai pela trilha (ADR-004).
+      const ev = r.events?.[0];
+      expect(ev?.kind).toBe("relato_criado");
+      expect(ev?.dados).toMatchObject({ categoria: "travou_ou_parou", alcance: "mensagem", mensagens_anexadas: 1, com_diagnostico: true });
+      expect(JSON.stringify(ev?.dados)).not.toContain("devia ter avisado");
+
+      // A prosa vive fora do registro, e chega aparada.
+      const prosa = await a.repos.relatos.prosaDe(r.data.relato.id);
+      expect(prosa?.textoPessoa).toBe("devia ter avisado");
+      expect(prosa?.trecho?.mensagens).toHaveLength(1);
+      expect(prosa?.trecho?.mensagens[0]?.texto).toBe("resposta ruim");
+    });
+  });
+
+  it("a janela anexa só o que cabe nos 15 minutos anteriores à mensagem apontada", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const autoria = autoriaPessoa(PESSOA_MARLON);
+      const criar = async (texto: string) =>
+        (await a.repos.mensagens.criar({ conversaId: a.conversaId, autoria, kind: "texto", texto, confianca: "confiavel" }))!;
+
+      const antiga = await criar("muito antes");
+      await trx`update mensagens set criado_em = ${new Date(agora - JANELA_RELATO_MS - 60_000)} where id = ${antiga.id}`;
+      const dentro = await criar("dentro da janela");
+      await trx`update mensagens set criado_em = ${new Date(agora - 60_000)} where id = ${dentro.id}`;
+      const alvo = await criar("a que deu errado");
+      await trx`update mensagens set criado_em = ${new Date(agora)} where id = ${alvo.id}`;
+
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: alvo.id, categoria: "lento", alcance: "janela" });
+      expect(r.data.relato.mensagensAnexadas).toBe(2);
+
+      const prosa = await a.repos.relatos.prosaDe(r.data.relato.id);
+      expect(prosa?.trecho?.mensagens.map((m) => m.texto)).toEqual(["dentro da janela", "a que deu errado"]);
+    });
+  });
+
+  it("mensagem sem turno (sistema) rende relato sem metadado de execução, e não quebra", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const m = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "sistema",
+        texto: "algo aconteceu", confianca: "confiavel",
+      });
+
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: m!.id, categoria: "interface", alcance: "mensagem" });
+      expect(r.data.relato.turnoId).toBeNull();
+      expect(r.data.relato.metadados.estadoTurno).toBeNull();
+      expect(r.data.relato.metadados.sinais).toBeNull();
+      expect(r.data.relato.diagnostico).toBeNull();
+      expect(r.data.relato.metadados.confiancaMensagem).toBe("confiavel");
+    });
+  });
+
+  it("mensagem inexistente é nao_encontrado, nunca um relato órfão", async () => {
+    await withRollback(escopo, async (trx) => {
+      await expect(
+        registrarRelato(deps(trx, escopo, Date.now()), { mensagemId: randomUUID(), categoria: "outro", alcance: "mensagem" }),
+      ).rejects.toMatchObject({ codigo: "nao_encontrado" });
+    });
+  });
+
+  /**
+   * O relato é insumo de ROADMAP: quem investiga precisa ver o que as outras pessoas relataram,
+   * senão a triagem lista só os próprios. A PROSA continua privada — é ela que carrega dado de
+   * aprendiz e conteúdo de conector (ADR-002/026).
+   */
+  it("o time lê o registro do relato, mas a prosa é só de quem escreveu", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const m = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto",
+        texto: "conteúdo privado do Marlon", confianca: "confiavel",
+      });
+      const r = await registrarRelato(deps(trx, escopo, agora), {
+        mensagemId: m!.id, categoria: "resposta_errada", alcance: "mensagem", texto: "segredo",
+      });
+
+      const ana = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+      await vincularEscopo(trx, ana);
+      const reposAna = criarRepos(trx, ana);
+      // Registro: visível para a equipe, senão ninguém faz triagem.
+      expect(await reposAna.relatos.buscar(r.data.relato.id)).not.toBeNull();
+      expect((await reposAna.relatos.listar()).some((x) => x.id === r.data.relato.id)).toBe(true);
+      // Prosa: privada. O texto da pessoa e o trecho da conversa não atravessam.
+      expect(await reposAna.relatos.prosaDe(r.data.relato.id)).toBeNull();
+      // Escrever também não: a policy da 0004 abre LEITURA para 'equipe', nunca escrita.
+      expect(await trx`update relatos set categoria = 'outro' where id = ${r.data.relato.id} returning id`).toHaveLength(0);
+      expect(await trx`update relato_prosa set texto_pessoa = 'adulterado' where relato_id = ${r.data.relato.id} returning id`).toHaveLength(0);
+
+      await vincularEscopo(trx, escopo);
+      expect((await criarRepos(trx, escopo).relatos.prosaDe(r.data.relato.id))?.textoPessoa).toBe("segredo");
+    });
+  });
+
+  it("a listagem traz o diagnóstico do turno — é o campo que a feature existe para resgatar", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const turno = await a.repos.turnos.enfileirar({
+        conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
+        profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet",
+      });
+      // Duas linhas para o mesmo turno: a segunda simula a entrega tardia, mais pobre.
+      await a.repos.relatos.registrarDiagnostico({ turnoId: turno!.id, erroCru: "causa real", ferramentas: ["Read"], negacoes: [], sessaoCli: "s1", em: agora });
+      await a.repos.relatos.registrarDiagnostico({ turnoId: turno!.id, erroCru: null, ferramentas: [], negacoes: [], sessaoCli: null, em: agora + 5_000 });
+
+      const m = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, turnoId: turno!.id, autoria: autoriaPessoa(PESSOA_MARLON),
+        kind: "texto", texto: "falhou", confianca: "confiavel",
+      });
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: m!.id, categoria: "travou_ou_parou", alcance: "mensagem" });
+
+      const naLista = (await a.repos.relatos.listar()).find((x) => x.id === r.data.relato.id);
+      // A PRIMEIRA linha vence: a entrega tardia não apaga a causa real da falha.
+      expect(naLista?.diagnostico).toEqual({ erroCru: "causa real", ferramentas: ["Read"], negacoes: [], sessaoCli: "s1" });
+    });
+  });
+});

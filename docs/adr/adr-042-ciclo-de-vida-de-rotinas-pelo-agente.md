@@ -1,4 +1,4 @@
-# ADR-041 — O agente cuida do ciclo de vida da rotina, não só do nascimento
+# ADR-042 — O agente cuida do ciclo de vida da rotina, não só do nascimento
 
 Status: aceito · Data: 2026-09-21 · Emenda ADR-011, ADR-033 e ADR-034.
 

@@ -5,7 +5,7 @@ import type { Entrega } from "../contracts/ponte.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
-import { redigir } from "../domain/redacao.ts";
+import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -30,8 +30,12 @@ type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: Motiv
  */
 export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm">, resultado: Entrega["resultado"]): Desfecho {
   if (resultado.desfecho === "sucesso") return { estado: "concluido", motivoInterrupcao: null, motivoFalha: null };
-  if (resultado.desfecho === "falha") return { estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: resultado.motivoFalha ?? "erro_execucao" };
-  const motivo = resultado.motivoInterrupcao ?? (turno.pararSolicitadoEm !== null ? "parado_pela_pessoa" : "sem_progresso");
+  // definido em 2026-09-18: quem produziu saída e não concluiu NÃO é 'sem_progresso' — o rótulo
+  // mentia num turno que tinha lido arquivos e escrito no chat antes de acabar. producedOutput é o
+  // sinal que o ADR-009 já grava para isso.
+  if (resultado.desfecho === "falha") return { estado: "interrompido", motivoInterrupcao: resultado.sinais.producedOutput ? "trabalho_incompleto" : "sem_progresso", motivoFalha: resultado.motivoFalha ?? "erro_execucao" };
+  const semMotivo = turno.pararSolicitadoEm !== null ? "parado_pela_pessoa" : resultado.sinais.producedOutput ? "trabalho_incompleto" : "sem_progresso";
+  const motivo = resultado.motivoInterrupcao ?? semMotivo;
   return { estado: "interrompido", motivoInterrupcao: motivo, motivoFalha: resultado.motivoFalha ?? null };
 }
 
@@ -142,7 +146,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       turnoId: turno.id,
       autoria,
       kind: "sistema",
-      texto: redigir("turno-interrompido", agora, { motivo }),
+      texto: redigir("turno-interrompido", agora, { motivo: motivoEmPortugues(motivo) }),
       confianca: "confiavel",
     });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));

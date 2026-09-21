@@ -9,6 +9,7 @@ import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
+import type { Relato } from "../../src/contracts/relato.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
@@ -56,6 +57,7 @@ export type BancoMemoria = {
   procuracoes: Procuracao[];
   inventario: { tenantId: string; pessoaId: string; motor: string; inventario: Inventario }[];
   gastos: (Gasto & { tenantId: string; ownerId: string })[];
+  relatos: (Relato & { ownerId: string })[];
   trilha: LinhaTrilha[];
   paradas: (Parada & { tenantId: string })[];
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
@@ -89,6 +91,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     procuracoes: [],
     inventario: [],
     gastos: [],
+    relatos: [],
     trilha: [],
     paradas: [],
     catcher: [],
@@ -384,6 +387,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async listarDaConversa(conversaId, limite = 200) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
+        return todas.slice(Math.max(0, todas.length - limite));
+      },
+      async janelaAte(conversaId, ancoraId, desde, limite = 100) {
+        const ancora = doTenant(b.mensagens).find((m) => m.id === ancoraId);
+        const todas = doTenant(b.mensagens)
+          .filter((m) => m.conversaId === conversaId && m.criadoEm >= desde && (m.id === ancoraId || (ancora ? m.criadoEm <= ancora.criadoEm : true)))
+          .sort((x, y) => x.criadoEm - y.criadoEm);
         return todas.slice(Math.max(0, todas.length - limite));
       },
       async ultimaDaConversa(conversaId) {
@@ -1007,6 +1017,56 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async listar() {
         return b.inventario.filter((i) => i.tenantId === escopo.tenantId && i.pessoaId === escopo.pessoaId).map(({ motor, inventario }) => ({ motor, inventario }));
+      },
+    },
+
+    relatos: {
+      async criar(r) {
+        const relato: Relato = {
+          tenantId: escopo.tenantId,
+          id: randomUUID(),
+          mensagemId: r.mensagemId,
+          conversaId: r.conversaId,
+          turnoId: r.turnoId,
+          categoria: r.categoria,
+          alcance: r.alcance,
+          mensagensAnexadas: r.mensagensAnexadas,
+          metadados: {
+            estadoTurno: r.estadoTurno,
+            origemTurno: r.origemTurno,
+            sinais: r.sinais,
+            motivoFalha: r.motivoFalha,
+            motivoInterrupcao: r.motivoInterrupcao,
+            modelo: r.modelo,
+            harness: r.harness,
+            executor: r.executor,
+            machineId: r.machineId,
+            custoUsd: r.custoUsd,
+            reenvios: r.reenvios,
+            confiancaMensagem: r.confiancaMensagem,
+            mensagemParcial: r.mensagemParcial,
+            versaoApp: r.versaoApp,
+            correlationId: r.correlationId,
+          },
+          diagnostico: null,
+          criadoEm: Date.now(),
+        };
+        b.relatos.push({ ...relato, ownerId: escopo.pessoaId });
+        return relato;
+      },
+      async gravarProsa() {},
+      async listar(limite = 100) {
+        return doTenant(b.relatos).sort((x, y) => y.criadoEm - x.criadoEm).slice(0, limite);
+      },
+      async buscar(id) {
+        return doTenant(b.relatos).find((r) => r.id === id) ?? null;
+      },
+      async prosaDe() {
+        return null;
+      },
+      async registrarDiagnostico() {},
+      async diagnosticoDoTurno() {
+        return null;
       },
     },
 

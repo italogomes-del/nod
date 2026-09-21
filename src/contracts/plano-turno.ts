@@ -56,7 +56,7 @@ export type PlanoTurno = {
   profundidade: Profundidade;
   catalogo: { ferramentas: FerramentaPlano[]; servidores: ServidorPlano[] };
   promptSistema: string;
-  entrada: { texto: string; sessaoCli: string | null; modelo: string; maxTurnos: number };
+  entrada: { texto: string; sessaoCli: string | null; modelo: string };
   politicaExecucao: {
     prazoMs: number;
     orcamentoResultadoChars: number;
