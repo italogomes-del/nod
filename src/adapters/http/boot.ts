@@ -143,7 +143,13 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     machineId,
     ponte: app.ponte,
     iniciarLaco: app.iniciarLaco,
-    executor: app.idDriver,
+    // valor VIVO como o scheduler abaixo: `executor: app.idDriver` avaliava o getter UMA vez e
+    // congelava o driver do boot. Hoje só alimenta o anúncio inicial à ponte (que trocar()
+    // re-anuncia em compor.ts), mas a cópia é a forma que o §Composição do AGENTS.md proíbe — e
+    // basta alguém passar a ler o.executor depois do início para virar bug silencioso.
+    get executor() {
+      return app.idDriver;
+    },
     relogio: agora,
     intervaloMs: iv.orquestradorMs,
     listarPessoas: o.listarPessoas,

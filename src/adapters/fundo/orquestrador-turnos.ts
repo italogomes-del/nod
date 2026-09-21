@@ -9,6 +9,17 @@ import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 /** definido em 2026-09-16: 2 s entre varreduras de pessoas — pessoa nova (seed/cadastro) ganha laço em até 2 s sem reiniciar. */
 export const INTERVALO_ORQUESTRADOR_MS = 2_000;
 
+/**
+ * Validade do inventário anunciado à ponte (definido em 2026-09-21). O anúncio é o que decide o gate
+ * pré-spawn em despachar-turno; antes disto ele era escrito UMA vez no boot e só mudava numa troca de
+ * executor, então o gate mentia nas duas direções até alguém mexer no interruptor: driver que caiu
+ * (deslogou, credencial expirou) seguia 'pronto' e o turno falhava adiante como executor_indisponivel;
+ * driver anunciado em sombra seguia 'ausente' e recusava TODO turno mesmo depois de ficar pronto.
+ * 60 s alinha com o TTL de 5 min da sonda compartilhada sem ressondar a cada tick de 2 s — a sonda do
+ * boot é `claude auth status` (sem turno, sem custo de token), mas é processo filho.
+ */
+export const VALIDADE_ANUNCIO_MS = 60_000;
+
 /** Assinatura do laço da L4 (src/adapters/executor/laco.ts): injetada aqui, nunca importada — a L9 liga. */
 export type LacoAtivo = { parar(): Promise<void> | void };
 export type IniciarLaco = (p: { ponte: PonteInterna; registry: Registry; pessoaId: string; machineId: string; relogio: Relogio }) => LacoAtivo;
@@ -19,10 +30,16 @@ export type OpcoesOrquestrador = {
   machineId: string;
   ponte: PonteInterna;
   iniciarLaco: IniciarLaco;
-  /** Driver anunciado à ponte (inventário vem da sonda dele); default catcher fora de produção. */
+  /**
+   * Driver anunciado à ponte (inventário vem da sonda dele); default catcher fora de produção.
+   * Quem liga passa GETTER, nunca cópia: o anúncio é renovado no tick e tem que ver a troca do
+   * interruptor (AGENTS.md §Composição).
+   */
   executor?: IdDriver;
   relogio?: Relogio;
   intervaloMs?: number;
+  /** Validade do anúncio; default VALIDADE_ANUNCIO_MS (testes encurtam). */
+  validadeAnuncioMs?: number;
   nomeMaquina?: string;
   listarPessoas?: OpcoesLaco["listarPessoas"];
 };
@@ -43,17 +60,35 @@ async function inventarioDoRegistry(registry: Registry, executor: IdDriver, agor
  */
 export async function iniciarOrquestrador(o: OpcoesOrquestrador): Promise<Orquestrador> {
   const relogio = o.relogio ?? (() => Date.now());
-  const executor = o.executor ?? "catcher";
+  const nome = o.nomeMaquina ?? hostname();
   const lacos = new Map<string, LacoAtivo>();
-  const inventario = await inventarioDoRegistry(o.registry, executor, relogio());
-  await o.ponte.conectar({ machineId: o.machineId, nome: o.nomeMaquina ?? hostname(), inventario, versaoContrato: 1 });
-  log("info", "orquestrador_iniciado", { machine_id: o.machineId, executor, inventario: inventario.estado });
+  // `o.executor` é lido A CADA anúncio, nunca copiado (AGENTS.md §Composição): depois de uma troca
+  // pelo interruptor o re-anúncio tem que sondar o driver NOVO.
+  const anunciar = async (): Promise<Inventario> => {
+    const executor = o.executor ?? "catcher";
+    const inventario = await inventarioDoRegistry(o.registry, executor, relogio());
+    await o.ponte.conectar({ machineId: o.machineId, nome, inventario, versaoContrato: 1 });
+    anunciadoEm = relogio();
+    return inventario;
+  };
+  let anunciadoEm = 0;
+  const inventario = await anunciar();
+  log("info", "orquestrador_iniciado", { machine_id: o.machineId, executor: o.executor ?? "catcher", inventario: inventario.estado });
 
   let varrendo = false;
   const tick = async () => {
     if (varrendo) return;
     varrendo = true;
     try {
+      // Anúncio vencido: ressonda antes de abrir laço, senão o gate pré-spawn decide por um estado velho.
+      if (relogio() - anunciadoEm >= (o.validadeAnuncioMs ?? VALIDADE_ANUNCIO_MS)) {
+        try {
+          await anunciar();
+        } catch (e) {
+          // ADR-029: falha de sonda é dita, nunca engolida — o anúncio anterior segue valendo até a próxima.
+          log("aviso", "anuncio_nao_renovado", { machine_id: o.machineId, erro: e instanceof Error ? e.name : "desconhecido" });
+        }
+      }
       await paraCadaPessoa(
         o.db,
         async (escopo) => {
