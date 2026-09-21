@@ -4,7 +4,7 @@ import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../domain/stream-json.ts";
 import { log } from "../../obs/log.ts";
-import { RENOVACAO_MS } from "../../shared/constantes.ts";
+import { INATIVIDADE_TURNO_MS, ISENCAO_FERRAMENTA_MS, RENOVACAO_MS, VERIFICACAO_INATIVIDADE_MS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import type { Adapter, IdDriver, Registry } from "./spi.ts";
 
@@ -26,6 +26,10 @@ export type OpcoesLaco = {
   esperaVaziaMs?: number;
   jitterMs?: number;
   renovacaoMs?: number;
+  /** Janela de silêncio que caracteriza turno travado; injetável para o teste não esperar 5 min. */
+  inatividadeMs?: number;
+  verificacaoInatividadeMs?: number;
+  isencaoFerramentaMs?: number;
   /** Deltas são efêmeros: vão direto ao barramento (L8), nunca pelo outbox. */
   aoDelta?: (plano: PlanoTurno, texto: string) => void;
   /** Cada EventoStream interpretado, para quem persiste (catcher_registros, trilha) sem passar pela ponte. */
@@ -67,6 +71,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
   const esperaVaziaMs = o.esperaVaziaMs ?? 1_000;
   const jitterMs = o.jitterMs ?? 300;
   const renovacaoMs = o.renovacaoMs ?? RENOVACAO_MS;
+  const inatividadeMs = o.inatividadeMs ?? INATIVIDADE_TURNO_MS;
+  const verificacaoInatividadeMs = o.verificacaoInatividadeMs ?? VERIFICACAO_INATIVIDADE_MS;
+  const isencaoFerramentaMs = o.isencaoFerramentaMs ?? ISENCAO_FERRAMENTA_MS;
   let parado = false;
   let acordar: (() => void) | null = null;
   let adapterAtual: Adapter | null = null;
@@ -83,6 +90,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let sinais: SinaisTurno = { ...SINAIS_ZERADOS };
     let entregue = false;
     let renovando: Promise<void> | null = null;
+    let travado = false;
 
     const renovar = async (): Promise<void> => {
       if (entregue) return;
@@ -101,6 +109,30 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     };
     const batida = setInterval(() => void renovar(), renovacaoMs);
     batida.unref?.();
+
+    /**
+     * Watchdog de ATIVIDADE (definido em 2026-09-18, no lugar do teto de passos). O lease prova que
+     * o processo vive; este relógio pergunta se o agente progride. Uma chamada de ferramenta em
+     * andamento é silêncio legítimo — computador_* leva até 240s e o proxy serializa as chamadas —
+     * então tool_use sem tool_result isenta, com teto para um resultado perdido não isentar sempre.
+     */
+    let ultimaAtividade = o.relogio();
+    let ferramentaAbertaDesde: number | null = null;
+    const ferramentasAbertas = new Set<string>();
+    const marcarAtividade = () => {
+      ultimaAtividade = o.relogio();
+    };
+    const vigiar = () => {
+      if (entregue || !adapterAtual) return;
+      const agora = o.relogio();
+      const isento = ferramentasAbertas.size > 0 && ferramentaAbertaDesde !== null && agora - ferramentaAbertaDesde < isencaoFerramentaMs;
+      if (isento || agora - ultimaAtividade < inatividadeMs) return;
+      travado = true;
+      log("aviso", "turno_travado", { turno_id: plano.turnoId, mudo_ms: agora - ultimaAtividade, ferramentas_abertas: ferramentasAbertas.size });
+      void adapterAtual.interromper();
+    };
+    const vigia = setInterval(vigiar, verificacaoInatividadeMs);
+    vigia.unref?.();
 
     const entregar = async (resultado: ResultadoTurno): Promise<void> => {
       if (entregue) return;
@@ -138,18 +170,32 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           if (s === "promptSubmitted") await renovar();
         },
         evento(ev) {
+          marcarAtividade();
+          if (ev.tipo === "tool_use") {
+            ferramentasAbertas.add(ev.id);
+            ferramentaAbertaDesde ??= o.relogio();
+          } else if (ev.tipo === "tool_result") {
+            ferramentasAbertas.delete(ev.toolUseId);
+            if (ferramentasAbertas.size === 0) ferramentaAbertaDesde = null;
+          }
           o.aoEvento?.(plano, ev);
         },
         delta(texto) {
+          marcarAtividade();
           o.aoDelta?.(plano, texto);
         },
       });
-      await entregar({ ...resultado, sinais: { ...resultado.sinais, ...sinais } });
+      // Interrompido por este watchdog: o classificador não sabe o motivo, quem sabe é quem matou.
+      const comMotivo = travado && resultado.desfecho === "interrompido" && !resultado.motivoInterrupcao
+        ? { ...resultado, motivoInterrupcao: "turno_travado" as const }
+        : resultado;
+      await entregar({ ...comMotivo, sinais: { ...resultado.sinais, ...sinais } });
     } catch (erro) {
       log("erro", "laco_turno_excecao", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
       await entregar(resultadoDeExcecao(erro, sinais));
     } finally {
       clearInterval(batida);
+      clearInterval(vigia);
       adapterAtual = null;
       turnoAtual = null;
       o.aoTerminarTurno?.(plano);

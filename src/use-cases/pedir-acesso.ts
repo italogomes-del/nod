@@ -22,6 +22,18 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   if (!conectar && (input.capacidades.length === 0 || desconhecidas.length > 0)) {
     throw new ErroDeDominio("entrada_invalida", { cause: `capacidades fora do catálogo: ${desconhecidas.join(", ")}` });
   }
+  // definido em 2026-09-21: pedido pendente IDÊNTICO (mesmo turno, conector e capacidades) não abre
+  // outro — devolve o que já está na conversa, como a proposta de pasta faz (fundo/workspaces.ts).
+  // Medido no dia: a Cecília chamou pedir_acesso três vezes em 3 s no mesmo turno; cada proposta virou
+  // uma decisão de acesso própria (mesmo id da proposta, confirmar-proposta.ts) com a MESMA frase, e
+  // depois de aprovar uma as outras ficaram impossíveis de resolver.
+  const mesmas = [...new Set(input.capacidades)].sort().join(",");
+  const jaPendente = (await deps.repos.propostas.pendentesDaConversa(input.conversaId)).find((p) => {
+    if (p.payload.kind !== "acesso" || p.agenteId !== input.agenteId) return false;
+    return p.payload.turnoId === input.turnoId && p.payload.conector === input.conector && [...new Set(p.payload.capacidades)].sort().join(",") === mesmas;
+  });
+  if (jaPendente) return { data: { proposta_id: jaPendente.id }, events: [] };
+
   const proposta = await deps.repos.propostas.criar({
     conversaId: input.conversaId,
     agenteId: input.agenteId,

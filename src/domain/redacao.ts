@@ -50,6 +50,24 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   anotei: "Anotei como {tipo}: {texto}",
 };
 
+/**
+ * definido em 2026-09-18: a frase interpolava o código cru e a pessoa lia "erro_max_turns". Motivo
+ * sem tradução continua saindo como está — é dado técnico visível, não um buraco silencioso.
+ */
+const MOTIVO_EM_PORTUGUES: Readonly<Record<string, string>> = {
+  turno_travado: "o agente ficou sem responder",
+  trabalho_incompleto: "o agente não chegou ao fim da tarefa",
+  sem_progresso: "o agente não chegou a produzir nada",
+  parado_pela_pessoa: "você pediu para parar",
+  maquina_sem_contato: "o computador parou de responder",
+  reinicio_servidor: "o servidor reiniciou",
+  executor_indisponivel: "a inteligência não estava disponível",
+};
+
+export function motivoEmPortugues(motivo: string): string {
+  return MOTIVO_EM_PORTUGUES[motivo] ?? motivo;
+}
+
 export function redigir(chave: ChaveRedacao, _agora: number, params: Readonly<Record<string, string>> = {}): string {
   let texto = CATALOGO[chave];
   for (const [k, v] of Object.entries(params)) texto = texto.split(`{${k}}`).join(v);

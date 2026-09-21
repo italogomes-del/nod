@@ -25,7 +25,7 @@ function planoDeTeste(parcial: Partial<PlanoTurno["entrada"]> = {}): PlanoTurno 
       servidores: [],
     },
     promptSistema: "Você é a Vera. Responda em português.",
-    entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001", maxTurnos: 12, ...parcial },
+    entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001", ...parcial },
     politicaExecucao: { prazoMs: 3_600_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
     tokenDeTurno: "tok",
     expiraEm: 1,
@@ -52,7 +52,8 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(valor(args, "--allowedTools")).toBe("mcp__nod__lembrar,mcp__nod__ex__somar");
     expect(valor(args, "--permission-mode")).toBe("default");
     expect(valor(args, "--model")).toBe("claude-haiku-4-5-20251001");
-    expect(valor(args, "--max-turns")).toBe("12");
+    // definido em 2026-09-18: sem teto de passos — quem limita o turno é o watchdog de atividade.
+    expect(args).not.toContain("--max-turns");
     expect(valor(args, "--append-system-prompt")).toBe("Você é a Vera. Responda em português.");
     // nunca as flags que liberam tudo
     expect(args).not.toContain("--dangerously-skip-permissions");
@@ -95,6 +96,26 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(env.MCP_TOOL_TIMEOUT).toBe("60000");
     expect(montarEnvDoFilho({}, "/h", 120_000).MCP_TOOL_TIMEOUT).toBe("120000");
     expect(env.LANG).toBe("pt_BR");
+  });
+});
+
+describe("sem teto de passos, com janela de contexto", () => {
+  it("nunca passa --max-turns", () => {
+    const { args } = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json" });
+    expect(args).not.toContain("--max-turns");
+  });
+  it("--autocompact entra só quando o help da versão instalada oferece a flag", () => {
+    const com = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json", compactar: true }).args;
+    expect(valor(com, "--autocompact")).toBe("200000");
+    // Fail-closed: versão sem a flag roda sem ela, em vez de o turno falhar.
+    const sem = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json", compactar: false }).args;
+    expect(sem).not.toContain("--autocompact");
+  });
+  it("--autocompact não entra no gate de todo turno; --max-turns fica na tabela para a sonda", () => {
+    expect(FLAGS_DO_TURNO).not.toContain("--autocompact");
+    expect(FLAGS_DO_TURNO).not.toContain("--max-turns");
+    expect(FLAG_FLOORS["--autocompact"].piso).toBe("2.1.276");
+    expect(FLAG_FLOORS["--max-turns"]).toBeDefined();
   });
 });
 

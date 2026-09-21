@@ -32,8 +32,6 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   peer: ["lembrar"],
 };
 
-/** definido em 2026-09-16: cabe lembrar → pedir_aprovacao → resposta, com folga; a sonda com MCP usou 2 (s3). */
-export const MAX_TURNOS_CLI = 12;
 /** definido em 2026-09-16: 1 h = janela do cache ephemeral_1h do CLI (mapa-cli); plano mais velho que isso é fail-closed. */
 export const PLANO_VALIDADE_MS = 3_600_000;
 
@@ -147,7 +145,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
     promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores }),
-    entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, maxTurnos: MAX_TURNOS_CLI },
+    entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo },
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,

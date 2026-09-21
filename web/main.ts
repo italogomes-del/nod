@@ -57,9 +57,12 @@ async function agir(fn: () => Promise<void>): Promise<void> {
   dispatch({ tipo: "ocupado", valor: true });
   try {
     await fn();
-    dispatch({ tipo: "ocupado", valor: false });
   } catch (e) {
     dispatch({ tipo: "erro", erro: erroDe(e) });
+  } finally {
+    // definido em 2026-09-21: 'ocupado' saía do catch ligado e travava os botões da tela até a próxima
+    // ação bem-sucedida (visto no 409 do card de acesso: "Permitir acesso" ficava inerte depois do erro).
+    dispatch({ tipo: "ocupado", valor: false });
   }
 }
 

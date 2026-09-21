@@ -37,7 +37,7 @@ function planoDeTeste(texto: string, parcial: Partial<PlanoTurno> = {}): PlanoTu
       servidores: [],
     },
     promptSistema: "",
-    entrada: { texto, sessaoCli: null, modelo: "claude-haiku-4-5-20251001", maxTurnos: 12 },
+    entrada: { texto, sessaoCli: null, modelo: "claude-haiku-4-5-20251001" },
     politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
     tokenDeTurno: TOKEN,
     expiraEm: Date.now() + 60_000,

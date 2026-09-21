@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { driverDoPlano, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
 import type { Adapter, Driver, Instance, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
+import type { EventoStream, ResultadoTurno } from "../../../src/contracts/turno.ts";
 import type { Entrega, PedidoRenovar, PonteInterna } from "../../../src/contracts/ponte.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../../src/domain/stream-json.ts";
@@ -23,7 +24,7 @@ function planoDeTeste(turnoId: string, texto: string, executor: "local" | "catch
     profundidade: 0,
     catalogo: { ferramentas: [], servidores: [] },
     promptSistema: "",
-    entrada: { texto, sessaoCli: null, modelo: "claude-haiku-4-5-20251001", maxTurnos: 12 },
+    entrada: { texto, sessaoCli: null, modelo: "claude-haiku-4-5-20251001" },
     politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
     tokenDeTurno: "tok",
     expiraEm: 1,
@@ -207,5 +208,112 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     expect(resultadoDeExcecao(new ErroDeDominio("executor_indisponivel"), SINAIS_ZERADOS)).toMatchObject({ desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel" });
     expect(resultadoDeExcecao(new Error("x"), SINAIS_ZERADOS)).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao" });
     expect(resultadoDeExcecao(new ErroDeDominio("nao_encontrado"), SINAIS_ZERADOS).desfecho).toBe("falha");
+  });
+});
+
+/**
+ * definido em 2026-09-18: o watchdog substituiu o teto de passos (--max-turns), que cortava
+ * trabalho legítimo. Driver controlado evento a evento, com relógio falso — o teste não espera
+ * cinco minutos de verdade.
+ */
+function driverControlado(): { driver: Driver; emitir: (ev: EventoStream) => void; terminar: () => void; interrupcoes: () => number } {
+  let sinks: { evento(e: EventoStream): void; delta(t: string): void; sinal(s: "attempted" | "promptSubmitted" | "producedOutput" | "rejected"): Promise<void> } | null = null;
+  let resolver: ((r: ResultadoTurno) => void) | null = null;
+  let interrupcoes = 0;
+  const parado = (): ResultadoTurno => ({ desfecho: "interrompido", texto: "", sessaoCli: null, sinais: { ...SINAIS_ZERADOS, attempted: true, producedOutput: true }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] });
+  const adapter: Adapter = {
+    async rodarTurno(s) {
+      sinks = s;
+      return new Promise<ResultadoTurno>((r) => { resolver = r; });
+    },
+    async interromper() {
+      interrupcoes += 1;
+      resolver?.(parado());
+    },
+  };
+  const instance: Instance = { async sondar() { return { estado: "pronto", versao: "falso", em: 0 }; }, adapter: () => adapter, async dispose() {} };
+  return {
+    driver: { meta: { id: "catcher", locality: "local" }, async create(): Promise<Instance> { return instance; } },
+    emitir: (ev) => sinks?.evento(ev),
+    terminar: () => resolver?.(parado()),
+    interrupcoes: () => interrupcoes,
+  };
+}
+
+describe("watchdog de atividade", () => {
+  const JANELA = 1_000;
+  async function cenario(d: ReturnType<typeof driverControlado>, agora: () => number) {
+    const ponte = ponteFalsa([planoDeTeste("t1", "tarefa longa"), null]);
+    const registry = await registryCom(d.driver);
+    const laco = iniciarLaco({
+      ponte, registry, pessoaId: "p", machineId: "m1",
+      relogio: agora,
+      renovacaoMs: 10 ** 6,
+      inatividadeMs: JANELA,
+      verificacaoInatividadeMs: 5,
+      isencaoFerramentaMs: JANELA * 3,
+      // Ceder o event loop como os demais testes: async () => {} gira em laço fechado.
+      dormir: async () => new Promise((r) => setTimeout(r, 1)),
+    });
+    return { ponte, laco };
+  }
+
+  it("não interrompe turno que segue emitindo eventos, por mais longo que seja", async () => {
+    let t = 0;
+    const d = driverControlado();
+    const { laco } = await cenario(d, () => t);
+    await new Promise((r) => setTimeout(r, 15));
+    // Muito além da janela, mas com atividade a cada passo: é trabalho, não travamento.
+    for (let n = 0; n < 6; n++) {
+      t += JANELA * 0.9;
+      d.emitir({ tipo: "delta", texto: `passo ${n}` });
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    expect(d.interrupcoes()).toBe(0);
+    d.terminar();
+    await laco.parar();
+  });
+
+  it("interrompe turno mudo e marca turno_travado", async () => {
+    let t = 0;
+    const d = driverControlado();
+    const { ponte, laco } = await cenario(d, () => t);
+    await new Promise((r) => setTimeout(r, 15));
+    t += JANELA * 2;
+    await esperarAte(() => ponte.entregas.length === 1);
+    expect(d.interrupcoes()).toBe(1);
+    expect(ponte.entregas[0]!.resultado.motivoInterrupcao).toBe("turno_travado");
+    await laco.parar();
+  });
+
+  // O caso que prova que o watchdog não mata quem espera: ferramenta em andamento é silêncio
+  // legítimo (computador_* leva até 240s; o proxy serializa as chamadas).
+  it("não interrompe enquanto uma ferramenta está aberta, e o relógio reinicia quando ela responde", async () => {
+    let t = 0;
+    const d = driverControlado();
+    const { ponte, laco } = await cenario(d, () => t);
+    await new Promise((r) => setTimeout(r, 15));
+    d.emitir({ tipo: "tool_use", id: "u1", nome: "computador_terminal", input: {} });
+    t += JANELA * 2.5;
+    await new Promise((r) => setTimeout(r, 25));
+    expect(d.interrupcoes()).toBe(0);
+    expect(ponte.entregas).toHaveLength(0);
+    d.emitir({ tipo: "tool_result", toolUseId: "u1", isError: false, texto: "ok" });
+    await new Promise((r) => setTimeout(r, 15));
+    expect(d.interrupcoes()).toBe(0);
+    d.terminar();
+    await laco.parar();
+  });
+
+  it("a isenção não é eterna: ferramenta aberta além do teto deixa de proteger", async () => {
+    let t = 0;
+    const d = driverControlado();
+    const { ponte, laco } = await cenario(d, () => t);
+    await new Promise((r) => setTimeout(r, 15));
+    d.emitir({ tipo: "tool_use", id: "u1", nome: "computador_terminal", input: {} });
+    t += JANELA * 4;
+    await esperarAte(() => ponte.entregas.length === 1);
+    expect(d.interrupcoes()).toBe(1);
+    await laco.parar();
   });
 });

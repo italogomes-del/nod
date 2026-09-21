@@ -100,7 +100,7 @@ describe("montarPlano", () => {
 
   it("entrada, prazo e expiração vêm do turno/relógio; sessaoCli passa para --resume; sem cwd (EMENDA 11)", () => {
     const p = montarPlano({ ...base, sessaoCli: "sess-1" });
-    expect(p.entrada).toEqual({ texto: "oi", sessaoCli: "sess-1", modelo: "claude-haiku-4-5-20251001", maxTurnos: 12 });
+    expect(p.entrada).toEqual({ texto: "oi", sessaoCli: "sess-1", modelo: "claude-haiku-4-5-20251001" });
     expect(p.politicaExecucao.prazoMs).toBe(86_400_000);
     expect(p.expiraEm).toBe(agora + 3_600_000);
     expect("cwd" in p.politicaExecucao).toBe(false);

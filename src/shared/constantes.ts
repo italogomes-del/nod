@@ -6,6 +6,20 @@ export const LEASE_MS = 90_000;
 export const RENOVACAO_MS = 30_000;
 /** Máquina sem poll há mais que isto = offline. definido em 2026-09-16: dois pulls de 20s + folga (ADR-021, presença derivada do poll). */
 export const OFFLINE_MS = 60_000;
+/**
+ * Silêncio total do agente que caracteriza turno travado. definido em 2026-09-18: substitui o teto
+ * de passos (--max-turns), que cortava trabalho legítimo. Vigia ATIVIDADE, não duração: um turno
+ * pode durar uma hora enquanto emite eventos. Mais curto que os 20 min do openmausbot de propósito —
+ * lá o relógio corre durante o card de permissão, aqui a espera por ferramenta já é isenta.
+ */
+export const INATIVIDADE_TURNO_MS = 300_000;
+/** Verificação do watchdog. definido em 2026-09-18: um quinto da janela, como a batida é do lease. */
+export const VERIFICACAO_INATIVIDADE_MS = 60_000;
+/**
+ * Teto da isenção por ferramenta aberta. definido em 2026-09-18: 2x o timeout de computador_* (240s),
+ * a chamada mais lenta do catálogo. Sem ele, um tool_result perdido isentaria o turno para sempre.
+ */
+export const ISENCAO_FERRAMENTA_MS = 480_000;
 /** Sonda de conector MCP. definido em 2026-09-16: a sonda de hoje viu um turno inteiro com MCP stdio em 8,3 s (mapa-cli); a descoberta tools/list precisa de bem menos. */
 export const PROBE_MS = 8_000;
 /** Fatia do long-poll de aprovação. definido em 2026-09-16: abaixo do teto do pull da ponte (20s no servidor, ADR-021); o teto real do tools/call do CLI é medido por scripts/sonda-mcp-timeout.ts (L4). */

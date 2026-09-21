@@ -38,8 +38,17 @@ export const conceder: CasoDeUso<EntradaConceder, SaidaConceder> = async (deps, 
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
   if (!conversa) throw new ErroDeDominio("estado_invalido", { cause: "agente sem conversa própria" });
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
-  const jaLigadas = (await deps.repos.concessoes.doAgente(agente.id)).filter((c) => c.conectorId === conector.id).map((c) => c.capacidade);
-  const naoInclui = complementoCapacidades(conector, [...jaLigadas, input.capacidade]);
+  const doConector = (await deps.repos.concessoes.doAgente(agente.id)).filter((c) => c.conectorId === conector.id);
+  const naoInclui = complementoCapacidades(conector, [...doConector.map((c) => c.capacidade), input.capacidade]);
+  // definido em 2026-09-21: conceder o que JÁ está concedido é sucesso, não erro. O repositório sempre
+  // foi idempotente por contrato escrito ("null quando a mesma (agente, conector, capacidade) já
+  // existe: conceder duas vezes não duplica", on conflict do nothing) e era este caso de uso que
+  // traduzia esse "nada a fazer" como estado_invalido — o 409 travava para sempre o card de uma
+  // decisão de acesso duplicada: a pessoa já havia consentido, não havia o que decidir nem desfazer.
+  // Sai ANTES da mensagem de consentimento: a original é a imutável e citável (ADR-013), uma segunda
+  // seria ruído na conversa própria do agente. A invariante segue sendo UMA concessão por capacidade.
+  const existente = doConector.find((c) => c.capacidade === input.capacidade);
+  if (existente) return { data: { concessaoId: existente.id, mensagemId: existente.mensagemId, naoInclui }, events: [] };
   const texto = redigir("consentimento", agora, {
     pessoa: pessoa?.nome ?? "a pessoa",
     quando: quandoUtc(agora),

@@ -93,7 +93,12 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     const lista = (await (await srv.chamar(sessao, "GET", `agentes/${agenteId}/concessoes`)).json()) as { concessoes: { id: string; capacidade: string }[] };
     expect(lista.concessoes.map((c) => c.capacidade)).toEqual(["somar"]);
     expect((await srv.chamar(sessao, "POST", `agentes/${agenteId}/concessoes`, { conectorId })).status).toBe(400);
-    expect((await srv.chamar(sessao, "POST", `agentes/${agenteId}/concessoes`, { conectorId, capacidade: "somar" })).status).toBe(409);
+    // definido em 2026-09-21: conceder de novo a MESMA capacidade é idempotente (era 409). Devolve a
+    // concessão que já existe, sem criar outra nem um segundo consentimento — ver conceder.ts.
+    const repetida = await srv.chamar(sessao, "POST", `agentes/${agenteId}/concessoes`, { conectorId, capacidade: "somar" });
+    expect(repetida.status).toBe(201);
+    expect(((await repetida.json()) as { ids: { concessao: string } }).ids.concessao).toBe(corpo.ids.concessao);
+    expect(memoria.banco.mensagens.filter((m) => m.kind === "consentimento")).toHaveLength(1);
     expect((await srv.chamar(sessao, "DELETE", `concessoes/${corpo.ids.concessao}`)).status).toBe(200);
     expect((await srv.chamar(sessao, "DELETE", `concessoes/${corpo.ids.concessao}`)).status).toBe(404);
     // Recria para as rotas internas usarem.
