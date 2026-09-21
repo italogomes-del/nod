@@ -9,6 +9,7 @@ import type { Agente } from "../contracts/agente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
+import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -87,6 +88,15 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     rotina = { exigeAprovacao: daJanela ? daJanela.exigeAprovacao : true };
   }
 
+  // Inventário para o modelo escolher SOBRE QUAL rotina agir (o estado vem computado por COLUNAS:
+  // geração antiga do agente lê como 'pausada'). resumoCron traduz o cron para o texto humano.
+  const rotinasDoAgente = (await deps.repos.rotinas.listarDoAgente(agente.id)).map((r) => ({
+    id: r.id,
+    resumo: resumoCron(r.cron, r.fusoIana),
+    instrucao: r.instrucao,
+    estado: r.estado,
+  }));
+
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
 
@@ -110,6 +120,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pessoaNome: pessoa?.nome ?? "a pessoa",
     colegas: visiveis.filter((a) => a.id !== agente.id && a.ownerId === agente.ownerId && a.confirmado && !a.oculto),
     rotina,
+    rotinasDoAgente,
     agora,
   });
 

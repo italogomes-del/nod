@@ -14,7 +14,7 @@ import { conectorTocaAprendiz } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
-import { montarPromptSistema } from "./prompt-sistema.ts";
+import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
@@ -83,6 +83,8 @@ export type EntradaPlano = {
   contextoConversa?: string;
   /** Só para origem rotina: liga efeitoExternoSoPorAprovacao (EMENDA 15). */
   rotina?: { exigeAprovacao: boolean } | null;
+  /** Inventário para o modelo escolher SOBRE QUAL rotina agir; não confundir com `rotina` acima. */
+  rotinasDoAgente?: readonly RotinaNoPrompt[];
   agora: number;
 };
 
@@ -146,7 +148,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     confiancaEntrada: entrada.confianca,
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, maxTurnos: MAX_TURNOS_CLI },
     politicaExecucao: {
       prazoMs,

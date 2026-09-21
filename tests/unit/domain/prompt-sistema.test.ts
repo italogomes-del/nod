@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Memoria } from "../../../src/contracts/memoria.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
-import { MEMORIAS_NO_PROMPT, montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
+import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
 
 const agente = { nome: "Vera", titulo: "revisora de PRs", descricao: "Revisa PRs do time nod e responde curto." };
 const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } });
@@ -35,6 +35,40 @@ describe("montarPromptSistema", () => {
     expect(p).toContain("atualizar_perfil");
     expect(p).toContain("nenhuma");
     expect(p).not.toContain("O que você faz");
+  });
+
+  it("expõe o inventário de rotinas com id, só para quem pode agir sobre rotina existente", () => {
+    const rotinas = [{ id: "r-relatorio", resumo: "dias úteis às 08:00 (America/Sao_Paulo)", instrucao: "Resumir os PRs abertos", estado: "ativa" as const }];
+    const entrada = { agente, memorias: [], pessoaNome: "Marlon", modo: "conversa" as const, rotinas };
+    const p = montarPromptSistema({ ...entrada, ferramentas: [f("pausar_rotina")] });
+    expect(p).toContain('"id":"r-relatorio"');
+    expect(p).toContain("dias úteis às 08:00");
+    expect(p).toContain('"estado":"ativa"');
+    expect(p).toContain("use o id EXATO");
+    // criar_rotina sozinha não age sobre rotina existente: inventário seria contexto morto.
+    expect(montarPromptSistema({ ...entrada, ferramentas: [f("criar_rotina")] })).not.toContain("r-relatorio");
+    expect(montarPromptSistema({ ...entrada, ferramentas: [] })).not.toContain("Inventário de rotinas");
+  });
+
+  it("manda desambiguar com a pessoa em vez de escolher a rotina por conta própria", () => {
+    const rotinas = [
+      { id: "r-1", resumo: "todo dia às 09:00 (UTC)", instrucao: "Resumir vendas", estado: "ativa" as const },
+      { id: "r-2", resumo: "toda segunda às 09:00 (UTC)", instrucao: "Resumir vendas da semana", estado: "pausada" as const },
+    ];
+    const p = montarPromptSistema({ agente, memorias: [], pessoaNome: "Marlon", modo: "conversa", ferramentas: [f("excluir_rotina")], rotinas });
+    expect(p).toContain("pedir_a_pessoa");
+    expect(p).toContain("não escolha por conta própria");
+  });
+
+  it("inventário é estável e a instrução é truncada (o prompt é cacheado por agente)", () => {
+    const longa = "x".repeat(INSTRUCAO_ROTINA_NO_PROMPT + 50);
+    const r = (id: string, instrucao: string) => ({ id, resumo: "todo dia às 08:00 (UTC)", instrucao, estado: "ativa" as const });
+    const base = { agente, memorias: [], pessoaNome: "Marlon", modo: "conversa" as const, ferramentas: [f("listar_rotinas")] };
+    const a = montarPromptSistema({ ...base, rotinas: [r("r-a", longa), r("r-b", "curta")] });
+    const b = montarPromptSistema({ ...base, rotinas: [r("r-b", "curta"), r("r-a", longa)] });
+    expect(a).toBe(b);
+    expect(a).not.toContain(longa);
+    expect(a).toContain("x".repeat(INSTRUCAO_ROTINA_NO_PROMPT));
   });
 
   it("memória é limitada para o prompt não crescer sem teto", () => {
