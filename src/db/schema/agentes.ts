@@ -25,7 +25,7 @@ export const ENUMS_DE_ESTADO = {
   transporte_conector: ["stdio", "http"],
   declaracao_sensibilidade: ["toca", "nao-toca", "nao-declarou"],
   tipo_conversa: ["propria", "sala"],
-  kind_proposta: ["perfil", "rotina", "acesso"],
+  kind_proposta: ["perfil", "rotina", "acesso", "pasta"],
   estado_proposta: ["pendente", "confirmada", "recusada"],
   estado_rotina: ["ativa", "pausada"],
   estado_inventario: ["ausente", "nao_autenticado", "pronto"],

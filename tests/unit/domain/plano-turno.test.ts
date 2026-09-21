@@ -106,3 +106,30 @@ describe("montarPlano", () => {
     expect("cwd" in p.politicaExecucao).toBe(false);
   });
 });
+
+describe("catálogo de workspace conforme haja projeto autorizado", () => {
+  // definido em 2026-09-18: ver ferramentas que ainda não pode usar levava o agente a tentar,
+  // falhar e virar tutorial de menu. Sem projeto, só consultar e propor.
+  it("sem projeto autorizado oferece apenas consultar e propor", () => {
+    const p = montarPlano({ ...base, workspace: true, workspaceVinculado: false });
+    const doWorkspace = p.catalogo.ferramentas.filter((f) => f.origem === "workspace").map((f) => f.nome);
+    expect(doWorkspace.sort()).toEqual(["workspace_consultar", "workspace_propor_pasta"]);
+    expect(doWorkspace).not.toContain("workspace_gravar_texto");
+    expect(doWorkspace).not.toContain("workspace_terminal");
+  });
+  it("com projeto autorizado oferece o catálogo completo", () => {
+    const p = montarPlano({ ...base, workspace: true, workspaceVinculado: true });
+    const doWorkspace = p.catalogo.ferramentas.filter((f) => f.origem === "workspace").map((f) => f.nome);
+    expect(doWorkspace).toContain("workspace_gravar_texto");
+    expect(doWorkspace).toContain("workspace_terminal");
+    expect(doWorkspace).toContain("workspace_trocar_projeto");
+  });
+  it("sem o serviço de workspace não oferece nenhuma", () => {
+    expect(montarPlano({ ...base, workspace: false, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
+  });
+  it("fora da conversa própria não oferece nenhuma", () => {
+    for (const modo of ["sala", "criacao"] as const) {
+      expect(montarPlano({ ...base, modo, workspace: true, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
+    }
+  });
+});

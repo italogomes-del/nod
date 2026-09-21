@@ -23,7 +23,7 @@ export type Conversa = {
   criadoEm: EpochMs;
 };
 
-export type KindProposta = "perfil" | "rotina" | "acesso";
+export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
 export type PayloadPropostaPerfil = { kind: "perfil"; nome?: string; titulo?: string; descricao?: string };
@@ -48,7 +48,19 @@ export type PayloadPropostaAcesso = {
   nivel: "leitura" | "escrita";
   naoPedido: string[];
 };
-export type PayloadProposta = PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso;
+/**
+ * definido em 2026-09-18: o produto descobre a pasta e a pessoa autoriza em um clique. A proposta
+ * carrega os caminhos encontrados; conceder continua sendo ato dela, por rota autenticada.
+ * candidatas vazio = busca sem resultado, e o card oferece escolher manualmente.
+ */
+export type PayloadPropostaPasta = {
+  kind: "pasta";
+  turnoId?: string;
+  candidatas: { caminho: string; nome: string; git: boolean }[];
+  motivo: string;
+  buscaTermo: string;
+};
+export type PayloadProposta = PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta;
 
 /** Proposta do modelo (ferramenta tipada) — nada é aplicado antes da confirmação da pessoa (E1.1). */
 export type Proposta = {

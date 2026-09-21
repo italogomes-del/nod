@@ -43,6 +43,12 @@ export type PlanoTurno = {
   executor: Executor;
   harness?: IdHarness;
   workspaceId?: string | null;
+  /**
+   * definido em 2026-09-18: onde o harness abre (pasta preparada do projeto ativo) e o que ele
+   * alcança (todos os projetos aprovados nesta conversa). Ausente = nenhum projeto autorizado,
+   * e o driver mantém o diretório temporário vazio com as ferramentas nativas desligadas.
+   */
+  workspacePastas?: { ativa: string; aprovadas: string[] } | null;
   superficie: "maquina_da_pessoa";
   decididoPor: `regra:${string}`;
   autoria: Autoria;

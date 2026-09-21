@@ -205,3 +205,27 @@ Usar banco de teste/ambiente descartável para a feature. Seguir AGENTS.md.
 Git neste ambiente requer escalada para escrever refs/index; rede também pode
 exigir escalada. O usuário autorizou commits e pushes da tarefa, não merge em main.
 Hook pre-commit existe; conferir a execução de lint-staged ao commitar.
+
+## 2026-09-18 — descoberta de pasta, multi-projeto e nativas do harness (ADR-039)
+
+A trava registrada antes — *"não habilitar Bash/Read/Edit irrestritos nem mudar o cwd
+do CLI para o projeto sem resolver configuração herdada, permissões, cancelamento e
+isolamento"* — foi levantada **com medição**, não ignorada:
+
+- **Configuração herdada**: `--restricted` ignora `CLAUDE.md`, skills e hooks do repo
+  aberto. Provado com um `CLAUDE.md` plantado mandando responder "MARMOTA": obedecido
+  com `--setting-sources project`, ignorado com `--restricted`.
+- **Permissões**: leitura fora das pastas permitidas negada pelo CLI
+  (`permission_denials`), por caminho relativo e absoluto; Bash não existe no modo.
+- **Cancelamento**: já resolvido por `Adapter.interromper()` (SIGTERM→SIGKILL), que
+  mata o processo inteiro — vale para nativas também.
+- **Isolamento**: parcial por construção. Sem Bash, comandos seguem no container do
+  nod, sem rede nem credenciais do Mac.
+
+Furo corrigido no caminho: o vínculo guardava **uma** pasta por conversa, então
+autorizar um segundo projeto apagava o primeiro. Agora é uma coleção com um ativo, e
+o formato antigo migra na leitura.
+
+Pendências que seguem abertas: provisionamento de dependências (o container não tem
+rede), associação de pastas no desktop/login Google, **Codex não homologado** (binário
+ausente na máquina da medição) e Cursor sem driver.

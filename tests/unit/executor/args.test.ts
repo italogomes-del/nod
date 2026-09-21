@@ -118,3 +118,63 @@ describe("sem teto de passos, com janela de contexto", () => {
     expect(FLAG_FLOORS["--max-turns"]).toBeDefined();
   });
 });
+
+describe("pastas autorizadas no harness", () => {
+  // definido em 2026-09-18, medido com o CLI real: --restricted nega leitura fora das pastas
+  // permitidas (por caminho relativo e absoluto) e ignora o CLAUDE.md do repositório aberto.
+  const comPastas = (ativa: string, aprovadas: string[]): PlanoTurno => ({ ...planoDeTeste(), workspacePastas: { ativa, aprovadas } });
+
+  it("sem projeto autorizado mantém o comportamento atual: nativas desligadas", () => {
+    const { args } = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json" });
+    expect(args).toContain("--tools");
+    expect(args[args.indexOf("--tools") + 1]).toBe("");
+    expect(args).not.toContain("--restricted");
+    expect(args).not.toContain("--add-dir");
+    expect(args.join(" ")).not.toMatch(/\bRead\b/);
+    // Sem pasta da pessoa, segue lendo a configuração do projeto como antes.
+    expect(args).toContain("--setting-sources");
+  });
+
+  it("com projeto autorizado liga as nativas de arquivo sob --restricted", () => {
+    const { args } = montarArgs({ plano: comPastas("/w/nod", ["/w/nod"]), mcpJson: "/tmp/mcp.json" });
+    expect(args).toContain("--restricted");
+    // --restricted substitui a leitura de configuração do repo aberto.
+    expect(args).not.toContain("--setting-sources");
+    // --tools "" apagaria as nativas que acabamos de liberar.
+    expect(args).not.toContain("--tools");
+    const permitidas = args[args.indexOf("--allowedTools") + 1]!.split(",");
+    expect(permitidas).toContain("Read");
+    expect(permitidas).toContain("Edit");
+    expect(permitidas).toContain("mcp__nod__lembrar");
+    // Bash continua fora: comando só no container isolado do nod.
+    expect(permitidas).not.toContain("Bash");
+  });
+
+  it("todos os projetos aprovados entram em --add-dir, sem repetir o ativo", () => {
+    const { args } = montarArgs({ plano: comPastas("/w/nod", ["/w/nod", "/w/site", "/w/api"]), mcpJson: "/tmp/mcp.json" });
+    const dirs = args.filter((a, i) => args[i - 1] === "--add-dir");
+    expect(dirs.sort()).toEqual(["/w/api", "/w/site"]);
+    expect(dirs).not.toContain("/w/nod");
+  });
+
+  it("um projeto só não gera --add-dir", () => {
+    const { args } = montarArgs({ plano: comPastas("/w/nod", ["/w/nod"]), mcpJson: "/tmp/mcp.json" });
+    expect(args).not.toContain("--add-dir");
+  });
+
+  it("pasta não aprovada nunca aparece nos args", () => {
+    const { args } = montarArgs({ plano: comPastas("/w/nod", ["/w/nod", "/w/site"]), mcpJson: "/tmp/mcp.json" });
+    expect(args.join(" ")).not.toContain("/w/secreto");
+  });
+});
+
+describe("pisos das flags de confinamento", () => {
+  it("--restricted e --add-dir têm piso registrado", () => {
+    expect(FLAG_FLOORS["--restricted"].piso).toBe("2.1.276");
+    expect(FLAG_FLOORS["--add-dir"].piso).toBe("2.1.276");
+  });
+  it("não entram no gate de todo turno: um CLI antigo sem elas ainda atende quem não usa pasta", () => {
+    expect(FLAGS_DO_TURNO).not.toContain("--restricted");
+    expect(FLAGS_DO_TURNO).not.toContain("--add-dir");
+  });
+});

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -23,9 +23,10 @@ describeIntegracao("pastas locais pela conversa", () => {
   let pasta: string;
   const caminho = () => `conversas/${bot.conversa.id}/workspace`;
   beforeAll(async () => {
-    raiz = await mkdtemp(join(tmpdir(), "nod-workspace-http-"));
+    // realpath: no macOS /var é link para /private/var, e a busca devolve o caminho resolvido.
+    raiz = await realpath(await mkdtemp(join(tmpdir(), "nod-workspace-http-")));
     pasta = join(raiz, "documentos"); await mkdir(pasta);
-    srv = await servidorCompleto({ env: { NOD_HOME: join(raiz, "nod"), NOD_MODO: "local" }, intervalos: { orquestradorMs: 3600000, schedulerMs: 3600000, expiracaoMs: 3600000 } });
+    srv = await servidorCompleto({ env: { NOD_HOME: join(raiz, "nod"), NOD_MODO: "local", NOD_BUSCA_BASE: raiz }, intervalos: { orquestradorMs: 3600000, schedulerMs: 3600000, expiracaoMs: 3600000 } });
     bot = await srv.json("POST", "agentes", { dono: "pessoa", interativo: true });
     await srv.app.dentro(srv.pessoa, d => d.tx(async trx => { await trx`update agentes set confirmado = true where id = ${bot.agente.id}`; }));
   }, 30000);
@@ -69,6 +70,70 @@ describeIntegracao("pastas locais pela conversa", () => {
     await expect(readFile(join(pasta, "indevido.txt"))).rejects.toThrow();
     expect(await readFile(join(pasta, "relatorio.txt"), "utf8")).toBe("Resultado verificável");
   });
+  // definido em 2026-09-18: o print do MetaNod — o agente mandava a pessoa abrir menu, procurar no
+  // Finder e remandar a mensagem. Este bloco prova o fluxo que substitui o tutorial.
+  it("sem projeto autorizado o catálogo do turno só oferece consultar e propor", async () => {
+    expect((await srv.chamar("DELETE", caminho())).status).toBe(200);
+    const p = await plano();
+    const doWorkspace = p.catalogo.ferramentas.filter(f => f.origem === "workspace").map(f => f.nome);
+    expect(doWorkspace.sort()).toEqual(["workspace_consultar", "workspace_propor_pasta"]);
+    expect(p.workspaceId).toBeNull();
+  });
+  it("propor cria o card com a pasta achada e NÃO concede acesso", async () => {
+    const p = await plano();
+    const r = await chamar(p, "workspace_propor_pasta", { projeto: "documentos", motivo: "para escrever o relatório" });
+    expect(r).toMatchObject({ ok: true, conteudo: expect.stringContaining("proposta_criada") });
+    expect(JSON.stringify(r)).toContain(pasta);
+    // O modelo propôs; nada foi autorizado.
+    expect(await srv.json("GET", caminho())).toMatchObject({ vinculo: null });
+    const propostas = await srv.app.dentro(srv.pessoa, d => d.repos.propostas.pendentesDaConversa(bot.conversa.id));
+    const daPasta = propostas.find(x => x.payload.kind === "pasta");
+    expect(daPasta).toBeTruthy();
+    // Chamar de novo não empilha cards.
+    expect(await chamar(await plano(), "workspace_propor_pasta", { projeto: "documentos", motivo: "de novo" })).toMatchObject({ conteudo: expect.stringContaining("ja_proposto") });
+  });
+  it("permitir concede a pasta e retoma a tarefa sozinho", async () => {
+    // Independente da ordem: garante a proposta neste próprio teste.
+    await srv.chamar("DELETE", caminho());
+    await chamar(await plano(), "workspace_propor_pasta", { projeto: "documentos", motivo: "para o relatório" });
+    const propostas = await srv.app.dentro(srv.pessoa, d => d.repos.propostas.pendentesDaConversa(bot.conversa.id));
+    const daPasta = propostas.find(x => x.payload.kind === "pasta")!;
+    expect(daPasta).toBeTruthy();
+    const r = await srv.json("POST", `propostas/${daPasta.id}/permitir-pasta`, { pasta }) as { ok: boolean; ids: { turnoRetomada?: string } };
+    expect(r.ok).toBe(true);
+    expect(r.ids.turnoRetomada).toBeTruthy();
+    expect(await srv.json("GET", caminho())).toMatchObject({ vinculo: { ativoId: expect.any(String) } });
+    // A pessoa não remandou nada: o turno de retomada carrega a entrada original.
+    const t = await srv.app.dentro(srv.pessoa, d => d.repos.turnos.buscar(r.ids.turnoRetomada!));
+    expect(t?.origem).toBe("retomada");
+    expect(t?.entradaTexto).toContain("Prepare o relatório");
+    expect(t?.entradaTexto).toContain(pasta);
+    // O turno novo já nasce com o catálogo completo.
+    const p = await plano();
+    expect(p.catalogo.ferramentas.filter(f => f.origem === "workspace").map(f => f.nome)).toContain("workspace_gravar_texto");
+  });
+  it("outra pessoa não permite a pasta de uma proposta alheia", async () => {
+    const p = await plano();
+    await chamar(p, "workspace_propor_pasta", { projeto: "documentos", motivo: "x" });
+    const propostas = await srv.app.dentro(srv.pessoa, d => d.repos.propostas.pendentesDaConversa(bot.conversa.id));
+    const daPasta = propostas.find(x => x.payload.kind === "pasta");
+    if (daPasta) {
+      const outra = srv.sessaoDe({ tenantId: srv.pessoa.tenantId, pessoaId: randomUUID() });
+      expect([403, 404]).toContain((await srv.chamar("POST", `propostas/${daPasta.id}/permitir-pasta`, { pasta }, outra)).status);
+    }
+  });
+  it("o mesmo bot guarda dois projetos e o plano leva os dois ao harness", async () => {
+    const outro = join(raiz, "segundo-projeto"); await mkdir(outro, { recursive: true });
+    expect((await srv.chamar("POST", caminho(), { pasta })).status).toBe(200);
+    expect((await srv.chamar("POST", caminho(), { pasta: outro })).status).toBe(200);
+    const v = await srv.json("GET", caminho()) as { vinculo: { projetos: { pasta: string }[] } };
+    expect(v.vinculo.projetos.map(x => x.pasta).sort()).toEqual([outro, pasta].sort());
+    const p = await plano();
+    // Transitar entre projetos aprovados não exige reautorizar: os dois vão ao harness.
+    expect(p.workspacePastas?.aprovadas.sort()).toEqual([outro, pasta].sort());
+    expect(p.workspacePastas?.ativa).toBe(outro);
+  });
+
   // definido em 2026-09-18: opt-in pago explícito; nunca roda inferência no gate/CI comum.
   it.skipIf(process.env.NOD_SMOKE_HARNESSES !== "1")("aceite pago: Claude grava e Codex continua pela ponte MCP real", async () => {
     await srv.json("POST", caminho(), { pasta });
