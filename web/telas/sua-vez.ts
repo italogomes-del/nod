@@ -108,8 +108,25 @@ export function renderChamada(estado: Estado): string {
   </button>${abertos.length > 1 ? `<button class="chamada-todas" data-act="navegar" data-tela="sua-vez">ver todas</button>` : ""}`;
 }
 
+/**
+ * definido em 2026-09-21: pedido de acesso repetido aparecia uma vez POR decisão, todas com a mesma
+ * frase e nada distinguindo qual estava viva — a pessoa resolvia uma e as gêmeas continuavam na tela.
+ * Colapsa por tipo+frase e mostra a mais antiga (a que vence primeiro, ADR-007); só 'acesso', porque
+ * aprovação e pedir_a_pessoa repetem a frase legitimamente com itens/respostas diferentes.
+ */
+function semGemeas(itens: Item[]): Item[] {
+  const vistas = new Set<string>();
+  return itens.filter((item) => {
+    if (item.decisao.tipo !== "acesso") return true;
+    const chave = `${item.decisao.tipo}\u0000${item.decisao.frase}`;
+    if (vistas.has(chave)) return false;
+    vistas.add(chave);
+    return true;
+  });
+}
+
 export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): string {
-  const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? [];
+  const itens = semGemeas(estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? []);
   if (!itens.length) return "";
   const pendentes = itens.some((item) => item.estadoColuna !== "vencido");
   return `<section class="decisoes-chat" aria-label="Decisões nesta conversa"><h2>${pendentes ? "Preciso da sua decisão para continuar" : "Pedidos vencidos"}</h2><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${itens.map((item) => renderItem(item, estado, true)).join("")}</ul></section>`;
