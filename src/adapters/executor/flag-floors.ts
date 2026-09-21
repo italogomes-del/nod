@@ -25,6 +25,11 @@ export const FLAG_FLOORS = {
   "--verbose": { piso: "2.1.272", ocultaNoHelp: false },
   "--model": { piso: "2.1.272", ocultaNoHelp: false },
   "--max-turns": { piso: "2.1.272", ocultaNoHelp: true },
+  // definido em 2026-09-18: sondadas na 2.1.276, onde o confinamento foi medido de fato — leitura
+  // fora das pastas permitidas negada pelo CLI e CLAUDE.md do projeto ignorado. Piso na versão
+  // sondada, não antes: o driver só aponta o cwd para a pasta da pessoa se o help trouxer a flag.
+  "--restricted": { piso: "2.1.276", ocultaNoHelp: false },
+  "--add-dir": { piso: "2.1.276", ocultaNoHelp: false },
 } as const satisfies Record<string, { piso: string; ocultaNoHelp: boolean }>;
 
 export type FlagComPiso = keyof typeof FLAG_FLOORS;

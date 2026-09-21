@@ -14,8 +14,16 @@ import type { LigacaoClaudeCli } from "./claude-cli.ts";
 
 export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config", "--sandbox", "--skip-git-repo-check"] as const;
 
+/**
+ * definido em 2026-09-18: com projeto autorizado o Codex escreve na pasta (workspace-write) em vez
+ * de read-only, e `--cd` aponta a pasta ativa. NÃO HOMOLOGADO: o binário do Codex não estava
+ * instalado na máquina onde o confinamento do Claude foi medido, então este caminho está coberto
+ * só por teste de montagem de args. Validar com o CLI real antes de anunciar paridade.
+ */
 export function argsCodex(plano: PlanoTurno, config: string): string[] {
-  return ["exec", ...FLAGS_CODEX.filter((f) => f !== "--sandbox"), "--sandbox", "read-only", "--color", "never", "--model", plano.entrada.modelo,
+  const pastas = plano.workspacePastas ?? null;
+  return ["exec", ...FLAGS_CODEX.filter((f) => f !== "--sandbox"), "--sandbox", pastas ? "workspace-write" : "read-only", "--color", "never", "--model", plano.entrada.modelo,
+    ...(pastas ? ["--cd", pastas.ativa] : []),
     "-c", `developer_instructions=${JSON.stringify(plano.promptSistema)}`,
     "-c", `mcp_servers=${config}`, "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
     "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", "features.apply_patch_freeform=false",

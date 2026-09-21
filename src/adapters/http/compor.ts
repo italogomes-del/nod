@@ -247,7 +247,7 @@ export function comporApp(o: OpcoesCompor): App {
     mudou: (escopo, agenteId) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
-  const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
+  const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
   if (workspaces) services.workspaces = workspaces;
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
@@ -464,7 +464,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMaquinas({ dentro }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
-    ...rotasWorkspaces(workspaces),
+    ...rotasWorkspaces(workspaces, dentro),
     ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),

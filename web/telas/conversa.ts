@@ -78,6 +78,18 @@ function renderProposta(p: Proposta, estado: Estado): string {
     const nome = estado.marketplace.find((a) => a.slug === slug)?.nome ?? p.payload.conector;
     return `<section class="connection-card"><span class="app-logo app-${esc(p.payload.conector)}">${esc(nome.slice(0, 1).toUpperCase())}</span><div><b>${conectado ? `${esc(nome)} conectado` : `Conecte o ${esc(nome)}`}</b><p>${conectado ? "Tudo pronto para continuar com seu bot." : "Para seguir com essa tarefa, preciso de acesso a este app."}</p>${conectado ? botao("retomar-conexao", "Continuar tarefa", { classe: "pri", id: p.id, dados: { slug: p.payload.conector } }) : botao("abrir-conexao", "Conectar", { classe: "pri", id: p.payload.conector })}${botao("recusar-proposta", "Agora não", { classe: "link", id: p.id })}</div></section>`;
   }
+  // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
+  // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
+  if (p.payload.kind === "pasta") {
+    const c = p.payload;
+    const escolher = botao("abrir-workspace", c.candidatas.length ? "Escolher outra" : "Escolher pasta", { classe: c.candidatas.length ? "link" : "pri", id: p.agenteId });
+    const recusar = botao("recusar-proposta", "Agora não", { classe: "link", id: p.id });
+    if (c.candidatas.length === 0) {
+      return `<section class="connection-card"><span class="app-logo">📁</span><div><b>Não encontrei "${esc(c.buscaTermo)}" no seu computador</b><p>Escolha a pasta do projeto para eu continuar.</p>${escolher}${recusar}</div></section>`;
+    }
+    const lista = c.candidatas.map((cand) => `<div class="it"><code>${esc(cand.caminho)}</code>${cand.git ? " · projeto Git" : ""} ${botao("permitir-pasta", "Permitir", { classe: "pri", id: p.id, dados: { pasta: cand.caminho } })}</div>`).join("");
+    return `<section class="connection-card"><span class="app-logo">📁</span><div><b>${c.candidatas.length === 1 ? "Usar esta pasta?" : "Qual destas pastas?"}</b><p>${esc(c.motivo)}</p>${lista}${escolher}${recusar}</div></section>`;
+  }
   let itens = "";
   if (p.payload.kind === "perfil") {
     const c = p.payload;

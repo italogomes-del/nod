@@ -21,7 +21,11 @@ export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | {
  * catcher ← L4/L3; relogio ← L9 (relogio-sistema). L9 compõe.
  */
 export interface ServicesNod<Trx> {
-  workspaces?: { id(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<string | null> };
+  workspaces?: {
+    id(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<string | null>;
+    /** Pasta onde o harness abre e as que ele alcança; null quando não há projeto autorizado. */
+    pastasDoHarness(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<{ ativa: string; aprovadas: string[] } | null>;
+  };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
   };

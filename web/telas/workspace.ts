@@ -40,7 +40,7 @@ export function abrirWorkspace(api: Api, conversaId: string): void {
     if (b.hasAttribute("data-ir")) void tratar(() => navegar(q<HTMLInputElement>("[data-endereco]").value));
     if (b.hasAttribute("data-permitir")) void tratar(async () => {
       await api.escolherWorkspace(conversaId, pasta);
-      q("[data-estado]").textContent = "Pasta associada. Continue a conversa com o que você quer fazer; o agente já poderá usar este acesso no próximo turno.";
+      q("[data-estado]").textContent = "Pasta associada. Conte o que você quer fazer.";
       q("[data-escolha]").hidden = true; q("[data-revogar]").hidden = false;
     });
     if (b.hasAttribute("data-revogar")) void tratar(async () => {

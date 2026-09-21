@@ -69,6 +69,24 @@ arquitetural: não deve ser necessário acrescentar instruções ao núcleo para
 `tests/unit/executor/programacao-harnesses.test.ts` confere que os dois drivers
 recebem as capacidades do plano e não acrescentam capacidades ausentes.
 
+## O que mudou em 2026-09-18 (ADR-039)
+
+O fluxo acima deixou de ser pendência. O agente **descobre** a pasta com
+`workspace_propor_pasta` e mostra um card com o caminho achado; a pessoa autoriza em
+um clique e a tarefa **retoma sozinha**, sem remandar mensagem. Sem projeto
+autorizado, o catálogo do turno traz só consultar e propor.
+
+A conversa guarda **vários projetos** com um ativo: o mesmo bot coda no repo X e
+depois no Y sem perder o primeiro nem o worktree já preparado. Trocar entre projetos
+aprovados não exige card nem nova autorização (`workspace_trocar_projeto`).
+
+Com projeto autorizado, o Claude Code passa a abrir **na pasta**, com as nativas de
+arquivo sob `--restricted` — medido em 2026-09-18: ler fora das pastas permitidas é
+negado pelo próprio CLI, e o `CLAUDE.md` do repositório aberto é ignorado. Bash não
+existe no modo restrito, então comandos continuam no container isolado do nod.
+Codex recebe `--cd`/`workspace-write` pelo mesmo contrato, mas **não homologado**:
+o binário não estava instalado na máquina da medição.
+
 ## Pasta local na conversa
 
 No servidor local com login `stub` (loopback), **Pasta de trabalho** permite escolher uma pasta uma vez para
