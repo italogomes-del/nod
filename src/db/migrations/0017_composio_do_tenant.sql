@@ -5,8 +5,13 @@
 ALTER TABLE composio_configuracoes DROP CONSTRAINT composio_configuracoes_visibility_check;
 ALTER TABLE composio_configuracoes DROP CONSTRAINT composio_configuracoes_tenant_id_owner_id_key;
 ALTER TABLE composio_configuracoes ADD CONSTRAINT composio_configuracoes_tenant_id_key UNIQUE (tenant_id);
-ALTER TABLE composio_configuracoes ADD CONSTRAINT composio_configuracoes_visibility_check CHECK (visibility = 'equipe');
+-- UPDATE antes do CHECK: com linhas 'privado' já gravadas, o CHECK primeiro falha (23514) no banco diário.
+-- NO FORCE só em volta do UPDATE (regra da 0005): como nod_dono, FORCE faz o UPDATE afetar 0 linhas
+-- em silêncio, e o CHECK — que não passa por RLS — acha as linhas 'privado' mesmo assim.
+ALTER TABLE composio_configuracoes NO FORCE ROW LEVEL SECURITY;
 UPDATE composio_configuracoes SET visibility = 'equipe';
+ALTER TABLE composio_configuracoes FORCE ROW LEVEL SECURITY;
+ALTER TABLE composio_configuracoes ADD CONSTRAINT composio_configuracoes_visibility_check CHECK (visibility = 'equipe');
 
 -- A 0004 dá UPDATE só para a dona ('equipe' abre LEITURA). Sem esta policy, quem cadastrou a chave
 -- é a única que a troca — e ao sair da Leapy a troca passaria a exigir nod_dono (ADR-041 §2).
