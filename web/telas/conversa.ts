@@ -130,8 +130,25 @@ function renderProposta(p: Proposta, estado: Estado): string {
     <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}</div>
     ${itens}
     ${p.payload.kind === "acesso" ? '<div class="it">Revise o pedido. A autorização final aparecerá aqui na conversa.</div>' : ""}
-    <div class="ft">${botao("confirmar-proposta", p.payload.kind === "acesso" ? "Revisar acesso" : "Confirmar", { classe: "pri", id: p.id })}${botao("recusar-proposta", "Deixar de lado", { id: p.id })}</div>
+    <div class="ft">${acoesProposta(p)}</div>
   </div>`;
+}
+
+/** definido em 2026-09-22: mudar/excluir rotina existente se aplica pela DECISÃO (id === proposta.id),
+ *  não por POST propostas/:id/confirmar, que recusa esses kinds (confirmar-proposta.ts). Mesmos
+ *  botões e verbos de "Sua vez", para o chat não oferecer um Confirmar que sempre falha. */
+function acoesProposta(p: Proposta): string {
+  if (p.payload.kind === "rotina_atualizacao") return `${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter como está", { id: p.id })}`;
+  if (p.payload.kind === "rotina_exclusao") return `${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter rotina", { id: p.id })}`;
+  return `${botao("confirmar-proposta", p.payload.kind === "acesso" ? "Revisar acesso" : "Confirmar", { classe: "pri", id: p.id })}${botao("recusar-proposta", "Deixar de lado", { id: p.id })}`;
+}
+
+/** A proposta de rotina existente continua 'pendente' quando a decisão dela vence (o varredor só
+ *  vence decisões). Os botões do card dariam estado_invalido; sai o card e fica a decisão vencida,
+ *  em cinza e com Reabrir, como em "Sua vez". Reaberta, o card volta com os botões funcionando. */
+function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
+  if (p.payload.kind !== "rotina_atualizacao" && p.payload.kind !== "rotina_exclusao") return false;
+  return estado.suaVez?.itens.some((i) => i.decisao.id === p.id && i.estadoColuna === "vencido") ?? false;
 }
 
 function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
@@ -193,13 +210,14 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
     ["Pesquisa e ideias", "Explorar assuntos e encontrar respostas", "Quero ajuda com pesquisa e desenvolvimento de ideias."],
     ["Ainda não sei", "Vamos descobrir juntos", "Ainda não sei. Me ajude a descobrir como você pode ser útil."],
   ].map(([titulo, descricao, texto], i) => botao("escolher-missao", `<span class="option-key">${String.fromCharCode(65 + i)}</span><span><b>${titulo}</b><small>${descricao}</small></span><span>↗</span>`, { classe: "welcome-option", dados: { texto: texto ?? "" } })).join("")}</section>` : "";
+  const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado));
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
   return `<div class="timeline">
     ${sep}
     ${renderMensagensAgrupadas(c.mensagens, estado, sala)}
     ${acolhimento}
-    ${c.propostas.map((p) => renderProposta(p, estado)).join("")}
-    ${renderDecisoesDaConversa(estado, c.conversa.id, new Set(c.propostas.map((p) => p.id)))}
+    ${propostas.map((p) => renderProposta(p, estado)).join("")}
+    ${renderDecisoesDaConversa(estado, c.conversa.id, new Set(propostas.map((p) => p.id)))}
     ${vivos.map((t) => renderTurnoVivo(t, c, estado)).join("")}
     ${renderFaixaParada(estado.faixaParada)}
   </div>`;

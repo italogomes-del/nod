@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
+import type { Proposta } from "../../../src/contracts/conversa.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem, renderTimeline } from "../../../web/telas/conversa.ts";
@@ -120,4 +121,35 @@ describe("decisões no chat", () => {
     expect(html).toContain("disabled");
     expect(html).toContain("Dado de aprendiz sempre passa por você");
   });
+
+  it("mudança e exclusão de rotina no chat decidem pela decisão, não por propostas/:id/confirmar", () => {
+    const base = { tenantId: "t", conversaId: "c", agenteId: "a", estado: "pendente" as const, criadoEm: 0 };
+    const propostas: Proposta[] = [
+      { ...base, id: "pa", kind: "rotina_atualizacao", payload: { kind: "rotina_atualizacao", rotinaId: "r1", cron: "0 9 * * *", resumo: "todo dia às 09:00", fusoIana: "America/Sao_Paulo", proximaExecucao: 0, antes: { resumo: "a cada 5 min", instrucao: "x" } } as Proposta["payload"] },
+      { ...base, id: "pe", kind: "rotina_exclusao", payload: { kind: "rotina_exclusao", rotinaId: "r2", resumo: "a cada 15 min", instrucao: "y" } },
+    ];
+    const html = renderTimeline({ ...conversa, propostas }, { ...estadoInicial });
+    expect(html).not.toContain('data-act="confirmar-proposta"');
+    expect(html).not.toContain('data-act="recusar-proposta"');
+    expect(html).toContain("Aplicar mudança");
+    expect(html).toContain("Excluir rotina");
+    expect(html.match(/data-act="decidir-proposta"/g)).toHaveLength(2);
+    expect(html.match(/data-act="recusar-decisao"/g)).toHaveLength(2);
+  });
+
+  it("proposta de rotina com decisão vencida sai do chat e dá lugar à decisão vencida com Reabrir", () => {
+    const proposta: Proposta = { tenantId: "t", id: "d", conversaId: "c", agenteId: "a", estado: "pendente", criadoEm: 0, kind: "rotina_exclusao", payload: { kind: "rotina_exclusao", rotinaId: "r", resumo: "a cada 15 min", instrucao: "y" } };
+    const decisao = { ...item.decisao, tipo: "rotina_exclusao" as const };
+    const vencido: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "vencido", decisao: { ...decisao, estado: "vencida" } }] } };
+    const html = renderTimeline({ ...conversa, propostas: [proposta] }, vencido);
+    expect(html).not.toContain("Manter rotina");
+    expect(html).not.toContain('data-act="decidir-proposta"');
+    expect(html).toContain('data-act="reabrir"');
+
+    const reaberta: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "pendente", decisao: { ...decisao, estado: "reaberta" } }] } };
+    const aberto = renderTimeline({ ...conversa, propostas: [proposta] }, reaberta);
+    expect(aberto.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
+    expect(aberto).toContain("Excluir rotina");
+  });
 });
+
