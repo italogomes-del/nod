@@ -186,10 +186,92 @@ Verde em 2026-09-24, sobre a `main` com #51–#54: lint, typecheck (4 projetos),
   assunto (a retomada recebe texto sem relação com a pergunta), o padrão deixa de ser responder e o
   campo passa a perguntar a cada envio enquanto houver pergunta aberta.
 
-**Não implementado.** O fio da pergunta (próximo PR, migração 0024): hoje cada resposta fecha a decisão
+**Não implementado.** O fio da pergunta (próximo PR, migração 0025): hoje cada resposta fecha a decisão
 mesmo quando é um pedido de explicação, e a pergunta seguinte abre outro pedido do zero — `fio_id`, a
 rodada na faixa, o histórico do fio na entrada da retomada e o recolher "Pergunta resolvida · N
 mensagens" ficam para lá. Também ficam de fora a linha "Você deixou uma pergunta pra lá" ao dispensar
 e o anexo na resposta (a rota `responder` segue só com texto). Perguntas gravadas antes desta emenda não
 têm balão ligado: continuam como texto comum, e a faixa e o campo funcionam por "Sua vez" (sem "Ver
 pergunta").
+
+## Emenda de 2026-09-24 — fio da pergunta
+
+**Contexto.** Conversa de verdade tem idas e vindas: o agente pergunta, a pessoa não entende e pede
+explicação, o agente explica, a pessoa responde — às vezes mais de uma volta. Até aqui a primeira
+mensagem da pessoa fechava a pergunta como "respondida" mesmo quando era um pedido de explicação, e se
+o agente perguntasse de novo nascia um pedido do zero: faixa nova, contador novo, nenhum vínculo com o
+anterior. A retomada de rotina, que roda em sessão nova, recebia só a última resposta e a frase da
+última pergunta. O dono escolheu nos mockups (fileira 7) "a pergunta é um fio".
+
+**Decisão.** A pergunta é um FIO que fica aberto enquanto o agente ainda precisa da pessoa e fecha
+sozinho quando ele segue. Quem decide se a mensagem é resposta ou pedido de explicação é o agente —
+perguntando de novo ou seguindo —, nunca a interface.
+
+- **Migração 0025.** `decisoes.fio_id uuid` (NULL = a decisão começa o próprio fio) e o índice parcial
+  `decisoes_por_fio (tenant_id, fio_id) WHERE fio_id IS NOT NULL`. Sem backfill. A coluna nasce travada
+  para a decisora (a lista fechada da 0003 não a nomeia). Contrato: `Decisao.fioId`.
+- **Rodada seguinte.** `pedir_a_pessoa` num turno que é retomada de uma pergunta RESPONDIDA (um dos três
+  tipos, `turno_id` = `retomaTurnoId` do turno, desfecho `decidida`) cria a decisão com
+  `fio_id = anterior.fioId ?? anterior.id`. Cada rodada tem prazo próprio (24 h a partir dela) e
+  `opcoes` próprias. Duas respostas ao mesmo turno desempatam pela resposta que criou o turno
+  (`resposta_a_pedido.turnoRetomadaId`, campo novo no jsonb). Sem pergunta no turno de cima, a busca
+  sobe só por retomada INTERROMPIDA: o "Retomar" depois de uma queda continua o mesmo fio. A rodada não
+  passa pela regra "a mesma pergunta da rotina" (ADR-044) — ela é o agente explicando, não repetindo.
+- **Histórico na retomada.** Da 2ª rodada em diante, a entrada da retomada leva "Esta pergunta é a Nª
+  rodada do mesmo fio…" e as últimas 10 mensagens do fio (perguntas, respostas e as falas do agente nas
+  retomadas que perguntaram de novo), cada uma aparada em 400 caracteres. As linhas "Resposta de X ao
+  seu pedido…" e "Entrada original da rotina" continuam.
+- **Estados, sem coluna** (`src/domain/fio-da-pergunta.ts`): esperando você (última rodada aberta) →
+  lendo sua mensagem (respondida, retomada na fila ou rodando) → resolvida (a retomada terminou sem
+  perguntar de novo; turno interrompido também fecha, a queda tem o aviso dela) · deixada pra lá
+  (dispensada) · vencida. `ConversaDto.fios` leva id, agente, estado, rodada, decisões e os ids das
+  mensagens do fio; cada item de "Sua vez" leva `fio {id, rodada}`.
+- **Web.** Da 2ª rodada, a faixa diz "{agente} ainda está esperando sua resposta · 2ª rodada · vence
+  em …"; respondida, a faixa fica neutra ("Pergunta aberta · {agente} está lendo sua mensagem") e o
+  campo volta ao modo normal. O fio aberto com duas ou mais mensagens ganha um trilho azul fino com
+  "Pergunta aberta · N mensagens · Xª rodada" (a pergunta recém-chegada, sozinha, é só o balão).
+  Resolvido, o fio inteiro recolhe num `<details>` verde "Pergunta resolvida · “início da primeira
+  pergunta” · N mensagens · ver conversa", seguido de "{agente} seguiu com a sua resposta" — nada é
+  apagado. O selo azul, a faixa de "pedidos" e o título de "Sua vez" contam FIOS, não rodadas. "Outro
+  assunto" continua mandando mensagem comum e deixando o fio aberto.
+- **Modelo.** A descrição de `pedir_a_pessoa` ganha: "Se a pessoa pedir esclarecimento em vez de
+  responder, explique e chame pedir_a_pessoa de novo: a pergunta continua no mesmo fio. Pedido de
+  explicação não é resposta."
+- **Rotina.** Todas as rodadas são da mesma janela (cadeia de `rotinaDoTurno`, cujo teto de saltos
+  subiu de 5 para 10). A pergunta aberta SEGURA o desfecho como o gate (`TIPOS_QUE_SEGURAM_A_EXECUCAO`):
+  o 'executou' do turno que perguntou não conta, e o desfecho é do fio inteiro — 'executou' quando a
+  retomada segue, 'passou_em_branco' quando a pergunta é deixada pra lá (`pedido_dispensado`) ou vence
+  (`pergunta_sem_resposta`, novo, texto sem migração). Continua uma linha por janela; o chat ganha um
+  marcador de execução só, no fim, em vez de um por rodada.
+
+**Alternativas descartadas.** A interface adivinhar se a mensagem é resposta ou pergunta (o dono
+recusou: quem entende a mensagem é o agente). Uma coluna de estado do fio: seria uma segunda fonte da
+verdade ao lado da decisão e do turno, que já dizem tudo. Reaproveitar a MESMA decisão entre as rodadas
+(reabrir): perderia o prazo e as opções de cada rodada e reescreveria o registro do que a pessoa
+respondeu.
+
+**Validação.** unit `domain/fio-da-pergunta` (os cinco estados; três rodadas são um fio, 3ª rodada;
+mensagens do fio; histórico com 10 e aparado), `use-cases/fio-da-pergunta` (fio_id na rodada seguinte e
+não nos outros casos, queda no meio, rodada não reaproveita a pergunta de outra janela, histórico na
+retomada, estado na conversa, rotina resolvida e deixada pra lá), `web/fio-da-pergunta` (faixa "2ª
+rodada", "lendo sua mensagem" com o campo normal, trilho com cabeçalho, resolvido num `<details>` só,
+contadores por fio); integração `fio-da-pergunta` (migração aplicada; três rodadas pelas rotas HTTP até
+o fio resolvido e o contador zerado; rotina com UMA linha 'executou' e a pergunta vencida como
+'passou_em_branco'); `dispensar-decisao`, `rotina-gate` e `perguntas-conversa` ajustados à janela que
+espera o fio e ao `turnoRetomadaId`.
+
+Verde em 2026-09-24, sobre a `main` 94951ac: lint, typecheck (4 projetos), fence:domain; unit 122
+arquivos/720 testes, integration 78/286, conformidade 8/59, concurrency 22/70 (1 pulado).
+
+**Gatilho de reversão.**
+
+- Fio que não fecha: se em 14 dias aparecerem 3 fios com 4 rodadas ou mais (o agente pergunta de novo
+  em vez de seguir), a descrição passa a limitar as rodadas e a quarta pergunta vira pedido novo com o
+  histórico do fio.
+- Pessoa sem saber a que pergunta responde: se em 14 dias aparecerem 3 relatos (ADR-041) de resposta
+  dada à rodada errada ou de "já respondi isso", o trilho passa a mostrar a rodada em cada balão e a
+  faixa passa a citar a pergunta da rodada atual.
+
+**Não implementado.** A decisora designada que não é dona da conversa responde em "Sua vez" sem ver o
+fio (RLS de `mensagens`): a retomada leva o histórico, mas a tela dela mostra só a frase da rodada. Fio
+que começou antes desta migração não tem rodadas ligadas.

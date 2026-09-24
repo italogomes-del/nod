@@ -63,6 +63,11 @@ export type Decisao = {
   desfecho: DesfechoDecisao | null;
   vistaEm: IsoUtc | null;
   criadoEm: IsoUtc;
+  /**
+   * definido em 2026-09-24 (fio da pergunta, 0024): a primeira decisão do fio a que esta pergunta
+   * pertence — a rodada seguinte de uma pergunta respondida. null = a decisão começa o próprio fio.
+   */
+  fioId: string | null;
 };
 
 export type EstadoColunaFila = "pendente" | "vencido" | "reaberto";

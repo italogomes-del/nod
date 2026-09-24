@@ -43,9 +43,11 @@ export type PayloadMensagem =
   | { kind: "pedido_a_pessoa"; decisaoId: string; opcoes?: string[] }
   /**
    * A resposta da pessoa, ligada à pergunta (responder-decisao.ts): `perguntaEm` rotula "respondendo à
-   * pergunta das HH:MM" e `retomada` diz se um turno de retomada nasceu junto.
+   * pergunta das HH:MM" e `retomada` diz se um turno de retomada nasceu junto. `turnoRetomadaId`
+   * (definido em 2026-09-24, fio da pergunta): QUAL turno — é por ele que o fio sabe se o agente ainda
+   * está lendo a resposta. Respostas gravadas antes não o têm: o fio as dá por resolvidas.
    */
-  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean };
+  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean; turnoRetomadaId?: string };
 
 export type Mensagem = {
   tenantId: TenantId;

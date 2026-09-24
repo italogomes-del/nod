@@ -125,10 +125,11 @@ export async function agenteVisivel(repos: Repos, agenteId: string): Promise<Age
 
 /**
  * definido em 2026-09-24 (ADR-044): quantos saltos de `retomaTurnoId` a ligação turno → rotina segue.
- * Rotina que pergunta, recebe resposta e pergunta de novo encadeia retomadas; cinco cobre o uso real
- * e o teto impede que uma cadeia malformada vire laço.
+ * Rotina que pergunta, recebe resposta e pergunta de novo encadeia retomadas; o teto impede que uma
+ * cadeia malformada vire laço. definido em 2026-09-24 (fio da pergunta): 10, era 5 — cada rodada do fio
+ * e cada "Retomar" depois de uma queda somam um salto, e a rotina que passasse do teto perderia a janela.
  */
-export const SALTOS_DE_RETOMADA = 5;
+export const SALTOS_DE_RETOMADA = 10;
 
 /**
  * Liga um turno à rotina que o disparou pela janela reivindicada (rotina_janelas.turno_id, índice da

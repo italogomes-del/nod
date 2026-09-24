@@ -18,6 +18,7 @@ const base: DecisaoComNomes = {
   desfecho: null,
   vistaEm: null,
   criadoEm: new Date(100_000).toISOString(),
+  fioId: null,
 };
 
 describe("montarFila", () => {

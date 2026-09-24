@@ -4,9 +4,10 @@ import type { Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { historicoDoFio, mensagensDoFio, rodadaNoFio } from "../domain/fio-da-pergunta.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
  * Os três tipos de pedir_a_pessoa (EMENDA 16): a resposta é TEXTO da pessoa, nunca um botão.
@@ -41,6 +42,22 @@ export type EntradaRetomarComResposta = { decisao: Decisao; texto: string; respo
 export type SaidaRetomarComResposta = { mensagem: Mensagem; turno: Turno | null };
 
 /**
+ * definido em 2026-09-24 (fio da pergunta, emenda da ADR-045): da 2ª rodada em diante, a retomada leva
+ * o histórico do fio — as perguntas, as respostas e as explicações anteriores, as últimas 10, cada uma
+ * aparada. A retomada de rotina roda em sessão nova e só sabe o que a entrada diz: sem isto, a terceira
+ * pergunta chegaria sem as duas primeiras. Na 1ª rodada não há fio a contar (a pergunta está na frase).
+ */
+async function historicoDaResposta(deps: Deps, d: Decisao): Promise<string[]> {
+  if (d.fioId === null) return [];
+  const rodadas = (await deps.repos.decisoes.dosFios([d.fioId])).filter((x) => Date.parse(x.criadoEm) <= Date.parse(d.criadoEm));
+  const doFio = mensagensDoFio(rodadas, await deps.repos.mensagens.listarDaConversa(d.conversaId));
+  if (doFio.length === 0) return [];
+  const pessoas = await deps.repos.pessoas.listarDoTenant();
+  const linhas = historicoDoFio(doFio, (id) => pessoas.find((p) => p.id === id)?.nome ?? "a pessoa");
+  return [`Esta pergunta é a ${rodadaNoFio(rodadas, d.id)}ª rodada do mesmo fio. O que já foi dito nele (as ${linhas.length} últimas mensagens, da mais antiga para a mais nova):`, ...linhas];
+}
+
+/**
  * FASE 2 — pela DONA (o outbox e o turno exigem owner = pessoa da sessão): a resposta vira mensagem
  * de texto na conversa e um turno de RETOMADA (origem 'retomada', retoma_turno_id = o turno que
  * parou, --resume pela sessão da conversa) com a resposta como entrada. O turno original de
@@ -49,17 +66,15 @@ export type SaidaRetomarComResposta = { mensagem: Mensagem; turno: Turno | null 
  *
  * definido em 2026-09-24 (emenda da ADR-045): a mensagem leva o payload `resposta_a_pedido`, que a
  * liga à pergunta — a web rotula "respondendo à pergunta das HH:MM", marca a pergunta como respondida
- * e, com `retomada`, escreve "{agente} retomou com a sua resposta" sem gravar outra linha.
+ * e, com `retomada`, escreve "{agente} retomou com a sua resposta" sem gravar outra linha. Fio da
+ * pergunta (mesma data): o turno nasce ANTES da mensagem para ela levar `turnoRetomadaId` — é por ele
+ * que o fio sabe se o agente ainda está lendo.
  */
 export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetomarComResposta> = async (deps, input) => {
   const agora = deps.agora();
   const d = input.decisao;
   const autoria: ReturnType<typeof autoriaPessoa> = { ...autoriaPessoa(deps.escopo, input.executor ?? "catcher"), autor_id: input.respondidaPor.id };
   const original = d.turnoId ? await deps.repos.turnos.buscar(d.turnoId) : null;
-  const payload: PayloadMensagem = { kind: "resposta_a_pedido", decisaoId: d.id, agenteId: d.agenteId, perguntaEm: Date.parse(d.criadoEm), retomada: original !== null };
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: d.conversaId, turnoId: d.turnoId, autoria, kind: "texto", texto: input.texto, payload, confianca: "confiavel" });
-  if (!mensagem) throw new ErroDeDominio("nao_permitido");
-  const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: d.conversaId, turnoId: d.turnoId, dados: { mensagem_id: mensagem.id, kind: "texto", decisao_id: d.id, destravou: true } })];
   let turno: Turno | null = null;
   if (original) {
     await deps.repos.paradas.encerrarAbertas({ conversaId: d.conversaId, agora });
@@ -75,6 +90,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
       entradaTexto: [
         `Resposta de ${input.respondidaPor.nome} ao seu pedido (${d.tipo}: "${d.frase}"): ${input.texto}`,
         "Continue a partir daqui; nada foi reenviado.",
+        ...(await historicoDaResposta(deps, d)),
         ...(daRotina ? ["Entrada original da rotina:", daRotina.turnoDisparado.entradaTexto] : []),
       ].join("\n"),
       // definido em 2026-09-24 (ADR-044): a confiança é a do turno que PAROU, nunca "confiavel" fixo. A
@@ -86,7 +102,11 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
       reenvios: original.reenvios + 1,
       executor: input.executor ?? "catcher",
     });
-    if (turno) events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: d.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: d.id } }));
   }
+  const payload: PayloadMensagem = { kind: "resposta_a_pedido", decisaoId: d.id, agenteId: d.agenteId, perguntaEm: Date.parse(d.criadoEm), retomada: original !== null, ...(turno ? { turnoRetomadaId: turno.id } : {}) };
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: d.conversaId, turnoId: d.turnoId, autoria, kind: "texto", texto: input.texto, payload, confianca: "confiavel" });
+  if (!mensagem) throw new ErroDeDominio("nao_permitido");
+  const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: d.conversaId, turnoId: d.turnoId, dados: { mensagem_id: mensagem.id, kind: "texto", decisao_id: d.id, destravou: true } })];
+  if (original && turno) events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: d.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: d.id } }));
   return { data: { mensagem, turno }, events };
 };

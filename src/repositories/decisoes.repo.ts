@@ -18,9 +18,10 @@ interface Linha {
   desfecho: DesfechoDecisao | null;
   vista_em: Date | null;
   criado_em: Date;
+  fio_id: string | null;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, estado, prazo_decisao_em, prazo_execucao_em, frase, desfecho, vista_em, criado_em";
+const COLUNAS = "tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, estado, prazo_decisao_em, prazo_execucao_em, frase, desfecho, vista_em, criado_em, fio_id";
 
 function paraDecisao(l: Linha): Decisao {
   return {
@@ -39,6 +40,7 @@ function paraDecisao(l: Linha): Decisao {
     desfecho: l.desfecho,
     vistaEm: isoOuNull(l.vista_em),
     criadoEm: iso(l.criado_em),
+    fioId: l.fio_id,
   };
 }
 
@@ -53,6 +55,8 @@ export type NovaDecisao = {
   prazoDecisaoEm: number;
   prazoExecucaoEm?: number | null;
   frase: string;
+  /** definido em 2026-09-24 (fio da pergunta, 0024): a primeira decisão do fio, na rodada seguinte de uma pergunta respondida. */
+  fioId?: string | null;
 };
 
 /** definido em 2026-09-16: vencidas ficam visíveis em cinza por 7 dias (ADR-007: nunca suprimidas de imediato). */
@@ -74,9 +78,9 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
   return {
     async criar(d: NovaDecisao): Promise<Decisao | null> {
       const [l] = await conn<Linha[]>`
-        insert into decisoes (tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, prazo_decisao_em, prazo_execucao_em, frase)
+        insert into decisoes (tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, prazo_decisao_em, prazo_execucao_em, frase, fio_id)
         values (${escopo.tenantId}, ${d.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${d.decisorId ?? escopo.pessoaId}, ${d.agenteId}, ${d.conversaId},
-          ${d.turnoId ?? null}, ${d.tipo}, ${data(d.prazoDecisaoEm)}, ${dataOuNull(d.prazoExecucaoEm)}, ${d.frase})
+          ${d.turnoId ?? null}, ${d.tipo}, ${data(d.prazoDecisaoEm)}, ${dataOuNull(d.prazoExecucaoEm)}, ${d.frase}, ${d.fioId ?? null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
     },
@@ -99,6 +103,24 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
           and (d.estado in ('pendente', 'reaberta') or (d.estado = 'vencida' and d.prazo_decisao_em >= ${data(agora - VENCIDAS_VISIVEIS_MS)}))
         order by d.criado_em`;
       return linhas.map((l) => ({ ...paraDecisao(l), agenteNome: l.agente_nome ?? "agente" }));
+    },
+
+    /** As decisões que um turno criou (fio da pergunta: a pergunta respondida que a retomada continua). */
+    async doTurno(turnoId: string): Promise<Decisao[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from decisoes where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} order by criado_em`;
+      return linhas.map(paraDecisao);
+    },
+
+    /**
+     * Os fios inteiros (definido em 2026-09-24, 0024): cada id é a raiz de um fio; volta a raiz e as
+     * rodadas seguintes (índice decisoes_por_fio). Dado um id de rodada, volta ela mesma.
+     */
+    async dosFios(ids: readonly string[]): Promise<Decisao[]> {
+      if (ids.length === 0) return [];
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from decisoes where tenant_id = ${escopo.tenantId} and (id in ${conn([...ids])} or fio_id in ${conn([...ids])}) order by criado_em`;
+      return linhas.map(paraDecisao);
     },
 
     async pendentesDaConversa(conversaId: string): Promise<Decisao[]> {

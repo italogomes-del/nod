@@ -10,7 +10,7 @@ import { renderDetalhes } from "../../../web/telas/detalhes.ts";
  * "Rotinas"/"Marketplace" sumiriam sem destino.
  */
 const decisao = (id: string, agenteId: string, agenteNome: string, vencido = false, gemeas: string[] = []): SuaVezDto["itens"][number] => ({
-  decisao: { tenantId: "t", id, ownerId: "p", decisorId: "p", agenteId, conversaId: `c-${agenteId}`, turnoId: null, tipo: "acesso", estado: vencido ? "vencida" : "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: `Ler Slack ${id}`, desfecho: null, vistaEm: null, criadoEm: "2026-09-18T00:00:00Z" },
+  decisao: { tenantId: "t", id, ownerId: "p", decisorId: "p", agenteId, conversaId: `c-${agenteId}`, turnoId: null, tipo: "acesso", estado: vencido ? "vencida" : "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: `Ler Slack ${id}`, desfecho: null, vistaEm: null, criadoEm: "2026-09-18T00:00:00Z", fioId: null },
   estadoColuna: vencido ? "vencido" : "pendente",
   agenteNome,
   aguardandoHaMs: 0,
@@ -18,6 +18,7 @@ const decisao = (id: string, agenteId: string, agenteNome: string, vencido = fal
   gemeas,
   itensAprovacao: [],
   proposta: null,
+  fio: null,
 });
 
 const comFila = (itens: SuaVezDto["itens"], incidentes: SuaVezDto["incidentes"] = []): Estado => ({ ...estadoInicial, suaVez: { itens, incidentes, foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });

@@ -2,7 +2,7 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { ehPergunta, iconeBalao } from "../lib/perguntas.ts";
+import { chaveDoItem, contarFios, ehPergunta, iconeBalao, umPorFio } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 
@@ -304,13 +304,14 @@ export function perguntasPorAgente(estado: Estado): Map<string, number> {
   return contarAbertas(estado, ehPergunta);
 }
 
+/** definido em 2026-09-24 (fio da pergunta): conta FIOS — as rodadas de uma pergunta são uma espera só. */
 function contarAbertas(estado: Estado, conta: (tipo: TipoDecisao) => boolean): Map<string, number> {
-  const por = new Map<string, number>();
+  const fios = new Map<string, Set<string>>();
   for (const item of estado.suaVez?.itens ?? []) {
     if (item.estadoColuna === "vencido" || !conta(item.decisao.tipo)) continue;
-    por.set(item.decisao.agenteId, (por.get(item.decisao.agenteId) ?? 0) + 1);
+    fios.set(item.decisao.agenteId, (fios.get(item.decisao.agenteId) ?? new Set<string>()).add(chaveDoItem(item)));
   }
-  return por;
+  return new Map([...fios].map(([agenteId, chaves]) => [agenteId, chaves.size]));
 }
 
 /** Os selos da linha do agente na barra lateral: ⚑ âmbar para decisões, balão azul (com a contagem) para perguntas. */
@@ -332,7 +333,7 @@ export const SUBTITULO_ESPERANDO = '<span class="sub-esperando">esperando sua re
  * "pedidos" — decisões e perguntas —, porque as duas esperam pela pessoa.
  */
 export function renderChamada(estado: Estado): string {
-  const abertos = (estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido");
+  const abertos = umPorFio((estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido"));
   const primeiro = abertos[0];
   if (!primeiro) return "";
   const d = primeiro.decisao;
@@ -411,8 +412,10 @@ export function renderSuaVez(estado: Estado): string {
   if (!sv) return `<section class="tela"><header class="tela-cab"><h1>Sua vez</h1></header><p class="mudo">carregando…</p></section>`;
   const fora = sv.foraDoAr.map((f) => `<li class="decisao dec-fora"><span class="tag tag-cinza">fora do ar</span> ${esc(foraDoArDesde(f.nome, f.desde))}</li>`).join("");
   const abertos = sv.itens.filter((i) => i.estadoColuna !== "vencido");
+  // O número do título conta fios (definido em 2026-09-24): as rodadas de uma pergunta são uma espera só.
+  const esperando = contarFios(abertos);
   return `<section class="tela tela-sua-vez">
-    <header class="tela-cab"><h1>Sua vez${abertos.length ? ` · ${abertos.length}` : ""}</h1><span class="chip">mais antiga no topo · vencidas recolhidas no fim</span></header>
+    <header class="tela-cab"><h1>Sua vez${esperando ? ` · ${esperando}` : ""}</h1><span class="chip">mais antiga no topo · vencidas recolhidas no fim</span></header>
     ${sv.vazio && sv.foraDoAr.length === 0 ? `<p class="vazio">${esc(nadaEsperando(sv.ultimaDecisaoEm, estado.agora))}</p>` : ""}
     <ul class="lista">${fora}${abertos.map((i) => renderItem(i, estado)).join("")}</ul>
     ${renderVencidos(sv.itens.filter((i) => i.estadoColuna === "vencido"), estado, false, "sua-vez")}
