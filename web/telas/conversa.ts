@@ -1,12 +1,10 @@
 import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
-import { nomeInteligencia } from "./inteligencia.ts";
 import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
-import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
@@ -396,7 +394,14 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
   </div>`;
 }
 
-/** Cabeçalho da conversa própria: nome, badge do executor e as ações (perfil, memória, Parar). */
+const PAINEL = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.5v13"/></svg>';
+
+/**
+ * Cabeçalho da conversa própria: só quem é o bot e o botão do painel. definido em 2026-09-24 (revisão da
+ * interface): a barra de ações (Computador, Pasta, Inteligência, Perfil, Memória, •••) competia com o
+ * chat; o que é do bot mora no painel (web/telas/detalhes.ts) e o ••• no clique direito da sidebar.
+ * Parar só aparece enquanto há turno vivo, que é quando ele serve.
+ */
 export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
@@ -404,12 +409,8 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
   return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
-      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-computador", `Computador do bot${a.computadorForaDoAr ? ' <span class="tag tag-vermelha">fora do ar</span>' : ""}`, { id: agenteId, titulo: a.computadorForaDoAr ? `Fora do ar desde ${dataHora(a.computadorForaDoAr.desde)}: ${MOTIVO_FALHA_TEXTO[a.computadorForaDoAr.motivo]}` : "O computador próprio do bot (ADR-037), não o seu Mac" }) : ""}
-      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-workspace", "Pasta de trabalho", { id: agenteId }) : ""}
-      ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
-      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("inteligencia", `✦ ${nomeInteligencia(a, estado.executor?.harnesses)}`, { id: agenteId, classe: "inteligencia-atalho", titulo: "Inteligência do agente: modelo e harness" }) : ""}${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}
-      ${botao("ir-memoria", "Memória", { id: agenteId })}
-      ${botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" })}
+      ${vivo ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" }) : ""}
+      <button type="button" class="bt toggle-detalhes" data-act="alternar-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot">${PAINEL}</button>
     </div>`;
 }
 

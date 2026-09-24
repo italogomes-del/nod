@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { rotuloExecucao } from "../../../web/lib/execucao.ts";
-import { renderCabecalhoConversa } from "../../../web/telas/conversa.ts";
+import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { fraseDoIncidente, renderIncidentes } from "../../../web/telas/sua-vez.ts";
 
 type Incidente = SuaVezDto["incidentes"][number];
@@ -43,12 +43,12 @@ describe("aviso de queda do Mac (ADR-045): incidente não é decisão", () => {
     expect(reduzir(comAvisos([incidente()]), { tipo: "tick", agora: T0 + 6 * H }).invalidacoes).not.toContain("sua-vez");
   });
 
-  it("histórico da rotina diz quem parou; o botão do cabeçalho é o computador DO BOT, não o Mac", () => {
+  it("histórico da rotina diz quem parou; o botão do painel é o computador DO BOT, não o Mac", () => {
     expect(rotuloExecucao({ desfecho: "interrompida", motivo: "maquina_sem_contato" })).toBe("interrompida · seu Mac parou de responder");
     expect(rotuloExecucao({ desfecho: "interrompida", motivo: "reinicio_servidor" })).toBe("interrompida · o servidor reiniciou");
     expect(rotuloExecucao({ desfecho: "passou_em_branco", motivo: "ninguem_respondeu_o_gate" })).toBe("passou em branco");
     const agente = { id: "a1", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c1", confirmado: true, fixado: false, oculto: false } as never;
-    const html = renderCabecalhoConversa({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [agente], negacoes: [] } as never }, "a1");
+    const html = renderDetalhes({ ...estadoInicial, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" }, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [agente], negacoes: [] } as never });
     expect(html).toContain("Computador do bot");
     expect(html).toMatch(/data-act="abrir-computador"[^>]*>Computador do bot</);
   });
