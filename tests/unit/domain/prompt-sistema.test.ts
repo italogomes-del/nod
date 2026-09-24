@@ -59,6 +59,8 @@ describe("montarPromptSistema", () => {
     const p = montarPromptSistema({ agente, memorias: [], pessoaNome: "Marlon", modo: "conversa", ferramentas: [f("excluir_rotina")], rotinas });
     expect(p).toContain("pedir_a_pessoa");
     expect(p).toContain("não escolha por conta própria");
+    // Emenda da ADR-045: as candidatas são respostas previsíveis — viram botões de um toque.
+    expect(p).toContain("com as candidatas em opcoes");
   });
 
   it("inventário é estável e a instrução é truncada (o prompt é cacheado por agente)", () => {

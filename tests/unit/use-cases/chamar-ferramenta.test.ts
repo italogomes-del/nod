@@ -120,7 +120,12 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(pergunta).toBeDefined();
     expect(pergunta?.decisorId).toBe(c.deps.escopo.pessoaId);
     expect(c.banco.decisoes.some((d) => d.tipo === "permissao")).toBe(false);
-    expect(c.banco.mensagens.some((m) => m.texto.startsWith("parei para perguntar"))).toBe(true);
+    // Emenda da ADR-045: a conversa recebe a fala do agente LIGADA à decisão; o molde curto fica só na fila.
+    const fala = c.banco.mensagens.find((m) => m.payload?.kind === "pedido_a_pessoa");
+    expect(fala?.payload).toEqual({ kind: "pedido_a_pessoa", decisaoId: pergunta?.id });
+    expect(fala?.texto).toBe("(pedido sem texto)");
+    expect(pergunta?.frase.startsWith("parei para perguntar")).toBe(true);
+    expect(c.banco.mensagens.some((m) => m.texto.startsWith("parei"))).toBe(false);
   });
 
   it("conector: concessão ativa lida AGORA — somar (concedida) chama o conector e volta nao_confiavel; enviar (sem concessão) é capacidade_desligada terminal", async () => {
@@ -180,6 +185,8 @@ describe("validação pelo subconjunto JSON Schema", () => {
     expect(validarArgsNod("pedir_aprovacao", { resumo: "r", itens: [{ texto: "t", destino: { conector: "c", ferramenta: "f", argumentos: { livre: true } } }] }).ok).toBe(true);
     expect(validarArgsNod("pedir_aprovacao", { resumo: "r", itens: [{ texto: "t", destino: { conector: "c", ferramenta: "f" } }] })).toMatchObject({ ok: false, erros: ["$.itens[0].destino.argumentos: obrigatório"] });
     expect(errosDoSchema({ type: "array", minItems: 1, items: { type: "string" } }, [])).toEqual(["$: mínimo 1 itens"]);
+    // definido em 2026-09-24 (emenda da ADR-045): o teto que o subconjunto expõe (opcoes de pedir_a_pessoa) também valida.
+    expect(errosDoSchema({ type: "array", maxItems: 2, items: { type: "string", maxLength: 3 } }, ["abc", "abcd", "x"])).toEqual(["$: máximo 2 itens", "$[1]: máximo 3 caracteres"]);
     expect(errosDoSchema({ type: "integer" }, 1.5)).toEqual(["$: esperado inteiro"]);
     expect(errosDoSchema({ type: "object" }, null)).toEqual(["$: esperado object, veio null"]);
     expect(errosDoSchema({ type: "object" }, [])).toEqual(["$: esperado object, veio array"]);

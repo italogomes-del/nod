@@ -34,7 +34,18 @@ export type PayloadMensagem =
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string }
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
-  | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador };
+  | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador }
+  /**
+   * definido em 2026-09-24 (emenda da ADR-045, perguntas viram conversa): a fala do agente que É a
+   * pergunta de pedir_a_pessoa. A web a desenha como pergunta, sem card nem caixa de texto; `opcoes`
+   * são as respostas prontas (pedido.ts), e o toque manda o texto da opção como a resposta.
+   */
+  | { kind: "pedido_a_pessoa"; decisaoId: string; opcoes?: string[] }
+  /**
+   * A resposta da pessoa, ligada à pergunta (responder-decisao.ts): `perguntaEm` rotula "respondendo à
+   * pergunta das HH:MM" e `retomada` diz se um turno de retomada nasceu junto.
+   */
+  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean };
 
 export type Mensagem = {
   tenantId: TenantId;

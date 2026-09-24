@@ -10,6 +10,8 @@ export type JsonSchema = {
   enum?: readonly string[];
   items?: JsonSchema;
   minLength?: number;
+  /** definido em 2026-09-24 (emenda da ADR-045): o teto das respostas prontas de pedir_a_pessoa chega ao modelo. */
+  maxLength?: number;
   minItems?: number;
+  maxItems?: number;
 };
-

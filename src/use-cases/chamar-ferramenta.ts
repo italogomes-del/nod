@@ -48,11 +48,13 @@ export function errosDoSchema(schema: JsonSchema, valor: unknown, caminho = "$")
   if (schema.type === "string") {
     const s = valor as string;
     if (schema.minLength !== undefined && s.length < schema.minLength) erros.push(`${caminho}: mínimo ${schema.minLength} caracteres`);
+    if (schema.maxLength !== undefined && s.length > schema.maxLength) erros.push(`${caminho}: máximo ${schema.maxLength} caracteres`);
     if (schema.enum && !schema.enum.includes(s)) erros.push(`${caminho}: valor fora de [${schema.enum.join(", ")}]`);
   }
   if (schema.type === "array") {
     const a = valor as unknown[];
     if (schema.minItems !== undefined && a.length < schema.minItems) erros.push(`${caminho}: mínimo ${schema.minItems} itens`);
+    if (schema.maxItems !== undefined && a.length > schema.maxItems) erros.push(`${caminho}: máximo ${schema.maxItems} itens`);
     if (schema.items) a.forEach((item, i) => erros.push(...errosDoSchema(schema.items as JsonSchema, item, `${caminho}[${i}]`)));
   }
   if (schema.type === "object") {
