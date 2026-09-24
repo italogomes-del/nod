@@ -49,7 +49,7 @@ Contra-prova: `NOD_CLAUDE_BIN=/bin/false NOD_EXECUTOR=claude-cli npm run dev` �
 
 ```bash
 npm run check          # lint → typecheck (3 tsconfigs) → cerca do domínio → unit → integration → conformidade → concurrency
-npm run e2e:fumaca     # as dez jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
+npm run e2e:fumaca     # as onze jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
 npm run uat:regressao  # 16 testes de apoio ao aceite: produto, MCP, revogação e isolamento Composio
 npm run e2e:haiku      # scripts/e2e-aceite.sh: o mesmo roteiro com o CLI real e curl+jq; imprime o custo somado
 ```
@@ -83,6 +83,7 @@ Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (conf
 - **Mobile / PWA / updater automático** — o desktop Electron verifica versão mínima, sem atualização automática. Windows ainda não foi validado.
 - **Computador por bot, driver remoto, browser** (ADR-028); **skills por demonstração**; skills por instrução (nomeadas, `/`) também ficaram fora desta rodada (EMENDA 24).
 - **OAuth real / credencial de colaborador com health-check** (ADR-015 revisado): conector é MCP registrado com env cifrado só no servidor. **Procuração entre donos** tem tabela e regra fail-closed, sem rota nem UI.
+- **Tarefa delegada fora da conversa** (ADR-046): `delegar_tarefa` leva a mensagem da pessoa ao colega, mas só a partir de turno aberto por fala dela. Rotina não delega (consulta por `perguntar_a_bot`); turno de sala criado por `postar-na-sala` é recusado; recusar o acesso pedido pelo colega encerra sem avisar o remetente; anexos não vão junto; computador e pasta ficam fora do turno delegado.
 - **Cadastro autônomo**: o login Google usa allowlist previamente cadastrada (ADR-030). Para desenvolvimento local, `NOD_LOGIN=stub` usa cookie assinado e recusa `NOD_HOST` fora de 127.0.0.1.
 - **Execução de rotina "em curso"**: `DesfechoRotina` não tem `pendente` — `rotina_execucoes` só ganha linha ao assentar; o "em curso" é a janela com `turno_id` (EMENDA-L9 §5, registrado).
 - **Executor de servidor**: `custo_servidor_mes` é 0 por construção; `gastosRepo.somarMes(agora, executor)` já filtra para o dia em que existir.
