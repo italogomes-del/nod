@@ -3,6 +3,7 @@ import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import { montarFila } from "../domain/fila-frota.ts";
 import { incidentesVisiveis } from "./dispensar-incidente.ts";
+import { fiosDosItens } from "./fios-da-pergunta.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** O que "Sua vez" e "reabrir" precisam de Deps: a rota (e o teste) montam só isto. */
@@ -40,6 +41,8 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
   const ultimaDecisaoEm = await repos.decisoes.ultimaDecisaoEm();
   const fila = montarFila({ decisoes, agora, ultimaDecisaoEm });
   const porId = new Map(decisoes.map((d) => [d.id, d]));
+  // definido em 2026-09-24 (fio da pergunta): a faixa diz a rodada, e os contadores contam fios.
+  const fios = await fiosDosItens(repos, fila.itens.map((i) => i.decisao));
 
   const itens: SuaVezDto["itens"] = [];
   for (const item of fila.itens) {
@@ -55,7 +58,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     }
     const itensAprovacao: ItemAprovacao[] = decisao.tipo === "aprovacao" ? await repos.itensAprovacao.listar(decisao.id) : [];
     const proposta = TIPOS_COM_PROPOSTA.has(decisao.tipo) ? await repos.propostas.buscar(decisao.id) : null;
-    itens.push({ ...item, decisao, itensAprovacao, proposta });
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null });
   }
 
   const foraDoAr = (await repos.inventario.listar())

@@ -336,7 +336,7 @@ function atualizarComposer(): void {
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
   if (!alvo || !caixa || !ta) return;
   const nota = document.getElementById("composer-nota");
-  const a = aparenciaDoComposer(modoDoComposer(estado, alvo.conversaId), estado, { placeholder: placeholderPadrao(), nota: nota?.dataset.padrao ?? "" });
+  const a = aparenciaDoComposer(modoDoComposer(estado, alvo.conversaId), estado, { placeholder: placeholderPadrao(), nota: nota?.dataset.padrao ?? "" }, alvo.conversaId);
   regiao("composer-pergunta", a.topo);
   caixa.classList.toggle("modo-resposta", a.resposta);
   if (ta.placeholder !== a.placeholder) ta.placeholder = a.placeholder;

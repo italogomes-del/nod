@@ -4,8 +4,9 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { PayloadMensagem } from "../contracts/mensagem.ts";
 import { MAX_CARACTERES_OPCAO, MAX_OPCOES, TIPOS_PEDIDO_A_PESSOA, type ArgsPedirAPessoa } from "../contracts/pedido.ts";
 import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
+import { chaveDoFio } from "../domain/fio-da-pergunta.ts";
 import { redigir } from "../domain/redacao.ts";
-import { rotinaDoTurno } from "./apoio-l7.ts";
+import { rotinaDoTurno, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -95,6 +96,39 @@ async function pedidoDaMesmaRotina(deps: Deps, input: ContextoFerramenta, tipo: 
   return null;
 }
 
+const PEDIDOS: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(TIPOS_PEDIDO_A_PESSOA);
+
+/** Respondida = fechada pela resposta da pessoa (desfecho 'decidida'); dispensada não conta. */
+function respondida(d: Decisao): boolean {
+  return PEDIDOS.has(d.tipo) && d.estado === "decidida" && d.desfecho?.tipo === "decidida";
+}
+
+/**
+ * definido em 2026-09-24 (fio da pergunta, emenda da ADR-045): a pergunta respondida que ESTE turno
+ * continua — a de um dos três tipos cujo `turno_id` é o `retomaTurnoId` do turno, fechada pela resposta.
+ * Achada, a pergunta nova é a rodada seguinte do mesmo fio: a pessoa pediu explicação, o agente explicou
+ * e pergunta de novo. Duas respostas ao mesmo turno (duas perguntas numa chamada só) desempatam pela
+ * resposta que criou ESTE turno (`turnoRetomadaId`). Sem pergunta no turno de cima, a busca só sobe
+ * por uma retomada INTERROMPIDA (queda do Mac, Parar): o "Retomar" continua o mesmo trabalho. Retomada
+ * que terminou normalmente encerrou o fio — a pergunta dela começa outro.
+ */
+async function perguntaQueEsteTurnoContinua(deps: Deps, turnoId: string): Promise<Decisao | null> {
+  let turno = await deps.repos.turnos.buscar(turnoId);
+  for (let saltos = 0; turno?.origem === "retomada" && turno.retomaTurnoId && saltos < SALTOS_DE_RETOMADA; saltos++) {
+    const candidatas = (await deps.repos.decisoes.doTurno(turno.retomaTurnoId)).filter(respondida);
+    if (candidatas.length === 1) return candidatas[0] ?? null;
+    if (candidatas.length > 1) {
+      const atual = turno.id;
+      const [ligada] = (await deps.repos.mensagens.listarDaConversa(turno.conversaId)).flatMap((m) => (m.payload?.kind === "resposta_a_pedido" && m.payload.turnoRetomadaId === atual ? [m.payload.decisaoId] : []));
+      return candidatas.find((d) => d.id === ligada) ?? candidatas.at(-1) ?? null;
+    }
+    const acima = await deps.repos.turnos.buscar(turno.retomaTurnoId);
+    if (acima?.estado !== "interrompido") return null;
+    turno = acima;
+  }
+  return null;
+}
+
 /**
  * Nona ferramenta nod (EMENDA 16): cria uma Decisao TIPADA ('pergunta' | 'falta_de_dado' |
  * 'permissao') dirigida à pessoa nomeada (perna extra da RLS, EMENDA 1) ou à dona e manda o modelo
@@ -111,7 +145,10 @@ export const pedirAPessoa: CasoNod<Deps, "pedir_a_pessoa"> = async (deps, input)
   const agora = deps.agora();
   const args = normalizarPedidoAPessoa(input);
   const tipo: TipoDecisao = args.tipo;
-  const repetida = await pedidoDaMesmaRotina(deps, input, tipo);
+  // definido em 2026-09-24 (fio da pergunta): a rodada seguinte de uma pergunta respondida nunca é
+  // "a mesma pergunta da rotina" — é o agente explicando e perguntando de novo, então não reaproveita.
+  const anterior = await perguntaQueEsteTurnoContinua(deps, input.turnoId);
+  const repetida = anterior ? null : await pedidoDaMesmaRotina(deps, input, tipo);
   if (repetida) return { data: { estado: "pendente", decisao_id: repetida.id, instrucao: "encerre o turno; a resposta retoma depois" }, events: [] };
   const decisor = await resolverDecisor(deps, args.quem_destrava);
   const frase = fraseDoPedido(args, decisor.nome, agora);
@@ -121,8 +158,10 @@ export const pedirAPessoa: CasoNod<Deps, "pedir_a_pessoa"> = async (deps, input)
     agenteId: input.agenteId,
     conversaId: input.conversaId,
     turnoId: input.turnoId,
+    // Cada rodada tem o próprio prazo (24 h a partir desta pergunta) e as próprias opções.
     prazoDecisaoEm: agora + PRAZO_DECISAO_MS,
     frase,
+    fioId: anterior ? chaveDoFio(anterior) : null,
   });
   if (!decisao) throw new Error("decisão não criada");
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
@@ -137,7 +176,7 @@ export const pedirAPessoa: CasoNod<Deps, "pedir_a_pessoa"> = async (deps, input)
     pessoaDestinoId: deps.escopo.pessoaId,
     conversaId: input.conversaId,
     turnoId: input.turnoId,
-    dados: { decisao_id: decisao.id, tipo, decisor_id: decisor.id, prazo_decisao_em: decisao.prazoDecisaoEm },
+    dados: { decisao_id: decisao.id, tipo, decisor_id: decisor.id, prazo_decisao_em: decisao.prazoDecisaoEm, ...(decisao.fioId ? { fio_id: decisao.fioId } : {}) },
   };
   return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a resposta retoma depois" }, events: [evento] };
 };

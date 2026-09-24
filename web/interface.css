@@ -450,6 +450,25 @@ body { background: #fcfdff; }
 .composer .clipe:disabled { opacity: .4; cursor: not-allowed; }
 .composer .clipe:disabled:hover { background: transparent; color: #41495c; }
 
+/* Fio da pergunta (2026-09-24): aberto, um trilho azul fino junta as mensagens do fio sob "Pergunta
+   aberta · N mensagens · Xª rodada"; enquanto o agente lê, a faixa acima do campo fica neutra, sem ações;
+   resolvido, o fio recolhe num <details> verde e a linha "{agente} seguiu com a sua resposta" fica embaixo. */
+.fio-aberto { margin: 0 0 6px; padding: 2px 0 2px 14px; border-left: 2px solid #9dbbe6; }
+.fio-cab { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 11.5px; font-weight: 500; color: var(--blue); }
+.fio-cab .fio-ic { display: inline-flex; }
+.faixa-pergunta.faixa-lendo { border-color: var(--line-2); background: var(--panel-soft); color: var(--ink-2); }
+.faixa-pergunta.faixa-lendo .fp-ic { color: var(--ink-3); }
+.fio-resolvido { margin: 4px auto 6px; max-width: 620px; border: 1px solid #cde8d6; border-radius: 12px; background: #f1faf4; }
+.fio-resolvido > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: 12.5px; color: #1d5b35; }
+.fio-resolvido > summary::-webkit-details-marker { display: none; }
+.fio-resolvido .fio-ok { color: var(--ok); font-weight: 700; }
+.fio-resolvido .fio-resumo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fio-resolvido .fio-resumo b { font-weight: 600; }
+.fio-resolvido .fio-ver { color: var(--ok); font-size: 12px; white-space: nowrap; }
+.fio-resolvido[open] .fio-ver { display: none; }
+.fio-resolvido .fio-corpo { padding: 6px 12px 10px; border-top: 1px solid #cde8d6; background: var(--panel); border-radius: 0 0 12px 12px; }
+.msg-seguiu { margin-top: 0; }
+
 /* Barra lateral: o balão azul conta perguntas, separado do ⚑ âmbar das decisões. */
 .ch-badge.ch-pergunta { gap: 3px; background: var(--blue-soft); color: var(--blue); }
 .ch-badge .ic-balao { display: block; }

@@ -18,6 +18,7 @@ function conversaVazia(): ConversaDto {
     turnosPendentes: [],
     turnosEmCurso: [],
     turnosCancelados: [],
+    fios: [],
     propostas: [],
   };
 }

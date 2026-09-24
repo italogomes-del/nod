@@ -6,7 +6,7 @@ import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
-import { registrarDesfechoRotina, TIPOS_GATE_ROTINA } from "../../use-cases/disparar-rotina.ts";
+import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -61,8 +61,11 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
       const events = [evento(deps, "decisao_vencida", autoria, { decisaoId: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atrasoMs: agora - Date.parse(d.prazoDecisaoEm) }, { conversaId: d.conversaId, turnoId: d.turnoId })];
       // Gate de rotina = gate_rotina OU aprovacao ligada a um turno de rotina (TIPOS_GATE_ROTINA); se o
       // turno não é de rotina, registrarDesfechoRotina devolve 'nao_e_rotina' e nada mais acontece.
-      if (TIPOS_GATE_ROTINA.has(d.tipo) && d.turnoId) {
-        const r = await registrarDesfechoRotina(deps, { turnoId: d.turnoId, desfecho: "passou_em_branco", motivo: "ninguem_respondeu_o_gate" });
+      // definido em 2026-09-24 (fio da pergunta): a pergunta vencida também fecha a janela — a execução
+      // esperava por ela (TIPOS_QUE_SEGURAM_A_EXECUCAO) e não entregou.
+      if (TIPOS_QUE_SEGURAM_A_EXECUCAO.has(d.tipo) && d.turnoId) {
+        const motivo = TIPOS_GATE_ROTINA.has(d.tipo) ? "ninguem_respondeu_o_gate" : "pergunta_sem_resposta";
+        const r = await registrarDesfechoRotina(deps, { turnoId: d.turnoId, desfecho: "passou_em_branco", motivo });
         if ("execucao" in r.data) {
           resultado.passaramEmBranco.push(r.data.rotina.id);
           resultado.mensagens += 1;

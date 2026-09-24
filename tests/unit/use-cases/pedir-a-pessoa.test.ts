@@ -77,7 +77,7 @@ describe("pedirAPessoa grava a fala ligada à decisão", () => {
     expect(banco.decisoes.find((d) => d.id === r.data.decisao_id)?.estado).toBe("decidida");
     const resposta = banco.mensagens.find((m) => m.id === ids.mensagem);
     expect(resposta).toMatchObject({ kind: "texto", texto: "Sim, pode arquivar", autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId } });
-    expect(resposta?.payload).toEqual({ kind: "resposta_a_pedido", decisaoId: r.data.decisao_id, agenteId: bot.agente.id, perguntaEm: Date.parse(decisao?.criadoEm ?? ""), retomada: true });
+    expect(resposta?.payload).toEqual({ kind: "resposta_a_pedido", decisaoId: r.data.decisao_id, agenteId: bot.agente.id, perguntaEm: Date.parse(decisao?.criadoEm ?? ""), retomada: true, turnoRetomadaId: ids.turnoRetomada });
     expect(banco.turnos.find((t) => t.id === ids.turnoRetomada)).toMatchObject({ origem: "retomada", retomaTurnoId: turno.id });
   });
 });

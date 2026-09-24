@@ -8,6 +8,7 @@ import type { ItemAprovacao } from "./item-aprovacao.ts";
 import type { Mensagem } from "./mensagem.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
+import type { FioDaPergunta, FioDoItem } from "./pedido.ts";
 import type { Rotina } from "./rotina.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
@@ -62,11 +63,16 @@ export type ConversaDto = {
   turnosCancelados: { id: string; mensagemId: string }[];
   /** Propostas PENDENTES da conversa (E1.1): o cartão da web nasce daqui, nunca de um kind de Mensagem (definido em 2026-09-16, L9). */
   propostas: Proposta[];
+  /** definido em 2026-09-24 (fio da pergunta): os fios com mensagem na janela carregada, com o estado derivado. */
+  fios: FioDaPergunta[];
 };
 
 export type SuaVezDto = {
-  /** `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos. */
-  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null })[];
+  /**
+   * `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos.
+   * `fio` (definido em 2026-09-24): o fio e a rodada dos três tipos de pedir_a_pessoa; null nos outros.
+   */
+  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null })[];
   /** Avisos de infraestrutura (ADR-045): um por queda do Mac, nunca um card por turno. Não são decisões. */
   incidentes: IncidenteDto[];
   foraDoAr: { nome: string; desde: EpochMs }[];

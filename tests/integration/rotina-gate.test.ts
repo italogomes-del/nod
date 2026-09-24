@@ -132,9 +132,10 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
       if (!("turno" in r.data)) throw new Error("deveria disparar");
       const turnoId = r.data.turno.id;
-      // A rotina esbarra num dado que falta, pergunta e encerra: o turno dela registra 'executou'.
+      // A rotina esbarra num dado que falta, pergunta e encerra. definido em 2026-09-24 (fio da pergunta):
+      // o 'executou' do turno que perguntou não conta — a janela espera o fio.
       const pergunta = await pedirAPessoa(deps, { turnoId, conversaId, agenteId, tipo: "falta_de_dado", texto: "falta a planilha", dado: "planilha" });
-      await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" });
+      expect((await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
       // A pessoa responde; a retomada roda e termina com outro desfecho, na MESMA janela.
       relogio += 3_600_000;
       const { data: fechada } = await fecharComResposta(deps, { decisaoId: pergunta.data.decisao_id, texto: "está no drive" });
