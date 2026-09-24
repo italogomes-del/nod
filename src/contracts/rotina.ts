@@ -1,3 +1,4 @@
+import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { DesfechoRotina, MotivoBloqueioRotina } from "./motivos.ts";
 import type { Executor } from "./evento.ts";
@@ -29,6 +30,12 @@ export type Rotina = {
    * tick do scheduler, sem apagar linha — a trilha e as execuções passadas continuam.
    */
   excluidoEm: EpochMs | null;
+  /**
+   * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso", migração 0027): os apps que a
+   * rotina DECLARA ler ou alterar, já normalizados pelo domínio. null = rotina anterior, sem declaração: o
+   * pré-voo lê a fonte. Presente, mesmo vazia, ganha da fonte.
+   */
+  acessos: AcessoPedido[] | null;
 };
 
 /**

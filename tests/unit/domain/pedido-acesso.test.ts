@@ -52,6 +52,23 @@ describe("normalizarPedidoAcesso (ADR-044)", () => {
     expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_SEND_EMAIL"] }), conector: pronto, emRotina: true }))).toBe("nao_permitido");
     expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido(), conector: { habilitado: true, catalogo: [cap("GMAIL_SEND_EMAIL", false)] }, emRotina: true }))).toBe("entrada_invalida");
   });
+
+  // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso").
+  it("rotina: a escrita que a rotina DECLAROU passa, pelo nome; escrita fora da declaração continua nao_permitido", () => {
+    const declaradas = ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"];
+    expect(normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita" }), conector: pronto, emRotina: true, declaradas })).toEqual({ conector: "gmail", capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita", naoPedido: [] });
+    expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_SEND_EMAIL", "GMAIL_DELETE_MESSAGE"], nivel: "escrita" }), conector: pronto, emRotina: true, declaradas }))).toBe("nao_permitido");
+    // Escrita sem nomes não vira "tudo que foi declarado": continua recusada.
+    expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ nivel: "escrita" }), conector: pronto, emRotina: true, declaradas }))).toBe("nao_permitido");
+  });
+
+  it("declaração (criar_rotina): leitura [] num app conectado vira as de leitura; app por conectar vira conexão; escrita exige os nomes", () => {
+    expect(normalizarPedidoAcesso({ pedido: pedido(), conector: pronto, emRotina: false, declaracao: true })).toEqual({ conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], nivel: "leitura", naoPedido: [] });
+    expect(normalizarPedidoAcesso({ pedido: pedido(), conector: null, emRotina: false, declaracao: true })).toMatchObject({ capacidades: [], conectar: true });
+    expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ nivel: "escrita" }), conector: pronto, emRotina: false, declaracao: true }))).toBe("entrada_invalida");
+    expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ nivel: "escrita" }), conector: null, emRotina: false, declaracao: true }))).toBe("entrada_invalida");
+    expect(normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita" }), conector: pronto, emRotina: false, declaracao: true })).toMatchObject({ capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita" });
+  });
 });
 
 describe("fraseDoPedidoDeAcesso (ADR-044)", () => {

@@ -1,3 +1,4 @@
+import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Visibilidade } from "./agente.ts";
 import type { Executor } from "./evento.ts";
@@ -38,6 +39,12 @@ export type PayloadPropostaRotina = {
   politicaSemDado: string;
   proximaExecucao: EpochMs;
   resumo: string;
+  /**
+   * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): o que a rotina declarou ler
+   * ou alterar, JÁ normalizado (leitura com [] num app conectado já traz as ferramentas de leitura).
+   * Confirmar concede o que estiver conectado. Ausente = a rotina não declarou (proposta anterior).
+   */
+  acessos?: AcessoPedido[];
 };
 /**
  * definido em 2026-09-21: atualizar uma rotina que já existe. Guarda só o que MUDA (campo ausente
@@ -55,6 +62,8 @@ export type PayloadPropostaRotinaAtualizacao = {
   entregavel?: string;
   limitesAprovacao?: string;
   politicaSemDado?: string;
+  /** A lista NOVA de acessos declarados, inteira (emenda de 2026-09-24); aplicar concede o que for novo. */
+  acessos?: AcessoPedido[];
   /** Recalculado na confirmação a partir de agora; este é o previsto quando a proposta nasceu. */
   proximaExecucao: EpochMs;
   resumo: string;

@@ -6,6 +6,7 @@ import { desdeDaParada, linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, contarFios, ehPergunta, iconeBalao, umPorFio } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
+import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -233,8 +234,9 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores"], daMinhaConversa: boolean): string {
+function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace">, daMinhaConversa: boolean): string {
   const d = item.decisao;
+  const conectores = estado.conectores;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
   switch (d.tipo) {
     case "aprovacao":
@@ -247,11 +249,20 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
       const r = rotulosAcesso(item.proposta);
       return `<div class="acoes">${botao("decidir-proposta", r.permitir, { classe: "pri", id: d.id })}${botao("recusar-decisao", r.recusar, { id: d.id })}</div>`;
     }
-    case "perfil":
-    case "rotina":
+    // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a rotina que declara acessos
+    // diz no botão que confirmar também libera; app por conectar vem primeiro (web/telas/rotina-precisa.ts).
+    case "rotina": {
+      const comAcesso = acoesComAcesso(item.proposta, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Deixar de lado" });
+      if (comAcesso) return `<div class="acoes">${comAcesso.botoes}</div>${comAcesso.ajuda}`;
       return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
-    case "rotina_atualizacao":
+    }
+    case "perfil":
+      return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    case "rotina_atualizacao": {
+      const comAcesso = acoesComAcesso(item.proposta, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Manter como está" });
+      if (comAcesso) return `<div class="acoes">${comAcesso.botoes}</div>${comAcesso.ajuda}`;
       return `<div class="acoes">${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter como está", { id: d.id })}</div>`;
+    }
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
@@ -298,8 +309,9 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
     <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
     <div class="dec-frase">${esc(d.frase)}</div>${parada.linha}
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
+    ${(d.tipo === "rotina" || d.tipo === "rotina_atualizacao") && aberta ? linhasPrecisa(item.proposta, estado) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
-    ${renderAcoes(item, aberta, estado.conectores, daMinhaConversa)}
+    ${renderAcoes(item, aberta, estado, daMinhaConversa)}
     ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}
   </li>`;
 }

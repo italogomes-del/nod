@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { autoriaPessoa, evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { concederAcessosDaRotina } from "./conceder-acessos-da-rotina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type SaidaAplicarPropostaRotina = { rotina: Rotina; jaAplicada: boolean };
@@ -44,6 +45,7 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string }, SaidaAp
     limitesAprovacao: p.limitesAprovacao,
     politicaSemDado: p.politicaSemDado,
     proximaExecucao,
+    acessos: p.acessos,
   });
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona atualiza a rotina" });
   const autoria = autoriaPessoa(deps.escopo.pessoaId);
@@ -57,6 +59,10 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string }, SaidaAp
   const events: RuntimeEvent[] = [
     evento(deps, "rotina_atualizada", autoria, { rotinaId: rotina.id, propostaId: proposta.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana }, { conversaId: rotina.conversaId }),
   ];
+  // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a mudança que traz `acessos`
+  // concede, na mesma transação, o que ainda não estava concedido — o que já estava não vira mensagem
+  // nova (concederLote é idempotente). App que saiu da lista NÃO é revogado aqui: revogar é pela tela.
+  if (p.acessos) events.push(...((await concederAcessosDaRotina(deps, { agenteId: rotina.agenteId, acessos: p.acessos })).events ?? []));
   const decisao = await deps.repos.decisoes.decidir(proposta.id, { por: deps.escopo.pessoaId, agora });
   if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_atualizacao" }, { conversaId: rotina.conversaId }));
   return { data: { rotina, jaAplicada: false }, events };

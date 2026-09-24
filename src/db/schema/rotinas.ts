@@ -11,6 +11,8 @@ export const ROTINAS = {
   },
   /** DEFAULT true na coluna: o gate nasce ligado por schema, nunca por texto (E7.3). */
   exigeAprovacaoDefault: true,
+  /** definido em 2026-09-24 (0027): `acessos` é null (sem declaração) ou uma LISTA jsonb. */
+  acessos: { coluna: "acessos", check: "rotinas_acessos_lista" },
   janelas: { tabela: "rotina_janelas", unique: "rotina_janelas_unica" },
   execucoes: { tabela: "rotina_execucoes", check: "rotina_execucoes_motivo_sem_texto_livre" },
   varredor: { tabela: "decisao_eventos_varridos", unique: "decisao_eventos_varridos_unico" },

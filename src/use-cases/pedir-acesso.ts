@@ -58,14 +58,17 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
  * Pedido de acesso em português com escopo nomeado (E6.2). A validação é do domínio
  * (normalizarPedidoAcesso); aqui mora a ligação com o turno. App ainda não conectado vira só o card
  * de conexão; app pronto vira proposta + decisão de mesmo id, que a pessoa decide com um clique
- * (decidir-acesso.ts concede). Turno de rotina só pede leitura e o pedido carrega a rotina: permitir
- * roda a rotina de novo, recusar a pausa — e, desde 2026-09-24 (emenda da ADR-044), é UM por (agente,
- * app) com o pré-voo (garantirPedidoDeAcesso). Nada é concedido aqui.
+ * (decidir-acesso.ts concede). Turno de rotina só pede leitura — ou a escrita que a rotina declarou — e
+ * o pedido carrega a rotina: permitir roda a rotina de novo, recusar a pausa — e, desde 2026-09-24
+ * (emenda da ADR-044), é UM por (agente, app) com o pré-voo (garantirPedidoDeAcesso). Nada é concedido aqui.
  */
 export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) => {
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
   const conector = await deps.repos.conectores.buscarPorSlug(input.conector);
-  const pedido = normalizarPedidoAcesso({ pedido: input, conector, emRotina: ligacao !== null });
+  // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a escrita que a rotina
+  // DECLAROU para este app — a pessoa a viu no card da rotina — pode ser pedida pelo turno; fora dela, não.
+  const declaradas = ligacao?.rotina.acessos?.filter((a) => a.conector === input.conector).flatMap((a) => a.capacidades) ?? [];
+  const pedido = normalizarPedidoAcesso({ pedido: input, conector, emRotina: ligacao !== null, declaradas });
   const rotina = ligacao?.rotina ?? null;
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
   if (rotina) {

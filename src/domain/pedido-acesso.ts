@@ -24,24 +24,44 @@ export function capacidadesDeLeitura(catalogo: Catalogo): string[] {
  * Em turno de rotina só se pede leitura, e [] quer dizer "as ferramentas de leitura deste app",
  * resolvidas aqui pelo catálogo. O nível segue o que é pedido de fato: 'leitura' com ferramenta de
  * escrita dentro seria rótulo mentiroso no card, então sobe para 'escrita' (e é recusado na rotina).
+ *
+ * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): dois modos a mais.
+ * - `declaracao`: os `acessos` de criar_rotina/atualizar_rotina. [] em leitura também vira as ferramentas
+ *   de leitura (a pessoa lê "Ler seu Gmail" no card e consente nisso); escrita exige os nomes exatos,
+ *   mesmo com o app ainda por conectar — não há o que conceder sem saber o quê.
+ * - `declaradas`, no turno de rotina: a escrita que a rotina DECLAROU para este app passa (a pessoa já a
+ *   viu no card da rotina); escrita fora da declaração continua nao_permitido.
  */
-export function normalizarPedidoAcesso(entrada: { pedido: ArgsPedirAcesso; conector: Pick<Conector, "habilitado" | "catalogo"> | null; emRotina: boolean }): AcessoPedido {
+export function normalizarPedidoAcesso(entrada: {
+  pedido: ArgsPedirAcesso;
+  conector: Pick<Conector, "habilitado" | "catalogo"> | null;
+  emRotina: boolean;
+  /** Turno de rotina: as capacidades que a rotina declarou para ESTE app (a escrita declarada passa). */
+  declaradas?: readonly string[];
+  /** Declaração de acesso da própria rotina (criar_rotina, atualizar_rotina). */
+  declaracao?: boolean;
+}): AcessoPedido {
   const { pedido, conector, emRotina } = entrada;
-  if (emRotina && pedido.nivel !== "leitura") throw new ErroDeDominio("nao_permitido", { cause: "turno de rotina só pede leitura" });
+  const declaracao = entrada.declaracao === true;
+  const declaradas = new Set(entrada.declaradas ?? []);
   const naoPedido = [...pedido.nao_pedido];
   const pedidas = [...new Set(pedido.capacidades)];
+  if (emRotina && pedido.nivel !== "leitura" && pedidas.length === 0) throw new ErroDeDominio("nao_permitido", { cause: "turno de rotina só pede leitura, ou a escrita que a rotina declarou, pelo nome" });
+  if (declaracao && pedido.nivel !== "leitura" && pedidas.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "escrita declarada pede as capacidades exatas do catálogo" });
   if ((!conector || !conector.habilitado) && pedidas.length === 0) {
     if (!conector && !APPS_MARKETPLACE.some((app) => app.slug === pedido.conector)) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${pedido.conector} não registrado` });
     return { conector: pedido.conector, capacidades: [], nivel: pedido.nivel, naoPedido, conectar: true };
   }
   if (!conector) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${pedido.conector} não registrado` });
-  const capacidades = pedidas.length === 0 && emRotina ? capacidadesDeLeitura(conector.catalogo) : pedidas;
-  if (capacidades.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: emRotina ? "o app não tem ferramenta de leitura" : "capacidades vazias para app já conectado" });
+  const deLeitura = pedidas.length === 0 && (emRotina || declaracao);
+  const capacidades = deLeitura ? capacidadesDeLeitura(conector.catalogo) : pedidas;
+  if (capacidades.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: deLeitura ? "o app não tem ferramenta de leitura" : "capacidades vazias para app já conectado" });
   const porNome = new Map(conector.catalogo.map((c) => [c.nome, c]));
   const desconhecidas = capacidades.filter((c) => !porNome.has(c));
   if (desconhecidas.length > 0) throw new ErroDeDominio("entrada_invalida", { cause: `capacidades fora do catálogo: ${desconhecidas.join(", ")}` });
   const escrita = capacidades.filter((c) => porNome.get(c)?.readOnlyHint !== true);
-  if (emRotina && escrita.length > 0) throw new ErroDeDominio("nao_permitido", { cause: `turno de rotina só pede leitura: ${escrita.join(", ")}` });
+  const naoDeclarada = escrita.filter((c) => !declaradas.has(c));
+  if (emRotina && naoDeclarada.length > 0) throw new ErroDeDominio("nao_permitido", { cause: `turno de rotina só pede leitura ou a escrita declarada: ${naoDeclarada.join(", ")}` });
   return { conector: pedido.conector, capacidades, nivel: escrita.length > 0 ? "escrita" : pedido.nivel, naoPedido };
 }
 

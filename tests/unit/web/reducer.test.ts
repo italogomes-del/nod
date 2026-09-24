@@ -51,7 +51,8 @@ describe("reducer: hidratação e o que cada tela precisa", () => {
     e = reduzir(e, { tipo: "invalidar", quais: ["conversa:c1"] });
     expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1", "rotinas", "conectores", "sua-vez"]);
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "sua-vez" } });
-    expect(invalidacoesDaTela(e)).toEqual(["sua-vez"]);
+    // "Sua vez" traz os conectores desde 2026-09-24: o card da rotina diz se o app que ela precisa está conectado.
+    expect(invalidacoesDaTela(e)).toEqual(["conectores", "sua-vez"]);
   });
 
   it("sessão, conexão e tick são estado escrito (o relógio nunca é lido no reducer)", () => {

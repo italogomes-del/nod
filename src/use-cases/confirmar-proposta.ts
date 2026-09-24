@@ -117,6 +117,8 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     resumo = [p.nome ? `nome: ${p.nome}` : null, p.titulo ? `título: ${p.titulo}` : null, p.descricao ? `descrição: ${p.descricao}` : null].filter((x) => x !== null).join("; ");
     events.push(evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: proposta.conversaId, dados: { agente_id: agente.id, acao: "perfil_confirmado", nome: agente.nome, proposta_id: proposta.id } }));
   } else if (proposta.payload.kind === "rotina") {
+    // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): ativar concede os acessos
+    // declarados dos apps conectados na MESMA transação (conceder-acessos-da-rotina.ts).
     rotina = await deps.tx((trx) => deps.services.rotinas.ativar(trx, proposta.id));
     resumo = proposta.payload.resumo;
     events.push(evento(deps.escopo, { kind: "rotina_criada", autoria, agora, conversaId: proposta.conversaId, dados: { rotina_id: rotina.id, proposta_id: proposta.id, proxima_execucao: rotina.proximaExecucao } }));

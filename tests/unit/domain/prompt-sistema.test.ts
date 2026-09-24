@@ -83,6 +83,13 @@ describe("montarPromptSistema", () => {
     expect(p).not.toContain("informe o bloqueio");
   });
 
+  it("emenda da ADR-044 (rotina nasce com o acesso): criar_rotina manda declarar acessos por app — slug, nível, [] para leitura", () => {
+    const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("criar_rotina")], pessoaNome: "Marlon", modo: "conversa" });
+    expect(p).toContain("Se a rotina lê ou altera um app, declare em acessos um item por app: conector com o slug e nivel; para leitura, capacidades []; escrita leva os nomes exatos do catálogo.");
+    expect(p).toContain("A pessoa permite esse acesso no mesmo clique que cria a rotina");
+    expect(montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "conversa" })).not.toContain("declare em acessos");
+  });
+
   it("ADR-044: na rotina entram só os slugs — o catálogo de cada conexão (~4-5 mil tokens) fica de fora", () => {
     const conectores = [{ tenantId: "t", id: "k1", ownerId: "p", visibility: "privado" as const, nome: "Interno", slug: "interno", transporte: "stdio" as const, comando: "node", args: [], url: null, env: {}, declaracao: "nao-toca" as const, habilitado: true, catalogo: [{ nome: "LER_TUDO", descricao: "lê tudo", schema: { type: "object" as const }, readOnlyHint: true }], sondadoEm: 1, ultimaFalha: null, criadoEm: 0 }];
     const rotina = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "Marlon", modo: "rotina", conectores });

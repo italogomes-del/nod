@@ -229,3 +229,87 @@ conexão fica parada (cada janela 'bloqueada', sem turno) até a pessoa conectar
 roda na hora só a rotina do card; outra rotina do mesmo agente que esperava o mesmo app roda na
 próxima janela dela. O segundo "executar agora" no mesmo minuto cai na janela já reivindicada e não
 traz o bloqueio. Os `acessos` declarados (PR 6) têm só o formato aqui.
+
+## Emenda de 2026-09-24 — rotina nasce com o acesso
+
+**Contexto.** A rotina de Gmail da Nina nasceu em 18/09 com fonte "Gmail do Marlon", e nada pediu o
+acesso que ela obviamente precisava: falhou desde a primeira execução. A emenda anterior para a janela
+antes de gastar um turno, mas o card só aparece DEPOIS da primeira janela — horas depois de a pessoa ter
+estado ali, criando a rotina. A pessoa está presente na criação: é o momento certo de consentir.
+
+**Decisão.** A rotina DECLARA o que lê ou altera, e confirmar a rotina concede.
+
+- **Coluna.** `rotinas.acessos jsonb` (0027), com CHECK `rotinas_acessos_lista` (null ou lista), sem
+  backfill. null = rotina anterior: o pré-voo segue lendo a fonte. Presente, mesmo vazia, a declaração
+  ganha da fonte (`necessidadesDaRotina`, como a emenda anterior já previa). Cada item é o
+  `AcessoPedido` já normalizado (`conector`, `capacidades`, `nivel`, `naoPedido`).
+- **Ferramentas.** `criar_rotina` e `atualizar_rotina` aceitam `acessos: [{conector, capacidades, nivel,
+  nao_pedido}]` — os argumentos de `pedir_acesso`, `additionalProperties: false`. Em `atualizar_rotina` é
+  a lista NOVA e inteira; só entra na proposta se muda a declaração, e só declarar já é mudança.
+- **Validação no domínio** (`normalizarPedidoAcesso` em modo `declaracao`, via
+  `normalizarAcessosDeclarados`): app registrado ou do marketplace, capacidades do catálogo sondado, um
+  item por app. Leitura com `[]` num app conectado vira as ferramentas de leitura do catálogo AGORA e fica
+  GUARDADA na proposta — é o que o card mostra e o que confirmar concede. App por conectar fica com `[]` e
+  `conectar`. Escrita exige os nomes exatos, mesmo com o app por conectar. Erro volta tipado à ferramenta
+  (`{erro}`), como as outras validações da rotina.
+- **Conceder ao confirmar** (`conceder-acessos-da-rotina.ts`, o nome reservado). `ativarRotina` — o
+  caminho do chat (`confirmarProposta`) e o da decisão 'rotina' em "Sua vez" (`decisoes.ts`), os dois por
+  `services.rotinas.ativar` sobre a transação corrente — grava os acessos na rotina e concede, na MESMA
+  transação, o que é de app conectado e habilitado: por app, a trava (agente, conector) do pré-voo e
+  `concederLote`, com UMA mensagem de consentimento por app. App por conectar é pulado; o pré-voo abre o
+  card quando ele conectar. Leitura declarada sem capacidades vira as de leitura do catálogo de agora
+  (o botão só libera depois de conectar). A segunda ativação não concede de novo, e `concederLote` não
+  escreve mensagem para o que já estava concedido. `aplicarAtualizacaoRotina` concede o que a mudança
+  declara; app que sai da lista não é revogado (revogar é pela tela, por capacidade).
+- **Escrita declarada no turno de rotina.** `pedir_acesso` em turno de rotina aceita também a escrita que
+  a rotina declarou para o app (pelo nome); escrita fora da declaração segue `nao_permitido`. O gate da
+  rotina (EMENDA 15) não muda: efeito externo continua item a item por `pedir_aprovacao`.
+- **Pré-voo.** Declaração com capacidades exige todas concedidas (como já era); leitura declarada com
+  `[]` se comporta como a rotina legada (uma de leitura basta; o card resolve as de leitura quando nasce).
+- **Web.** O card da rotina proposta (chat e "Sua vez") ganha a linha em destaque "Precisa" por app:
+  ícone, "Ler seu Gmail" / "Alterar seu {App}" / "Ler e alterar…" pelo `readOnlyHint`, "Não inclui: enviar,
+  apagar, arquivar." (curadoria, que agora também chega à web pelo marketplace mesclado) e as ações no
+  `<details>`. Botão principal "Criar rotina e permitir leitura" (ou "…e permitir acesso" com escrita),
+  secundário "Deixar de lado". App por conectar: "Conectar {App}" vem primeiro (`abrir-conexao`) e o botão
+  de criar fica desabilitado com "Liberado assim que o {App} conectar." O mesmo na mudança de rotina que
+  traz acessos ("Aplicar mudança e permitir leitura"). "Sua vez" passa a carregar os conectores.
+- **Prompt.** A linha de `criar_rotina` manda declarar `acessos` quando a rotina lê ou altera um app: um
+  item por app, slug e nível, `[]` para leitura, nomes exatos para escrita.
+
+**Alternativas descartadas.**
+
+- **Inferir o acesso da fonte na criação** ("Gmail do Marlon" → Gmail): é interpretação de texto; a fonte
+  segue só como a rede da rotina antiga, e quem declara é o modelo, com a pessoa conferindo no card.
+- **Conceder sem mostrar o que** ("Confirmar" como antes): o consentimento seria implícito; o botão agora
+  diz que libera e a linha "Precisa" diz o quê.
+- **Um pedido de acesso separado logo depois da rotina:** dois cards para uma decisão, e o segundo chega
+  quando a pessoa já saiu da conversa.
+
+**Validação.** unit `domain/pedido-acesso` (modo declaração; escrita declarada no turno de rotina),
+`domain/rotina-acessos` (`normalizarAcessosDeclarados`, `mesmosAcessos`, leitura `[]` → legada),
+`use-cases/criar-rotina-acessos` (leitura resolvida e guardada; escrita sem nomes, app inventado e
+capacidade fora do catálogo recusados sem proposta; confirmar concede com um consentimento e pula o app
+por conectar; atualizar só com acessos; `pedir_acesso` com escrita declarada), `domain/prompt-sistema`,
+`web/rotina-precisa` (linha "Precisa", rótulos, botão desabilitado + "Conectar Gmail", "Sua vez");
+integração `rotina-nasce-com-acesso` (confirmar concede na mesma transação — desfeita a confirmação num
+savepoint, não sobra concessão nem rotina —, um consentimento, idempotente, e a primeira janela roda sem
+card; app por conectar pulado e o pré-voo abre o card de conexão; a mudança concede ao ser aplicada; o
+CHECK recusa `acessos` que não é lista); conformidade `conceder-so-pela-pessoa` (o arquivo reservado agora
+importa `concederLote`).
+
+Verde em 2026-09-24, sobre a `main` dc3f5b2, com a 0027 aplicada num banco descartável: lint, typecheck
+(4 projetos), fence:domain; unit 130 arquivos/780 testes, integration 81/296, conformidade 8/60,
+concurrency 24/75 (1 pulado).
+
+**Gatilho de reversão.**
+
+- Se, em 30 dias, mais de 1 em cada 5 rotinas criadas com `acessos` tiver o grupo concedido revogado em
+  até 24 h, ou for excluída sem nenhuma execução, o consentimento embutido está largo demais: a
+  confirmação volta a só criar a rotina e o acesso vira um card de um clique logo abaixo, no mesmo chat.
+- Se aparecer rotina nova (criada depois desta emenda) com `acessos` null cuja fonte cita um app
+  registrado — medido por consulta em `rotinas` com `criado_em` posterior e `acessos is null` — o modelo
+  não está declarando: a declaração vira obrigatória no schema de `criar_rotina` (lista, mesmo vazia).
+
+**Não implementado.** O card de acesso do pré-voo que já estava aberto para o app quando a mudança de
+rotina concedeu não fecha sozinho: vale o clique (idempotente) ou o vencimento. A lista de rotinas e o
+painel do bot ainda não mostram os acessos declarados.

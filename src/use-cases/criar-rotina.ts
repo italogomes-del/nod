@@ -1,9 +1,13 @@
+import type { AcessoPedido } from "../contracts/acesso.ts";
+import type { Conector } from "../contracts/conector.ts";
 import type { PayloadPropostaRotina, Proposta } from "../contracts/conversa.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
+import type { ArgsPedirAcesso } from "../contracts/ferramentas-nod.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
+import { normalizarAcessosDeclarados } from "../domain/rotina-acessos.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { validarRotinaNormalizada, type RotinaNormalizada } from "../domain/rotina-texto.ts";
 import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
@@ -32,15 +36,31 @@ async function normalizarComLimite(deps: Deps, agenteId: string, entrada: Entrad
 }
 
 /**
+ * Os `acessos` que a rotina declara (definido em 2026-09-24, emenda da ADR-044, "rotina nasce com o
+ * acesso"), validados pelo domínio contra os conectores registrados AGORA: leitura com [] num app conectado
+ * sai com as ferramentas de leitura do catálogo e fica GUARDADA na proposta — é o que o card mostra e o que
+ * confirmar concede. Ausente = undefined (a rotina não declarou; o pré-voo lê a fonte). Também usado por
+ * atualizar_rotina (rotinas-do-agente.ts).
+ */
+export async function acessosDeclarados(deps: Deps, pedidos: readonly ArgsPedirAcesso[] | undefined): Promise<AcessoPedido[] | undefined> {
+  if (pedidos === undefined) return undefined;
+  const conectores = new Map<string, Pick<Conector, "habilitado" | "catalogo"> | null>();
+  for (const slug of new Set(pedidos.map((p) => p.conector))) conectores.set(slug, await deps.repos.conectores.buscarPorSlug(slug));
+  return normalizarAcessosDeclarados(pedidos, (slug) => conectores.get(slug) ?? null);
+}
+
+/**
  * Ferramenta `criar_rotina` (origem AGENTE): NADA é agendado — nasce uma proposta kind 'rotina'
  * com o payload já normalizado (sobrevive a reinício sem reinterpretar, E7.1) e uma decisão tipo
  * 'rotina' em "Sua vez". definido em 2026-09-16: a decisão nasce com o MESMO id da proposta —
  * é a ligação entre as duas sem coluna nova no contrato; ativarRotina usa esse id nos dois lados.
  * Erro de domínio volta TIPADO no resultado ({erro}) para o modelo corrigir a chamada, em vez de
- * virar negação do proxy.
+ * virar negação do proxy — inclusive o de `acessos` (app fora do registro e do marketplace, capacidade
+ * fora do catálogo, escrita sem os nomes exatos, dois itens para o mesmo app).
  */
 export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) => {
   let normalizada: RotinaNormalizada;
+  let acessos: AcessoPedido[] | undefined;
   try {
     normalizada = await normalizarComLimite(deps, input.agenteId, {
       cron: input.cron,
@@ -51,6 +71,7 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
       limitesAprovacao: input.limites_aprovacao,
       politicaSemDado: input.politica_sem_dado,
     });
+    acessos = await acessosDeclarados(deps, input.acessos);
   } catch (e) {
     if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
     throw e;
@@ -66,6 +87,7 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
     politicaSemDado: normalizada.politicaSemDado,
     proximaExecucao: normalizada.proximaExecucao,
     resumo: normalizada.resumo,
+    ...(acessos !== undefined ? { acessos } : {}),
   };
   const proposta = await deps.repos.propostas.criar({ conversaId: input.conversaId, agenteId: input.agenteId, payload });
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: "proposta não criada" });

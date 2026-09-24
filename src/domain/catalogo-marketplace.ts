@@ -27,6 +27,8 @@ export function mesclarCatalogo(doProvedor: readonly AppDoProvedor[]): AppComLog
       nome: c?.nome ?? p.nome,
       descricao: c?.descricao ?? DESCRICAO_PADRAO,
       categoria: c?.categoria ?? CATEGORIA_PADRAO,
+      // definido em 2026-09-24 ("rotina nasce com o acesso"): o card da rotina escreve o "Não inclui" curado.
+      ...(c?.naoIncluiNaLeitura ? { naoIncluiNaLeitura: c.naoIncluiNaLeitura } : {}),
       logo: p.logo,
     };
   });
