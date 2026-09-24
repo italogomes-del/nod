@@ -41,7 +41,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const branco = mensagens.find((m) => m.kind === "rotina_execucao");
       expect(branco?.texto).toContain("A rotina passou em branco: ninguém respondeu o gate. Nada foi enviado.");
       expect(branco?.payload).toEqual({ kind: "rotina_execucao", rotinaId: rotina?.id, instanteAgendado: JANELA, desfecho: "passou_em_branco" });
-      expect(mensagens.find((m) => m.kind === "sistema")?.texto).toContain("Esta decisão venceu em");
+      expect(mensagens.find((m) => m.kind === "sistema")?.texto).toContain("Este pedido venceu em");
       expect((await repos.decisoes.buscar(gate?.id ?? ""))?.estado).toBe("vencida");
       // Nenhum efeito externo: o conector falso não foi chamado.
       expect(chamadas.conectores).toEqual([]);

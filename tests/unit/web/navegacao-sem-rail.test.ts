@@ -9,17 +9,18 @@ import { renderDetalhes } from "../../../web/telas/detalhes.ts";
  * decisão na sidebar e o painel do bot. Sem eles, remover a entrada "Sua vez" apagaria o aviso, e
  * "Rotinas"/"Marketplace" sumiriam sem destino.
  */
-const decisao = (id: string, agenteId: string, agenteNome: string, vencido = false): SuaVezDto["itens"][number] => ({
-  decisao: { tenantId: "t", id, ownerId: "p", decisorId: "p", agenteId, conversaId: `c-${agenteId}`, turnoId: null, tipo: "acesso", estado: vencido ? "vencida" : "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: "Ler Slack", desfecho: null, vistaEm: null, criadoEm: "2026-09-18T00:00:00Z" },
+const decisao = (id: string, agenteId: string, agenteNome: string, vencido = false, gemeas: string[] = []): SuaVezDto["itens"][number] => ({
+  decisao: { tenantId: "t", id, ownerId: "p", decisorId: "p", agenteId, conversaId: `c-${agenteId}`, turnoId: null, tipo: "acesso", estado: vencido ? "vencida" : "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: `Ler Slack ${id}`, desfecho: null, vistaEm: null, criadoEm: "2026-09-18T00:00:00Z" },
   estadoColuna: vencido ? "vencido" : "pendente",
   agenteNome,
   aguardandoHaMs: 0,
   recusaAutomaticaEmMs: 60_000,
+  gemeas,
   itensAprovacao: [],
   proposta: null,
 });
 
-const comFila = (itens: SuaVezDto["itens"]): Estado => ({ ...estadoInicial, suaVez: { itens, incidentes: [], foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });
+const comFila = (itens: SuaVezDto["itens"], incidentes: SuaVezDto["incidentes"] = []): Estado => ({ ...estadoInicial, suaVez: { itens, incidentes, foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });
 
 describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
   it("conta só as decisões abertas por agente — vencida não pede ação e não vira badge", () => {
@@ -27,6 +28,17 @@ describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
     const por = abertasPorAgente(estado);
     expect(por.get("a1")).toBe(2);
     expect(por.get("a2")).toBeUndefined();
+  });
+
+  it("⚑ e faixa contam GRUPOS: um ×3 é uma decisão a tomar; aviso de queda do Mac não é decisão e não conta (definido em 2026-09-24)", () => {
+    const queda: SuaVezDto["incidentes"][number] = { id: "i1", tipo: "mac_sem_contato", comecouEm: 0, voltouEm: 60_000, rotinas: 3, conversas: 1, agentes: ["Vera"] };
+    const estado = comFila([decisao("d1", "a1", "Vera", false, ["d1b", "d1c"]), decisao("d2", "a2", "Tuca")], [queda]);
+    expect(abertasPorAgente(estado).get("a1")).toBe(1);
+    expect(abertasPorAgente(estado).get("a2")).toBe(1);
+    expect(renderChamada(estado)).toContain("<b>2 decisões</b> esperando por você");
+    const umSo = comFila([decisao("d1", "a1", "Vera", false, ["d1b", "d1c"])], [queda]);
+    expect(renderChamada(umSo)).toContain("precisa de você");
+    expect(renderChamada(umSo)).not.toContain("decisões");
   });
 
   it("a faixa nomeia o agente quando é uma só e leva à conversa dela", () => {

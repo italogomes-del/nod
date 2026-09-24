@@ -3,12 +3,12 @@ import type { SuaVezDto } from "../../../src/contracts/api.ts";
 import type { Proposta } from "../../../src/contracts/conversa.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { renderMensagem, renderTimeline } from "../../../web/telas/conversa.ts";
-import { renderDecisoesDaConversa, renderSuaVez } from "../../../web/telas/sua-vez.ts";
+import { renderMensagem, renderMensagensAgrupadas, renderTimeline } from "../../../web/telas/conversa.ts";
+import { renderDecisoesDaConversa, renderSuaVez, rotuloVencido } from "../../../web/telas/sua-vez.ts";
 
 const item: SuaVezDto["itens"][number] = {
   decisao: { tenantId: "t", id: "d", ownerId: "p", decisorId: "p", agenteId: "a", conversaId: "c", turnoId: null, tipo: "acesso", estado: "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: "Ler Slack <script>alert(1)</script>", desfecho: null, vistaEm: null, criadoEm: "2026-09-17T00:00:00Z" },
-  estadoColuna: "pendente", agenteNome: "Milton", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, itensAprovacao: [], proposta: null,
+  estadoColuna: "pendente", agenteNome: "Milton", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, gemeas: [], itensAprovacao: [], proposta: null,
 };
 const estado: Estado = { ...estadoInicial, suaVez: { itens: [item], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } };
 const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], atividades: {}, carregadaEm: 0 };
@@ -37,7 +37,8 @@ describe("decisões no chat", () => {
   it("pedido vencido oferece reabertura e não concede acesso", () => {
     const vencido: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna: "vencido", decisao: { ...item.decisao, estado: "vencida" } }] } };
     const html = renderTimeline(conversa, vencido);
-    expect(html).toContain("Pedidos vencidos");
+    expect(html).toContain("1 pedido vencido · ver");
+    expect(html).not.toContain("Preciso da sua decisão para continuar");
     expect(html).toContain('data-act="reabrir"');
     expect(html).not.toContain('data-act="decidir-proposta"');
   });
@@ -239,5 +240,143 @@ describe("decisões no chat", () => {
     const duas = renderDecisoesDaConversa(com([falta, vencida("v1"), vencida("v2")]), "c", new Set());
     expect(duas).toContain("Limpar vencidos (2)");
     expect(duas).toContain('data-ids="v1,v2"');
+  });
+});
+
+type Item = SuaVezDto["itens"][number];
+const H = 3_600_000;
+const AGORA = Date.parse("2026-09-24T12:00:00Z");
+const comItens = (itens: Item[]): Estado => ({ ...estadoInicial, agora: AGORA, suaVez: { itens, incidentes: [], foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });
+const aberto = (id: string, tipo: Item["decisao"]["tipo"], extra: Partial<Item> = {}): Item => ({ ...item, ...extra, decisao: { ...item.decisao, id, tipo, frase: `pedido ${id}` } });
+const vencido = (id: string, desfecho: Item["decisao"]["desfecho"] = { tipo: "expirou_sem_ninguem_ver", em: new Date(AGORA - 3 * H).toISOString() }): Item => ({
+  ...item,
+  estadoColuna: "vencido",
+  decisao: { ...item.decisao, id, tipo: "retomar_turno", estado: "vencida", prazoDecisaoEm: new Date(AGORA - 3 * H).toISOString(), frase: "Turno interrompido: seu Mac parou de responder", desfecho },
+});
+/** O trecho entre a abertura do <details> dos vencidos e o seu fechamento. */
+const dentroDosVencidos = (html: string): string => html.slice(html.indexOf('<details class="dec-vencidos-lista"'), html.indexOf("</details>", html.indexOf('<details class="dec-vencidos-lista"')));
+
+/**
+ * Fila honesta (definido em 2026-09-24). medido em 2026-09-24 na tela do dono: uma conversa com 5
+ * pedidos abertos e 15 cards cinza de "turno interrompido" vencidos, rótulo "venceu expirou com alguem
+ * ciente", "recusa automática" onde nada é recusado e aprovações do computador sem dizer a ação.
+ */
+describe("fila honesta: vencidos recolhidos, ×N, prazo por tipo e rótulos em palavras", () => {
+  it("15 vencidos viram UM <details> '15 pedidos vencidos · ver' com os 15 Reabrir lá dentro; os abertos ficam à vista, antes", () => {
+    const abertos = ["a1", "a2", "a3", "a4", "a5"].map((id) => aberto(id, "pergunta"));
+    const vencidos = Array.from({ length: 15 }, (_, i) => vencido(`v${i}`));
+    const html = renderDecisoesDaConversa(comItens([...abertos, ...vencidos]), "c", new Set());
+    expect(html.match(/<details/g)).toHaveLength(1);
+    expect(html).toContain("<summary>15 pedidos vencidos · ver</summary>");
+    // ADR-007: nenhum some — todos continuam lá dentro, cada um com o seu Reabrir.
+    expect(dentroDosVencidos(html).match(/data-act="reabrir"/g)).toHaveLength(15);
+    expect(html.match(/data-act="reabrir"/g)).toHaveLength(15);
+    expect(html.indexOf("Preciso da sua decisão para continuar")).toBeLessThan(html.indexOf("<details"));
+    expect(html.match(/class="decisao dec-pendente/g)).toHaveLength(5);
+    // "Limpar vencidos" ao lado do resumo, fora do <summary> (senão o clique abriria e fecharia a lista).
+    expect(html).toContain("Limpar vencidos (15)");
+    expect(html.slice(html.indexOf("<summary>"), html.indexOf("</summary>"))).not.toContain("limpar-vencidos");
+    expect(html.indexOf('data-act="limpar-vencidos"')).toBeGreaterThan(html.indexOf("</details>"));
+  });
+
+  it("prazo estourado que o varredor ainda não viu: fica no recolhido, mas sem × e fora do 'Limpar' — o servidor recusaria (podeDispensar)", () => {
+    const estourada: Item = { ...item, estadoColuna: "vencido", decisao: { ...item.decisao, id: "ap", tipo: "aprovacao", estado: "pendente", prazoDecisaoEm: new Date(AGORA - 10_000).toISOString() } };
+    const html = renderDecisoesDaConversa(comItens([estourada, vencido("v1"), vencido("v2")]), "c", new Set());
+    expect(dentroDosVencidos(html)).toContain('data-decisao="ap"');
+    expect(html).not.toContain('data-act="dispensar" data-id="ap"');
+    expect(html).toContain('data-ids="v1,v2"');
+    expect(html).toContain("Limpar vencidos (2)");
+    expect(html).toContain("<summary>3 pedidos vencidos · ver</summary>");
+  });
+
+  it("'Sua vez' recolhe os vencidos do mesmo jeito e conta só os abertos no título", () => {
+    const html = renderSuaVez(comItens([aberto("a1", "acesso"), vencido("v1"), vencido("v2")]));
+    expect(html).toContain("<h1>Sua vez · 1</h1>");
+    expect(html.match(/<details class="dec-vencidos-lista"/g)).toHaveLength(1);
+    expect(html).toContain('data-disclosure="vencidos-sua-vez"');
+    expect(dentroDosVencidos(html).match(/data-act="reabrir"/g)).toHaveLength(2);
+  });
+
+  it("×3 no pedido que dobrou dois iguais, com a dica de que decidir resolve todos", () => {
+    const html = renderDecisoesDaConversa(comItens([aberto("g", "acesso", { gemeas: ["g2", "g3"] })]), "c", new Set());
+    expect(html).toContain(">×3</span>");
+    expect(html).toContain("3 pedidos iguais; decidir aqui resolve todos");
+  });
+
+  it("prazo honesto por tipo: 'recusa automática' só em aprovação e acesso", () => {
+    const relogio = (tipo: Item["decisao"]["tipo"]): string => {
+      const html = renderSuaVez(comItens([aberto("x", tipo, { aguardandoHaMs: 2 * H, recusaAutomaticaEmMs: 18 * H })]));
+      return /<span class="mudo">([^<]*)<\/span>/.exec(html)?.[1] ?? "";
+    };
+    expect(relogio("aprovacao")).toBe("aguardando há 2h · recusa automática em 18h");
+    expect(relogio("acesso")).toBe("aguardando há 2h · recusa automática em 18h");
+    expect(relogio("gate_rotina")).toBe("aguardando há 2h · passa em branco em 18h");
+    for (const tipo of ["perfil", "rotina", "rotina_atualizacao", "rotina_exclusao"] as const) expect(relogio(tipo), tipo).toBe("aguardando há 2h · vence em 18h · nada muda sem você");
+    for (const tipo of ["retomar_turno", "pergunta", "falta_de_dado", "permissao"] as const) expect(relogio(tipo), tipo).toBe("aguardando há 2h · vence em 18h");
+  });
+
+  it("vencido em palavras, nunca o enum: quanto tempo faz e o que aconteceu", () => {
+    const html = renderDecisoesDaConversa(comItens([vencido("v1"), vencido("v2", { tipo: "expirou_com_alguem_ciente", em: new Date(AGORA - 3 * H).toISOString() })]), "c", new Set());
+    expect(html).toContain("venceu há 3h · ninguém chegou a ver");
+    expect(html).toContain("venceu há 3h · alguém viu, mas ninguém respondeu");
+    expect(html).not.toMatch(/expirou[ _]/);
+    const d = vencido("x").decisao;
+    const rotulo = (desfecho: Item["decisao"]["desfecho"]): string => rotuloVencido({ ...d, desfecho }, AGORA);
+    const em = new Date(AGORA).toISOString();
+    expect(rotulo({ tipo: "dispensada", por: "p", em, antes: "vencida" })).toBe("dispensado por você");
+    expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:rotina_nao_retoma", regraVersao: 1, em })).toBe("fechado: a rotina não retoma");
+    expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:gemea_resolvida", regraVersao: 1, em })).toBe("resolvido junto do pedido igual");
+    expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:uma_nova", regraVersao: 1, em })).toBe("fechado automaticamente");
+    expect(rotulo(null)).toBe("venceu há 3h");
+    for (const r of [rotulo({ tipo: "expirou_sem_ninguem_ver", em }), rotulo({ tipo: "expirou_com_alguem_ciente", em }), rotulo({ tipo: "decidida", por: "p", em })]) expect(r).not.toContain("_");
+  });
+
+  it("aprovação no computador: a ação concreta aparece FORA do 'Ver detalhes'; fora do computador, nada muda", () => {
+    const itemAp = (conector: string, texto: string) => ({ tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: texto, textoFinal: texto, destino: { conector, ferramenta: "executar", argumentos: { acaoId: "a" } }, selecionado: true, origemSensivel: false, justificativa: null, marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null });
+    const aprovacao = (conector: string, texto: string): Estado => comItens([{ ...item, decisao: { ...item.decisao, tipo: "aprovacao", frase: "Ação no computador do bot" }, itensAprovacao: [itemAp(conector, texto)] }]);
+    const html = renderTimeline(conversa, aprovacao("computador", "Abrir no navegador: https://exemplo.com.br"));
+    expect(html).toContain('<div class="ap-oque">Abrir no navegador: https://exemplo.com.br</div>');
+    expect(html.indexOf("Abrir no navegador")).toBeLessThan(html.indexOf("Ver detalhes"));
+    expect(html).toContain("no computador do bot");
+    // A frase já diz tudo: não repete.
+    expect(renderTimeline(conversa, aprovacao("computador", "Ação no computador do bot"))).not.toContain('class="ap-oque"');
+    // Conector editável: o texto continua no campo do disclosure, sem cópia fora que ficaria velha.
+    expect(renderTimeline(conversa, aprovacao("slack", "Avisar o time"))).not.toContain('class="ap-oque"');
+  });
+
+  it("'Retomar' aberto ganha 'Dispensar' ao lado (ADR-045), sem o × repetindo o gesto; vencido segue com ×", () => {
+    const retomar = aberto("r", "retomar_turno");
+    const html = renderDecisoesDaConversa(comItens([retomar]), "c", new Set());
+    expect(html).toContain('data-act="retomar" data-id="r"');
+    expect(html).toContain(">Dispensar</button>");
+    expect(html.match(/data-act="dispensar"/g)).toHaveLength(1);
+    expect(html.indexOf('data-act="retomar"')).toBeLessThan(html.indexOf('data-act="dispensar"'));
+    expect(renderDecisoesDaConversa(comItens([vencido("v")]), "c", new Set())).toContain('data-act="dispensar" data-id="v"');
+  });
+
+  it("três ou mais linhas de sistema seguidas viram UM <details> 'N avisos do sistema · ver'; menos que isso e o cartão do computador ficam à vista", () => {
+    const autoria = { autor_tipo: "pessoa", autor_id: "p", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "regra:varredor-expiracao", regra_versao: 1 } as const;
+    const msg = (id: string, kind: Mensagem["kind"], payload: Mensagem["payload"] = null): Mensagem => ({ tenantId: "t", id, conversaId: "c", turnoId: null, kind, texto: `texto ${id}`, payload, confianca: "confiavel", parcial: false, criadoEm: 0, autoria });
+    const mensagens = [
+      msg("oi", "texto"),
+      msg("s1", "sistema"),
+      msg("s2", "sistema"),
+      msg("s3", "sistema"),
+      msg("r1", "rotina_execucao", { kind: "rotina_execucao", rotinaId: "r", instanteAgendado: 0, desfecho: "passou_em_branco" }),
+      msg("meio", "texto"),
+      msg("s4", "sistema"),
+      msg("s5", "sistema"),
+      msg("pc", "sistema", { kind: "computador_fora_do_ar", agenteId: "a", desde: 0, motivo: "sem_resposta" }),
+      msg("s6", "sistema"),
+    ];
+    const html = renderMensagensAgrupadas(mensagens, estado);
+    expect(html.match(/<details class="avisos-sistema"/g)).toHaveLength(1);
+    expect(html).toContain("<summary>4 avisos do sistema · ver</summary>");
+    const recolhido = html.slice(html.indexOf('<details class="avisos-sistema"'), html.indexOf("</details>"));
+    for (const id of ["s1", "s2", "s3", "r1"]) expect(recolhido, id).toContain(`data-mensagem="${id}"`);
+    // Nada apagado: todas as mensagens continuam no HTML, e o que não recolhe fica fora do <details>.
+    for (const m of mensagens) expect(html).toContain(`data-mensagem="${m.id}"`);
+    for (const id of ["oi", "meio", "s4", "s5", "pc", "s6"]) expect(recolhido, id).not.toContain(`data-mensagem="${id}"`);
+    expect(html).toContain("Computador do bot fora do ar");
   });
 });

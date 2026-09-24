@@ -1,6 +1,6 @@
 import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
-import type { FrotaDto } from "../../src/contracts/api.ts";
+import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
@@ -13,7 +13,7 @@ import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
-import { detalheAcesso, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
+import { detalheAcesso, idsGemeas, marcaGemeas, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -156,15 +156,20 @@ function renderProposta(p: Proposta, estado: Estado): string {
   }
   return `<div class="card-prop" data-proposta="${esc(p.id)}">
     <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
-    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}</div>
+    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${marcaGemeas(itemAbertoDoCard(p, estado))}</div>
     ${itens}
     <div class="ft">${acoesProposta(p, estado)}</div>
   </div>`;
 }
 
+/** O item de mesmo id ainda aberto em "Sua vez" (pedir-acesso.ts cria proposta e decisão juntas). */
+function itemAbertoDoCard(p: Proposta, estado: Estado): SuaVezDto["itens"][number] | undefined {
+  return estado.suaVez?.itens.find((i) => i.decisao.id === p.id && i.estadoColuna !== "vencido");
+}
+
 /** A decisão de mesmo id ainda aberta em "Sua vez" (pedir-acesso.ts cria as duas juntas). */
 function decisaoAbertaDoCard(p: Proposta, estado: Estado): Decisao | null {
-  return estado.suaVez?.itens.find((i) => i.decisao.id === p.id && i.estadoColuna !== "vencido")?.decisao ?? null;
+  return itemAbertoDoCard(p, estado)?.decisao ?? null;
 }
 
 /** definido em 2026-09-22: mudar/excluir rotina existente se aplica pela DECISÃO (id === proposta.id),
@@ -245,7 +250,7 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
     if (k) grupos.set(k, [...(grupos.get(k) ?? []), m]);
   }
   const mostrados = new Set<string>();
-  return mensagens.map((m) => {
+  const pedacos = mensagens.map((m) => {
     const k = grupoDe(m);
     if (!k) return renderMensagem(m, estado, sala);
     if (mostrados.has(k)) return "";
@@ -259,7 +264,43 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
       const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
       return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? "Pedido" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto)}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
     }).join("")}</div></details>`;
-  }).join("");
+  });
+  return recolherAvisos(mensagens, pedacos);
+}
+
+/** definido em 2026-09-24: a partir de quantas linhas de sistema SEGUIDAS a conversa as recolhe. */
+const AVISOS_PARA_RECOLHER = 3;
+
+/** Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar tem botões e fica à vista. */
+function linhaDeSistema(m: Mensagem): boolean {
+  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar") || m.kind === "rotina_execucao";
+}
+
+/**
+ * definido em 2026-09-24: três ou mais linhas de sistema seguidas viram UM <details> "N avisos do
+ * sistema · ver" — cada queda e cada vencimento escrevem a sua linha (redacao.ts), e em sequência
+ * elas empurravam a conversa para longe. Nada é apagado: cada linha continua lá dentro, com o seu
+ * "relatar". `pedacos[i]` é o HTML já renderizado de `mensagens[i]`.
+ */
+function recolherAvisos(mensagens: readonly Mensagem[], pedacos: readonly string[]): string {
+  const sistema = mensagens.map(linhaDeSistema);
+  const saida: string[] = [];
+  let i = 0;
+  while (i < mensagens.length) {
+    let fim = i;
+    while (sistema[fim]) fim++;
+    if (fim - i >= AVISOS_PARA_RECOLHER) {
+      saida.push(`<details class="avisos-sistema" data-disclosure="avisos-${esc(mensagens[i]?.id ?? "")}"><summary>${fim - i} avisos do sistema · ver</summary>${pedacos.slice(i, fim).join("")}</details>`);
+      i = fim;
+    } else if (fim > i) {
+      saida.push(...pedacos.slice(i, fim));
+      i = fim;
+    } else {
+      saida.push(pedacos[i] ?? "");
+      i++;
+    }
+  }
+  return saida.join("");
 }
 
 export function renderTimeline(c: ConversaEstado | null, estado: Estado): string {
@@ -274,7 +315,10 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
     ["Pesquisa e ideias", "Explorar assuntos e encontrar respostas", "Quero ajuda com pesquisa e desenvolvimento de ideias."],
     ["Ainda não sei", "Vamos descobrir juntos", "Ainda não sei. Me ajude a descobrir como você pode ser útil."],
   ].map(([titulo, descricao, texto], i) => botao("escolher-missao", `<span class="option-key">${String.fromCharCode(65 + i)}</span><span><b>${titulo}</b><small>${descricao}</small></span><span>↗</span>`, { classe: "welcome-option", dados: { texto: texto ?? "" } })).join("")}</section>` : "";
-  const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado));
+  // definido em 2026-09-24: a proposta de um pedido dobrado no "×N" não vira card próprio — sem a
+  // decisão aberta ela cairia no card de revisão; o card do grupo (o mais antigo) decide por todas.
+  const gemeas = idsGemeas(estado);
+  const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id));
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
   return `<div class="timeline">
     ${sep}

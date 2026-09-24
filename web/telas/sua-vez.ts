@@ -1,12 +1,13 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
+import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 
 type Item = SuaVezDto["itens"][number];
 
-const TIPO_HUMANO: Record<Item["decisao"]["tipo"], string> = {
+const TIPO_HUMANO: Record<TipoDecisao, string> = {
   aprovacao: "aprovação em lista",
   acesso: "pedido de acesso",
   retomar_turno: "turno interrompido",
@@ -19,6 +20,78 @@ const TIPO_HUMANO: Record<Item["decisao"]["tipo"], string> = {
   falta_de_dado: "falta um dado",
   permissao: "pedido de permissão",
 };
+
+const recusaAutomatica = (em: string): string => `recusa automática ${em}`;
+const nadaMudaSemVoce = (em: string): string => `vence ${em} · nada muda sem você`;
+const vence = (em: string): string => `vence ${em}`;
+
+/**
+ * definido em 2026-09-24: o relógio do card diz o que ACONTECE quando o prazo passa — antes era
+ * "recusa automática" para todo tipo, inclusive onde nada é recusado. Aprovação (nada é executado) e
+ * acesso (nada é concedido) recusam; o gate da rotina passa em branco; proposta vence e nada muda; o
+ * resto só vence. Record exaustivo: um tipo novo não compila sem dizer o seu.
+ */
+const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string) => string> = {
+  aprovacao: recusaAutomatica,
+  acesso: recusaAutomatica,
+  gate_rotina: (em) => `passa em branco ${em}`,
+  perfil: nadaMudaSemVoce,
+  rotina: nadaMudaSemVoce,
+  rotina_atualizacao: nadaMudaSemVoce,
+  rotina_exclusao: nadaMudaSemVoce,
+  retomar_turno: vence,
+  pergunta: vence,
+  falta_de_dado: vence,
+  permissao: vence,
+};
+
+/** Regras que fecham decisão sem pessoa (ADR-042), em frase curta; regra sem tradução cai no genérico. */
+const REGRA_HUMANA: Readonly<Record<string, string>> = {
+  "regra:rotina_nao_retoma": "fechado: a rotina não retoma",
+  "regra:gemea_resolvida": "resolvido junto do pedido igual",
+  "regra:retomada_substituida": "fechado: uma retomada mais nova tomou o lugar",
+  "regra:aprovacao_permanente": "aprovado pela regra que você criou",
+};
+
+/**
+ * definido em 2026-09-24: o desfecho do card vencido em palavras — antes saía o enum com espaços
+ * ("venceu expirou com alguem ciente"). Mesmas frases da mensagem do varredor
+ * (src/adapters/fundo/varredor-expiracao.ts). Switch exaustivo: desfecho novo não compila sem rótulo.
+ */
+export function rotuloVencido(d: Item["decisao"], agora: number): string {
+  const venceu = `venceu ${haQuanto(Math.max(0, agora - Date.parse(d.prazoDecisaoEm)))}`;
+  const desfecho = d.desfecho;
+  if (!desfecho) return venceu;
+  switch (desfecho.tipo) {
+    case "expirou_sem_ninguem_ver":
+      return `${venceu} · ninguém chegou a ver`;
+    case "expirou_com_alguem_ciente":
+      return `${venceu} · alguém viu, mas ninguém respondeu`;
+    case "dispensada":
+      return "dispensado por você";
+    case "decidida_por_regra":
+      return REGRA_HUMANA[desfecho.regra] ?? "fechado automaticamente";
+    case "decidida":
+      return "decidido";
+  }
+}
+
+/**
+ * definido em 2026-09-24: pedidos abertos iguais chegam dobrados num item só (montarFila,
+ * src/domain/fila-frota.ts). O "×N" diz quantos são e que decidir aqui resolve todos — quem decide,
+ * recusa ou dispensa este item fecha os outros (src/use-cases/fechar-gemeas.ts).
+ */
+export function marcaGemeas(item: Pick<Item, "gemeas"> | undefined): string {
+  const n = (item?.gemeas.length ?? 0) + 1;
+  if (n < 2) return "";
+  const dica = `${n} pedidos iguais; decidir aqui resolve todos`;
+  return `<span class="tag tag-ambar dec-gemeas" title="${esc(dica)}" aria-label="${esc(dica)}">×${n}</span>`;
+}
+
+/** Ids dobrados num "×N": o card de proposta de cada um não aparece sozinho na conversa. */
+export function idsGemeas(estado: Estado): ReadonlySet<string> {
+  return new Set((estado.suaVez?.itens ?? []).flatMap((i) => i.gemeas));
+}
 
 const JUSTIFICATIVA_PADRAO = "Veio de um lugar que guarda dado de aprendiz. Deixei desmarcado — só você pode marcar.";
 
@@ -124,8 +197,12 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   const unico = itens[0];
   // Um item e nada sensível: a pergunta já está na frase da decisão; a lista seria uma linha só.
   if (itens.length === 1 && unico && !unico.origemSensivel) {
+    // definido em 2026-09-24: no computador a frase é genérica ("Ação no computador do bot") e quatro
+    // pedidos seguidos pareciam o mesmo; a ação concreta ("Abrir no navegador: …") sai do "Ver
+    // detalhes". Só no computador: lá o texto é somente leitura, então o que aparece é o que será feito.
+    const acao = unico.destino.conector === "computador" && unico.textoFinal.trim() !== item.decisao.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
     return `<div class="ap-unico">
-      <div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
+      ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
       ${aberta ? detalheTecnico(unico) : ""}
       ${unico.desfecho ? `<span class="tag tag-cinza">${esc(unico.desfecho.replaceAll("_", " "))}</span>` : ""}
     </div>
@@ -141,8 +218,9 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
     case "aprovacao":
     case "gate_rotina":
       return renderAprovacao(item, true, conectores);
+    // definido em 2026-09-24 (ADR-045): quem não quer retomar dispensa — antes o card só saía vencendo.
     case "retomar_turno":
-      return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}</div>`;
+      return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}${botao("dispensar", "Dispensar", { id: d.id, titulo: "Tirar da tela sem retomar" })}</div>`;
     case "acesso": {
       const r = rotulosAcesso(item.proposta);
       return `<div class="acoes">${botao("decidir-proposta", r.permitir, { classe: "pri", id: d.id })}${botao("recusar-decisao", r.recusar, { id: d.id })}</div>`;
@@ -163,21 +241,28 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
 }
 
 /**
- * Espelho de `podeDispensar` (src/use-cases/dispensar-decisao.ts) — a web só importa tipos de src/.
- * Vencida sai sempre; aberta, só a que se responde com texto (as outras têm recusar próprio).
+ * Espelho EXATO de `podeDispensar` (src/use-cases/dispensar-decisao.ts) — a web só importa tipos de
+ * src/. Vencida sai sempre; aberta, só TIPOS_DISPENSAVEIS_ABERTOS (as outras têm recusar próprio). Lê
+ * o ESTADO, não a coluna: com o prazo estourado e o varredor ainda por passar (até 30 s) a coluna já
+ * diz "vencido", mas o servidor recusaria (409) uma aprovação aberta — e "Limpar vencidos" pararia no
+ * meio. As chaves do Record são exatamente as do contrato: faltar ou sobrar um tipo não compila.
  */
+const DISPENSAVEIS_ABERTOS: Record<(typeof TIPOS_DISPENSAVEIS_ABERTOS)[number], true> = { pergunta: true, falta_de_dado: true, permissao: true, retomar_turno: true };
+
 function dispensavel(item: Item): boolean {
   const d = item.decisao;
-  return item.estadoColuna === "vencido" || d.tipo === "pergunta" || d.tipo === "falta_de_dado" || d.tipo === "permissao";
+  return d.estado === "vencida" || ((d.estado === "pendente" || d.estado === "reaberta") && d.tipo in DISPENSAVEIS_ABERTOS);
 }
 
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
-  const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · recusa automática ${emQuanto(item.recusaAutomaticaEmMs)}` : `venceu ${d.desfecho ? esc(d.desfecho.tipo.replaceAll("_", " ")) : ""}`;
+  const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs))}` : rotuloVencido(d, estado.agora);
+  // O "Retomar" aberto já tem "Dispensar" nas ações: o × repetiria o mesmo gesto no mesmo card.
+  const fechar = dispensavel(item) && !(aberta && d.tipo === "retomar_turno") ? botao("dispensar", "×", { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" }) : "";
   const conversa = estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
-    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span><b>${esc(item.agenteNome)}</b><span class="mudo">${relogio}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${dispensavel(item) ? botao("dispensar", "×", { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" }) : ""}</div>
+    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span>${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
     <div class="dec-frase">${esc(d.frase)}</div>
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
@@ -190,7 +275,9 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
  * Decisões abertas por agente (definido em 2026-09-18): o sinal que substitui a entrada "Sua vez" no
  * rail. A fila global deixou de ser porta de entrada — quem decide é a conversa
  * (`renderDecisoesDaConversa`), então o que falta é LEMBRAR onde há decisão parada. Vencida não conta:
- * ela não pede ação, e um badge que nunca zera deixa de ser sinal.
+ * ela não pede ação, e um badge que nunca zera deixa de ser sinal. Conta GRUPOS (definido em
+ * 2026-09-24): o servidor já dobra os pedidos iguais num item "×N" (montarFila), e aviso de queda
+ * (`incidentes`) não é decisão.
  */
 export function abertasPorAgente(estado: Estado): Map<string, number> {
   const por = new Map<string, number>();
@@ -203,8 +290,9 @@ export function abertasPorAgente(estado: Estado): Map<string, number> {
 
 /**
  * Faixa de chamada no topo da sidebar: some quando não há nada aberto, nomeia UM agente quando é um
- * só (o nome é o que faz voltar para a conversa) e conta quando são vários. Clicar leva à conversa do
- * mais antigo — `itens` já vem ordenado pelo servidor (ADR-007), então o primeiro aberto é ele.
+ * só (o nome é o que faz voltar para a conversa) e conta quando são vários — grupos, como o ⚑: um
+ * "×3" é uma decisão a tomar. Clicar leva à conversa do mais antigo — `itens` já vem ordenado pelo
+ * servidor (ADR-007), então o primeiro aberto é ele.
  */
 export function renderChamada(estado: Estado): string {
   const abertos = (estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido");
@@ -247,44 +335,47 @@ export function renderIncidentes(estado: Estado): string {
 }
 
 /**
- * definido em 2026-09-21: pedido de acesso repetido aparecia uma vez POR decisão, todas com a mesma
- * frase e nada distinguindo qual estava viva — a pessoa resolvia uma e as gêmeas continuavam na tela.
- * Colapsa por tipo+frase e mostra a mais antiga (a que vence primeiro, ADR-007); só 'acesso', porque
- * aprovação e pedir_a_pessoa repetem a frase legitimamente com itens/respostas diferentes.
+ * definido em 2026-09-24: vencidos recolhidos num <details> só, depois dos abertos. medido em
+ * 2026-09-24 (tela do dono): uma conversa tinha 15 cards cinza de "turno interrompido" vencidos em
+ * volta de 5 abertos. ADR-007 continua valendo: nenhum some — todos ficam lá dentro com o seu
+ * Reabrir. "Limpar vencidos" (a partir de dois, #46) fica ao lado do resumo e FORA do <summary>,
+ * senão o clique também abriria e fecharia a lista.
  */
-function semGemeas(itens: Item[]): Item[] {
-  const vistas = new Set<string>();
-  return itens.filter((item) => {
-    if (item.decisao.tipo !== "acesso") return true;
-    const chave = `${item.decisao.tipo}\u0000${item.decisao.frase}`;
-    if (vistas.has(chave)) return false;
-    vistas.add(chave);
-    return true;
-  });
+function renderVencidos(vencidos: readonly Item[], estado: Estado, naConversa: boolean, chave: string): string {
+  const n = vencidos.length;
+  if (n === 0) return "";
+  const ids = vencidos.filter(dispensavel).map((i) => i.decisao.id);
+  const limpar = ids.length > 1 ? botao("limpar-vencidos", `Limpar vencidos (${ids.length})`, { classe: "sm dec-limpar", dados: { ids: ids.join(",") } }) : "";
+  return `<div class="dec-vencidos"><details class="dec-vencidos-lista" data-disclosure="vencidos-${esc(chave)}"><summary>${n === 1 ? "1 pedido vencido" : `${n} pedidos vencidos`} · ver</summary><ul class="lista">${vencidos.map((i) => renderItem(i, estado, naConversa)).join("")}</ul></details>${limpar}</div>`;
 }
 
+/**
+ * Pedidos desta conversa, onde a pessoa decide sem sair do chat. Os pedidos iguais já vêm dobrados pelo
+ * servidor num item "×N" (definido em 2026-09-24; antes a web só escondia as gêmeas de acesso e o ⚑
+ * continuava contando cada uma); os vencidos ficam recolhidos no fim.
+ */
 export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): string {
-  const itens = semGemeas(estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? []);
+  const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? [];
   if (!itens.length) return "";
-  const pendentes = itens.some((item) => item.estadoColuna !== "vencido");
-  const vencidas = itens.filter((item) => item.estadoColuna === "vencido").map((item) => item.decisao.id);
-  const limpar = vencidas.length > 1 ? botao("limpar-vencidos", `Limpar vencidos (${vencidas.length})`, { classe: "sm", dados: { ids: vencidas.join(",") } }) : "";
-  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa"><div class="decisoes-chat-cab"><h2>${pendentes ? "Preciso da sua decisão para continuar" : "Pedidos vencidos"}</h2>${limpar}</div><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${itens.map((item) => renderItem(item, estado, true)).join("")}</ul></section>`;
+  const abertos = itens.filter((item) => item.estadoColuna !== "vencido");
+  const pedindo = abertos.length ? `<h2>Preciso da sua decisão para continuar</h2><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${abertos.map((item) => renderItem(item, estado, true)).join("")}</ul>` : "";
+  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa">${pedindo}${renderVencidos(itens.filter((item) => item.estadoColuna === "vencido"), estado, true, conversaId)}</section>`;
 }
 
 /**
  * "Sua vez" por pessoa (ADR-007): mais antiga no topo, reaberta volta ao topo, vencida em cinza com
- * reabrir e nunca suprimida; "Nada esperando por você · última decisão …" quando vazia; motor fora do
- * ar entra como item ESCRITO (E3.3).
+ * reabrir e nunca suprimida — recolhida no fim desde 2026-09-24; "Nada esperando por você · última
+ * decisão …" quando vazia; motor fora do ar entra como item ESCRITO (E3.3).
  */
 export function renderSuaVez(estado: Estado): string {
   const sv = estado.suaVez;
   if (!sv) return `<section class="tela"><header class="tela-cab"><h1>Sua vez</h1></header><p class="mudo">carregando…</p></section>`;
   const fora = sv.foraDoAr.map((f) => `<li class="decisao dec-fora"><span class="tag tag-cinza">fora do ar</span> ${esc(foraDoArDesde(f.nome, f.desde))}</li>`).join("");
-  const abertos = sv.itens.filter((i) => i.estadoColuna !== "vencido").length;
+  const abertos = sv.itens.filter((i) => i.estadoColuna !== "vencido");
   return `<section class="tela tela-sua-vez">
-    <header class="tela-cab"><h1>Sua vez${abertos ? ` · ${abertos}` : ""}</h1><span class="chip">mais antiga no topo · vencida fica em cinza</span></header>
+    <header class="tela-cab"><h1>Sua vez${abertos.length ? ` · ${abertos.length}` : ""}</h1><span class="chip">mais antiga no topo · vencidas recolhidas no fim</span></header>
     ${sv.vazio && sv.foraDoAr.length === 0 ? `<p class="vazio">${esc(nadaEsperando(sv.ultimaDecisaoEm, estado.agora))}</p>` : ""}
-    <ul class="lista">${fora}${sv.itens.map((i) => renderItem(i, estado)).join("")}</ul>
+    <ul class="lista">${fora}${abertos.map((i) => renderItem(i, estado)).join("")}</ul>
+    ${renderVencidos(sv.itens.filter((i) => i.estadoColuna === "vencido"), estado, false, "sua-vez")}
   </section>`;
 }

@@ -7,6 +7,8 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   maquina_sem_contato: "seu Mac parou de responder",
   reinicio_servidor: "o servidor reiniciou",
+  // definido em 2026-09-24: o pedido da execução foi dispensado ainda aberto (dispensar-decisao.ts).
+  pedido_dispensado: "o pedido foi dispensado sem resposta",
 };
 
 export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | null {

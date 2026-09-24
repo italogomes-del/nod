@@ -48,7 +48,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   consentimento: "Concedido por {pessoa} em {quando}: {escopo}; não inclui: {naoInclui}.",
   "executor-indisponivel": "Nenhum trabalho começa: executor indisponível ({motivo}) desde {desde}.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
-  "decisao-vencida": "Esta decisão venceu em {quando} sem resposta ({desfecho}). Você pode reabrir.",
+  // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
+  "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",
   retomada: "Retomando o turno interrompido ({motivo}) a partir de onde parou; nada foi reenviado.",
   "parei-falta-dado": "parei: falta {dado}; quem destrava: {quem}; não vou tentar de novo.",
   anotei: "Anotei como {tipo}: {texto}",

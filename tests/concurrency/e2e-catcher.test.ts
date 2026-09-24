@@ -474,11 +474,11 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
     const vencida = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.id === pergunta?.decisao.id);
     expect(vencida?.estadoColuna).toBe("vencido");
     expect(vencida?.decisao.desfecho?.tipo).toBe("expirou_com_alguem_ciente");
-    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.includes("Esta decisão venceu em"))).toBe(true);
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.includes("Este pedido venceu em"))).toBe(true);
     await new Promise((r) => setTimeout(r, 700)); // três voltas do varredor (200 ms): nada duplica
     const varridas = await comoPessoa((trx) => trx<{ n: number }[]>`select count(*)::int as n from decisao_eventos_varridos where decisao_id = ${pergunta?.decisao.id ?? UUID_NULO}`);
     expect(varridas[0]?.n).toBe(1);
-    expect((await conversa(vera.conversaId)).mensagens.filter((m) => m.kind === "sistema" && m.texto.includes("Esta decisão venceu em"))).toHaveLength(1);
+    expect((await conversa(vera.conversaId)).mensagens.filter((m) => m.kind === "sistema" && m.texto.includes("Este pedido venceu em"))).toHaveLength(1);
     const reaberta = await json<RespostaMutacao>("POST", `decisoes/${pergunta?.decisao.id}/reabrir`);
     expect(reaberta.ids.decisaoId).toBe(pergunta?.decisao.id);
     const depois = await json<SuaVezDto>("GET", "sua-vez");

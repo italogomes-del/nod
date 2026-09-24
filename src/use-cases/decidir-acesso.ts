@@ -6,6 +6,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { concederLote } from "./conceder.ts";
 import { dispararRotina } from "./disparar-rotina.ts";
+import { fecharGemeas } from "./fechar-gemeas.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
 import { recusarProposta } from "./recusar-proposta.ts";
 import { retomarAposAcesso } from "./retomar-apos-acesso.ts";
@@ -46,6 +47,9 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
   const p = proposta.payload;
   const autoria = autoriaPessoa(deps.escopo);
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { decisao_id: decisao.id, tipo: decisao.tipo, recusada: input.recusar } })];
+  // definido em 2026-09-24: o card "×N" prometia "decidir aqui resolve todos" — os pedidos iguais
+  // abertos fecham por regra na MESMA transação, e as propostas deles seguem este clique.
+  events.push(...(await fecharGemeas(deps, decisao, input.recusar ? "recusada" : "confirmada")).events);
   const rotina = await rotinaDoPedido(deps, proposta.agenteId, p.rotinaId);
 
   if (input.recusar) {

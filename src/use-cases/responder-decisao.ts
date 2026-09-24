@@ -7,7 +7,10 @@ import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-/** Os três tipos de pedir_a_pessoa (EMENDA 16): a resposta é TEXTO da pessoa, nunca um botão. */
+/**
+ * Os três tipos de pedir_a_pessoa (EMENDA 16): a resposta é TEXTO da pessoa, nunca um botão.
+ * Dispensar (× / "Dispensar", #46 e ADR-045) NÃO é responder: fecha sem texto e sem retomar (dispensar-decisao.ts).
+ */
 export const TIPOS_RESPONDIVEIS: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(["pergunta", "falta_de_dado", "permissao"]);
 
 /**
