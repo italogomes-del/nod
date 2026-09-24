@@ -24,4 +24,10 @@ describe("redacao", () => {
     expect(redigir("turno-interrompido", 0, { motivo: t })).toContain("Turno interrompido: seu Mac parou de responder");
     expect(motivoEmPortugues("reinicio_servidor")).toBe("o servidor reiniciou");
   });
+
+  it("pedido vencido em palavras (definido em 2026-09-24): o desfecho vem traduzido, nunca o enum", () => {
+    const t = redigir("decisao-vencida", 0, { quando: "24/09/2026, 15:00 UTC", desfecho: "alguém viu, mas ninguém respondeu" });
+    expect(t).toBe("Este pedido venceu em 24/09/2026, 15:00 UTC sem resposta — alguém viu, mas ninguém respondeu. Você pode reabrir.");
+    expect(t).not.toMatch(/expirou|_/);
+  });
 });

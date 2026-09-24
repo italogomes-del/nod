@@ -194,6 +194,11 @@ body.ocupado { cursor: progress; }
 
 /* mensagens de sistema / eventos: linhas discretas centradas ou à esquerda, sem balão */
 .msg-sistema { font-size: 12px; color: var(--ink-3); line-height: 1.55; margin: 4px auto 12px; text-align: center; max-width: 620px; }
+/* definido em 2026-09-24: três ou mais linhas de sistema seguidas recolhidas; abertas, voltam ao normal. */
+.avisos-sistema { margin: 4px auto 12px; max-width: 620px; width: 100%; }
+.avisos-sistema > summary { cursor: pointer; font-size: 12px; color: var(--ink-3); text-align: center; }
+.avisos-sistema > summary:hover { color: var(--ink-2); }
+.avisos-sistema[open] > summary { margin-bottom: 8px; }
 .msg-handoff, .msg-passe { font-size: 13px; color: var(--ink-2); margin: 4px 0 12px; }
 .msg-consentimento { font-size: 13px; border-left: 3px solid var(--line-2); padding-left: 10px; margin: 4px 0 12px; }
 .msg-consentimento small { display: block; color: var(--ink-3); }
@@ -287,7 +292,6 @@ body.ocupado { cursor: progress; }
 .decisao { border-left: 4px solid var(--amber) !important; }
 .decisoes-chat { width: min(640px, 100%); align-self: flex-start; margin: 12px 0; }
 .decisoes-chat h2 { font-size: 16px; margin: 0 0 6px; }
-.decisoes-chat-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dec-fechar { margin-left: auto; border: 0; background: none; color: var(--ink-3); font-size: 18px; line-height: 1; padding: 2px 6px; }
 .dec-fechar:hover, .dec-fechar:focus-visible { color: var(--ink); }
 .decisoes-chat > p { color: var(--ink-3); font-size: 13px; margin: 0 0 12px; }
@@ -301,6 +305,14 @@ body.ocupado { cursor: progress; }
 .dec-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .dec-frase { font-size: 15px; margin: 6px 0; }
 .dec-rodape { margin-top: 8px; }
+/* definido em 2026-09-24: pedidos iguais dobrados ("×N") e vencidos recolhidos num <details> só.
+   "Limpar vencidos" fica na linha do resumo, mas fora do <summary> (o clique não abre/fecha a lista). */
+.dec-gemeas { font-variant-numeric: tabular-nums; }
+.dec-vencidos { position: relative; margin-top: 4px; }
+.dec-vencidos-lista > summary { cursor: pointer; font-size: 13px; color: var(--ink-3); width: fit-content; padding: 4px 0; }
+.dec-vencidos-lista > summary:hover { color: var(--ink-2); }
+.dec-vencidos-lista[open] > summary { margin-bottom: 8px; }
+.dec-vencidos > .dec-limpar { position: absolute; top: 0; right: 0; }
 /* Aprovação em duas densidades: o que vai acontecer em português, o nome técnico atrás do
    disclosure. Item sensível sai do modo enxuto — ver renderAprovacao em web/telas/sua-vez.ts. */
 .ap-lista { list-style: none; padding: 0; margin: 8px 0 0; }

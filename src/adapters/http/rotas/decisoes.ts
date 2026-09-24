@@ -156,6 +156,7 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
         }
 
         // pergunta | falta_de_dado | permissao: a resposta é texto (EMENDA 16), nunca um botão.
+        // Tirar da tela sem responder é POST decisoes/:id/dispensar (#46, ADR-045): dispensar não é responder.
         throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.tipo} se responde em POST decisoes/:id/responder` });
       },
     },

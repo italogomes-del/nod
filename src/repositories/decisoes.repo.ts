@@ -1,4 +1,4 @@
-import type { Decisao, DesfechoDecisao, EstadoDecisao, TipoDecisao } from "../contracts/decisao.ts";
+import { TIPOS_DISPENSAVEIS_ABERTOS, type Decisao, type DesfechoDecisao, type EstadoDecisao, type TipoDecisao } from "../contracts/decisao.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, dataOuNull, iso, isoOuNull } from "./conversao.ts";
 
@@ -141,15 +141,16 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * Dispensar (definido em 2026-09-24): fecha como 'decidida' com desfecho 'dispensada'. Vale para
-     * vencida de qualquer tipo e para aberta só dos tipos que se respondem com texto — os outros têm
-     * botão de recusar próprio, e dispensar uma aprovação pularia o registro dos itens.
+     * vencida de qualquer tipo e para aberta só de TIPOS_DISPENSAVEIS_ABERTOS (os que se respondem com
+     * texto e o retomar_turno, ADR-045) — os outros têm botão de recusar próprio, e dispensar uma
+     * aprovação pularia o registro dos itens.
      */
     async dispensar(id: string, p: { por: string; agora: number; antes: EstadoDecisao }): Promise<Decisao | null> {
       const desfecho: DesfechoDecisao = { tipo: "dispensada", por: p.por, em: iso(p.agora), antes: p.antes };
       const [l] = await conn<Linha[]>`
         update decisoes set estado = 'decidida', desfecho = ${conn.json(desfecho)}, decidida_em = ${data(p.agora)}, decidida_por = ${p.por}
         where tenant_id = ${escopo.tenantId} and ${donaOuDecisora()} and id = ${id} and estado = ${p.antes}
-          and (estado = 'vencida' or tipo in ('pergunta', 'falta_de_dado', 'permissao'))
+          and (estado = 'vencida' or tipo in ${conn([...TIPOS_DISPENSAVEIS_ABERTOS])})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
     },

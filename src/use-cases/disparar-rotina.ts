@@ -95,7 +95,18 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   };
 };
 
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | null };
+/**
+ * `pedido_dispensado` (definido em 2026-09-24): a pessoa dispensou, ainda aberto, o pedido que a
+ * execução fez (dispensar-decisao.ts). rotina_execucoes.motivo é text com CHECK '^[a-z_]+$' (0002):
+ * o valor novo passa sem migração.
+ */
+export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | null };
+
+/** O motivo do passou_em_branco em palavras na conversa; o código fica na execução. Sem tradução sai como está. */
+const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {
+  ninguem_respondeu_o_gate: "ninguém respondeu o gate",
+  pedido_dispensado: "o pedido foi dispensado sem resposta",
+};
 
 /**
  * Desfechos que NÃO escrevem na conversa: a execução fica só no histórico da rotina. sem_novidade
@@ -166,7 +177,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
     input.desfecho === "executou"
       ? `Rotina executou em ${quando} (${rotina.fusoIana}): ${resumoCron(rotina.cron, rotina.fusoIana)}.`
       : input.desfecho === "passou_em_branco"
-        ? `${redigir("rotina-passou-em-branco", agora, { motivo: input.motivo === "ninguem_respondeu_o_gate" ? "ninguém respondeu o gate" : (input.motivo ?? "sem motivo") })} (${quando})`
+        ? `${redigir("rotina-passou-em-branco", agora, { motivo: input.motivo ? (MOTIVO_EM_BRANCO[input.motivo] ?? input.motivo) : "sem motivo" })} (${quando})`
         : `${redigir("rotina-falhou", agora, { motivo: input.motivo ?? "erro_execucao" })} (${quando})`;
   const autoria = input.desfecho === "executou" ? autoriaAgente(rotina.agenteId, deps.escopo.pessoaId) : autoriaPessoa(deps.escopo.pessoaId, "regra:varredor-expiracao");
   await deps.repos.mensagens.criar({

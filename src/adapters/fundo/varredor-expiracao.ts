@@ -16,9 +16,13 @@ export const INTERVALO_VARREDOR_MS = 30_000;
 export type OpcoesVarredor = { services: Services; useCases: UseCasesNod; agora: Relogio; metricas?: Metricas };
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[] };
 
-const DESFECHO_HUMANO: Record<string, string> = {
-  expirou_sem_ninguem_ver: "expirou sem ninguém ver",
-  expirou_com_alguem_ciente: "expirou com alguém ciente",
+/**
+ * definido em 2026-09-24: o que o desfecho quer dizer, em palavras — as mesmas do rótulo do card
+ * vencido (web/telas/sua-vez.ts, rotuloVencido). Os VALORES da métrica (ADR-017 #2) não mudam.
+ */
+const DESFECHO_HUMANO: Readonly<Record<string, string>> = {
+  expirou_sem_ninguem_ver: "ninguém chegou a ver",
+  expirou_com_alguem_ciente: "alguém viu, mas ninguém respondeu",
 };
 
 /**

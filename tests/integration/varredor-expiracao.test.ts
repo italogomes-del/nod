@@ -32,12 +32,13 @@ describeIntegracao("varredor de expiração (E7.4, ADR-007/011): vencido escrito
       const mensagens = (await repos.mensagens.listarDaConversa(conversaId)).filter((m) => m.kind === "sistema");
       expect(mensagens).toHaveLength(2);
       for (const m of mensagens) {
-        expect(m.texto).toContain("Esta decisão venceu em 16/09/2026, 15:00 UTC");
+        expect(m.texto).toContain("Este pedido venceu em 16/09/2026, 15:00 UTC");
         expect(m.autoria).toMatchObject({ autor_tipo: "pessoa", autor_id: PESSOA_MARLON, decidido_por: "regra:varredor-expiracao" });
       }
+      // definido em 2026-09-24: o desfecho em palavras; os VALORES da métrica (ADR-017) seguem os do enum.
       expect(mensagens.map((m) => m.texto).sort()).toEqual([
-        "Esta decisão venceu em 16/09/2026, 15:00 UTC sem resposta (expirou com alguém ciente). Você pode reabrir.",
-        "Esta decisão venceu em 16/09/2026, 15:00 UTC sem resposta (expirou sem ninguém ver). Você pode reabrir.",
+        "Este pedido venceu em 16/09/2026, 15:00 UTC sem resposta — alguém viu, mas ninguém respondeu. Você pode reabrir.",
+        "Este pedido venceu em 16/09/2026, 15:00 UTC sem resposta — ninguém chegou a ver. Você pode reabrir.",
       ]);
       expect((await repos.decisoes.buscar(naoVista?.id ?? ""))?.desfecho?.tipo).toBe("expirou_sem_ninguem_ver");
       expect((await repos.decisoes.buscar(vista?.id ?? ""))?.desfecho?.tipo).toBe("expirou_com_alguem_ciente");

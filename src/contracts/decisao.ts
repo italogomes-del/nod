@@ -16,6 +16,14 @@ export type TipoDecisao =
 
 export type EstadoDecisao = "pendente" | "decidida" | "vencida" | "reaberta";
 
+/**
+ * ABERTAS que a pessoa tira da tela sem responder (× / "Dispensar"; vencida de qualquer tipo sempre
+ * sai). Os três de pedir_a_pessoa (#46: dispensar não é responder, EMENDA 16 intacta) e, definido em
+ * 2026-09-24 (ADR-045), o "Retomar" de uma conversa que o Mac interrompeu. Usada pelo caso de uso e
+ * pelo repositório; a web espelha num Record sobre este tipo (web/telas/sua-vez.ts).
+ */
+export const TIPOS_DISPENSAVEIS_ABERTOS = ["pergunta", "falta_de_dado", "permissao", "retomar_turno"] as const satisfies readonly TipoDecisao[];
+
 export type DesfechoDecisao =
   | { tipo: "decidida"; por: string; em: IsoUtc }
   /**
@@ -66,4 +74,10 @@ export type ItemFila = {
   agenteNome: string;
   aguardandoHaMs: number;
   recusaAutomaticaEmMs: number;
+  /**
+   * definido em 2026-09-24: ids dos pedidos ABERTOS iguais a este (mesma decisora, agente, conversa,
+   * tipo e frase; só acesso e retomar_turno) que a fila dobrou nele — o mais antigo. A web mostra
+   * "×N" e decidir este fecha as gêmeas por regra:gemea_resolvida. Vazio no caso comum.
+   */
+  gemeas: string[];
 };

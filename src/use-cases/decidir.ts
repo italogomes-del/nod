@@ -7,6 +7,7 @@ import type { DesfechoItem } from "../contracts/motivos.ts";
 import { redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
+import { fecharGemeas } from "./fechar-gemeas.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
@@ -223,7 +224,10 @@ export const decidir: CasoDeUso<EntradaDecidir, SaidaDecidir> = async (deps: Dep
  */
 export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaId: string | null }> = async (deps, { decisao }) => {
   const agora = deps.agora();
-  if (!decisao.turnoId) return { data: { turnoRetomadaId: null } };
+  // definido em 2026-09-24: o "Retomar" repetido da mesma conversa (×N na fila) sai junto — fase da
+  // DONA, a mesma transação que cria o turno de retomada.
+  const gemeas = await fecharGemeas(deps, decisao);
+  if (!decisao.turnoId) return { data: { turnoRetomadaId: null }, events: gemeas.events };
   const original = await deps.repos.turnos.buscar(decisao.turnoId);
   if (!original) throw new ErroDeDominio("nao_encontrado", { cause: "turno interrompido" });
   const turno = await deps.repos.turnos.enfileirar({
@@ -242,5 +246,5 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
   const events: RuntimeEvent[] = turno
     ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria: autoriaDaPessoa(deps.escopo), pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: decisao.id } }]
     : [];
-  return { data: { turnoRetomadaId: turno?.id ?? null }, events };
+  return { data: { turnoRetomadaId: turno?.id ?? null }, events: [...gemeas.events, ...events] };
 };

@@ -5,6 +5,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { fecharGemeas } from "./fechar-gemeas.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type EntradaRetomarTurno = ({ decisaoId: string; turnoId?: undefined } | { turnoId: string; decisaoId?: undefined }) & {
@@ -81,6 +82,8 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     if (decidida) {
       decisao = decidida;
       events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: decisao.tipo } }));
+      // definido em 2026-09-24: o "Retomar" repetido da mesma conversa (×N na fila) sai junto, na mesma tx.
+      events.push(...(await fecharGemeas(deps, decidida)).events);
     }
   }
   return { data: { turno, original, mensagem, sessaoCli: conversa.sessaoCli, decisao }, events };
