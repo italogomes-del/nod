@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Conector } from "../../../src/contracts/conector.ts";
 import type { Memoria } from "../../../src/contracts/memoria.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
@@ -75,5 +76,31 @@ describe("montarPromptSistema", () => {
     const muitas = Array.from({ length: MEMORIAS_NO_PROMPT + 5 }, (_, i) => mem(`m${i}`, `fato ${i}`, i));
     const p = montarPromptSistema({ agente, memorias: muitas, ferramentas: [], pessoaNome: "M", modo: "conversa" });
     expect(p.split("\n- [").length - 1).toBe(MEMORIAS_NO_PROMPT);
+  });
+
+  describe("conexões: o que é do agente, não só o que está habilitado", () => {
+    const gmail: Conector = {
+      tenantId: "t", id: "c-gmail", ownerId: "p", visibility: "privado", nome: "Gmail", slug: "gmail", transporte: "http",
+      comando: null, args: [], url: "https://x", env: {}, declaracao: "toca", habilitado: true, sondadoEm: 1, ultimaFalha: null, criadoEm: 1,
+      catalogo: [
+        { nome: "GMAIL_FETCH_EMAILS", descricao: "busca", schema: { type: "object" }, readOnlyHint: true },
+        { nome: "GMAIL_LIST_LABELS", descricao: "rótulos", schema: { type: "object" }, readOnlyHint: true },
+      ],
+    };
+    const doConector = (tool: string): FerramentaPlano => ({ ...f(`gmail__${tool}`), origem: "conector", conectorId: "c-gmail" });
+    const conexoes = (p: string) => JSON.parse(p.split("\n").find((l) => l.startsWith("Conexões cadastradas"))!.replace(/^[^:]+: /, "")) as { slug: string; concedidas_a_voce: string[] }[];
+
+    it("conector habilitado sem concessão sai com concedidas_a_voce vazio e a instrução de pedir", () => {
+      const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
+      expect(conexoes(p)[0]).toMatchObject({ slug: "gmail", concedidas_a_voce: [] });
+      expect(p).toContain("Conector habilitado não é acesso seu");
+      expect(p).toContain("Histórico e memória não provam concessão");
+    });
+
+    it("concedidas_a_voce vem do plano do turno, sem o prefixo slug__, e ignora ferramenta de outro conector", () => {
+      const outro: FerramentaPlano = { ...f("slack__SLACK_LIST"), origem: "conector", conectorId: "c-slack" };
+      const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), doConector("GMAIL_LIST_LABELS"), doConector("GMAIL_FETCH_EMAILS"), outro], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
+      expect(conexoes(p)[0]?.concedidas_a_voce).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"]);
+    });
   });
 });
