@@ -4,6 +4,7 @@ import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import { montarFila } from "../domain/fila-frota.ts";
 import { incidentesVisiveis } from "./dispensar-incidente.ts";
 import { fiosDosItens } from "./fios-da-pergunta.ts";
+import { paradaDoPedido } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** O que "Sua vez" e "reabrir" precisam de Deps: a rota (e o teste) montam só isto. */
@@ -58,7 +59,10 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     }
     const itensAprovacao: ItemAprovacao[] = decisao.tipo === "aprovacao" ? await repos.itensAprovacao.listar(decisao.id) : [];
     const proposta = TIPOS_COM_PROPOSTA.has(decisao.tipo) ? await repos.propostas.buscar(decisao.id) : null;
-    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null });
+    // definido em 2026-09-24 (emenda da ADR-044): o pedido aberto de uma rotina diz desde quando ela está
+    // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.
+    const rotinaParada = proposta && aberta && decisao.tipo === "acesso" ? await paradaDoPedido(repos, proposta) : null;
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada });
   }
 
   const foraDoAr = (await repos.inventario.listar())

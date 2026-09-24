@@ -50,7 +50,9 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Cuida dos e-mails" });
       await conectorPronto(repos, { slug: "gmail", nome: "Gmail (Composio)", catalogo: GMAIL });
-      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8,13,18 * * *", fusoIana: TZ, instrucao: "E-mails às 8h, 13h e 18h", fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
+      // A fonte não cita o app: o turno roda e pede no meio. Com "Gmail" na fonte o pré-voo (emenda da
+      // ADR-044) pararia a janela antes do turno — tests/integration/rotina-bloqueio.test.ts.
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8,13,18 * * *", fusoIana: TZ, instrucao: "E-mails às 8h, 13h e 18h", fonte: "a caixa de entrada", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
       if (!rotina) throw new Error("rotina");
       const oito = await disparar(deps, repos, rotina.id, JANELA);
 
@@ -62,11 +64,15 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       expect(await repos.decisoes.buscar(pedido.data.proposta_id)).toMatchObject({ tipo: "acesso", estado: "pendente", turnoId: oito, frase: "Nina precisa ler seu Gmail para a rotina “E-mails às 8h, 13h e 18h”. Não inclui: enviar, apagar, arquivar." });
 
       // O disparo das 13h esbarra no mesmo buraco: nada novo nasce. (O das 8h já tinha terminado:
-      // com ele aberto a janela seria pulada — uma execução aberta por rotina, ADR-045.)
+      // com ele aberto a janela seria pulada — uma execução aberta por rotina, ADR-045.) Desde a emenda
+      // de 2026-09-24 nem turno nasce: o pedido aberto da rotina para a janela no pré-voo.
       await repos.turnos.assentar(oito, { estado: "concluido" });
-      const treze = await disparar(deps, repos, rotina.id, JANELA + 5 * 3_600_000);
-      expect((await pedirAcesso(deps, { turnoId: treze, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] })).data.proposta_id).toBe(pedido.data.proposta_id);
-      await expect(pedirAcesso(deps, { turnoId: treze, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "escrita", nao_pedido: [] })).rejects.toMatchObject({ codigo: "nao_permitido" });
+      const rotinaDas13 = await repos.rotinas.buscar(rotina.id);
+      if (!rotinaDas13) throw new Error("rotina");
+      const treze = await dispararRotina(deps, { rotina: rotinaDas13, instanteAgendado: JANELA + 5 * 3_600_000, machineId: randomUUID(), executor: "catcher" });
+      expect(treze.data).toMatchObject({ bloqueada: "sem_acesso", propostaId: pedido.data.proposta_id });
+      expect((await pedirAcesso(deps, { turnoId: oito, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] })).data.proposta_id).toBe(pedido.data.proposta_id);
+      await expect(pedirAcesso(deps, { turnoId: oito, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "escrita", nao_pedido: [] })).rejects.toMatchObject({ codigo: "nao_permitido" });
       expect((await repos.propostas.pendentesDaConversa(conversaId)).filter((p) => p.kind === "acesso")).toHaveLength(1);
 
       // "Sua vez" leva a proposta junto, para a web rotular "Permitir e rodar agora".
@@ -100,7 +106,8 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
       await conectorPronto(repos, { slug: "gmail", nome: "Gmail", catalogo: GMAIL });
-      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8,13,18 * * *", fusoIana: TZ, instrucao: "E-mails às 8h, 13h e 18h", fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
+      // Fonte sem o app: o turno roda e pede (o card do pré-voo, sem turno, tem o seu teste em rotina-bloqueio).
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8,13,18 * * *", fusoIana: TZ, instrucao: "E-mails às 8h, 13h e 18h", fonte: "a caixa de entrada", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
       if (!rotina) throw new Error("rotina");
       const disparado = await disparar(deps, repos, rotina.id, JANELA);
       const pedido = await pedirAcesso(deps, { turnoId: disparado, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] });

@@ -9,7 +9,7 @@ import type { Mensagem } from "./mensagem.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
 import type { FioDaPergunta, FioDoItem } from "./pedido.ts";
-import type { Rotina } from "./rotina.ts";
+import type { BloqueioRotina, ParadaDaRotina, Rotina } from "./rotina.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
@@ -71,8 +71,9 @@ export type SuaVezDto = {
   /**
    * `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos.
    * `fio` (definido em 2026-09-24): o fio e a rodada dos três tipos de pedir_a_pessoa; null nos outros.
+   * `rotinaParada` (mesma data, emenda da ADR-044): o pedido de acesso aberto que veio de uma rotina — desde quando e o que não rodou.
    */
-  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null })[];
+  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null; rotinaParada: ParadaDaRotina | null })[];
   /** Avisos de infraestrutura (ADR-045): um por queda do Mac, nunca um card por turno. Não são decisões. */
   incidentes: IncidenteDto[];
   foraDoAr: { nome: string; desde: EpochMs }[];
@@ -81,7 +82,8 @@ export type SuaVezDto = {
 };
 
 export type DecisaoDto = { decisao: Decisao; itens: ItemAprovacao[] };
-export type RotinaDto = { rotina: Rotina; proximaExecucao: EpochMs };
+/** `bloqueio` (definido em 2026-09-24, emenda da ADR-044): parada por falta de conexão ou acesso, com o card aberto; null = roda. */
+export type RotinaDto = { rotina: Rotina; proximaExecucao: EpochMs; bloqueio: BloqueioRotina | null };
 
 export type MetodoHttp = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 export type EntradaRota = { metodo: MetodoHttp; caminho: string; lane: "L1" | "L4" | "L5" | "L6" | "L7" | "L8" | "L9" };

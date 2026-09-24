@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { CapacidadeConector } from "../../../src/contracts/conector.ts";
 import { EXECUCOES_GUARDADAS } from "../../../src/shared/constantes.ts";
+import { concederLote } from "../../../src/use-cases/conceder.ts";
+import { confirmarProposta } from "../../../src/use-cases/confirmar-proposta.ts";
+import { decidirAcesso } from "../../../src/use-cases/decidir-acesso.ts";
 import { confiancaDaFonte, dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { executarRotinaAgora } from "../../../src/use-cases/executar-rotina-agora.ts";
+import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
 
 const TZ = "America/Sao_Paulo";
@@ -177,5 +182,173 @@ describe("dispararRotina", () => {
     const retomada = await d.deps.repos.turnos.enfileirar({ conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "retomada", retomaTurnoId: turnoId, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     const ok = await registrarDesfechoRotina(d.deps, { turnoId: retomada?.id ?? "", desfecho: "executou" });
     expect("execucao" in ok.data && ok.data.execucao.turnoId).toBe(turnoId);
+  });
+});
+
+/**
+ * Emenda da ADR-044, "rotina se trava sozinha": a rotina da Nina rodava 3x/dia sem a concessão do Gmail
+ * — cada execução gastava um turno (~US$ 0,09), falhava e abria um card. O pré-voo para a janela ANTES
+ * do turno quando o servidor já sabe que falta o app.
+ */
+describe("pré-voo da rotina (emenda da ADR-044)", () => {
+  const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome, schema: { type: "object" }, readOnlyHint });
+  const SEXTA = Date.parse("2026-09-18T08:00:00-03:00");
+  const SEGUNDA = Date.parse("2026-09-21T08:00:00-03:00");
+
+  async function gmail(d: ReturnType<typeof depsMemoria>, habilitado = true) {
+    const c = await d.deps.repos.conectores.criar({ nome: "Gmail (Composio)", slug: "gmail", transporte: "http", url: "https://example.com/mcp", declaracao: "nao-toca" });
+    if (!c) throw new Error("conector");
+    await d.deps.repos.conectores.registrarSonda(c.id, { ok: true, agora: AGORA, catalogo: [cap("GMAIL_FETCH_EMAILS", true), cap("GMAIL_LIST_LABELS", true), cap("GMAIL_SEND_EMAIL", false)] });
+    if (!habilitado) await d.deps.repos.conectores.habilitar(c.id, false);
+    return c;
+  }
+  /** A rotina como o agendador a vê agora (proximaExecucao reagendada). */
+  const atual = async (d: ReturnType<typeof depsMemoria>, id: string) => {
+    const r = await d.deps.repos.rotinas.buscar(id);
+    if (!r) throw new Error("rotina");
+    return r;
+  };
+
+  it("sem acesso: a janela vira 'bloqueada' sem turno; UM card de um clique, sem turno e com a geração do agente; nenhuma mensagem; a agenda anda", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "E-mails do Gmail" });
+    const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("bloqueada" in r.data)) throw new Error("deveria ter bloqueado");
+    expect(r.data).toEqual({ bloqueada: "sem_acesso", propostaId: expect.any(String), proximaExecucao: SEXTA });
+    expect(d.banco.turnos).toHaveLength(0);
+    expect(d.banco.janelas.map((j) => [j.instanteAgendado, j.turnoId])).toEqual([[JANELA, null]]);
+    expect(d.banco.execucoes.map((e) => [e.instanteAgendado, e.desfecho, e.motivo, e.turnoId])).toEqual([[JANELA, "bloqueada", "sem_acesso", null]]);
+    const propostaId = r.data.propostaId;
+    const proposta = d.banco.propostas.find((p) => p.id === propostaId);
+    expect(proposta?.payload).toEqual({ kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], nivel: "leitura", naoPedido: [], rotinaId: rotina.id, geracao: 0 });
+    expect(d.banco.decisoes.find((x) => x.id === propostaId)).toMatchObject({ tipo: "acesso", estado: "pendente", turnoId: null, frase: "Vera precisa ler seu Gmail para a rotina “poste o resumo”. Não inclui: enviar, apagar, arquivar." });
+    expect(d.banco.mensagens).toHaveLength(0);
+    expect(r.events?.map((e) => e.kind)).toEqual(["proposta_criada", "decisao_criada", "rotina_bloqueada"]);
+    expect(r.events?.at(-1)?.dados).toMatchObject({ rotinaId: rotina.id, desfecho: "bloqueada", motivo: "sem_acesso", propostaId: r.data.propostaId, instanteAgendado: JANELA });
+    expect(d.banco.rotinas[0]?.proximaExecucao).toBe(SEXTA);
+  });
+
+  it("três janelas sem acesso: três execuções 'bloqueada' e UM card só", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "Gmail" });
+    const ids: (string | null)[] = [];
+    for (const instante of [JANELA, SEXTA, SEGUNDA]) {
+      const r = await dispararRotina(d.deps, { rotina: await atual(d, rotina.id), instanteAgendado: instante, machineId: "m1", executor: "catcher" });
+      if (!("bloqueada" in r.data)) throw new Error("deveria ter bloqueado");
+      ids.push(r.data.propostaId);
+      if (instante !== JANELA) expect(r.events?.map((e) => e.kind)).toEqual(["rotina_bloqueada"]);
+    }
+    expect(new Set(ids).size).toBe(1);
+    expect(d.banco.execucoes.filter((e) => e.desfecho === "bloqueada")).toHaveLength(3);
+    expect(d.banco.propostas).toHaveLength(1);
+    expect(d.banco.decisoes).toHaveLength(1);
+    expect(d.banco.turnos).toHaveLength(0);
+  });
+
+  it("permitir roda a rotina na hora (sem pré-voo) e a janela seguinte roda normal", async () => {
+    let agora = AGORA;
+    const d = depsMemoria({ agora: () => agora });
+    await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "Gmail" });
+    const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("bloqueada" in r.data) || !r.data.propostaId) throw new Error("deveria ter bloqueado");
+    agora = AGORA + 3 * 60_000 + 417;
+    const decidido = await decidirAcesso(d.deps, { decisaoId: r.data.propostaId, recusar: false, executor: "catcher" });
+    expect(decidido.data).toMatchObject({ concessoes: 2, rotinaId: rotina.id, turnoId: expect.any(String) });
+    expect(d.banco.turnos.find((t) => t.id === decidido.data.turnoId)?.origem).toBe("rotina");
+    await d.deps.repos.turnos.assentar(decidido.data.turnoId ?? "", { estado: "concluido" });
+    const sexta = await dispararRotina(d.deps, { rotina: await atual(d, rotina.id), instanteAgendado: SEXTA, machineId: "m1", executor: "catcher" });
+    expect("turno" in sexta.data).toBe(true);
+    expect(d.banco.propostas.filter((p) => p.estado === "pendente")).toHaveLength(0);
+  });
+
+  it("'executar agora' bloqueado: turnoId null e o bloqueio com o card; a agenda não muda", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "Gmail" });
+    const r = await executarRotinaAgora(d.deps, { rotinaId: rotina.id, executor: "local" });
+    expect(r.data).toEqual({ conversaId: rotina.conversaId, turnoId: null, bloqueio: { motivo: "sem_acesso", propostaId: d.banco.propostas[0]?.id } });
+    expect(d.banco.turnos).toHaveLength(0);
+    expect(d.banco.rotinas[0]?.proximaExecucao).toBe(JANELA);
+  });
+
+  it("sem conexão: card de conexão, sem decisão; com o app ligado, a janela seguinte troca pelo card de um clique", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const conector = await gmail(d, false);
+    const rotina = await rotinaAtiva(d, { fonte: "Gmail" });
+    const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("bloqueada" in r.data)) throw new Error("deveria ter bloqueado");
+    expect(r.data.bloqueada).toBe("sem_conexao");
+    expect(d.banco.propostas[0]?.payload).toMatchObject({ kind: "acesso", conectar: true, capacidades: [], rotinaId: rotina.id });
+    expect(d.banco.decisoes).toHaveLength(0);
+    expect(r.events?.map((e) => e.kind)).toEqual(["proposta_criada", "rotina_bloqueada"]);
+
+    await d.deps.repos.conectores.habilitar(conector.id, true);
+    const sexta = await dispararRotina(d.deps, { rotina: await atual(d, rotina.id), instanteAgendado: SEXTA, machineId: "m1", executor: "catcher" });
+    if (!("bloqueada" in sexta.data)) throw new Error("deveria ter bloqueado");
+    const [conexao, umClique] = [r.data.propostaId, sexta.data.propostaId];
+    expect(sexta.data.bloqueada).toBe("sem_acesso");
+    expect(umClique).not.toBe(conexao);
+    expect(d.banco.propostas.find((p) => p.id === conexao)?.estado).toBe("confirmada");
+    expect(d.banco.decisoes.find((x) => x.id === umClique)?.tipo).toBe("acesso");
+  });
+
+  it("'Continuar tarefa' no card de conexão do pré-voo vira o card de um clique da rotina; o clique repetido no card velho devolve o novo", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const conector = await gmail(d, false);
+    const rotina = await rotinaAtiva(d, { fonte: "Gmail" });
+    const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("bloqueada" in r.data) || !r.data.propostaId) throw new Error("deveria ter bloqueado");
+    const conexao = r.data.propostaId;
+    await d.deps.repos.conectores.habilitar(conector.id, true);
+    const primeiro = await confirmarProposta(d.deps, { propostaId: conexao });
+    expect(primeiro.data.proposta.id).not.toBe(conexao);
+    expect(primeiro.data.proposta.payload).toMatchObject({ kind: "acesso", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], rotinaId: rotina.id });
+    expect(primeiro.data.decisao).toMatchObject({ tipo: "acesso", id: primeiro.data.proposta.id });
+    expect(primeiro.events?.map((e) => e.kind)).toEqual(["proposta_criada", "decisao_criada", "mensagem_criada"]);
+    const repetido = await confirmarProposta(d.deps, { propostaId: conexao });
+    expect(repetido.data.proposta.id).toBe(primeiro.data.proposta.id);
+    expect(d.banco.propostas.filter((p) => p.estado === "pendente")).toHaveLength(1);
+  });
+
+  it("card aberto por pedir_acesso num turno (app fora da fonte) segura a janela seguinte; a concessão feita à mão libera", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const conector = await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "a caixa de entrada" });
+    const oito = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in oito.data)) throw new Error("deveria ter disparado");
+    const pedido = await pedirAcesso(d.deps, { turnoId: oito.data.turno.id, conversaId: rotina.conversaId, agenteId: rotina.agenteId, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] });
+    await d.deps.repos.turnos.assentar(oito.data.turno.id, { estado: "concluido" });
+    const sexta = await dispararRotina(d.deps, { rotina: await atual(d, rotina.id), instanteAgendado: SEXTA, machineId: "m1", executor: "catcher" });
+    expect(sexta.data).toMatchObject({ bloqueada: "sem_acesso", propostaId: pedido.data.proposta_id });
+
+    await concederLote(d.deps, { agenteId: rotina.agenteId, conectorId: conector.id, capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], autorTipo: "pessoa" });
+    const segunda = await dispararRotina(d.deps, { rotina: await atual(d, rotina.id), instanteAgendado: SEGUNDA, machineId: "m1", executor: "catcher" });
+    expect("turno" in segunda.data).toBe(true);
+  });
+
+  it("a pergunta pendente da execução anterior segura só o AGENDADOR (aguardando_resposta); 'executar agora' roda", async () => {
+    let agora = AGORA;
+    const d = depsMemoria({ agora: () => agora });
+    const rotina = await rotinaAtiva(d);
+    const oito = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in oito.data)) throw new Error("deveria ter disparado");
+    await d.deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: rotina.agenteId, conversaId: rotina.conversaId, turnoId: oito.data.turno.id, prazoDecisaoEm: AGORA + 86_400_000, frase: "qual repositório?" });
+    await d.deps.repos.turnos.assentar(oito.data.turno.id, { estado: "concluido" });
+    const sexta = await dispararRotina(d.deps, { rotina: await atual(d, rotina.id), instanteAgendado: SEXTA, machineId: "m1", executor: "catcher" });
+    expect(sexta.data).toEqual({ bloqueada: "aguardando_resposta", propostaId: null, proximaExecucao: SEGUNDA });
+    expect(d.banco.execucoes.map((e) => [e.desfecho, e.motivo])).toEqual([["bloqueada", "aguardando_resposta"]]);
+    expect(sexta.events?.map((e) => e.kind)).toEqual(["rotina_bloqueada"]);
+    agora = AGORA + 5 * 60_000; // fora do minuto das 08:00, que o agendador já reivindicou
+    expect((await executarRotinaAgora(d.deps, { rotinaId: rotina.id, executor: "local" })).data.turnoId).toBeTruthy();
+  });
+
+  it("app citado que a pessoa NÃO registrou não trava: 'regressão linear' roda sem o Linear", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "planilha de regressão linear" });
+    expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" })).data).toBe(true);
   });
 });

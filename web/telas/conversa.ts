@@ -14,7 +14,8 @@ import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
-import { detalheAcesso, idsGemeas, marcaGemeas, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
+import { linhaNaoRodaram } from "../lib/execucao.ts";
+import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -192,13 +193,16 @@ function renderProposta(p: Proposta, estado: Estado): string {
     const decisao = decisaoAbertaDoCard(p, estado);
     // definido em 2026-09-24 (ADR-044): com a decisão de mesmo id aberta, o card é a frase do domínio e
     // um botão; os nomes técnicos vão para o <details>. Sem ela (pedido anterior), o card de revisão.
+    // Pedido de rotina (emenda de 2026-09-24): as janelas que não rodaram enquanto o card espera.
     itens = decisao
-      ? `<div class="it">${esc(decisao.frase)}</div>${detalheAcesso(p)}`
+      ? `<div class="it">${esc(decisao.frase)}${linhaNaoRodaram(itemAbertoDoCard(p, estado)?.rotinaParada ?? null, estado.agora)}</div>${detalheAcesso(p)}`
       : `<div class="it"><b>conector</b>${esc(c.conector)}</div><div class="it"><b>capacidades</b>${esc(c.capacidades.join(", "))} (${esc(c.nivel)})</div><div class="it"><b>não pedido</b>${esc(c.naoPedido.join(", ") || "—")}</div><div class="it">Revise o pedido. A autorização final aparecerá aqui na conversa.</div>`;
   }
+  const aberto = itemAbertoDoCard(p, estado);
+  const rotinaParada = p.payload.kind === "acesso" && aberto ? marcaRotinaParada(p, aberto.rotinaParada, estado.agora) : "";
   return `<div class="card-prop" data-proposta="${esc(p.id)}">
     <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
-    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${marcaGemeas(itemAbertoDoCard(p, estado))}</div>
+    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${rotinaParada}${marcaGemeas(aberto)}</div>
     ${itens}
     <div class="ft">${acoesProposta(p, estado)}</div>
   </div>`;

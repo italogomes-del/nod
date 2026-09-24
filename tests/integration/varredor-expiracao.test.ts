@@ -27,7 +27,7 @@ describeIntegracao("varredor de expiração (E7.4, ADR-007/011): vencido escrito
       expect(primeira.mensagens).toBe(2);
       expect(primeira.passaramEmBranco).toEqual([]);
       const segunda = await varrerPessoa(MARLON, tx, opcoes);
-      expect(segunda).toEqual({ vencidas: [], mensagens: 0, passaramEmBranco: [] });
+      expect(segunda).toEqual({ vencidas: [], mensagens: 0, passaramEmBranco: [], pausadas: [] });
 
       const mensagens = (await repos.mensagens.listarDaConversa(conversaId)).filter((m) => m.kind === "sistema");
       expect(mensagens).toHaveLength(2);
@@ -57,7 +57,26 @@ describeIntegracao("varredor de expiração (E7.4, ADR-007/011): vencido escrito
       const terceira = await varrerPessoa(MARLON, tx, { ...opcoes, agora: () => AGORA + 2 * 86_400_000 });
       expect(terceira.vencidas.sort()).toEqual([futura?.id, vista?.id].sort());
       expect(terceira.mensagens).toBe(1);
+      // O acesso que NÃO veio de rotina (a "futura", sem proposta de rotina) vence com a mensagem de sempre
+      // e não pausa nada (emenda da ADR-044: só o pedido de rotina pausa a rotina).
+      expect(terceira.pausadas).toEqual([]);
       expect((await repos.mensagens.listarDaConversa(conversaId)).filter((m) => m.kind === "sistema")).toHaveLength(3);
+    });
+  });
+
+  it("pedido de acesso de ROTINA vencido com a rotina já pausada: proposta recusada, mensagem de sempre, nada pausado de novo (emenda da ADR-044)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", instrucao: "E-mails", fonte: "gmail", entregavel: "resumo", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: AGORA, estado: "pausada" });
+      const proposta = await repos.propostas.criarAcessoDeRotina({ conversaId, agenteId, payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", naoPedido: [], rotinaId: rotina?.id ?? "" } });
+      await repos.decisoes.criar({ id: proposta?.proposta.id, tipo: "acesso", agenteId, conversaId, prazoDecisaoEm: AGORA - 1_000, frase: "Nina precisa ler seu Gmail" });
+      const r = await varrerPessoa(MARLON, (fn) => fn(trx), { services: deps.services, useCases: deps.useCases, agora: () => AGORA });
+      expect(r).toMatchObject({ vencidas: [proposta?.proposta.id], mensagens: 1, pausadas: [] });
+      expect((await repos.propostas.buscar(proposta?.proposta.id ?? ""))?.estado).toBe("recusada");
+      const textos = (await repos.mensagens.listarDaConversa(conversaId)).filter((m) => m.kind === "sistema").map((m) => m.texto);
+      expect(textos).toHaveLength(1);
+      expect(textos[0]).toContain("Este pedido venceu em");
     });
   });
 });

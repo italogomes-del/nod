@@ -14,8 +14,10 @@ import type { CasoDeUso } from "./tipos.ts";
  *
  * `autoria` é opcional porque quem escreve a mensagem muda: pela rota é a pessoa; pela ferramenta
  * é o agente sob procuração dela (ADR-023). O efeito no banco é o mesmo nos dois caminhos.
+ * `texto` (definido em 2026-09-24, emenda da ADR-044): quem pausa por regra diz POR QUÊ — o varredor,
+ * quando ninguém liberou o acesso da rotina no prazo. Ausente, a linha de sempre.
  */
-export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; autoria?: Autoria }, { rotina: Rotina }> = async (deps, input) => {
+export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; autoria?: Autoria; texto?: string }, { rotina: Rotina }> = async (deps, input) => {
   const atual = exigir(await deps.repos.rotinas.buscar(input.rotinaId), "nao_encontrado", "rotina");
   if (atual.estado === input.estado) return { data: { rotina: atual } };
   const agora = deps.agora();
@@ -29,7 +31,7 @@ export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; a
     conversaId: rotina.conversaId,
     autoria: input.autoria ?? autoriaPessoa(deps.escopo.pessoaId),
     kind: "sistema",
-    texto: rotina.estado === "ativa" ? textoRotinaAtiva(rotina, agora) : "Rotina pausada: nada será disparado até você reativar.",
+    texto: input.texto ?? (rotina.estado === "ativa" ? textoRotinaAtiva(rotina, agora) : "Rotina pausada: nada será disparado até você reativar."),
     confianca: "confiavel",
   });
   return { data: { rotina } };

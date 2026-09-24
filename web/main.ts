@@ -26,7 +26,7 @@ import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
-import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, selosDoAgente, SUBTITULO_ESPERANDO } from "./telas/sua-vez.ts";
+import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, selosDoAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
@@ -153,6 +153,7 @@ function renderSidebar(): string {
   const agentes = estado.frota?.agentes ?? [];
   const abertas = abertasPorAgente(estado);
   const perguntas = perguntasPorAgente(estado);
+  const paradas = rotinasParadasPorAgente(estado);
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
   const linha = (a: (typeof agentes)[number]) => {
@@ -163,7 +164,8 @@ function renderSidebar(): string {
     // agente que perguntou diz "esperando sua resposta" no lugar do título.
     const perguntando = perguntas.get(a.id) ?? 0;
     const selos = selosDoAgente(abertas.get(a.id) ?? 0, perguntando);
-    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    // definido em 2026-09-24 (emenda da ADR-044): "rotina parada" (âmbar) quando uma rotina dele espera acesso.
+    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
     return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${perguntando ? " (esperando sua resposta)" : ""}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b>${subtitulo}</span><span class="meta">${selos}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
@@ -733,9 +735,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
   },
   "nova-rotina": (el) => navegar({ tipo: "nova-rotina", agenteId: el.dataset.id }),
+  // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo (`ids.bloqueada`), o teste não roda —
+  // a conversa abre com o card de acesso "rotina parada" e o botão que a destrava; "Sua vez" relê.
   "executar-rotina": (el) => agir(async () => {
     const r = await api!.executarRotina(el.dataset.id ?? "");
-    dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`] });
+    dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`, ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),
   "abrir-conversa": (el) => {

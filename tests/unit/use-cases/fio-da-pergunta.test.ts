@@ -95,8 +95,10 @@ describe("pedirAPessoa: a pergunta da retomada de uma pergunta respondida é a r
     const c = await cenario();
     const rotina = await c.deps.repos.rotinas.criar({ ...c.alvo, cron: "0 8,13 * * *", fusoIana: "America/Sao_Paulo", instrucao: "resuma os PRs", fonte: "GitHub", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "diga que não houve", proximaExecucao: JANELA });
     if (!rotina) throw new Error("rotina");
+    // "Executar agora" (preservarAgenda): o agendador não dispara com a pergunta da rotina pendente desde a
+    // emenda da ADR-044 (janela 'bloqueada' / aguardando_resposta); a pessoa, sim.
     const disparar = async (instante: number) => {
-      const r = await dispararRotina(c.deps, { rotina, instanteAgendado: instante, machineId: "m", executor: "catcher" });
+      const r = await dispararRotina(c.deps, { rotina, instanteAgendado: instante, machineId: "m", executor: "catcher", preservarAgenda: true });
       if (!("turno" in r.data)) throw new Error("sem turno");
       return r.data.turno.id;
     };

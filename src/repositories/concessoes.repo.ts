@@ -55,6 +55,17 @@ export function concessoesRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraConcessao);
     },
 
+    /**
+     * Trava (agente, conector) até o fim da tx (definido em 2026-09-24, emenda da ADR-044). O pré-voo da
+     * rotina (lê concessões → abre ou reaproveita o card) e o clique que concede (decidir-acesso.ts)
+     * passam aqui: sem a trava, o pré-voo lia "sem concessão", o clique commitava concessão + proposta
+     * confirmada, e o pré-voo — sem ver mais proposta pendente — abria um card novo para um acesso já
+     * dado. Advisory lock transacional, como agentes.excluir; a chave leva o tenant e o par.
+     */
+    async travar(agenteId: string, conectorId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`acesso:${agenteId}:${conectorId}`}))`;
+    },
+
     async revogar(id: string): Promise<boolean> {
       const r = await conn`delete from concessoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;

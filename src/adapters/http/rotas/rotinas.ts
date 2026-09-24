@@ -72,7 +72,11 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       padrao: /^\/rotinas\/(?<id>[^/]+)\/executar$/,
       async handler(ctx) {
         const r = await executar(deps, ctx.escopo, executarRotinaAgora, { rotinaId: uuid(ctx.params.id, "id"), executor: deps.executor?.() ?? "catcher" });
-        ctx.json(200, { ok: true, ids: { conversaId: r.conversaId, ...(r.turnoId ? { turnoId: r.turnoId } : {}) } });
+        // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo, sem turno — `bloqueada` leva o
+        // motivo e `propostaId` o card que a destrava; a web abre a conversa onde o card está.
+        const bloqueio = r.bloqueio ? { bloqueada: r.bloqueio.motivo, ...(r.bloqueio.propostaId ? { propostaId: r.bloqueio.propostaId } : {}) } : {};
+        const resposta: RespostaMutacao = { ok: true, ids: { conversaId: r.conversaId, ...(r.turnoId ? { turnoId: r.turnoId } : {}), ...bloqueio } };
+        ctx.json(200, resposta);
       },
     },
     {

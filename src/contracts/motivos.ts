@@ -84,9 +84,21 @@ export type MotivoInatividadePermissao = (typeof MOTIVOS_INATIVIDADE_PERMISSAO)[
  * interrompida ≠ falhou (definido em 2026-09-24, ADR-045): a máquina parou de responder no meio
  * (motivo maquina_sem_contato) — não é erro da rotina nem do agente. Também não escreve no chat: vai
  * para o histórico da rotina e para o aviso único do incidente.
+ * bloqueada ≠ falhou (definido em 2026-09-24, emenda da ADR-044): a janela foi reivindicada e NÃO virou
+ * turno — o pré-voo viu que falta conexão ou acesso, ou que a pergunta anterior segue sem resposta
+ * (MOTIVOS_BLOQUEIO_ROTINA). Nenhum modelo rodou; não escreve no chat: o card de acesso já está lá.
  */
-export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou", "interrompida"] as const;
+export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou", "interrompida", "bloqueada"] as const;
 export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
+
+/**
+ * Por que a janela ficou 'bloqueada' (definido em 2026-09-24, emenda da ADR-044). Vai em
+ * rotina_execucoes.motivo, text com CHECK '^[a-z_]+$' (0002): lista TS, sem enum no banco — o gate
+ * motivos-enum não se aplica. sem_conexao: o app está registrado e desligado; sem_acesso: o agente não
+ * tem a concessão; aguardando_resposta: a pergunta da execução anterior ainda espera (só no agendador).
+ */
+export const MOTIVOS_BLOQUEIO_ROTINA = ["sem_conexao", "sem_acesso", "aguardando_resposta"] as const;
+export type MotivoBloqueioRotina = (typeof MOTIVOS_BLOQUEIO_ROTINA)[number];
 
 /**
  * Por que a execução não rendeu notícia. Campo TIPADO vindo da ferramenta `sem_novidade` —

@@ -23,7 +23,8 @@ export type ChaveRedacao =
   | "parei-falta-dado"
   | "anotei"
   | "permissao-permanente"
-  | "computador-fora-do-ar";
+  | "computador-fora-do-ar"
+  | "rotina-pausada-sem-acesso";
 
 /** Textos de sistema FIXOS em português; nunca vêm do modelo. `{chave}` é preenchido com params. */
 const CATALOGO: Record<ChaveRedacao, string> = {
@@ -57,6 +58,9 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   anotei: "Anotei como {tipo}: {texto}",
   // definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO da transição; a hora sai no cartão da web.
   "computador-fora-do-ar": "O computador de {agente} não responde: {motivo}. Tirei o computador das próximas execuções até você religá-lo.",
+  // definido em 2026-09-24 (emenda da ADR-044): a linha ÚNICA quando o pedido de acesso da rotina vence —
+  // no lugar do "este pedido venceu"; {prazo} é o da decisão ("24h"), {app} o nome que a pessoa lê.
+  "rotina-pausada-sem-acesso": "Rotina pausada: ninguém liberou o acesso ao {app} em {prazo}. Reative quando quiser.",
 };
 
 /**

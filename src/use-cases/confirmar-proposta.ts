@@ -6,7 +6,9 @@ import type { Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { capacidadesDeLeitura, fraseDoPedidoDeAcesso } from "../domain/pedido-acesso.ts";
 import { redigir } from "../domain/redacao.ts";
+import type { ConectorGuardado } from "../contracts/conector.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -26,9 +28,10 @@ async function conexaoViraPedido(deps: Deps, existente: Proposta, p: PayloadProp
   if (!conector?.habilitado || p.nivel !== "leitura") throw new ErroDeDominio("estado_invalido", { cause: "conecte pelo marketplace antes de pedir capacidades" });
   const capacidades = capacidadesDeLeitura(conector.catalogo);
   if (capacidades.length === 0) throw new ErroDeDominio("estado_invalido", { cause: "o app não tem ferramenta de leitura" });
-  if (!(await deps.repos.propostas.decidir(existente.id, "confirmada"))) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
+  if (p.rotinaId) return conexaoDaRotinaViraPedido(deps, existente, { ...p, rotinaId: p.rotinaId }, conector);
+  if (!(await deps.repos.propostas.decidir(existente.id, "confirmada"))) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
   // O agente pode ter pedido de novo depois da conexão: o card de concessão que já está aberto serve.
   for (const aberta of await deps.repos.propostas.pendentesDaConversa(existente.conversaId)) {
     if (aberta.payload.kind !== "acesso" || aberta.payload.conectar || aberta.agenteId !== existente.agenteId || aberta.payload.conector !== p.conector) continue;
@@ -36,12 +39,47 @@ async function conexaoViraPedido(deps: Deps, existente: Proposta, p: PayloadProp
     if (decisao && (decisao.estado === "pendente" || decisao.estado === "reaberta")) return { data: { proposta: aberta, agente: null, rotina: null, decisao }, events: [] };
   }
   const { conectar: _conectar, ...resto } = p;
-  const rotina = p.rotinaId ? await deps.repos.rotinas.buscar(p.rotinaId) : null;
-  const aberto = await abrirPedidoDeAcesso(deps, { conversaId: existente.conversaId, agenteId: existente.agenteId, turnoId: p.turnoId ?? null, payload: { ...resto, capacidades }, conector, rotina: rotina?.excluidoEm === null ? rotina : null, autoria });
+  const aberto = await abrirPedidoDeAcesso(deps, { conversaId: existente.conversaId, agenteId: existente.agenteId, turnoId: p.turnoId ?? null, payload: { ...resto, capacidades }, conector, autoria });
   const events = [...aberto.events];
   const mensagem = await deps.repos.mensagens.criar({ conversaId: existente.conversaId, autoria, kind: "sistema", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" });
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: existente.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
   return { data: { proposta: aberto.proposta, agente: null, rotina: null, decisao: aberto.decisao }, events };
+}
+
+/**
+ * definido em 2026-09-24 (emenda da ADR-044): o card de conexão de uma ROTINA vira o de um clique por
+ * garantirPedidoDeAcesso — um pedido aberto por (agente, app), pelo índice único da 0026. O pré-voo pode
+ * ter feito a troca antes do clique: aí "Continuar tarefa" devolve o card de um clique que já está aberto,
+ * em vez do 409 de "proposta confirmada".
+ */
+async function conexaoDaRotinaViraPedido(deps: Deps, existente: Proposta, p: PayloadPropostaAcesso & { rotinaId: string }, conector: ConectorGuardado): Promise<{ data: SaidaConfirmarProposta; events: RuntimeEvent[] }> {
+  if (existente.estado !== "pendente") {
+    const aberto = existente.estado === "confirmada" ? await deps.repos.propostas.acessoDeRotinaAberto(existente.agenteId, p.conector) : null;
+    const decisao = aberto ? await deps.repos.decisoes.buscar(aberto.id) : null;
+    if (!aberto || !decisao) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
+    return { data: { proposta: aberto, agente: null, rotina: null, decisao }, events: [] };
+  }
+  const rotina = await deps.repos.rotinas.buscar(p.rotinaId);
+  const autoria = autoriaPessoa(deps.escopo);
+  const g = await garantirPedidoDeAcesso(deps, {
+    agenteId: existente.agenteId,
+    conversaId: existente.conversaId,
+    rotinaId: p.rotinaId,
+    instrucaoDaRotina: rotina && rotina.excluidoEm === null ? rotina.instrucao : null,
+    slug: p.conector,
+    conector,
+    conectar: false,
+    capacidades: null,
+    naoPedido: p.naoPedido,
+    turnoId: p.turnoId ?? null,
+    autoria,
+  });
+  const events = [...g.events];
+  if (g.criada) {
+    const mensagem = await deps.repos.mensagens.criar({ conversaId: existente.conversaId, autoria, kind: "sistema", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" });
+    if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: deps.agora(), conversaId: existente.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
+  }
+  return { data: { proposta: g.proposta, agente: null, rotina: null, decisao: g.decisao }, events };
 }
 
 /**

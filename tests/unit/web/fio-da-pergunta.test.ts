@@ -27,7 +27,7 @@ function item(id: string, fio: { id: string; rodada: number } | null, p: { agent
       prazoDecisaoEm: new Date(AGORA + 22 * H).toISOString(), prazoExecucaoEm: null, frase: `parei para perguntar a Marlon: ${id}`, desfecho: null, vistaEm: null,
       criadoEm: new Date(AGORA - 2 * H).toISOString(), fioId: fio && fio.id !== id ? fio.id : null,
     },
-    estadoColuna: "pendente", agenteNome: "Nina", aguardandoHaMs: 2 * H, recusaAutomaticaEmMs: 22 * H, gemeas: [], itensAprovacao: [], proposta: null, fio,
+    estadoColuna: "pendente", agenteNome: "Nina", aguardandoHaMs: 2 * H, recusaAutomaticaEmMs: 22 * H, gemeas: [], itensAprovacao: [], proposta: null, fio, rotinaParada: null,
   };
 }
 

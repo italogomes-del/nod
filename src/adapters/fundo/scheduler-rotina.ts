@@ -19,8 +19,11 @@ export type OpcoesTick = {
   agora: Relogio;
 };
 
-/** `puladas`: rotinas cuja execução anterior ainda estava aberta — só reagendadas (ADR-045). */
-export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; puladas: string[]; falhas: string[] };
+/**
+ * `puladas`: rotinas cuja execução anterior ainda estava aberta — só reagendadas (ADR-045).
+ * `bloqueadas` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno.
+ */
+export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; puladas: string[]; bloqueadas: string[]; falhas: string[] };
 
 /**
  * Um tick para UMA pessoa (o teste chama isto sob withRollback com `tx = (fn) => fn(trx)`): lista
@@ -30,7 +33,7 @@ export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; p
  */
 export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTick): Promise<ResultadoTick> {
   const agora = opcoes.agora();
-  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], puladas: [], falhas: [] };
+  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], falhas: [] };
   const vencidas = await tx(async (trx) => criarRepos(trx, escopo).rotinas.ativasVencidas(agora));
   for (const rotina of vencidas) {
     try {
@@ -45,6 +48,13 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
         if ("pulada" in r.data) {
           resultado.puladas.push(rotina.id);
           log("aviso", "rotina_janela_pulada", { rotina_id: rotina.id, turno_aberto_id: r.data.turnoAbertoId, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
+          return;
+        }
+        // Sem turno e sem crédito gasto: a execução 'bloqueada', o card e o evento vão juntos nesta tx.
+        if ("bloqueada" in r.data) {
+          await repos.events.gravarComOutbox(r.events ?? []);
+          resultado.bloqueadas.push(rotina.id);
+          log("info", "rotina_bloqueada", { rotina_id: rotina.id, motivo: r.data.bloqueada, proposta_id: r.data.propostaId, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
         await repos.events.gravarComOutbox(r.events ?? []);

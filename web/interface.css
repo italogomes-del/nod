@@ -474,4 +474,6 @@ body { background: #fcfdff; }
 .ch-badge.ch-pergunta { gap: 3px; background: var(--blue-soft); color: var(--blue); }
 .ch-badge .ic-balao { display: block; }
 .sub-esperando { color: var(--blue) !important; }
+/* definido em 2026-09-24 (emenda da ADR-044): a rotina do bot parou por falta de acesso — âmbar de "precisa de você". */
+.sub-rotina-parada { color: var(--amber) !important; }
 @media (prefers-reduced-motion: reduce) { .message.pergunta.realce .bubble { transition: none; } }

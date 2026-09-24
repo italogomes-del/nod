@@ -39,6 +39,8 @@ import { PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
 export type BancoMemoria = {
   pessoas: Pessoa[];
   agentes: Agente[];
+  /** agentes.geracao_execucao (ADR-034): ausente = 0. */
+  geracoes: Map<string, number>;
   memorias: Memoria[];
   conversas: Conversa[];
   mensagens: Mensagem[];
@@ -76,6 +78,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
   const banco: BancoMemoria = {
     pessoas: [],
     agentes: [],
+    geracoes: new Map(),
     memorias: [],
     conversas: [],
     mensagens: [],
@@ -121,6 +124,9 @@ const iso = (n: number) => new Date(n).toISOString();
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
+  /** A linha do índice único propostas_acesso_de_rotina_aberta (0026): pedido de rotina pendente por (dona, agente, app). */
+  const acessoDeRotinaAberto = (agenteId: string, conector: string): Proposta | null =>
+    doTenant(b.propostas).find((p) => p.agenteId === agenteId && p.estado === "pendente" && p.payload.kind === "acesso" && p.payload.conector === conector && p.payload.rotinaId !== undefined) ?? null;
 
   const repos = {
     computadores: {
@@ -230,6 +236,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const t = doTenant(b.turnos).find((t) => t.id === turnoId);
         return !!doTenant(b.agentes).find((a) => a.id === t?.agenteId)?.excluidoEm;
       },
+      // A geração sobe a cada exclusão (agentes.geracao_execucao, 0012); em memória, um contador por agente.
+      async geracaoExecucao(id) {
+        return doTenant(b.agentes).some((a) => a.id === id) ? (b.geracoes.get(id) ?? 0) : null;
+      },
       async organizar(id, campos) {
         const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
         if (!a) return null;
@@ -241,6 +251,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (!a) return null;
         a.excluidoEm = em;
         a.fixado = false;
+        b.geracoes.set(id, (b.geracoes.get(id) ?? 0) + 1);
         for (const r of doTenant(b.rotinas).filter((r) => r.agenteId === id)) r.estado = "pausada";
         b.concessoes = b.concessoes.filter((c) => c.agenteId !== id);
         return a;
@@ -470,9 +481,27 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
 
     propostas: {
       async criar(p) {
+        // O índice único propostas_acesso_de_rotina_aberta (0026) vale aqui também: quem insere pedido de
+        // rotina por `criar` em vez de `criarAcessoDeRotina` recebe o mesmo 23505 que o Postgres daria.
+        if (p.payload.kind === "acesso" && p.payload.rotinaId && acessoDeRotinaAberto(p.agenteId, p.payload.conector)) {
+          throw Object.assign(new Error("duplicate key value violates unique constraint \"propostas_acesso_de_rotina_aberta\""), { code: "23505" });
+        }
         const proposta: Proposta = { tenantId: escopo.tenantId, id: p.id ?? randomUUID(), conversaId: p.conversaId, agenteId: p.agenteId, kind: p.payload.kind, estado: "pendente", payload: p.payload, criadoEm: agora() };
         b.propostas.push(proposta);
         return proposta;
+      },
+      async criarAcessoDeRotina(p) {
+        const existente = acessoDeRotinaAberto(p.agenteId, p.payload.conector);
+        if (existente) return { proposta: existente, criada: false };
+        const proposta: Proposta = { tenantId: escopo.tenantId, id: p.id ?? randomUUID(), conversaId: p.conversaId, agenteId: p.agenteId, kind: "acesso", estado: "pendente", payload: p.payload, criadoEm: agora() };
+        b.propostas.push(proposta);
+        return { proposta, criada: true };
+      },
+      async acessoDeRotinaAberto(agenteId, conector) {
+        return acessoDeRotinaAberto(agenteId, conector);
+      },
+      async pendentesDeAcessoDaRotina(rotinaId) {
+        return doTenant(b.propostas).filter((p) => p.payload.kind === "acesso" && p.estado === "pendente" && p.payload.rotinaId === rotinaId);
       },
       async buscar(id) {
         return doTenant(b.propostas).find((p) => p.id === id) ?? null;
@@ -1112,6 +1141,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async doAgente(agenteId) {
         return doTenant(b.concessoes).filter((c) => c.agenteId === agenteId);
+      },
+      // Sem concorrência em memória: a trava advisory não tem o que serializar.
+      async travar() {
+        return undefined;
       },
       async revogar(id) {
         const i = b.concessoes.findIndex((c) => c.tenantId === escopo.tenantId && c.id === id);

@@ -1,13 +1,32 @@
 import type { RotinaDto } from "../contracts/api.ts";
+import type { Concessao } from "../contracts/concessao.ts";
 import type { ExecucaoRotina } from "../contracts/rotina.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
+import { bloqueioDaRotina } from "./pre-voo-rotina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-/** GET rotinas: o que a policy deixa ver, com a próxima execução calculada pelo servidor (ADR-011). */
+/**
+ * GET rotinas: o que a policy deixa ver, com a próxima execução calculada pelo servidor (ADR-011).
+ * `bloqueio` (definido em 2026-09-24, emenda da ADR-044): a rotina da pessoa parada por falta de conexão
+ * ou acesso, com o card que a destrava — a lista mostra "parada · falta acesso ao Gmail" e o botão.
+ * Rotina de outra pessoa (visível por 'equipe') sai sem: as concessões e os cards dela são da dona.
+ */
 export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDto[] }> = async (deps) => {
   const rotinas = await deps.repos.rotinas.listar();
-  return { data: { rotinas: rotinas.map((rotina) => ({ rotina, proximaExecucao: rotina.proximaExecucao })) } };
+  const minhas = rotinas.filter((r) => r.ownerId === deps.escopo.pessoaId && r.excluidoEm === null);
+  const registrados = minhas.length ? await deps.repos.conectores.listar() : [];
+  const concessoes = new Map<string, Concessao[]>();
+  const dtos: RotinaDto[] = [];
+  for (const rotina of rotinas) {
+    let bloqueio: RotinaDto["bloqueio"] = null;
+    if (minhas.includes(rotina)) {
+      if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
+      bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
+    }
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio });
+  }
+  return { data: { rotinas: dtos } };
 };
 
 /** GET rotinas/:id/execucoes: as 20 mais recentes (Grok Bot), mais recente primeiro. */
