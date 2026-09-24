@@ -3,6 +3,7 @@ import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import {
   decidirAprovacao,
   decidirLote,
+  nuncaPermanente,
   REGRA_APROVACAO_PERMANENTE,
   REGRA_CONSULTA_SEM_DECISAO,
   VERSAO_APROVACAO_PERMANENTE,
@@ -120,5 +121,18 @@ describe("lote misto", () => {
 
   it("lote vazio não é automático (nada a executar não é permissão)", () => {
     expect(decidirLote([]).automatico).toBe(false);
+  });
+});
+
+describe("ações que nunca são permanentes (ADR-046)", () => {
+  it("aprovar PR e merge nunca viram regra; comentar vira", () => {
+    for (const nome of ["github__pr_revisar", "github__pr_merge", "pr_merge", "github__GITHUB_MERGE_A_PULL_REQUEST", "github__GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST", "x__aprovar_despesa", "x__approve"]) expect(nuncaPermanente(nome), nome).toBe(true);
+    for (const nome of ["github__pr_comentar", "github__pr_ver", "slack__send_message", "pr_comentar"]) expect(nuncaPermanente(nome), nome).toBe(false);
+  });
+
+  it("mesmo com a linha na lista da pessoa, aprovar PR pergunta — a regra gravada antes da lista não vale", () => {
+    const p = plano({ catalogo: { ferramentas: [ferramenta("github__pr_revisar"), ferramenta("github__pr_comentar")], servidores: [] }, semprePermitir: ["github__pr_revisar", "github__pr_comentar"] });
+    expect(decidirAprovacao({ plano: p, destino: { conector: "github", ferramenta: "pr_revisar", argumentos: { evento: "APPROVE" } }, origemSensivel: false })).toEqual({ automatico: false, motivo: "sem_regra_permanente" });
+    expect(decidirAprovacao({ plano: p, destino: { conector: "github", ferramenta: "pr_comentar", argumentos: {} }, origemSensivel: false })).toMatchObject({ automatico: true, regra: REGRA_APROVACAO_PERMANENTE });
   });
 });

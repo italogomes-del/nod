@@ -5,11 +5,11 @@ import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
 const ESPERADAS = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina",
-  "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot",
+  "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as QUINZE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina)", () => {
+  it("lista fechada com as DEZESSEIS ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-24 traz delegar_tarefa)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });

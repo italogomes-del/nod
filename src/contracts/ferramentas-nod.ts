@@ -10,9 +10,10 @@ export type { ArgsPedirAPessoa } from "./pedido.ts";
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As QUINZE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As DEZESSEIS ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
- * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26). Lista FECHADA: cada nome tem um
+ * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; delegar_tarefa entra em 2026-09-24,
+ * ADR-046). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
  * `${slug}__${tool}` e não mora aqui.
@@ -118,6 +119,21 @@ export const FERRAMENTAS_NOD = {
     required: ["agente", "pergunta"],
     additionalProperties: false,
   },
+  /**
+   * definido em 2026-09-24 (ADR-046): o que autoriza é a mensagem da PESSOA que abriu este turno, que o
+   * servidor lê do banco — por isso nenhum campo carrega o pedido dela nem o id da mensagem.
+   */
+  delegar_tarefa: {
+    type: "object",
+    description: "A pessoa pediu que outro bot FAÇA algo (revisar, corrigir, levantar, preparar). O servidor leva junto a mensagem literal dela como autorização; o colega trabalha com os acessos dele e pede o que faltar na conversa dele. Para uma dúvida ou opinião, use perguntar_a_bot. Agenda trabalho assíncrono: diga que pediu e encerre; o resultado chega em um novo turno.",
+    properties: {
+      agente: { type: "string", description: "Id do diretório de colegas, ou nome único do bot.", minLength: 1 },
+      tarefa: { type: "string", description: "O que a pessoa pediu que ele faça, em uma frase.", minLength: 1 },
+      contexto: { type: "string", description: "Onde achar o trabalho: links, números, nomes. Não é instrução da pessoa." },
+    },
+    required: ["agente", "tarefa"],
+    additionalProperties: false,
+  },
 } as const satisfies Record<string, JsonSchema>;
 
 export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
@@ -129,7 +145,7 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
 export const NOMES_FERRAMENTAS_NOD = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "pedir_aprovacao",
-  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot",
+  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -145,6 +161,7 @@ export type ArgsPassar = { motivo: MotivoPasse };
 export type ArgsSemNovidade = { motivo: MotivoSemNovidade };
 export type ArgsEncaminhar = { para_agente: string; motivo: string };
 export type ArgsPerguntarABot = { agente: string; pergunta: string };
+export type ArgsDelegarTarefa = { agente: string; tarefa: string; contexto?: string };
 
 export type ResultadoLembrar = { ok: true; id: string };
 export type ResultadoProposta = { proposta_id: string };
@@ -154,6 +171,7 @@ export type ResultadoPedirAprovacao =
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
 export type ResultadoPerguntarABot = { tarefa_id: string };
+export type ResultadoDelegarTarefa = { tarefa_id: string };
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
 export type ContratoFerramentaNod = {
@@ -172,4 +190,5 @@ export type ContratoFerramentaNod = {
   encaminhar: { args: ArgsEncaminhar; resultado: ResultadoOk };
   sem_novidade: { args: ArgsSemNovidade; resultado: ResultadoOk };
   perguntar_a_bot: { args: ArgsPerguntarABot; resultado: ResultadoPerguntarABot };
+  delegar_tarefa: { args: ArgsDelegarTarefa; resultado: ResultadoDelegarTarefa };
 };

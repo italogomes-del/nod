@@ -19,6 +19,7 @@ const NOD: Record<string, string> = {
   encaminhar: "Encaminhou a outro bot",
   sem_novidade: "Viu que não há novidade",
   perguntar_a_bot: "Perguntou a outro bot",
+  delegar_tarefa: "Pediu uma tarefa a outro bot",
 };
 
 /** Prefixos de capacidade que só leem; o resto de um conector conta como alteração. */
