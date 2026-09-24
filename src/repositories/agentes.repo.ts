@@ -80,6 +80,14 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
         where t.tenant_id = ${escopo.tenantId} and t.id = ${turnoId}`;
       return l?.bloqueada ?? false;
     },
+    /**
+     * Geração de execução do agente (ADR-034; sobe a cada exclusão). definido em 2026-09-24 (emenda da
+     * ADR-044): o card do pré-voo nasce sem turno e guarda esta geração no payload; null = agente sumiu.
+     */
+    async geracaoExecucao(id: string): Promise<number | null> {
+      const [l] = await conn<{ geracao_execucao: number }[]>`select geracao_execucao from agentes where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l ? Number(l.geracao_execucao) : null;
+    },
     async organizar(id: string, campos: { secao?: string; naoLido?: boolean }): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`update agentes set secao = coalesce(${campos.secao ?? null}, secao),
         nao_lido = coalesce(${campos.naoLido ?? null}, nao_lido)

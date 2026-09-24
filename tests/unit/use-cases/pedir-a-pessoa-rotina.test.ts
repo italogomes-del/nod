@@ -21,11 +21,13 @@ async function cenario() {
   const rotina = await criarRotina("Resumo das vendas");
   let passo = 0;
   // Cada disparo é o de uma janela nova: o turno da anterior já terminou (a guarda "uma execução aberta
-  // por rotina", ADR-045, pularia a janela com ele ainda pendente).
+  // por rotina", ADR-045, pularia a janela com ele ainda pendente). É o "executar agora" (preservarAgenda):
+  // desde a emenda da ADR-044 o AGENDADOR não dispara a rotina com a pergunta dela pendente (a janela fica
+  // 'bloqueada' / aguardando_resposta) — quem roda de novo, com a pergunta aberta, é a pessoa.
   const disparo = async (r = rotina) => {
     for (const t of banco.turnos) if (t.origem === "rotina" && t.estado === "pendente") await deps.repos.turnos.assentar(t.id, { estado: "concluido" });
     passo += 1;
-    const d = await dispararRotina(deps, { rotina: r, instanteAgendado: agora - passo * 3_600_000, machineId: "m", executor: "catcher" });
+    const d = await dispararRotina(deps, { rotina: r, instanteAgendado: agora - passo * 3_600_000, machineId: "m", executor: "catcher", preservarAgenda: true });
     if (!("turno" in d.data)) throw new Error("sem turno");
     return d.data.turno.id;
   };

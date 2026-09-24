@@ -80,6 +80,12 @@ export type PayloadPropostaAcesso = {
    * novo na hora; recusar pausa a rotina. Ausente = pedido da conversa, que retoma o turno.
    */
   rotinaId?: string;
+  /**
+   * definido em 2026-09-24 (emenda da ADR-044): geração de execução do agente (ADR-034) quando o card
+   * nasceu SEM turno — o pré-voo da rotina. Sem turno não há como `execucaoBloqueada` ver que o agente foi
+   * excluído e restaurado; permitir um card de outra geração concede, mas não reativa nem dispara a rotina.
+   */
+  geracao?: number;
 };
 /**
  * definido em 2026-09-18: o produto descobre a pasta e a pessoa autoriza em um clique. A proposta

@@ -6,6 +6,7 @@ import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
+import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
@@ -14,7 +15,8 @@ import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 export const INTERVALO_VARREDOR_MS = 30_000;
 
 export type OpcoesVarredor = { services: Services; useCases: UseCasesNod; agora: Relogio; metricas?: Metricas };
-export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[] };
+/** `pausadas` (definido em 2026-09-24, emenda da ADR-044): rotinas cujo pedido de acesso venceu. */
+export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[]; pausadas: string[] };
 
 /**
  * definido em 2026-09-24: o que o desfecho quer dizer, em palavras — as mesmas do rótulo do card
@@ -38,7 +40,7 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
   return tx(async (trx) => {
     const repos = criarRepos(trx, escopo);
     const deps: Deps = { repos, services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
-    const resultado: ResultadoVarredura = { vencidas: [], mensagens: 0, passaramEmBranco: [] };
+    const resultado: ResultadoVarredura = { vencidas: [], mensagens: 0, passaramEmBranco: [], pausadas: [] };
     const vencidas: Decisao[] = await repos.decisoes.vencerPendentes(agora);
     for (const d of vencidas) {
       resultado.vencidas.push(d.id);
@@ -49,16 +51,23 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
         (opcoes.metricas ?? registroPadrao).incrementar({ metrica: "expiracao", causa: tipoDesfecho, tenant_id: escopo.tenantId });
       }
       const autoria = autoriaPessoa(escopo.pessoaId, "regra:varredor-expiracao");
-      await repos.mensagens.criar({
-        conversaId: d.conversaId,
-        turnoId: d.turnoId,
-        autoria,
-        kind: "sistema",
-        texto: redigir("decisao-vencida", agora, { quando: carimbo(agora), desfecho: DESFECHO_HUMANO[tipoDesfecho] ?? tipoDesfecho }),
-        confianca: "confiavel",
-      });
+      // definido em 2026-09-24 (emenda da ADR-044): o pedido de acesso de uma rotina que vence pausa a
+      // rotina, e a linha da pausa ("ninguém liberou o acesso ao Gmail em 24h") substitui a de vencimento.
+      const pedidoDaRotina = await vencerPedidoDaRotina(deps, d);
+      if (pedidoDaRotina.pausada) {
+        resultado.pausadas.push(pedidoDaRotina.pausada.id);
+      } else {
+        await repos.mensagens.criar({
+          conversaId: d.conversaId,
+          turnoId: d.turnoId,
+          autoria,
+          kind: "sistema",
+          texto: redigir("decisao-vencida", agora, { quando: carimbo(agora), desfecho: DESFECHO_HUMANO[tipoDesfecho] ?? tipoDesfecho }),
+          confianca: "confiavel",
+        });
+      }
       resultado.mensagens += 1;
-      const events = [evento(deps, "decisao_vencida", autoria, { decisaoId: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atrasoMs: agora - Date.parse(d.prazoDecisaoEm) }, { conversaId: d.conversaId, turnoId: d.turnoId })];
+      const events = [evento(deps, "decisao_vencida", autoria, { decisaoId: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atrasoMs: agora - Date.parse(d.prazoDecisaoEm) }, { conversaId: d.conversaId, turnoId: d.turnoId }), ...pedidoDaRotina.events];
       // Gate de rotina = gate_rotina OU aprovacao ligada a um turno de rotina (TIPOS_GATE_ROTINA); se o
       // turno não é de rotina, registrarDesfechoRotina devolve 'nao_e_rotina' e nada mais acontece.
       // definido em 2026-09-24 (fio da pergunta): a pergunta vencida também fecha a janela — a execução

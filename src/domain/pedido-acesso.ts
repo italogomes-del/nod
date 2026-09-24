@@ -56,6 +56,15 @@ function nomeDaRotina(instrucao: string): string {
 const acoes = (n: number): string => `${n} ${n === 1 ? "ação" : "ações"}`;
 
 /**
+ * O nome do app que a pessoa lê: o da curadoria do marketplace ganha do que ela deu no registro; sem
+ * nenhum, o slug. definido em 2026-09-24 (emenda da ADR-044): a mesma regra na frase do pedido, na linha
+ * da rotina pausada e no "falta acesso ao {App}" da lista de rotinas.
+ */
+export function nomeDoApp(slug: string, nomeConector?: string | null): string {
+  return APPS_MARKETPLACE.find((a) => a.slug === slug)?.nome ?? nomeConector ?? slug;
+}
+
+/**
  * A frase da decisão 'acesso' em português de gente (definido em 2026-09-24, ADR-044): o nome do app,
  * o verbo pelo que é pedido DE FATO (ler/alterar, lido do readOnlyHint do catálogo, nunca do nível
  * que o modelo declarou) e o que fica de fora. Sem nome de ferramenta: a lista técnica vai para o
@@ -73,7 +82,7 @@ export function fraseDoPedidoDeAcesso(entrada: {
   rotina?: string | null;
 }): string {
   const curado = APPS_MARKETPLACE.find((a) => a.slug === entrada.slug);
-  const app = curado?.nome ?? entrada.nomeConector ?? entrada.slug;
+  const app = nomeDoApp(entrada.slug, entrada.nomeConector);
   const porNome = new Map(entrada.catalogo.map((c) => [c.nome, c]));
   const leitura = entrada.capacidades.filter((c) => porNome.get(c)?.readOnlyHint === true).length;
   const escrita = entrada.capacidades.length - leitura;

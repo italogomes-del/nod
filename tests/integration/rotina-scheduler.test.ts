@@ -26,7 +26,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       const tx: Transacao = (fn) => fn(trx);
 
       const r1 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], puladas: [], falhas: [] });
+      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], puladas: [], bloqueadas: [], falhas: [] });
       const janelas = await repos.rotinaJanelas.listar(vencida?.id ?? "");
       expect(janelas).toHaveLength(1);
       expect(janelas[0]).toMatchObject({ instanteAgendado: JANELA, machineId: opcoes.machineId, executor: "catcher" });
@@ -38,7 +38,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(kinds.map((k) => k.kind)).toEqual(["turno_criado"]);
 
       const r2 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [], falhas: [] });
+      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
 
@@ -48,7 +48,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       await repos.rotinas.atualizarEstado(futura?.id ?? "", "pausada");
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA + 86_400_000);
       const pulada = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
-      expect(pulada).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [vencida?.id], falhas: [] });
+      expect(pulada).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [vencida?.id], bloqueadas: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
       expect(new Date((await repos.rotinas.buscar(vencida?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-21T11:00:00.000Z");
@@ -57,7 +57,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       await repos.turnos.assentar(janelas[0]?.turnoId ?? "", { estado: "concluido" });
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA);
       const r3 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], puladas: [], falhas: [] });
+      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], puladas: [], bloqueadas: [], falhas: [] });
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
     });
   });

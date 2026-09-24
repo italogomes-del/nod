@@ -1,7 +1,7 @@
 import type { Estado } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
-import { rotuloExecucao } from "../lib/execucao.ts";
+import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 
 /**
@@ -57,11 +57,15 @@ export function renderDetalhes(estado: Estado): string {
       .join("")}</ul>`;
   };
 
-  const linhaRotina = ({ rotina: r, proximaExecucao }: (typeof rotinas)[number]) => {
+  // definido em 2026-09-24 (emenda da ADR-044): a rotina parada por falta de acesso diz qual app falta e
+  // traz o mesmo botão de um clique do card, sem a pessoa procurar o card na conversa.
+  const linhaRotina = ({ rotina: r, proximaExecucao, bloqueio }: (typeof rotinas)[number]) => {
     const quando = r.estado === "pausada" ? "Pausada" : `${dataHora(proximaExecucao, r.fusoIana)} · ${interpolar(proximaExecucao, estado.agora)}`;
+    const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
     return `<li class="detalhe-rotina rotina-${esc(r.estado)}">
       <div class="dr-txt"><b>${esc(r.instrucao)}</b><small>${esc(quando)}</small></div>
       <div class="dr-acoes">${r.estado === "ativa" ? botao("pausar-rotina", "Pausar", { classe: "link sm", id: r.id }) : botao("ativar-rotina", "Ativar", { classe: "link sm", id: r.id })}${botao("executar-rotina", "Testar", { classe: "link sm", id: r.id, dados: { agente: r.agenteId }, desabilitado: estado.ocupado })}</div>
+      ${parada}
       ${historico(r)}
     </li>`;
   };

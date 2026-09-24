@@ -42,6 +42,8 @@ export type KindEvento =
   | "rotina_executou"
   /** O agente chamou `sem_novidade`: a rotina encerra em silêncio (nenhuma mensagem na conversa). */
   | "rotina_sem_novidade"
+  /** definido em 2026-09-24 (emenda da ADR-044): o pré-voo parou a janela sem turno (desfecho 'bloqueada'). */
+  | "rotina_bloqueada"
   | "sala_handoff"
   | "negacao"
   | "concessao_criada"

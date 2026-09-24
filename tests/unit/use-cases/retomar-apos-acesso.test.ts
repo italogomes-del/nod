@@ -81,7 +81,8 @@ describe("pedido que veio de uma rotina (ADR-044)", () => {
       { nome: "GMAIL_LIST_LABELS", descricao: "Lista rótulos", schema: { type: "object" }, readOnlyHint: true },
       { nome: "GMAIL_SEND_EMAIL", descricao: "Envia e-mail", schema: { type: "object" }, readOnlyHint: false },
     ];
-    const rotina = await deps.repos.rotinas.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: "E-mails às 8h, 13h e 18h", fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
+    // A fonte não cita o app: o turno roda e pede no meio (com "Gmail" o pré-voo pararia a janela antes).
+    const rotina = await deps.repos.rotinas.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: "E-mails às 8h, 13h e 18h", fonte: "a caixa de entrada", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
     if (!rotina) throw new Error("rotina");
     const disparo = await dispararRotina(deps, { rotina, instanteAgendado: JANELA, machineId: "m", executor: "catcher" });
     if (!("turno" in disparo.data)) throw new Error("sem turno");

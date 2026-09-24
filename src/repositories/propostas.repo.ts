@@ -1,4 +1,4 @@
-import type { EstadoProposta, KindProposta, PayloadProposta, Proposta } from "../contracts/conversa.ts";
+import type { EstadoProposta, KindProposta, PayloadProposta, PayloadPropostaAcesso, Proposta } from "../contracts/conversa.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
 
@@ -30,7 +30,18 @@ export type NovaProposta = { id?: string; conversaId: string; agenteId: string; 
 
 /** Proposta do modelo (ferramenta tipada): nada aplicado antes da confirmação (E1.1). kind vem do payload. */
 export function propostasRepo(conn: Conn, escopo: Escopo) {
+  /** O pedido de rotina pendente para (agente, app) — a linha do índice único da 0026, se houver. */
+  async function acessoDeRotinaAberto(agenteId: string, conector: string): Promise<Proposta | null> {
+    const [l] = await conn<Linha[]>`
+      select ${conn.unsafe(COLUNAS)} from propostas
+      where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and agente_id = ${agenteId} and payload->>'conector' = ${conector}
+        and kind = 'acesso' and estado = 'pendente' and payload ? 'rotinaId'`;
+    return l ? paraProposta(l) : null;
+  }
+
   return {
+    acessoDeRotinaAberto,
+
     async criar(p: NovaProposta): Promise<Proposta | null> {
       const [l] = await conn<Linha[]>`
         insert into propostas (tenant_id, id, owner_id, conversa_id, agente_id, kind, payload)
@@ -42,6 +53,33 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
     async buscar(id: string): Promise<Proposta | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? paraProposta(l) : null;
+    },
+
+    /**
+     * Pedido de acesso vindo de ROTINA (definido em 2026-09-24, emenda da ADR-044): UM pendente por
+     * (dona, agente, app), qualquer que seja a rotina — índice propostas_acesso_de_rotina_aberta (0026).
+     * INSERT ... ON CONFLICT DO NOTHING e, perdendo, devolve o que já estava: duas rotinas no mesmo tick,
+     * ou pedir_acesso contra o pré-voo, nunca viram 23505. Quem perde para uma tx ainda aberta espera o
+     * commit dela no índice e então lê a linha commitada. `criada` diz quem inseriu (só ele abre a decisão).
+     */
+    async criarAcessoDeRotina(p: { id?: string; conversaId: string; agenteId: string; payload: PayloadPropostaAcesso & { rotinaId: string } }): Promise<{ proposta: Proposta; criada: boolean } | null> {
+      const [l] = await conn<Linha[]>`
+        insert into propostas (tenant_id, id, owner_id, conversa_id, agente_id, kind, payload)
+        values (${escopo.tenantId}, ${p.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${p.conversaId}, ${p.agenteId}, 'acesso', ${conn.json(p.payload)})
+        on conflict (tenant_id, owner_id, agente_id, (payload->>'conector')) where kind = 'acesso' and estado = 'pendente' and payload ? 'rotinaId' do nothing
+        returning ${conn.unsafe(COLUNAS)}`;
+      if (l) return { proposta: paraProposta(l), criada: true };
+      const existente = await acessoDeRotinaAberto(p.agenteId, p.payload.conector);
+      return existente ? { proposta: existente, criada: false } : null;
+    },
+
+    /** Pedidos de acesso pendentes que ESTA rotina abriu (pelo pré-voo ou por pedir_acesso num turno dela). */
+    async pendentesDeAcessoDaRotina(rotinaId: string): Promise<Proposta[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from propostas
+        where tenant_id = ${escopo.tenantId} and kind = 'acesso' and estado = 'pendente' and payload->>'rotinaId' = ${rotinaId}
+        order by criado_em, id`;
+      return linhas.map(paraProposta);
     },
 
     async pendentesDaConversa(conversaId: string): Promise<Proposta[]> {
