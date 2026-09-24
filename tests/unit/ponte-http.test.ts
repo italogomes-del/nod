@@ -28,20 +28,24 @@ describe("desktop: fronteiras HTTP", () => {
     expect(() => sinais({ attempted: "true" })).toThrow();
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
   });
-  it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, e esvazia a fila", async () => {
+  it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, esvazia a fila e não mistura turnos", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
-    c.delta("Próximo "); c.delta("lote."); c.ferramenta("mcp__nod__gmail__search_threads"); c.delta("44 processados.");
+    c.delta("x", "Próximo "); c.delta("x", "lote."); c.ferramenta("x", "mcp__nod__gmail__search_threads"); c.delta("x", "44 processados.");
+    c.delta("outro", "de outro turno");
     const pedido = { turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, eventos: [] };
     await c.ponte.renovar(pedido);
     expect(JSON.parse(String(f.mock.calls[0]?.[1]?.body)).trechos).toEqual([{ texto: "Próximo lote." }, { ferramenta: "mcp__nod__gmail__search_threads" }, { texto: "44 processados." }]);
     await c.ponte.renovar(pedido);
     expect(JSON.parse(String(f.mock.calls[1]?.[1]?.body)).trechos).toEqual([]);
+    // Pool de laços: cada turno renova só o próprio texto.
+    await c.ponte.renovar({ ...pedido, turnoId: "outro" });
+    expect(JSON.parse(String(f.mock.calls[2]?.[1]?.body)).trechos).toEqual([{ texto: "de outro turno" }]);
   });
   it("fila acima de 16k de texto descarta o mais antigo", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
-    c.delta("a".repeat(10_000)); c.ferramenta("Bash"); c.delta("b".repeat(10_000));
+    c.delta("x", "a".repeat(10_000)); c.ferramenta("x", "Bash"); c.delta("x", "b".repeat(10_000));
     await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, eventos: [] });
     const enviados = JSON.parse(String(f.mock.calls[0]?.[1]?.body)).trechos as { texto?: string }[];
     expect(enviados.reduce((n, t) => n + (t.texto?.length ?? 0), 0)).toBe(16_000);

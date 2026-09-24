@@ -12,7 +12,13 @@ import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import { entrega, exigir, inventario, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 
-type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; plano: PlanoTurno | null; recebida?: { turnoId: string; seqLocal: number } };
+/**
+ * `planos`: os turnos que esta máquina está rodando AGORA (definido em 2026-09-24). Com o pool de laços
+ * o app roda um turno por agente em paralelo; antes era um `plano` só e a renovação do segundo turno
+ * voltava {ativo:false}, matando a CLI. `recebidas` guarda a última entrega de cada turno (idempotência).
+ */
+type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number> };
+const RECEBIDAS_GUARDADAS = 64;
 export function criarPonteHttpServidor(d: {
   criar(escopo: Escopo): PonteInternaNod;
   persistir(escopo: Escopo, inv: Inventario): Promise<void>;
@@ -53,12 +59,12 @@ export function criarPonteHttpServidor(d: {
       const id = ctx.params.chaveId!;
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, plano: null };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map() };
         conexoes.set(id, c);
       }
-      if (c.plano) {
+      if (c.planos.size > 0) {
         if (d.agora() - c.ultimo < 90_000) throw new ErroDeDominio("estado_invalido");
-        c.plano = null;
+        c.planos.clear();
       }
       c.inv = inventario(b.inventario, d.agora()); c.ultimo = d.agora();
       const motores: Partial<Record<IdHarness, Inventario>> = {};
@@ -72,44 +78,47 @@ export function criarPonteHttpServidor(d: {
     }),
     rota("puxar", async (ctx) => {
       const c = conexao(ctx);
-      if (c.puxando || c.plano) throw new ErroDeDominio("estado_invalido");
+      if (c.puxando) throw new ErroDeDominio("estado_invalido");
       c.puxando = true;
       try {
         const ate = d.agora() + (d.longpollMs ?? 20_000);
+        let plano: PlanoTurno | null = null;
         do {
           if (ctx.res.destroyed) return;
           const identidade = await d.autorizar((ctx.req.headers.authorization ?? "").slice(7));
           if (!identidade) { ctx.json(401, { codigo: "nao_permitido" }); return; }
           c.ultimo = d.agora();
-          if (c.inv.estado === "pronto") c.plano = await c.ponte.puxar(ctx.escopo.pessoaId);
-          if (c.plano) break;
+          if (c.inv.estado === "pronto") plano = await c.ponte.puxar(ctx.escopo.pessoaId);
+          if (plano) { c.planos.set(plano.turnoId, plano); break; }
           await esperar(250);
         } while (d.agora() < ate);
-        ctx.json(200, { plano: c.plano });
+        ctx.json(200, { plano });
       } finally { c.puxando = false; }
     }),
     rota("renovar", async (ctx, b) => {
       const c = conexao(ctx), turnoId = uuid(b.turnoId);
       exigir(b.eventos === undefined || (Array.isArray(b.eventos) && b.eventos.length === 0));
       const s = sinais(b.sinais);
-      if (c.plano?.turnoId !== turnoId) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP }); return; }
+      const plano = c.planos.get(turnoId);
+      if (!plano) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP }); return; }
       c.ultimo = d.agora();
       const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [] });
-      if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(c.plano, b.delta);
+      if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(plano, b.delta);
       if (r.ativo) for (const t of trechos(b.trechos)) {
-        if ("ferramenta" in t) d.ferramenta(c.plano, t.ferramenta);
-        else if (t.texto) d.delta(c.plano, t.texto);
+        if ("ferramenta" in t) d.ferramenta(plano, t.ferramenta);
+        else if (t.texto) d.delta(plano, t.texto);
       }
       ctx.json(200, r);
     }),
     rota("entregar", async (ctx, b) => {
       const c = conexao(ctx), e = entrega(b, ctx.params.chaveId!);
-      if (c.recebida?.turnoId === e.turnoId && c.recebida.seqLocal === e.seqLocal) { ctx.json(200, { ok: true }); return; }
-      if (c.plano?.turnoId !== e.turnoId) throw new ErroDeDominio("nao_permitido");
+      if (c.recebidas.get(e.turnoId) === e.seqLocal) { ctx.json(200, { ok: true }); return; }
+      if (!c.planos.has(e.turnoId)) throw new ErroDeDominio("nao_permitido");
       c.ultimo = d.agora();
       await c.ponte.entregar(e);
-      c.recebida = { turnoId: e.turnoId, seqLocal: e.seqLocal };
-      c.plano = null;
+      c.recebidas.set(e.turnoId, e.seqLocal);
+      if (c.recebidas.size > RECEBIDAS_GUARDADAS) c.recebidas.delete(c.recebidas.keys().next().value!);
+      c.planos.delete(e.turnoId);
       ctx.json(200, { ok: true });
     }),
     rota("desconectar", async (ctx) => {

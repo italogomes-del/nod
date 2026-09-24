@@ -5,7 +5,8 @@ import { hostname } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
-import { iniciarLaco, type Laco } from "../src/adapters/executor/laco.ts";
+import { iniciarLaco } from "../src/adapters/executor/laco.ts";
+import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
@@ -17,7 +18,7 @@ const setup = join(dir, "setup.html");
 const setupUrl = pathToFileURL(setup).href;
 let janela: BrowserWindow | null = null;
 let configuracao: Config | null = null;
-let laco: Laco | null = null;
+let laco: PoolDeLacos | null = null;
 let registry: Registry | null = null;
 let cliente: ReturnType<typeof criarPonteHttp> | null = null;
 let mensagem = "";
@@ -105,7 +106,8 @@ async function conectar(c: Config) {
     mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta do Claude Code ou Codex e conecte novamente." : "Instale o Claude Code ou Codex neste Mac e conecte novamente.";
     throw new Error("harness_indisponivel");
   }
-  laco = iniciarLaco({ ponte: cliente.ponte, registry, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (_p, t) => cliente?.delta(t), aoEvento: (_p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(ev.nome); } });
+  const reg = registry;
+  laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); } }), cliente.ponte);
   const anterior = janela;
   const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", webPreferences: { partition: "nod-web", nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova, c.url);
