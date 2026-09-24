@@ -408,3 +408,50 @@ body { background: #fcfdff; }
 .fila-chip .bt.link.perigo { color: var(--red); }
 .fila-relogio { width: 12px; height: 12px; border: 1.4px solid var(--ink-3); border-radius: 50%; position: relative; flex: none; }
 .fila-relogio::after { content: ""; position: absolute; left: 4.5px; top: 2px; width: 3.5px; height: 3.5px; border-left: 1.4px solid var(--ink-3); border-bottom: 1.4px solid var(--ink-3); }
+
+/* Perguntas viram conversa (emenda da ADR-045, 2026-09-24): a pergunta é a fala do agente num balão azul
+   claro — o azul de STATUS, não o âmbar das decisões —, e o campo embaixo responde. */
+.message.pergunta .bubble { background: var(--blue-soft); border: 1px solid #cfe0f5; color: #1f2f4a; }
+.message.pergunta.pergunta-citada .bubble { border-color: #9dbbe6; }
+.message.pergunta.realce .bubble { box-shadow: 0 0 0 3px rgba(31, 103, 198, .18); transition: box-shadow .2s ease; }
+.pergunta-estado { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; margin: 6px 4px 0; font-size: 12px; color: var(--ink-3); }
+.pergunta-estado.respondida { color: var(--ok); }
+.pergunta-estado .bt.link { font-size: 12px; padding: 0 2px; }
+.pergunta-opcoes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.bt.opcao { border: 1px solid #cfe0f5; border-radius: 99px; background: var(--panel); color: var(--blue); padding: 5px 12px; font-size: 12.5px; white-space: normal; text-align: left; }
+.bt.opcao:hover, .bt.opcao:focus-visible { background: var(--blue-soft); border-color: #9dbbe6; }
+.pergunta-ou { margin: 6px 4px 0; font-size: 11.5px; color: var(--ink-3); }
+.message.respondendo:has(+ .msg-retomou) { margin-bottom: 8px; }
+.resposta-a { margin: 0 4px 4px; font-size: 11.5px; color: var(--ink-3); text-align: right; }
+.msg-retomou { margin-bottom: 25px; }
+
+/* Acima do campo, só com pergunta aberta: a faixa (quem espera, há quanto, até quando), os dois modos e,
+   com duas ou mais, a citação da que está sendo respondida. */
+.composer-pergunta:empty { display: none; }
+.faixa-pergunta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 8px; padding: 8px 12px;
+  border: 1px solid #cfe0f5; border-radius: 12px; background: var(--blue-soft); color: #274b78; font-size: 12.5px; line-height: 1.4; }
+.faixa-pergunta .fp-ic { display: inline-flex; color: var(--blue); }
+.faixa-pergunta .fp-txt { flex: 1; min-width: 0; }
+.faixa-pergunta .fp-txt b { font-weight: 600; }
+.faixa-pergunta .fp-acoes { display: flex; gap: 2px; }
+.faixa-pergunta .bt.link { color: var(--blue); font-size: 12px; padding: 2px 6px; }
+.composer-modo { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
+.modo-envio { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line-2); border-radius: 99px; background: var(--panel); }
+.modo-envio .seg { padding: 3px 11px; border-radius: 99px; font-size: 11.5px; color: var(--ink-3); cursor: pointer; }
+.modo-envio .seg:hover { color: var(--ink-2); }
+.modo-envio .seg[aria-pressed="true"] { background: var(--blue-soft); color: var(--blue); font-weight: 500; }
+.citacao-pergunta { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 3px 4px 3px 10px;
+  border-left: 3px solid var(--blue); border-radius: 6px; background: #f5f8fe; font-size: 12px; color: var(--ink-2); }
+.citacao-pergunta .cp-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.citacao-pergunta .cp-txt b { font-weight: 600; }
+.citacao-pergunta .bt.cp-fechar { border: 0; background: none; padding: 0 6px; color: var(--ink-3); font-size: 14px; line-height: 1; }
+.citacao-pergunta .bt.cp-fechar:hover { color: var(--ink); }
+.composer.modo-resposta .box { border-color: #9dbbe6; box-shadow: 0 0 0 3px rgba(31, 103, 198, .08); }
+.composer .clipe:disabled { opacity: .4; cursor: not-allowed; }
+.composer .clipe:disabled:hover { background: transparent; color: #41495c; }
+
+/* Barra lateral: o balão azul conta perguntas, separado do ⚑ âmbar das decisões. */
+.ch-badge.ch-pergunta { gap: 3px; background: var(--blue-soft); color: var(--blue); }
+.ch-badge .ic-balao { display: block; }
+.sub-esperando { color: var(--blue) !important; }
+@media (prefers-reduced-motion: reduce) { .message.pergunta.realce .bubble { transition: none; } }

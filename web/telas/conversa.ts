@@ -13,6 +13,7 @@ import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
+import { linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta } from "./pergunta.ts";
 import { detalheAcesso, idsGemeas, marcaGemeas, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
@@ -140,11 +141,16 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
     ? ""
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
+  // definido em 2026-09-24 (emenda da ADR-045): a pergunta de pedir_a_pessoa é esta fala, desenhada como
+  // pergunta; a mensagem que a respondeu leva o rótulo, e a retomada vira uma linha logo depois.
+  const pergunta = !ehPessoa && m.payload?.kind === "pedido_a_pessoa" ? m.payload : null;
+  const resposta = ehPessoa && m.payload?.kind === "resposta_a_pedido" ? m.payload : null;
   const fila = situacaoNaFila(m, estado);
-  const classeFila = fila ? ` fila-${fila.tipo}` : "";
-  return `<article class="message ${ehPessoa ? "you" : "bot"}${classeFila}" data-mensagem="${esc(m.id)}">
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div>`}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}</div>
-  </article>`;
+  // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
+  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
+  return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div>`}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}</div>
+  </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
 function renderProposta(p: Proposta, estado: Estado): string {
@@ -393,16 +399,22 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * Composer criado UMA vez por conversa (main.ts não o regrava): textarea + enviar. Com `anexos`
  * (ADR-045, só conversa própria) ganha o clipe, a fila de arquivos e o input escondido; a fila é
  * preenchida por web/lib/anexos.ts direto no DOM, porque o composer não se regrava.
+ *
+ * definido em 2026-09-24 (emenda da ADR-045): `composer-pergunta` recebe a faixa, os modos e a citação
+ * quando há pergunta aberta (web/telas/pergunta.ts), e `data-padrao` / `data-titulo` guardam a dica e
+ * a dica do clipe de sempre, para o main voltar a elas quando o campo sai do modo resposta.
  */
 export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
   const aceita = opcoes.anexos;
   const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
+  const tituloClipe = aceita === "sem_pdf" ? "Este agente roda no Codex: lê imagens e texto, não PDF" : "";
   const anexar = aceita
-    ? `<div class="anexos-fila" id="composer-anexos" hidden></div><button type="button" class="clipe" data-act="anexar" aria-label="Anexar arquivo"${aceita === "sem_pdf" ? ' title="Este agente roda no Codex: lê imagens e texto, não PDF"' : ""}>${CLIPE}</button><input type="file" id="composer-arquivos" multiple accept="${accept}" hidden data-aceita="${aceita}" />`
+    ? `<div class="anexos-fila" id="composer-anexos" hidden></div><button type="button" class="clipe" data-act="anexar" aria-label="Anexar arquivo"${tituloClipe ? ` title="${esc(tituloClipe)}" data-titulo="${esc(tituloClipe)}"` : ""}>${CLIPE}</button><input type="file" id="composer-arquivos" multiple accept="${accept}" hidden data-aceita="${aceita}" />`
     : "";
   const resumo = aceita ? `<span class="anexos-resumo" id="composer-resumo"></span>` : "";
   const dica = aceita ? " · arraste ou cole imagens e PDFs" : sugestoes.length ? " · @ menciona um bot" : "";
-  return `<div class="composer"><div class="box${aceita ? " com-anexos" : ""}">${lista}${anexar}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
-  <p class="nota">Enter envia · Shift+Enter quebra linha${dica}</p></div>`;
+  const nota = `Enter envia · Shift+Enter quebra linha${dica}`;
+  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div><div class="box${aceita ? " com-anexos" : ""}">${lista}${anexar}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  <p class="nota" id="composer-nota" data-padrao="${esc(nota)}">${esc(nota)}</p></div>`;
 }

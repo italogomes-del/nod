@@ -2,6 +2,7 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
+import { ehPergunta, iconeBalao } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 
@@ -211,7 +212,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores"]): string {
+function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores"], daMinhaConversa: boolean): string {
   const d = item.decisao;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
   switch (d.tipo) {
@@ -233,10 +234,15 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
+    // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde NA CONVERSA, no campo de sempre —
+    // sem uma segunda caixa de texto aqui. O botão abre a conversa com o campo já respondendo a ela.
+    // Exceção: a decisora designada (quem_destrava, EMENDA 1) não lê a conversa de outra pessoa (RLS
+    // de conversas e mensagens), então para ela a resposta, em texto, continua aqui.
     case "pergunta":
     case "falta_de_dado":
     case "permissao":
-      return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="${esc(d.tipo === "falta_de_dado" ? "o dado que faltava" : "sua resposta em texto")}" />${botao("responder", "Responder e retomar", { classe: "pri", id: d.id })}</div>`;
+      if (!daMinhaConversa) return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="${esc(`Responda à ${item.agenteNome}…`)}" aria-label="Sua resposta" />${botao("responder", "Responder", { classe: "pri", id: d.id })}</div>`;
+      return `<div class="acoes">${botao("responder-na-conversa", "Responder na conversa", { classe: "pri", id: d.id, dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>`;
   }
 }
 
@@ -259,14 +265,19 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const aberta = item.estadoColuna !== "vencido";
   const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs))}` : rotuloVencido(d, estado.agora);
   // O "Retomar" aberto já tem "Dispensar" nas ações: o × repetiria o mesmo gesto no mesmo card.
-  const fechar = dispensavel(item) && !(aberta && d.tipo === "retomar_turno") ? botao("dispensar", "×", { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" }) : "";
-  const conversa = estado.frota?.agentes.find((a) => a.id === d.agenteId);
+  const pergunta = aberta && ehPergunta(d.tipo);
+  const daMinhaConversa = d.ownerId === estado.sessao?.pessoaId;
+  const fechar = dispensavel(item) && !(aberta && d.tipo === "retomar_turno")
+    ? botao("dispensar", "×", pergunta ? { classe: "dec-fechar", id: d.id, titulo: "Deixar pra lá: fecha sem responder", aria: "Deixar esta pergunta pra lá" } : { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" })
+    : "";
+  // A pergunta aberta já abre a conversa pelo "Responder na conversa": "abrir conversa" repetiria o gesto.
+  const conversa = pergunta && daMinhaConversa ? undefined : estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
     <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span>${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
     <div class="dec-frase">${esc(d.frase)}</div>
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
-    ${renderAcoes(item, aberta, estado.conectores)}
+    ${renderAcoes(item, aberta, estado.conectores, daMinhaConversa)}
     ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}
   </li>`;
 }
@@ -277,22 +288,48 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
  * (`renderDecisoesDaConversa`), então o que falta é LEMBRAR onde há decisão parada. Vencida não conta:
  * ela não pede ação, e um badge que nunca zera deixa de ser sinal. Conta GRUPOS (definido em
  * 2026-09-24): o servidor já dobra os pedidos iguais num item "×N" (montarFila), e aviso de queda
- * (`incidentes`) não é decisão.
+ * (`incidentes`) não é decisão. Pergunta também não entra aqui (emenda da ADR-045): ela tem o selo
+ * próprio, `perguntasPorAgente`.
  */
 export function abertasPorAgente(estado: Estado): Map<string, number> {
+  return contarAbertas(estado, (tipo) => !ehPergunta(tipo));
+}
+
+/**
+ * Perguntas abertas por agente (definido em 2026-09-24, emenda da ADR-045): o selo azul de balão na
+ * barra lateral e o subtítulo "esperando sua resposta" — separados do ⚑ âmbar, porque pergunta se
+ * responde conversando e decisão se decide num botão.
+ */
+export function perguntasPorAgente(estado: Estado): Map<string, number> {
+  return contarAbertas(estado, ehPergunta);
+}
+
+function contarAbertas(estado: Estado, conta: (tipo: TipoDecisao) => boolean): Map<string, number> {
   const por = new Map<string, number>();
   for (const item of estado.suaVez?.itens ?? []) {
-    if (item.estadoColuna === "vencido") continue;
+    if (item.estadoColuna === "vencido" || !conta(item.decisao.tipo)) continue;
     por.set(item.decisao.agenteId, (por.get(item.decisao.agenteId) ?? 0) + 1);
   }
   return por;
 }
 
+/** Os selos da linha do agente na barra lateral: ⚑ âmbar para decisões, balão azul (com a contagem) para perguntas. */
+export function selosDoAgente(decisoes: number, perguntas: number): string {
+  const flag = decisoes ? `<span class="ch-badge" title="${decisoes === 1 ? "uma decisão esperando você" : `${decisoes} decisões esperando você`}">⚑${decisoes > 1 ? decisoes : ""}</span>` : "";
+  const dica = perguntas === 1 ? "uma pergunta esperando sua resposta" : `${perguntas} perguntas esperando sua resposta`;
+  const balao = perguntas ? `<span class="ch-badge ch-pergunta" title="${dica}">${iconeBalao(11)}${perguntas}</span>` : "";
+  return flag + balao;
+}
+
+/** O subtítulo do agente que perguntou, no lugar do título (definido em 2026-09-24, emenda da ADR-045). */
+export const SUBTITULO_ESPERANDO = '<span class="sub-esperando">esperando sua resposta</span>';
+
 /**
  * Faixa de chamada no topo da sidebar: some quando não há nada aberto, nomeia UM agente quando é um
  * só (o nome é o que faz voltar para a conversa) e conta quando são vários — grupos, como o ⚑: um
  * "×3" é uma decisão a tomar. Clicar leva à conversa do mais antigo — `itens` já vem ordenado pelo
- * servidor (ADR-007), então o primeiro aberto é ele.
+ * servidor (ADR-007), então o primeiro aberto é ele. definido em 2026-09-24 (emenda da ADR-045): conta
+ * "pedidos" — decisões e perguntas —, porque as duas esperam pela pessoa.
  */
 export function renderChamada(estado: Estado): string {
   const abertos = (estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido");
@@ -302,10 +339,10 @@ export function renderChamada(estado: Estado): string {
   const texto =
     abertos.length === 1
       ? `<b>${esc(primeiro.agenteNome)}</b> precisa de você`
-      : `<b>${abertos.length} decisões</b> esperando por você`;
-  return `<button class="chamada" data-act="abrir-conversa" data-conversa="${esc(d.conversaId)}" data-agente="${esc(d.agenteId)}" aria-label="Abrir a decisão mais antiga, com ${esc(primeiro.agenteNome)}">
+      : `<b>${abertos.length} pedidos</b> esperando por você`;
+  return `<button class="chamada" data-act="abrir-conversa" data-conversa="${esc(d.conversaId)}" data-agente="${esc(d.agenteId)}" aria-label="Abrir o pedido mais antigo, com ${esc(primeiro.agenteNome)}">
     <span class="ch-ic" aria-hidden="true">⚑</span><span class="ch-txt">${texto}</span><span class="ch-seta" aria-hidden="true">→</span>
-  </button>${abertos.length > 1 ? `<button class="chamada-todas" data-act="navegar" data-tela="sua-vez">ver todas</button>` : ""}`;
+  </button>${abertos.length > 1 ? `<button class="chamada-todas" data-act="navegar" data-tela="sua-vez">ver todos</button>` : ""}`;
 }
 
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
@@ -352,10 +389,12 @@ function renderVencidos(vencidos: readonly Item[], estado: Estado, naConversa: b
 /**
  * Pedidos desta conversa, onde a pessoa decide sem sair do chat. Os pedidos iguais já vêm dobrados pelo
  * servidor num item "×N" (definido em 2026-09-24; antes a web só escondia as gêmeas de acesso e o ⚑
- * continuava contando cada uma); os vencidos ficam recolhidos no fim.
+ * continuava contando cada uma); os vencidos ficam recolhidos no fim. Pergunta não vira card aqui
+ * (emenda da ADR-045): ela É a fala do agente na conversa, e o balão mostra onde está — aberta,
+ * respondida ou vencida com o seu Reabrir (web/telas/pergunta.ts).
  */
 export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): string {
-  const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? [];
+  const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id) && !ehPergunta(item.decisao.tipo)) ?? [];
   if (!itens.length) return "";
   const abertos = itens.filter((item) => item.estadoColuna !== "vencido");
   const pedindo = abertos.length ? `<h2>Preciso da sua decisão para continuar</h2><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${abertos.map((item) => renderItem(item, estado, true)).join("")}</ul>` : "";

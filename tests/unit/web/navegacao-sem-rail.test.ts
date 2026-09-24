@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
-import { abertasPorAgente, renderChamada } from "../../../web/telas/sua-vez.ts";
+import { abertasPorAgente, perguntasPorAgente, renderChamada, selosDoAgente, SUBTITULO_ESPERANDO } from "../../../web/telas/sua-vez.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 
 /**
@@ -35,10 +35,37 @@ describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
     const estado = comFila([decisao("d1", "a1", "Vera", false, ["d1b", "d1c"]), decisao("d2", "a2", "Tuca")], [queda]);
     expect(abertasPorAgente(estado).get("a1")).toBe(1);
     expect(abertasPorAgente(estado).get("a2")).toBe(1);
-    expect(renderChamada(estado)).toContain("<b>2 decisões</b> esperando por você");
+    expect(renderChamada(estado)).toContain("<b>2 pedidos</b> esperando por você");
     const umSo = comFila([decisao("d1", "a1", "Vera", false, ["d1b", "d1c"])], [queda]);
     expect(renderChamada(umSo)).toContain("precisa de você");
-    expect(renderChamada(umSo)).not.toContain("decisões");
+    expect(renderChamada(umSo)).not.toContain("pedidos");
+  });
+
+  it("pergunta aberta conta como PEDIDO na faixa, mas tem selo azul de balão próprio, separado do ⚑ (emenda da ADR-045)", () => {
+    const pergunta = (id: string, agenteId: string, nome: string, vencido = false): SuaVezDto["itens"][number] => {
+      const d = decisao(id, agenteId, nome, vencido);
+      return { ...d, decisao: { ...d.decisao, tipo: "pergunta" } };
+    };
+    const estado = comFila([decisao("d1", "a1", "Vera"), pergunta("p1", "a1", "Vera"), pergunta("p2", "a1", "Vera"), pergunta("p3", "a2", "Tuca"), pergunta("p4", "a3", "Nina", true)]);
+    // ⚑ só decisão; balão só pergunta; vencida não conta em nenhum.
+    expect(abertasPorAgente(estado).get("a1")).toBe(1);
+    expect(abertasPorAgente(estado).get("a2")).toBeUndefined();
+    expect(perguntasPorAgente(estado).get("a1")).toBe(2);
+    expect(perguntasPorAgente(estado).get("a2")).toBe(1);
+    expect(perguntasPorAgente(estado).get("a3")).toBeUndefined();
+    // A faixa do topo conta decisões E perguntas: as duas esperam pela pessoa.
+    expect(renderChamada(estado)).toContain("<b>4 pedidos</b> esperando por você");
+
+    const selos = selosDoAgente(1, 2);
+    expect(selos).toContain('<span class="ch-badge" title="uma decisão esperando você">⚑</span>');
+    expect(selos).toContain('class="ch-badge ch-pergunta" title="2 perguntas esperando sua resposta"');
+    expect(selos).toContain("</svg>2</span>");
+    const soPergunta = selosDoAgente(0, 1);
+    expect(soPergunta).not.toContain("⚑");
+    expect(soPergunta).toContain("uma pergunta esperando sua resposta");
+    expect(soPergunta).toContain("</svg>1</span>");
+    expect(selosDoAgente(0, 0)).toBe("");
+    expect(SUBTITULO_ESPERANDO).toBe('<span class="sub-esperando">esperando sua resposta</span>');
   });
 
   it("a faixa nomeia o agente quando é uma só e leva à conversa dela", () => {
@@ -53,9 +80,9 @@ describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
 
   it("com várias, conta e oferece a fila completa, abrindo a mais antiga", () => {
     const html = renderChamada(comFila([decisao("d1", "a1", "Vera"), decisao("d2", "a2", "Tuca")]));
-    expect(html).toContain("2 decisões");
+    expect(html).toContain("2 pedidos");
     expect(html).toContain('data-conversa="c-a1"');
-    expect(html).toContain("ver todas");
+    expect(html).toContain("ver todos");
     expect(html).toContain('data-tela="sua-vez"');
   });
 

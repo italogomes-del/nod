@@ -14,6 +14,7 @@ import type { FaixaParada } from "../../src/contracts/turno.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { comFerramenta, comTexto, type AtividadeTurno } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
+import { conversasComPergunta } from "../lib/perguntas.ts";
 
 /**
  * Estado da web (ADR-020: a web decide, nunca executa; ADR-029: todo fail-closed vira estado
@@ -49,6 +50,14 @@ export type ConversaEstado = ConversaDto & {
 };
 
 export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: number };
+
+/**
+ * definido em 2026-09-24 (emenda da ADR-045): o que a PRÓXIMA mensagem do campo faz enquanto há
+ * pergunta aberta na conversa. Sem entrada, responde à mais antiga (web/lib/perguntas.ts);
+ * `outroAssunto` manda mensagem comum e deixa a pergunta aberta; `alvoId` escolhe qual pergunta
+ * responder quando são várias. Vale até o próximo envio, e some quando a conversa fica sem pergunta.
+ */
+export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
 export type Invalidacao = "gestao" | "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
 
@@ -86,6 +95,8 @@ export type Estado = {
   chaveEmitida: ChaveEmitidaDto | null;
   negacoes: NegacaoVista[];
   faixaParada: FaixaParada | null;
+  /** Escolha do campo por conversa (EscolhaComposer); ausente = o padrão. */
+  composer: Record<string, EscolhaComposer>;
   conexao: { estado: EstadoConexao; tentativa: number; proximaEmMs: number | null };
   /** O que a próxima volta do main precisa buscar por REST (conjunto, sem duplicata). */
   invalidacoes: Invalidacao[];
@@ -120,6 +131,7 @@ export type Acao =
   | { tipo: "hidratar-relatos"; relatos: Relato[] }
   | { tipo: "chave-emitida"; emitida: ChaveEmitidaDto | null }
   | { tipo: "faixa"; faixa: FaixaParada | null }
+  | { tipo: "composer"; conversaId: string; escolha: EscolhaComposer | null }
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
   | { tipo: "erro"; erro: { codigo: string; mensagem: string; correlationId?: string | null } | null }
@@ -150,6 +162,7 @@ export const estadoInicial: Estado = {
   chaveEmitida: null,
   negacoes: [],
   faixaParada: null,
+  composer: {},
   conexao: { estado: "parado", tentativa: 0, proximaEmMs: null },
   invalidacoes: [],
   agora: 0,
@@ -331,8 +344,13 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       for (const [turnoId, t] of Object.entries(anterior?.atividades ?? {})) if (vivosDaConversa.has(turnoId)) atividades[turnoId] = t;
       return { ...estado, turnosVivos, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
     }
-    case "hidratar-sua-vez":
-      return { ...estado, suaVez: acao.suaVez };
+    case "hidratar-sua-vez": {
+      // A escolha do campo só vale enquanto a conversa tem pergunta aberta: respondida ou deixada pra lá
+      // (aqui ou noutra aba), um "Outro assunto" antigo não pode decidir pela pergunta seguinte.
+      const comPergunta = conversasComPergunta(acao.suaVez);
+      const composer = Object.fromEntries(Object.entries(estado.composer).filter(([conversaId]) => comPergunta.has(conversaId)));
+      return { ...estado, suaVez: acao.suaVez, composer };
+    }
     case "hidratar-rotinas":
       return { ...estado, rotinas: acao.rotinas };
     case "hidratar-execucoes":
@@ -357,6 +375,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return acao.emitida ? invalidar({ ...estado, chaveEmitida: acao.emitida }, "chaves") : { ...estado, chaveEmitida: null };
     case "faixa":
       return { ...estado, faixaParada: acao.faixa };
+    case "composer": {
+      const composer = { ...estado.composer };
+      if (acao.escolha) composer[acao.conversaId] = acao.escolha;
+      else delete composer[acao.conversaId];
+      return { ...estado, composer };
+    }
     case "invalidar":
       return invalidar(estado, ...acao.quais);
     case "invalidacoes-tratadas":

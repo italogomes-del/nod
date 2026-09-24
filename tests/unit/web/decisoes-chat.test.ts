@@ -225,19 +225,22 @@ describe("decisões no chat", () => {
   });
 
   it("× só onde dispensar vale: vencida sempre, aberta só se responde com texto; 'Limpar vencidos' a partir de duas", () => {
-    const vencida = (id: string): typeof item => ({ ...item, estadoColuna: "vencido", decisao: { ...item.decisao, id, estado: "vencida", tipo: "falta_de_dado" } });
+    const vencida = (id: string): typeof item => ({ ...item, estadoColuna: "vencido", decisao: { ...item.decisao, id, estado: "vencida", tipo: "retomar_turno" } });
     const falta: typeof item = { ...item, decisao: { ...item.decisao, id: "f", tipo: "falta_de_dado" } };
     const com = (itens: (typeof item)[]): Estado => ({ ...estado, suaVez: { ...estado.suaVez!, itens } });
 
     const aberta = renderDecisoesDaConversa(com([item]), "c", new Set());
     expect(aberta).not.toContain('data-act="dispensar"');
-    expect(renderDecisoesDaConversa(com([falta]), "c", new Set())).toContain('data-act="dispensar" data-id="f"');
+    // Emenda da ADR-045: a pergunta aberta não é card na conversa (lá ela sai pelo "Deixar pra lá" da
+    // faixa); em "Sua vez" continua com o seu ×.
+    expect(renderDecisoesDaConversa(com([falta]), "c", new Set())).toBe("");
+    expect(renderSuaVez(com([falta]))).toContain('data-act="dispensar" data-id="f"');
 
     const uma = renderDecisoesDaConversa(com([vencida("v1")]), "c", new Set());
     expect(uma).toContain('data-act="dispensar" data-id="v1"');
     expect(uma).not.toContain("Limpar vencidos");
 
-    const duas = renderDecisoesDaConversa(com([falta, vencida("v1"), vencida("v2")]), "c", new Set());
+    const duas = renderDecisoesDaConversa(com([item, vencida("v1"), vencida("v2")]), "c", new Set());
     expect(duas).toContain("Limpar vencidos (2)");
     expect(duas).toContain('data-ids="v1,v2"');
   });
@@ -263,7 +266,8 @@ const dentroDosVencidos = (html: string): string => html.slice(html.indexOf('<de
  */
 describe("fila honesta: vencidos recolhidos, ×N, prazo por tipo e rótulos em palavras", () => {
   it("15 vencidos viram UM <details> '15 pedidos vencidos · ver' com os 15 Reabrir lá dentro; os abertos ficam à vista, antes", () => {
-    const abertos = ["a1", "a2", "a3", "a4", "a5"].map((id) => aberto(id, "pergunta"));
+    // Acesso, não pergunta: pergunta não vira card na conversa desde a emenda da ADR-045.
+    const abertos = ["a1", "a2", "a3", "a4", "a5"].map((id) => aberto(id, "acesso"));
     const vencidos = Array.from({ length: 15 }, (_, i) => vencido(`v${i}`));
     const html = renderDecisoesDaConversa(comItens([...abertos, ...vencidos]), "c", new Set());
     expect(html.match(/<details/g)).toHaveLength(1);

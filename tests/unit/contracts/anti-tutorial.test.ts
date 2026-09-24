@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import { FERRAMENTAS_WORKSPACE } from "../../../src/contracts/ferramentas-workspace.ts";
 import { montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
@@ -41,6 +42,15 @@ function verificar(texto: string, origem: string) {
 it("as descrições das ferramentas de workspace não mandam a pessoa configurar", () => {
   for (const [nome, schema] of Object.entries(FERRAMENTAS_WORKSPACE)) {
     verificar((schema as { description: string }).description, `descrição de ${nome}`);
+  }
+});
+
+// definido em 2026-09-24 (emenda da ADR-045): a pergunta virou a fala do agente na conversa; a descrição
+// que a pede é copy que chega ao modelo e passa pela mesma guarda.
+it("a descrição de pedir_a_pessoa pede fala natural, não tutorial", () => {
+  verificar(FERRAMENTAS_NOD.pedir_a_pessoa.description, "descrição de pedir_a_pessoa");
+  for (const [campo, schema] of Object.entries(FERRAMENTAS_NOD.pedir_a_pessoa.properties)) {
+    verificar((schema as { description?: string }).description ?? "", `descrição de pedir_a_pessoa.${campo}`);
   }
 });
 
