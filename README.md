@@ -86,6 +86,7 @@ Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (conf
 - **Cadastro autônomo**: o login Google usa allowlist previamente cadastrada (ADR-030). Para desenvolvimento local, `NOD_LOGIN=stub` usa cookie assinado e recusa `NOD_HOST` fora de 127.0.0.1.
 - **Execução de rotina "em curso"**: `DesfechoRotina` não tem `pendente` — `rotina_execucoes` só ganha linha ao assentar; o "em curso" é a janela com `turno_id` (EMENDA-L9 §5, registrado).
 - **Executor de servidor**: `custo_servidor_mes` é 0 por construção; `gastosRepo.somarMes(agora, executor)` já filtra para o dia em que existir.
+- **GitHub pelo gh no modo compartilhado** (ADR-047): o conector `github` roda no processo do servidor, então no `NOD_MODO=compartilhado` o jeito gh nunca é usado (App da organização → Composio → token). Rodar o conector no Mac pediria um verbo novo na ponte. A tela do GitHub App só cadastra: não mostra se o tenant já tem App, e só quem cadastrou troca.
 - Deliberadamente fora (lista NÃO CONSTRUIR dos ADRs): policy só por tenant, store JSON, cache de catálogo, endpoint síncrono de decisão, heartbeat, requeue automático, regex de intenção, DELETE em teste fora de concurrency, seed no CI, SDK MCP, workspaces.
 
 ## Desvios registrados
