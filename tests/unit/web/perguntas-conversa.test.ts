@@ -6,7 +6,7 @@ import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../
 import { destinoDoEnvio, enviarPeloComposer, inicioDaPergunta, modoDoComposer, MOTIVO_SEM_ANEXO, type ApiDeEnvio } from "../../../web/lib/perguntas.ts";
 import { hora } from "../../../web/lib/render.ts";
 import { htmlComposer, renderTimeline } from "../../../web/telas/conversa.ts";
-import { aparenciaDoComposer, renderTopoComposer } from "../../../web/telas/pergunta.ts";
+import { aparenciaDoComposer, renderTopoComposer, TRECHO_FAIXA_MAX } from "../../../web/telas/pergunta.ts";
 import { renderDecisoesDaConversa, renderSuaVez } from "../../../web/telas/sua-vez.ts";
 
 /**
@@ -145,6 +145,28 @@ describe("a faixa e o campo em modo resposta", () => {
     // Sem pergunta aberta, nada acima do campo.
     const nada = cenario([], []);
     expect(renderTopoComposer(modoDoComposer(nada, "c"), nada)).toBe("");
+  });
+
+  it("a faixa diz O QUE a pergunta pergunta: o início do balão, ou a frase da fila sem o molde quando não há balão ligado", () => {
+    const e = umaAberta();
+    const topo = renderTopoComposer(modoDoComposer(e, "c"), e);
+    expect(topo).toContain(`class="fp-pergunta" title="${PERGUNTA}">“${PERGUNTA}”`);
+    // Pergunta longa: cortada na palavra, com reticências; o title guarda o texto inteiro.
+    const longa = "O backlog de não lidos ainda tem 200+ e-mails, e minhas ferramentas só aplicam label um e-mail por vez — prefere que eu continue ou pare o backfill?";
+    const el = cenario([fala("m1", "d1", longa)], [item("d1")]);
+    const topoLongo = renderTopoComposer(modoDoComposer(el, "c"), el);
+    expect(topoLongo).toContain(`“${inicioDaPergunta(longa, TRECHO_FAIXA_MAX)}”`);
+    expect(inicioDaPergunta(longa, TRECHO_FAIXA_MAX).endsWith("…")).toBe(true);
+    // Sem balão ligado (o caso da Nina em 24/09, 18:19): o trecho vem da frase, sem "parei para perguntar a Marlon:".
+    const antiga = cenario([], [item("d1", { frase: "parei para perguntar a Marlon: Continuo o backlog <todo>?" })]);
+    const topoAntigo = renderTopoComposer(modoDoComposer(antiga, "c"), antiga);
+    expect(topoAntigo).toContain("“Continuo o backlog &lt;todo&gt;?”");
+    expect(topoAntigo).not.toContain("parei para perguntar");
+    // Com duas abertas a citação já mostra o trecho: a faixa não repete.
+    const duas = cenario([fala("m1", "d1", PERGUNTA), fala("m2", "d2", "Outra coisa?", undefined, AGORA - H)], [item("d1"), item("d2", { criadoEm: AGORA - H })]);
+    const topoDuas = renderTopoComposer(modoDoComposer(duas, "c"), duas);
+    expect(topoDuas).toContain("citacao-pergunta");
+    expect(topoDuas).not.toContain("fp-pergunta");
   });
 
   it("modo resposta: placeholder 'Responda à Nina…', borda realçada, a dica e o clipe desligado com o motivo", () => {

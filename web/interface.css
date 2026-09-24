@@ -433,6 +433,7 @@ body { background: #fcfdff; }
 .faixa-pergunta .fp-ic { display: inline-flex; color: var(--blue); }
 .faixa-pergunta .fp-txt { flex: 1; min-width: 0; }
 .faixa-pergunta .fp-txt b { font-weight: 600; }
+.faixa-pergunta .fp-pergunta { display: block; margin-top: 2px; color: var(--ink-2); overflow-wrap: anywhere; }
 .faixa-pergunta .fp-acoes { display: flex; gap: 2px; }
 .faixa-pergunta .bt.link { color: var(--blue); font-size: 12px; padding: 2px 6px; }
 .composer-modo { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
