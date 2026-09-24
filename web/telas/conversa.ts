@@ -13,7 +13,7 @@ import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
-import { linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta } from "./pergunta.ts";
+import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
 import { detalheAcesso, idsGemeas, marcaGemeas, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
@@ -310,7 +310,11 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
       return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? "Pedido" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto)}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
     }).join("")}</div></details>`;
   });
-  return recolherAvisos(mensagens, pedacos);
+  // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de
+  // recolher os avisos — o <details> do fio não é linha de sistema.
+  const linhas: LinhaDaConversa[] = mensagens.map((m, i) => ({ id: m.id, sistema: linhaDeSistema(m), html: pedacos[i] ?? "" }));
+  const conversaId = mensagens[0]?.conversaId;
+  return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas);
 }
 
 /** definido em 2026-09-24: a partir de quantas linhas de sistema SEGUIDAS a conversa as recolhe. */
@@ -325,23 +329,22 @@ function linhaDeSistema(m: Mensagem): boolean {
  * definido em 2026-09-24: três ou mais linhas de sistema seguidas viram UM <details> "N avisos do
  * sistema · ver" — cada queda e cada vencimento escrevem a sua linha (redacao.ts), e em sequência
  * elas empurravam a conversa para longe. Nada é apagado: cada linha continua lá dentro, com o seu
- * "relatar". `pedacos[i]` é o HTML já renderizado de `mensagens[i]`.
+ * "relatar". Cada `linha` leva o HTML já renderizado da mensagem (ou do fio que a recolheu).
  */
-function recolherAvisos(mensagens: readonly Mensagem[], pedacos: readonly string[]): string {
-  const sistema = mensagens.map(linhaDeSistema);
+function recolherAvisos(linhas: readonly LinhaDaConversa[]): string {
   const saida: string[] = [];
   let i = 0;
-  while (i < mensagens.length) {
+  while (i < linhas.length) {
     let fim = i;
-    while (sistema[fim]) fim++;
+    while (linhas[fim]?.sistema) fim++;
     if (fim - i >= AVISOS_PARA_RECOLHER) {
-      saida.push(`<details class="avisos-sistema" data-disclosure="avisos-${esc(mensagens[i]?.id ?? "")}"><summary>${fim - i} avisos do sistema · ver</summary>${pedacos.slice(i, fim).join("")}</details>`);
+      saida.push(`<details class="avisos-sistema" data-disclosure="avisos-${esc(linhas[i]?.id ?? "")}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>`);
       i = fim;
     } else if (fim > i) {
-      saida.push(...pedacos.slice(i, fim));
+      saida.push(...linhas.slice(i, fim).map((l) => l.html));
       i = fim;
     } else {
-      saida.push(pedacos[i] ?? "");
+      saida.push(linhas[i]?.html ?? "");
       i++;
     }
   }

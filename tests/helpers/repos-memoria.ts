@@ -680,12 +680,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           vistaEm: null,
           criadoEm: iso(em + b.decisoes.length),
           decididaEm: null,
+          fioId: d.fioId ?? null,
         };
         b.decisoes.push(decisao);
         return decisao;
       },
       async buscar(id) {
         return doTenant(b.decisoes).find((d) => d.id === id) ?? null;
+      },
+      async doTurno(turnoId) {
+        return doTenant(b.decisoes).filter((d) => d.turnoId === turnoId).sort((x, y) => Date.parse(x.criadoEm) - Date.parse(y.criadoEm));
+      },
+      async dosFios(ids) {
+        const alvo = new Set(ids);
+        return doTenant(b.decisoes).filter((d) => alvo.has(d.id) || (d.fioId !== null && alvo.has(d.fioId))).sort((x, y) => Date.parse(x.criadoEm) - Date.parse(y.criadoEm));
       },
       async listarSuaVez(em) {
         return doTenant(b.decisoes)

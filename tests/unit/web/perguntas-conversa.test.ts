@@ -31,9 +31,9 @@ function item(id: string, p: { tipo?: TipoDecisao; criadoEm?: number; vencido?: 
       prazoDecisaoEm: new Date(p.vencido ? AGORA - 3 * H : criadoEm + 24 * H).toISOString(), prazoExecucaoEm: null,
       frase: p.frase ?? `parei para perguntar a Marlon: pergunta ${id}`,
       desfecho: p.vencido ? { tipo: "expirou_sem_ninguem_ver", em: new Date(AGORA - 3 * H).toISOString() } : null,
-      vistaEm: null, criadoEm: new Date(criadoEm).toISOString(),
+      vistaEm: null, criadoEm: new Date(criadoEm).toISOString(), fioId: null,
     },
-    estadoColuna: p.vencido ? "vencido" : "pendente", agenteNome: "Nina", aguardandoHaMs: 0, recusaAutomaticaEmMs: 0, gemeas: [], itensAprovacao: [], proposta: null,
+    estadoColuna: p.vencido ? "vencido" : "pendente", agenteNome: "Nina", aguardandoHaMs: 0, recusaAutomaticaEmMs: 0, gemeas: [], itensAprovacao: [], proposta: null, fio: null,
   };
 }
 
@@ -48,7 +48,7 @@ function resposta(id: string, decisaoId: string, texto: string, criadoEm: number
 const nina = { id: "a", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "E-mails", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c", confirmado: true, fixado: false, oculto: false, naoLido: false, secao: null, computadorForaDoAr: null } as never;
 
 function conversa(mensagens: Mensagem[]): ConversaEstado {
-  return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], atividades: {}, carregadaEm: 0 };
+  return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
 }
 
 function cenario(mensagens: Mensagem[], itens: Item[]): Estado {

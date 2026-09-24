@@ -1,7 +1,7 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
-import type { TIPOS_PEDIDO_A_PESSOA } from "../../src/contracts/pedido.ts";
+import type { FioDaPergunta, TIPOS_PEDIDO_A_PESSOA } from "../../src/contracts/pedido.ts";
 import type { Estado } from "../estado/reducer.ts";
 
 /**
@@ -33,6 +33,41 @@ export function perguntasAbertas(estado: Estado, conversaId: string): ItemPergun
   return (estado.suaVez?.itens ?? [])
     .filter((i) => i.decisao.conversaId === conversaId && aberta(i) && ehPergunta(i.decisao.tipo))
     .sort((a, b) => Date.parse(a.decisao.criadoEm) - Date.parse(b.decisao.criadoEm));
+}
+
+/**
+ * Fio da pergunta (emenda da ADR-045, definido em 2026-09-24): as rodadas de um fio são decisões
+ * diferentes, mas esperam pela pessoa como UMA pergunta. A chave junta as rodadas; os outros pedidos
+ * são o próprio fio (`fio` null).
+ */
+export function chaveDoItem(item: ItemPergunta): string {
+  return item.fio?.id ?? item.decisao.id;
+}
+
+/** Quantos FIOS há entre os itens — os contadores (selo, faixa do topo, "Sua vez") contam fios, não rodadas. */
+export function contarFios(itens: readonly ItemPergunta[]): number {
+  return new Set(itens.map(chaveDoItem)).size;
+}
+
+/** Um item por fio, o primeiro de cada (a ordem do servidor: mais antigo primeiro). */
+export function umPorFio<T extends ItemPergunta>(itens: readonly T[]): T[] {
+  const vistos = new Set<string>();
+  return itens.filter((i) => !vistos.has(chaveDoItem(i)) && Boolean(vistos.add(chaveDoItem(i))));
+}
+
+/** Os fios da conversa carregada, com o estado que o servidor derivou (ConversaDto.fios). */
+export function fiosDaConversa(estado: Estado, conversaId: string): readonly FioDaPergunta[] {
+  return estado.conversas[conversaId]?.fios ?? [];
+}
+
+/** O fio em que o agente está lendo a resposta: a faixa neutra acima do campo, que volta ao modo normal. */
+export function fioLendo(estado: Estado, conversaId: string): FioDaPergunta | undefined {
+  return fiosDaConversa(estado, conversaId).find((f) => f.estado === "lendo_sua_mensagem");
+}
+
+/** "2ª rodada". */
+export function rodadaEscrita(n: number): string {
+  return `${n}ª rodada`;
 }
 
 /** Conversas com pergunta aberta: o que o reducer usa para esquecer a escolha do campo que perdeu o assunto. */

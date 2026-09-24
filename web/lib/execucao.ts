@@ -9,6 +9,8 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   reinicio_servidor: "o servidor reiniciou",
   // definido em 2026-09-24: o pedido da execução foi dispensado ainda aberto (dispensar-decisao.ts).
   pedido_dispensado: "o pedido foi dispensado sem resposta",
+  // definido em 2026-09-24 (fio da pergunta): a pergunta da execução venceu sem resposta (varredor-expiracao.ts).
+  pergunta_sem_resposta: "ninguém respondeu a pergunta",
 };
 
 export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | null {

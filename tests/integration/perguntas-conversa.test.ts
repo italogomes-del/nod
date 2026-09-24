@@ -46,7 +46,7 @@ describeIntegracao("perguntas viram conversa: a pergunta é fala ligada à decis
       expect((await repos.decisoes.buscar(decisaoId))?.estado).toBe("decidida");
       const resposta = (await repos.mensagens.listarDaConversa(conversaId)).find((m) => m.id === ids.mensagem);
       expect(resposta).toMatchObject({ kind: "texto", texto: "Sim, pode arquivar", autoria: { autor_tipo: "pessoa", autor_id: PESSOA_MARLON } });
-      expect(resposta?.payload).toEqual({ kind: "resposta_a_pedido", decisaoId, agenteId, perguntaEm: Date.parse(decisao?.criadoEm ?? ""), retomada: true });
+      expect(resposta?.payload).toEqual({ kind: "resposta_a_pedido", decisaoId, agenteId, perguntaEm: Date.parse(decisao?.criadoEm ?? ""), retomada: true, turnoRetomadaId: ids.turnoRetomada });
       const retomada = await repos.turnos.buscar(ids.turnoRetomada ?? "");
       expect(retomada).toMatchObject({ origem: "retomada", retomaTurnoId: turno.id, estado: "pendente" });
       expect(retomada?.entradaTexto).toContain("Sim, pode arquivar");

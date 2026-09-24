@@ -2,6 +2,7 @@ import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { DesfechoRotina, MotivoFalha, MotivoSemNovidade } from "../contracts/motivos.ts";
+import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
@@ -97,15 +98,17 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
 
 /**
  * `pedido_dispensado` (definido em 2026-09-24): a pessoa dispensou, ainda aberto, o pedido que a
- * execução fez (dispensar-decisao.ts). rotina_execucoes.motivo é text com CHECK '^[a-z_]+$' (0002):
- * o valor novo passa sem migração.
+ * execução fez (dispensar-decisao.ts). `pergunta_sem_resposta` (mesma data, fio da pergunta): a
+ * pergunta da execução venceu sem resposta (varredor-expiracao.ts). rotina_execucoes.motivo é text com
+ * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração.
  */
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | null };
+export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null };
 
 /** O motivo do passou_em_branco em palavras na conversa; o código fica na execução. Sem tradução sai como está. */
 const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {
   ninguem_respondeu_o_gate: "ninguém respondeu o gate",
   pedido_dispensado: "o pedido foi dispensado sem resposta",
+  pergunta_sem_resposta: "ninguém respondeu a pergunta",
 };
 
 /**
@@ -122,6 +125,14 @@ const SILENCIOSOS: ReadonlySet<DesfechoRotina> = new Set<DesfechoRotina>(["sem_n
  * sem depender de a L5 trocar o rótulo; a ligação é o turno_id, dado tipado, nunca a frase.
  */
 export const TIPOS_GATE_ROTINA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(["gate_rotina", "aprovacao"]);
+
+/**
+ * definido em 2026-09-24 (fio da pergunta, emenda da ADR-045): o que SEGURA o desfecho da execução — o
+ * gate e as perguntas de pedir_a_pessoa. A execução que pergunta não "executou" ao encerrar o turno da
+ * pergunta: todas as rodadas do fio são da mesma janela, e o desfecho é do fio inteiro — 'executou' quando
+ * a retomada segue sem perguntar de novo, 'passou_em_branco' quando a pergunta é deixada pra lá ou vence.
+ */
+export const TIPOS_QUE_SEGURAM_A_EXECUCAO: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>([...TIPOS_GATE_ROTINA, ...TIPOS_PEDIDO_A_PESSOA]);
 export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" };
 
 /**
@@ -140,7 +151,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
   // pedido de aprovação pendente. A rotina só encerra quando o efeito saiu.
   if (input.desfecho === "executou" || input.desfecho === "sem_novidade") {
     const turnosDaRotina = new Set([turnoDisparado.id, input.turnoId]);
-    const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => TIPOS_GATE_ROTINA.has(d.tipo) && d.turnoId !== null && turnosDaRotina.has(d.turnoId));
+    const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => TIPOS_QUE_SEGURAM_A_EXECUCAO.has(d.tipo) && d.turnoId !== null && turnosDaRotina.has(d.turnoId));
     if (gatesAbertos.length > 0) return { data: { ignorado: "aguardando_gate" } };
   }
   const agora = deps.agora();

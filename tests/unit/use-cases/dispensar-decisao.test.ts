@@ -24,9 +24,10 @@ async function rotinaQuePediu(d: ReturnType<typeof depsMemoria>, extra: { deciso
   if (!("turno" in r.data)) throw new Error("sem turno");
   const turnoId = r.data.turno.id;
   const pedido = await d.deps.repos.decisoes.criar({ tipo: "falta_de_dado", decisorId: extra.decisorId, agenteId: rotina.agenteId, conversaId: rotina.conversaId, turnoId, prazoDecisaoEm: AGORA + DIA, frase: "falta o acesso ao Gmail" });
-  // O turno terminou depois de pedir: a janela ficou 'executou' (compor.ts, depoisDeAssentar).
+  // O turno terminou depois de pedir (compor.ts, depoisDeAssentar). definido em 2026-09-24 (fio da
+  // pergunta): a janela ESPERA o fio — 'executou' com a pergunta aberta não conta, nenhuma linha ainda.
   await d.deps.repos.turnos.assentar(turnoId, { estado: "concluido" });
-  await registrarDesfechoRotina(d.deps, { turnoId, desfecho: "executou" });
+  expect((await registrarDesfechoRotina(d.deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
   return { rotina, turnoId, pedidoId: pedido?.id ?? "" };
 }
 
@@ -70,7 +71,7 @@ describe("dispensar o pedido ABERTO de uma execução de rotina (definido em 202
     expect(aviso?.texto).toContain("A rotina passou em branco: o pedido foi dispensado sem resposta. Nada foi enviado.");
   });
 
-  it("pedido VENCIDO não reescreve a janela (a causa verdadeira já está lá) nem escreve na conversa", async () => {
+  it("pedido VENCIDO não reescreve a janela (a causa verdadeira é do varredor) nem escreve na conversa", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const c = await rotinaQuePediu(d);
     const pedido = d.banco.decisoes.find((x) => x.id === c.pedidoId);
@@ -79,7 +80,7 @@ describe("dispensar o pedido ABERTO de uma execução de rotina (definido em 202
     await d.deps.repos.decisoes.vencerPendentes(AGORA);
     const mensagensAntes = d.banco.mensagens.length;
     await dispensarDecisao(d.deps, { decisaoId: c.pedidoId });
-    expect(d.banco.execucoes.map((e) => [e.desfecho, e.motivo])).toEqual([["executou", null]]);
+    expect(d.banco.execucoes).toEqual([]);
     expect(d.banco.mensagens).toHaveLength(mensagensAntes);
   });
 

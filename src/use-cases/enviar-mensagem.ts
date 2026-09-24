@@ -9,6 +9,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { fiosDaConversa } from "./fios-da-pergunta.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaEnviarMensagem = {
@@ -116,7 +117,10 @@ export async function mensagemExecutorIndisponivel(
   });
 }
 
-/** GET conversas/:id/mensagens (EMENDA 13): mensagens + turnos pendentes renderizáveis ("na fila — ocupado em …"). */
+/**
+ * GET conversas/:id/mensagens (EMENDA 13): mensagens + turnos pendentes renderizáveis ("na fila — ocupado em …").
+ * definido em 2026-09-24 (fio da pergunta): + os fios das perguntas com mensagem na janela, já com o estado.
+ */
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
@@ -136,5 +140,6 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   const turnosEmCurso = vivos
     .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
     .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null }));
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas } };
+  const fios = await fiosDaConversa(deps.repos, mensagens);
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios } };
 };

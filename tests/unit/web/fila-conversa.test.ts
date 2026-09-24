@@ -14,7 +14,7 @@ function mensagem(id: string): Mensagem {
 function comConversa(dto: Partial<ConversaDto>): Estado {
   const conversa: ConversaDto = {
     conversa: { tenantId: "t", id: C, ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 1 },
-    mensagens: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], propostas: [],
+    mensagens: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], propostas: [], fios: [],
     ...dto,
   };
   const e = reduzir(estadoInicial, { tipo: "hidratar-conversa", conversa, agora: AGORA });
