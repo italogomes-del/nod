@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import type { JeitoGithub, OndeRodaConector } from "../../../contracts/github.ts";
+import { ENV_COMPOSIO_CHAVE, ENV_COMPOSIO_URL, ENV_TOKEN_GITHUB, type JeitoGithub, type OndeRodaConector } from "../../../contracts/github.ts";
 import { montarAmbienteConectorNativo } from "../../../domain/ambiente-executor.ts";
 import { escolherJeitoGithub } from "../../../domain/github.ts";
 import { caminhoAumentado, homeDaPessoa } from "../../executor/caminho.ts";
@@ -8,10 +8,6 @@ import { caminhoAumentado, homeDaPessoa } from "../../executor/caminho.ts";
 /** O servidor stdio do conector nativo; rodado pelo Node deste processo, como o proxy (boot.ts). */
 export const CAMINHO_SERVIDOR_GITHUB = fileURLToPath(new URL("./servidor.ts", import.meta.url));
 
-/** As chaves do env cifrado do conector `github` que cada jeito lê (o resto é recusado na rota). */
-export const ENV_TOKEN_GITHUB = "GITHUB_TOKEN";
-export const ENV_COMPOSIO_URL = "COMPOSIO_URL";
-export const ENV_COMPOSIO_CHAVE = "COMPOSIO_API_KEY";
 
 type Ambiente = Readonly<Record<string, string | undefined>>;
 

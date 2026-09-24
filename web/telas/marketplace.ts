@@ -16,6 +16,14 @@ export function logoApp(slug: string, nome: string, temLogo = false): string {
   return `<span class="app-logo app-${esc(slug)}" aria-hidden="true">${inicial}${img}</span>`;
 }
 
+/**
+ * definido em 2026-09-24 (ADR-047): o GitHub conecta sozinho pelo gh desta máquina; o token pessoal
+ * fica recolhido em "Avançado" para quem não tem gh. O valor nunca volta: só a marca de que existe.
+ */
+function avancadoGithub(temToken: boolean): string {
+  return `<details class="github-avancado"><summary>Avançado: token pessoal${temToken ? " · ✓ guardado" : ""}</summary><form class="form" data-form="token-github"><label>Token do GitHub<input type="password" name="token" required autocomplete="off" placeholder="ghp_… ou github_pat_…" /></label><button class="bt" type="submit">Guardar e verificar</button></form><small>Use quando esta máquina não tem o gh logado. O token fica cifrado neste servidor e os comentários saem em nome da conta dele.</small></details>`;
+}
+
 export function renderMarketplace(estado: Estado): string {
   const tela = estado.tela.tipo === "conectores" ? estado.tela : null;
   const instalados = estado.conectores.filter((c) => c.habilitado).length;
@@ -28,7 +36,7 @@ export function renderMarketplace(estado: Estado): string {
       const c = estado.conectores.find((c) => c.slug === app.slug && c.ownerId === estado.sessao?.pessoaId);
       const selecionado = tela?.app === app.slug;
       const auth = estado.autorizacaoApp?.slug === app.slug ? estado.autorizacaoApp : null;
-      return `<article class="app-card${selecionado ? " selected" : ""}" data-app-busca="${esc(`${app.nome} ${app.categoria} ${app.descricao}`.toLowerCase())}" id="app-${esc(app.slug)}"><div class="app-card-heading">${logoApp(app.slug, app.nome, !!app.logo)}<span><h3>${esc(app.nome)}</h3><small>${esc(app.categoria)}</small></span>${c?.habilitado ? '<span class="connected-dot" title="Conectado">✓</span>' : ""}</div><p>${esc(app.descricao)}</p><div class="app-card-actions">${botao("conectar-composio", c?.habilitado ? "Reconectar" : c ? "Refazer conexão" : "Conectar", { id: app.slug, classe: selecionado ? "pri" : "" })}${c ? botao("verificar-composio", "Verificar conexão", { id: app.slug }) : ""}</div>${auth ? `<div class="auth-pending"><a class="bt pri" href="${esc(auth.url)}" target="_blank" rel="noopener noreferrer">Entrar no ${esc(app.nome)} ↗</a><p>Conclua o login na aba que abrir e clique em Verificar conexão.</p></div>` : ""}${c?.ultimaFalha ? '<p class="connection-error" role="status">Não foi possível acessar as ferramentas. Verifique o login e tente novamente.</p>' : ""}${c?.habilitado && selecionado && tela?.voltar ? botao("voltar-conexao", "Voltar e continuar tarefa", { classe: "pri" }) : ""}</article>`;
+      return `<article class="app-card${selecionado ? " selected" : ""}" data-app-busca="${esc(`${app.nome} ${app.categoria} ${app.descricao}`.toLowerCase())}" id="app-${esc(app.slug)}"><div class="app-card-heading">${logoApp(app.slug, app.nome, !!app.logo)}<span><h3>${esc(app.nome)}</h3><small>${esc(app.categoria)}</small></span>${c?.habilitado ? '<span class="connected-dot" title="Conectado">✓</span>' : ""}</div><p>${esc(app.descricao)}</p><div class="app-card-actions">${botao("conectar-composio", c?.habilitado ? "Reconectar" : c ? "Refazer conexão" : "Conectar", { id: app.slug, classe: selecionado ? "pri" : "" })}${c ? botao("verificar-composio", "Verificar conexão", { id: app.slug }) : ""}</div>${auth ? `<div class="auth-pending"><a class="bt pri" href="${esc(auth.url)}" target="_blank" rel="noopener noreferrer">Entrar no ${esc(app.nome)} ↗</a><p>Conclua o login na aba que abrir e clique em Verificar conexão.</p></div>` : ""}${c?.ultimaFalha ? '<p class="connection-error" role="status">Não foi possível acessar as ferramentas. Verifique o login e tente novamente.</p>' : ""}${c?.habilitado && selecionado && tela?.voltar ? botao("voltar-conexao", "Voltar e continuar tarefa", { classe: "pri" }) : ""}${app.slug === "github" ? avancadoGithub(c?.env.GITHUB_TOKEN === true) : ""}</article>`;
     }).join("")}</div>
     <p id="marketplace-vazio" class="mudo" hidden>Nenhum app encontrado. Tente outro nome ou conecte seu próprio MCP abaixo.</p>
     ${estado.avisoConexao ? `<p class="connection-notice" role="status">${esc(estado.avisoConexao)}</p>` : ""}`;

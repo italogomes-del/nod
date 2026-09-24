@@ -776,7 +776,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const slug = el.dataset.id ?? "";
     const r = await api!.conectarApp(slug);
     if (r.url) dispatch({ tipo: "autorizacao-app", slug, url: r.url });
-    else dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "GitHub conectado pelo gh desta máquina. Seus bots pedem o acesso de que precisam, e você permite com um clique." : (r.frase ?? "Não foi possível conectar agora.") });
+    else dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "GitHub conectado. Seus bots pedem o acesso de que precisam, e você permite com um clique." : (r.frase ?? "Não foi possível conectar agora.") });
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
   }),
   "verificar-composio": (el) => agir(async () => {
@@ -1051,6 +1051,13 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     const d = new FormData(form);
     await api!.configurarComposio(String(d.get("chave") ?? ""));
     form.reset();
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
+  "token-github": (form) => agir(async () => {
+    const d = new FormData(form);
+    const r = await api!.tokenGithub(String(d.get("token") ?? ""));
+    form.reset();
+    dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "Token guardado. O GitHub usa o gh desta máquina quando ele está logado, e o token nos outros casos." : "Token guardado, mas o GitHub não respondeu. Tente Conectar de novo em instantes." });
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
   }),
   "credenciais-conector": (form) => agir(async () => {

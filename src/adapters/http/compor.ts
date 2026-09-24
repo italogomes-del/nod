@@ -498,7 +498,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
     ...rotasConcessoes({ dentro }),
-    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
+    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), onde: ondeRodaConector }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     ...rotasMaquinas({ dentro }),

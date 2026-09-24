@@ -14,6 +14,11 @@ export const SLUG_GITHUB = "github" as const;
  */
 export const COMANDO_GITHUB_NATIVO = "nod:github" as const;
 
+/** As chaves do env CIFRADO do conector `github` que cada jeito lê (token pessoal; login do Composio). */
+export const ENV_TOKEN_GITHUB = "GITHUB_TOKEN" as const;
+export const ENV_COMPOSIO_URL = "COMPOSIO_URL" as const;
+export const ENV_COMPOSIO_CHAVE = "COMPOSIO_API_KEY" as const;
+
 /**
  * Os jeitos de conectar, em ordem de nome (a ordem de PREFERÊNCIA depende de onde roda, ADR-047):
  * `gh` = o CLI já logado na máquina da pessoa; `token` = token pessoal colado no campo avançado;

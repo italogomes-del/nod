@@ -1,14 +1,27 @@
-import { SLUG_GITHUB } from "../../../contracts/github.ts";
+import { COMANDO_GITHUB_NATIVO, ENV_TOKEN_GITHUB, SLUG_GITHUB, type OndeRodaConector } from "../../../contracts/github.ts";
 import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { garantirGithubPeloGh } from "../../../use-cases/conectar-github.ts";
+import { fraseSemJeito } from "../../../domain/github.ts";
+import { formatoDeTokenGithub, garantirGithubPeloGh, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
+import { API_GITHUB } from "../../conectores-locais/github/backend-rest.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
 import { criarClienteComposio } from "../../integracoes/composio.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
-export function rotasMarketplace(op: { dentro: DentroDeTx; cifrar: (s: string) => string; decifrar: (s: string) => string; fetchImpl?: typeof fetch }): Rota[] {
+export type OpcoesRotasMarketplace = {
+  dentro: DentroDeTx;
+  cifrar: (s: string) => string;
+  decifrar: (s: string) => string;
+  fetchImpl?: typeof fetch;
+  /** Onde o conector roda (ADR-047): muda a frase de quando nenhum jeito de conectar o GitHub serve. */
+  onde?: OndeRodaConector;
+  /** Base da API do GitHub; só teste. */
+  apiGithub?: string;
+};
+
+export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
   const cliente = (chave: string) => criarClienteComposio(chave, op.fetchImpl);
   /**
    * revisto em 2026-09-21 (ADR-041): a curadoria deixou de ser a lista do que EXISTE, então
@@ -20,6 +33,28 @@ export function rotasMarketplace(op: { dentro: DentroDeTx; cifrar: (s: string) =
     return APPS_MARKETPLACE.find((a) => a.slug === slug) ?? { slug, nome: slug, descricao: "", categoria: "" };
   };
   return [
+    /**
+     * Jeito 3 (ADR-047): token pessoal no campo avançado. O GitHub é perguntado ANTES de guardar
+     * (GET /user): token recusado não vira conector "conectado" que falha na primeira chamada. Guardar
+     * e sondar são duas transações — a sonda decifra o env da linha já gravada.
+     */
+    { metodo: "POST", padrao: /^\/marketplace\/github\/token$/, async handler(ctx) {
+      const body = await ctx.corpo() as { token?: unknown } | null;
+      const token = typeof body?.token === "string" ? body.token.trim() : "";
+      if (!formatoDeTokenGithub(token)) throw new ErroDeDominio("entrada_invalida");
+      let aceito: boolean;
+      try {
+        const r = await (op.fetchImpl ?? fetch)(`${op.apiGithub ?? API_GITHUB}/user`, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "nod" }, redirect: "error", signal: AbortSignal.timeout(10_000) });
+        if (r.status !== 200 && r.status !== 401 && r.status !== 403) throw new ErroDeDominio("conector_indisponivel");
+        aceito = r.status === 200;
+      } catch (e) {
+        throw e instanceof ErroDeDominio ? e : new ErroDeDominio("conector_indisponivel");
+      }
+      if (!aceito) throw new ErroDeDominio("integracao_autenticacao");
+      const salvo = await op.dentro(ctx.escopo, (d) => guardarTokenGithub(d, { token, cifrar: op.cifrar, decifrar: op.decifrar }));
+      const s = await op.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: salvo.id }));
+      ctx.json(200, { conectado: s.ok, conectorId: salvo.id, conector: s.conector });
+    } },
     { metodo: "POST", padrao: /^\/marketplace\/configurar$/, async handler(ctx) {
       const body = await ctx.corpo() as { chave?: unknown } | null;
       if (typeof body?.chave !== "string" || !body.chave.trim() || body.chave.length > 4096 || /[\r\n]/.test(body.chave)) throw new ErroDeDominio("entrada_invalida");
@@ -34,8 +69,18 @@ export function rotasMarketplace(op: { dentro: DentroDeTx; cifrar: (s: string) =
         // ADR-047: o que já está pronto ganha. gh logado nesta máquina = conectado agora, sem login nem campo.
         const r = await op.dentro(ctx.escopo, (d) => garantirGithubPeloGh(d, { pelaPessoa: true }));
         if (r.ok) { ctx.json(200, { conectado: true, conectorId: r.conector.id, jeito: "gh" }); return; }
+        // Sem gh: o token já colado serve sem nova tela; a sonda escolhe o jeito (token antes do Composio na máquina).
+        const comToken = await op.dentro(ctx.escopo, async (d) => {
+          const c = await d.repos.conectores.buscarPorSlug(SLUG_GITHUB);
+          return c && c.ownerId === ctx.escopo.pessoaId && c.comando === COMANDO_GITHUB_NATIVO && c.env[ENV_TOKEN_GITHUB] ? c.id : null;
+        });
+        if (comToken) {
+          const s = await op.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: comToken }));
+          if (s.ok) { ctx.json(200, { conectado: true, conectorId: comToken, jeito: "token" }); return; }
+        }
       }
       const cifrada = await op.dentro(ctx.escopo, (d) => d.repos.composio.chave());
+      if (!cifrada && app.slug === SLUG_GITHUB) { ctx.json(200, { conectado: false, frase: fraseSemJeito(op.onde ?? "maquina_da_pessoa") }); return; }
       if (!cifrada) throw new ErroDeDominio("integracao_nao_configurada");
       const chave = op.decifrar(cifrada);
       const c = cliente(chave);

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { chaveDe, cifrar, decifrar } from "../../src/db/cifra.ts";
 import { configGithubNativo } from "../../src/adapters/conectores-locais/github/nativo.ts";
 import { rotasConectores } from "../../src/adapters/http/rotas/conectores.ts";
 import type { DentroDeTx } from "../../src/adapters/http/rotas/dentro-de-tx.ts";
@@ -21,6 +22,7 @@ import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const CHAVE = chaveDe("teste-github-local");
 const LEITURA = CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => c.nome);
 const TODAS = CAPACIDADES_GITHUB.map((c) => c.nome);
 
@@ -30,12 +32,19 @@ const TODAS = CAPACIDADES_GITHUB.map((c) => c.nome);
  * lista os nomes estáveis sem chamar o gh. `carregar` não enxerga a tx do teste (como na composição
  * real não enxerga a tx aberta de pedir_acesso): quem responde é `resolverSemBanco`.
  */
-function depsGithub(trx: Tx, escopo: Escopo, ghLogado: boolean): { deps: Deps; repos: Repos; sondas: string[] } {
+function depsGithub(trx: Tx, escopo: Escopo, ghLogado: boolean, opcoes: { carregarDaTx?: boolean } = {}): { deps: Deps; repos: Repos; sondas: string[] } {
   const base = depsSobre(trx, escopo);
   const sondas: string[] = [];
   const vivos = criarConectoresVivos({
     agora: () => Date.now(),
-    carregar: async () => null,
+    // Como `carregar` da composição, mas lendo a tx do teste (a linha foi "gravada" em outra chamada da rota).
+    carregar: async (id) => {
+      if (!opcoes.carregarDaTx) return null;
+      const c = await base.repos.conectores.buscar(id);
+      if (!c) return null;
+      const r = configGithubNativo({ onde: "maquina_da_pessoa", envConector: c.envCifrado ? (JSON.parse(decifrar(c.envCifrado, CHAVE)) as Record<string, string>) : {}, ghLogado, app: null, ambiente: process.env });
+      return r.ok ? { nome: c.slug, transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, env: r.cfg.env } : null;
+    },
     resolverSemBanco: async (c) => {
       sondas.push(c.id);
       const r = configGithubNativo({ onde: "maquina_da_pessoa", envConector: {}, ghLogado, app: null, ambiente: process.env });
@@ -131,6 +140,61 @@ describeIntegracao("GitHub nativo: registro sem configuração (ADR-047)", () =>
         const lista = await (await srv.chamar(sessao, "GET", "conectores")).json() as { conectores: { slug: string; comando: string }[]; marketplace: { slug: string }[] };
         expect(lista.conectores.filter((c) => c.slug === "github")).toEqual([expect.objectContaining({ comando: COMANDO_GITHUB_NATIVO })]);
         expect(lista.marketplace.map((a) => a.slug)).toContain("github");
+      } finally {
+        await srv.close();
+      }
+    });
+  });
+
+  it("token pessoal (campo avançado): o GitHub é perguntado antes, o token vai cifrado para o env e o conector sonda pelo jeito token", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { deps, repos } = depsGithub(trx, MARLON, false, { carregarDaTx: true });
+      const dentro: DentroDeTx = (escopo, fn) => fn({ ...deps, escopo, repos: depsSobre(trx, escopo).repos });
+      const perguntas: string[] = [];
+      const fakeFetch: typeof fetch = async (url, init) => {
+        perguntas.push(String(url));
+        return new Headers(init?.headers).get("authorization") === "Bearer ghp_aceitoaceitoaceitoaceito1" ? Response.json({ login: "marlon" }) : new Response("{}", { status: 401 });
+      };
+      const cifra = (s: string) => cifrar(s, CHAVE);
+      const srv = await servidorDeTeste([
+        ...rotasMarketplace({ dentro, cifrar: cifra, decifrar: (s) => decifrar(s, CHAVE), fetchImpl: fakeFetch, apiGithub: "https://api.github.test" }),
+        ...rotasConectores({ dentro, cifrar: cifra, decifrar: (s) => decifrar(s, CHAVE), fetchImpl: async () => { throw new Error("sem provedor"); } }),
+      ]);
+      try {
+        const sessao = await srv.entrar("marlon");
+        expect((await srv.chamar(sessao, "POST", "marketplace/github/token", { token: "nao-e-token" })).status).toBe(400);
+        expect((await srv.chamar(sessao, "POST", "marketplace/github/token", { token: "ghp_recusadorecusadorecusado1" })).status).toBe(403);
+        expect(await repos.conectores.buscarPorSlug("github")).toBeNull();
+
+        const r = await srv.chamar(sessao, "POST", "marketplace/github/token", { token: "ghp_aceitoaceitoaceitoaceito1" });
+        expect(r.status).toBe(200);
+        expect(await r.json()).toMatchObject({ conectado: true, conector: { slug: "github", habilitado: true, env: { GITHUB_TOKEN: true } } });
+        expect(perguntas).toEqual(["https://api.github.test/user", "https://api.github.test/user"]);
+        const guardado = await repos.conectores.buscarPorSlug("github");
+        expect(guardado?.envCifrado).not.toContain("ghp_");
+        expect(JSON.parse(decifrar(guardado?.envCifrado ?? "", CHAVE))).toEqual({ GITHUB_TOKEN: "ghp_aceitoaceitoaceitoaceito1" });
+        expect(guardado?.catalogo).toHaveLength(9);
+        const lista = await (await srv.chamar(sessao, "GET", "conectores")).text();
+        expect(lista).not.toContain("ghp_aceito");
+
+        // Sem gh, Conectar usa o token já guardado: nada de Composio, nada de nova tela.
+        expect(await (await srv.chamar(sessao, "POST", "marketplace/github/conectar")).json()).toEqual({ conectado: true, conectorId: guardado?.id, jeito: "token" });
+      } finally {
+        await srv.close();
+      }
+    });
+  });
+
+  it("sem gh, sem token e sem Composio: Conectar GitHub devolve a frase do que fazer, não um erro", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { deps } = depsGithub(trx, MARLON, false);
+      const dentro: DentroDeTx = (escopo, fn) => fn({ ...deps, escopo, repos: depsSobre(trx, escopo).repos });
+      const srv = await servidorDeTeste(rotasMarketplace({ dentro, cifrar: (s) => s, decifrar: (s) => s }));
+      try {
+        const sessao = await srv.entrar("marlon");
+        const r = await (await srv.chamar(sessao, "POST", "marketplace/github/conectar")).json() as { conectado: boolean; frase: string };
+        expect(r.conectado).toBe(false);
+        expect(r.frase).toContain("rode `gh auth login` nesta máquina");
       } finally {
         await srv.close();
       }
