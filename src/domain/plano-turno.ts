@@ -1,3 +1,4 @@
+import type { AnexoMeta } from "../contracts/anexo.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { Conector } from "../contracts/conector.ts";
@@ -97,6 +98,8 @@ export type EntradaPlano = {
   inventario: Inventario;
   executor: Executor;
   sessaoCli: string | null;
+  /** ADR-045: metadados dos anexos da mensagem do turno, lidos pelo caso de uso. */
+  anexos?: readonly AnexoMeta[];
   pessoaNome: string;
   colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];
   contextoConversa?: string;
@@ -171,7 +174,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
     promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null }),
-    entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo },
+    entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}) },
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,

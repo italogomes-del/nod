@@ -334,3 +334,43 @@ body { background: #fcfdff; }
 .computador-fora summary{cursor:pointer;color:#687182;font-size:12.5px}
 .computador-tecnico{font-family:var(--fm);font-size:12px;line-height:1.8;margin-top:6px!important}
 .computador-atividade .tag{margin-left:4px}
+
+/* ---- anexos no chat (ADR-045; mockup de 2026-09-24) ---- */
+.stage { position: relative; }
+.composer .box.com-anexos { flex-wrap: wrap; align-items: center; padding-left: 8px; }
+.composer .clipe { width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: #41495c; display: grid; place-items: center; flex: none; cursor: pointer; }
+.composer .clipe:hover, .composer .clipe:focus-visible { background: #eef2fb; color: var(--blue); }
+.anexos-fila { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 4px 2px 6px; }
+.anexos-fila[hidden] { display: none; }
+.composer .box.com-anexos:has(.anexos-fila:not([hidden])) { border-radius: 24px; padding-top: 10px; }
+.anexos-resumo { font-size: 11px; color: #6b7389; white-space: nowrap; flex: none; }
+.anexos-resumo:empty { display: none; }
+.anexo-chip { position: relative; height: 56px; box-sizing: border-box; min-width: 190px; max-width: 260px; border: 1px solid #e3e7ef; background: #fff; border-radius: 12px; padding: 0 8px 0 10px; display: flex; align-items: center; gap: 10px; }
+.anexo-chip.anexo-erro { border-color: #efc9c4; background: #fdf5f4; color: #8f1d14; }
+.anexo-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.anexo-info b { font-size: 12.5px; font-weight: 500; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.anexo-chip:not(.anexo-erro) .anexo-info b { color: var(--ink); }
+.anexo-info span { font-size: 11px; color: #6b7389; }
+.anexo-erro .anexo-info span { color: #8f1d14; }
+.anexo-tipo { width: 32px; height: 40px; border-radius: 6px; display: grid; place-items: center; font-size: 9.5px; font-weight: 700; letter-spacing: .02em; flex: none; background: #eef2fb; color: var(--blue); }
+.anexo-tipo.tipo-pdf { background: #fbeceb; color: #b42318; }
+.anexo-tipo.tipo-img { background: #eef6ee; color: #1f6b35; }
+.anexo-thumb { position: relative; width: 56px; height: 56px; border-radius: 12px; border: 1px solid #e3e7ef; overflow: hidden; background: #fff; flex: none; }
+.anexo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.anexo-thumb.enviando img { opacity: .55; }
+.anexo-thumb .anexo-barra { position: absolute; left: 6px; right: 6px; bottom: 6px; width: auto; }
+.anexo-barra { display: block; height: 4px; width: 110px; border-radius: 2px; background: #e8ecf4; overflow: hidden; }
+.anexo-barra > span { display: block; height: 100%; background: var(--blue); transition: width .15s ease; }
+.anexo-x { width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0; background: transparent; color: #7f879e; display: grid; place-items: center; flex: none; cursor: pointer; }
+.anexo-x:hover, .anexo-x:focus-visible { background: #eef0f5; color: var(--ink); }
+.anexo-thumb .anexo-x { position: absolute; top: 3px; right: 3px; background: rgba(23, 29, 45, .72); color: #fff; width: 20px; height: 20px; }
+.anexo-erro .anexo-x { color: #8f1d14; }
+.anexo-soltar { position: absolute; inset: 72px 24px 96px; z-index: 5; border: 2px dashed #8fa9d6; border-radius: 20px; background: rgba(238, 242, 251, .92); display: grid; place-items: center; pointer-events: none; text-align: center; }
+.anexo-soltar b { display: block; font-size: 17px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.anexo-soltar span { font-size: 12.5px; color: #4f5870; }
+.msg-anexos { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-bottom: 6px; }
+.msg-anexo-img { display: block; width: 168px; height: 112px; border-radius: 14px; overflow: hidden; border: 1px solid #e3e7ef; background: #fff; }
+.msg-anexo-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.msg-anexo-card { display: flex; align-items: center; gap: 10px; height: 56px; box-sizing: border-box; padding: 0 14px 0 10px; border-radius: 14px; border: 1px solid #e3e7ef; background: #fff; text-decoration: none; color: var(--ink); align-self: flex-end; max-width: 280px; }
+.msg-anexo-card:hover { border-color: #c9d6ee; }
+@media (max-width: 640px) { .anexo-chip { min-width: 0; max-width: 100%; flex: 1 1 100%; } .msg-anexo-img { width: 132px; height: 88px; } }

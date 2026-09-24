@@ -30,6 +30,7 @@ interface Linha {
   reenvios: number;
   parar_solicitado_em: Date | null;
   entrada_texto: string;
+  entrada_anexos: string[];
   entrada_confianca: Confianca;
   custo_usd: string | null;
   modelo: string;
@@ -38,7 +39,7 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_confianca, custo_usd, modelo, harness, criado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -61,6 +62,7 @@ function paraTurno(l: Linha): Turno {
     reenvios: l.reenvios,
     pararSolicitadoEm: msOuNull(l.parar_solicitado_em),
     entradaTexto: l.entrada_texto,
+    entradaAnexos: l.entrada_anexos ?? [],
     entradaConfianca: l.entrada_confianca,
     custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
     modelo: l.modelo,
@@ -77,6 +79,8 @@ export type NovoTurno = {
   prazoEm: number;
   profundidade: Profundidade;
   entradaTexto: string;
+  /** ADR-045: anexos da mensagem que abriu o turno; o plano leva os metadados. */
+  entradaAnexos?: readonly string[];
   entradaConfianca: Confianca;
   modelo: string;
   harness?: PreferenciaHarness;
@@ -110,9 +114,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
-          ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
+          ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"})
         returning ${conn.unsafe(COLUNAS)}`;

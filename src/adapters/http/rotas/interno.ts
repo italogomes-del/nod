@@ -9,6 +9,7 @@ import type { Relogio } from "../../../shared/types.ts";
 import { chamarFerramenta } from "../../../use-cases/chamar-ferramenta.ts";
 import { registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import type { Rota } from "../roteador.ts";
+import { bytes } from "../util.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export type DepsRotasInternas = {
@@ -51,6 +52,27 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           return;
         }
         ctx.json(200, plano);
+      },
+    },
+    {
+      // ADR-045: o driver baixa os bytes de um anexo DESTE turno. O plano em memória do token diz quais
+      // ids o turno pode ler; qualquer outro é 404, mesmo sendo da mesma pessoa.
+      metodo: "GET",
+      padrao: /^\/anexos\/(?<aid>[^/]+)$/,
+      interno: true,
+      async handler(ctx) {
+        const plano = deps.tokens.planoDe(ctx.params.turnoId ?? "");
+        const aid = ctx.params.aid ?? "";
+        if (!plano?.entrada.anexos?.some((a) => a.id === aid)) {
+          ctx.json(404, { codigo: "nao_encontrado", mensagem: "anexo fora do turno" });
+          return;
+        }
+        const r = await deps.dentro(ctx.escopo, (d) => d.repos.anexos.conteudo(aid));
+        if (!r) {
+          ctx.json(404, { codigo: "nao_encontrado", mensagem: "anexo ausente" });
+          return;
+        }
+        bytes(ctx.res, r.meta.mime, r.meta.nome, r.bytes);
       },
     },
     {

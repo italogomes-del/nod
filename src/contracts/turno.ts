@@ -50,6 +50,8 @@ export type Turno = {
   reenvios: number;
   pararSolicitadoEm: EpochMs | null;
   entradaTexto: string;
+  /** ADR-045: ids dos anexos que entraram neste turno (vazio na maioria). */
+  entradaAnexos: readonly string[];
   entradaConfianca: Confianca;
   custoUsd: number | null;
   modelo: string;

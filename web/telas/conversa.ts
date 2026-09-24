@@ -1,3 +1,4 @@
+import { renderAnexosDaMensagem, type Aceita } from "../lib/anexos.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
 import type { FrotaDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
@@ -86,6 +87,13 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
  * esquerda (cinza). Os demais kinds (sistema, handoff, negação, rotina…) seguem como linhas discretas.
  * `mostrarAutor` liga o nome do bot dentro do balão — útil em salas com vários agentes.
  */
+/** ADR-045: arquivos que a pessoa mandou, acima do balão. URL escopada pelo tenant da sessão. */
+function anexosDe(m: Mensagem, estado: Estado): string {
+  const tenant = estado.sessao?.tenantId;
+  if (!m.anexos?.length || !tenant) return "";
+  return renderAnexosDaMensagem(m.anexos, (id) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(m.conversaId)}/anexos/${encodeURIComponent(id)}`);
+}
+
 export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
@@ -98,7 +106,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
   return `<article class="message ${ehPessoa ? "you" : "bot"}" data-mensagem="${esc(m.id)}">
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div></div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div>`}</div>
   </article>`;
 }
 
@@ -271,9 +279,22 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
     </div>`;
 }
 
-/** Composer criado UMA vez por conversa (main.ts não o regrava): textarea + enviar. */
-export function htmlComposer(placeholder: string, sugestoes: readonly string[] = []): string {
+const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
+
+/**
+ * Composer criado UMA vez por conversa (main.ts não o regrava): textarea + enviar. Com `anexos`
+ * (ADR-045, só conversa própria) ganha o clipe, a fila de arquivos e o input escondido; a fila é
+ * preenchida por web/lib/anexos.ts direto no DOM, porque o composer não se regrava.
+ */
+export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
-  return `<div class="composer"><div class="box">${lista}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea><button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
-  <p class="nota">Enter envia · Shift+Enter quebra linha${sugestoes.length ? " · @ menciona um bot" : ""}</p></div>`;
+  const aceita = opcoes.anexos;
+  const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
+  const anexar = aceita
+    ? `<div class="anexos-fila" id="composer-anexos" hidden></div><button type="button" class="clipe" data-act="anexar" aria-label="Anexar arquivo"${aceita === "sem_pdf" ? ' title="Este agente roda no Codex: lê imagens e texto, não PDF"' : ""}>${CLIPE}</button><input type="file" id="composer-arquivos" multiple accept="${accept}" hidden data-aceita="${aceita}" />`
+    : "";
+  const resumo = aceita ? `<span class="anexos-resumo" id="composer-resumo"></span>` : "";
+  const dica = aceita ? " · arraste ou cole imagens e PDFs" : sugestoes.length ? " · @ menciona um bot" : "";
+  return `<div class="composer"><div class="box${aceita ? " com-anexos" : ""}">${lista}${anexar}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  <p class="nota">Enter envia · Shift+Enter quebra linha${dica}</p></div>`;
 }
