@@ -10,6 +10,8 @@ describe("rotuloFerramenta", () => {
     expect(rotuloFerramenta("mcp__nod__gmail__search_threads")).toBe("Consultou Gmail");
     expect(rotuloFerramenta("mcp__nod__gmail__label_thread")).toBe("Alterou Gmail");
     expect(rotuloFerramenta("mcp__nod__google-calendar__list_events")).toBe("Consultou Google calendar");
+    expect(rotuloFerramenta("mcp__nod__gmail__GMAIL_FETCH_EMAILS")).toBe("Consultou Gmail");
+    expect(rotuloFerramenta("mcp__nod__gmail__GMAIL_ADD_LABEL_TO_EMAIL")).toBe("Alterou Gmail");
   });
   it("computador e pasta de trabalho viram um rótulo só", () => {
     expect(rotuloFerramenta("mcp__nod__computador_observar")).toBe("Usou o computador");
