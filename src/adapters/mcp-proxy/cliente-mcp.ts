@@ -203,6 +203,8 @@ function transporteHttp(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
   };
 }
 
+const RESPOSTA_GRANDE = "resposta_mcp_grande: o resultado passou de 1 MiB e foi descartado. Refaça a chamada pedindo menos itens ou sem o corpo completo (ex.: limite de resultados menor, só metadados).";
+
 export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
   const timeoutMs = cfg.timeoutMs ?? 8_000;
   const transporte = cfg.transporte === "stdio" ? transporteStdio(cfg, timeoutMs) : transporteHttp(cfg, timeoutMs);
@@ -260,6 +262,10 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
           // Erro JSON-RPC da ferramenta (ex.: -32602) não é queda do conector: volta como isError para o modelo.
           if (e instanceof ErroTransporteMcp && e.motivo === "falha_tecnica" && typeof e.cause === "string" && /^-\d+ /.test(e.cause)) {
             return { conteudo: e.cause, isError: true };
+          }
+          // Resposta acima do teto (resposta-http) também não é queda: o conector respondeu; o modelo refaz pedindo menos.
+          if (e instanceof ErroTransporteMcp && e.cause instanceof Error && e.cause.message === "resposta_mcp_grande") {
+            return { conteudo: RESPOSTA_GRANDE, isError: true };
           }
           throw e;
         }
