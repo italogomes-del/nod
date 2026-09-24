@@ -45,12 +45,12 @@ export interface DepsRoteador {
 
 const PREFIXO_TENANT = /^\/api\/t\/([^/]+)(\/.*)?$/;
 /**
- * definido em 2026-09-16 (EMENDA-L9 §2): todo grupo de path chamado `id` ou `mid` é um identificador de
+ * definido em 2026-09-16 (EMENDA-L9 §2): todo grupo de path chamado `id`, `mid` ou `aid` (anexo, 2026-09-24) é um identificador de
  * linha (uuid); fora do formato, a rota não existe (404) — nunca 22P02 do Postgres virando 500.
  * Grupos com outro nome (`nome` de ferramenta) não passam por aqui.
  */
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const GRUPOS_UUID = new Set(["id", "mid"]);
+const GRUPOS_UUID = new Set(["id", "mid", "aid"]);
 const PREFIXO_INTERNO = /^\/api\/interno(\/.*)$/;
 const PREFIXO_PUBLICO = /^\/api(\/.*)$/;
 

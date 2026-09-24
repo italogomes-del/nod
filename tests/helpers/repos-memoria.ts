@@ -1,3 +1,4 @@
+import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { PermissaoPermanente } from "../../src/contracts/permissao-permanente.ts";
@@ -41,6 +42,7 @@ export type BancoMemoria = {
   memorias: Memoria[];
   conversas: Conversa[];
   mensagens: Mensagem[];
+  anexos: { tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number }[];
   propostas: Proposta[];
   turnos: Turno[];
   entregas: Set<string>;
@@ -77,6 +79,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     memorias: [],
     conversas: [],
     mensagens: [],
+    anexos: [],
     propostas: [],
     turnos: [],
     entregas: new Set(),
@@ -373,6 +376,44 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    anexos: {
+      async criar(a) {
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), conversaId: a.conversaId, mensagemId: null, nome: a.nome, mime: a.mime, bytes: Buffer.from(a.conteudo), criadoEm: Date.now() };
+        b.anexos.push(l);
+        return { id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength, conversaId: l.conversaId, mensagemId: null };
+      },
+      async buscar(id) {
+        const l = doTenant(b.anexos).find((x) => x.id === id);
+        return l ? { id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength, conversaId: l.conversaId, mensagemId: l.mensagemId } : null;
+      },
+      async conteudo(id) {
+        const l = doTenant(b.anexos).find((x) => x.id === id);
+        return l ? { meta: { id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength, conversaId: l.conversaId, mensagemId: l.mensagemId }, bytes: l.bytes } : null;
+      },
+      async prender(ids, p) {
+        return ids.flatMap((id) => {
+          const l = doTenant(b.anexos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.conversaId === p.conversaId && x.mensagemId === null);
+          if (!l) return [];
+          l.mensagemId = p.mensagemId;
+          return [{ id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength }];
+        });
+      },
+      async daMensagens(ids) {
+        const saida = new Map<string, { id: string; nome: string; mime: MimeAnexo; tamanho: number }[]>();
+        for (const l of doTenant(b.anexos)) {
+          if (!l.mensagemId || !ids.includes(l.mensagemId)) continue;
+          saida.set(l.mensagemId, [...(saida.get(l.mensagemId) ?? []), { id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength }]);
+        }
+        return saida;
+      },
+      async metas(ids) {
+        return ids.flatMap((id) => {
+          const l = doTenant(b.anexos).find((x) => x.id === id);
+          return l ? [{ id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength }] : [];
+        });
+      },
+    },
+
     mensagens: {
       async criar(m) {
         const mensagem: Mensagem = {
@@ -472,6 +513,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           reenvios: t.reenvios ?? 0,
           pararSolicitadoEm: null,
           entradaTexto: t.entradaTexto,
+          entradaAnexos: [...(t.entradaAnexos ?? [])],
           entradaConfianca: t.entradaConfianca,
           custoUsd: null,
           modelo: t.modelo,

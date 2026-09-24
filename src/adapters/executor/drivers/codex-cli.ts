@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { EventoStream, SinaisTurno } from "../../../contracts/turno.ts";
+import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import { interpretarCodex } from "../../../domain/codex-stream.ts";
 import { classificarResultado, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -30,7 +31,7 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * contexto aqui sem sondar o CLI real. Assimetria inversa a registrar: este driver já tem deadline
  * absoluto por `prazoMs` (setTimeout → interromper), que o driver do Claude não tem.
  */
-export function argsCodex(plano: PlanoTurno, config: string): string[] {
+export function argsCodex(plano: PlanoTurno, config: string, imagens: readonly string[] = []): string[] {
   const pastas = plano.workspacePastas ?? null;
   return ["exec", ...FLAGS_CODEX.filter((f) => f !== "--sandbox"), "--sandbox", pastas ? "workspace-write" : "read-only", "--color", "never", "--model", plano.entrada.modelo,
     ...(pastas ? ["--cd", pastas.ativa] : []),
@@ -41,7 +42,9 @@ export function argsCodex(plano: PlanoTurno, config: string): string[] {
     "-c", "features.browser_use=false", "-c", "features.browser_use_external=false", "-c", "features.computer_use=false",
     "-c", "features.in_app_browser=false", "-c", "features.remote_plugin=false", "-c", "features.image_generation=false",
     "-c", "features.code_mode_host=false", "-c", "features.workspace_dependencies=false", "-c", "features.shell_snapshot=false",
-    "-c", "features.skip_host_skill_discovery=true", "-c", "features.skill_search=false", "-c", "project_doc_max_bytes=0", "-"];
+    "-c", "features.skip_host_skill_discovery=true", "-c", "features.skill_search=false", "-c", "project_doc_max_bytes=0",
+    // ADR-045: imagem anexada entra como arquivo do turno; o texto continua pelo stdin ("-").
+    ...imagens.flatMap((i) => ["--image", i]), "-"];
 }
 
 /** definido em 2026-09-18: configuração aponta para um launcher privado; token nunca em argv. */
@@ -90,7 +93,11 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
               try {
                 const launcher = join(dir, "proxy.mjs");
                 await writeFile(launcher, `process.env.NOD_URL = ${JSON.stringify(lig.urlNod)};\nprocess.env.NOD_TOKEN_TURNO = ${JSON.stringify(plano.tokenDeTurno)};\nconst proxy = await import(${JSON.stringify(pathToFileURL(lig.proxyPath).href)});\nawait proxy.main();\n`, { mode: 0o600, flag: "wx" });
-                const args = argsCodex(plano, configMcpCodex(plano, { ...lig, proxyPath: launcher }));
+                // ADR-045 (não homologado: o Codex não estava instalado na máquina da medição): imagem por
+                // --image, texto de arquivo no prompt, PDF vira linha de "não lido".
+                const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
+                const entrada = anexos.length > 0 ? await entradaCodex(plano.entrada.texto, anexos, dir) : { texto: plano.entrada.texto, imagens: [] };
+                const args = argsCodex(plano, configMcpCodex(plano, { ...lig, proxyPath: launcher }), entrada.imagens);
                 const pendentes: Promise<void>[] = [];
                 proc = iniciarProcesso({ bin, args, env, cwd: dir, sigtermParaSigkillMs: lig.sigtermParaSigkillMs, aoLinha(linha) {
                   for (const ev of interpretarCodex(linha)) {
@@ -105,7 +112,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 if (parado) await proc.interromper();
                 else {
                   await sinks.sinal("promptSubmitted"); sinais.promptSubmitted = true;
-                  proc.escrever(plano.entrada.texto); proc.fecharStdin();
+                  proc.escrever(entrada.texto); proc.fecharStdin();
                 }
                 const fim = await proc.fim;
                 await Promise.all(pendentes);

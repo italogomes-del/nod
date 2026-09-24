@@ -134,6 +134,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     executor,
     // 0005: --resume só para o MESMO executor que gravou a sessão; senão sessão nova (--session-id).
     sessaoCli,
+    anexos: await deps.repos.anexos.metas(turno.entradaAnexos),
     contextoConversa,
     pessoaNome: pessoa?.nome ?? "a pessoa",
     colegas: visiveis.filter((a) => a.id !== agente.id && a.ownerId === agente.ownerId && a.confirmado && !a.oculto),

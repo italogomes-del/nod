@@ -8,6 +8,7 @@ import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
+import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
@@ -90,7 +91,7 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
 export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"] as const;
 
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean }): { args: string[]; sessaoCli: string } {
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean }): { args: string[]; sessaoCli: string } {
   const { plano } = entrada;
   const pastas = plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio.
@@ -100,6 +101,8 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
   const extras = (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
   const args = [
     "-p",
+    // ADR-045: com anexo, a entrada é uma linha stream-json com blocos de imagem/PDF em vez de texto puro.
+    ...(entrada.streamJson ? ["--input-format", "stream-json"] : []),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -216,7 +219,14 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
                 // Fail-closed: sem --autocompact no help da versão instalada, o turno roda sem ela.
                 const compactar = (flagsNoHelp ?? []).includes("--autocompact");
-                const { args } = montarArgs({ plano: pastas ? plano : { ...plano, workspacePastas: null }, mcpJson, compactar });
+                // Fail-closed como --autocompact: sem --input-format no help, o turno segue só com o texto e
+                // uma linha por anexo dizendo que não foi lido — nunca some com o arquivo em silêncio.
+                const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
+                const streamJson = anexos.length > 0 && (flagsNoHelp ?? []).includes("--input-format");
+                const entradaStdin = streamJson
+                  ? mensagemClaude(plano.entrada.texto, anexos)
+                  : [plano.entrada.texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
+                const { args } = montarArgs({ plano: pastas ? plano : { ...plano, workspacePastas: null }, mcpJson, compactar, streamJson });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs);
 
                 const pendentes: Promise<void>[] = [];
@@ -245,7 +255,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 // ADR-009: promptSubmitted é gravado ANTES de o prompt sair para o CLI.
                 sinais = { ...sinais, promptSubmitted: true };
                 await sinks.sinal("promptSubmitted");
-                proc.escrever(plano.entrada.texto);
+                proc.escrever(entradaStdin);
                 proc.fecharStdin();
 
                 const fim = await proc.fim;

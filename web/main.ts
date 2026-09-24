@@ -27,6 +27,7 @@ import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, renderChamada, renderIncidentes, renderSuaVez } from "./telas/sua-vez.ts";
+import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -249,7 +250,7 @@ function renderPrincipal(): void {
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(`Escreva uma mensagem para ${botGerido(t.agenteId)?.nome ?? "o bot"}…`, (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome)) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(`Escreva uma mensagem para ${botGerido(t.agenteId)?.nome ?? "o bot"}…`, (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness) }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -301,6 +302,7 @@ function renderPrincipal(): void {
     regiao("composer", composer?.html ?? "");
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     ta?.focus();
+    redesenharAnexos();
   }
   // definido em 2026-09-17: hidratação do nome atualiza só o placeholder; nunca recria o textarea nem perde rascunho.
   const campoMensagem = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
@@ -463,15 +465,83 @@ async function enviarComposer(): Promise<void> {
   const alvo = conversaAtual();
   if (!ta || !alvo || !api) return;
   const texto = ta.value.trim();
-  if (!texto) return;
+  const fila = alvo.salaId ? [] : anexosPendentes.get(alvo.conversaId) ?? [];
+  // Não sai com arquivo pela metade: o clique espera o upload terminar (o chip mostra a barra).
+  if (fila.some((i) => i.estado === "enviando")) return;
+  const ids = fila.flatMap((i) => (i.estado === "pronto" && i.meta ? [i.meta.id] : []));
+  if (!texto && ids.length === 0) return;
   const a = api;
   await agir(async () => {
     if (alvo.salaId) await a.postarNaSala(alvo.salaId, texto);
-    else await a.enviar(alvo.conversaId, texto);
+    else await a.enviar(alvo.conversaId, texto, ids);
     ta.value = "";
     ta.style.height = "auto";
+    limparAnexos(alvo.conversaId);
     dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   });
+}
+
+// ---- anexos (ADR-045) ----------------------------------------------------------------------------
+// A fila vive fora do reducer: são File e objectURL do navegador, não estado da API. Por conversa,
+// para o rascunho de anexos sobreviver a ir e voltar entre conversas como o texto sobrevive.
+const anexosPendentes = new Map<string, ItemAnexo[]>();
+
+function aceitaDo(harness: string | undefined): Aceita | undefined {
+  if (harness === "codex-cli") return "sem_pdf";
+  if (harness === undefined || harness === "auto" || harness === "claude-cli") return "tudo";
+  return undefined;
+}
+
+function redesenharAnexos(): void {
+  const alvo = conversaAtual();
+  const fila = document.getElementById("composer-anexos");
+  if (!fila || !alvo || alvo.salaId) return;
+  const itens = anexosPendentes.get(alvo.conversaId) ?? [];
+  fila.innerHTML = renderItensAnexo(itens);
+  fila.hidden = itens.length === 0;
+  const r = document.getElementById("composer-resumo");
+  if (r) r.textContent = resumoAnexos(itens);
+}
+
+function limparAnexos(conversaId: string): void {
+  for (const i of anexosPendentes.get(conversaId) ?? []) if (i.previa) URL.revokeObjectURL(i.previa);
+  anexosPendentes.delete(conversaId);
+  redesenharAnexos();
+}
+
+function adicionarArquivos(arquivos: readonly File[]): void {
+  const alvo = conversaAtual();
+  const input = document.getElementById("composer-arquivos") as HTMLInputElement | null;
+  if (!alvo || alvo.salaId || !api || !input || arquivos.length === 0) return;
+  const aceita = (input.dataset.aceita as Aceita | undefined) ?? "tudo";
+  const conversaId = alvo.conversaId;
+  const fila = anexosPendentes.get(conversaId) ?? [];
+  anexosPendentes.set(conversaId, fila);
+  const a = api;
+  for (const arquivo of arquivos) {
+    const validos = fila.filter((i) => i.estado !== "erro").length;
+    const mime = mimeDe(arquivo);
+    const recusa = validos >= POR_MENSAGEM ? `Até ${POR_MENSAGEM} arquivos por mensagem.` : motivoRecusa(arquivo, aceita);
+    const item: ItemAnexo = { chave: crypto.randomUUID(), nome: arquivo.name, mime, tamanho: arquivo.size, estado: recusa ? "erro" : "enviando", progresso: 0,
+      ...(recusa ? { erro: recusa } : {}), ...(!recusa && mime.startsWith("image/") ? { previa: URL.createObjectURL(arquivo) } : {}) };
+    fila.push(item);
+    if (recusa) continue;
+    void a.subirAnexo(conversaId, arquivo, mime, (f) => { item.progresso = f; redesenharAnexos(); })
+      .then((meta) => { item.estado = "pronto"; item.meta = meta; })
+      .catch(() => { item.estado = "erro"; item.erro = "Não foi possível enviar. Tente de novo."; })
+      .finally(redesenharAnexos);
+  }
+  redesenharAnexos();
+}
+
+function removerAnexo(chave: string): void {
+  const alvo = conversaAtual();
+  if (!alvo) return;
+  const fila = anexosPendentes.get(alvo.conversaId) ?? [];
+  const item = fila.find((i) => i.chave === chave);
+  if (item?.previa) URL.revokeObjectURL(item.previa);
+  anexosPendentes.set(alvo.conversaId, fila.filter((i) => i.chave !== chave));
+  redesenharAnexos();
 }
 
 function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; textoFinal?: string }[] {
@@ -578,6 +648,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.permitirPasta(el.dataset.id ?? "", el.dataset.pasta);
     dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   }),
+  anexar: () => document.getElementById("composer-arquivos")?.click(),
+  "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
@@ -783,6 +855,11 @@ document.addEventListener("submit", (ev) => {
 // Contador ao vivo da aprovação em lista e autocomplete de @menção.
 document.addEventListener("change", (ev) => {
   const cb = ev.target as HTMLInputElement;
+  if (cb.id === "composer-arquivos") {
+    adicionarArquivos([...(cb.files ?? [])]);
+    cb.value = "";
+    return;
+  }
   if (cb.matches('select[name="inteligencia"]')) {
     const select = ev.target as HTMLSelectElement;
     const chip = select.closest(".inteligencia-card")?.querySelector(".inteligencia-chip");
@@ -799,6 +876,49 @@ document.addEventListener("change", (ev) => {
   const raiz = cb.closest("[data-decisao]");
   const contador = raiz?.querySelector("[data-contador]");
   if (contador && raiz) contador.textContent = String(raiz.querySelectorAll("input[data-item]:checked").length);
+});
+
+// Colar um print no campo (⌘V) anexa; texto colado segue normal.
+document.addEventListener("paste", (ev) => {
+  if ((ev.target as HTMLElement).id !== "composer-texto" || !document.getElementById("composer-arquivos")) return;
+  const arquivos = [...(ev.clipboardData?.files ?? [])];
+  if (arquivos.length === 0) return;
+  ev.preventDefault();
+  adicionarArquivos(arquivos);
+});
+
+// Arrastar sobre a conversa mostra onde soltar; só quando o composer aceita anexo.
+let arrastando = 0;
+const temArquivos = (ev: DragEvent) => [...(ev.dataTransfer?.types ?? [])].includes("Files");
+function areaSoltar(visivel: boolean): void {
+  const timeline = document.getElementById("timeline");
+  let area = document.getElementById("anexo-soltar");
+  if (!visivel) { area?.remove(); return; }
+  if (area || !timeline) return;
+  const nome = botGerido(estado.tela.tipo === "conversa" ? estado.tela.agenteId : undefined)?.nome ?? "o bot";
+  area = document.createElement("div");
+  area.id = "anexo-soltar";
+  area.className = "anexo-soltar";
+  area.innerHTML = `<div><b>Solte para mandar para ${esc(nome)}</b><span>Imagens, PDF e arquivos de texto · até 10 MB cada</span></div>`;
+  timeline.parentElement?.appendChild(area);
+}
+document.addEventListener("dragenter", (ev) => {
+  if (!temArquivos(ev) || !document.getElementById("composer-arquivos")) return;
+  arrastando += 1;
+  areaSoltar(true);
+});
+document.addEventListener("dragover", (ev) => { if (temArquivos(ev) && document.getElementById("composer-arquivos")) ev.preventDefault(); });
+document.addEventListener("dragleave", (ev) => {
+  if (!temArquivos(ev)) return;
+  arrastando = Math.max(0, arrastando - 1);
+  if (arrastando === 0) areaSoltar(false);
+});
+document.addEventListener("drop", (ev) => {
+  if (!temArquivos(ev) || !document.getElementById("composer-arquivos")) return;
+  ev.preventDefault();
+  arrastando = 0;
+  areaSoltar(false);
+  adicionarArquivos([...(ev.dataTransfer?.files ?? [])]);
 });
 
 document.addEventListener("keydown", (ev) => {

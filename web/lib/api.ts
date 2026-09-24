@@ -1,3 +1,4 @@
+import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente } from "../../src/contracts/agente.ts";
@@ -57,6 +58,24 @@ async function pedir<T>(metodo: string, url: string, corpo?: unknown): Promise<T
   return lido as T;
 }
 
+function subir(url: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void): Promise<AnexoMeta> {
+  return new Promise((resolver, rejeitar) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", url);
+    x.setRequestHeader("content-type", mime);
+    x.setRequestHeader("x-nod-nome", encodeURIComponent(arquivo.name));
+    x.upload.onprogress = (e) => { if (e.lengthComputable) aoProgresso?.(e.loaded / e.total); };
+    x.onerror = () => rejeitar(new ErroApi(0, "falha_interna", "falha de rede"));
+    x.onload = () => {
+      let lido: { codigo?: string; mensagem?: string } & Partial<AnexoMeta> = {};
+      try { lido = JSON.parse(x.responseText) as typeof lido; } catch { lido = {}; }
+      if (x.status >= 200 && x.status < 300) resolver(lido as AnexoMeta);
+      else rejeitar(new ErroApi(x.status, lido.codigo ?? "falha_interna", lido.mensagem ?? "falha"));
+    };
+    x.send(arquivo);
+  });
+}
+
 export type Api = ReturnType<typeof criarApi>;
 
 export function criarApi(escopo: Escopo) {
@@ -86,7 +105,10 @@ export function criarApi(escopo: Escopo) {
     executor: () => get<EstadoExecutor>("executor"),
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
-    enviar: (conversaId: string, texto: string) => post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, { texto }),
+    enviar: (conversaId: string, texto: string, anexos: readonly string[] = []) => post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, anexos.length ? { texto, anexos } : { texto }),
+    /** ADR-045: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
+    subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
+    urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,
     pararConversa: (conversaId: string) => post<FaixaParada>(`conversas/${conversaId}/parar`),
     pararTudo: () => post<FaixaParada>("parar"),
     turno: (id: string) => get<{ turno: Turno }>(`turnos/${id}`),

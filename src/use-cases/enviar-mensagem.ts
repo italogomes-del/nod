@@ -3,6 +3,8 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
+import type { IdHarness } from "../contracts/harness.ts";
+import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -12,6 +14,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 export type EntradaEnviarMensagem = {
   conversaId: string;
   texto: string;
+  /** ADR-045: ids de anexos já enviados (soltos) desta conversa. Com anexo, o texto pode vir vazio. */
+  anexos?: readonly string[];
   /** Só para conversa de SALA (a própria já sabe o agente): quem responde, decidido por postarNaSala (L7). */
   agenteId?: string;
   /** Prazo de DECISÃO do turno (relógio de parede, ADR-007); default 24 h. */
@@ -31,7 +35,9 @@ export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: M
  */
 export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensagem> = async (deps, input) => {
   const texto = typeof input.texto === "string" ? input.texto.trim() : "";
-  if (texto === "") throw new ErroDeDominio("texto_vazio");
+  const anexoIds = [...new Set(input.anexos ?? [])];
+  if (texto === "" && anexoIds.length === 0) throw new ErroDeDominio("texto_vazio");
+  if (excedeQuantidade(anexoIds.length)) throw new ErroDeDominio("entrada_invalida", { cause: "anexos demais" });
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
   const agenteId = conversa.tipo === "propria" ? conversa.agenteId : (input.agenteId ?? null);
@@ -45,8 +51,15 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   await deps.repos.paradas.encerrarAbertas({ conversaId: conversa.id, agora });
 
   const autoria = autoriaPessoa(deps.escopo, executor);
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel" });
-  if (!mensagem) throw new ErroDeDominio("nao_permitido");
+  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel" });
+  if (!criada) throw new ErroDeDominio("nao_permitido");
+  // Prende só o que é solto, desta conversa e da dona; qualquer id que sobrar derruba a tx inteira.
+  const anexos = await deps.repos.anexos.prender(anexoIds, { conversaId: conversa.id, mensagemId: criada.id });
+  if (anexos.length !== anexoIds.length) throw new ErroDeDominio("entrada_invalida", { cause: "anexo de outra conversa, já enviado ou inexistente" });
+  // PDF para um agente cujo motor declarado não lê PDF: recusa escrita em vez de o modelo não ver o arquivo.
+  const naoLido = agente.harness && agente.harness !== "auto" ? anexos.find((a) => !motorLe(agente.harness as IdHarness, tipoDoAnexo(a.mime))) : undefined;
+  if (naoLido) throw new ErroDeDominio("entrada_invalida", { cause: `${agente.harness} não lê ${tipoDoAnexo(naoLido.mime)}` });
+  const mensagem: Mensagem = anexos.length > 0 ? { ...criada, anexos } : criada;
 
   const inventario = input.inventario ?? (await deps.repos.inventario.buscar(motorDe(executor))) ?? inventarioAusente(agora);
   const localidade = resolverLocalidade({ origem, tocaAprendiz: false, motorExigido: agente.modelo, inventario });
@@ -59,6 +72,7 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
     profundidade: 0,
     entradaTexto: texto,
+    entradaAnexos: anexos.map((a) => a.id),
     entradaConfianca: "confiavel",
     modelo: agente.modelo,
     harness: agente.harness,
@@ -105,10 +119,12 @@ export async function mensagemExecutorIndisponivel(
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
-  const [mensagens, turnosPendentes, propostas] = await Promise.all([
+  const [lidas, turnosPendentes, propostas] = await Promise.all([
     deps.repos.mensagens.listarDaConversa(conversa.id, input.limite),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),
   ]);
+  const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id));
+  const mensagens = anexos.size === 0 ? lidas : lidas.map((m) => (anexos.has(m.id) ? { ...m, anexos: anexos.get(m.id) } : m));
   return { data: { conversa, mensagens, turnosPendentes, propostas } };
 };
