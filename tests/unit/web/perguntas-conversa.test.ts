@@ -48,7 +48,7 @@ function resposta(id: string, decisaoId: string, texto: string, criadoEm: number
 const nina = { id: "a", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "E-mails", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c", confirmado: true, fixado: false, oculto: false, naoLido: false, secao: null, computadorForaDoAr: null } as never;
 
 function conversa(mensagens: Mensagem[]): ConversaEstado {
-  return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], atividades: {}, carregadaEm: 0 };
+  return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], atividades: {}, carregadaEm: 0 };
 }
 
 function cenario(mensagens: Mensagem[], itens: Item[]): Estado {

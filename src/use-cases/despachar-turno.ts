@@ -2,6 +2,7 @@ import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from "./autoria-evento.ts";
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
@@ -52,9 +53,15 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const inventario = input.inventario ?? (await deps.repos.inventario.buscar(motorDe(executor))) ?? inventarioAusente(agora);
   if (inventario.estado !== "pronto") return recusarPorExecutor(deps, { turno, executor, inventario, agora });
 
+  // Fila lida junta (definido em 2026-09-24), só depois dos gates: um turno recusado não arrasta as outras
+  // falas. As demais pendentes desta conversa entram neste turno e cada uma sai 'absorvido'.
+  const { turno: comFila, absorvidos } = await deps.repos.turnos.absorverPendentes(turno, entradaDaFila);
+  const autoria = autoriaPessoa(deps.escopo, executor);
+  const events = absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: comFila.id } }));
+
   try {
-    const plano = await deps.tx((trx) => deps.services.planos.emitir(trx, turno.id, input.machineId));
-    return { data: { plano, turno, motivo: null } };
+    const plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
+    return { data: { plano, turno: comFila, motivo: null }, events };
   } catch (e) {
     // montarPlano recusa a localidade (inventário mudou entre o gate e o plano): mesmo caminho, nunca silêncio.
     if (ehErroDeDominio(e) && e.codigo === "executor_indisponivel") return recusarPorExecutor(deps, { turno, executor, inventario, agora });

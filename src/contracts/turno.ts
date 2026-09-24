@@ -57,6 +57,10 @@ export type Turno = {
   modelo: string;
   harness?: PreferenciaHarness;
   criadoEm: EpochMs;
+  /** Fala da pessoa que disparou o turno (0024). Não é `mensagens.turno_id`, que é a fala que o turno produziu. */
+  mensagemOrigemId?: string | null;
+  /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
+  absorvidoPor?: string | null;
 };
 
 export type TokensTurno = {

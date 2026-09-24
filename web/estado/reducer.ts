@@ -71,6 +71,8 @@ export type Estado = {
   executor: EstadoExecutor | null;
   conversas: Record<string, ConversaEstado>;
   turnosVivos: Record<string, TurnoVivo>;
+  /** Cancelar da fila tem 5 s de Desfazer antes de ir ao servidor (turnoId → instante do clique). */
+  cancelando: Record<string, number>;
   salas: { sala: Sala; membros: MembroSala[] }[];
   suaVez: SuaVezDto | null;
   rotinas: RotinaDto[];
@@ -109,6 +111,8 @@ export type Acao =
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
   | { tipo: "tick"; agora: number }
+  | { tipo: "cancelando-turno"; turnoId: string; agora: number }
+  | { tipo: "desfazer-cancelamento"; turnoId: string }
   | { tipo: "conexao"; estado: EstadoConexao; tentativa: number; proximaEmMs: number | null }
   | { tipo: "frame"; frame: FrameSse; agora: number }
   | { tipo: "hidratar-gestao"; gestao: FrotaDto }
@@ -141,6 +145,7 @@ export const estadoInicial: Estado = {
   executor: null,
   conversas: {},
   turnosVivos: {},
+  cancelando: {},
   salas: [],
   suaVez: null,
   rotinas: [],
@@ -298,6 +303,14 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
       };
+    case "cancelando-turno":
+      return { ...estado, cancelando: { ...estado.cancelando, [acao.turnoId]: acao.agora } };
+    case "desfazer-cancelamento": {
+      if (!(acao.turnoId in estado.cancelando)) return estado;
+      const cancelando = { ...estado.cancelando };
+      delete cancelando[acao.turnoId];
+      return { ...estado, cancelando };
+    }
     case "tick": {
       // definido em 2026-09-24 (ADR-045): nenhum evento diz que o Mac voltou (o fechamento do aviso é do
       // varredor, no modo compartilhado). Enquanto houver aviso EM CURSO, cada tick relê "Sua vez".
@@ -317,11 +330,19 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-executor":
       return { ...estado, executor: acao.executor };
     case "hidratar-conversa": {
-      const anterior = estado.conversas[acao.conversa.conversa.id];
-      const vivosDaConversa = new Set(Object.values(estado.turnosVivos).filter((t) => t.conversaId === acao.conversa.conversa.id).map((t) => t.turnoId));
+      const conversaId = acao.conversa.conversa.id;
+      const anterior = estado.conversas[conversaId];
+      // Turno aberto que a web não viu nascer (página recarregada no meio dele): o REST o devolve e ele
+      // volta a ser vivo, com o `desde` do banco. O frame turno.iniciado não se repete para quem chegou depois.
+      const turnosVivos = { ...estado.turnosVivos };
+      for (const t of acao.conversa.turnosEmCurso ?? []) {
+        if (turnosVivos[t.id]) continue;
+        turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde };
+      }
+      const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
       const atividades: Record<string, AtividadeTurno> = {};
       for (const [turnoId, t] of Object.entries(anterior?.atividades ?? {})) if (vivosDaConversa.has(turnoId)) atividades[turnoId] = t;
-      return { ...estado, conversas: { ...estado.conversas, [acao.conversa.conversa.id]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
+      return { ...estado, turnosVivos, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
     }
     case "hidratar-sua-vez": {
       // A escolha do campo só vale enquanto a conversa tem pergunta aberta: respondida ou deixada pra lá

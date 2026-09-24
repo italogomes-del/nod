@@ -18,7 +18,8 @@ export function urlServidor(valor: unknown, desenvolvimento = false): string {
 export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void }) {
   const f = o.fetchImpl ?? fetch;
   let anuncio: AnuncioMaquina | null = null;
-  let trechos: TrechoVivo[] = [];
+  /** Um buffer por turno: com o pool de laços, dois turnos renovam em paralelo e não podem trocar texto. */
+  const trechos = new Map<string, TrechoVivo[]>();
   const ativos = new Set<AbortController>();
   async function chamar<T>(nome: string, corpo: unknown): Promise<T> {
     const ctrl = new AbortController(); ativos.add(ctrl);
@@ -47,11 +48,12 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       }
     },
     async renovar(p) {
-      const enviar = trechos; trechos = [];
+      const enviar = trechos.get(p.turnoId) ?? []; trechos.delete(p.turnoId);
       try { return await chamar("renovar", { ...p, trechos: enviar }); }
       catch { return { ativo: false, versaoMinimaApp: o.versao }; }
     },
     async entregar(e) {
+      trechos.delete(e.turnoId);
       for (let tentativa = 0; ; tentativa++) {
         try { await chamar("entregar", e); return; }
         catch (erro) {
@@ -62,26 +64,30 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     },
     async desconectar() { await chamar("desconectar", {}); },
   };
-  /** Teto de 16k de texto por renovação (o mesmo da rota): descarta os trechos mais antigos. */
-  function aparar() {
-    let total = trechos.reduce((n, t) => n + ("texto" in t ? t.texto.length : 0), 0);
-    while (total > 16_000 && trechos.length > 0) {
-      const t = trechos[0]!;
-      if ("texto" in t && total - t.texto.length < 16_000) { trechos[0] = { texto: t.texto.slice(total - 16_000) }; break; }
+  /** Teto de 16k de texto por renovação (o mesmo da rota): descarta os trechos mais antigos do turno. */
+  function aparar(turnoId: string) {
+    let fila = trechos.get(turnoId) ?? [];
+    let total = fila.reduce((n, t) => n + ("texto" in t ? t.texto.length : 0), 0);
+    while (total > 16_000 && fila.length > 0) {
+      const t = fila[0]!;
+      if ("texto" in t && total - t.texto.length < 16_000) { fila[0] = { texto: t.texto.slice(total - 16_000) }; break; }
       total -= "texto" in t ? t.texto.length : 0;
-      trechos.shift();
+      fila.shift();
     }
-    if (trechos.length > 2_000) trechos = trechos.slice(-2_000);
+    if (fila.length > 2_000) fila = fila.slice(-2_000);
+    trechos.set(turnoId, fila);
   }
   return {
     ponte,
-    delta(texto: string) {
-      const ultimo = trechos[trechos.length - 1];
-      if (ultimo && "texto" in ultimo) trechos[trechos.length - 1] = { texto: ultimo.texto + texto };
-      else trechos.push({ texto });
-      aparar();
+    delta(turnoId: string, texto: string) {
+      const fila = trechos.get(turnoId) ?? [];
+      const ultimo = fila[fila.length - 1];
+      if (ultimo && "texto" in ultimo) fila[fila.length - 1] = { texto: ultimo.texto + texto };
+      else fila.push({ texto });
+      trechos.set(turnoId, fila);
+      aparar(turnoId);
     },
-    ferramenta(nome: string) { trechos.push({ ferramenta: nome }); aparar(); },
+    ferramenta(turnoId: string, nome: string) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []), { ferramenta: nome }]); aparar(turnoId); },
     cancelar() { for (const c of ativos) c.abort(); },
   };
 }

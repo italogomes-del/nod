@@ -44,16 +44,18 @@ describe("enviarMensagem: mensagem + turno + outbox na mesma tx (ADR-010), local
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
     const m1 = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "primeira", inventario: PRONTO });
-    const m2 = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "segunda", inventario: PRONTO });
     const maquina = randomUUID();
-
+    // A 2ª chega com a 1ª já rodando (duas pendentes juntas seriam lidas num turno só: fila-lida-junta).
     const d1 = await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO });
+    const m2 = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "segunda", inventario: PRONTO });
     expect(d1.data.plano?.turnoId).toBe(m1.data.turno.id);
     expect(d1.data.plano?.entrada.texto).toBe("primeira");
     const d2 = await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO });
     expect(d2.data).toMatchObject({ plano: null, motivo: "fila_vazia" });
     const lida = (await lerConversa(deps, { conversaId: criado.conversa.id })).data;
     expect(lida.turnosPendentes).toEqual([{ id: m2.data.turno.id, motivo: "agente_ocupado_em", conversaId: criado.conversa.id }]);
+    // O turno rodando também vem, para a web recriar o "trabalhando" depois de recarregar a página.
+    expect(lida.turnosEmCurso.map((t) => [t.id, t.estado])).toEqual([[m1.data.turno.id, "despachando"], [m2.data.turno.id, "pendente"]]);
     expect(lida.mensagens.map((m) => m.texto)).toEqual([expect.stringContaining("identidade"), "primeira", "segunda"]);
 
     await executar(deps, assentarTurno, {

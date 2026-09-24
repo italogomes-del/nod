@@ -48,6 +48,7 @@ import { servicoSala } from "../../use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { iniciarLaco } from "../executor/laco.ts";
+import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
@@ -513,9 +514,11 @@ export function comporApp(o: OpcoesCompor): App {
     });
   }
 
+  // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
   const iniciar: IniciarLaco = (p) =>
-    iniciarLaco({
+    iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
+      ponte,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
@@ -523,7 +526,7 @@ export function comporApp(o: OpcoesCompor): App {
       },
       aoIniciarTurno: (plano, adapter) => interruptor.registrar(plano.turnoId, () => adapter.interromper()),
       aoTerminarTurno: (plano) => interruptor.esquecer(plano.turnoId),
-    });
+    }), p.ponte);
 
   return {
     services,

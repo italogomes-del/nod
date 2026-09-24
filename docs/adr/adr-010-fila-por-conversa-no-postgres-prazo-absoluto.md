@@ -25,6 +25,24 @@ Este é o ADR que MAIS ganha com a mudança de premissa, e quem o lesse procuran
 
 `assentarTurno` lê o turno com `FOR UPDATE` (`turnosRepo.buscarTravado`). Medido no e2e: Parar (que marca `parar_solicitado_em`) e a entrega do laço correm em transações paralelas; a leitura sem trava via `NULL`, esperava o commit de Parar só no UPDATE seguinte e assentava `sem_progresso` em vez de `parado_pela_pessoa`. Com a trava, a leitura espera o commit e o motivo sai certo — ADR-009: quem decide o motivo é o servidor, e ele precisa ler o estado commitado.
 
+## Refinamento (2026-09-24, fila honesta e frota em paralelo)
+
+Três mudanças vieram de um caso real: a Nina ficou 30 min numa triagem de e-mails, a tela mostrava só "na fila", o Marlon mandou "fazer novamente" mais duas vezes (duas triagens a mais enfileiradas) e a Taga esperou o tempo todo.
+
+- **A conversa devolve os turnos abertos** (`turnosEmCurso`). A web recria o turno vivo depois de recarregar a página; antes ela só o conhecia pelo frame `turno.iniciado`, que não se repete.
+- **Cada mensagem na fila se cancela sozinha, e as que ficam são lidas juntas.**
+  - `turnos.mensagem_origem_id` (0024) liga o turno à fala que o disparou. Não é `mensagens.turno_id`, que continua sendo a fala que o turno produziu.
+  - O Cancelar (`POST /turnos/:id/cancelar`) só pega turno `pendente`.
+  - Ao reivindicar um turno disparado por fala da pessoa, os outros pendentes da mesma conversa e agente saem `interrompido`/`absorvido` com `absorvido_por`, e a entrada do vencedor vira a lista das falas.
+  - Isso nunca é requeue: nenhum turno volta a `pendente`.
+- **Pool elástico de laços por pessoa, sem teto** (decisão do Marlon). Sempre um laço ocioso puxando e mais um por turno rodando.
+  - A serialização que importa já estava aqui: mesma conversa e mesmo agente. O laço único serializava também agentes diferentes, sem motivo.
+  - O paralelismo máximo é o número de agentes com trabalho.
+  - Custo aceito: rotinas simultâneas de vários agentes abrem várias CLIs e gastam o limite da assinatura mais rápido.
+  - A rota da ponte desktop guarda um plano por turno, e o app tem um buffer de trechos por turno.
+
+Gatilho de reversão do pool: se o limite da assinatura estourar por paralelismo (rate_limit `rejected` no stream-json) mais de uma vez por semana, pôr teto configurável por pessoa.
+
 ## Gatilho de reversão
 
 Reabrir (trocar por fila externa) se, medido em produção: latência de reivindicação p95 > 500 ms com o pool do ADR-001, ou `outbox_abandonados` > 0 por dia durante duas semanas seguidas sem causa no consumidor, ou a fila precisar de fan-out entre serviços que não compartilham o Postgres.

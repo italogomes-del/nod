@@ -36,10 +36,12 @@ interface Linha {
   modelo: string;
   harness?: PreferenciaHarness;
   criado_em: Date;
+  mensagem_origem_id: string | null;
+  absorvido_por: string | null;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em, mensagem_origem_id, absorvido_por";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -68,6 +70,8 @@ function paraTurno(l: Linha): Turno {
     modelo: l.modelo,
     harness: l.harness ?? "auto",
     criadoEm: ms(l.criado_em),
+    mensagemOrigemId: l.mensagem_origem_id,
+    absorvidoPor: l.absorvido_por,
   };
 }
 
@@ -79,6 +83,8 @@ export type NovoTurno = {
   prazoEm: number;
   profundidade: Profundidade;
   entradaTexto: string;
+  /** Fala da pessoa que disparou o turno; a web põe "Na fila" e Cancelar embaixo dela. */
+  mensagemOrigemId?: string | null;
   /** ADR-045: anexos da mensagem que abriu o turno; o plano leva os metadados. */
   entradaAnexos?: readonly string[];
   entradaConfianca: Confianca;
@@ -114,11 +120,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
-          ${t.decididoPor ?? "regra:localidade"})
+          ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },
@@ -243,6 +249,39 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<Linha[]>`
         update turnos set estado = 'interrompido', motivo_interrupcao = ${motivo}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'despachando')
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /**
+     * Fila lida junta (definido em 2026-09-24): logo depois de reivindicar um turno disparado por fala da
+     * pessoa, os OUTROS pendentes da mesma conversa e do mesmo agente, também disparados por fala dela,
+     * saem como interrompido/'absorvido' apontando para ele, e a entrada dele vira a lista de todas as
+     * falas (entradaDaFila). Rotina, retomada e peer nunca entram nem absorvem. Só toca 'pendente', então
+     * um Cancelar que chegou antes deixa aquela mensagem de fora e um que chega depois recebe estado_invalido.
+     */
+    async absorverPendentes(turno: Turno, entrada: (textos: readonly string[]) => string): Promise<{ turno: Turno; absorvidos: Turno[] }> {
+      if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return { turno, absorvidos: [] };
+      const linhas = await conn<Linha[]>`
+        update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
+          and estado = 'pendente' and origem in ('conversa', 'sala') and mensagem_origem_id is not null and id <> ${turno.id}
+        returning ${conn.unsafe(COLUNAS)}`;
+      const absorvidos = linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+      if (absorvidos.length === 0) return { turno, absorvidos };
+      const anexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
+      const [l] = await conn<Linha[]>`
+        update turnos set entrada_texto = ${entrada([turno.entradaTexto, ...absorvidos.map((a) => a.entradaTexto)])}, entrada_anexos = ${anexos as string[]}::uuid[]
+        where tenant_id = ${escopo.tenantId} and id = ${turno.id}
+        returning ${conn.unsafe(COLUNAS)}`;
+      return { turno: l ? paraTurno(l) : turno, absorvidos };
+    },
+
+    /** Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. */
+    async cancelarPendente(id: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa', lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },

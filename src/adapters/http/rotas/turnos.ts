@@ -1,6 +1,7 @@
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Turno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { cancelarTurno } from "../../../use-cases/cancelar-turno.ts";
 import { retomarTurno } from "../../../use-cases/retomar-turno.ts";
 import type { CasoDeUso } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
@@ -28,6 +29,16 @@ export function criarRotasTurnos(d: DepsRotas): Rota[] {
       padrao: new RegExp(`^/turnos/${ID}$`),
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, lerTurno, { turnoId: ctx.params.id ?? "" }));
+      },
+    },
+    {
+      // definido em 2026-09-24: cancelar UMA mensagem da fila (o Cancelar embaixo dela); o Parar continua parando tudo.
+      metodo: "POST",
+      padrao: new RegExp(`^/turnos/${ID}/cancelar$`),
+      async handler(ctx) {
+        const r = await executar(ctx.escopo, cancelarTurno, { turnoId: ctx.params.id ?? "" });
+        const resposta: RespostaMutacao = { ok: true, ids: { turno: r.turno.id } };
+        ctx.json(200, resposta);
       },
     },
     {

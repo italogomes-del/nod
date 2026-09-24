@@ -96,6 +96,40 @@ function anexosDe(m: Mensagem, estado: Estado): string {
   return renderAnexosDaMensagem(m.anexos, (id) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(m.conversaId)}/anexos/${encodeURIComponent(id)}`);
 }
 
+type SituacaoFila = { tipo: "na_fila"; texto: string } | { tipo: "cancelando" } | { tipo: "cancelada" };
+
+/**
+ * Onde a mensagem da pessoa está na fila (definido em 2026-09-24): o turno que ela disparou ainda
+ * espera, está nos 5 s do Desfazer, ou foi cancelado antes de rodar. null = seguiu o fluxo normal.
+ */
+export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { turnoId: string }) | null {
+  if (m.autoria.autor_tipo !== "pessoa") return null;
+  const c = estado.conversas[m.conversaId];
+  if (!c) return null;
+  const cancelado = c.turnosCancelados.find((t) => t.mensagemId === m.id);
+  if (cancelado) return { tipo: "cancelada", turnoId: cancelado.id };
+  const emCurso = c.turnosEmCurso.find((t) => t.mensagemId === m.id);
+  if (!emCurso) return null;
+  if (emCurso.id in estado.cancelando) return { tipo: "cancelando", turnoId: emCurso.id };
+  // O estado VIVO manda: o frame turno.iniciado 'despachado' tira o chip antes do REST reler a conversa.
+  if (estado.turnosVivos[emCurso.id]?.estado !== "na_fila") return null;
+  const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
+  const nome = agente?.nome ?? "o agente";
+  const outra = c.turnosPendentes.find((p) => p.id === emCurso.id && p.conversaId !== c.conversa.id);
+  if (outra) {
+    const la = estado.frota?.agentes.find((a) => a.conversaId === outra.conversaId);
+    return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${nome} está respondendo em ${la ? `#${la.nome}` : "outra conversa"}` };
+  }
+  const naFila = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id && t.estado === "na_fila" && !(t.turnoId in estado.cancelando)).length;
+  return { tipo: "na_fila", turnoId: emCurso.id, texto: naFila > 1 ? `Na fila · ${nome} lê junto com as outras quando terminar` : `Na fila · ${nome} lê quando terminar o turno atual` };
+}
+
+function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
+  if (s.tipo === "cancelada") return `<div class="fila-chip cancelada">Cancelada · não rodou</div>`;
+  if (s.tipo === "cancelando") return `<div class="fila-chip">Cancelando…${botao("desfazer-cancelamento", "Desfazer", { classe: "link", id: turnoId })}</div>`;
+  return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
+}
+
 export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
@@ -111,10 +145,11 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // pergunta; a mensagem que a respondeu leva o rótulo, e a retomada vira uma linha logo depois.
   const pergunta = !ehPessoa && m.payload?.kind === "pedido_a_pessoa" ? m.payload : null;
   const resposta = ehPessoa && m.payload?.kind === "resposta_a_pedido" ? m.payload : null;
+  const fila = situacaoNaFila(m, estado);
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
-  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}`;
+  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div>`}${pergunta ? rodapeDaPergunta(m, estado) : ""}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div>`}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -232,12 +267,15 @@ function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): strin
   if (atividade?.atual) {
     return `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(atividade.atual)}<span class="cursor">▍</span></div></div></article>`;
   }
+  // A mensagem que disparou o turno já mostra "Na fila" com Cancelar embaixo dela: não repete a linha.
+  const origem = c.turnosEmCurso.find((e) => e.id === t.turnoId)?.mensagemId;
+  if (t.estado === "na_fila" && origem && c.mensagens.some((m) => m.id === origem)) return "";
   const pendente = c.turnosPendentes.find((p) => p.id === t.turnoId);
   if (pendente && pendente.conversaId !== c.conversa.id) {
     const outra = estado.frota?.agentes.find((a) => a.conversaId === pendente.conversaId);
     return `<div class="msg-sistema">na fila — o agente está respondendo em ${esc(outra ? `#${outra.nome}` : "outra conversa")} (${haQuanto(estado.agora - t.desde)})</div>`;
   }
-  return `<div class="msg-sistema">${t.estado === "rodando" ? "trabalhando" : "na fila"} · ${esc(t.executor ?? "")} · ${haQuanto(estado.agora - t.desde)}</div>`;
+  return `<div class="msg-sistema">${[t.estado === "rodando" ? "trabalhando" : "na fila", t.executor ?? "", haQuanto(estado.agora - t.desde)].filter(Boolean).map(esc).join(" · ")}</div>`;
 }
 
 /** definido em 2026-09-17: uma linha por turno remetente; respostas se ligam pelo tarefaId, não pelo texto. */
