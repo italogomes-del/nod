@@ -4,6 +4,7 @@ import type { PermissaoPermanente } from "../../src/contracts/permissao-permanen
 import type { Concessao, Procuracao } from "../../src/contracts/concessao.ts";
 import type { Conversa, Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
+import type { Incidente } from "../../src/contracts/incidente.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { ItemAprovacao } from "../../src/contracts/item-aprovacao.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
@@ -59,6 +60,7 @@ export type BancoMemoria = {
   procuracoes: Procuracao[];
   inventario: { tenantId: string; pessoaId: string; motor: string; inventario: Inventario }[];
   gastos: (Gasto & { tenantId: string; ownerId: string })[];
+  incidentes: (Incidente & { ownerId: string })[];
   relatos: (Relato & { ownerId: string })[];
   trilha: LinhaTrilha[];
   paradas: (Parada & { tenantId: string })[];
@@ -94,6 +96,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     procuracoes: [],
     inventario: [],
     gastos: [],
+    incidentes: [],
     relatos: [],
     trilha: [],
     paradas: [],
@@ -670,7 +673,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return true;
       },
       async fecharPorRegra(id, p) {
-        const d = doTenant(b.decisoes).find((x) => x.id === id && x.estado === "pendente");
+        const d = doTenant(b.decisoes).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "reaberta"));
         if (!d) return null;
         d.estado = "decidida";
         d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
@@ -820,6 +823,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscarPorTurno(turnoId) {
         return doTenant(b.janelas).find((j) => j.turnoId === turnoId) ?? null;
       },
+      // Sem concorrência em memória: travar só confirma que a janela existe.
+      async travar(rotinaId, instanteAgendado) {
+        return doTenant(b.janelas).some((j) => j.rotinaId === rotinaId && j.instanteAgendado === instanteAgendado);
+      },
+      async turnoAberto(rotinaId) {
+        const abertas = doTenant(b.janelas)
+          .filter((j) => j.rotinaId === rotinaId && j.turnoId !== null)
+          .filter((j) => ["pendente", "despachando"].includes(doTenant(b.turnos).find((t) => t.id === j.turnoId)?.estado ?? ""))
+          .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
+        return abertas[0]?.turnoId ?? null;
+      },
     },
 
     rotinaExecucoes: {
@@ -828,12 +842,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.execucoes.push(exec);
         return exec;
       },
-      async atualizarDesfecho(id, desfecho, motivo = null) {
+      async atualizarDesfecho(id, desfecho, motivo = null, em) {
         const e = doTenant(b.execucoes).find((x) => x.id === id);
         if (!e) return null;
         e.desfecho = desfecho;
         e.motivo = motivo;
+        if (em !== undefined) e.em = em;
         return e;
+      },
+      async daJanela(rotinaId, instanteAgendado) {
+        return doTenant(b.execucoes).filter((e) => e.rotinaId === rotinaId && e.instanteAgendado === instanteAgendado).sort((x, y) => y.em - x.em || y.id.localeCompare(x.id))[0] ?? null;
       },
       async listar(rotinaId, limite = EXECUCOES_GUARDADAS) {
         return doTenant(b.execucoes).filter((e) => e.rotinaId === rotinaId).sort((x, y) => y.em - x.em || y.id.localeCompare(x.id)).slice(0, limite);
@@ -1096,6 +1114,52 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async registrarDiagnostico() {},
       async diagnosticoDoTurno() {
         return null;
+      },
+    },
+
+    incidentes: {
+      // Espelha o SQL (incidentes.repo.ts): um em curso (voltouEm null) por pessoa e tipo; sem advisory lock em memória.
+      async travarUltimo(tipo) {
+        const meus = b.incidentes.filter((i) => i.tenantId === escopo.tenantId && i.ownerId === escopo.pessoaId && i.tipo === tipo);
+        return meus.find((i) => i.voltouEm === null) ?? [...meus].sort((x, y) => (y.voltouEm ?? 0) - (x.voltouEm ?? 0) || y.comecouEm - x.comecouEm)[0] ?? null;
+      },
+      async abrir(n) {
+        if (n.voltouEm === null && b.incidentes.some((i) => i.tenantId === escopo.tenantId && i.ownerId === escopo.pessoaId && i.tipo === n.tipo && i.voltouEm === null)) {
+          throw Object.assign(new Error('duplicate key value violates unique constraint "incidente_em_curso"'), { code: "23505" });
+        }
+        const incidente = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), tipo: n.tipo, machineId: n.machineId, comecouEm: n.comecouEm, voltouEm: n.voltouEm, rotinas: n.rotinas, conversas: n.conversas, agentes: [...new Set(n.agentes)], dispensadoEm: null, criadoEm: agora() };
+        b.incidentes.push(incidente);
+        return incidente;
+      },
+      async mesclar(id, m) {
+        const i = b.incidentes.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        if (!i) return null;
+        i.comecouEm = Math.min(i.comecouEm, m.comecouEm);
+        i.voltouEm = m.voltouEm === null ? null : Math.max(i.voltouEm ?? m.voltouEm, m.voltouEm);
+        i.rotinas += m.rotinas;
+        i.conversas += m.conversas;
+        i.agentes = [...new Set([...i.agentes, ...m.agentes])];
+        return i;
+      },
+      async emCurso() {
+        return b.incidentes.filter((i) => i.tenantId === escopo.tenantId && i.ownerId === escopo.pessoaId && i.voltouEm === null).sort((x, y) => x.comecouEm - y.comecouEm);
+      },
+      async marcarVolta(id, em) {
+        const i = b.incidentes.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.voltouEm === null);
+        if (!i) return null;
+        i.voltouEm = Math.max(i.comecouEm, em);
+        return i;
+      },
+      async dispensar(id, em) {
+        const i = b.incidentes.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        if (!i) return null;
+        i.dispensadoEm ??= em;
+        return i;
+      },
+      async visiveis(desde) {
+        return b.incidentes
+          .filter((i) => i.tenantId === escopo.tenantId && i.ownerId === escopo.pessoaId && i.dispensadoEm === null && (i.voltouEm === null || i.voltouEm > desde))
+          .sort((x, y) => x.comecouEm - y.comecouEm);
       },
     },
 

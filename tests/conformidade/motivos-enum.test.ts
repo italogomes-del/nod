@@ -12,6 +12,7 @@ import {
   MOTIVOS_PASSE,
   MOTIVOS_SEM_NOVIDADE,
 } from "../../src/contracts/motivos.ts";
+import { TIPOS_INCIDENTE } from "../../src/contracts/incidente.ts";
 import { ALCANCES_RELATO, CATEGORIAS_RELATO } from "../../src/contracts/relato.ts";
 import { ENUMS_DE_ESTADO } from "../../src/db/schema/agentes.ts";
 import { db } from "../helpers/db.ts";
@@ -36,6 +37,8 @@ const MOTIVOS: Record<string, readonly string[]> = {
   motivo_inatividade_permissao: MOTIVOS_INATIVIDADE_PERMISSAO,
   categoria_relato: CATEGORIAS_RELATO,
   alcance_relato: ALCANCES_RELATO,
+  // ADR-045 (0021): o incidente é aviso de infraestrutura, e o tipo dele também é enum fechado.
+  tipo_incidente: TIPOS_INCIDENTE,
 };
 
 async function rotulos(tipo: string): Promise<string[]> {

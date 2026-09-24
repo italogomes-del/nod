@@ -2,6 +2,7 @@ import type { SuaVezDto } from "../contracts/api.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import { montarFila } from "../domain/fila-frota.ts";
+import { incidentesVisiveis } from "./dispensar-incidente.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** O que "Sua vez" e "reabrir" precisam de Deps: a rota (e o teste) montam só isto. */
@@ -55,7 +56,10 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     .filter((m) => m.inventario.estado !== "pronto")
     .map((m) => ({ nome: m.motor, desde: m.inventario.em }));
 
-  return { data: { itens, foraDoAr, vazio: fila.vazio, ultimaDecisaoEm: fila.ultimaDecisaoEm } };
+  // Avisos de infraestrutura (ADR-045): a queda do Mac é um aviso com começo e fim, não uma decisão.
+  const incidentes = await incidentesVisiveis(repos, agora);
+
+  return { data: { itens, incidentes, foraDoAr, vazio: fila.vazio, ultimaDecisaoEm: fila.ultimaDecisaoEm } };
 }
 
 /** Prova de que a assinatura cabe no contrato CasoDeUso (Deps completo é um DepsSuaVez). */

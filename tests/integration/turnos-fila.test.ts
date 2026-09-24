@@ -116,17 +116,24 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
   });
 
   it("interrompido sem motivo: parado_pela_pessoa se a pessoa pediu, senão pelo sinal de saída; fala fica parcial; falha técnica guarda motivo_falha", async () => {
-    expect(desfechoDaEntrega({ pararSolicitadoEm: 1 }, interrompido())).toEqual({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa", motivoFalha: null });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: 1, leaseAte: null }, interrompido(), 0)).toEqual({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa", motivoFalha: null });
     const mudo = { ...interrompido(), sinais: { ...interrompido().sinais, producedOutput: false } };
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, mudo)).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: null });
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, interrompido({ motivoInterrupcao: "sessao_rejeitada" }))).toMatchObject({ motivoInterrupcao: "sessao_rejeitada" });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: null }, mudo, 0)).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: null });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: null }, interrompido({ motivoInterrupcao: "sessao_rejeitada" }), 0)).toMatchObject({ motivoInterrupcao: "sessao_rejeitada" });
     // definido em 2026-09-18 (ADR-040): quem produziu saída e não concluiu não é 'sem_progresso'.
     // O motivo_falha continua guardando o subtipo técnico, inclusive erro_max_turns da sonda.
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, { ...sucesso(""), desfecho: "falha", motivoFalha: "erro_max_turns" })).toEqual({ estado: "interrompido", motivoInterrupcao: "trabalho_incompleto", motivoFalha: "erro_max_turns" });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: null }, { ...sucesso(""), desfecho: "falha", motivoFalha: "erro_max_turns" }, 0)).toEqual({ estado: "interrompido", motivoInterrupcao: "trabalho_incompleto", motivoFalha: "erro_max_turns" });
     const semSaida = { ...sucesso(""), desfecho: "falha" as const, motivoFalha: "erro_execucao" as const, sinais: { ...sucesso("").sinais, producedOutput: false } };
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, semSaida)).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: "erro_execucao" });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: null }, semSaida, 0)).toEqual({ estado: "interrompido", motivoInterrupcao: "sem_progresso", motivoFalha: "erro_execucao" });
     // interrompido() já vem com producedOutput: quem falou antes de morrer é trabalho incompleto.
-    expect(desfechoDaEntrega({ pararSolicitadoEm: null }, interrompido())).toMatchObject({ motivoInterrupcao: "trabalho_incompleto" });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: null }, interrompido(), 0)).toMatchObject({ motivoInterrupcao: "trabalho_incompleto" });
+    // ADR-045: lease VENCIDO sem Parar e sem sucesso é a máquina que caiu — o mesmo desfecho do varredor.
+    // Sucesso com o lease vencido é trabalho terminado; Parar pedido continua sendo parado_pela_pessoa.
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: 1_000 }, interrompido(), 1_001)).toEqual({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato", motivoFalha: null });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: 1_000 }, { ...sucesso(""), desfecho: "falha", motivoFalha: "erro_execucao" }, 1_001)).toMatchObject({ motivoInterrupcao: "maquina_sem_contato", motivoFalha: "erro_execucao" });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: 1_000 }, sucesso("pronto"), 1_001)).toEqual({ estado: "concluido", motivoInterrupcao: null, motivoFalha: null });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: 900, leaseAte: 1_000 }, interrompido(), 1_001)).toMatchObject({ motivoInterrupcao: "parado_pela_pessoa" });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: 2_000 }, interrompido(), 1_001)).toMatchObject({ motivoInterrupcao: "trabalho_incompleto" });
 
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);

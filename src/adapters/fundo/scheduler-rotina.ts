@@ -1,5 +1,6 @@
 import type { Executor } from "../../contracts/evento.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
+import { passoDoAgendador, type RelogioDoAgendador } from "../../domain/presenca.ts";
 import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
@@ -18,7 +19,8 @@ export type OpcoesTick = {
   agora: Relogio;
 };
 
-export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; falhas: string[] };
+/** `puladas`: rotinas cuja execução anterior ainda estava aberta — só reagendadas (ADR-045). */
+export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; puladas: string[]; falhas: string[] };
 
 /**
  * Um tick para UMA pessoa (o teste chama isto sob withRollback com `tx = (fn) => fn(trx)`): lista
@@ -28,7 +30,7 @@ export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; f
  */
 export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTick): Promise<ResultadoTick> {
   const agora = opcoes.agora();
-  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], falhas: [] };
+  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], puladas: [], falhas: [] };
   const vencidas = await tx(async (trx) => criarRepos(trx, escopo).rotinas.ativasVencidas(agora));
   for (const rotina of vencidas) {
     try {
@@ -38,6 +40,11 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
         const r = await dispararRotina(deps, { rotina, instanteAgendado: rotina.proximaExecucao, machineId: opcoes.machineId, executor: opcoes.executor });
         if ("janelaDeOutro" in r.data) {
           resultado.deOutroProcesso.push(rotina.id);
+          return;
+        }
+        if ("pulada" in r.data) {
+          resultado.puladas.push(rotina.id);
+          log("aviso", "rotina_janela_pulada", { rotina_id: rotina.id, turno_aberto_id: r.data.turnoAbertoId, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
         await repos.events.gravarComOutbox(r.events ?? []);
@@ -57,18 +64,29 @@ export async function tick(db: Db, opcoes: OpcoesTick, laco: OpcoesLaco = {}): P
   await paraCadaPessoa(db, (escopo, tx) => tickPessoa(escopo, tx, opcoes).then(() => undefined), laco);
 }
 
-/** Laço do servidor (boot da L9): um tick por intervalo, nunca dois sobrepostos, erro logado sem derrubar. */
+/**
+ * Laço do servidor (boot da L9): um tick por intervalo, nunca dois sobrepostos, erro logado sem derrubar.
+ * definido em 2026-09-24 (ADR-045): o relógio que salta mais de 3 intervalos entre dois ticks é o Mac
+ * que acordou (o processo ficou suspenso); o laço espera 3 min antes de disparar, para uma rotina não
+ * nascer num "dark wake" de segundos e morrer no sono seguinte. Corta a cadeia na origem.
+ */
 export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
   let rodando = false;
+  let relogio: RelogioDoAgendador = { ultimoTick: null, esperarAte: 0 };
+  const intervaloMs = opcoes.intervaloMs ?? INTERVALO_SCHEDULER_MS;
   const timer = setInterval(() => {
-    if (rodando) return;
+    // O relógio anda a cada disparo do timer, mesmo com um tick ainda rodando: um tick longo não é sono.
+    const passo = passoDoAgendador(relogio, opcoes.agora(), intervaloMs);
+    relogio = passo.estado;
+    if (passo.paradoMs !== null) log("aviso", "processo_acordou", { parado_ms: passo.paradoMs, espera_ms: relogio.esperarAte - (relogio.ultimoTick ?? 0) });
+    if (rodando || !passo.disparar) return;
     rodando = true;
     tick(db, opcoes, laco)
       .catch((e: unknown) => log("erro", "scheduler_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }))
       .finally(() => {
         rodando = false;
       });
-  }, opcoes.intervaloMs ?? INTERVALO_SCHEDULER_MS);
+  }, intervaloMs);
   timer.unref();
   return { parar: () => clearInterval(timer) };
 }

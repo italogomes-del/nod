@@ -127,12 +127,14 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
      * fica NULA — quem decidiu está no desfecho tipado e na autoria do evento (ADR-023: autoria
      * nunca se infere de outro campo). Fechada não entra em listarSuaVez, não conta na gauge
      * pendencia_mais_velha_s e não pode expirar: nada é suprimido, só nunca fica pendente (ADR-007).
+     * Também fecha a REABERTA (definido em 2026-09-24, ADR-045): um "Retomar" reaberto que uma queda
+     * nova substitui (regra:retomada_substituida) senão ficaria para sempre ao lado do novo.
      */
     async fecharPorRegra(id: string, p: { regra: `regra:${string}`; regraVersao: number; agora: number }): Promise<Decisao | null> {
       const desfecho: DesfechoDecisao = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: iso(p.agora) };
       const [l] = await conn<Linha[]>`
         update decisoes set estado = 'decidida', desfecho = ${conn.json(desfecho)}, decidida_em = ${data(p.agora)}
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'reaberta')
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
     },

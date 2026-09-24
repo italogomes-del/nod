@@ -10,6 +10,7 @@ import type { conversasRepo } from "./conversas.repo.ts";
 import type { decisoesRepo } from "./decisoes.repo.ts";
 import type { eventsRepo } from "./events.repo.ts";
 import type { gastosRepo } from "./gastos.repo.ts";
+import type { incidentesRepo } from "./incidentes.repo.ts";
 import type { inventarioRepo } from "./inventario.repo.ts";
 import type { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
 import type { maquinaTokensRepo } from "./maquina-tokens.repo.ts";
@@ -63,6 +64,7 @@ export interface Repos {
   procuracoes: ReturnType<typeof procuracoesRepo>;
   inventario: ReturnType<typeof inventarioRepo>;
   gastos: ReturnType<typeof gastosRepo>;
+  incidentes: ReturnType<typeof incidentesRepo>;
   trilha: ReturnType<typeof trilhaRepo>;
   paradas: ReturnType<typeof paradasRepo>;
   catcher: ReturnType<typeof catcherRepo>;

@@ -3,6 +3,7 @@ import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { log } from "../../obs/log.ts";
+import { metricas as registroPadrao } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
@@ -161,6 +162,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
               log("aviso", "diagnostico_nao_gravado", { turno_id: e.turnoId });
             }
           }
+          // ADR-017 #4 / ADR-045: a entrega que chegou com o lease vencido é um turno perdido pela máquina.
+          if (!r.data.tardia && r.data.turno?.motivoInterrupcao === "maquina_sem_contato") registroPadrao.incrementar({ metrica: "pos_restart", desfecho: "perdido", origem: "maquina_sumida", tenant_id: escopo.tenantId });
           const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
           const events = [...(r.events ?? []), ...extras];
           if (events.length) await d.repos.events.gravarComOutbox(events);

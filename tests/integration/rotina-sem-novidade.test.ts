@@ -27,7 +27,7 @@ describeIntegracao("rotina sem novidade: silêncio absoluto na conversa, execuç
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "*/5 * * * *", fusoIana: TZ, instrucao: "verificar o DM do Daniel", fonte: "slack", entregavel: "mensagem nesta conversa", limitesAprovacao: "sem ações externas", politicaSemDado: "não avisar", proximaExecucao: JANELA });
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
       const turnoId = r.data.turno.id;
 
       // O agente consultou o Slack e nada mudou: chama a ferramenta em vez de escrever texto.
@@ -52,7 +52,7 @@ describeIntegracao("rotina sem novidade: silêncio absoluto na conversa, execuç
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "*/5 * * * *", fusoIana: TZ, instrucao: "i", fonte: "slack", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
 
       await registrarDesfechoRotina(deps, { turnoId: r.data.turno.id, desfecho: "executou" });
       const mensagens = await repos.mensagens.listarDaConversa(conversaId);
@@ -66,7 +66,7 @@ describeIntegracao("rotina sem novidade: silêncio absoluto na conversa, execuç
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "*/5 * * * *", fusoIana: TZ, instrucao: "i", fonte: "slack", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
       const turnoId = r.data.turno.id;
       await repos.decisoes.criar({ tipo: "gate_rotina", agenteId, conversaId, turnoId, prazoDecisaoEm: AGORA + 60_000, frase: "1 e-mail para enviar" });
 

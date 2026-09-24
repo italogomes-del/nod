@@ -79,8 +79,11 @@ export type MotivoInatividadePermissao = (typeof MOTIVOS_INATIVIDADE_PERMISSAO)[
  * completa e correta, só não rendeu notícia. É o único desfecho que não escreve no chat
  * (definido em 2026-09-21): rotina que não tem o que dizer fica em silêncio, e a pessoa confere
  * no histórico da rotina que ela rodou.
+ * interrompida ≠ falhou (definido em 2026-09-24, ADR-045): a máquina parou de responder no meio
+ * (motivo maquina_sem_contato) — não é erro da rotina nem do agente. Também não escreve no chat: vai
+ * para o histórico da rotina e para o aviso único do incidente.
  */
-export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou"] as const;
+export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou", "interrompida"] as const;
 export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
 
 /**

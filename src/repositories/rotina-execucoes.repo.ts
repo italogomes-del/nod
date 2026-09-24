@@ -51,9 +51,20 @@ export function rotinaExecucoesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraExecucao(l) : null;
     },
 
-    async atualizarDesfecho(id: string, desfecho: DesfechoRotina, motivo: string | null = null): Promise<ExecucaoRotina | null> {
+    /** `em` ausente = mantém o instante do registro; presente = o desfecho novo é de agora (ADR-045). */
+    async atualizarDesfecho(id: string, desfecho: DesfechoRotina, motivo: string | null = null, em?: number): Promise<ExecucaoRotina | null> {
       const [l] = await conn<Linha[]>`
-        update rotina_execucoes set desfecho = ${desfecho}, motivo = ${motivo} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
+        update rotina_execucoes set desfecho = ${desfecho}, motivo = ${motivo}, em = coalesce(${em === undefined ? null : data(em)}, em)
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraExecucao(l) : null;
+    },
+
+    /** A execução já registrada para esta janela (ADR-045: uma linha por janela). */
+    async daJanela(rotinaId: string, instanteAgendado: number): Promise<ExecucaoRotina | null> {
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from rotina_execucoes
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and instante_agendado = ${data(instanteAgendado)}
+        order by em desc, id desc limit 1`;
       return l ? paraExecucao(l) : null;
     },
 

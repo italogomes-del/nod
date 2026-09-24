@@ -5,9 +5,11 @@ import type { Entrega } from "../contracts/ponte.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
+import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
+import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -28,9 +30,15 @@ type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: Motiv
  * interrompido SEM motivo vira parado_pela_pessoa se a pessoa pediu (parar_solicitado_em), senão
  * sem_progresso. definido em 2026-09-16: com quatro estados (ADR-010) a falha técnica do CLI
  * (result com subtype ≠ success) é um turno INTERROMPIDO cujo motivo_falha guarda o subtipo.
+ *
+ * definido em 2026-09-24 (ADR-045): entrega que NÃO é sucesso com o lease já vencido e sem Parar é a
+ * máquina que parou de responder (o Mac dormiu; a renovação voltou {ativo:false} e o laço matou o CLI)
+ * — maquina_sem_contato, o mesmo desfecho do varredor. Sucesso depois do lease vencido é trabalho
+ * TERMINADO e assenta como concluído.
  */
-export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm">, resultado: Entrega["resultado"]): Desfecho {
+export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm" | "leaseAte">, resultado: Entrega["resultado"], agora: number): Desfecho {
   if (resultado.desfecho === "sucesso") return { estado: "concluido", motivoInterrupcao: null, motivoFalha: null };
+  if (turno.pararSolicitadoEm === null && turno.leaseAte !== null && turno.leaseAte < agora) return { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato", motivoFalha: resultado.motivoFalha ?? null };
   // definido em 2026-09-18: quem produziu saída e não concluiu NÃO é 'sem_progresso' — o rótulo
   // mentia num turno que tinha lido arquivos e escrito no chat antes de acabar. producedOutput é o
   // sinal que o ADR-009 já grava para isso.
@@ -57,8 +65,17 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const executor = entrega.executor ?? "catcher";
   const resultado = entrega.resultado;
   const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
-  const desfecho = desfechoDaEntrega(turno, resultado);
+  const desfecho = desfechoDaEntrega(turno, resultado, agora);
   const interrompido = tardia || desfecho.estado === "interrompido";
+  // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia).
+  const quedaDaMaquina = !tardia && desfecho.motivoInterrupcao === "maquina_sem_contato";
+  // Lido AGORA: assentar zera lease_ate, e o último sinal de vida (lease − LEASE_MS) é o começo do aviso.
+  const perdidoDesde = ultimoSinalDoTurno(turno, agora);
+  const caiuAntes = tardia && turno.motivoInterrupcao === "maquina_sem_contato" && resultado.desfecho !== "sucesso";
+  // definido em 2026-09-24 (ADR-045): rotina derrubada pela máquina não escreve na conversa — nem a
+  // fala parcial, que seria um "Vou verificar…" cortado. A execução vai só para o histórico da rotina.
+  // Sucesso tardio continua entrando: é trabalho terminado, e o entregável da rotina É a fala.
+  const rotinaCaida = quedaDaMaquina || caiuAntes ? (await rotinaDoTurno(deps.repos, turno.id)) !== null : false;
   // definido em 2026-09-21: o agente chamou `sem_novidade` — consultou e nada mudou, então a fala
   // dele NÃO entra na conversa (era o flood de "nenhum update" a cada execução). Só vale onde
   // ninguém espera resposta: turno de rotina/retomada. Em conversa ou sala a pessoa ficaria no
@@ -90,7 +107,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: entrega.fala.texto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
-  } else if (entrega.fala.texto.trim() !== "" && !silencioso) {
+  } else if (entrega.fala.texto.trim() !== "" && !silencioso && !rotinaCaida) {
     mensagem = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,
@@ -149,7 +166,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   });
   if (!assentado) throw new ErroDeDominio("estado_invalido", { cause: "turno mudou de estado durante a entrega" });
 
-  if (desfecho.estado === "interrompido") {
+  if (quedaDaMaquina) {
+    // A MESMA regra do varredor (interromper-por-maquina.ts): sem a linha 'sistema' e o evento daqui,
+    // que dariam à rotina uma mensagem no chat e à conversa duas linhas para a mesma queda.
+    const q = await aposQuedaDaMaquina(deps, assentado, { perdidoDesde });
+    events.push(...q.events);
+  } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
     const aviso = await deps.repos.mensagens.criar({

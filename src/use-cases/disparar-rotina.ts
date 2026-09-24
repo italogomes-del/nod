@@ -13,7 +13,8 @@ import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DEC
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaDisparo = { rotina: Rotina; instanteAgendado: number; machineId: string; executor: Executor; preservarAgenda?: boolean };
-export type SaidaDisparo = { turno: Turno; proximaExecucao: number } | { janelaDeOutro: true };
+/** `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045). */
+export type SaidaDisparo = { turno: Turno; proximaExecucao: number } | { janelaDeOutro: true } | { pulada: true; turnoAbertoId: string; proximaExecucao: number };
 
 /**
  * Entrada de um turno de rotina é a instrução normalizada mais o contexto fixo (fonte, entregável,
@@ -55,6 +56,18 @@ export async function confiancaDaFonte(deps: Pick<Deps, "repos">, fonte: string)
  */
 export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (deps, input) => {
   const { rotina, instanteAgendado } = input;
+  // definido em 2026-09-24 (ADR-045): UMA execução aberta por rotina, só no caminho do AGENDADOR. Turno
+  // anterior ainda pendente ou rodando (o Mac dormiu no meio) → reagenda sem reivindicar a janela: sem
+  // isto as execuções se empilhavam a cada acordar. "Executar agora" e "Permitir e rodar agora"
+  // (preservarAgenda) são atos da pessoa e nunca são pulados.
+  if (!input.preservarAgenda) {
+    const turnoAbertoId = await deps.repos.rotinaJanelas.turnoAberto(rotina.id);
+    if (turnoAbertoId) {
+      const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(deps.agora(), instanteAgendado) });
+      await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
+      return { data: { pulada: true, turnoAbertoId, proximaExecucao } };
+    }
+  }
   const ganhou = await deps.repos.rotinaJanelas.reivindicar({ rotinaId: rotina.id, instanteAgendado, machineId: input.machineId, executor: input.executor });
   if (!ganhou) return { data: { janelaDeOutro: true } };
   const agente = await agenteVisivel(deps.repos, rotina.agenteId);
@@ -82,7 +95,14 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   };
 };
 
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "ninguem_respondeu_o_gate" | null };
+export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | null };
+
+/**
+ * Desfechos que NÃO escrevem na conversa: a execução fica só no histórico da rotina. sem_novidade
+ * (definido em 2026-09-21): rodou e não tinha nada; interrompida (definido em 2026-09-24, ADR-045): a
+ * máquina parou no meio — quem avisa é o aviso único do incidente, não uma linha por execução.
+ */
+const SILENCIOSOS: ReadonlySet<DesfechoRotina> = new Set<DesfechoRotina>(["sem_novidade", "interrompida"]);
 
 /**
  * definido em 2026-09-16: o gate de uma rotina é QUALQUER pedido de aprovação pendente ligado ao turno
@@ -100,7 +120,7 @@ export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas:
  * kind 'rotina_execucao' na conversa da rotina e emite rotina_executou. 'executou' com um gate
  * ainda pendente para o mesmo turno NÃO conta: a rotina só executou quando o efeito saiu.
  */
-export const registrarDesfechoRotina: CasoDeUso<EntradaDesfecho, SaidaDesfecho> = async (deps, input) => {
+export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo" | "agora">, input: EntradaDesfecho): Promise<{ data: SaidaDesfecho; events?: RuntimeEvent[] }> {
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
   if (!ligacao) return { data: { ignorado: "nao_e_rotina" } };
   const { rotina, turnoDisparado, instanteAgendado } = ligacao;
@@ -113,22 +133,29 @@ export const registrarDesfechoRotina: CasoDeUso<EntradaDesfecho, SaidaDesfecho> 
     if (gatesAbertos.length > 0) return { data: { ignorado: "aguardando_gate" } };
   }
   const agora = deps.agora();
-  const execucao = await deps.repos.rotinaExecucoes.registrar({
-    rotinaId: rotina.id,
-    instanteAgendado,
-    turnoId: turnoDisparado.id,
-    desfecho: input.desfecho,
-    motivo: input.motivo ?? null,
-    em: agora,
-  });
+  // definido em 2026-09-24 (ADR-045): UMA linha por janela. A rotina que pergunta e é retomada, ou que
+  // cai e depois vence o gate, registra desfecho mais de uma vez para a MESMA janela; a trava da
+  // janela serializa quem registra (varredor × entrega) e o desfecho mais recente substitui o anterior.
+  await deps.repos.rotinaJanelas.travar(rotina.id, instanteAgendado);
+  const anterior = await deps.repos.rotinaExecucoes.daJanela(rotina.id, instanteAgendado);
+  const execucao = anterior
+    ? await deps.repos.rotinaExecucoes.atualizarDesfecho(anterior.id, input.desfecho, input.motivo ?? null, agora)
+    : await deps.repos.rotinaExecucoes.registrar({
+        rotinaId: rotina.id,
+        instanteAgendado,
+        turnoId: turnoDisparado.id,
+        desfecho: input.desfecho,
+        motivo: input.motivo ?? null,
+        em: agora,
+      });
   if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução não registrada" });
   const podadas = await deps.repos.rotinaExecucoes.podar(rotina.id);
   // definido em 2026-09-21: SILÊNCIO. A execução ficou registrada acima (e aparece no histórico da
   // rotina), mas nada é escrito na conversa — nem a fala do agente (suprimida em assentar-turno.ts)
   // nem este marcador. Uma rotina que roda a cada 5 min e não acha novidade não deve deixar rastro
   // no chat; quem quer conferir que ela rodou olha o histórico.
-  if (input.desfecho === "sem_novidade") {
-    const autoriaSilencio = autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
+  if (SILENCIOSOS.has(input.desfecho)) {
+    const autoriaSilencio = input.desfecho === "interrompida" ? autoriaPessoa(deps.escopo.pessoaId, "regra:varredor_lease") : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
     return {
       data: { execucao, rotina, podadas },
       events: [evento(deps, "rotina_executou", autoriaSilencio, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })],
@@ -155,4 +182,4 @@ export const registrarDesfechoRotina: CasoDeUso<EntradaDesfecho, SaidaDesfecho> 
     evento(deps, "rotina_executou", autoria, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
   ];
   return { data: { execucao, rotina, podadas }, events };
-};
+}

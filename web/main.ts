@@ -26,7 +26,7 @@ import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
-import { abertasPorAgente, renderChamada, renderSuaVez } from "./telas/sua-vez.ts";
+import { abertasPorAgente, renderChamada, renderIncidentes, renderSuaVez } from "./telas/sua-vez.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -190,7 +190,7 @@ function renderSidebar(): string {
       <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
-    ${renderChamada(estado)}
+    ${renderChamada(estado)}${renderIncidentes(estado)}
     <div class="list">
       ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
@@ -625,6 +625,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ocultar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "ocultar"); },
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },
   revogar: (el) => agir(async () => void (await api!.revogar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
+  // definido em 2026-09-24 (ADR-045): "Entendi" no aviso de queda do Mac.
+  "dispensar-incidente": (el) => agir(async () => void (await api!.dispensarIncidente(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   // definido em 2026-09-24 (ADR-044): o grupo (app · nível) do painel sai inteiro, com um registro só.
   "revogar-acessos": (el) => agir(async () => void (await api!.revogarAcessos(el.dataset.agente ?? "", (el.dataset.ids ?? "").split(",").filter(Boolean)), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
   "salvar-memoria": (el) =>

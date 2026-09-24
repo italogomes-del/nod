@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redigir } from "../../../src/domain/redacao.ts";
+import { motivoEmPortugues, redigir } from "../../../src/domain/redacao.ts";
 
 describe("redacao", () => {
   it("rotina sem resposta NÃO envia — caso adversarial", () => {
@@ -15,5 +15,13 @@ describe("redacao", () => {
     expect(redigir("turno-interrompido", 0)).toContain("{motivo}");
     expect(redigir("parada-nada-rodando", 0)).toMatch(/nada estava rodando/i);
     expect(redigir("memoria-nao-e-fonte", 0)).toMatch(/não substitui fonte autoritativa/i);
+  });
+
+  it("ADR-045: a queda é do Mac da pessoa, com as três causas — nunca 'o computador' (lido como o computador do bot)", () => {
+    const t = motivoEmPortugues("maquina_sem_contato");
+    expect(t).toBe("seu Mac parou de responder (repouso, sem rede ou nod fechado)");
+    expect(t).not.toMatch(/computador/i);
+    expect(redigir("turno-interrompido", 0, { motivo: t })).toContain("Turno interrompido: seu Mac parou de responder");
+    expect(motivoEmPortugues("reinicio_servidor")).toBe("o servidor reiniciou");
   });
 });
