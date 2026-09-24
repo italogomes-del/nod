@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http";
-import { ehErroDeDominio, type CodigoErro } from "../../domain/erro.ts";
+import { ehErroDeDominio, ErroDeDominio, type CodigoErro } from "../../domain/erro.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
 import { json } from "./util.ts";
@@ -42,14 +42,38 @@ export interface ErroDto {
  */
 const SQLSTATE_TEXTO_INVALIDO = "22P02";
 
-export function responderErro(res: ServerResponse, err: unknown): void {
+/** Onde a recusa aconteceu, para o log. Ids viram `:id`: a linha diz a ROTA, não o registro. */
+export type OrigemRequisicao = { metodo: string; caminho: string };
+
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * definido em 2026-09-24: a recusa de domínio (4xx) também vai para o log, com a rota e o `cause`.
+ * Motivo: um banner `entrada_invalida` na tela da Nina não deixou rastro nenhum no servidor — havia
+ * uma dúzia de lugares que lançam esse código e nada dizia qual. O `cause` sai só quando é texto
+ * (é o que os casos de uso escrevem para quem depura) e cortado; nunca vai para o cliente.
+ */
+function logarRecusa(err: ErroDeDominio, status: number, origem: OrigemRequisicao | undefined, causa?: string): void {
+  const bruta = causa ?? (typeof err.cause === "string" ? err.cause : err.cause instanceof SyntaxError ? "json_malformado" : undefined);
+  log(status >= 500 ? "erro" : "aviso", "requisicao_recusada", {
+    codigo: err.codigo,
+    status,
+    metodo: origem?.metodo,
+    rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"),
+    causa: bruta?.slice(0, 200),
+  });
+}
+
+export function responderErro(res: ServerResponse, err: unknown, origem?: OrigemRequisicao): void {
   if (ehErroDeDominio(err)) {
     const { status, mensagem } = TABELA[err.codigo];
+    logarRecusa(err, status, origem);
     const corpo: ErroDto = { codigo: err.codigo, mensagem };
     json(res, status, corpo);
     return;
   }
   if (typeof err === "object" && err !== null && (err as { code?: unknown }).code === SQLSTATE_TEXTO_INVALIDO) {
+    logarRecusa(new ErroDeDominio("entrada_invalida"), 400, origem, "id_malformado");
     json(res, 400, { codigo: "entrada_invalida", mensagem: TABELA.entrada_invalida.mensagem });
     return;
   }
