@@ -186,7 +186,7 @@ Verde em 2026-09-24, sobre a `main` com #51–#54: lint, typecheck (4 projetos),
   assunto (a retomada recebe texto sem relação com a pergunta), o padrão deixa de ser responder e o
   campo passa a perguntar a cada envio enquanto houver pergunta aberta.
 
-**Não implementado.** O fio da pergunta (próximo PR, migração 0024): hoje cada resposta fecha a decisão
+**Não implementado.** O fio da pergunta (próximo PR, migração 0025): hoje cada resposta fecha a decisão
 mesmo quando é um pedido de explicação, e a pergunta seguinte abre outro pedido do zero — `fio_id`, a
 rodada na faixa, o histórico do fio na entrada da retomada e o recolher "Pergunta resolvida · N
 mensagens" ficam para lá. Também ficam de fora a linha "Você deixou uma pergunta pra lá" ao dispensar
@@ -207,7 +207,7 @@ anterior. A retomada de rotina, que roda em sessão nova, recebia só a última 
 sozinho quando ele segue. Quem decide se a mensagem é resposta ou pedido de explicação é o agente —
 perguntando de novo ou seguindo —, nunca a interface.
 
-- **Migração 0024.** `decisoes.fio_id uuid` (NULL = a decisão começa o próprio fio) e o índice parcial
+- **Migração 0025.** `decisoes.fio_id uuid` (NULL = a decisão começa o próprio fio) e o índice parcial
   `decisoes_por_fio (tenant_id, fio_id) WHERE fio_id IS NOT NULL`. Sem backfill. A coluna nasce travada
   para a decisora (a lista fechada da 0003 não a nomeia). Contrato: `Decisao.fioId`.
 - **Rodada seguinte.** `pedir_a_pessoa` num turno que é retomada de uma pergunta RESPONDIDA (um dos três

@@ -42,7 +42,7 @@ const resposta = (id: string, decisaoId: string, texto: string) => msg(id, texto
 const nina = { id: "a", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "E-mails", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c", confirmado: true, fixado: false, oculto: false, naoLido: false, secao: null, computadorForaDoAr: null } as never;
 
 function cenario(mensagens: Mensagem[], fios: FioDaPergunta[], itens: Item[]): Estado {
-  const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], fios, atividades: {}, carregadaEm: 0 };
+  const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios, atividades: {}, carregadaEm: 0 };
   return {
     ...estadoInicial,
     agora: AGORA,

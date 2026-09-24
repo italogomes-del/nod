@@ -22,7 +22,7 @@ import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-te
 import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
- * Fio da pergunta (emenda da ADR-045, 0024, definido em 2026-09-24) no Postgres de verdade e pelas
+ * Fio da pergunta (emenda da ADR-045, 0025, definido em 2026-09-24) no Postgres de verdade e pelas
  * rotas HTTP: a pergunta que a pessoa não entendeu vira um fio de rodadas — pergunta → pedido de
  * explicação → explicação e pergunta de novo → resposta — que fica aberto enquanto o agente precisa
  * dela e fecha sozinho quando ele segue. O agente (pedir_a_pessoa, ferramenta) é chamado direto; a
@@ -106,7 +106,7 @@ describeIntegracao("fio da pergunta: rodadas no mesmo fio, estado derivado, cont
   const abertas = (sv: SuaVezDto) => sv.itens.filter((i) => i.estadoColuna !== "vencido");
   const fios = (c: ConversaDto) => c.fios.map((f) => ({ id: f.id, estado: f.estado, rodada: f.rodada, mensagens: f.mensagens.length }));
 
-  it("a migração 0024 aplicou: decisoes.fio_id (uuid, nulo) e o índice parcial (tenant_id, fio_id)", async () => {
+  it("a migração 0025 aplicou: decisoes.fio_id (uuid, nulo) e o índice parcial (tenant_id, fio_id)", async () => {
     await withRollback(MARLON, async (trx) => {
       const [coluna] = await trx<{ data_type: string; is_nullable: string }[]>`select data_type, is_nullable from information_schema.columns where table_name = 'decisoes' and column_name = 'fio_id'`;
       expect(coluna).toEqual({ data_type: "uuid", is_nullable: "YES" });
