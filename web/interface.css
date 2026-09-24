@@ -153,8 +153,6 @@ body { background: #fcfdff; }
   .sh b { font-size: 15px; }
   .marca { font-size: 22px; }
   .list { padding: 0 7px; }
-  .chamada { width: calc(100% - 16px); margin: 0 8px 8px; padding: 9px 10px; }
-  .chamada-todas { margin: -2px 8px 10px; }
   .cabecalho { padding: 13px 15px; min-height: 77px; flex-wrap: wrap; }
   .cab-esq .nome { font-size: 17px; }
   .cab-esq { gap: 10px; }
@@ -175,9 +173,7 @@ body { background: #fcfdff; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .list { background: transparent; box-shadow: none; border: 0; margin: 0; }
-.toggle-detalhes { display: none; }
 @media (max-width: 1250px) {
-  .toggle-detalhes { display: inline-block; }
   .com-detalhes.detalhes-abertos .detalhes { display: block; position: fixed; top: 92px; bottom: 0; right: 0; width: 290px; z-index: 8; box-shadow: -12px 8px 35px #142f5114; }
 }
 .bubble pre, .msg-peer pre { max-width: 100%; overflow-x: auto; background: #e8ebf1; padding: 12px; border-radius: 8px; }
@@ -255,18 +251,6 @@ body { background: #fcfdff; }
 .computador-input{display:flex;gap:5px;margin:12px 0 6px;font-size:11px;flex-wrap:wrap}.computador-texto{display:flex;flex:1;gap:5px}.computador-texto input{width:100%;font-size:11px!important}.computador-dica{font-size:11px;line-height:1.6;color:#76806d}.computador-desktop audio{height:34px;width:100%;margin-top:5px}.computador-lateral{font-size:12px;min-width:0}.computador-lateral details{border-bottom:1px solid #e1e5dc;padding:10px 0}.computador-lateral summary{font-size:13px;font-weight:600;cursor:pointer}.computador-lateral p{color:#77816e;font-size:11px;line-height:1.5}.computador-pasta{display:flex;gap:4px;margin:10px 0}.computador-pasta input{width:100%}.computador-upload{display:block;font-size:11px;margin:12px 0}.computador-upload input{display:block;max-width:100%;margin-top:7px;font-size:10px}.computador-arquivos{max-height:240px;overflow:auto}.computador-arquivos button{display:flex;width:100%;gap:5px;text-align:left;border:0;padding:7px 0;background:transparent;white-space:normal;word-break:break-word}.computador-arquivos small{margin-left:auto;white-space:nowrap;color:#7b8572}.computador-terminal textarea{width:100%;margin:10px 0;font-family:monospace!important;font-size:12px!important}.computador-saida{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px}.computador-atividade{list-style:none;padding:0;max-height:250px;overflow:auto}.computador-atividade li{padding:7px 0;font-size:11px;border-bottom:1px solid #e7eae2}.computador-atividade small{display:block;color:#7f8879;margin-top:4px}
 @media(max-width:950px){.computador-layout{grid-template-columns:1fr;padding:8px 12px 16px}.computador-header,.computador-toolbar{padding-left:12px;padding-right:12px}.computador-ajuda{margin-left:12px;margin-right:12px}.computador-lateral{display:grid;grid-template-columns:1fr 1fr;gap:14px}.computador-toolbar label{margin-left:0}.computador-vazio{font-size:14px}.computador-dialog{width:98vw;max-height:97vh}}
 
-/* definido em 2026-09-18: o sinal que substituiu a entrada "Sua vez" do rail. A faixa só existe
-   quando há decisão aberta; o badge ⚑ marca em QUAL conversa ela está. Quem decide é a conversa. */
-.chamada { display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); margin: 0 16px 10px;
-  padding: 11px 13px; border: 1px solid #f0d8a8; border-radius: 13px; background: #fdf6e7;
-  color: #6d5220; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
-.chamada:hover, .chamada:focus-visible { background: #fbefd6; border-color: #e6c886; outline: none; }
-.chamada .ch-ic { font-size: 14px; }
-.chamada .ch-txt { flex: 1; min-width: 0; }
-.chamada .ch-txt b { font-weight: 600; }
-.chamada .ch-seta { color: #b08d43; }
-.chamada-todas { display: block; margin: -4px 16px 12px; padding: 0 2px; border: 0; background: none;
-  color: #9096a7; font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
 /* Aviso de sistema (ADR-045): incidente não é decisão. Azul neutro de STATUS, distinto do âmbar da
    faixa de decisões acima; não é um botão inteiro — só o "Entendi" age. */
 .aviso-sistema { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 8px; row-gap: 6px; width: calc(100% - 32px); margin: 0 16px 10px;
@@ -276,8 +260,6 @@ body { background: #fcfdff; }
 .aviso-sistema .av-txt { min-width: 0; }
 /* Vence o `.sidebar .bt.sm` (bloco de largura total), que espremia o texto numa coluna de uma palavra. */
 .aviso-sistema .bt, .sidebar .aviso-sistema .bt.sm { grid-column: 2; justify-self: start; display: inline-block; width: auto; margin: 0; padding: 0; border: 0; background: none; text-align: left; font-size: 12px; font-weight: 500; color: var(--blue); }
-.ch-badge { display: inline-flex; align-items: center; gap: 1px; padding: 1px 5px; border-radius: 7px;
-  background: #f5e2b6; color: #6d5220; font-size: 10px; font-weight: 600; }
 
 /* Painel do bot: rotinas e acessos com controle real, não só atalho para outra tela. */
 .detalhes .secao-titulo .cont { color: #9096a7; font-weight: 400; }
@@ -470,8 +452,80 @@ body { background: #fcfdff; }
 .fio-resolvido .fio-corpo { padding: 6px 12px 10px; border-top: 1px solid #cde8d6; background: var(--panel); border-radius: 0 0 12px 12px; }
 .msg-seguiu { margin-top: 0; }
 
-/* Barra lateral: o balão azul conta perguntas, separado do ⚑ âmbar das decisões. */
-.ch-badge.ch-pergunta { gap: 3px; background: var(--blue-soft); color: var(--blue); }
-.ch-badge .ic-balao { display: block; }
+/* Barra lateral: quem perguntou diz "esperando sua resposta" no subtítulo, em azul como o ponto do mascote. */
 .sub-esperando { color: var(--blue) !important; }
 @media (prefers-reduced-motion: reduce) { .message.pergunta.realce .bubble { transition: none; } }
+
+/* definido em 2026-09-24 (revisão da interface): o chat é a tela principal. Cabeçalho só com o bot e o
+   botão do painel; o painel pode ficar escondido; o que espera a pessoa vira um sino, não uma faixa. */
+.cab-acoes .toggle-detalhes { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0;
+  border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink-2); }
+.cab-acoes .toggle-detalhes:hover, .cab-acoes .toggle-detalhes:focus-visible { background: var(--panel-soft); }
+@media (min-width: 1251px) {
+  .app.com-detalhes.detalhes-ocultos { grid-template-columns: 292px minmax(360px, 1fr); }
+  .com-detalhes.detalhes-ocultos .detalhes { display: none; }
+}
+.sino { position: relative; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; }
+.sino:hover, .sino:focus-visible { background: var(--panel-soft); outline: none; }
+.sino-ponto { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%;
+  background: #e0a526; box-shadow: 0 0 0 2px var(--bg); }
+.sino-cont { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 8px; background: #e0a526; color: #3d2a05; font-size: 9.5px; font-weight: 700; line-height: 15px; }
+
+/* ••• da linha do agente só aparece no hover ou no foco; o clique direito abre o mesmo menu. Em tela de
+   toque não há hover, então ali ele continua visível. */
+@media (hover: hover) {
+  .bot-row .bot-overflow { opacity: 0; transition: opacity .12s; }
+  .bot-row:hover .bot-overflow, .bot-row:focus-within .bot-overflow { opacity: 1; }
+}
+
+/* Rotinas e acessos em cartões: nome em cima, estado em palavras, ações no rodapé. */
+.lista-cartoes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.lista-cartoes > li { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 11px 12px;
+  border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+.lista-cartoes .detalhe-rotina { flex-wrap: nowrap; }
+.detalhe-rotina.rotina-pausada { background: var(--panel-soft); }
+.dr-cab { display: flex; align-items: center; gap: 8px; }
+.dr-cab b { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; color: #273044; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rotina-pausada .dr-cab b { color: #8a91a2; }
+.lista-cartoes .detalhe-rotina > small { font-size: 11px; color: var(--ink-3); }
+.lista-cartoes .dr-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.lista-cartoes .dr-execucoes { flex-basis: 100%; list-style: none; margin: 4px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line);
+  font-size: 10.5px; color: var(--ink-3); line-height: 1.8; }
+.chave { position: relative; flex-shrink: 0; width: 30px; height: 18px; padding: 0; border: 0; border-radius: 9px;
+  background: #d5d8df; cursor: pointer; transition: background .15s; }
+.chave span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px #0003; transition: left .15s; }
+.chave[aria-checked="true"] { background: var(--ok); }
+.chave[aria-checked="true"] span { left: 14px; }
+.chave:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.acesso-cab { display: flex; align-items: center; gap: 10px; }
+.acesso-cab > div { flex: 1; min-width: 0; }
+.acesso-marca { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: #273044;
+  color: #fff; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.acesso-frase { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); }
+.acesso-rodape { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.acesso-rodape details { flex: 1; min-width: 0; }
+.acesso-rodape summary { cursor: pointer; font-size: 11.5px; color: var(--blue); }
+.acesso-acoes { list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); }
+.acesso-acoes li { padding: 3px 0 3px 14px; position: relative; font-size: 11.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acesso-acoes li::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: var(--line-2); }
+.acesso-rodape summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+.acesso-rodape summary:focus:not(:focus-visible) { outline: none; }
+.detalhes .bt.link.perigo { color: var(--red); }
+
+/* definido em 2026-09-24 (revisão da interface): a linha do agente é UM componente — fundo de hover e de
+   selecionado ficam na .bot-row, e o ••• mora dentro dela, não num segundo cartão ao lado. */
+.bot-row { border-radius: 12px; margin: 2px 0; }
+.bot-row:hover { background: var(--panel-soft); }
+.bot-row:has(> .row[aria-current="true"]) { background: #f0f2f7; }
+.bot-row > .row, .bot-row > .row:hover, .bot-row > .row[aria-current="true"] { background: transparent; margin: 0; }
+.bot-row .bot-overflow, .bot-row .bot-overflow:hover, .bot-row .bot-overflow:focus-visible { background: transparent; margin-right: 6px; }
+.bot-row .bot-overflow:hover, .bot-row .bot-overflow:focus-visible { color: #182339; }
+
+/* O ponto do mascote diz o tipo do aviso (mascote-svg.ts lê --nod-aviso). */
+nod-mascote[data-aviso="decisao"] { --nod-aviso: #e0a526; }
+nod-mascote[data-aviso="pergunta"] { --nod-aviso: #2496e8; }
+nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }

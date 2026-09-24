@@ -2,7 +2,7 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { chaveDoItem, contarFios, ehPergunta, iconeBalao, umPorFio } from "../lib/perguntas.ts";
+import { chaveDoItem, contarFios, ehPergunta, umPorFio } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 
@@ -296,9 +296,9 @@ export function abertasPorAgente(estado: Estado): Map<string, number> {
 }
 
 /**
- * Perguntas abertas por agente (definido em 2026-09-24, emenda da ADR-045): o selo azul de balão na
- * barra lateral e o subtítulo "esperando sua resposta" — separados do ⚑ âmbar, porque pergunta se
- * responde conversando e decisão se decide num botão.
+ * Perguntas abertas por agente (definido em 2026-09-24, emenda da ADR-045): o ponto azul do mascote na
+ * barra lateral e o subtítulo "esperando sua resposta" — separados do ponto âmbar das decisões, porque
+ * pergunta se responde conversando e decisão se decide num botão.
  */
 export function perguntasPorAgente(estado: Estado): Map<string, number> {
   return contarAbertas(estado, ehPergunta);
@@ -314,36 +314,29 @@ function contarAbertas(estado: Estado, conta: (tipo: TipoDecisao) => boolean): M
   return new Map([...fios].map(([agenteId, chaves]) => [agenteId, chaves.size]));
 }
 
-/** Os selos da linha do agente na barra lateral: ⚑ âmbar para decisões, balão azul (com a contagem) para perguntas. */
-export function selosDoAgente(decisoes: number, perguntas: number): string {
-  const flag = decisoes ? `<span class="ch-badge" title="${decisoes === 1 ? "uma decisão esperando você" : `${decisoes} decisões esperando você`}">⚑${decisoes > 1 ? decisoes : ""}</span>` : "";
-  const dica = perguntas === 1 ? "uma pergunta esperando sua resposta" : `${perguntas} perguntas esperando sua resposta`;
-  const balao = perguntas ? `<span class="ch-badge ch-pergunta" title="${dica}">${iconeBalao(11)}${perguntas}</span>` : "";
-  return flag + balao;
-}
-
 /** O subtítulo do agente que perguntou, no lugar do título (definido em 2026-09-24, emenda da ADR-045). */
 export const SUBTITULO_ESPERANDO = '<span class="sub-esperando">esperando sua resposta</span>';
 
+const SINO = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3z"/><path d="M6.5 14a1.6 1.6 0 0 0 3 0"/></svg>';
+
 /**
- * Faixa de chamada no topo da sidebar: some quando não há nada aberto, nomeia UM agente quando é um
- * só (o nome é o que faz voltar para a conversa) e conta quando são vários — grupos, como o ⚑: um
- * "×3" é uma decisão a tomar. Clicar leva à conversa do mais antigo — `itens` já vem ordenado pelo
- * servidor (ADR-007), então o primeiro aberto é ele. definido em 2026-09-24 (emenda da ADR-045): conta
- * "pedidos" — decisões e perguntas —, porque as duas esperam pela pessoa.
+ * Sino ao lado do título da sidebar: some quando não há nada aberto. definido em 2026-09-24 (revisão da
+ * interface): substituiu a faixa âmbar, que ocupava o topo da lista inteira; o selo ⚑ na linha do
+ * agente continua dizendo QUEM espera. Um pedido: o sino leva à conversa dele (`itens` já vem ordenado
+ * pelo servidor, ADR-007). Vários: leva à fila completa e mostra a contagem. Conta "pedidos" —
+ * decisões e perguntas —, porque as duas esperam pela pessoa (emenda da ADR-045).
  */
 export function renderChamada(estado: Estado): string {
   const abertos = umPorFio((estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido"));
   const primeiro = abertos[0];
   if (!primeiro) return "";
   const d = primeiro.decisao;
-  const texto =
-    abertos.length === 1
-      ? `<b>${esc(primeiro.agenteNome)}</b> precisa de você`
-      : `<b>${abertos.length} pedidos</b> esperando por você`;
-  return `<button class="chamada" data-act="abrir-conversa" data-conversa="${esc(d.conversaId)}" data-agente="${esc(d.agenteId)}" aria-label="Abrir o pedido mais antigo, com ${esc(primeiro.agenteNome)}">
-    <span class="ch-ic" aria-hidden="true">⚑</span><span class="ch-txt">${texto}</span><span class="ch-seta" aria-hidden="true">→</span>
-  </button>${abertos.length > 1 ? `<button class="chamada-todas" data-act="navegar" data-tela="sua-vez">ver todos</button>` : ""}`;
+  if (abertos.length === 1) {
+    const texto = `${primeiro.agenteNome} precisa de você`;
+    return `<button type="button" class="sino" data-act="abrir-conversa" data-conversa="${esc(d.conversaId)}" data-agente="${esc(d.agenteId)}" aria-label="${esc(texto)}" title="${esc(texto)}">${SINO}<span class="sino-ponto" aria-hidden="true"></span></button>`;
+  }
+  const texto = `${abertos.length} pedidos esperando por você`;
+  return `<button type="button" class="sino" data-act="navegar" data-tela="sua-vez" aria-label="${esc(texto)}" title="${esc(texto)}">${SINO}<span class="sino-cont" aria-hidden="true">${abertos.length}</span></button>`;
 }
 
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;

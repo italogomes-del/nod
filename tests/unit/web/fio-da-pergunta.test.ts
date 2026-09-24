@@ -156,10 +156,10 @@ describe("os contadores contam fios, não rodadas", () => {
     const e = cenario([], [], [item("d2", { id: "d1", rodada: 2 }), item("d3", { id: "d1", rodada: 3 }), item("x", { id: "x", rodada: 1 }, { agenteId: "b", conversaId: "cb" })]);
     expect(perguntasPorAgente(e).get("a")).toBe(1);
     expect(perguntasPorAgente(e).get("b")).toBe(1);
-    expect(renderChamada(e)).toContain("<b>2 pedidos</b> esperando por você");
+    expect(renderChamada(e)).toContain("2 pedidos esperando por você");
     expect(renderSuaVez(e)).toContain("<h1>Sua vez · 2</h1>");
     const umFio = cenario([], [], [item("d2", { id: "d1", rodada: 2 }), item("d3", { id: "d1", rodada: 3 })]);
-    expect(renderChamada(umFio)).toContain("<b>Nina</b> precisa de você");
+    expect(renderChamada(umFio)).toContain("Nina precisa de você");
     expect(renderSuaVez(umFio)).toContain("<h1>Sua vez · 1</h1>");
   });
 });

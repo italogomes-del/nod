@@ -77,6 +77,8 @@ export type Estado = {
   suaVez: SuaVezDto | null;
   rotinas: RotinaDto[];
   execucoes: Record<string, ExecucaoRotina[]>;
+  /** Rotinas com o histórico aberto no painel. Separado de `execucoes`: um evento recarrega a lista, mas não a reabre. */
+  historicoAberto: Record<string, boolean>;
   conectores: Conector[];
   marketplace: AppComLogo[];
   composioConfigurado: boolean;
@@ -123,6 +125,7 @@ export type Acao =
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
   | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
+  | { tipo: "alternar-historico"; rotinaId: string }
   | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
@@ -150,6 +153,7 @@ export const estadoInicial: Estado = {
   suaVez: null,
   rotinas: [],
   execucoes: {},
+  historicoAberto: {},
   conectores: [],
   marketplace: [],
   composioConfigurado: false,
@@ -355,6 +359,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, rotinas: acao.rotinas };
     case "hidratar-execucoes":
       return { ...estado, execucoes: { ...estado.execucoes, [acao.rotinaId]: acao.execucoes } };
+    case "alternar-historico":
+      return { ...estado, historicoAberto: { ...estado.historicoAberto, [acao.rotinaId]: !estado.historicoAberto[acao.rotinaId] } };
     case "autorizacao-app":
       return { ...estado, autorizacaoApp: { slug: acao.slug, url: acao.url }, avisoConexao: null };
     case "aviso-conexao":

@@ -26,7 +26,7 @@ import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
-import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, selosDoAgente, SUBTITULO_ESPERANDO } from "./telas/sua-vez.ts";
+import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, SUBTITULO_ESPERANDO } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
@@ -46,6 +46,13 @@ let reidratando = false;
 let ambienteBanco: AmbienteBancoDto | null = null;
 /** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
 let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, recusado: false };
+
+// definido em 2026-09-24 (revisão da interface): a tela principal é o chat; quem esconde o painel do
+// bot espera achá-lo escondido na próxima conversa e no próximo carregamento.
+const CHAVE_PAINEL_OCULTO = "nod.painelOculto";
+function painelOculto(): boolean {
+  try { return localStorage.getItem(CHAVE_PAINEL_OCULTO) === "1"; } catch { return false; }
+}
 
 function dispatch(acao: Acao): void {
   estado = reduzir(estado, acao);
@@ -156,15 +163,16 @@ function renderSidebar(): string {
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
   const linha = (a: (typeof agentes)[number]) => {
-    const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
-    const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
-    const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
-    // definido em 2026-09-24 (emenda da ADR-045): ⚑ âmbar conta decisões; o balão azul conta perguntas, e o
-    // agente que perguntou diz "esperando sua resposta" no lugar do título.
+    // definido em 2026-09-24 (revisão da interface): a linha só tem UM sinal, o ponto do próprio mascote.
+    // A cor diz o tipo — âmbar decisão, azul pergunta, cinza mensagem não lida —; o mascote animado já
+    // diz quando o bot trabalha. Selos ⚑, estrela de fixado e pontos soltos saíram.
     const perguntando = perguntas.get(a.id) ?? 0;
-    const selos = selosDoAgente(abertas.get(a.id) ?? 0, perguntando);
+    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : a.naoLido ? "nao-lido" : "";
+    const rotuloAviso = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
+    const mascote = estadoMascoteNaConversa(estado, a.conversaId);
+    const estadoVisual = aviso && mascote === "disponivel" ? "aguardando" : mascote;
     const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${perguntando ? " (esperando sua resposta)" : ""}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b>${subtitulo}</span><span class="meta">${selos}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><b>${esc(a.nome)}</b>${subtitulo}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";
@@ -196,10 +204,10 @@ function renderSidebar(): string {
         : "Sua IA conectada";
   // A marca voltou do rail para cá: é o único lugar dela agora, e continua levando ao início.
   return `<div class="search-wrap">
-      <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b><span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b>${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
     </div>
-    ${renderChamada(estado)}${renderIncidentes(estado)}
+    ${renderIncidentes(estado)}
     <div class="list">
       ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
@@ -268,6 +276,7 @@ function renderPrincipal(): void {
   }
   regiao("detalhes", renderDetalhes(estado));
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
+  document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
   regiao("cabecalho", cabecalho);
   regiao("erro", erro);
   const timeline = document.getElementById("timeline");
@@ -727,7 +736,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   anexar: () => document.getElementById("composer-arquivos")?.click(),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
-  "alternar-detalhes": () => { document.querySelector(".app")?.classList.toggle("detalhes-abertos"); },
+  "alternar-detalhes": () => {
+    const app = document.querySelector(".app");
+    if (!app) return;
+    // Estreita, o painel é sobreposto e abre/fecha a cada vez; larga, esconder é preferência que fica.
+    if (window.matchMedia("(max-width: 1250px)").matches) { app.classList.toggle("detalhes-abertos"); return; }
+    const oculto = !app.classList.contains("detalhes-ocultos");
+    app.classList.toggle("detalhes-ocultos", oculto);
+    try { localStorage.setItem(CHAVE_PAINEL_OCULTO, oculto ? "1" : "0"); } catch { /* sem storage, vale só nesta aba */ }
+  },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
@@ -818,7 +835,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "apagar-memoria": (el) => agir(async () => void (await api!.apagarMemoria(el.dataset.agente ?? "", el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] }))),
   "pausar-rotina": (el) => agir(async () => void (await api!.pausarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ativar-rotina": (el) => agir(async () => void (await api!.ativarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
-  "ver-execucoes": (el) => dispatch({ tipo: "invalidar", quais: [`execucoes:${el.dataset.id ?? ""}`] }),
+  "ver-execucoes": (el) => {
+    const id = el.dataset.id ?? "";
+    const abrindo = !estado.historicoAberto[id];
+    dispatch({ tipo: "alternar-historico", rotinaId: id });
+    if (abrindo) dispatch({ tipo: "invalidar", quais: [`execucoes:${id}`] });
+  },
   "sondar-conector": (el) => agir(async () => void (await api!.sondarConector(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["conectores", "frota"] }))),
   "habilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", true), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),
   "desabilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", false), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),

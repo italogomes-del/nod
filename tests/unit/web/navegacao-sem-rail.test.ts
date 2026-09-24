@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
-import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
-import { abertasPorAgente, perguntasPorAgente, renderChamada, selosDoAgente, SUBTITULO_ESPERANDO } from "../../../web/telas/sua-vez.ts";
-import { renderDetalhes } from "../../../web/telas/detalhes.ts";
+import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
+import { abertasPorAgente, perguntasPorAgente, renderChamada, SUBTITULO_ESPERANDO } from "../../../web/telas/sua-vez.ts";
+import { nomeLegivel, renderDetalhes } from "../../../web/telas/detalhes.ts";
 
 /**
  * O rail saiu em 2026-09-18 (main.ts). Estes testes travam o que tomou o lugar dele: o sinal de
@@ -36,13 +36,13 @@ describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
     const estado = comFila([decisao("d1", "a1", "Vera", false, ["d1b", "d1c"]), decisao("d2", "a2", "Tuca")], [queda]);
     expect(abertasPorAgente(estado).get("a1")).toBe(1);
     expect(abertasPorAgente(estado).get("a2")).toBe(1);
-    expect(renderChamada(estado)).toContain("<b>2 pedidos</b> esperando por você");
+    expect(renderChamada(estado)).toContain("2 pedidos esperando por você");
     const umSo = comFila([decisao("d1", "a1", "Vera", false, ["d1b", "d1c"])], [queda]);
     expect(renderChamada(umSo)).toContain("precisa de você");
     expect(renderChamada(umSo)).not.toContain("pedidos");
   });
 
-  it("pergunta aberta conta como PEDIDO na faixa, mas tem selo azul de balão próprio, separado do ⚑ (emenda da ADR-045)", () => {
+  it("pergunta aberta conta como PEDIDO no sino e é contada à parte das decisões (emenda da ADR-045)", () => {
     const pergunta = (id: string, agenteId: string, nome: string, vencido = false): SuaVezDto["itens"][number] => {
       const d = decisao(id, agenteId, nome, vencido);
       return { ...d, decisao: { ...d.decisao, tipo: "pergunta" } };
@@ -55,35 +55,26 @@ describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
     expect(perguntasPorAgente(estado).get("a2")).toBe(1);
     expect(perguntasPorAgente(estado).get("a3")).toBeUndefined();
     // A faixa do topo conta decisões E perguntas: as duas esperam pela pessoa.
-    expect(renderChamada(estado)).toContain("<b>4 pedidos</b> esperando por você");
+    expect(renderChamada(estado)).toContain("4 pedidos esperando por você");
 
-    const selos = selosDoAgente(1, 2);
-    expect(selos).toContain('<span class="ch-badge" title="uma decisão esperando você">⚑</span>');
-    expect(selos).toContain('class="ch-badge ch-pergunta" title="2 perguntas esperando sua resposta"');
-    expect(selos).toContain("</svg>2</span>");
-    const soPergunta = selosDoAgente(0, 1);
-    expect(soPergunta).not.toContain("⚑");
-    expect(soPergunta).toContain("uma pergunta esperando sua resposta");
-    expect(soPergunta).toContain("</svg>1</span>");
-    expect(selosDoAgente(0, 0)).toBe("");
     expect(SUBTITULO_ESPERANDO).toBe('<span class="sub-esperando">esperando sua resposta</span>');
   });
 
-  it("a faixa nomeia o agente quando é uma só e leva à conversa dela", () => {
+  it("o sino nomeia o agente quando é um só e leva à conversa dela", () => {
     const html = renderChamada(comFila([decisao("d1", "a1", "Vera")]));
     expect(html).toContain("Vera");
     expect(html).toContain("precisa de você");
     expect(html).toContain('data-act="abrir-conversa"');
     expect(html).toContain('data-conversa="c-a1"');
-    // Com uma só, "ver todas" seria um desvio inútil: a conversa já resolve.
-    expect(html).not.toContain("ver todas");
+    // Com um só, a fila seria um desvio inútil: a conversa já resolve.
+    expect(html).not.toContain('data-tela="sua-vez"');
+    expect(html).toContain('class="sino-ponto"');
   });
 
-  it("com várias, conta e oferece a fila completa, abrindo a mais antiga", () => {
+  it("com vários, o sino conta e leva à fila completa", () => {
     const html = renderChamada(comFila([decisao("d1", "a1", "Vera"), decisao("d2", "a2", "Tuca")]));
     expect(html).toContain("2 pedidos");
-    expect(html).toContain('data-conversa="c-a1"');
-    expect(html).toContain("ver todos");
+    expect(html).toContain('<span class="sino-cont" aria-hidden="true">2</span>');
     expect(html).toContain('data-tela="sua-vez"');
   });
 
@@ -126,7 +117,8 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     expect(html).toContain('data-act="revogar-acessos"');
     expect(html).toContain('data-ids="g1"');
     // Sem a sonda dizer que é leitura, o painel não promete "só leitura".
-    expect(html).toContain("pode alterar · 1 ação");
+    expect(html).toContain("<small>pode alterar</small>");
+    expect(html).toContain("1 ação permitida");
   });
 
   it("ADR-044: agrupa por app e nível — 'Gmail · só leitura · N ações' — com os nomes técnicos só no <details>", () => {
@@ -146,12 +138,39 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     };
     const html = renderDetalhes(estado);
     expect(html.match(/class="acesso"/g)).toHaveLength(2);
-    expect(html).toContain("só leitura · 2 ações");
-    expect(html).toContain("pode alterar · 1 ação");
+    expect(html).toContain("<small>só leitura</small>");
+    expect(html).toContain("2 ações permitidas");
+    expect(html).toContain("Não envia nem altera nada.");
+    expect(html).toContain("1 ação permitida");
     expect(html).toContain('data-ids="g1,g2"');
     expect(html).toContain('data-ids="g3"');
     expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
     expect(html).not.toContain('data-act="revogar"');
+  });
+
+  it("cada ação vira uma linha legível; a descrição do catálogo fica só no title (definido em 2026-09-24)", () => {
+    expect(nomeLegivel("SLACK_FETCH_MESSAGE_THREAD", "Slack")).toBe("Fetch message thread");
+    expect(nomeLegivel("GMAIL_SEND_EMAIL", "Gmail")).toBe("Send email");
+    expect(nomeLegivel("ler_issues", "GitHub")).toBe("Ler issues");
+    const estado: Estado = {
+      ...base,
+      conectores: [{ id: "k1", nome: "Slack", slug: "slack", catalogo: [{ nome: "SLACK_WHO_AM_I", descricao: "Return the identity (user + workspace).", readOnlyHint: true }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
+      concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "SLACK_WHO_AM_I" } as never] },
+    };
+    const html = renderDetalhes(estado);
+    expect(html).toContain('<li title="Return the identity (user + workspace).">Who am i</li>');
+  });
+
+  it("o histórico da rotina abre e fecha; um evento que recarrega a lista não o reabre", () => {
+    const rotina = { rotina: { id: "r1", agenteId: "a1", conversaId: "c1", instrucao: "Resumo", cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", estado: "ativa" }, proximaExecucao: 10_000 } as never;
+    const fechado: Estado = { ...base, rotinas: [rotina], execucoes: { r1: [] }, agora: 0 };
+    expect(renderDetalhes(fechado)).toContain(">Histórico</button>");
+    expect(renderDetalhes(fechado)).not.toContain("nunca executou");
+    const aberto = reduzir(fechado, { tipo: "alternar-historico", rotinaId: "r1" });
+    expect(renderDetalhes(aberto)).toContain(">Ocultar histórico</button>");
+    expect(renderDetalhes(aberto)).toContain("nunca executou");
+    const fechadoDeNovo = reduzir(reduzir(aberto, { tipo: "alternar-historico", rotinaId: "r1" }), { tipo: "hidratar-execucoes", rotinaId: "r1", execucoes: [] });
+    expect(renderDetalhes(fechadoDeNovo)).not.toContain("nunca executou");
   });
 
   it("sem acessos, convida a conectar em vez de deixar a seção muda", () => {
