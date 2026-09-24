@@ -173,7 +173,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
         res.end();
         return;
       }
-      responderErro(res, err instanceof SyntaxError ? new ErroDeDominio("entrada_invalida", { cause: err }) : err);
+      responderErro(res, err instanceof SyntaxError ? new ErroDeDominio("entrada_invalida", { cause: err }) : err, { metodo: req.method ?? "?", caminho: req.url ?? "" });
     });
   };
 }
