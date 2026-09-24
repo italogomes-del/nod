@@ -22,7 +22,7 @@ const NOD: Record<string, string> = {
 };
 
 /** Prefixos de capacidade que só leem; o resto de um conector conta como alteração. */
-const LEITURA = /^(search|list|get|read|find|fetch|query|consultar|listar|ler|buscar)/;
+const LEITURA = /^(search|list|get|read|find|fetch|query|who|consultar|listar|ler|buscar)/i;
 
 function titulo(slug: string): string {
   const limpo = slug.replace(/[-_]+/g, " ").trim();
@@ -38,6 +38,11 @@ export function rotuloFerramenta(nomeCli: string): string {
   if (nome.startsWith("computador_")) return "Usou o computador";
   if (nome.startsWith("workspace_")) return "Usou a pasta de trabalho";
   const conector = /^(.+?)__(.+)$/.exec(nome);
-  if (conector) return `${LEITURA.test(conector[2]!) ? "Consultou" : "Alterou"} ${titulo(conector[1]!)}`;
+  if (conector) {
+    // Composio repete o app no nome da capacidade (gmail__GMAIL_FETCH_EMAILS): o verbo vem depois dele.
+    const slug = conector[1]!;
+    const cap = conector[2]!.toLowerCase().startsWith(`${slug.toLowerCase()}_`) ? conector[2]!.slice(slug.length + 1) : conector[2]!;
+    return `${LEITURA.test(cap) ? "Consultou" : "Alterou"} ${titulo(slug)}`;
+  }
   return `Usou ${titulo(m[1] === "nod" ? nome : m[1]!)}`;
 }
