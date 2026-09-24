@@ -2,7 +2,7 @@ import { COMANDO_GITHUB_NATIVO, ENV_TOKEN_GITHUB, SLUG_GITHUB, type OndeRodaCone
 import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { fraseSemJeito } from "../../../domain/github.ts";
-import { formatoDeTokenGithub, garantirGithubPeloGh, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
+import { formatoDeTokenGithub, garantirGithubPeloGh, guardarComposioGithub, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
 import { API_GITHUB } from "../../conectores-locais/github/backend-rest.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
@@ -88,6 +88,12 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const sessao = await c.criarSessao(userId, app.slug);
       const link = await c.autorizar(sessao.id, app.slug);
       const conectorId = await op.dentro(ctx.escopo, async (d) => {
+        if (app.slug === SLUG_GITHUB) {
+          // ADR-047: o Composio é um jeito DENTRO do GitHub nativo; os nomes estáveis e as concessões ficam.
+          const g = await guardarComposioGithub(d, { url: sessao.url, chave, cifrar: op.cifrar, decifrar: op.decifrar });
+          await d.repos.composio.salvarSessao({ toolkit: app.slug, sessaoId: sessao.id, contaId: link.contaId, conectorId: g.id });
+          return g.id;
+        }
         const existente = await d.repos.conectores.buscarPorSlug(app.slug);
         if (existente && existente.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_permitido");
         const anterior = await d.repos.composio.sessao(app.slug);

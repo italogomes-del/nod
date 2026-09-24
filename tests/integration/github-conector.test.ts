@@ -185,6 +185,39 @@ describeIntegracao("GitHub nativo: registro sem configuração (ADR-047)", () =>
     });
   });
 
+  it("sem gh e sem token: o Composio vira um jeito DENTRO do GitHub nativo — mesmos nomes, menos o que o Composio não tem", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { deps, repos } = depsGithub(trx, MARLON, false, { carregarDaTx: true });
+      const dentro: DentroDeTx = (escopo, fn) => fn({ ...deps, escopo, repos: depsSobre(trx, escopo).repos });
+      await repos.composio.salvarChave(cifrar("ak_segredo", CHAVE));
+      const userId = `nod:${TENANT_LEAPY}:${PESSOA_MARLON}`;
+      const fakeFetch: typeof fetch = async (url) => {
+        const u = String(url);
+        if (u.endsWith("/tool_router/session")) return Response.json({ session_id: "trs_gh", mcp: { url: "https://backend.composio.dev/tool_router/v3/trs_gh/mcp" } });
+        if (u.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/lk_gh", connected_account_id: "ca_gh" });
+        if (u.endsWith("/connected_accounts/ca_gh")) return Response.json({ status: "ACTIVE", user_id: userId, toolkit: { slug: "github" } });
+        if (u.endsWith("/tool_router/session/trs_gh")) return Response.json({});
+        throw new Error(`inesperado: ${u}`);
+      };
+      const cifra = (s: string) => cifrar(s, CHAVE);
+      const srv = await servidorDeTeste(rotasMarketplace({ dentro, cifrar: cifra, decifrar: (s) => decifrar(s, CHAVE), fetchImpl: fakeFetch }));
+      try {
+        const sessao = await srv.entrar("marlon");
+        const inicio = await (await srv.chamar(sessao, "POST", "marketplace/github/conectar")).json() as { url: string; conectorId: string };
+        expect(inicio.url).toBe("https://connect.composio.dev/link/lk_gh");
+        const antes = await repos.conectores.buscar(inicio.conectorId);
+        expect(antes).toMatchObject({ slug: "github", comando: COMANDO_GITHUB_NATIVO, habilitado: false, env: { COMPOSIO_API_KEY: true, COMPOSIO_URL: true } });
+        expect(antes?.envCifrado).not.toContain("ak_segredo");
+
+        expect(await (await srv.chamar(sessao, "POST", "marketplace/github/verificar")).json()).toMatchObject({ conectado: true, conector: { habilitado: true } });
+        const depois = await repos.conectores.buscar(inicio.conectorId);
+        expect(depois?.catalogo.map((c) => c.nome)).toEqual(["pr_ver", "pr_arquivos", "pr_comentarios", "arquivo_ler", "issue_ver", "pr_comentar", "pr_revisar"]);
+      } finally {
+        await srv.close();
+      }
+    });
+  });
+
   it("sem gh, sem token e sem Composio: Conectar GitHub devolve a frase do que fazer, não um erro", async () => {
     await withRollback(MARLON, async (trx) => {
       const { deps } = depsGithub(trx, MARLON, false);

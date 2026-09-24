@@ -1,5 +1,5 @@
 import type { ConectorGuardado } from "../contracts/conector.ts";
-import { COMANDO_GITHUB_NATIVO, ENV_TOKEN_GITHUB, SLUG_GITHUB } from "../contracts/github.ts";
+import { COMANDO_GITHUB_NATIVO, ENV_COMPOSIO_CHAVE, ENV_COMPOSIO_URL, ENV_TOKEN_GITHUB, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import type { Deps } from "./tipos.ts";
@@ -60,20 +60,18 @@ export function formatoDeTokenGithub(token: string): boolean {
 }
 
 /**
- * Jeito 3 (ADR-047): o token pessoal colado no campo avançado vai CIFRADO para o env do conector
- * `github` (chave GITHUB_TOKEN), mesclado com o que já estava lá (o login do Composio, se houver).
- * Quem não tinha conector ganha o nativo; o `github` do Composio por HTTP é trocado no lugar. A
- * sonda vem depois, em OUTRA transação: `carregar` só decifra o env de linha já gravada.
+ * O env do conector `github` recebe `extra` por cima do que já tinha (o token não apaga o login do
+ * Composio, nem o contrário), cifrado de novo. Quem não tinha conector ganha o nativo; o `github` do
+ * Composio por HTTP é trocado no lugar, mesmo id. A sonda vem depois, em OUTRA transação: `carregar`
+ * só decifra o env de linha já gravada.
  */
-export async function guardarTokenGithub(deps: Deps, input: { token: string; cifrar: (s: string) => string; decifrar: (s: string) => string }): Promise<ConectorGuardado> {
-  const token = input.token.trim();
-  if (!formatoDeTokenGithub(token)) throw new ErroDeDominio("entrada_invalida", { cause: "token do GitHub" });
+async function mesclarEnvGithub(deps: Deps, extra: Record<string, string>, cifra: { cifrar: (s: string) => string; decifrar: (s: string) => string }): Promise<ConectorGuardado> {
   const achado = await deps.repos.conectores.buscarPorSlug(SLUG_GITHUB);
   const meu = achado && achado.ownerId === deps.escopo.pessoaId ? achado : null;
   const nativo = meu?.comando === COMANDO_GITHUB_NATIVO ? meu : null;
-  const anterior = nativo?.envCifrado ? (JSON.parse(input.decifrar(nativo.envCifrado)) as Record<string, string>) : {};
-  const env = { ...anterior, [ENV_TOKEN_GITHUB]: token };
-  const envCifrado = input.cifrar(JSON.stringify(env));
+  const anterior = nativo?.envCifrado ? (JSON.parse(cifra.decifrar(nativo.envCifrado)) as Record<string, string>) : {};
+  const env = { ...anterior, ...extra };
+  const envCifrado = cifra.cifrar(JSON.stringify(env));
   const envChaves = Object.keys(env).sort();
   const salvo = nativo
     ? ((await deps.repos.conectores.atualizarEnv(nativo.id, { envCifrado, envChaves })) ? await deps.repos.conectores.buscar(nativo.id) : null)
@@ -82,4 +80,22 @@ export async function guardarTokenGithub(deps: Deps, input: { token: string; cif
       : await deps.repos.conectores.criar({ nome: "GitHub", slug: SLUG_GITHUB, transporte: "stdio", comando: COMANDO_GITHUB_NATIVO, envCifrado, envChaves, declaracao: "toca" });
   if (!salvo) throw new ErroDeDominio("nao_encontrado", { cause: "conector github" });
   return salvo;
+}
+
+/** Jeito 3 (ADR-047): o token pessoal colado no campo avançado, cifrado no env (GITHUB_TOKEN). */
+export async function guardarTokenGithub(deps: Deps, input: { token: string; cifrar: (s: string) => string; decifrar: (s: string) => string }): Promise<ConectorGuardado> {
+  const token = input.token.trim();
+  if (!formatoDeTokenGithub(token)) throw new ErroDeDominio("entrada_invalida", { cause: "token do GitHub" });
+  return mesclarEnvGithub(deps, { [ENV_TOKEN_GITHUB]: token }, input);
+}
+
+/**
+ * Jeito 2 (ADR-047): o login do Composio vira um jeito DENTRO do conector nativo — a URL da sessão
+ * e a chave do tenant vão cifradas no env (COMPOSIO_URL, COMPOSIO_API_KEY) e o catálogo continua o
+ * dos nomes estáveis, menos o que o Composio não tem.
+ */
+export async function guardarComposioGithub(deps: Deps, input: { url: string; chave: string; cifrar: (s: string) => string; decifrar: (s: string) => string }): Promise<ConectorGuardado> {
+  // Conector novo nasce desligado e só o Verificar (depois do login no navegador) o sonda; um que já
+  // funcionava por token continua ligado enquanto isso.
+  return mesclarEnvGithub(deps, { [ENV_COMPOSIO_URL]: input.url, [ENV_COMPOSIO_CHAVE]: input.chave }, input);
 }

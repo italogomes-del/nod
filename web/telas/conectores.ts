@@ -2,12 +2,28 @@ import { renderMarketplace } from "./marketplace.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { avatarAgente, botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
+import type { NomeCapacidadeGithub } from "../../src/contracts/github.ts";
+
+/**
+ * definido em 2026-09-24 (ADR-047): o que o GitHub nativo sabe fazer, para dizer o que o jeito de
+ * conectar em uso NÃO cumpre (o Composio não tem diff nem checks). Record: faltar um nome não compila.
+ */
+const CAPACIDADES_GITHUB: Record<NomeCapacidadeGithub, true> = { pr_ver: true, pr_diff: true, pr_arquivos: true, pr_comentarios: true, pr_checks: true, arquivo_ler: true, issue_ver: true, pr_comentar: true, pr_revisar: true };
+
+function nativo(c: { comando: string | null }): boolean {
+  return c.comando?.startsWith("nod:") === true;
+}
 
 /**
  * Conectores (E6, ADR-013/015): registrar (nasce desabilitado; env fica cifrado no servidor e a web
  * só vê chaves → true), sondar (catálogo com readOnlyHint), habilitar/desabilitar e conceder POR BOT
  * E POR CAPACIDADE — a concessão nasce com a mensagem de consentimento na conversa do bot.
  */
+function indisponiveis(tem: readonly string[]): string {
+  const faltam = Object.keys(CAPACIDADES_GITHUB).filter((n) => !tem.includes(n));
+  return faltam.length ? `<p class="mudo">Indisponível neste jeito de conectar: ${faltam.map((n) => `<code>${esc(n)}</code>`).join(", ")}. Com o gh desta máquina ou um token pessoal, tudo fica disponível.</p>` : "";
+}
+
 export function renderConectores(estado: Estado): string {
   const agentes = estado.frota?.agentes ?? [];
   const cartoes = estado.conectores
@@ -28,11 +44,12 @@ export function renderConectores(estado: Estado): string {
         .join("");
       return `<li class="conector" data-conector="${esc(c.id)}">
         <div class="cn-cab"><b>${esc(c.nome)}</b> <code>${esc(c.slug)}</code> <span class="tag">${esc(c.transporte)}</span> <span class="tag ${c.habilitado ? "tag-ok" : "tag-cinza"}">${c.habilitado ? "habilitado" : "desabilitado"}</span> <span class="tag ${c.declaracao === "nao-toca" ? "tag-cinza" : "tag-ambar"}">${esc(c.declaracao === "nao-toca" ? "não toca dado de aprendiz" : c.declaracao === "toca" ? "toca dado de aprendiz" : "não declarou = toca")}</span>${c.sondadoEm ? `<span class="mudo">sondado ${hora(c.sondadoEm)}</span>` : ""}</div>
-        <div class="mudo">${esc(c.transporte === "stdio" ? `${c.comando ?? ""} ${c.args.join(" ")}` : (c.url ?? ""))} · env: ${esc(Object.keys(c.env).join(", ") || "—")} (valores só no servidor)</div>
+        <div class="mudo">${nativo(c) ? "conector do próprio nod · o jeito de conectar é escolhido sozinho (gh desta máquina, token, Composio)" : esc(c.transporte === "stdio" ? `${c.comando ?? ""} ${c.args.join(" ")}` : (c.url ?? ""))} · env: ${esc(Object.keys(c.env).join(", ") || "—")} (valores só no servidor)</div>
         ${falha}
         ${catalogo}
+        ${nativo(c) && c.catalogo.length ? indisponiveis(c.catalogo.map((cap) => cap.nome)) : ""}
         <div class="acoes">${botao("sondar-conector", "Sondar", { id: c.id })}${c.habilitado ? botao("desabilitar-conector", "Desabilitar", { id: c.id }) : botao("habilitar-conector", "Habilitar", { id: c.id, titulo: "exige catálogo sondado" })}</div>
-        <details><summary>Atualizar credenciais do MCP</summary><form class="form" data-form="credenciais-conector" data-id="${esc(c.id)}"><label>Novas credenciais (JSON)<textarea name="env" rows="2" required autocomplete="off" placeholder='{"Authorization":"Bearer …"}'></textarea></label><p class="mudo">Substitui as credenciais atuais. Depois de salvar, use Sondar para verificar e reativar a conexão.</p><button class="bt" type="submit">Salvar credenciais</button></form></details>
+        ${nativo(c) ? "" : `<details><summary>Atualizar credenciais do MCP</summary><form class="form" data-form="credenciais-conector" data-id="${esc(c.id)}"><label>Novas credenciais (JSON)<textarea name="env" rows="2" required autocomplete="off" placeholder='{"Authorization":"Bearer …"}'></textarea></label><p class="mudo">Substitui as credenciais atuais. Depois de salvar, use Sondar para verificar e reativar a conexão.</p><button class="bt" type="submit">Salvar credenciais</button></form></details>`}
         ${conceder}
         ${concedidas ? `<ul class="lista">${concedidas}</ul>` : ""}
       </li>`;

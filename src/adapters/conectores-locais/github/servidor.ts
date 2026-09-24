@@ -7,6 +7,7 @@ import { PROTOCOLO_MCP } from "../../mcp-proxy/cliente-mcp.ts";
 import { cortar } from "../../mcp-proxy/corte.ts";
 import { CODIGO, erro, interpretar, resposta } from "../../mcp-proxy/jsonrpc.ts";
 import { criarLineSplitter } from "../../mcp-proxy/line-splitter.ts";
+import { criarBackendComposio } from "./backend-composio.ts";
 import { criarBackendGh } from "./backend-gh.ts";
 import { criarBackendRest } from "./backend-rest.ts";
 import type { BackendGithub } from "./capacidades.ts";
@@ -102,6 +103,7 @@ export function backendDoAmbiente(env: Readonly<Record<string, string | undefine
   const jeito = env.NOD_GITHUB_JEITO;
   if (jeito === "gh") return criarBackendGh({ env: Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined && !e[0].startsWith("NOD_"))) });
   if ((jeito === "token" || jeito === "app") && env.NOD_GITHUB_TOKEN) return criarBackendRest({ jeito, token: env.NOD_GITHUB_TOKEN, base: env.NOD_GITHUB_API });
+  if (jeito === "composio" && env.NOD_COMPOSIO_URL && env.NOD_COMPOSIO_CHAVE) return criarBackendComposio({ url: env.NOD_COMPOSIO_URL, chave: env.NOD_COMPOSIO_CHAVE });
   return null;
 }
 
