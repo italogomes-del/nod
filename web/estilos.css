@@ -275,6 +275,9 @@ body.ocupado { cursor: progress; }
 .decisao { border-left: 4px solid var(--amber) !important; }
 .decisoes-chat { width: min(640px, 100%); align-self: flex-start; margin: 12px 0; }
 .decisoes-chat h2 { font-size: 16px; margin: 0 0 6px; }
+.decisoes-chat-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dec-fechar { margin-left: auto; border: 0; background: none; color: var(--ink-3); font-size: 18px; line-height: 1; padding: 2px 6px; }
+.dec-fechar:hover, .dec-fechar:focus-visible { color: var(--ink); }
 .decisoes-chat > p { color: var(--ink-3); font-size: 13px; margin: 0 0 12px; }
 .decisoes-chat .dec-frase { overflow-wrap: anywhere; }
 .decisoes-chat .acoes { flex-wrap: wrap; }

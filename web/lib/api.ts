@@ -130,6 +130,7 @@ export function criarApi(escopo: Escopo) {
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),
     reabrir: (id: string) => post<RespostaMutacao>(`decisoes/${id}/reabrir`),
+    dispensar: (id: string) => post<RespostaMutacao>(`decisoes/${id}/dispensar`),
     trilha: (q: string) => get<{ linhas: unknown[] }>(`trilha${q ? `?${q}` : ""}`),
     devCatcher: () => get<{ executor: string; registros: RegistroCatcher[] }>("dev/catcher"),
     chaves: () => get<{ chaves: ChaveMaquinaDto[] }>("maquinas/chaves"),

@@ -25,7 +25,13 @@ export type DesfechoDecisao =
    */
   | { tipo: "decidida_por_regra"; regra: `regra:${string}`; regraVersao: number; em: IsoUtc }
   | { tipo: "expirou_sem_ninguem_ver"; em: IsoUtc }
-  | { tipo: "expirou_com_alguem_ciente"; em: IsoUtc };
+  | { tipo: "expirou_com_alguem_ciente"; em: IsoUtc }
+  /**
+   * definido em 2026-09-24: a pessoa tirou a decisão da tela com o ×, sem responder. `antes` guarda
+   * de onde saiu (vencida ou ainda aberta) — ADR-007 continua valendo: o sistema nunca some com
+   * nada sozinho; quem dispensa é a pessoa, e o registro fica.
+   */
+  | { tipo: "dispensada"; por: string; em: IsoUtc; antes: EstadoDecisao };
 
 /**
  * Pendência em "Sua vez" (ADR-007). Instantes em ISO UTC: o servidor manda absoluto, o cliente

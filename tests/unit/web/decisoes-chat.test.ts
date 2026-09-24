@@ -222,5 +222,22 @@ describe("decisões no chat", () => {
       expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
     });
   });
-});
 
+  it("× só onde dispensar vale: vencida sempre, aberta só se responde com texto; 'Limpar vencidos' a partir de duas", () => {
+    const vencida = (id: string): typeof item => ({ ...item, estadoColuna: "vencido", decisao: { ...item.decisao, id, estado: "vencida", tipo: "falta_de_dado" } });
+    const falta: typeof item = { ...item, decisao: { ...item.decisao, id: "f", tipo: "falta_de_dado" } };
+    const com = (itens: (typeof item)[]): Estado => ({ ...estado, suaVez: { ...estado.suaVez!, itens } });
+
+    const aberta = renderDecisoesDaConversa(com([item]), "c", new Set());
+    expect(aberta).not.toContain('data-act="dispensar"');
+    expect(renderDecisoesDaConversa(com([falta]), "c", new Set())).toContain('data-act="dispensar" data-id="f"');
+
+    const uma = renderDecisoesDaConversa(com([vencida("v1")]), "c", new Set());
+    expect(uma).toContain('data-act="dispensar" data-id="v1"');
+    expect(uma).not.toContain("Limpar vencidos");
+
+    const duas = renderDecisoesDaConversa(com([falta, vencida("v1"), vencida("v2")]), "c", new Set());
+    expect(duas).toContain("Limpar vencidos (2)");
+    expect(duas).toContain('data-ids="v1,v2"');
+  });
+});

@@ -636,6 +636,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         d.decididaEm = p.agora;
         return d;
       },
+      async dispensar(id, p) {
+        const d = doTenant(b.decisoes).find((x) => x.id === id && x.estado === p.antes && (x.estado === "vencida" || ["pergunta", "falta_de_dado", "permissao"].includes(x.tipo)));
+        if (!d) return null;
+        d.estado = "decidida";
+        d.desfecho = { tipo: "dispensada", por: p.por, em: iso(p.agora), antes: p.antes };
+        d.decididaEm = p.agora;
+        return d;
+      },
       async reabrir(id, prazoDecisaoEm) {
         const d = doTenant(b.decisoes).find((x) => x.id === id && x.estado === "vencida");
         if (!d) return null;

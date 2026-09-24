@@ -666,6 +666,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
   reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  dispensar: (el) => agir(async () => void (await api!.dispensar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  // Em série: são poucas, e uma recusa no meio não deixa metade gravada sem a tela saber.
+  "limpar-vencidos": (el) => agir(async () => {
+    for (const id of (el.dataset.ids ?? "").split(",").filter(Boolean)) await api!.dispensar(id);
+    dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
+  }),
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {

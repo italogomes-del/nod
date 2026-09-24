@@ -20,3 +20,11 @@ Este ADR já se chamava 'lê por PESSOA' — estava certo por antecipação e a 
 - Com a 0004 (policies por comando), a decisora não apaga a decisão nem o item (DELETE é só da dona; antes o USING FOR ALL deixava). O que exige `owner_id` = pessoa — mensagem de resultado, turno de retomada, concessão — roda numa transação da DONA: a composição (`src/adapters/http/rotas/decisoes.ts`) separa a fase da decisora (marcar, fechar) da fase da dona (assentar, retomar), e a decisão diz quem é a dona (`ownerId`).
 - `listarSuaVez` carimba `vista_em` ao listar (listar = ver): é o único sinal que separa `expirou_sem_ninguem_ver` de `expirou_com_alguem_ciente` (ADR-017 #2); consultas de fundo passam `marcarVista: false`.
 
+
+## Refinamento (2026-09-24 — a pessoa dispensa; o sistema continua sem suprimir)
+
+- "Nunca suprimido" vale para o SISTEMA: nenhum laço, filtro ou prazo tira um pedido da tela sem a pessoa saber. A pessoa, sim, pode tirar: o × do card chama `POST decisoes/:id/dispensar` (`src/use-cases/dispensar-decisao.ts`), que fecha como `decidida` com desfecho `{ tipo: "dispensada", por, em, antes }`. O registro fica; só sai da fila.
+- Vale para vencida de qualquer tipo e, aberta, só para os tipos que se respondem com texto (pergunta, falta_de_dado, permissao). Aprovação, acesso e propostas abertas continuam só com os próprios botões de recusar — dispensar uma aprovação pularia o registro dos itens.
+- Decisão com proposta de mesmo id ainda pendente (acesso, mudança de rotina): a proposta é recusada junto, senão o card dela voltaria à conversa com botões que dariam `estado_invalido`.
+- Motivo, medido no dia: a conversa da Nina tinha cinco cartões "falta um dado" (quatro vencidos) de rotinas que rodaram sem Gmail, fixos no fim do chat, e o único botão era "Reabrir". Na conversa, "Limpar vencidos (N)" aparece a partir de dois vencidos.
+- Gatilho de revisão: se aparecer pedido dispensado por engano que precisava voltar, o caminho é oferecer "desfazer" logo depois do ×, não esconder o ×.
