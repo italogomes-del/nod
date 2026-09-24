@@ -78,13 +78,26 @@ function relogio(item: ItemPergunta, agora: number): { ha: number; vence: number
   return { ha: Math.max(0, agora - Date.parse(item.decisao.criadoEm)), vence: Date.parse(item.decisao.prazoDecisaoEm) - agora };
 }
 
+/** Até onde a faixa mostra a pergunta: cabe numa linha larga do campo sem virar parágrafo. */
+export const TRECHO_FAIXA_MAX = 110;
+
 /**
- * A faixa logo acima do campo, enquanto a pergunta está aberta: quem espera, há quanto e até quando;
- * "Ver pergunta" leva ao balão e "Deixar pra lá" fecha sem responder (POST decisoes/:id/dispensar, #46:
- * dispensar não é responder, nada é retomado). Pergunta de antes desta mudança não tem balão ligado:
- * aí não há o que mostrar e o "Ver pergunta" não aparece.
+ * O que a pergunta diz: a fala do balão; sem balão ligado (pergunta de antes da emenda da ADR-045),
+ * a frase da fila sem o molde "parei para perguntar a X:", que só repete quem pergunta.
  */
-export function renderFaixaPergunta(item: ItemPergunta, estado: Estado): string {
+export function textoDaPergunta(estado: Estado, d: ItemPergunta["decisao"]): string {
+  return mensagemDaPergunta(mensagensDe(estado, d.conversaId), d.id)?.texto ?? d.frase.replace(/^parei para perguntar a [^:]+:\s*/u, "");
+}
+
+/**
+ * A faixa logo acima do campo, enquanto a pergunta está aberta: quem espera, há quanto, até quando e
+ * O QUE pergunta (definido em 2026-09-24: sem o trecho, a faixa dizia que a Nina esperava sem dizer
+ * pelo quê, e a pergunta estava enterrada debaixo da rotina seguinte). "Ver pergunta" leva ao balão e
+ * "Deixar pra lá" fecha sem responder (POST decisoes/:id/dispensar, #46: dispensar não é responder,
+ * nada é retomado). Pergunta de antes desta mudança não tem balão ligado: o "Ver pergunta" não aparece,
+ * mas o trecho vem da frase da fila. Com a citação à vista (duas ou mais), o trecho sai para não repetir.
+ */
+export function renderFaixaPergunta(item: ItemPergunta, estado: Estado, comTrecho = true): string {
   const d = item.decisao;
   const { ha, vence } = relogio(item, estado.agora);
   const ver = mensagemDaPergunta(mensagensDe(estado, d.conversaId), d.id) ? botao("ver-pergunta", "Ver pergunta", { classe: "link sm", id: d.id }) : "";
@@ -92,10 +105,12 @@ export function renderFaixaPergunta(item: ItemPergunta, estado: Estado): string 
   // definido em 2026-09-24 (fio da pergunta): da 2ª rodada em diante a faixa diz a rodada no lugar do
   // "há quanto" — o relógio de cada rodada recomeça, e "há 2 min" esconderia que a conversa já vem de antes.
   const rodada = item.fio?.rodada ?? 1;
-  const texto = rodada > 1
+  const cabeca = rodada > 1
     ? `<b>${esc(item.agenteNome)}</b> ainda está esperando sua resposta · ${esc(rodadaEscrita(rodada))} · vence ${esc(emQuanto(vence))}`
     : `<b>${esc(item.agenteNome)}</b> está esperando sua resposta · ${esc(haQuanto(ha))} · vence ${esc(emQuanto(vence))}`;
-  return `<div class="faixa-pergunta"><span class="fp-ic">${iconeBalao(15)}</span><span class="fp-txt">${texto}</span><span class="fp-acoes">${ver}${deixar}</span></div>`;
+  const texto = comTrecho ? textoDaPergunta(estado, d) : "";
+  const trecho = texto ? `<span class="fp-pergunta" title="${esc(texto)}">“${esc(inicioDaPergunta(texto, TRECHO_FAIXA_MAX))}”</span>` : "";
+  return `<div class="faixa-pergunta"><span class="fp-ic">${iconeBalao(15)}</span><span class="fp-txt">${cabeca}${trecho}</span><span class="fp-acoes">${ver}${deixar}</span></div>`;
 }
 
 /**
@@ -115,7 +130,7 @@ function segmento(act: string, rotulo: string, ligado: boolean): string {
 /** Com duas ou mais abertas, o campo cita qual está respondendo (a mais antiga, salvo escolha) e em que posição. */
 function renderCitacao(modo: Extract<ModoComposer, { tipo: "resposta" }>, estado: Estado): string {
   const d = modo.alvo.decisao;
-  const texto = mensagemDaPergunta(mensagensDe(estado, d.conversaId), d.id)?.texto ?? d.frase;
+  const texto = textoDaPergunta(estado, d);
   const fechar = botao("composer-outro", "×", { classe: "cp-fechar", titulo: "Mandar como mensagem comum (Esc)", aria: "Cancelar a resposta e mandar como mensagem comum" });
   return `<div class="citacao-pergunta"><span class="cp-txt">Respondendo à <b>${esc(modo.alvo.agenteNome)}</b> · “${esc(inicioDaPergunta(texto))}” · ${modo.indice + 1} de ${modo.perguntas.length}</span>${fechar}</div>`;
 }
@@ -133,7 +148,7 @@ export function renderTopoComposer(modo: ModoComposer, estado: Estado, conversaI
   if (!alvo) return "";
   const modos = `<div class="modo-envio" role="group" aria-label="O que a próxima mensagem faz">${segmento("composer-responder", "Responder à pergunta", modo.tipo === "resposta")}${segmento("composer-outro", "Outro assunto", modo.tipo === "outro")}</div>`;
   const citacao = modo.tipo === "resposta" && modo.perguntas.length > 1 ? renderCitacao(modo, estado) : "";
-  return `${renderFaixaPergunta(alvo, estado)}<div class="composer-modo">${modos}${citacao}</div>`;
+  return `${renderFaixaPergunta(alvo, estado, !citacao)}<div class="composer-modo">${modos}${citacao}</div>`;
 }
 
 export type AparenciaComposer = {
