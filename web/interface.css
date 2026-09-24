@@ -269,12 +269,13 @@ body { background: #fcfdff; }
   color: #9096a7; font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
 /* Aviso de sistema (ADR-045): incidente não é decisão. Azul neutro de STATUS, distinto do âmbar da
    faixa de decisões acima; não é um botão inteiro — só o "Entendi" age. */
-.aviso-sistema { display: flex; align-items: flex-start; gap: 8px; width: calc(100% - 32px); margin: 0 16px 10px;
+.aviso-sistema { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 8px; row-gap: 6px; width: calc(100% - 32px); margin: 0 16px 10px;
   padding: 9px 12px; border: 1px solid #cfe0f5; border-radius: 13px; background: var(--blue-soft);
   color: #274b78; font-size: 12.5px; line-height: 1.4; }
 .aviso-sistema .av-ic { color: var(--blue); }
-.aviso-sistema .av-txt { flex: 1; min-width: 0; }
-.aviso-sistema .bt { flex: none; color: var(--blue); }
+.aviso-sistema .av-txt { min-width: 0; }
+/* Vence o `.sidebar .bt.sm` (bloco de largura total), que espremia o texto numa coluna de uma palavra. */
+.aviso-sistema .bt, .sidebar .aviso-sistema .bt.sm { grid-column: 2; justify-self: start; display: inline-block; width: auto; margin: 0; padding: 0; border: 0; background: none; text-align: left; font-size: 12px; font-weight: 500; color: var(--blue); }
 .ch-badge { display: inline-flex; align-items: center; gap: 1px; padding: 1px 5px; border-radius: 7px;
   background: #f5e2b6; color: #6d5220; font-size: 10px; font-weight: 600; }
 
