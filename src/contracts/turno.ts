@@ -17,9 +17,10 @@ export type SinaisTurno = {
 /** Quatro estados (ADR-010 revisado); 'interrompido' exige motivo (CHECK na 0002). */
 export type EstadoTurno = "pendente" | "despachando" | "concluido" | "interrompido";
 
-export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer";
+/** 'delegacao' (definido em 2026-09-24, ADR-046): tarefa que a pessoa pediu a outro bot por meio do remetente. */
+export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer" | "delegacao";
 
-/** Profundidade estrutural de peer: 0 = normal; 1 = respondendo a perguntar_a_bot, sem porta lateral (E12.4). */
+/** Profundidade estrutural de peer: 0 = normal; 1 = respondendo a perguntar_a_bot ou cumprindo delegar_tarefa, sem porta lateral (E12.4). */
 export type Profundidade = 0 | 1;
 
 export type Turno = {
@@ -61,6 +62,11 @@ export type Turno = {
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
   absorvidoPor?: string | null;
+  /**
+   * Pessoa que PEDIU o trabalho (0026, ADR-046/ADR-025). Preenchido só no turno de delegação: a autoria do
+   * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
+   */
+  sobProcuracaoDe?: string | null;
 };
 
 export type TokensTurno = {

@@ -8,7 +8,7 @@ import type { JsonSchema } from "./ferramentas-nod.ts";
 import type { TransporteConector } from "./conector.ts";
 
 /** Modo do turno decide quais ferramentas nod entram no catálogo (src/domain/plano-turno.ts). */
-export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer";
+export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer" | "delegacao";
 
 export type FerramentaPlano = {
   /** 'lembrar' | 'exemplo__enviar_email' (conector = `${slug}__${tool}`). */

@@ -550,6 +550,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora() + b.turnos.length / 1000,
           mensagemOrigemId: t.mensagemOrigemId ?? null,
           absorvidoPor: null,
+          sobProcuracaoDe: t.sobProcuracaoDe ?? null,
         };
         b.turnos.push(turno);
         return turno;
