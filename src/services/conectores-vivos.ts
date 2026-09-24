@@ -4,6 +4,7 @@ import type { Conector } from "../contracts/conector.ts";
 import type { ResultadoSonda, ServicesNod } from "../contracts/servicos.ts";
 import { montarAmbiente } from "../domain/ambiente-executor.ts";
 import { log } from "../obs/log.ts";
+import { CHAMADA_CONECTOR_MS } from "../shared/constantes.ts";
 import type { Relogio } from "../shared/types.ts";
 
 /**
@@ -25,7 +26,7 @@ export type OpcoesConectoresVivos = {
   fetchImpl?: typeof fetch;
 };
 
-export const CHAMADA_CONECTOR_MS = 15_000;
+export { CHAMADA_CONECTOR_MS };
 
 export type ConectoresVivos = ServicesNod<unknown>["conectores"] & {
   fechar(): Promise<void>;

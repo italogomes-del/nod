@@ -2,7 +2,7 @@ import type { Confianca } from "../../contracts/mensagem.ts";
 import type { DesfechoItem } from "../../contracts/motivos.ts";
 import type { Negacao } from "../../contracts/negacao.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { LONGPOLL_APROVACAO_MS } from "../../shared/constantes.ts";
+import { LONGPOLL_APROVACAO_MS, PRAZO_FERRAMENTA_PROXY_MS } from "../../shared/constantes.ts";
 import { negacaoConectorIndisponivel, redigirNegacao } from "../mcp-proxy/negacao.ts";
 
 /**
@@ -77,6 +77,9 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
   const base = opcoes.url.replace(/\/+$/, "");
   const f = opcoes.fetchImpl ?? fetch;
   const timeout = opcoes.timeoutMs ?? TIMEOUT_CLIENTE_NOD_MS;
+  // O servidor só responde a ferramenta depois de ouvir o conector: esperar menos que ele é declarar
+  // "servidor fora" um servidor que está trabalhando. timeoutMs explícito (testes) vale para tudo.
+  const prazoFerramenta = (nome: string): number => (nome.startsWith("computador_") ? 240_000 : opcoes.timeoutMs ?? PRAZO_FERRAMENTA_PROXY_MS);
   const agora = opcoes.agora ?? (() => Date.now());
 
   async function chamar(metodo: "GET" | "POST", caminho: string, corpo?: unknown, timeoutMs = timeout): Promise<{ status: number; json: unknown } | FalhaTransporte> {
@@ -115,7 +118,7 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
     },
 
     async ferramenta(nome, argumentos) {
-      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, nome.startsWith("computador_") ? 240_000 : timeout);
+      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, prazoFerramenta(nome));
       if (ehFalha(r)) return r;
       const c = obj(r.json);
       if (r.status === 200 && c) {
@@ -139,7 +142,7 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
     },
 
     async chamarFerramenta(nome, argumentos) {
-      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, nome.startsWith("computador_") ? 240_000 : timeout);
+      const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, prazoFerramenta(nome));
       if (ehFalha(r)) {
         const n = negacaoConectorIndisponivel(nome, agora(), r.transporte === "timeout" ? "timeout_transporte" : "conector_indisponivel");
         return { conteudo: redigirNegacao(n, agora()), isError: true };
