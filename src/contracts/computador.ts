@@ -1,3 +1,6 @@
+import type { EpochMs } from "./ids.ts";
+import type { MotivoFalhaComputador } from "./motivos.ts";
+
 export type ControleComputador = "bot" | "pessoa" | "aguardando_pessoa";
 export type PoliticaComputador = "supervisionado" | "autonomo";
 export type Computador = {
@@ -11,6 +14,14 @@ export type Computador = {
   ocupadoAte: number | null;
   operacaoId: string | null;
   criadoEm: number;
+  /**
+   * Saúde (definido em 2026-09-24, emenda da ADR-037): falhas SEGUIDAS da máquina (só as que contam
+   * para a saúde), o motivo da última e quando ela foi dada como fora do ar — a partir daí o plano sai
+   * sem as ferramentas computador_* e a pessoa religa. Uma resposta da máquina zera tudo.
+   */
+  falhasSeguidas: number;
+  falhaMotivo: MotivoFalhaComputador | null;
+  indisponivelDesde: EpochMs | null;
 };
 export type AcaoComputador =
   | { tipo: "observar" }
@@ -59,6 +70,8 @@ export type RegistroComputador = {
   autor: "bot" | "pessoa";
   tipo: string;
   estado: "pendente" | "executando" | "concluida" | "falhou" | "recusada";
+  /** Só na ação que falhou: o código fechado, para a atividade dizer o que houve. */
+  motivo: MotivoFalhaComputador | null;
   em: number;
 };
 export type ComputadorDto = {
@@ -66,10 +79,12 @@ export type ComputadorDto = {
   disponivel: boolean;
   ativo: boolean;
   motivo: string | null;
+  /** Quantas vezes o Docker reiniciou o container (docker inspect); null quando não se sabe. */
+  reinicios?: number | null;
   atividade: RegistroComputador[];
 };
 export interface DriverComputador {
-  estado(id: string): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null }>;
+  estado(id: string): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null }>;
   iniciar(id: string): Promise<void>;
   parar(id: string): Promise<void>;
   executar(id: string, acao: AcaoComputador): Promise<ResultadoComputador>;

@@ -1,10 +1,11 @@
 import type { Computador, ControleComputador, PoliticaComputador, RegistroComputador } from "../contracts/computador.ts";
+import type { MotivoFalhaComputador } from "../contracts/motivos.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 
-type Linha = { id: string; agente_id: string; habilitado: boolean; controle: ControleComputador; politica: PoliticaComputador; ajuda: string | null; ajuda_decisao_id: string | null; ocupado_ate: Date | null; operacao_id: string | null; criado_em: Date };
-type LinhaAcao = { id: string; computador_id: string; turno_id: string | null; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; argumentos_cifrados: string | null; em: Date };
-const computador = (l: Linha): Computador => ({ id: l.id, agenteId: l.agente_id, habilitado: l.habilitado, controle: l.controle, politica: l.politica, ajuda: l.ajuda, ajudaDecisaoId: l.ajuda_decisao_id, ocupadoAte: l.ocupado_ate?.getTime() ?? null, operacaoId: l.operacao_id, criadoEm: l.criado_em.getTime() });
-const acao = (l: LinhaAcao): RegistroComputador => ({ id: l.id, computadorId: l.computador_id, turnoId: l.turno_id, autor: l.autor, tipo: l.tipo, estado: l.estado, em: l.em.getTime() });
+type Linha = { id: string; agente_id: string; habilitado: boolean; controle: ControleComputador; politica: PoliticaComputador; ajuda: string | null; ajuda_decisao_id: string | null; ocupado_ate: Date | null; operacao_id: string | null; criado_em: Date; falhas_seguidas: number; falha_motivo: MotivoFalhaComputador | null; indisponivel_desde: Date | null };
+type LinhaAcao = { id: string; computador_id: string; turno_id: string | null; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; motivo: MotivoFalhaComputador | null; argumentos_cifrados: string | null; em: Date };
+const computador = (l: Linha): Computador => ({ id: l.id, agenteId: l.agente_id, habilitado: l.habilitado, controle: l.controle, politica: l.politica, ajuda: l.ajuda, ajudaDecisaoId: l.ajuda_decisao_id, ocupadoAte: l.ocupado_ate?.getTime() ?? null, operacaoId: l.operacao_id, criadoEm: l.criado_em.getTime(), falhasSeguidas: l.falhas_seguidas, falhaMotivo: l.falha_motivo, indisponivelDesde: l.indisponivel_desde?.getTime() ?? null });
+const acao = (l: LinhaAcao): RegistroComputador => ({ id: l.id, computadorId: l.computador_id, turnoId: l.turno_id, autor: l.autor, tipo: l.tipo, estado: l.estado, motivo: l.motivo, em: l.em.getTime() });
 
 export function computadoresRepo(conn: Conn, escopo: Escopo) {
   return {
@@ -49,12 +50,55 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
       return l ? { ...acao(l), argumentosCifrados: l.argumentos_cifrados } : null;
     },
-    async concluir(id: string, estado: RegistroComputador["estado"]): Promise<void> {
-      await conn`update computador_acoes set estado = ${estado}, argumentos_cifrados = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    /** `motivo` só na ação que falhou (CHECK computador_acao_motivo_so_na_falha, 0022). */
+    async concluir(id: string, estado: RegistroComputador["estado"], motivo: MotivoFalhaComputador | null = null): Promise<void> {
+      await conn`update computador_acoes set estado = ${estado}, motivo = ${estado === "falhou" ? motivo : null}, argumentos_cifrados = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
     },
+    /**
+     * definido em 2026-09-24 (emenda da ADR-037): o observar que DEU CERTO continua fora (a tela é
+     * lida a cada 2 s); o que falhou entra — era justamente o que a pessoa não via.
+     */
     async atividade(id: string): Promise<RegistroComputador[]> {
-      const linhas = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and tipo <> 'observar' order by em desc limit 30`;
+      const linhas = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and computador_id = ${id} and (tipo <> 'observar' or estado = 'falhou') order by em desc limit 30`;
       return linhas.map(acao);
+    },
+    /**
+     * Uma falha da MÁQUINA (só as que contam para a saúde). Na `limite`-ésima seguida o computador sai
+     * do ar; `virouIndisponivel` é verdadeiro SÓ nessa transição — é ela que escreve a mensagem única.
+     * A trava da linha (travar) é de quem chama; o UPDATE lê o valor anterior no mesmo comando.
+     */
+    async registrarFalha(id: string, p: { motivo: MotivoFalhaComputador; em: number; limite: number }): Promise<{ computador: Computador; virouIndisponivel: boolean } | null> {
+      const [l] = await conn<(Linha & { antes: Date | null })[]>`
+        with anterior as (
+          select id, indisponivel_desde as antes from computadores
+          where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+        ), atualizado as (
+          update computadores c set
+            falhas_seguidas = c.falhas_seguidas + 1,
+            falha_motivo = ${p.motivo},
+            indisponivel_desde = coalesce(c.indisponivel_desde, case when c.falhas_seguidas + 1 >= ${p.limite} then ${new Date(p.em)}::timestamptz end)
+          from anterior a
+          where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.id = a.id
+          returning c.*
+        )
+        select u.*, g.id as agente_id, a.antes from atualizado u
+        join anterior a on a.id = u.id
+        join agentes g on g.tenant_id = u.tenant_id and g.computador_id = u.id`;
+      return l ? { computador: computador(l), virouIndisponivel: l.antes === null && l.indisponivel_desde !== null } : null;
+    },
+    /** A máquina respondeu: a sequência de falhas acaba e o computador volta às execuções. */
+    async registrarSucesso(id: string): Promise<boolean> {
+      const linhas = await conn`update computadores set falhas_seguidas = 0, falha_motivo = null, indisponivel_desde = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and falhas_seguidas > 0 returning id`;
+      return linhas.length > 0;
+    },
+    /** Os computadores fora do ar desta pessoa, por agente (a frota diz sem abrir cada um). */
+    async foraDoAr(): Promise<Map<string, { desde: number; motivo: MotivoFalhaComputador }>> {
+      const linhas = await conn<{ agente_id: string; indisponivel_desde: Date; falha_motivo: MotivoFalhaComputador }[]>`
+        select a.id as agente_id, c.indisponivel_desde, c.falha_motivo from computadores c
+        join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id
+        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.indisponivel_desde is not null`;
+      return new Map(linhas.map((l) => [l.agente_id, { desde: l.indisponivel_desde.getTime(), motivo: l.falha_motivo }]));
     },
   };
 }

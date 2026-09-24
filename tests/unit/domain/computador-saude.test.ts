@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import { CODIGOS_RUNTIME, codigoDaAcao, codigoDaSubida, falhaDe, primeiraLinha, TRAVAS_DO_PERFIL } from "../../../infra/computador/falhas.mjs";
+import type { Agente } from "../../../src/contracts/agente.ts";
+import { MOTIVOS_FALHA_COMPUTADOR } from "../../../src/contracts/motivos.ts";
+import type { Turno } from "../../../src/contracts/turno.ts";
+import { CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe } from "../../../src/domain/computador.ts";
+import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
+import { redigir } from "../../../src/domain/redacao.ts";
+import { MOTIVO_FALHA_TEXTO } from "../../../web/lib/computador.ts";
+
+const agora = 1_000_000;
+const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "", descricao: "lê e-mails", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
+const turno: Turno = { tenantId: "t", id: "t1", conversaId: "c1", agenteId: "a1", ownerId: "p", origem: "conversa", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 86_400_000, motivoInterrupcao: null, motivoFalha: null, semNovidadeMotivo: null, retomaTurnoId: null, profundidade: 0, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "oi", entradaConfianca: "confiavel", custoUsd: null, modelo: "claude-haiku-4-5-20251001", criadoEm: agora };
+const base: EntradaPlano = { turno, agente, memorias: [], concessoes: [], conectores: [], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, computador: true };
+const doComputador = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.filter((f) => f.origem === "computador").map((f) => f.nome);
+
+describe("saúde do computador do bot (emenda da ADR-037)", () => {
+  it("só a MÁQUINA sem responder conta; a ação que falhou numa máquina viva não conta", () => {
+    expect([...CONTA_PARA_SAUDE].sort()).toEqual(["cofre_invalido", "docker_indisponivel", "imagem_ausente", "nao_iniciou", "navegador_nao_abriu", "sem_resposta"]);
+    for (const m of ["acao_falhou", "tela_alterada", "ocupado"] as const) expect(CONTA_PARA_SAUDE.has(m)).toBe(false);
+    expect(LIMITE_FALHAS_SEGUIDAS).toBe(3);
+    const f = new FalhaComputador("navegador_nao_abriu", { detalhe: "Target page, context or browser has been closed", reinicios: 6 });
+    expect(ehFalhaComputador(f)).toBe(true);
+    expect(f).toMatchObject({ motivo: "navegador_nao_abriu", reinicios: 6, message: "navegador_nao_abriu" });
+    expect(ehFalhaComputador(new Error("navegador_nao_abriu"))).toBe(false);
+  });
+
+  it("a ferramenta devolve instrução de tabela: máquina fora não se insiste; tela velha se observa de novo", () => {
+    expect(instrucaoDaFalha("navegador_nao_abriu")).toContain("o navegador do computador não abriu");
+    expect(instrucaoDaFalha("navegador_nao_abriu")).toContain("Não tente de novo neste turno");
+    expect(instrucaoDaFalha("tela_alterada")).toContain("Observe de novo");
+    expect(instrucaoDaFalha("acao_falhou")).toContain("não afirme que executou");
+    for (const m of MOTIVOS_FALHA_COMPUTADOR) expect(instrucaoDaFalha(m)).not.toMatch(/indispon[íi]vel ou tela alterada/);
+  });
+
+  it("a mensagem única diz de quem é o computador, o motivo em palavras e o que foi feito", () => {
+    const texto = redigir("computador-fora-do-ar", agora, { agente: "Nina", motivo: MOTIVO_FALHA_EM_PORTUGUES.navegador_nao_abriu });
+    expect(texto).toBe("O computador de Nina não responde: o navegador do computador não abriu. Tirei o computador das próximas execuções até você religá-lo.");
+  });
+
+  it("o detalhe do log é a 1ª linha, curta e sem nada com cara de segredo", () => {
+    expect(resumirDetalhe("\n  Error response from daemon: No such container: nod-computador-x\nstack…")).toBe("Error response from daemon: No such container: nod-computador-x");
+    expect(resumirDetalhe(`token=${"a".repeat(64)} e Bearer abc.def`)).toBe("token=[redigido] e Bearer [redigido]");
+    expect(resumirDetalhe(`chave ${"0f".repeat(32)} vazou`)).toBe("chave [redigido] vazou");
+    expect(resumirDetalhe("x".repeat(500))?.length).toBeLessThanOrEqual(200);
+    expect(resumirDetalhe(null)).toBeNull();
+    expect(resumirDetalhe("  \n ")).toBeNull();
+  });
+
+  it("a web fala a mesma língua do servidor: as duas tabelas de motivo são iguais", () => {
+    expect(MOTIVO_FALHA_TEXTO).toEqual(MOTIVO_FALHA_EM_PORTUGUES);
+    expect(Object.keys(MOTIVO_FALHA_EM_PORTUGUES)).toEqual([...MOTIVOS_FALHA_COMPUTADOR]);
+  });
+});
+
+describe("runtime do computador: códigos fixos (infra/computador/falhas.mjs)", () => {
+  it("todo código que o runtime emite existe no enum do servidor", () => {
+    for (const c of CODIGOS_RUNTIME) expect(MOTIVOS_FALHA_COMPUTADOR).toContain(c);
+  });
+
+  it("ação: só a tela velha tem código próprio; subida: o código marcado pelo passo, ou nao_iniciou", () => {
+    expect(codigoDaAcao(new Error("tela_alterada"))).toBe("tela_alterada");
+    expect(codigoDaAcao(new Error("page.goto: net::ERR_NAME_NOT_RESOLVED"))).toBe("acao_falhou");
+    expect(codigoDaAcao("texto solto")).toBe("acao_falhou");
+    expect(codigoDaSubida(falhaDe("navegador_nao_abriu", new Error("browserType.launchPersistentContext: Timeout 30000ms exceeded.\n=== logs ===")))).toBe("navegador_nao_abriu");
+    expect(falhaDe("cofre_invalido", "o cofre de logins não abriu").message).toBe("o cofre de logins não abriu");
+    expect(codigoDaSubida(new Error("Command failed: pactl"))).toBe("nao_iniciou");
+    expect(codigoDaSubida(Object.assign(new Error("x"), { codigo: "inventado" }))).toBe("nao_iniciou");
+    expect(primeiraLinha("\nlinha 1\nlinha 2")).toBe("linha 1");
+    expect(primeiraLinha(undefined)).toBeNull();
+  });
+
+  it("a trava do Chromium que o container anterior deixou no volume é apagada antes de abrir o navegador", () => {
+    expect([...TRAVAS_DO_PERFIL]).toEqual(["SingletonLock", "SingletonSocket", "SingletonCookie"]);
+  });
+});
+
+describe("plano de turno com o computador fora de uso (emenda da ADR-037)", () => {
+  it("ligado e respondendo: as ferramentas computador_* entram", () => {
+    const p = montarPlano(base);
+    expect(doComputador(p)).toContain("computador_observar");
+    expect(p.promptSistema).not.toContain("fora do ar");
+  });
+
+  it("fora do ar: nenhuma ferramenta de computador, e o prompt diz por quê (sem tutorial)", () => {
+    const p = montarPlano({ ...base, computadorFora: { estado: "fora_do_ar", motivo: MOTIVO_FALHA_EM_PORTUGUES.navegador_nao_abriu } });
+    expect(doComputador(p)).toEqual([]);
+    expect(p.promptSistema).toContain("Seu computador está fora do ar (o navegador do computador não abriu)");
+    expect(p.promptSistema).not.toContain("Você tem um computador persistente");
+  });
+
+  it("desligado pela pessoa: nenhuma ferramenta — antes o plano as oferecia com habilitado=false", () => {
+    const p = montarPlano({ ...base, computadorFora: { estado: "desligado" } });
+    expect(doComputador(p)).toEqual([]);
+    expect(p.promptSistema).toContain("Seu computador está desligado pela pessoa");
+  });
+
+  it("sem o serviço de computador, ou em modo sem computador, a linha não aparece", () => {
+    expect(montarPlano({ ...base, computador: false, computadorFora: { estado: "desligado" } }).promptSistema).not.toContain("Seu computador");
+    expect(montarPlano({ ...base, modo: "criacao", computadorFora: { estado: "desligado" } }).promptSistema).not.toContain("Seu computador");
+  });
+});

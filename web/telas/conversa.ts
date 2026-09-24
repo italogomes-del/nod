@@ -1,10 +1,11 @@
 import { nomeInteligencia } from "./inteligencia.ts";
-import type { Agente } from "../../src/contracts/agente.ts";
+import type { FrotaDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
+import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
@@ -20,7 +21,7 @@ export function nomesDe(estado: Estado): Record<string, string> {
   return mapa;
 }
 
-function agenteDe(estado: Estado, id: string): (Agente & { conversaId: string; descricaoEstado: string }) | undefined {
+function agenteDe(estado: Estado, id: string): FrotaDto["agentes"][number] | undefined {
   return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
 }
 
@@ -49,6 +50,15 @@ function acoesDaMensagem(m: Mensagem): string {
 
 function corpoMensagem(m: Mensagem, estado: Estado): string {
   const p = m.payload;
+  if (p?.kind === "computador_fora_do_ar") {
+    // definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO vira cartão de estado, com a hora local e
+    // as duas saídas; depois que o computador volta, o cartão fica como registro, sem botões.
+    const bot = agenteDe(estado, p.agenteId);
+    const aindaFora = Boolean(bot?.computadorForaDoAr);
+    const dono = bot?.ownerId === estado.sessao?.pessoaId;
+    const acoes = aindaFora && dono ? `<div class="mcf-acoes">${botao("religar-computador", "Tentar de novo", { id: p.agenteId, classe: "pri sm" })}${botao("abrir-computador", "Abrir computador", { id: p.agenteId, classe: "sm" })}</div>` : bot && !aindaFora ? '<p class="mudo sm">O computador voltou a responder.</p>' : "";
+    return `<div class="msg-computador-fora" role="status"><div class="mcf-titulo"><b>Computador do bot fora do ar</b><span class="mudo">desde ${esc(dataHora(p.desde))}</span></div><p>${paragrafos(m.texto)}</p>${acoes}</div>`;
+  }
   if (m.kind === "sistema") return `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     const de = agenteDe(estado, p.de)?.nome ?? "agente";
@@ -252,7 +262,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
   return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
-      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-computador", "Computador do bot", { id: agenteId, titulo: "O computador próprio do bot (ADR-037), não o seu Mac" }) : ""}
+      ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-computador", `Computador do bot${a.computadorForaDoAr ? ' <span class="tag tag-vermelha">fora do ar</span>' : ""}`, { id: agenteId, titulo: a.computadorForaDoAr ? `Fora do ar desde ${dataHora(a.computadorForaDoAr.desde)}: ${MOTIVO_FALHA_TEXTO[a.computadorForaDoAr.motivo]}` : "O computador próprio do bot (ADR-037), não o seu Mac" }) : ""}
       ${a && a.ownerId === estado.sessao?.pessoaId ? botao("abrir-workspace", "Pasta de trabalho", { id: agenteId }) : ""}
       ${botao("menu-agente", "•••", { id: agenteId, titulo: `Ações de ${nome}` })}
       ${a && a.ownerId === estado.sessao?.pessoaId ? botao("inteligencia", `✦ ${nomeInteligencia(a, estado.executor?.harnesses)}`, { id: agenteId, classe: "inteligencia-atalho", titulo: "Inteligência do agente: modelo e harness" }) : ""}${botao("alternar-detalhes", "Detalhes", { classe: "toggle-detalhes" })}${botao("ir-perfil", "Perfil", { id: agenteId })}

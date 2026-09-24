@@ -22,7 +22,8 @@ export type ChaveRedacao =
   | "retomada"
   | "parei-falta-dado"
   | "anotei"
-  | "permissao-permanente";
+  | "permissao-permanente"
+  | "computador-fora-do-ar";
 
 /** Textos de sistema FIXOS em português; nunca vêm do modelo. `{chave}` é preenchido com params. */
 const CATALOGO: Record<ChaveRedacao, string> = {
@@ -51,6 +52,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   retomada: "Retomando o turno interrompido ({motivo}) a partir de onde parou; nada foi reenviado.",
   "parei-falta-dado": "parei: falta {dado}; quem destrava: {quem}; não vou tentar de novo.",
   anotei: "Anotei como {tipo}: {texto}",
+  // definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO da transição; a hora sai no cartão da web.
+  "computador-fora-do-ar": "O computador de {agente} não responde: {motivo}. Tirei o computador das próximas execuções até você religá-lo.",
 };
 
 /**

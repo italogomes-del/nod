@@ -1,17 +1,18 @@
 import type { AcaoComputador, ComputadorDto, ResultadoComputador, TelaComputador } from "../../src/contracts/computador.ts";
 import type { Api } from "../lib/api.ts";
-import { esc } from "../lib/render.ts";
+import { agruparAtividade, estadoEmPalavras, foraDoAr, MOTIVO_FALHA_TEXTO, rotuloDaAtividade, rotuloDoEstado, tituloDaFalha } from "../lib/computador.ts";
+import { dataHora, esc } from "../lib/render.ts";
 
 export function abrirComputador(api: Api, agente: { id: string; nome: string }): void {
   document.querySelector<HTMLDialogElement>(".computador-dialog")?.close();
   const dialog = document.createElement("dialog");
   dialog.className = "computador-dialog";
   dialog.setAttribute("aria-label", `Computador de ${agente.nome}`);
-  dialog.innerHTML = `<header class="computador-header"><div><span class="computador-kicker">COMPUTADOR DO BOT</span><h2>${esc(agente.nome)}</h2></div><span class="computador-status" role="status">Conectando…</span><button type="button" data-c="fechar" aria-label="Fechar computador">✕</button></header>
+  dialog.innerHTML = `<header class="computador-header"><div><span class="computador-kicker">COMPUTADOR DO BOT</span><h2>${esc(agente.nome)}</h2><p class="computador-sub">Privado de ${esc(agente.nome)} · separado do seu Mac e dos outros bots</p></div><span class="computador-status" role="status">Conectando…</span><button type="button" data-c="fechar" aria-label="Fechar computador">✕</button></header>
     <div class="computador-toolbar"><button data-c="iniciar">Ligar computador</button><button data-c="assumir">Assumir controle</button><button data-c="devolver">Devolver ao bot</button><button data-c="parar">Desligar</button><button data-c="atualizar">Atualizar tela</button><label>Bot pode agir<select aria-label="Permissão do bot"><option value="supervisionado">Com aprovação por ação</option><option value="autonomo">Nas tarefas que eu pedir</option></select></label></div>
     <p class="computador-ajuda" role="status">Seu navegador, logins e arquivos ficam neste computador.</p><p class="computador-erro" role="alert"></p>
     <div class="computador-layout"><section class="computador-desktop"><form class="computador-url"><label class="sr-only" for="computador-url">Endereço do navegador</label><input id="computador-url" name="url" placeholder="https://…" autocomplete="off" /><button>Abrir</button></form>
-      <div class="computador-abas"></div><div class="computador-browser-dialog" hidden><p></p><input aria-label="Resposta ao diálogo do navegador" /><button data-c="aceitar-dialogo">Confirmar</button><button data-c="recusar-dialogo">Cancelar</button></div><div class="computador-viewport"><div class="computador-vazio">Um espaço de trabalho só deste bot.<small>Ligue o computador para abrir a tela.</small></div><img hidden alt="Tela do computador do bot" tabindex="0" draggable="false" /></div>
+      <div class="computador-abas"></div><div class="computador-browser-dialog" hidden><p></p><input aria-label="Resposta ao diálogo do navegador" /><button data-c="aceitar-dialogo">Confirmar</button><button data-c="recusar-dialogo">Cancelar</button></div><div class="computador-viewport"><div class="computador-vazio">Um espaço de trabalho só deste bot.<small>Ligue o computador para abrir a tela.</small></div><div class="computador-fora" role="status" hidden></div><img hidden alt="Tela do computador do bot" tabindex="0" draggable="false" /></div>
       <div class="computador-input"><form class="computador-texto"><input type="password" autocomplete="off" aria-label="Texto para digitar no computador" placeholder="Cole texto ou senha aqui para digitar na tela" /><button>Digitar</button></form><button data-c="enter">Enter</button><button data-c="tab">Tab</button><button data-c="esc">Esc</button><button data-c="audio">Ouvir 5 s</button></div><audio controls hidden></audio><p class="computador-dica">Assuma o controle para clicar e digitar. Clique na tela para usar o teclado. Senhas são enviadas diretamente ao computador.</p>
     </section><aside class="computador-lateral"><details open><summary>Arquivos</summary><p>Arquivos e downloads em /workspace</p><form class="computador-pasta"><input aria-label="Pasta" value="." /><button>Ver</button></form><label class="computador-upload">Enviar arquivo<input type="file" /></label><div class="computador-arquivos"></div></details>
       <details><summary>Terminal</summary><form class="computador-terminal"><textarea aria-label="Comando no computador" placeholder="python3 --version" rows="3"></textarea><button>Executar</button></form><pre class="computador-saida"></pre></details>
@@ -31,19 +32,47 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }):
   let timerTeclas: number | undefined;
   let timerClique: number | undefined;
   const erro = (texto: string) => { q(".computador-erro").textContent = texto; };
-  const controla = () => dto?.computador.controle === "pessoa" && dto.ativo;
+  const controla = () => dto?.computador.controle === "pessoa" && dto.ativo && !foraDoAr(dto);
+  /**
+   * definido em 2026-09-24 (emenda da ADR-037): fora do ar, a tela diz o que quebrou, desde quando e o
+   * que fazer ("Tentar de novo" = ligar de novo), com os detalhes técnicos recolhidos.
+   */
+  function pintarForaDoAr(d: ComputadorDto) {
+    const c = d.computador;
+    const card = q(".computador-fora");
+    const fora = foraDoAr(d);
+    card.hidden = !fora;
+    if (!fora) { card.innerHTML = ""; return; }
+    const motivo = c.falhaMotivo ?? "sem_resposta";
+    const ultima = d.atividade.find((a) => a.estado === "falhou");
+    const reinicios = d.reinicios ? ` O computador reiniciou ${d.reinicios} ${d.reinicios === 1 ? "vez" : "vezes"} tentando.` : "";
+    card.innerHTML = `<b>${esc(tituloDaFalha(motivo))}</b><p>Fora do ar desde ${esc(dataHora(c.indisponivelDesde ?? 0))}.${esc(reinicios)}</p><p>Enquanto isso, ${esc(agente.nome)} trabalha sem o computador: as rotinas continuam pelos acessos que tem.</p>
+      <button type="button" class="bt pri" data-c="iniciar">Tentar de novo</button>
+      <details><summary>Detalhes técnicos</summary><p class="computador-tecnico">motivo: ${esc(motivo)}<br>falhas seguidas: ${c.falhasSeguidas}${d.reinicios !== undefined && d.reinicios !== null ? `<br>reinícios: ${d.reinicios}` : ""}${ultima ? `<br>última falha: ${esc(dataHora(ultima.em))} · ${esc(rotuloDaAtividade(ultima.tipo).toLowerCase())}` : ""}</p></details>`;
+    q(".computador-vazio").hidden = true;
+    q<HTMLImageElement>("img").hidden = true;
+  }
   function pintarEstado() {
     if (!dto) return;
     const c = dto.computador;
-    q(".computador-status").textContent = configuracao === "iniciar" ? "Ligando computador…" : configuracao === "parar" ? "Desligando…" : !dto.disponivel ? "Ambiente indisponível" : !dto.ativo ? "Desligado" : c.controle === "pessoa" ? "Você está no controle" : c.controle === "aguardando_pessoa" ? "Precisa de você" : c.ocupadoAte && c.ocupadoAte > Date.now() ? "Bot trabalhando" : "Pronto para o bot";
-    q(".computador-ajuda").textContent = dto.motivo ?? c.ajuda ?? "Entre nos seus apps uma vez neste computador. Use Devolver ao bot quando terminar.";
+    const fora = foraDoAr(dto);
+    q(".computador-status").textContent = estadoEmPalavras(dto, Date.now(), configuracao);
+    q(".computador-status").classList.toggle("fora-do-ar", fora);
+    q(".computador-ajuda").textContent = fora ? "Tirei o computador das próximas execuções até você religá-lo." : c.falhasSeguidas > 0 && c.falhaMotivo ? `A última tentativa falhou: ${MOTIVO_FALHA_TEXTO[c.falhaMotivo]}.` : dto.motivo ?? c.ajuda ?? "Entre nos seus apps uma vez neste computador. Use Devolver ao bot quando terminar.";
     q<HTMLSelectElement>("select").value = c.politica;
-    q<HTMLButtonElement>('[data-c="iniciar"]').disabled = operando || !dto.disponivel || dto.ativo;
+    pintarForaDoAr(dto);
+    q<HTMLButtonElement>('.computador-toolbar [data-c="iniciar"]').textContent = fora ? "Tentar de novo" : "Ligar computador";
+    q<HTMLButtonElement>('.computador-toolbar [data-c="iniciar"]').disabled = operando || !dto.disponivel || (dto.ativo && !fora);
     q<HTMLButtonElement>('[data-c="parar"]').disabled = !dto.ativo && configuracao !== "iniciar";
     q<HTMLButtonElement>('[data-c="assumir"]').disabled = operando || !dto.ativo || c.controle === "pessoa";
     q<HTMLButtonElement>('[data-c="devolver"]').disabled = operando || !dto.ativo || c.controle === "bot";
     q<HTMLImageElement>("img").classList.toggle("controlavel", Boolean(controla()));
-    q(".computador-atividade").innerHTML = dto.atividade.slice(0,12).map(a => `<li><b>${a.autor === "pessoa" ? "Você" : esc(agente.nome)}</b> · ${esc(a.tipo.replaceAll("_", " "))}<small>${esc(a.estado.replaceAll("_", " "))} · ${new Date(a.em).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small></li>`).join("") || "<li>Nenhuma ação ainda.</li>";
+    // definido em 2026-09-24 (emenda da ADR-037): vizinhos iguais viram uma linha com ×N e o intervalo.
+    q(".computador-atividade").innerHTML = agruparAtividade(dto.atividade).slice(0, 12).map((l) => {
+      const quando = l.n > 1 ? `${dataHora(l.de)} → ${dataHora(l.ate)}` : dataHora(l.ate);
+      const motivo = l.motivo ? ` · ${MOTIVO_FALHA_TEXTO[l.motivo]}` : "";
+      return `<li class="atividade-${esc(l.estado)}"><b>${l.autor === "pessoa" ? "Você" : esc(agente.nome)}</b> · ${esc(rotuloDaAtividade(l.tipo))} <span class="tag ${l.estado === "falhou" ? "tag-vermelha" : "tag-cinza"}">${esc(rotuloDoEstado(l.estado))}${l.n > 1 ? ` ×${l.n}` : ""}</span><small>${esc(quando)}${esc(motivo)}</small></li>`;
+    }).join("") || "<li>Nenhuma ação ainda.</li>";
   }
   function resultado(r: ResultadoComputador) {
     if (terminou) return;
@@ -122,10 +151,11 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }):
     if (cmd === "fechar") dialog.close();
     else if (cmd === "parar") { configuracao="parar";pintarEstado();void api.configurarComputador(agente.id,"parar").then(atualizar).catch(()=>erro("Não foi possível desligar o computador.")).finally(()=>{configuracao=null;pintarEstado();}); }
     else if ((cmd === "aceitar-dialogo" || cmd === "recusar-dialogo") && tela) void interagir({tipo:"dialogo",aceitar:cmd === "aceitar-dialogo",texto:q<HTMLInputElement>(".computador-browser-dialog input").value,quadro:tela.quadro});
-    else if (cmd === "atualizar") void fazer(async()=>{await atualizar();if(dto?.ativo)await acao({tipo:"observar"});});
+    else if (cmd === "atualizar") void fazer(async()=>{await atualizar();if(dto?.ativo && !foraDoAr(dto))await acao({tipo:"observar"});});
     else if (cmd === "audio") void fazer(()=>acao({tipo:"audio",segundos:5}));
     else if (["enter","tab","esc"].includes(cmd??"") && tela) void interagir({tipo:"tecla",tecla:cmd==="enter"?"Enter":cmd==="tab"?"Tab":"Escape",quadro:tela.quadro});
-    else if (cmd) void fazer(async()=>{configuracao=cmd;pintarEstado();try{await api.configurarComputador(agente.id,cmd);await atualizar();if(dto?.ativo)await acao({tipo:"observar"});}finally{configuracao=null;}});
+    // Ligar e "Tentar de novo" são o mesmo iniciar. Falhou: relê o estado (o cartão diz o motivo).
+    else if (cmd) void fazer(async()=>{configuracao=cmd;pintarEstado();try{await api.configurarComputador(agente.id,cmd);await atualizar();if(dto?.ativo && !foraDoAr(dto))await acao({tipo:"observar"});}catch(e){configuracao=null;await atualizar().catch(()=>undefined);throw e;}finally{configuracao=null;}});
     else if (el.dataset.aba) void interagir({tipo:"abas",aba:Number(el.dataset.aba)});
     else if (el.dataset.arquivo) void fazer(async()=>{if(el.dataset.diretorio==="true")q<HTMLInputElement>(".computador-pasta input").value=el.dataset.arquivo!;await acao({tipo:el.dataset.diretorio==="true"?"arquivos":"ler_arquivo",caminho:el.dataset.arquivo!});});
   });
@@ -140,12 +170,13 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }):
     void f.arrayBuffer().then(b=>interagir({tipo:"gravar_arquivo",caminho:f.name,base64:btoa(Array.from(new Uint8Array(b),c=>String.fromCharCode(c)).join(""))}));
   };
   const timer = window.setInterval(()=>{
-    if(document.hidden || terminou || Date.now()<proximaLeitura) return;
+    // Fora do ar não há tela para ler: o laço de 2 s para até "Tentar de novo" (emenda da ADR-037).
+    if(document.hidden || terminou || Date.now()<proximaLeitura || (dto && foraDoAr(dto))) return;
     proximaLeitura=Date.now()+2000;
     void fazer(async()=>{await atualizar();if(dto?.ativo && (dto.computador.ocupadoAte ?? 0) <= Date.now()) await acao({tipo:"observar"});},true);
   },2000);
   dialog.addEventListener("close",()=>{terminou=true;window.clearInterval(timer);if(timerTeclas)window.clearTimeout(timerTeclas);if(timerClique)window.clearTimeout(timerClique);teclas="";if(audioUrl)URL.revokeObjectURL(audioUrl);dialog.remove();});
-  void fazer(async()=>{await atualizar();if(dto?.ativo)await acao({tipo:"observar"});});
+  void fazer(async()=>{await atualizar();if(dto?.ativo && !foraDoAr(dto))await acao({tipo:"observar"});});
 }
 function blob(base64: string, type: string): Blob { return new Blob([Uint8Array.from(atob(base64), c=>c.charCodeAt(0))],{type}); }
 function baixar(nome: string, base64: string) { const url=URL.createObjectURL(blob(base64,"application/octet-stream"));const a=document.createElement("a");a.href=url;a.download=nome;a.click();window.setTimeout(()=>URL.revokeObjectURL(url),1000); }

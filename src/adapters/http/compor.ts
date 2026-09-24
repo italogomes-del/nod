@@ -249,7 +249,8 @@ export function comporApp(o: OpcoesCompor): App {
 
   const computadores = criarComputadores({ dentro, driver: o.computador ?? criarDriverDocker(env), executor: () => executorAtual,
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
-    mudou: (escopo, agenteId) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId }); } });
+    // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
+    mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });

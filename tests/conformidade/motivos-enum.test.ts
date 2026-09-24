@@ -5,6 +5,7 @@ import {
   DESFECHOS_ROTINA,
   MOTIVOS_APROVACAO_MANUAL,
   MOTIVOS_FALHA,
+  MOTIVOS_FALHA_COMPUTADOR,
   MOTIVOS_INATIVIDADE_PERMISSAO,
   MOTIVOS_INTERRUPCAO,
   MOTIVOS_LOCALIDADE,
@@ -39,6 +40,8 @@ const MOTIVOS: Record<string, readonly string[]> = {
   alcance_relato: ALCANCES_RELATO,
   // ADR-045 (0021): o incidente é aviso de infraestrutura, e o tipo dele também é enum fechado.
   tipo_incidente: TIPOS_INCIDENTE,
+  // Emenda da ADR-037 (0022): a falha do computador do bot tem código fechado, no banco e no runtime.
+  motivo_falha_computador: MOTIVOS_FALHA_COMPUTADOR,
 };
 
 async function rotulos(tipo: string): Promise<string[]> {
