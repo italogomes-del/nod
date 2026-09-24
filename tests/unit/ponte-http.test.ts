@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
 import { versaoAceita } from "../../src/domain/versao-app.ts";
-import { entrega, inventario, sinais } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { entrega, inventario, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
 
 describe("desktop: fronteiras HTTP", () => {
   it("só aceita HTTPS sem credenciais ou caminhos; loopback exige opção de desenvolvimento", () => {
@@ -27,5 +27,29 @@ describe("desktop: fronteiras HTTP", () => {
     expect(inventario({ estado: "ausente", em: Infinity, motivo: "segredo" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });
     expect(() => sinais({ attempted: "true" })).toThrow();
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
+  });
+  it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, e esvazia a fila", async () => {
+    const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
+    const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
+    c.delta("Próximo "); c.delta("lote."); c.ferramenta("mcp__nod__gmail__search_threads"); c.delta("44 processados.");
+    const pedido = { turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, eventos: [] };
+    await c.ponte.renovar(pedido);
+    expect(JSON.parse(String(f.mock.calls[0]?.[1]?.body)).trechos).toEqual([{ texto: "Próximo lote." }, { ferramenta: "mcp__nod__gmail__search_threads" }, { texto: "44 processados." }]);
+    await c.ponte.renovar(pedido);
+    expect(JSON.parse(String(f.mock.calls[1]?.[1]?.body)).trechos).toEqual([]);
+  });
+  it("fila acima de 16k de texto descarta o mais antigo", async () => {
+    const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
+    const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
+    c.delta("a".repeat(10_000)); c.ferramenta("Bash"); c.delta("b".repeat(10_000));
+    await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, eventos: [] });
+    const enviados = JSON.parse(String(f.mock.calls[0]?.[1]?.body)).trechos as { texto?: string }[];
+    expect(enviados.reduce((n, t) => n + (t.texto?.length ?? 0), 0)).toBe(16_000);
+    expect(enviados.at(-1)?.texto).toBe("b".repeat(10_000));
+  });
+  it("servidor: trecho fora do formato cai sozinho; acima do teto, nada passa", () => {
+    expect(trechos([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }, { ferramenta: "rm -rf /" }, { texto: "a", ferramenta: "b" }, 3])).toEqual([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }]);
+    expect(trechos([{ texto: "a".repeat(9_000) }, { texto: "b".repeat(9_000) }])).toEqual([]);
+    expect(trechos("texto")).toEqual([]);
   });
 });

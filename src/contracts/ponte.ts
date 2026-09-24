@@ -34,6 +34,12 @@ export type PedidoRenovar = {
 };
 
 /**
+ * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
+ * de ferramenta (nunca input/resultado). O servidor republica como turno.delta / turno.atividade.
+ */
+export type TrechoVivo = { texto: string } | { ferramenta: string };
+
+/**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois
  * sem trocar o driver. {ativo:false} em renovar manda o executor abortar.
  */

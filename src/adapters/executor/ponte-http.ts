@@ -1,4 +1,4 @@
-import type { AnuncioMaquina, PonteInterna } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, PonteInterna, TrechoVivo } from "../../contracts/ponte.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
 
@@ -18,7 +18,7 @@ export function urlServidor(valor: unknown, desenvolvimento = false): string {
 export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void }) {
   const f = o.fetchImpl ?? fetch;
   let anuncio: AnuncioMaquina | null = null;
-  let delta = "";
+  let trechos: TrechoVivo[] = [];
   const ativos = new Set<AbortController>();
   async function chamar<T>(nome: string, corpo: unknown): Promise<T> {
     const ctrl = new AbortController(); ativos.add(ctrl);
@@ -47,8 +47,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       }
     },
     async renovar(p) {
-      const texto = delta; delta = "";
-      try { return await chamar("renovar", { ...p, delta: texto }); }
+      const enviar = trechos; trechos = [];
+      try { return await chamar("renovar", { ...p, trechos: enviar }); }
       catch { return { ativo: false, versaoMinimaApp: o.versao }; }
     },
     async entregar(e) {
@@ -62,5 +62,26 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     },
     async desconectar() { await chamar("desconectar", {}); },
   };
-  return { ponte, delta(texto: string) { delta = (delta + texto).slice(-16_000); }, cancelar() { for (const c of ativos) c.abort(); } };
+  /** Teto de 16k de texto por renovação (o mesmo da rota): descarta os trechos mais antigos. */
+  function aparar() {
+    let total = trechos.reduce((n, t) => n + ("texto" in t ? t.texto.length : 0), 0);
+    while (total > 16_000 && trechos.length > 0) {
+      const t = trechos[0]!;
+      if ("texto" in t && total - t.texto.length < 16_000) { trechos[0] = { texto: t.texto.slice(total - 16_000) }; break; }
+      total -= "texto" in t ? t.texto.length : 0;
+      trechos.shift();
+    }
+    if (trechos.length > 2_000) trechos = trechos.slice(-2_000);
+  }
+  return {
+    ponte,
+    delta(texto: string) {
+      const ultimo = trechos[trechos.length - 1];
+      if (ultimo && "texto" in ultimo) trechos[trechos.length - 1] = { texto: ultimo.texto + texto };
+      else trechos.push({ texto });
+      aparar();
+    },
+    ferramenta(nome: string) { trechos.push({ ferramenta: nome }); aparar(); },
+    cancelar() { for (const c of ativos) c.abort(); },
+  };
 }

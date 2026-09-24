@@ -17,6 +17,7 @@ import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
@@ -297,6 +298,7 @@ export function comporApp(o: OpcoesCompor): App {
     seguro: env.NOD_LOGIN === "google",
     agora: relogio,
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
+    ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
   });
 
@@ -499,7 +501,7 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade", dados: Record<string, unknown>): void {
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
 
@@ -517,6 +519,7 @@ export function comporApp(o: OpcoesCompor): App {
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
+        else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });
       },
       aoIniciarTurno: (plano, adapter) => interruptor.registrar(plano.turnoId, () => adapter.interromper()),
       aoTerminarTurno: (plano) => interruptor.esquecer(plano.turnoId),

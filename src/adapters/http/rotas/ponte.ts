@@ -9,7 +9,7 @@ import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { entrega, exigir, inventario, objeto, sinais, texto, uuid } from "./ponte-validacao.ts";
+import { entrega, exigir, inventario, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 
 type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; plano: PlanoTurno | null; recebida?: { turnoId: string; seqLocal: number } };
@@ -21,6 +21,7 @@ export function criarPonteHttpServidor(d: {
   seguro: boolean;
   agora(): number;
   delta(plano: PlanoTurno, texto: string): void;
+  ferramenta(plano: PlanoTurno, nome: string): void;
   longpollMs?: number;
 }) {
   const conexoes = new Map<string, Conexao>();
@@ -95,6 +96,10 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [] });
       if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(c.plano, b.delta);
+      if (r.ativo) for (const t of trechos(b.trechos)) {
+        if ("ferramenta" in t) d.ferramenta(c.plano, t.ferramenta);
+        else if (t.texto) d.delta(c.plano, t.texto);
+      }
       ctx.json(200, r);
     }),
     rota("entregar", async (ctx, b) => {

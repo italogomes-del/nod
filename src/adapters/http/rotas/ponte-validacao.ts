@@ -1,6 +1,6 @@
 import type { Inventario } from "../../../contracts/inventario.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
-import type { Entrega } from "../../../contracts/ponte.ts";
+import type { Entrega, TrechoVivo } from "../../../contracts/ponte.ts";
 import type { SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { UUID } from "../roteador.ts";
@@ -13,6 +13,23 @@ export function objeto(v: unknown): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 export function texto(v: unknown, max = 100_000): v is string { return typeof v === "string" && v.length <= max; }
+/**
+ * Trechos do turno vivo. São efêmeros: um item fora do formato é descartado sozinho e uma lista acima
+ * dos tetos vira vazia, sem nunca derrubar a renovação (que é o lease do turno).
+ */
+export function trechos(v: unknown): TrechoVivo[] {
+  if (!Array.isArray(v) || v.length > 2_000) return [];
+  const saida: TrechoVivo[] = [];
+  let total = 0;
+  for (const t of v) {
+    if (!t || typeof t !== "object" || Array.isArray(t)) continue;
+    const o = t as Record<string, unknown>;
+    if (Object.keys(o).length !== 1) continue;
+    if (texto(o.texto, 16_000)) { total += o.texto.length; saida.push({ texto: o.texto }); }
+    else if (texto(o.ferramenta, 200) && /^[A-Za-z0-9_.-]+$/.test(o.ferramenta)) saida.push({ ferramenta: o.ferramenta });
+  }
+  return total > 16_000 ? [] : saida;
+}
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
 export function sinais(v: unknown): SinaisTurno {
   const s = objeto(v);

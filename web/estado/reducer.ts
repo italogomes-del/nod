@@ -12,6 +12,7 @@ import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada } from "../../src/contracts/turno.ts";
 import type { Escopo } from "../../src/shared/types.ts";
+import { comFerramenta, comTexto, type AtividadeTurno } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 
 /**
@@ -42,8 +43,8 @@ export type Tela =
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
 export type ConversaEstado = ConversaDto & {
-  /** Texto em streaming por turno (turno.delta), descartado ao encerrar. */
-  deltas: Record<string, string>;
+  /** Turno vivo por turnoId (turno.delta + turno.atividade), descartado ao encerrar. */
+  atividades: Record<string, AtividadeTurno>;
   carregadaEm: number;
 };
 
@@ -170,10 +171,10 @@ function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
 function semDelta(estado: Estado, conversaId: string | null, turnoId: string | null): Estado {
   if (!conversaId || !turnoId) return estado;
   const c = estado.conversas[conversaId];
-  if (!c || !(turnoId in c.deltas)) return estado;
-  const deltas = { ...c.deltas };
-  delete deltas[turnoId];
-  return { ...estado, conversas: { ...estado.conversas, [conversaId]: { ...c, deltas } } };
+  if (!c || !(turnoId in c.atividades)) return estado;
+  const atividades = { ...c.atividades };
+  delete atividades[turnoId];
+  return { ...estado, conversas: { ...estado.conversas, [conversaId]: { ...c, atividades } } };
 }
 
 /** Um handler por TipoFrame — a tabela é TOTAL: um tipo novo no contrato não compila sem entrar aqui. */
@@ -205,7 +206,17 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
     if (!c) return { ...e, turnosVivos };
-    return { ...e, turnosVivos, conversas: { ...e.conversas, [conversaId]: { ...c, deltas: { ...c.deltas, [turnoId]: (c.deltas[turnoId] ?? "") + trecho } } } };
+    return { ...e, turnosVivos, conversas: { ...e.conversas, [conversaId]: { ...c, atividades: { ...c.atividades, [turnoId]: comTexto(c.atividades[turnoId], trecho) } } } };
+  },
+  "turno.atividade": (e, f) => {
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    const c = conversaId ? e.conversas[conversaId] : undefined;
+    if (!turnoId || !c) return e;
+    const rotulo = texto(f.dados.rotulo) ?? "Usou uma ferramenta";
+    const vivo = e.turnosVivos[turnoId];
+    const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
+    return { ...e, turnosVivos, conversas: { ...e.conversas, [c.conversa.id]: { ...c, atividades: { ...c.atividades, [turnoId]: comFerramenta(c.atividades[turnoId], rotulo) } } } };
   },
   "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
   "turno.interrompido": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
@@ -295,9 +306,9 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-conversa": {
       const anterior = estado.conversas[acao.conversa.conversa.id];
       const vivosDaConversa = new Set(Object.values(estado.turnosVivos).filter((t) => t.conversaId === acao.conversa.conversa.id).map((t) => t.turnoId));
-      const deltas: Record<string, string> = {};
-      for (const [turnoId, t] of Object.entries(anterior?.deltas ?? {})) if (vivosDaConversa.has(turnoId)) deltas[turnoId] = t;
-      return { ...estado, conversas: { ...estado.conversas, [acao.conversa.conversa.id]: { ...acao.conversa, deltas, carregadaEm: acao.agora } } };
+      const atividades: Record<string, AtividadeTurno> = {};
+      for (const [turnoId, t] of Object.entries(anterior?.atividades ?? {})) if (vivosDaConversa.has(turnoId)) atividades[turnoId] = t;
+      return { ...estado, conversas: { ...estado.conversas, [acao.conversa.conversa.id]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
     }
     case "hidratar-sua-vez":
       return { ...estado, suaVez: acao.suaVez };

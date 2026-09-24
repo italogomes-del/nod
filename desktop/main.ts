@@ -105,7 +105,7 @@ async function conectar(c: Config) {
     mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta do Claude Code ou Codex e conecte novamente." : "Instale o Claude Code ou Codex neste Mac e conecte novamente.";
     throw new Error("harness_indisponivel");
   }
-  laco = iniciarLaco({ ponte: cliente.ponte, registry, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (_p, t) => cliente?.delta(t) });
+  laco = iniciarLaco({ ponte: cliente.ponte, registry, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (_p, t) => cliente?.delta(t), aoEvento: (_p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(ev.nome); } });
   const anterior = janela;
   const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", webPreferences: { partition: "nod-web", nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova, c.url);
