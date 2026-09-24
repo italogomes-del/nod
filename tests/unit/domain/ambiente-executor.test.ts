@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chaveNegada, montarAmbiente } from "../../../src/domain/ambiente-executor.ts";
+import { chaveNegada, montarAmbiente, montarAmbienteConectorNativo } from "../../../src/domain/ambiente-executor.ts";
 
 describe("montarAmbiente", () => {
   const source = {
@@ -49,5 +49,10 @@ describe("montarAmbiente", () => {
     expect(chaveNegada("CLAUDECODE")).toBe(true);
     expect(chaveNegada("CLAUDE")).toBe(false);
     expect(chaveNegada("PATH")).toBe(false);
+  });
+
+  it("conector nativo (ADR-047) ganha só o que o gh precisa para achar a conta logada; segredo do servidor fica", () => {
+    const r = montarAmbienteConectorNativo({ PATH: "/bin", HOME: "/Users/m", USER: "m", GH_CONFIG_DIR: "/c", NOD_CREDENTIAL_KEY: "x", DATABASE_URL: "postgres://", GITHUB_TOKEN: "ghp_x" });
+    expect(r).toEqual({ PATH: "/bin", HOME: "/Users/m", USER: "m", GH_CONFIG_DIR: "/c" });
   });
 });

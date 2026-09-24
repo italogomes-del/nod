@@ -138,7 +138,8 @@ export function criarApi(escopo: Escopo) {
     pararSala: (salaId: string) => post<FaixaParada>(`salas/${salaId}/parar`),
     conectores: () => get<{ conectores: Conector[]; marketplace: AppComLogo[]; composioConfigurado: boolean }>("conectores"),
     configurarComposio: (chave: string) => post<{ configurado: boolean }>("marketplace/configurar", { chave }),
-    conectarApp: (slug: string) => post<{ url: string; conectorId: string }>(`marketplace/${encodeURIComponent(slug)}/conectar`),
+    // definido em 2026-09-24 (ADR-047): o GitHub pode conectar na hora (gh logado nesta máquina, sem URL de login) ou dizer o que falta (`frase`).
+    conectarApp: (slug: string) => post<{ url?: string; conectorId?: string; conectado?: boolean; frase?: string }>(`marketplace/${encodeURIComponent(slug)}/conectar`),
     verificarApp: (slug: string) => post<{ conectado: boolean }>(`marketplace/${encodeURIComponent(slug)}/verificar`),
     atualizarCredenciais: (id: string, env: Record<string, string>) => patch<{ conector: Conector }>(`conectores/${id}/credenciais`, { env }),
     registrarConector: (c: Record<string, unknown>) => post<{ ok: true; ids: { conector: string }; conector: Conector }>("conectores", c),

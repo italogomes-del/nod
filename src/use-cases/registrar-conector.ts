@@ -43,6 +43,9 @@ export const registrarConector: CasoDeUso<EntradaRegistrarConector, Conector> = 
   if (input.transporte === "stdio" && (typeof input.comando !== "string" || input.comando.trim() === "")) throw new ErroDeDominio("entrada_invalida", { cause: "stdio exige comando" });
   if (input.transporte === "http" && (typeof input.url !== "string" || !/^https?:\/\//.test(input.url))) throw new ErroDeDominio("entrada_invalida", { cause: "http exige url" });
   if (input.transporte === "http" && declaracao !== "nao-toca" && !input.url?.startsWith("https://")) throw new ErroDeDominio("http_toca_aprendiz");
+  // definido em 2026-09-24 (ADR-047): `nod:` é a marca do conector nativo (mais ambiente e o servidor
+  // stdio do próprio nod); quem registra à mão não a usa, nem para ganhar a lista de ambiente dele.
+  if (input.transporte === "stdio" && input.comando?.trim().startsWith("nod:")) throw new ErroDeDominio("entrada_invalida", { cause: "comando reservado" });
   const args = input.args ?? [];
   if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) throw new ErroDeDominio("entrada_invalida", { cause: "args" });
 

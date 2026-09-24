@@ -5,9 +5,11 @@ import type { Decisao } from "../contracts/decisao.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
+import { SLUG_GITHUB } from "../contracts/github.ts";
+import { capacidadesDeLeitura, normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { evento } from "./autoria-evento.ts";
+import { garantirGithubPeloGh } from "./conectar-github.ts";
 import { abrirDecisaoDeAcesso, eventosDoPedido, garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { Deps } from "./tipos.ts";
@@ -64,11 +66,22 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
  */
 export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) => {
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
-  const conector = await deps.repos.conectores.buscarPorSlug(input.conector);
+  let conector = await deps.repos.conectores.buscarPorSlug(input.conector);
+  let entrada = input;
+  if (input.conector === SLUG_GITHUB && !conector?.habilitado) {
+    // definido em 2026-09-24 (ADR-047): com o gh desta máquina logado, o GitHub nasce aqui mesmo e o
+    // card já sai com o botão de permitir — nada de card de conexão nem passo de configuração. Sem
+    // capacidades nomeadas, o nível decide: leitura = as de leitura, escrita = o catálogo inteiro.
+    const r = await garantirGithubPeloGh(deps, { pelaPessoa: false });
+    if (r.ok) {
+      conector = r.conector;
+      if (input.capacidades.length === 0) entrada = { ...input, capacidades: input.nivel === "leitura" ? capacidadesDeLeitura(r.conector.catalogo) : r.conector.catalogo.map((c) => c.nome) };
+    }
+  }
   // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a escrita que a rotina
   // DECLAROU para este app — a pessoa a viu no card da rotina — pode ser pedida pelo turno; fora dela, não.
   const declaradas = ligacao?.rotina.acessos?.filter((a) => a.conector === input.conector).flatMap((a) => a.capacidades) ?? [];
-  const pedido = normalizarPedidoAcesso({ pedido: input, conector, emRotina: ligacao !== null, declaradas });
+  const pedido = normalizarPedidoAcesso({ pedido: entrada, conector, emRotina: ligacao !== null, declaradas });
   const rotina = ligacao?.rotina ?? null;
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
   if (rotina) {
@@ -89,7 +102,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     });
     return { data: aguardandoPessoa(g.proposta.id), events: g.events };
   }
-  const repetido = await pedidoRepetido(deps, input, pedido);
+  const repetido = await pedidoRepetido(deps, entrada, pedido);
   if (repetido) return { data: aguardandoPessoa(repetido.id), events: [] };
 
   const payload: PayloadPropostaAcesso = {

@@ -1,5 +1,7 @@
+import { SLUG_GITHUB } from "../../../contracts/github.ts";
 import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { garantirGithubPeloGh } from "../../../use-cases/conectar-github.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
 import { criarClienteComposio } from "../../integracoes/composio.ts";
@@ -28,6 +30,11 @@ export function rotasMarketplace(op: { dentro: DentroDeTx; cifrar: (s: string) =
     } },
     { metodo: "POST", padrao: /^\/marketplace\/(?<slug>[a-z0-9-]+)\/conectar$/, async handler(ctx) {
       const app = acharApp(ctx.params.slug ?? "");
+      if (app.slug === SLUG_GITHUB) {
+        // ADR-047: o que já está pronto ganha. gh logado nesta máquina = conectado agora, sem login nem campo.
+        const r = await op.dentro(ctx.escopo, (d) => garantirGithubPeloGh(d, { pelaPessoa: true }));
+        if (r.ok) { ctx.json(200, { conectado: true, conectorId: r.conector.id, jeito: "gh" }); return; }
+      }
       const cifrada = await op.dentro(ctx.escopo, (d) => d.repos.composio.chave());
       if (!cifrada) throw new ErroDeDominio("integracao_nao_configurada");
       const chave = op.decifrar(cifrada);

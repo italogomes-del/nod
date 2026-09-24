@@ -23,7 +23,10 @@ import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas } from "../../repositories/pessoas.repo.ts";
 import { criarBarramento, type Barramento } from "../../services/barramento.ts";
-import { criarConectoresVivos, type ConectoresVivos } from "../../services/conectores-vivos.ts";
+import { criarConectoresVivos, type ConectoresVivos, type ConfigConectorVivo } from "../../services/conectores-vivos.ts";
+import type { Conector } from "../../contracts/conector.ts";
+import { COMANDO_GITHUB_NATIVO, type OndeRodaConector } from "../../contracts/github.ts";
+import { configGithubNativo, criarDetectorGh, type DetectorGh } from "../conectores-locais/github/nativo.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
@@ -107,6 +110,8 @@ export type OpcoesCompor = {
   relogio?: Relogio;
   /** Fonte das pessoas (tenant de um pessoaId); só em teste. Default: tabela pessoas. */
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
+  /** Quem responde se o `gh` desta máquina está logado (ADR-047); só em teste. Default: `gh auth status`. */
+  detectorGh?: DetectorGh;
 };
 
 export type App = {
@@ -205,6 +210,22 @@ export function comporApp(o: OpcoesCompor): App {
   // Conectores vivos (L5): quem carrega e DECIFRA o env é este callback — o conector é da pessoa que o
   // registrou, então a busca corre as pessoas do servidor (ids são uuid: acha em uma).
   const donoDoConector = new Map<string, Escopo>();
+  // definido em 2026-09-24 (ADR-047): no modo local o servidor É o Mac da pessoa e o gh logado dela
+  // serve; no compartilhado o conector roda no servidor, onde o gh nunca entra.
+  const ondeRodaConector: OndeRodaConector = compartilhado ? "servidor" : "maquina_da_pessoa";
+  const detectorGh = compartilhado ? null : (o.detectorGh ?? criarDetectorGh({ ambiente: env }));
+  // ADR-047: a marca `nod:github` vira o servidor stdio nativo, com o jeito escolhido AGORA (gh, token,
+  // Composio, App); o resto dos conectores sai como foi registrado.
+  async function configDe(conectorId: string, c: Pick<Conector, "slug" | "transporte" | "comando" | "args" | "url">, envDecifrado: Record<string, string>): Promise<ConfigConectorVivo | null> {
+    if (c.comando !== COMANDO_GITHUB_NATIVO) return { nome: c.slug, transporte: c.transporte, comando: c.comando, args: c.args, url: c.url, env: envDecifrado };
+    const r = configGithubNativo({ onde: ondeRodaConector, envConector: envDecifrado, ghLogado: detectorGh ? await detectorGh.logado() : false, app: null, ambiente: env });
+    if (!r.ok) {
+      log("aviso", "github_sem_jeito", { conector_id: conectorId, onde: ondeRodaConector });
+      return null;
+    }
+    log("info", "github_jeito_escolhido", { conector_id: conectorId, jeito: r.cfg.jeito, onde: ondeRodaConector });
+    return { nome: c.slug, transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, url: null, env: r.cfg.env, ...(r.cfg.expiraEm !== undefined ? { expiraEm: r.cfg.expiraEm } : {}) };
+  }
   const conectoresVivos = criarConectoresVivos({
     agora: relogio,
     ambiente: env,
@@ -215,10 +236,12 @@ export function comporApp(o: OpcoesCompor): App {
         if (!c) continue;
         donoDoConector.set(conectorId, escopo);
         const envDecifrado = c.envCifrado ? (JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, string>) : {};
-        return { nome: c.slug, transporte: c.transporte, comando: c.comando, args: c.args, url: c.url, env: envDecifrado };
+        return configDe(conectorId, c, envDecifrado);
       }
       return null;
     },
+    // O GitHub que acabou de nascer dentro da tx de pedir_acesso ainda não é visível a `carregar` (outra tx).
+    resolverSemBanco: (c) => configDe(c.id, c, {}),
   });
 
   const services: Services = {
@@ -257,6 +280,7 @@ export function comporApp(o: OpcoesCompor): App {
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
   if (workspaces) services.workspaces = workspaces;
+  if (detectorGh) services.githubLocal = { ghLogado: () => detectorGh.logado() };
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
   const depsPonte: Parameters<typeof criarPonteInterna>[1] = {

@@ -1058,6 +1058,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         Object.assign(c, { url, envCifrado, env: Object.fromEntries(envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
         return c;
       },
+      async tornarNativo(id, p) {
+        const c = b.conectores.find((c) => c.id === id && c.ownerId === escopo.pessoaId);
+        if (!c) return null;
+        Object.assign(c, { transporte: "stdio", comando: p.comando, args: [], url: null, envCifrado: p.envCifrado, env: Object.fromEntries(p.envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
+        return c;
+      },
       async criar(c) {
         const env: Record<string, true> = {};
         for (const k of c.envChaves ?? []) env[k] = true;

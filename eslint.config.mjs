@@ -75,6 +75,14 @@ export default tseslint.config(
     "executor e proxy recebem plano e sinks; quem grava é o servidor (ADR-018, ADR-024).",
     { allowTypeImports: true },
   ),
+  // definido em 2026-09-24 (ADR-047): conector nativo roda em processo filho com o stdout como canal
+  // JSON-RPC — sem banco, sem caso de uso e sem src/obs/log.ts (que escreve no stdout).
+  fronteira(
+    ["src/adapters/conectores-locais/**/*.ts"],
+    ["**/db/**", "**/repositories/**", "**/use-cases/**", "**/services/**", "**/obs/**", "**/adapters/http/**", "postgres"],
+    "conector nativo é processo filho: recebe tudo pelo ambiente que o servidor montou e só fala JSON-RPC no stdout (ADR-047).",
+    { allowTypeImports: true },
+  ),
   fronteira(
     ["web/**/*.ts"],
     ["**/src/**", "node:*", "postgres"],

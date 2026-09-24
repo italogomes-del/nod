@@ -26,6 +26,12 @@ export interface ServicesNod<Trx> {
     /** Pasta onde o harness abre e as que ele alcança; null quando não há projeto autorizado. */
     pastasDoHarness(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<{ ativa: string; aprovadas: string[] } | null>;
   };
+  /**
+   * definido em 2026-09-24 (ADR-047): o `gh` desta máquina está logado? Só existe quando o conector
+   * roda na máquina da pessoa (servidor local); no servidor compartilhado a composição não o cria,
+   * e sem ele o GitHub nunca nasce sozinho pelo jeito `gh`.
+   */
+  githubLocal?: { ghLogado(): Promise<boolean> };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
   };
