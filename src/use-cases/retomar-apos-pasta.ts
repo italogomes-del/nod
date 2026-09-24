@@ -36,6 +36,7 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
     harness: original.harness,
     modelo: original.modelo,
     retomaTurnoId: original.id,
+    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   return {

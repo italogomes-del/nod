@@ -67,6 +67,7 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     modelo: original.modelo,
     harness: original.harness,
     retomaTurnoId: original.id,
+    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
     executor: input.executor ?? "catcher",
   });

@@ -72,6 +72,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     encaminhar: async () => ({ data: { ok: true } }),
     semNovidade: async () => ({ data: { ok: true } }),
     perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    delegarTarefa: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     ...opcoes.useCases,
   };
   const tx: Transacao = (fn) => fn({} as Tx);

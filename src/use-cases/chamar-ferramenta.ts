@@ -101,6 +101,7 @@ const DESPACHO: Despacho = {
   encaminhar: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.encaminhar](deps, { ...ctx, ...args }),
   sem_novidade: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.sem_novidade](deps, { ...ctx, ...args }),
   perguntar_a_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.perguntar_a_bot](deps, { ...ctx, ...args }),
+  delegar_tarefa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.delegar_tarefa](deps, { ...ctx, ...args }),
 };
 
 function ehNomeNod(nome: string): nome is NomeFerramentaNod {

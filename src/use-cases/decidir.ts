@@ -167,6 +167,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       modelo: original?.modelo ?? MODELO_AGENTE_PADRAO,
       harness: original?.harness,
       retomaTurnoId: decisao.turnoId,
+      sobProcuracaoDe: original?.sobProcuracaoDe ?? null,
     });
     turnoRetomadaId = turno?.id ?? null;
     if (turno) {
@@ -241,6 +242,7 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
     modelo: original.modelo,
     harness: original.harness,
     retomaTurnoId: original.id,
+    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   const events: RuntimeEvent[] = turno

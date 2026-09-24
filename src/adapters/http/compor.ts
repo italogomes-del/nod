@@ -44,6 +44,7 @@ import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
 import { perguntarABot } from "../../use-cases/perguntar-a-bot.ts";
+import { delegarTarefa } from "../../use-cases/delegar-tarefa.ts";
 import { servicoSala } from "../../use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
@@ -90,7 +91,7 @@ import { criarRotasTurnos } from "./rotas/turnos.ts";
  * Fatias de Services: planos ← L5 (emitirPlanoTurno), rotinas ← L7 (servicoRotinas), conectores ← L5
  * (conectores-vivos), interruptor ← L6, catcher ← L3/L4 (catcherRepo), tokenTurno ← L5, sala ← L7
  * (servicoSala), barramento ← L8. UseCasesNod: lembrar/atualizarPerfil ← L6; criarRotina/passar/
- * encaminhar/perguntarABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5 (EMENDA 5).
+ * encaminhar/perguntarABot/delegarTarefa ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5 (EMENDA 5).
  *
  * O registry chega DEPOIS (ligarRegistry): o driver catcher precisa da URL do servidor, que só existe
  * depois do listen — em produção a porta é fixa, no teste é 0 (EMENDA 34).
@@ -194,7 +195,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot, delegarTarefa };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -281,7 +282,9 @@ export function comporApp(o: OpcoesCompor): App {
         const r = await registrarDesfechoRotina(d, { turnoId: turno.id, desfecho, motivo: silencioso ? turno.semNovidadeMotivo : desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
         if ("execucao" in r.data) events.push(...(r.events ?? []));
       }
-      if (turno.origem === "peer" && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {
+      // definido em 2026-09-24 (ADR-046): a tarefa delegada (e a retomada dela, depois de um acesso aprovado)
+      // também devolve o resultado ao remetente; entregarRespostaPeer segue a cadeia e ignora o resto.
+      if ((turno.origem === "peer" || turno.origem === "delegacao" || turno.origem === "retomada") && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {
         const r = await entregarRespostaPeer(d, { tarefaId: turno.id, texto: entrega.fala.texto });
         if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
       }
