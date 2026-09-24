@@ -78,6 +78,8 @@ it("rotina: o pedido pendente vale para os disparos seguintes, ignorando turno e
     return r.data.turno.id;
   };
   const oito = await disparo(agora - 5 * 3_600_000);
+  // O disparo das 8h terminou antes do das 13h (ADR-045: uma execução aberta por rotina).
+  await c.deps.repos.turnos.assentar(oito, { estado: "concluido" });
   const treze = await disparo(agora);
 
   const primeiro = await c.pedir([], oito);

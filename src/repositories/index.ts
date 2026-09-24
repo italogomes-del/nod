@@ -10,6 +10,7 @@ import { conversasRepo } from "./conversas.repo.ts";
 import { decisoesRepo } from "./decisoes.repo.ts";
 import { eventsRepo } from "./events.repo.ts";
 import { gastosRepo } from "./gastos.repo.ts";
+import { incidentesRepo } from "./incidentes.repo.ts";
 import { inventarioRepo } from "./inventario.repo.ts";
 import { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
 import { maquinaTokensRepo } from "./maquina-tokens.repo.ts";
@@ -56,6 +57,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     procuracoes: procuracoesRepo(conn, escopo),
     inventario: inventarioRepo(conn, escopo),
     gastos: gastosRepo(conn, escopo),
+    incidentes: incidentesRepo(conn, escopo),
     trilha: trilhaRepo(conn, escopo),
     paradas: paradasRepo(conn, escopo),
     catcher: catcherRepo(conn, escopo),

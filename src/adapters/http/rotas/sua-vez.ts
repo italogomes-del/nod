@@ -1,7 +1,8 @@
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Escopo } from "../../../shared/types.ts";
-import { listarSuaVez, type DepsSuaVez } from "../../../use-cases/listar-sua-vez.ts";
 import { dispensarDecisao } from "../../../use-cases/dispensar-decisao.ts";
+import { dispensarIncidente } from "../../../use-cases/dispensar-incidente.ts";
+import { listarSuaVez, type DepsSuaVez } from "../../../use-cases/listar-sua-vez.ts";
 import { reabrirDecisao } from "../../../use-cases/reabrir-decisao.ts";
 import type { Rota } from "../roteador.ts";
 
@@ -14,7 +15,7 @@ import type { Rota } from "../roteador.ts";
  */
 export type ComDeps = <T>(escopo: Escopo, fn: (deps: DepsSuaVez) => Promise<T>) => Promise<T>;
 
-/** GET sua-vez, POST decisoes/:id/reabrir e decisoes/:id/dispensar (EMENDA 4: decidir/retomar/responder são da L9 em rotas/decisoes.ts). */
+/** GET sua-vez, POST decisoes/:id/reabrir, decisoes/:id/dispensar e incidentes/:id/dispensar (EMENDA 4: decidir/retomar/responder são da L9 em rotas/decisoes.ts). */
 export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
   return [
     {
@@ -23,6 +24,16 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
       async handler(ctx) {
         const saida = await comDeps(ctx.escopo, (deps) => listarSuaVez(deps, {}));
         ctx.json(200, saida.data);
+      },
+    },
+    {
+      // definido em 2026-09-24 (ADR-045): "Entendi" no aviso de queda do Mac. Id desconhecido → 404.
+      metodo: "POST",
+      padrao: /^\/incidentes\/(?<id>[^/]+)\/dispensar$/,
+      async handler(ctx) {
+        const saida = await comDeps(ctx.escopo, (deps) => dispensarIncidente(deps, { incidenteId: ctx.params.id ?? "" }));
+        const corpo: RespostaMutacao = { ok: true, ids: { incidente: saida.data.incidente.id } };
+        ctx.json(200, corpo);
       },
     },
     {

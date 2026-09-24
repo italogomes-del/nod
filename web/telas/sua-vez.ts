@@ -1,7 +1,7 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { botao, esc } from "../lib/render.ts";
+import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 
 type Item = SuaVezDto["itens"][number];
@@ -218,6 +218,32 @@ export function renderChamada(estado: Estado): string {
   return `<button class="chamada" data-act="abrir-conversa" data-conversa="${esc(d.conversaId)}" data-agente="${esc(d.agenteId)}" aria-label="Abrir a decisão mais antiga, com ${esc(primeiro.agenteNome)}">
     <span class="ch-ic" aria-hidden="true">⚑</span><span class="ch-txt">${texto}</span><span class="ch-seta" aria-hidden="true">→</span>
   </button>${abertos.length > 1 ? `<button class="chamada-todas" data-act="navegar" data-tela="sua-vez">ver todas</button>` : ""}`;
+}
+
+const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
+
+/**
+ * A frase do aviso de queda (ADR-045). Não é decisão: diz o que aconteceu, o que NÃO foi feito e o que
+ * segue sozinho. Rotina interrompida não se retoma (a próxima janela roda); conversa tem o seu Retomar.
+ */
+export function fraseDoIncidente(i: SuaVezDto["incidentes"][number]): string {
+  const quando = i.voltouEm === null ? `Seu Mac está sem contato desde ${hora(i.comecouEm)}.` : `Seu Mac ficou sem contato entre ${hora(i.comecouEm)} e ${hora(i.voltouEm)}.`;
+  const partes = [i.rotinas > 0 ? plural(i.rotinas, "execução de rotina", "execuções de rotina") : "", i.conversas > 0 ? plural(i.conversas, "resposta em conversa", "respostas em conversa") : ""].filter(Boolean);
+  if (partes.length === 0) return quando;
+  const verbo = i.rotinas + i.conversas === 1 ? "não concluiu" : "não concluíram";
+  const quem = i.agentes.length ? ` (${i.agentes.join(", ")})` : "";
+  const segue = i.rotinas === 0 ? " e dá para retomar pela conversa" : i.conversas === 0 ? " e as próximas seguem agendadas" : ": as rotinas seguem agendadas e a conversa pode ser retomada";
+  return `${quando} ${partes.join(" e ")} ${verbo}${quem}; nada foi reenviado${segue}.`;
+}
+
+/**
+ * definido em 2026-09-24 (ADR-045): incidente não é decisão. Um aviso por queda, sob a faixa de
+ * decisões e em estilo neutro de STATUS (não o âmbar de "precisa de você"), com "Entendi".
+ */
+export function renderIncidentes(estado: Estado): string {
+  return (estado.suaVez?.incidentes ?? [])
+    .map((i) => `<div class="aviso-sistema" role="status" data-incidente="${esc(i.id)}"><span class="av-ic" aria-hidden="true">◑</span><span class="av-txt">${esc(fraseDoIncidente(i))}</span>${botao("dispensar-incidente", "Entendi", { classe: "link sm", id: i.id })}</div>`)
+    .join("");
 }
 
 /**

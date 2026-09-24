@@ -94,6 +94,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   const donoEmprestado = o.dbDono !== undefined;
   const dbEmprestado = o.db !== undefined;
   const agora = () => Date.now();
+  // definido em 2026-09-24 (ADR-045): no modo compartilhado, turno sem sinal desde antes daqui foi perdido pelo servidor, não pelo Mac.
+  const inicioDoProcesso = agora();
   const machineId = env.NOD_MACHINE_ID ?? (await machineIdEstavel(env));
 
   // 1. partições do mês corrente até 12 à frente, como nod_dono (ADR-006).
@@ -169,7 +171,17 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
     { listarPessoas: o.listarPessoas },
   );
-  const varredorLease = iniciarVarredorLease({ db, relogio: agora, intervaloMs: iv.leaseMs, opcoes: { listarPessoas: o.listarPessoas, prazoDecisaoMs: Number(env.NOD_PRAZO_DECISAO_MS) || undefined } });
+  const varredorLease = iniciarVarredorLease({
+    db,
+    relogio: agora,
+    intervaloMs: iv.leaseMs,
+    opcoes: {
+      listarPessoas: o.listarPessoas,
+      prazoDecisaoMs: Number(env.NOD_PRAZO_DECISAO_MS) || undefined,
+      // Só no compartilhado: no modo local o servidor É o nod no Mac — reiniciar é "nod fechado".
+      ...(app.compartilhado ? { inicioDoProcesso, ultimoContato: (id: string) => app.ultimoContatoDaMaquina(id) } : {}),
+    },
+  });
   const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
   const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas });
 

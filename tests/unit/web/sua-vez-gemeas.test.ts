@@ -37,7 +37,7 @@ function item(id: string, p: { tipo?: Item["decisao"]["tipo"]; frase?: string; t
 }
 
 const render = (itens: Item[]) =>
-  renderDecisoesDaConversa({ ...estadoInicial, suaVez: { itens, foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } }, CONVERSA, new Set());
+  renderDecisoesDaConversa({ ...estadoInicial, suaVez: { itens, incidentes: [], foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } }, CONVERSA, new Set());
 const quantosCards = (html: string) => html.split("<li").length - 1;
 
 /**

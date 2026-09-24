@@ -1,5 +1,6 @@
 import type { Estado } from "../estado/reducer.ts";
 import { avatarAgente, botao, dataHora, esc } from "../lib/render.ts";
+import { motivoDaExecucao } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 
 /**
@@ -14,7 +15,7 @@ export function renderRotinas(estado: Estado): string {
       const exec = estado.execucoes[r.id];
       const execucoes = exec
         ? exec.length
-          ? `<ul class="execucoes">${exec.map((e) => `<li class="exec exec-${esc(e.desfecho)}"><b>${esc(e.desfecho.replaceAll("_", " "))}</b> · agendada ${esc(dataHora(e.instanteAgendado, r.fusoIana))} · registrada ${esc(dataHora(e.em, r.fusoIana))}${e.motivo ? ` · ${esc(e.motivo)}` : ""}</li>`).join("")}</ul>`
+          ? `<ul class="execucoes">${exec.map((e) => `<li class="exec exec-${esc(e.desfecho)}"><b>${esc(e.desfecho.replaceAll("_", " "))}</b> · agendada ${esc(dataHora(e.instanteAgendado, r.fusoIana))} · registrada ${esc(dataHora(e.em, r.fusoIana))}${e.motivo ? ` · ${esc(motivoDaExecucao(e) ?? e.motivo)}` : ""}</li>`).join("")}</ul>`
           : '<p class="mudo">nunca executou</p>'
         : "";
       return `<li class="rotina rotina-${esc(r.estado)}" data-rotina="${esc(r.id)}">

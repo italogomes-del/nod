@@ -1,5 +1,6 @@
 import type { Estado } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
+import { rotuloExecucao } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 
 /**
@@ -51,7 +52,7 @@ export function renderDetalhes(estado: Estado): string {
     if (!exec.length) return '<p class="mudo sm">nunca executou</p>';
     return `<ul class="dr-execucoes">${exec
       .slice(0, 5)
-      .map((e) => `<li class="exec exec-${esc(e.desfecho)}">${esc(dataHora(e.em, r.fusoIana))} · ${esc(e.desfecho.replaceAll("_", " "))}</li>`)
+      .map((e) => `<li class="exec exec-${esc(e.desfecho)}">${esc(dataHora(e.em, r.fusoIana))} · ${esc(rotuloExecucao(e))}</li>`)
       .join("")}</ul>`;
   };
 

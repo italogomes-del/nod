@@ -62,7 +62,9 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<string, string>> = {
   trabalho_incompleto: "o agente não chegou ao fim da tarefa",
   sem_progresso: "o agente não chegou a produzir nada",
   parado_pela_pessoa: "você pediu para parar",
-  maquina_sem_contato: "o computador parou de responder",
+  // definido em 2026-09-24 (ADR-045): "o computador" era lido como o computador DO BOT (ADR-037); quem
+  // parou foi o Mac da pessoa, e as três causas comuns cabem na frase.
+  maquina_sem_contato: "seu Mac parou de responder (repouso, sem rede ou nod fechado)",
   reinicio_servidor: "o servidor reiniciou",
   executor_indisponivel: "a inteligência não estava disponível",
 };

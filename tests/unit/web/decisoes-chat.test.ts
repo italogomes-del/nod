@@ -10,7 +10,7 @@ const item: SuaVezDto["itens"][number] = {
   decisao: { tenantId: "t", id: "d", ownerId: "p", decisorId: "p", agenteId: "a", conversaId: "c", turnoId: null, tipo: "acesso", estado: "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: "Ler Slack <script>alert(1)</script>", desfecho: null, vistaEm: null, criadoEm: "2026-09-17T00:00:00Z" },
   estadoColuna: "pendente", agenteNome: "Milton", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, itensAprovacao: [], proposta: null,
 };
-const estado: Estado = { ...estadoInicial, suaVez: { itens: [item], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } };
+const estado: Estado = { ...estadoInicial, suaVez: { itens: [item], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } };
 const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], deltas: {}, carregadaEm: 0 };
 
 describe("decisões no chat", () => {
@@ -30,7 +30,7 @@ describe("decisões no chat", () => {
 
   it("não duplica a decisão que já tem proposta e remove o cartão quando a fila é reidratada", () => {
     expect(renderDecisoesDaConversa(estado, "c", new Set(["d"]))).toBe("");
-    const atualizado = reduzir(estado, { tipo: "hidratar-sua-vez", suaVez: { itens: [], foraDoAr: [], vazio: true, ultimaDecisaoEm: "2026-09-17T00:01:00Z" } });
+    const atualizado = reduzir(estado, { tipo: "hidratar-sua-vez", suaVez: { itens: [], incidentes: [], foraDoAr: [], vazio: true, ultimaDecisaoEm: "2026-09-17T00:01:00Z" } });
     expect(renderTimeline(conversa, atualizado)).not.toContain("Permitir e continuar");
   });
 

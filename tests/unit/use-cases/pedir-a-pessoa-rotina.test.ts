@@ -20,7 +20,10 @@ async function cenario() {
   };
   const rotina = await criarRotina("Resumo das vendas");
   let passo = 0;
+  // Cada disparo é o de uma janela nova: o turno da anterior já terminou (a guarda "uma execução aberta
+  // por rotina", ADR-045, pularia a janela com ele ainda pendente).
   const disparo = async (r = rotina) => {
+    for (const t of banco.turnos) if (t.origem === "rotina" && t.estado === "pendente") await deps.repos.turnos.assentar(t.id, { estado: "concluido" });
     passo += 1;
     const d = await dispararRotina(deps, { rotina: r, instanteAgendado: agora - passo * 3_600_000, machineId: "m", executor: "catcher" });
     if (!("turno" in d.data)) throw new Error("sem turno");

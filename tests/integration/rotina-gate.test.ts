@@ -5,6 +5,8 @@ import { montarPlano } from "../../src/domain/plano-turno.ts";
 import type { Transacao } from "../../src/shared/types.ts";
 import { rotinaDoTurno } from "../../src/use-cases/apoio-l7.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
+import { pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
+import { fecharComResposta, retomarComResposta } from "../../src/use-cases/responder-decisao.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
@@ -23,7 +25,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => AGORA });
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
       const turnoId = r.data.turno.id;
       // A rotina rodou, chamou pedir_aprovacao e encerrou: o gate (tipo gate_rotina, ligado ao turno) ficou em Sua vez.
       const tx: Transacao = (fn) => fn(trx);
@@ -48,9 +50,11 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const kinds = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turnoId}`;
       expect(kinds.map((k) => k.kind).sort()).toEqual(["decisao_vencida", "rotina_executou"]);
 
-      // Erro técnico numa outra janela é 'falhou', distinto de 'passou_em_branco'.
+      // Erro técnico numa outra janela é 'falhou', distinto de 'passou_em_branco'. (O turno da janela
+      // anterior terminou; aberto, a janela nova seria pulada — ADR-045.)
+      await repos.turnos.assentar(turnoId, { estado: "concluido" });
       const r2 = await dispararRotina(deps, { rotina: (await repos.rotinas.buscar(rotina?.id ?? ""))!, instanteAgendado: JANELA + 86_400_000, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r2.data) throw new Error("deveria disparar");
+      if (!("turno" in r2.data)) throw new Error("deveria disparar");
       const falhou = await registrarDesfechoRotina(deps, { turnoId: r2.data.turno.id, desfecho: "falhou", motivo: "erro_max_turns" });
       expect("execucao" in falhou.data && falhou.data.execucao.desfecho).toBe("falhou");
       // As duas execuções têm o mesmo `em` (relógio injetado): a ordem entre elas é por id, então compara-se como conjunto.
@@ -64,7 +68,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => AGORA });
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
       const turnoId = r.data.turno.id;
       const gate = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId, prazoDecisaoEm: AGORA - 60_000, frase: "1 e-mail para enviar" });
       // Uma aprovação de um turno comum, vencida no mesmo tick, não é gate de rotina.
@@ -89,7 +93,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
       const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-      if ("janelaDeOutro" in r.data) throw new Error("deveria disparar");
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
       const ligacao = await rotinaDoTurno(repos, r.data.turno.id);
       expect(ligacao?.rotina.id).toBe(rotina?.id);
       expect(ligacao?.instanteAgendado).toBe(JANELA);
@@ -116,6 +120,29 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       // turno de conversa comum não liga a flag
       const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       expect(await rotinaDoTurno(repos, comum?.id ?? "")).toBeNull();
+    });
+  });
+
+  it("ADR-045: responder a um pedido da rotina deixa UMA linha para a janela — o desfecho da retomada substitui o do turno que perguntou", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
+      let relogio = AGORA;
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => relogio });
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "e-mails", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
+      const r = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      if (!("turno" in r.data)) throw new Error("deveria disparar");
+      const turnoId = r.data.turno.id;
+      // A rotina esbarra num dado que falta, pergunta e encerra: o turno dela registra 'executou'.
+      const pergunta = await pedirAPessoa(deps, { turnoId, conversaId, agenteId, tipo: "falta_de_dado", texto: "falta a planilha", dado: "planilha" });
+      await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" });
+      // A pessoa responde; a retomada roda e termina com outro desfecho, na MESMA janela.
+      relogio += 3_600_000;
+      const { data: fechada } = await fecharComResposta(deps, { decisaoId: pergunta.data.decisao_id, texto: "está no drive" });
+      const { data: resposta } = await retomarComResposta(deps, { decisao: fechada.decisao, texto: "está no drive", respondidaPor: { id: PESSOA_MARLON, nome: "Marlon" } });
+      const final = await registrarDesfechoRotina(deps, { turnoId: resposta.turno?.id ?? "", desfecho: "falhou", motivo: "erro_execucao" });
+      if (!("execucao" in final.data)) throw new Error("deveria registrar");
+      const execucoes = await repos.rotinaExecucoes.listar(rotina?.id ?? "");
+      expect(execucoes.map((e) => [e.desfecho, e.turnoId, e.instanteAgendado, e.em])).toEqual([["falhou", turnoId, JANELA, relogio]]);
     });
   });
 });

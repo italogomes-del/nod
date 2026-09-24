@@ -135,5 +135,9 @@ export function criarPonteHttpServidor(d: {
     }
     return todos;
   }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa };
+  /** Último contato da máquina pela ponte (conectar/puxar/renovar/entregar); null = não está conectada. */
+  function ultimoContato(machineId: string): number | null {
+    return conexoes.get(machineId)?.ultimo ?? null;
+  }
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato };
 }

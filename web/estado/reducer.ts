@@ -272,8 +272,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
       };
-    case "tick":
-      return { ...estado, agora: acao.agora };
+    case "tick": {
+      // definido em 2026-09-24 (ADR-045): nenhum evento diz que o Mac voltou (o fechamento do aviso é do
+      // varredor, no modo compartilhado). Enquanto houver aviso EM CURSO, cada tick relê "Sua vez".
+      const comAgora = { ...estado, agora: acao.agora };
+      return estado.suaVez?.incidentes.some((i) => i.voltouEm === null) ? invalidar(comAgora, "sua-vez") : comAgora;
+    }
     case "conexao":
       return { ...estado, conexao: { estado: acao.estado, tentativa: acao.tentativa, proximaEmMs: acao.proximaEmMs } };
     case "frame":

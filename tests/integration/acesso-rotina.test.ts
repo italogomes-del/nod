@@ -61,7 +61,9 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       expect(proposta?.payload).toEqual({ kind: "acesso", turnoId: oito, conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], nivel: "leitura", naoPedido: [], rotinaId: rotina.id });
       expect(await repos.decisoes.buscar(pedido.data.proposta_id)).toMatchObject({ tipo: "acesso", estado: "pendente", turnoId: oito, frase: "Nina precisa ler seu Gmail para a rotina “E-mails às 8h, 13h e 18h”. Não inclui: enviar, apagar, arquivar." });
 
-      // O disparo das 13h esbarra no mesmo buraco: nada novo nasce.
+      // O disparo das 13h esbarra no mesmo buraco: nada novo nasce. (O das 8h já tinha terminado:
+      // com ele aberto a janela seria pulada — uma execução aberta por rotina, ADR-045.)
+      await repos.turnos.assentar(oito, { estado: "concluido" });
       const treze = await disparar(deps, repos, rotina.id, JANELA + 5 * 3_600_000);
       expect((await pedirAcesso(deps, { turnoId: treze, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] })).data.proposta_id).toBe(pedido.data.proposta_id);
       await expect(pedirAcesso(deps, { turnoId: treze, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "escrita", nao_pedido: [] })).rejects.toMatchObject({ codigo: "nao_permitido" });

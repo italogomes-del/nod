@@ -26,7 +26,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       const tx: Transacao = (fn) => fn(trx);
 
       const r1 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], falhas: [] });
+      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], puladas: [], falhas: [] });
       const janelas = await repos.rotinaJanelas.listar(vencida?.id ?? "");
       expect(janelas).toHaveLength(1);
       expect(janelas[0]).toMatchObject({ instanteAgendado: JANELA, machineId: opcoes.machineId, executor: "catcher" });
@@ -38,14 +38,26 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(kinds.map((k) => k.kind)).toEqual(["turno_criado"]);
 
       const r2 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], falhas: [] });
+      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
 
-      // Uma janela já reivindicada por outro processo: false, silencioso, sem turno novo.
+      // ADR-045: o turno da janela ainda está pendente (o Mac dormiu) → a janela vencida de novo é
+      // PULADA: só reagenda, sem reivindicar nem enfileirar — as execuções não se empilham. (A das 9h
+      // fica de fora: no dia seguinte ela também venceria.)
+      await repos.rotinas.atualizarEstado(futura?.id ?? "", "pausada");
+      await repos.rotinas.reagendar(vencida?.id ?? "", JANELA + 86_400_000);
+      const pulada = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
+      expect(pulada).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [vencida?.id], falhas: [] });
+      expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
+      expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
+      expect(new Date((await repos.rotinas.buscar(vencida?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-21T11:00:00.000Z");
+
+      // Uma janela já reivindicada por outro processo (com o turno dela já terminado): false, silencioso, sem turno novo.
+      await repos.turnos.assentar(janelas[0]?.turnoId ?? "", { estado: "concluido" });
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA);
       const r3 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], falhas: [] });
+      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], puladas: [], falhas: [] });
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
     });
   });
@@ -55,19 +67,24 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       let relogio = JANELA + 30_000;
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => relogio });
-      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
+      // A cada 5 min: 21 janelas de verdade, cada uma com o seu turno (ADR-045: uma linha POR JANELA — o
+      // caso antigo registrava 21 desfechos no mesmo turno, que agora são uma linha só).
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "*/5 * * * *", fusoIana: "UTC", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
       const tx: Transacao = (fn) => fn(trx);
-      const r = await tickPessoa(MARLON, tx, { machineId: randomUUID(), executor: "catcher", services: deps.services, useCases: deps.useCases, agora: () => relogio });
-      const turnoId = (await repos.rotinaJanelas.listar(rotina?.id ?? ""))[0]?.turnoId ?? "";
-      expect(r.disparadas).toEqual([rotina?.id]);
+      const opcoes = { machineId: randomUUID(), executor: "catcher" as const, services: deps.services, useCases: deps.useCases, agora: () => relogio };
       for (let i = 0; i < EXECUCOES_GUARDADAS + 1; i++) {
-        relogio += 1_000;
-        const d = await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" });
+        const r = await tickPessoa(MARLON, tx, opcoes);
+        expect(r.disparadas).toEqual([rotina?.id]);
+        const janela = (await repos.rotinaJanelas.listar(rotina?.id ?? "")).at(-1);
+        const d = await registrarDesfechoRotina(deps, { turnoId: janela?.turnoId ?? "", desfecho: "executou" });
         if (!("execucao" in d.data)) throw new Error("deveria registrar");
+        await repos.turnos.assentar(janela?.turnoId ?? "", { estado: "concluido" });
+        relogio += 5 * 60_000;
       }
+      expect(await repos.rotinaJanelas.listar(rotina?.id ?? "")).toHaveLength(EXECUCOES_GUARDADAS + 1);
       const execucoes = await repos.rotinaExecucoes.listar(rotina?.id ?? "", 100);
       expect(execucoes).toHaveLength(EXECUCOES_GUARDADAS);
-      expect(execucoes[0]?.em).toBe(relogio);
+      expect(execucoes[0]?.em).toBe(relogio - 5 * 60_000);
     });
   });
 });

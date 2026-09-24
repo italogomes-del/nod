@@ -19,7 +19,7 @@ const decisao = (id: string, agenteId: string, agenteNome: string, vencido = fal
   proposta: null,
 });
 
-const comFila = (itens: SuaVezDto["itens"]): Estado => ({ ...estadoInicial, suaVez: { itens, foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });
+const comFila = (itens: SuaVezDto["itens"]): Estado => ({ ...estadoInicial, suaVez: { itens, incidentes: [], foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });
 
 describe("o sinal que substituiu a entrada \"Sua vez\" do rail", () => {
   it("conta só as decisões abertas por agente — vencida não pede ação e não vira badge", () => {

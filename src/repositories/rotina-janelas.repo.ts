@@ -47,6 +47,32 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /**
+     * Trava a linha da janela (FOR UPDATE) até o fim da tx. definido em 2026-09-24 (ADR-045): quem
+     * registra desfecho da janela (varredor, entrega, retomada) passa aqui, e a segunda transação lê a
+     * execução que a primeira gravou — uma linha por janela, nunca duas.
+     */
+    async travar(rotinaId: string, instanteAgendado: number): Promise<boolean> {
+      const linhas = await conn`
+        select 1 from rotina_janelas
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and instante_agendado = ${data(instanteAgendado)}
+        for update`;
+      return linhas.length === 1;
+    },
+
+    /**
+     * O turno de uma janela desta rotina que ainda está pendente ou rodando (ADR-045: uma execução
+     * aberta por rotina). null = pode abrir outra.
+     */
+    async turnoAberto(rotinaId: string): Promise<string | null> {
+      const [l] = await conn<{ turno_id: string }[]>`
+        select j.turno_id from rotina_janelas j
+        join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
+        where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId} and t.estado in ('pendente', 'despachando')
+        order by j.instante_agendado desc limit 1`;
+      return l?.turno_id ?? null;
+    },
+
     /** A janela que ligou este turno à rotina (índice rotina_janelas_turno_idx, 0004) — pendência L7 §5. */
     async buscarPorTurno(turnoId: string): Promise<JanelaRotina | null> {
       const [l] = await conn<Linha[]>`

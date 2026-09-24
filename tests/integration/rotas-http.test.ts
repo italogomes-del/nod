@@ -53,6 +53,10 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
     const naoEncontrado = await srv.chamar(marlon, "GET", `conversas/${UUID}/mensagens`);
     expect(naoEncontrado.status).toBe(404);
     expect(await naoEncontrado.json()).toEqual({ codigo: "nao_encontrado", mensagem: "não encontrado" });
+    // ADR-045: "Entendi" num aviso que não existe (ou de outra pessoa, invisível pela RLS) é 404, nunca 500.
+    const aviso = await srv.chamar(marlon, "POST", `incidentes/${UUID}/dispensar`, {});
+    expect(aviso.status).toBe(404);
+    expect(await aviso.json()).toEqual({ codigo: "nao_encontrado", mensagem: "não encontrado" });
     const fuso = await srv.chamar(marlon, "POST", "rotinas", { agenteId: UUID, cron: "0 8 * * *", fusoIana: "+03:00" });
     expect(fuso.status).toBe(400);
     expect(await fuso.json()).toEqual({ codigo: "fuso_invalido", mensagem: "fuso inválido: use um nome IANA, nunca offset" });
@@ -64,6 +68,7 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
   it("id fora do formato uuid: no path → 404 (roteador); no corpo/query → 400 entrada_invalida (22P02 traduzido), sem ecoar o valor", async () => {
     expect((await srv.chamar(marlon, "GET", "agentes/nao-e-uuid/memoria")).status).toBe(404);
     expect((await srv.chamar(marlon, "POST", "decisoes/123/decidir", {})).status).toBe(404);
+    expect((await srv.chamar(marlon, "POST", "incidentes/nao-e-uuid/dispensar", {})).status).toBe(404);
     expect((await srv.chamar(marlon, "PATCH", `agentes/${UUID}/memoria/abc`, { texto: "x" })).status).toBe(404);
     const corpo = await srv.chamar(marlon, "GET", "trilha?agente=valor-que-nao-e-uuid");
     expect(corpo.status).toBe(400);

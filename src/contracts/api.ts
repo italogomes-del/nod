@@ -2,6 +2,7 @@ import type { Agente } from "./agente.ts";
 import type { Conversa, Proposta } from "./conversa.ts";
 import type { Decisao, ItemFila } from "./decisao.ts";
 import type { EpochMs, IsoUtc } from "./ids.ts";
+import type { IncidenteDto } from "./incidente.ts";
 import type { Inventario } from "./inventario.ts";
 import type { ItemAprovacao } from "./item-aprovacao.ts";
 import type { Mensagem } from "./mensagem.ts";
@@ -51,6 +52,8 @@ export type ConversaDto = {
 export type SuaVezDto = {
   /** `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos. */
   itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null })[];
+  /** Avisos de infraestrutura (ADR-045): um por queda do Mac, nunca um card por turno. Não são decisões. */
+  incidentes: IncidenteDto[];
   foraDoAr: { nome: string; desde: EpochMs }[];
   vazio: boolean;
   ultimaDecisaoEm: IsoUtc | null;
@@ -122,6 +125,8 @@ export const ROTAS = [
   { metodo: "POST", caminho: "conectores/:id/habilitar", lane: "L5" },
   { metodo: "POST", caminho: "conectores/:id/desabilitar", lane: "L5" },
   { metodo: "GET", caminho: "sua-vez", lane: "L8" },
+  /** definido em 2026-09-24 (ADR-045): "Entendi" no aviso de queda do Mac. */
+  { metodo: "POST", caminho: "incidentes/:id/dispensar", lane: "L8" },
   { metodo: "POST", caminho: "decisoes/:id/decidir", lane: "L9" },
   { metodo: "POST", caminho: "decisoes/:id/reabrir", lane: "L8" },
   { metodo: "POST", caminho: "decisoes/:id/retomar", lane: "L9" },

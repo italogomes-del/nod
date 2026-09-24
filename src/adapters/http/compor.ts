@@ -124,6 +124,8 @@ export type App = {
   readonly idDriver: IdDriver;
   machineId: string;
   compartilhado: boolean;
+  /** Modo compartilhado: último contato de uma máquina pela ponte HTTP (o varredor de lease fecha o aviso de queda quando ela volta, ADR-045). */
+  ultimoContatoDaMaquina(machineId: string): number | null;
   autorizarMaquina(token: string): ReturnType<typeof autorizarChaveMaquina>;
   /** Liga o registry sondado (boot), os snapshots das sondas por driver e quem liga um driver DEPOIS do boot (interruptor). */
   ligarRegistry(registry: Registry, inventarios?: Partial<Record<IdDriver, Inventario>>, ativar?: AtivarDriver): void;
@@ -265,7 +267,9 @@ export function comporApp(o: OpcoesCompor): App {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];
       const events: RuntimeEvent[] = [];
-      if (turno.origem === "rotina" || turno.origem === "retomada") {
+      // definido em 2026-09-24 (ADR-045): turno derrubado pela máquina já registrou a execução como
+      // 'interrompida' (interromper-por-maquina.ts); registrar 'falhou' aqui sobrescreveria a janela.
+      if ((turno.origem === "rotina" || turno.origem === "retomada") && turno.motivoInterrupcao !== "maquina_sem_contato") {
         // definido em 2026-09-21: concluído + `sem_novidade` chamado = execução completa que não
         // rendeu notícia. Desfecho próprio para o histórico distinguir "rodou e não tinha nada" de
         // "rodou e relatou" — e para registrarDesfechoRotina saber que não deve escrever marcador.
@@ -537,6 +541,7 @@ export function comporApp(o: OpcoesCompor): App {
     },
     machineId,
     compartilhado,
+    ultimoContatoDaMaquina: (machineId) => ponteHttp.ultimoContato(machineId),
     autorizarMaquina,
     ligarRegistry(registry, inventarios, ativar) {
       registryLigado = registry;

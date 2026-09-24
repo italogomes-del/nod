@@ -34,6 +34,9 @@ distribui tarefas e guarda os registros, mas **nunca vê a sua senha** e nunca f
 | **Rotina** | Uma tarefa que se repete sozinha num horário (tipo agenda). | O despertador que manda o assistente fazer algo toda manhã. |
 | **Sala** | Um espaço onde 2 a 6 agentes conversam entre si para resolver algo. | Uma sala de reunião de assistentes. |
 | **Trilha** | O registro de tudo que aconteceu, que **não pode ser editado nem apagado**. | O livro do cartório (à prova de rasura). |
+| **Seu Mac** | O **seu** computador, onde o nod e a IA rodam. Quando ele dorme, perde a rede ou o nod é fechado, o que estava rodando para no meio — "seu Mac parou de responder". | A mesa do escritório: se a luz cai, o trabalho em cima dela para. |
+| **Computador do bot** | Um computador **próprio de cada bot**, separado do seu Mac, onde ele navega em sites e guarda arquivos (ADR-037). Pode estar fora do ar mesmo com o seu Mac ligado. | A estação de trabalho que o assistente tem na sala dele. |
+| **Aviso** (incidente) | Um recado de infraestrutura com começo e fim ("Seu Mac ficou sem contato entre 00:50 e 06:13"). **Não é decisão**: não pede nada, só conta o que aconteceu; "Entendi" tira da tela (ADR-045). | O bilhete do zelador: "faltou luz de madrugada". |
 
 ### As peças "de dentro" (a mecânica)
 
