@@ -40,13 +40,14 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     srv=await servidorCompleto({computador:driver,env:{NOD_MODO:"compartilhado"},intervalos:{orquestradorMs:3600000,schedulerMs:3600000,expiracaoMs:3600000}});
     bot=await srv.json("POST","agentes",{dono:"pessoa",interativo:true});
   },30000);
-  beforeEach(async()=>{
-    await srv.app.dentro(srv.pessoa,async d=>{
-      await d.tx(async trx=>{await trx`update agentes set confirmado = true where id = ${bot.agente.id}`;});
-      const t=await d.repos.turnos.enfileirar({agenteId:bot.agente.id,conversaId:bot.conversa.id,origem:"conversa",prazoEm:Date.now()+600000,profundidade:0,entradaTexto:"Use seu computador",entradaConfianca:"confiavel",modelo:"auto",harness:"auto"});
-      plano=(await emitirPlanoTurno(d,{turnoId:t!.id,machineId:randomUUID(),executor:"catcher"})).data;
-    });
-  },30000);
+  // O plano é lido no PUXAR: desde a emenda da ADR-037 (24/09), computador desligado sai do catálogo —
+  // quem liga no meio do teste emite o plano de novo.
+  const emitirPlano=()=>srv.app.dentro(srv.pessoa,async d=>{
+    await d.tx(async trx=>{await trx`update agentes set confirmado = true where id = ${bot.agente.id}`;});
+    const t=await d.repos.turnos.enfileirar({agenteId:bot.agente.id,conversaId:bot.conversa.id,origem:"conversa",prazoEm:Date.now()+600000,profundidade:0,entradaTexto:"Use seu computador",entradaConfianca:"confiavel",modelo:"auto",harness:"auto"});
+    plano=(await emitirPlanoTurno(d,{turnoId:t!.id,machineId:randomUUID(),executor:"catcher"})).data;
+  });
+  beforeEach(emitirPlano,30000);
   afterAll(async()=>{if(srv){await srv.fechar();await limparPessoaE2E(srv.db,srv.dbDono,srv.pessoa,{agentes:[bot.agente.id],conversas:[bot.conversa.id]});await srv.desligar();}if(raizArquivos)await rm(raizArquivos,{recursive:true,force:true});},30000);
   const consultar=()=>srv.json<ComputadorDto>("GET",`agentes/${bot.agente.id}/computador`);
   const configurar=(operacao:string)=>srv.json("POST",`agentes/${bot.agente.id}/computador`,{operacao});
@@ -98,7 +99,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     expect((await consultar()).ativo).toBe(false);
   });
   it("pedido de login retoma por Devolver, preservando a inteligência original",async()=>{
-    await configurar("iniciar");await configurar("devolver");
+    await configurar("iniciar");await configurar("devolver");await emitirPlano();
     const r=await chamar("computador_pedir_ajuda",{motivo:"Entrar no portal"});expect(r).toMatchObject({ok:true});
     const c=await consultar();expect(c.computador).toMatchObject({controle:"aguardando_pessoa",ajuda:"Entrar no portal"});
     await configurar("assumir");await configurar("devolver");

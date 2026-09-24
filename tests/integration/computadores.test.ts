@@ -22,6 +22,29 @@ describeIntegracao("computador persistente por bot",()=>{
       expect((await a.repos.computadores.travar(c!.id))!.ocupadoAte).toBeNull();
     });
   });
+  it("saúde (emenda da ADR-037): a 3ª falha seguida tira do ar UMA vez; resposta zera; a atividade mostra o observar que falhou",async()=>{
+    await withRollback(escopo,async trx=>{
+      const a=await agenteComConversa(trx,escopo);
+      const c=(await a.repos.computadores.obter(a.agenteId))!;
+      expect(c).toMatchObject({falhasSeguidas:0,falhaMotivo:null,indisponivelDesde:null});
+      const falhar=(em:number)=>a.repos.computadores.registrarFalha(c.id,{motivo:"navegador_nao_abriu",em,limite:3});
+      const r=[await falhar(1000),await falhar(2000),await falhar(3000),await falhar(4000)];
+      expect(r.map(x=>x?.virouIndisponivel)).toEqual([false,false,true,false]);
+      expect(r[3]!.computador).toMatchObject({falhasSeguidas:4,falhaMotivo:"navegador_nao_abriu",indisponivelDesde:3000,agenteId:a.agenteId});
+      expect(await a.repos.computadores.foraDoAr()).toEqual(new Map([[a.agenteId,{desde:3000,motivo:"navegador_nao_abriu"}]]));
+      const falhou=await a.repos.computadores.registrar({computadorId:c.id,autor:"bot",tipo:"observar",estado:"executando"});
+      await a.repos.computadores.concluir(falhou.id,"falhou","navegador_nao_abriu");
+      const deuCerto=await a.repos.computadores.registrar({computadorId:c.id,autor:"bot",tipo:"observar",estado:"executando"});
+      await a.repos.computadores.concluir(deuCerto.id,"concluida","navegador_nao_abriu");
+      expect((await a.repos.computadores.atividade(c.id)).map(x=>[x.tipo,x.estado,x.motivo])).toEqual([["observar","falhou","navegador_nao_abriu"]]);
+      expect(await a.repos.computadores.registrarSucesso(c.id)).toBe(true);
+      expect(await a.repos.computadores.registrarSucesso(c.id)).toBe(false);
+      expect(await a.repos.computadores.travar(c.id)).toMatchObject({falhasSeguidas:0,falhaMotivo:null,indisponivelDesde:null});
+      expect((await a.repos.computadores.foraDoAr()).size).toBe(0);
+      // 0022: motivo só em ação que falhou (o último comando: o erro aborta a transação do teste).
+      await expect(trx`update computador_acoes set motivo = 'ocupado' where id = ${deuCerto.id}`).rejects.toThrow(/computador_acao_motivo_so_na_falha/);
+    });
+  });
   it("outra pessoa não vê nem muda computador, arquivos ou ações de um bot compartilhado em leitura",async()=>{
     await withRollback(escopo,async trx=>{
       const a=await agenteComConversa(trx,escopo);

@@ -1,6 +1,6 @@
 import type { Autoria } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
-import type { DesfechoItem, DesfechoRotina, MotivoNegacao, MotivoPasse } from "./motivos.ts";
+import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
 export type Confianca = "confiavel" | "nao_confiavel";
@@ -31,7 +31,9 @@ export type PayloadMensagem =
   | { kind: "resultado_aprovacao"; decisaoId: string; itens: { idx: number; desfecho: DesfechoItem }[] }
   | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
-  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string };
+  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string }
+  /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
+  | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador };
 
 export type Mensagem = {
   tenantId: TenantId;

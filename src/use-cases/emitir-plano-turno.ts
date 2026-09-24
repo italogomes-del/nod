@@ -7,8 +7,10 @@ import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
+import type { ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
@@ -106,10 +108,20 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
 
+  // definido em 2026-09-24 (emenda da ADR-037): o computador que ainda não existe nasce ligado (as
+  // ferramentas entram); o que existe só entra ligado e respondendo — desligado ou fora do ar, o plano
+  // sai sem computador_* e o prompt diz por quê.
+  const computadorDoAgente = deps.services.computadores ? await deps.repos.computadores.buscarVinculo(agente.id) : null;
+  const computadorFora: ComputadorFora | null = !computadorDoAgente ? null
+    : !computadorDoAgente.habilitado ? { estado: "desligado" }
+      : computadorDoAgente.indisponivelDesde !== null ? { estado: "fora_do_ar", motivo: MOTIVO_FALHA_EM_PORTUGUES[computadorDoAgente.falhaMotivo ?? "sem_resposta"] }
+        : null;
+
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
     workspaceVinculado: workspaceId !== null,
     computador: Boolean(deps.services.computadores),
+    computadorFora,
     turno: escolha ? { ...turno, modelo: escolha.modelo } : turno,
     agente,
     memorias,

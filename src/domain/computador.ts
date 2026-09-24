@@ -1,5 +1,78 @@
 import type { AcaoComputador } from "../contracts/computador.ts";
+import type { MotivoFalhaComputador } from "../contracts/motivos.ts";
 import { ErroDeDominio } from "./erro.ts";
+
+/**
+ * definido em 2026-09-24 (emenda da ADR-037): a falha do computador do bot com código FECHADO. Antes o
+ * adaptador jogava tudo em "estado_invalido" e a ferramenta devolvia "indisponível ou tela alterada"
+ * em toda execução — o Chromium travado por um SingletonLock velho ficou dois dias assim. `detalhe` é
+ * a 1ª linha do stderr (só para o log, passada por resumirDetalhe); `reinicios` vem do docker inspect.
+ */
+export class FalhaComputador extends Error {
+  readonly motivo: MotivoFalhaComputador;
+  readonly detalhe: string | null;
+  readonly reinicios: number | null;
+  constructor(motivo: MotivoFalhaComputador, extra: { detalhe?: string | null; reinicios?: number | null } = {}) {
+    super(motivo);
+    this.name = "FalhaComputador";
+    this.motivo = motivo;
+    this.detalhe = extra.detalhe ?? null;
+    this.reinicios = extra.reinicios ?? null;
+  }
+}
+
+export function ehFalhaComputador(e: unknown): e is FalhaComputador {
+  return e instanceof FalhaComputador;
+}
+
+/** Só a MÁQUINA sem responder conta para a saúde; a ação que falhou numa máquina viva não conta. */
+export const CONTA_PARA_SAUDE: ReadonlySet<MotivoFalhaComputador> = new Set<MotivoFalhaComputador>(["docker_indisponivel", "imagem_ausente", "nao_iniciou", "cofre_invalido", "navegador_nao_abriu", "sem_resposta"]);
+
+/**
+ * definido em 2026-09-24, NÃO medido: três falhas seguidas da máquina tiram o computador das próximas
+ * execuções (uma mensagem só, na transição). Uma falha isolada é rede ou reinício; três seguidas, com
+ * a mesma resposta, é a máquina quebrada — e cada tentativa custava um turno inteiro do agente.
+ */
+export const LIMITE_FALHAS_SEGUIDAS = 3;
+
+/** O motivo em português, para a mensagem da conversa e as instruções ao agente. */
+export const MOTIVO_FALHA_EM_PORTUGUES: Readonly<Record<MotivoFalhaComputador, string>> = {
+  docker_indisponivel: "o Docker do servidor não está respondendo",
+  imagem_ausente: "a imagem do computador não foi preparada no servidor",
+  nao_iniciou: "o computador não conseguiu ligar",
+  cofre_invalido: "o cofre de logins do computador não abriu",
+  navegador_nao_abriu: "o navegador do computador não abriu",
+  sem_resposta: "o computador parou de responder",
+  acao_falhou: "a ação falhou dentro do computador",
+  tela_alterada: "a tela mudou desde a última observação",
+  ocupado: "outra ação estava em andamento",
+};
+
+/**
+ * O que a FERRAMENTA devolve ao agente em cada falha (tabela fixa, sem catch-all). Máquina fora do
+ * ar: não insistir neste turno. Ação que falhou: observar antes de repetir.
+ */
+export function instrucaoDaFalha(motivo: MotivoFalhaComputador): string {
+  if (CONTA_PARA_SAUDE.has(motivo)) return `O computador não respondeu: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
+  if (motivo === "tela_alterada") return "A tela mudou desde a sua observação. Observe de novo e reavalie antes de agir; nada foi executado.";
+  if (motivo === "ocupado") return "Outra ação estava em andamento no computador. Observe a tela antes de tentar de novo; nada foi executado.";
+  return "A ação falhou. Observe a tela antes de tentar novamente; não afirme que executou.";
+}
+
+/**
+ * A 1ª linha não vazia do stderr, com até 200 caracteres e sem nada com cara de segredo. Só vai para
+ * o log (computador_falhou) — nunca para a pessoa, o agente ou o banco.
+ */
+export function resumirDetalhe(texto: string | null | undefined): string | null {
+  const linha = (texto ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l !== "");
+  if (!linha) return null;
+  return linha
+    .replace(/(bearer\s+)\S+/gi, "$1[redigido]")
+    .replace(/\b(senha|password|passwd|token|secret|segredo|chave|key|authorization|cookie)(\s*[=:]\s*)\S+/gi, "$1$2[redigido]")
+    .replace(/[A-Za-z0-9+_=-]{40,}/g, "[redigido]")
+    .replace(/\b[a-f0-9]{32,}\b/gi, "[redigido]")
+    .slice(0, 200);
+}
 
 export function validarAcaoComputador(valor: unknown): AcaoComputador {
   if (!valor || typeof valor !== "object" || Array.isArray(valor)) throw new ErroDeDominio("entrada_invalida");

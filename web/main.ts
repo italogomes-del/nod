@@ -155,7 +155,7 @@ function renderSidebar(): string {
     const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
     const pedindo = abertas.get(a.id) ?? 0;
     const flag = pedindo ? `<span class="ch-badge" title="${pedindo === 1 ? "uma decisão esperando você" : `${pedindo} decisões esperando você`}">⚑${pedindo > 1 ? pedindo : ""}</span>` : "";
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b><span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span></span><span class="meta">${flag}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b>${a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`}</span><span class="meta">${flag}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";
@@ -561,6 +561,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (ta) { ta.value = el.dataset.texto ?? ""; return enviarComposer(); }
   },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
+  // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
+  // frota relê e o cartão continua dizendo o motivo.
+  "religar-computador": (el) => agir(async () => {
+    try {
+      await api!.configurarComputador(el.dataset.id ?? "", "iniciar");
+    } finally {
+      dispatch({ tipo: "invalidar", quais: ["frota"] });
+    }
+  }),
   "abrir-workspace": (el) => { const a = botGerido(el.dataset.id); const c = conversaAtual(); if (a && api && a.ownerId === estado.sessao?.pessoaId && c && !c.salaId) abrirWorkspace(api, c.conversaId); },
   // Um clique: autoriza a pasta proposta e a tarefa retoma sozinha, sem a pessoa remandar a mensagem.
   "permitir-pasta": (el) => agir(async () => {

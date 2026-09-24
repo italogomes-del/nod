@@ -23,6 +23,7 @@ const frota: FrotaDto = {
       criadoEm: 1,
       conversaId: "c1",
       descricaoEstado: "sem acessos · nunca executou",
+      computadorForaDoAr: null,
     },
   ],
   inventario: { estado: "pronto", versao: "catcher", em: 1 },

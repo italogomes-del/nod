@@ -126,6 +126,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [],
       buscarAcao: async () => null, concluir: async () => undefined,
       registrar: async () => { throw new Error("use o banco para testar computadores"); },
+      registrarFalha: async () => null, registrarSucesso: async () => false,
+      // Sem computador em memória, nenhum está fora do ar (a frota em memória segue igual).
+      foraDoAr: async () => new Map(),
     },
     pessoas: {
       async buscar(id: string) {

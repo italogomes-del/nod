@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
+import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { alteraComputador, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
-import { ErroDeDominio } from "../../domain/erro.ts";
+import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
+import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
+import { redigir } from "../../domain/redacao.ts";
+import { log } from "../../obs/log.ts";
 import type { Escopo } from "../../shared/types.ts";
+import { autoriaAgente, evento } from "../../use-cases/autoria-evento.ts";
 import { errosDoSchema, type ResultadoChamada } from "../../use-cases/chamar-ferramenta.ts";
 import { pedirAprovacaoComputador } from "../../use-cases/pedir-aprovacao.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
@@ -13,7 +17,8 @@ import { fecharComResposta, retomarComResposta } from "../../use-cases/responder
 import type { Deps } from "../../use-cases/tipos.ts";
 
 type Dentro = <T>(escopo: Escopo, fn: (d: Deps) => Promise<T>) => Promise<T>;
-type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string): void };
+/** `saude`: o computador entrou ou saiu do ar — a frota (lateral, cabeçalho, painel) precisa reler. */
+type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void };
 type Reserva = { computador: Computador; operacao: string; acao: AcaoComputador; registroId: string; turnoId?: string; aprovado: boolean };
 
 // definido em 2026-09-18: reserva confirmada ANTES do efeito; watchdog do runtime encerra em 55 s.
@@ -41,11 +46,72 @@ async function turnoPermitido(d: Deps, turnoId: string, agenteId: string, aprova
     await d.repos.paradas.ativa(d.escopo.pessoaId, t.conversaId) === false);
 }
 
+/** A ferramenta de texto tem instrução própria quando a ação falha (caminho, UTF-8, revisão). */
+const FERRAMENTAS_DE_TEXTO = new Set(["computador_ler_texto", "computador_gravar_texto"]);
+
+/**
+ * definido em 2026-09-24 (emenda da ADR-037): o que a ferramenta devolve ao agente — código fechado e
+ * instrução de tabela, nunca mais o catch-all "indisponível ou tela alterada".
+ */
+function erroDaFerramenta(nome: string, e: unknown): { erro: string; instrucao: string } {
+  if (ehErroDeDominio(e) && e.codigo === "nao_permitido") return { erro: "nao_permitido", instrucao: "O computador foi desligado, assumido pela pessoa ou a tarefa foi parada antes da ação. Nada foi executado; não tente de novo neste turno." };
+  // Erro que não é falha tipada (bug ou driver novo): vira acao_falhou, mas fica no log com o nome.
+  if (!ehFalhaComputador(e)) log("erro", "computador_erro_inesperado", { ferramenta: nome, erro: e instanceof Error ? e.name : "desconhecido" });
+  const motivo = ehFalhaComputador(e) ? e.motivo : "acao_falhou";
+  if (motivo === "acao_falhou" && FERRAMENTAS_DE_TEXTO.has(nome)) return { erro: motivo, instrucao: "A operação de texto falhou. Confira caminho, tamanho, UTF-8 e revisão; releia o arquivo antes de editar. Não afirme que gravou." };
+  return { erro: motivo, instrucao: instrucaoDaFalha(motivo) };
+}
+
+/** Para a borda HTTP: a falha da máquina é estado (409), nunca falha interna (500). */
+function comoErroDeDominio(e: unknown): unknown {
+  return ehFalhaComputador(e) ? new ErroDeDominio("estado_invalido", { cause: e.motivo }) : e;
+}
+
+/** "O computador está fora do ar desde …" para o agente, sem tocar no Docker (falha rápida). */
+function foraDoArParaAgente(c: Computador): { erro: MotivoFalhaComputador; instrucao: string } {
+  const motivo = c.falhaMotivo ?? "sem_resposta";
+  return { erro: motivo, instrucao: `O computador está fora do ar desde ${new Date(c.indisponivelDesde ?? 0).toISOString()}: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. A pessoa já foi avisada. Não tente usá-lo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.` };
+}
+
 export function criarComputadores(o: Opcoes) {
+  /**
+   * A MENSAGEM ÚNICA da transição para fora do ar (a web a mostra como cartão, com a hora local). Na
+   * conversa própria do bot; as execuções seguintes saem sem as ferramentas de computador.
+   */
+  async function avisarForaDoAr(d: Deps, c: Computador, motivo: MotivoFalhaComputador): Promise<void> {
+    const agente = await d.repos.agentes.buscar(c.agenteId);
+    const conversa = agente ? await d.repos.conversas.buscarPropriaDoAgente(agente.id) : null;
+    if (!agente || !conversa) return;
+    const agora = d.agora();
+    const autoria = autoriaAgente({ agenteId: agente.id, contaDeExecucao: d.escopo.pessoaId, executor: o.executor(), decididoPor: "regra:saude_computador" });
+    const texto = redigir("computador-fora-do-ar", agora, { agente: agente.nome, motivo: MOTIVO_FALHA_EM_PORTUGUES[motivo] });
+    const m = await d.repos.mensagens.criar({ conversaId: conversa.id, turnoId: null, autoria, kind: "sistema", texto, payload: { kind: "computador_fora_do_ar", agenteId: agente.id, desde: c.indisponivelDesde ?? agora, motivo }, confianca: "confiavel" });
+    if (m) await d.repos.events.gravarComOutbox([evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: null, dados: { mensagem_id: m.id, kind: "sistema" } })]);
+  }
+
+  /**
+   * A saúde anda com o registro da ação, na MESMA transação e com a linha travada. Só a máquina sem
+   * responder conta (CONTA_PARA_SAUDE); qualquer resposta dela zera a sequência. Computador desligado
+   * pela pessoa no meio não conta — quem parou foi ela. Devolve se a frota precisa reler.
+   */
+  async function registrarSaude(d: Deps, c: Computador | null, etapa: string, falha: FalhaComputador | null, respondeu: boolean): Promise<boolean> {
+    if (!c) return false;
+    if (!falha || !CONTA_PARA_SAUDE.has(falha.motivo)) return respondeu ? d.repos.computadores.registrarSucesso(c.id) : false;
+    if (!c.habilitado) return false;
+    const r = await d.repos.computadores.registrarFalha(c.id, { motivo: falha.motivo, em: d.agora(), limite: LIMITE_FALHAS_SEGUIDAS });
+    // Sem segredos: o detalhe é a 1ª linha do stderr, curta e redigida (resumirDetalhe).
+    log("aviso", "computador_falhou", { computador_id: c.id, agente_id: c.agenteId, motivo: falha.motivo, etapa, falhas_seguidas: r?.computador.falhasSeguidas ?? null, fora_do_ar: (r?.computador.indisponivelDesde ?? null) !== null, detalhe: resumirDetalhe(falha.detalhe), reinicios: falha.reinicios });
+    if (r?.virouIndisponivel) await avisarForaDoAr(d, r.computador, falha.motivo);
+    return Boolean(r?.virouIndisponivel);
+  }
+
   async function executar(escopo: Escopo, r: Reserva): Promise<ResultadoComputador> {
     let estado: "concluida" | "falhou" = "falhou";
+    let falha: FalhaComputador | null = null;
+    let respondeu = false;
     try {
       await o.driver.iniciar(r.computador.id);
+      respondeu = true;
       const estadoAtual = await o.dentro(escopo, async d => {
         const c = await d.repos.computadores.travar(r.computador.id);
         const agente = c ? await d.repos.agentes.buscar(c.agenteId) : null;
@@ -55,13 +121,21 @@ export function criarComputadores(o: Opcoes) {
       const resultado = await o.driver.executar(r.computador.id, r.acao);
       estado = resultado.codigoSaida !== undefined && resultado.codigoSaida !== 0 ? "falhou" : "concluida";
       return resultado;
+    } catch (e) {
+      if (ehFalhaComputador(e)) {
+        falha = e;
+        // A ação falhou numa máquina que RESPONDEU (tela alterada, ocupado…): ela está viva.
+        respondeu = !CONTA_PARA_SAUDE.has(e.motivo);
+      }
+      throw e;
     } finally {
-      await o.dentro(escopo, async (d) => {
-        await d.repos.computadores.travar(r.computador.id);
-        await d.repos.computadores.concluir(r.registroId, estado);
+      const saude = await o.dentro(escopo, async (d) => {
+        const c = await d.repos.computadores.travar(r.computador.id);
+        await d.repos.computadores.concluir(r.registroId, estado, falha?.motivo ?? null);
         await d.repos.computadores.liberar(r.computador.id, r.operacao);
+        return registrarSaude(d, c, r.acao.tipo, falha, respondeu);
       });
-      o.mudou(escopo, r.computador.agenteId);
+      o.mudou(escopo, r.computador.agenteId, saude);
     }
   }
   return {
@@ -110,20 +184,29 @@ export function criarComputadores(o: Opcoes) {
         return c;
       });
       let sucesso = false;
+      let falha: FalhaComputador | null = null;
+      let ligou = false;
       try {
         if (operacao === "iniciar") {
           await o.driver.iniciar(c.id);
+          ligou = true;
           const habilitado = await o.dentro(escopo, async d => (await d.repos.computadores.travar(c.id))?.habilitado);
           if (!habilitado) { await o.driver.parar(c.id); throw new ErroDeDominio("estado_invalido"); }
         }
         if (operacao === "parar") await o.driver.parar(c.id);
         sucesso = true;
+      } catch (e) {
+        if (ehFalhaComputador(e)) falha = e;
+        throw comoErroDeDominio(e);
       } finally {
-        await o.dentro(escopo, async d => {
+        const saude = await o.dentro(escopo, async d => {
           if (operacao === "iniciar") await d.repos.computadores.liberar(c.id, operacaoId);
-          if (registroId) await d.repos.computadores.concluir(registroId, sucesso ? "concluida" : "falhou");
+          if (registroId) await d.repos.computadores.concluir(registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
+          // "Ligar" e "Tentar de novo" são o mesmo iniciar: ligou zera a saúde; não ligou conta como falha.
+          if (operacao !== "iniciar" || (!ligou && !falha)) return false;
+          return registrarSaude(d, await d.repos.computadores.travar(c.id), "iniciar", ligou ? null : falha, ligou);
         });
-        o.mudou(escopo, agenteId);
+        o.mudou(escopo, agenteId, saude);
       }
     },
     async humano(escopo: Escopo, agenteId: string, valor: unknown): Promise<ResultadoComputador> {
@@ -131,9 +214,11 @@ export function criarComputadores(o: Opcoes) {
       const r = await o.dentro(escopo, async (d) => {
         const c = await obter(d, agenteId);
         if (!c.habilitado || (acao.tipo !== "observar" && acao.tipo !== "arquivos" && acao.tipo !== "ler_arquivo" && acao.tipo !== "ler_texto" && acao.tipo !== "audio" && c.controle !== "pessoa")) throw new ErroDeDominio("nao_permitido");
+        // Fora do ar: só "Tentar de novo" (iniciar) religa; a ação não vai ao Docker.
+        if (c.indisponivelDesde !== null) throw new ErroDeDominio("estado_invalido", { cause: "computador fora do ar" });
         return reservar(d, c, acao, "pessoa");
       });
-      return executar(escopo, r);
+      return executar(escopo, r).catch((e: unknown) => { throw comoErroDeDominio(e); });
     },
     async chamar(escopo: Escopo, plano: PlanoTurno, nome: string, argumentos: unknown): Promise<ResultadoChamada> {
       const resultado = await o.dentro(escopo, async (d): Promise<ResultadoChamada | Reserva> => {
@@ -149,6 +234,9 @@ export function criarComputadores(o: Opcoes) {
         if (!schema || errosDoSchema(schema, argumentos).length) return negar("args_invalidos");
         const c = await obter(d, plano.agenteId);
         if (!c.habilitado) return negar("capacidade_desligada");
+        // definido em 2026-09-24 (emenda da ADR-037): fora do ar, a ferramenta responde na hora — sem
+        // Docker, sem reserva. O plano seguinte já sai sem as ferramentas computador_*.
+        if (c.indisponivelDesde !== null) return { ok: true, isError: true, conteudo: JSON.stringify(foraDoArParaAgente(c)), confianca: "confiavel" };
         if (c.controle !== "bot") return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" };
         const args = argumentos as Record<string, unknown>;
         if (nome === "computador_pedir_ajuda") {
@@ -178,14 +266,15 @@ export function criarComputadores(o: Opcoes) {
         const r = await executar(escopo, resultado);
         const imagem = r.tela?.imagem;
         return { ok: true, isError: r.codigoSaida !== undefined && r.codigoSaida !== 0, conteudo: JSON.stringify({ ...r, audio: undefined, ...(r.tela ? { tela: { ...r.tela, imagem: undefined } } : {}) }), confianca: "nao_confiavel", ...(r.audio ? { audio: r.audio } : {}), ...(imagem ? { imagem: { mimeType: "image/png" as const, data: imagem } } : {}) };
-      } catch {
-        return { ok: true, isError: true, conteudo: JSON.stringify({ erro: "computador_indisponivel_ou_tela_alterada", instrucao: nome === "computador_ler_texto" || nome === "computador_gravar_texto" ? "A operação de texto falhou. Confira caminho, tamanho, UTF-8 e revisão; releia o arquivo antes de editar. Não afirme que gravou." : "A ação falhou. Observe a tela antes de tentar novamente; não afirme que executou." }), confianca: "confiavel" };
+      } catch (e) {
+        return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
     },
     async executarAprovado(p: Escopo & { agenteId: string; turnoId: string; acaoId: string }): Promise<void> {
       const r = await o.dentro(p, async (d) => {
         const c = await obter(d, p.agenteId);
         if (!c.habilitado || c.controle !== "bot" || !await turnoPermitido(d, p.turnoId, p.agenteId, true)) throw new ErroDeDominio("nao_permitido");
+        if (c.indisponivelDesde !== null) throw new ErroDeDominio("estado_invalido", { cause: "computador fora do ar" });
         const a = await d.repos.computadores.buscarAcao(p.acaoId);
         if (!a || a.computadorId !== c.id || a.turnoId !== p.turnoId || a.estado !== "pendente" || !a.argumentosCifrados) throw new ErroDeDominio("estado_invalido");
         const acao = validarAcaoComputador(JSON.parse(o.decifrar(a.argumentosCifrados)));

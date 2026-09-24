@@ -9,44 +9,27 @@ import process from 'node:process';
 import { Buffer } from 'node:buffer';
 import { setTimeout as delay } from 'node:timers/promises';
 import { lerTexto, gravarTexto } from './texto.mjs';
+import { codigoDaAcao, codigoDaSubida, falhaDe, primeiraLinha, PRAZO_NAVEGADOR_MS, TRAVAS_DO_PERFIL } from './falhas.mjs';
 const exec = promisify(execFile);
 const run = (bin,args,options={}) => exec(bin,args,{timeout:25000,maxBuffer:4*1024*1024,...options});
 const filhos = [];
 let chaveEstado;
-process.umask(0o077);
-function start(bin,args) { const p=spawn(bin,args,{stdio:'ignore'});p.on('error',()=>process.exit(1));filhos.push(p); }
-await mkdir('/workspace/downloads',{recursive:true});
-await mkdir('/home/node/profile',{recursive:true});
-process.env.DBUS_SESSION_BUS_ADDRESS=(await run('dbus-daemon',['--session','--fork','--print-address=1'])).stdout.trim();
-await unlink('/tmp/nod-keyring.sock').catch(()=>{});
-// definido em 2026-09-18: cofre cifrado; a senha derivada no servidor só entra por stdin/socket, nunca argv, volume ou ambiente.
-await new Promise((resolve,reject)=>{
-  const segredo=net.createServer({allowHalfOpen:true},socket=>{
-    let chave='';socket.on('error',()=>{});socket.setTimeout(10000,()=>socket.destroy());
-    socket.on('data',b=>{chave+=b.toString();if(chave.length>128)socket.destroy();});
-    socket.on('end',()=>{
-      if(!/^[a-f0-9]{64}$/.test(chave)){socket.end('invalido');return;}
-      chaveEstado=createHmac('sha256',Buffer.from(chave,'hex')).update('checkpoint-cookies-v1').digest();
-      const p=spawn('gnome-keyring-daemon',['--unlock','--components=secrets'],{stdio:['pipe','ignore','ignore']});
-      p.stdin.end(chave);chave='';p.on('error',reject);
-      p.on('close',code=>{if(code!==0){socket.end('falhou');reject(new Error('cofre'));return;}socket.end('ok');segredo.close();resolve();});
-    });
-  });segredo.listen('/tmp/nod-keyring.sock');
-});
-start('Xvfb',[':99','-screen','0','1280x800x24','-nolisten','tcp']);
-await delay(500);
-start('openbox',[]);
-await run('pulseaudio',['--start','--exit-idle-time=-1']);
-await run('pactl',['load-module','module-null-sink','sink_name=nod','sink_properties=device.description=nod']);
-await run('pactl',['set-default-sink','nod']);
-const context = await chromium.launchPersistentContext('/home/node/profile',{
-  executablePath:'/usr/bin/chromium',headless:false,viewport:null,acceptDownloads:true,
-  chromiumSandbox:false,proxy:{server:'http://egress:3128',bypass:'localhost,127.0.0.1'},
-  args:['--password-store=gnome-libsecret','--window-size=1280,760','--window-position=0,30','--disable-dev-shm-usage','--disable-quic','--autoplay-policy=no-user-gesture-required'],
-});
-context.setDefaultTimeout(15000);
-// definido em 2026-09-18: checkpoint autenticado dos cookies evita depender do flush assíncrono do SQLite do Chromium.
+// definido em 2026-09-24 (emenda da ADR-037): o socket de comando abre ANTES de tudo. Enquanto a
+// máquina sobe, o ping responde {pronto:false}; se a subida para, {pronto:false, falha, detalhe} com
+// código fixo — o processo fica de pé em vez de morrer e o Docker reiniciar em loop sem ninguém ver.
+let pronto = false;
+let falha = null;
+let context = null;
+let page = null;
+let revision = randomBytes(32).toString('hex');
+const quadros=new Map();
+let dialogo=null;
 let salvando = Promise.resolve();
+let ocupado=false;
+process.umask(0o077);
+function start(bin,args) { const p=spawn(bin,args,{stdio:'ignore'});p.on('error',()=>{falha??={codigo:'nao_iniciou',detalhe:`${bin} não iniciou`};});filhos.push(p); }
+const mudar = () => {revision=randomBytes(32).toString('hex');quadros.clear();};
+// definido em 2026-09-18: checkpoint autenticado dos cookies evita depender do flush assíncrono do SQLite do Chromium.
 async function gravarCookies() {
   const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',chaveEstado,iv);
   const dados=Buffer.concat([cipher.update(JSON.stringify(await context.cookies())),cipher.final()]);
@@ -54,25 +37,12 @@ async function gravarCookies() {
   await rename('/home/node/cookies.enc.tmp','/home/node/cookies.enc');
 }
 function guardarCookies() { const proxima=salvando.catch(()=>{}).then(gravarCookies);salvando=proxima;return proxima; }
-try {
-  const b=await readFile('/home/node/cookies.enc');
-  const decipher=createDecipheriv('aes-256-gcm',chaveEstado,b.subarray(0,12));decipher.setAuthTag(b.subarray(12,28));
-  const cookies=JSON.parse(Buffer.concat([decipher.update(b.subarray(28)),decipher.final()]).toString());
-  await context.addCookies(cookies);
-} catch(e) { if(e.code!=='ENOENT') throw new Error('cofre_invalido'); }
-let page = context.pages()[0] ?? await context.newPage();
-let revision = randomBytes(32).toString('hex');
-const quadros=new Map();
-let dialogo=null;
-const mudar = () => {revision=randomBytes(32).toString('hex');quadros.clear();};
 function acompanhar(p) {
   p.on('framenavigated', f=>{if(f===p.mainFrame()) mudar();});
   p.on('close', mudar);
   p.on('download', async d=>{try {await d.saveAs('/workspace/downloads/'+path.basename(d.suggestedFilename()));} catch { /* definido em 2026-09-18: falha de download permanece observável no navegador. */ }});
   p.on('dialog', d=>{dialogo=d;mudar();});
 }
-context.pages().forEach(acompanhar);
-context.on('page',p=>{acompanhar(p);page=p;mudar();});
 async function atual() {if(page.isClosed()) page=context.pages().at(-1) ?? await context.newPage();return page;}
 async function tela() {
   const p=await atual();
@@ -97,7 +67,6 @@ function tecla(k) {
   return k.split('+').map(x=>nomes[x]??x).join('+');
 }
 async function acao(a) {
-  if(a.tipo==='ping') return {pronto:true};
   const observado=quadros.get(a.quadro);
   if('quadro' in a && (!observado || observado.revision!==revision || Date.now()-observado.em>120000)) throw new Error('tela_alterada');
   const p=await atual();
@@ -149,19 +118,74 @@ async function acao(a) {
   await delay(100);
   return {tela:await tela()};
 }
-let ocupado=false;
+
 await unlink('/tmp/nod-computer.sock').catch(()=>{});
 const server=net.createServer({allowHalfOpen:true},socket=>{
   let corpo='';socket.setTimeout(60000,()=>socket.destroy());socket.on('error',()=>{});
   socket.on('data',chunk=>{corpo+=chunk;if(corpo.length>1000000)socket.destroy();});
   socket.on('end',async()=>{
+    let pedido;
+    try{pedido=JSON.parse(corpo);}catch{socket.end(JSON.stringify({erro:'acao_falhou'}));return;}
+    if(pedido?.tipo==='ping'){socket.end(JSON.stringify({resultado:{pronto,falha:falha?.codigo??null,detalhe:falha?.detalhe??null}}));return;}
+    // Ainda subindo, ou parado num código: a ação não roda, e o servidor sabe por quê.
+    if(!pronto){socket.end(JSON.stringify({erro:falha?.codigo??'sem_resposta'}));return;}
     if(ocupado){socket.end(JSON.stringify({erro:'ocupado'}));return;}
     ocupado=true;
     const limite=globalThis.setTimeout(()=>process.exit(1),55000);
-    try{const resultado=await acao(JSON.parse(corpo));await guardarCookies();socket.end(JSON.stringify({resultado}));}
-    catch {socket.end(JSON.stringify({erro:'acao_falhou_observe_novamente'}));}
+    try{const resultado=await acao(pedido);await guardarCookies();socket.end(JSON.stringify({resultado}));}
+    catch(e){socket.end(JSON.stringify({erro:codigoDaAcao(e)}));}
     finally{globalThis.clearTimeout(limite);ocupado=false;}
   });
 });
 server.listen('/tmp/nod-computer.sock');
-process.on('SIGTERM',()=>{void guardarCookies().catch(()=>{}).then(()=>context.close()).finally(()=>{filhos.forEach(p=>p.kill());process.exit(0);});});
+process.on('SIGTERM',()=>{void guardarCookies().catch(()=>{}).then(()=>context?.close()).finally(()=>{filhos.forEach(p=>p.kill());process.exit(0);});});
+
+async function subir() {
+  await mkdir('/workspace/downloads',{recursive:true});
+  await mkdir('/home/node/profile',{recursive:true});
+  process.env.DBUS_SESSION_BUS_ADDRESS=(await run('dbus-daemon',['--session','--fork','--print-address=1'])).stdout.trim();
+  await unlink('/tmp/nod-keyring.sock').catch(()=>{});
+  // definido em 2026-09-18: cofre cifrado; a senha derivada no servidor só entra por stdin/socket, nunca argv, volume ou ambiente.
+  await new Promise((resolve,reject)=>{
+    const segredo=net.createServer({allowHalfOpen:true},socket=>{
+      let chave='';socket.on('error',()=>{});socket.setTimeout(10000,()=>socket.destroy());
+      socket.on('data',b=>{chave+=b.toString();if(chave.length>128)socket.destroy();});
+      socket.on('end',()=>{
+        if(!/^[a-f0-9]{64}$/.test(chave)){socket.end('invalido');return;}
+        chaveEstado=createHmac('sha256',Buffer.from(chave,'hex')).update('checkpoint-cookies-v1').digest();
+        const p=spawn('gnome-keyring-daemon',['--unlock','--components=secrets'],{stdio:['pipe','ignore','ignore']});
+        p.stdin.end(chave);chave='';p.on('error',e=>reject(falhaDe('cofre_invalido',e)));
+        p.on('close',code=>{if(code!==0){socket.end('falhou');reject(falhaDe('cofre_invalido','o cofre de logins não abriu'));return;}socket.end('ok');segredo.close();resolve();});
+      });
+    });segredo.listen('/tmp/nod-keyring.sock');
+  });
+  start('Xvfb',[':99','-screen','0','1280x800x24','-nolisten','tcp']);
+  await delay(500);
+  start('openbox',[]);
+  await run('pulseaudio',['--start','--exit-idle-time=-1']);
+  await run('pactl',['load-module','module-null-sink','sink_name=nod','sink_properties=device.description=nod']);
+  await run('pactl',['set-default-sink','nod']);
+  // definido em 2026-09-24 (emenda da ADR-037): um container por volume (ADR-037), então a trava do
+  // perfil que sobrou é de um container que já morreu — com ela o Chromium não abre (Nina, 22/09).
+  for(const nome of TRAVAS_DO_PERFIL) await unlink(path.join('/home/node/profile',nome)).catch(()=>{});
+  try {
+    context = await chromium.launchPersistentContext('/home/node/profile',{
+      executablePath:'/usr/bin/chromium',headless:false,viewport:null,acceptDownloads:true,timeout:PRAZO_NAVEGADOR_MS,
+      chromiumSandbox:false,proxy:{server:'http://egress:3128',bypass:'localhost,127.0.0.1'},
+      args:['--password-store=gnome-libsecret','--window-size=1280,760','--window-position=0,30','--disable-dev-shm-usage','--disable-quic','--autoplay-policy=no-user-gesture-required'],
+    });
+  } catch(e) { throw falhaDe('navegador_nao_abriu',e); }
+  context.setDefaultTimeout(15000);
+  try {
+    const b=await readFile('/home/node/cookies.enc');
+    const decipher=createDecipheriv('aes-256-gcm',chaveEstado,b.subarray(0,12));decipher.setAuthTag(b.subarray(12,28));
+    const cookies=JSON.parse(Buffer.concat([decipher.update(b.subarray(28)),decipher.final()]).toString());
+    await context.addCookies(cookies);
+  } catch(e) { if(e.code!=='ENOENT') throw falhaDe('cofre_invalido','os cookies guardados não abriram'); }
+  page = context.pages()[0] ?? await context.newPage();
+  context.pages().forEach(acompanhar);
+  context.on('page',p=>{acompanhar(p);page=p;mudar();});
+  if(falha) return;
+  pronto = true;
+}
+try { await subir(); } catch(e) { falha={codigo:codigoDaSubida(e),detalhe:primeiraLinha(e?.message)}; }

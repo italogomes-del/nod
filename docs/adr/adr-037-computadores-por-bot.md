@@ -71,3 +71,58 @@ Limites iniciais: tela 1280×800; upload/download pela API de arquivos até 512 
 ## Fora deste recorte
 
 Compartilhamento de computadores ou sessões, streaming com baixa latência, snapshots/migração de host, quotas globais por conta, coleta automática de volumes órfãos e provisionamento de nuvem. Excluir o bot impede novas ações e desliga seus processos; os volumes permanecem para recuperação. Desligar encerra processos e preserva os volumes. Restaurar o bot recupera o vínculo anterior; duplicar cria outro vínculo e não copia sessões.
+
+## Emenda de 2026-09-24 — erro real e aviso único
+
+**Contexto.** Medido em 24/09: o computador da Nina estava "Up" mas quebrado desde 22/09 18:01. O
+volume `-home` guardou o `SingletonLock` do Chromium de um container antigo, o navegador não abria e
+o container reiniciava em loop (6×). Três camadas escondiam o erro — o runtime morria sem dizer por
+quê, o adaptador Docker transformava tudo em `estado_invalido` e a ferramenta respondia
+"indisponível ou tela alterada" — e cada execução da rotina gastava um turno tentando de novo. O plano
+oferecia as ferramentas `computador_*` até com o computador desligado.
+
+**Decisão.**
+
+- **Runtime** (`infra/computador/runtime.mjs`): o socket de comando abre antes de tudo; o `ping`
+  responde `{pronto, falha, detalhe}`. As travas `Singleton{Lock,Socket,Cookie}` do perfil são
+  apagadas antes de abrir o navegador (um container por volume: quem as criou já morreu), e o
+  navegador tem 30 s para abrir. Subida que para fica de pé dizendo o código — sem loop de reinício.
+- **Código fechado de ponta a ponta** (`MOTIVOS_FALHA_COMPUTADOR`, enum `motivo_falha_computador` da
+  0022): runtime → adaptador (1ª linha do stderr, `RestartCount` do `docker inspect`) → ferramenta
+  (`{erro, instrucao}` de tabela fixa) → atividade (`computador_acoes.motivo`).
+- **Saúde no próprio computador** (`falhas_seguidas`, `falha_motivo`, `indisponivel_desde`): só a
+  MÁQUINA sem responder conta (`CONTA_PARA_SAUDE`; tela alterada, ocupado e ação que falhou não).
+  Na 3ª falha seguida (`LIMITE_FALHAS_SEGUIDAS`, definido, não medido) o computador sai do ar e UMA
+  mensagem vai para a conversa própria do bot: "O computador de {agente} não responde: {motivo}. Tirei o
+  computador das próximas execuções até você religá-lo." Fora do ar, a ferramenta responde na hora,
+  sem Docker. Qualquer resposta da máquina zera a sequência; "Tentar de novo" é o mesmo ligar, e
+  reinicia o container parado num código.
+- **Plano**: `computador_*` só entram com o computador ligado e respondendo (ou ainda não criado);
+  desligado ou fora do ar, o prompt ganha uma linha dizendo por quê.
+- **Tela**: chip "fora do ar" no botão "Computador do bot", subtítulo na barra lateral, seção no painel
+  direito, cartão com "Tentar de novo" e "Detalhes técnicos" no computador, atividade repetida como
+  ×N; o laço de 2 s para enquanto está fora do ar. Nada além do aviso único: não é incidente da
+  ADR-045 (aquele é o Mac da pessoa, em "Sua vez").
+
+**Alternativas descartadas.** Reaproveitar a coluna `ajuda` (é o pedido de login do bot). Registrar a
+queda como incidente em "Sua vez" (o computador tem estado próprio e o aviso é da conversa do bot).
+Religar sozinho a cada falha (cada tentativa custava um turno e escondia a causa).
+
+**Validação.** Concorrência `computador-saude` (servidor completo, driver falso: três falhas → uma
+mensagem → a quarta não chega ao Docker → plano sem ferramentas e com a linha → "Tentar de novo"
+quebrado dá 409 sem aviso novo → Ligar zera e as ferramentas voltam); `computadores-http` (o plano é
+emitido de novo depois de ligar); integração `computadores` (transição única, zerar, atividade com o
+observar que falhou, CHECK da 0022); unit `computador-saude` (tabelas, redação do detalhe, runtime,
+plano) e web `computador`; conformidade `motivos-enum`.
+
+**Gatilho de reversão.**
+
+- Se, em 14 dias de log, mais de 20% das transições para fora do ar (`computador_falhou` com
+  `fora_do_ar: true`) forem desfeitas por um "Tentar de novo" bem-sucedido em até 5 min, três falhas é
+  pouco (a máquina oscila, não quebrou): subir o limite.
+- Qualquer `computador_erro_inesperado` no log: um caminho escapou da tabela fixa — ganhar código.
+- Computador fora do ar por mais de 24 h com "Tentar de novo" falhando no mesmo código: a limpeza
+  automática não basta para aquele código — tratá-lo no runtime.
+
+**Não implementado.** Reconstruir a imagem (`npm run computador:build`) e recriar o container da Nina
+com os volumes preservados é passo de operação, fora do código.

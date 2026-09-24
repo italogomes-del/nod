@@ -114,3 +114,22 @@ export const CODIGOS_ERRO = [
   "integracao_autenticacao",
 ] as const;
 export type CodigoErro = (typeof CODIGOS_ERRO)[number];
+
+/**
+ * definido em 2026-09-24 (ADR-037, emenda "saúde do computador"): por que o computador do bot falhou,
+ * em código FECHADO — antes tudo virava "computador_indisponivel_ou_tela_alterada". As seis primeiras
+ * são a MÁQUINA sem responder e contam para a saúde (src/domain/computador.ts, CONTA_PARA_SAUDE); as
+ * três últimas são a AÇÃO que falhou numa máquina que respondeu.
+ */
+export const MOTIVOS_FALHA_COMPUTADOR = [
+  "docker_indisponivel",
+  "imagem_ausente",
+  "nao_iniciou",
+  "cofre_invalido",
+  "navegador_nao_abriu",
+  "sem_resposta",
+  "acao_falhou",
+  "tela_alterada",
+  "ocupado",
+] as const;
+export type MotivoFalhaComputador = (typeof MOTIVOS_FALHA_COMPUTADOR)[number];

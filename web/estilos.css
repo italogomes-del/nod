@@ -207,6 +207,18 @@ body.ocupado { cursor: progress; }
 .tag-ambar { color: var(--amber); border-color: var(--amber-line); background: var(--amber-bg); }
 .tag-cinza { color: var(--ink-3); }
 .tag-ok { color: var(--ok); border-color: #bbf7d0; background: #f0fdf4; }
+/* definido em 2026-09-24 (emenda da ADR-037): computador do bot fora do ar — o mesmo vermelho de ESTADO
+   no chip do cabeçalho, no subtítulo da lateral, no cartão da conversa e no painel. */
+.tag-vermelha { color: var(--red); border-color: #f0c3bd; background: #fdf0ee; }
+.sub-fora-do-ar { color: var(--red) !important; }
+.msg-computador-fora { padding: 14px 16px; border: 1px solid #f0c3bd; background: #fdf6f5; border-radius: 12px; }
+.msg-computador-fora .mcf-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.msg-computador-fora .mcf-titulo b { color: #5c140e; font-weight: 600; }
+.msg-computador-fora p { margin: 6px 0 0; line-height: 1.55; color: #3f2a28; }
+.msg-computador-fora .mcf-acoes { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.detalhe-computador-fora { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid #f0c3bd; background: #fdf6f5; border-radius: 10px; }
+.detalhe-computador-fora .tag { align-self: flex-start; }
+.detalhe-computador-fora p { margin: 0; font-size: 12.5px; line-height: 1.5; color: #3f2a28; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3);
   border: 1px solid var(--line-2); border-radius: 99px; padding: 3px 10px; }
 

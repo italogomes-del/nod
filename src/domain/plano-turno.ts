@@ -16,6 +16,7 @@ import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
+import type { ComputadorFora } from "./prompt-sistema.ts";
 import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
 /**
@@ -79,6 +80,12 @@ export type EntradaPlano = {
   /** Já existe projeto autorizado? Sem ele o catálogo oferece só consultar e propor. */
   workspaceVinculado?: boolean;
   computador?: boolean;
+  /**
+   * definido em 2026-09-24 (emenda da ADR-037): o computador do bot existe mas não serve AGORA — a
+   * pessoa desligou, ou três falhas seguidas o tiraram do ar. As ferramentas computador_* saem e o
+   * prompt ganha uma linha (antes o plano as oferecia até com o computador desligado).
+   */
+  computadorFora?: ComputadorFora | null;
   turno: Turno;
   agente: Agente;
   memorias: readonly Memoria[];
@@ -115,7 +122,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const modo: ModoTurno = entrada.profundidade >= 1 ? "peer" : entrada.modo;
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
-  const computador: FerramentaPlano[] = entrada.computador && modo !== "peer" && modo !== "criacao" ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
+  const temComputador = entrada.computador === true && modo !== "peer" && modo !== "criacao";
+  const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
   /**
    * definido em 2026-09-18: sem projeto autorizado o agente só enxerga consultar e propor. Ver um
    * martelo que ainda não pode usar era o que o levava a tentar, falhar e virar tutorial de menu.
@@ -162,7 +170,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     confiancaEntrada: entrada.confianca,
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo },
     politicaExecucao: {
       prazoMs,

@@ -229,7 +229,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     // definido em 2026-09-16: as 20 mais recentes bastam na tela; o registro completo está na trilha.
     return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f));
   },
-  "computador.mudou": (e) => e,
+  // definido em 2026-09-24 (emenda da ADR-037): só a SAÚDE (entrou ou saiu do ar) muda a frota — a
+  // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
+  "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
   "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);

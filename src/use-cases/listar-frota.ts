@@ -16,13 +16,15 @@ const TURNOS_CONTADOS = 1_000;
 export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, FrotaDto> = async (deps, input) => {
   const agora = deps.agora();
   const agentes = await deps.repos.agentes.listar(input.gerenciar ? { incluirOcultos: true, incluirExcluidos: true } : {});
+  // definido em 2026-09-24 (emenda da ADR-037): uma consulta para a frota inteira, não uma por agente.
+  const foraDoAr = await deps.repos.computadores.foraDoAr();
   const linhas: FrotaDto["agentes"] = [];
   for (const agente of agentes) {
     const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
     const concessoes = await deps.repos.concessoes.doAgente(agente.id);
     const turnos = conversa ? await deps.repos.turnos.listarDaConversa(conversa.id, TURNOS_CONTADOS) : [];
     const execucoes = turnos.filter((t) => t.estado === "concluido").length;
-    linhas.push({ ...agente, conversaId: conversa?.id ?? "", descricaoEstado: descricaoEstado(agente, { concessoes: concessoes.length, execucoes }) });
+    linhas.push({ ...agente, conversaId: conversa?.id ?? "", descricaoEstado: descricaoEstado(agente, { concessoes: concessoes.length, execucoes }), computadorForaDoAr: foraDoAr.get(agente.id) ?? null });
   }
 
   const motores = await deps.repos.inventario.listar();

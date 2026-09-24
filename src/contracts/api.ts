@@ -6,6 +6,7 @@ import type { IncidenteDto } from "./incidente.ts";
 import type { Inventario } from "./inventario.ts";
 import type { ItemAprovacao } from "./item-aprovacao.ts";
 import type { Mensagem } from "./mensagem.ts";
+import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
 import type { Rotina } from "./rotina.ts";
 
@@ -28,7 +29,11 @@ export type ChaveEmitidaDto = { chave: string; dados: ChaveMaquinaDto };
 export type ErroDto = { codigo: string; mensagem: string; correlation_id?: string | null };
 
 export type FrotaDto = {
-  agentes: (Agente & { conversaId: string; descricaoEstado: string })[];
+  /**
+   * `computadorForaDoAr` (definido em 2026-09-24, emenda da ADR-037): o computador do bot deixou de
+   * responder — a barra lateral, o cabeçalho e o painel dizem isso sem abrir o computador.
+   */
+  agentes: (Agente & { conversaId: string; descricaoEstado: string; computadorForaDoAr: { desde: EpochMs; motivo: MotivoFalhaComputador } | null })[];
   inventario: Inventario;
   negacoes: Negacao[];
 };

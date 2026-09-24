@@ -1,5 +1,6 @@
 import type { Estado } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
+import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { rotuloExecucao } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 
@@ -65,7 +66,15 @@ export function renderDetalhes(estado: Estado): string {
     </li>`;
   };
 
+  // definido em 2026-09-24 (emenda da ADR-037): fora do ar, o computador do bot abre o painel — é o
+  // estado que muda o que o bot consegue fazer agora. Ligado e respondendo, não ocupa lugar.
+  const fora = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? a.computadorForaDoAr : null;
+  const computador = fora
+    ? `<section class="detalhes-secao"><h3>Computador do bot</h3><div class="detalhe-computador-fora"><span class="tag tag-vermelha">fora do ar</span><p>Desde ${esc(dataHora(fora.desde))} · ${esc(MOTIVO_FALHA_TEXTO[fora.motivo])}.</p><div class="dr-acoes">${botao("religar-computador", "Tentar de novo", { classe: "link sm", id: a.id })}${botao("abrir-computador", "Abrir computador", { classe: "link sm", id: a.id })}</div></div></section>`
+    : "";
+
   return `<div class="detalhes-perfil"><div class="detalhes-identidade">${iconeAgente(a, "lg")}<div><h2>${esc(a.nome)}</h2><span>${esc(a.titulo || "Seu bot")}</span></div></div><p>${esc(a.descricao || "Conte na conversa como este bot pode ajudar você.")}</p>${botao("ir-perfil", "Editar perfil", { id: a.id, classe: "link" })}</div>
+    ${computador}
     <section class="detalhes-secao"><h3>Atalhos</h3>
       ${botao("preencher-prompt", "✧  Planejar uma tarefa", { classe: "atalho", dados: { texto: "Me ajude a planejar esta tarefa: " } })}
       ${botao("preencher-prompt", "↗  Pedir ajuda a outro bot", { classe: "atalho", dados: { texto: "Consulte o colega mais adequado da minha equipe para me ajudar com: " } })}
@@ -81,5 +90,5 @@ export function renderDetalhes(estado: Estado): string {
     <section class="detalhes-secao"><div class="secao-titulo"><h3>Colabora com</h3>${botao("navegar", "Criar sala", { classe: "link", dados: { tela: "nova-sala" } })}</div>
       ${colegas.length ? colegas.slice(0, 8).map((b) => `<button class="colega" data-act="preencher-prompt" data-texto="Consulte @${esc(b.nome)} sobre: ">${iconeAgente(b)}<div><b>${esc(b.nome)}</b><small>${esc(b.titulo || "Bot da sua equipe")}</small></div></button>`).join("") : '<p class="mudo">Crie outro bot para eles trabalharem juntos.</p>'}
     </section>
-    <section class="detalhes-secao"><h3>Execução</h3><p class="mudo">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p><p class="mudo">Use Computador na conversa para abrir a tela, entrar nos apps e acompanhar o trabalho.</p></section>`;
+    <section class="detalhes-secao"><h3>Execução</h3><p class="mudo">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p><p class="mudo">Use Computador do bot na conversa para abrir a tela dele, entrar nos apps e acompanhar o trabalho.</p></section>`;
 }

@@ -321,3 +321,16 @@ body { background: #fcfdff; }
 .me-falha .av-me { background: #fbead8; color: #a85b22; }
 /* A marca e o título formam um par à esquerda; as ações de criar ficam na ponta direita. */
 .sh b { margin-right: auto; }
+/* definido em 2026-09-24 (emenda da ADR-037): fora do ar, a tela do computador vira um cartão com o
+   motivo, "Tentar de novo" e os detalhes técnicos recolhidos. */
+.computador-sub{margin:2px 0 0;font-size:12px;color:#687182}
+.computador-status.fora-do-ar{background:#fdf0ee;color:var(--red)}
+.computador-fora{position:absolute;inset:0;margin:auto;width:min(470px,90%);height:max-content;box-sizing:border-box;background:#fff;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:10px;color:#3a4150;font-size:13.5px;line-height:1.55}
+.computador-fora[hidden]{display:none}
+.computador-fora b{font-size:17px;color:#11131a;font-weight:600}
+.computador-fora p{margin:0}
+.computador-fora .bt{align-self:flex-start}
+.computador-fora details{border-top:1px solid #ececf0;padding-top:8px}
+.computador-fora summary{cursor:pointer;color:#687182;font-size:12.5px}
+.computador-tecnico{font-family:var(--fm);font-size:12px;line-height:1.8;margin-top:6px!important}
+.computador-atividade .tag{margin-left:4px}
