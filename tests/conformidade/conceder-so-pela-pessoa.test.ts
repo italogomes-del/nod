@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 /**
  * ADR-044: conceder é ato da PESSOA. Chamam conceder/concederLote só o botão da decisão de acesso
  * (decidir-acesso.ts) e a concessão manual por capacidade da tela Conectores (rota de pessoa);
- * conceder-acessos-da-rotina.ts fica reservado. Prova PROGRAMÁTICA no estilo de fronteiras.test.ts:
+ * conceder-acessos-da-rotina.ts concede o que a rotina declarou quando a pessoa a confirma (emenda de
+ * 2026-09-24, "rotina nasce com o acesso"). Prova PROGRAMÁTICA no estilo de fronteiras.test.ts:
  * a regra do eslint.config.mjs está de pé (negativo e positivo) E o código de hoje a respeita —
  * um eslint-disable numa linha passaria pela primeira prova, não pela segunda.
  */
@@ -48,5 +49,6 @@ describe("conceder só pela pessoa (ADR-044)", () => {
     expect(importadores.length).toBeGreaterThan(0);
     for (const f of importadores) expect(PODEM.includes(f) || f.endsWith("conceder-acessos-da-rotina.ts"), f).toBe(true);
     expect(importadores).toContain("src/use-cases/decidir-acesso.ts");
+    expect(importadores).toContain("src/use-cases/conceder-acessos-da-rotina.ts");
   });
 });

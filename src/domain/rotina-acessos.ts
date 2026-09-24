@@ -1,8 +1,11 @@
+import type { AcessoPedido } from "../contracts/acesso.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { Conector } from "../contracts/conector.ts";
+import type { ArgsPedirAcesso } from "../contracts/ferramentas-nod.ts";
 import type { MotivoBloqueioRotina } from "../contracts/motivos.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
-import { capacidadesDeLeitura } from "./pedido-acesso.ts";
+import { ErroDeDominio } from "./erro.ts";
+import { capacidadesDeLeitura, normalizarPedidoAcesso } from "./pedido-acesso.ts";
 
 /**
  * O que uma rotina precisa de acesso, decidido ANTES de gastar um turno (definido em 2026-09-24, emenda
@@ -12,7 +15,11 @@ import { capacidadesDeLeitura } from "./pedido-acesso.ts";
 
 export type ConectorRegistrado = Pick<Conector, "id" | "slug" | "nome" | "habilitado" | "catalogo">;
 
-/** Acesso que a rotina DECLARA (a coluna nasce no PR "rotina nasce com o acesso"); aqui só o formato. */
+/**
+ * Acesso que a rotina DECLARA (rotinas.acessos, 0027): o que o pré-voo lê dele. `capacidades` vazia = a
+ * rotina declarou LER um app que ainda não estava conectado quando nasceu — as de leitura do catálogo,
+ * resolvidas quando o card nascer (definido em 2026-09-24, "rotina nasce com o acesso").
+ */
 export type AcessoDeclarado = { conector: string; capacidades: readonly string[] };
 
 export type NecessidadeDaRotina = {
@@ -21,7 +28,8 @@ export type NecessidadeDaRotina = {
   conector: ConectorRegistrado | null;
   /**
    * As capacidades exatas (declaradas, ou as do card aberto); null = rotina legada, que só cita o app na
-   * fonte: precisa ler, e UMA ferramenta de leitura concedida basta.
+   * fonte, ou leitura declarada sem capacidades (app por conectar): precisa ler, e UMA ferramenta de
+   * leitura concedida basta.
    */
   capacidades: readonly string[] | null;
 };
@@ -47,9 +55,28 @@ export function conectoresCitados<C extends Pick<Conector, "slug" | "nome">>(fon
 export function necessidadesDaRotina(rotina: Pick<Rotina, "fonte"> & { acessos?: readonly AcessoDeclarado[] | null }, registrados: readonly ConectorRegistrado[]): NecessidadeDaRotina[] {
   const lista: NecessidadeDaRotina[] =
     rotina.acessos !== undefined && rotina.acessos !== null
-      ? rotina.acessos.map((a) => ({ slug: a.conector, conector: registrados.find((c) => c.slug === a.conector) ?? null, capacidades: [...new Set(a.capacidades)] }))
+      ? rotina.acessos.map((a) => ({ slug: a.conector, conector: registrados.find((c) => c.slug === a.conector) ?? null, capacidades: a.capacidades.length > 0 ? [...new Set(a.capacidades)] : null }))
       : conectoresCitados(rotina.fonte, registrados).map((c) => ({ slug: c.slug, conector: c, capacidades: null }));
   return lista.sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+/**
+ * Os `acessos` de criar_rotina/atualizar_rotina, validados como pedidos de acesso em modo DECLARAÇÃO
+ * (definido em 2026-09-24, emenda da ADR-044, "rotina nasce com o acesso"): app registrado ou do
+ * marketplace, capacidades do catálogo, leitura com [] num app conectado já sai com as ferramentas de
+ * leitura (é o que fica guardado na proposta e o que a pessoa vê), escrita só com os nomes exatos. Um item
+ * por app — dois para o mesmo app seriam dois consentimentos para uma concessão. Ordenado por slug.
+ */
+export function normalizarAcessosDeclarados(pedidos: readonly ArgsPedirAcesso[], conectorDe: (slug: string) => Pick<Conector, "habilitado" | "catalogo"> | null): AcessoPedido[] {
+  const slugs = pedidos.map((p) => p.conector);
+  if (new Set(slugs).size !== slugs.length) throw new ErroDeDominio("entrada_invalida", { cause: "um item de acessos por app" });
+  return pedidos.map((pedido) => normalizarPedidoAcesso({ pedido, conector: conectorDe(pedido.conector), emRotina: false, declaracao: true })).sort((a, b) => a.conector.localeCompare(b.conector));
+}
+
+/** Mesma declaração: mesmos apps com as mesmas capacidades e nível (a ordem não conta). */
+export function mesmosAcessos(a: readonly AcessoPedido[] | null, b: readonly AcessoPedido[] | null): boolean {
+  const chave = (l: readonly AcessoPedido[] | null) => (l === null ? "null" : JSON.stringify([...l].map((x) => [x.conector, x.nivel, [...new Set(x.capacidades)].sort()]).sort()));
+  return chave(a) === chave(b);
 }
 
 /** O que o card pede: as capacidades exatas, ou — rotina legada — as de leitura do catálogo sondado agora. */

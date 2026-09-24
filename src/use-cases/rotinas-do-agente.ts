@@ -3,8 +3,11 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { EstadoRotina, Rotina } from "../contracts/rotina.ts";
 import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
+import { nomeDoApp } from "../domain/pedido-acesso.ts";
+import { mesmosAcessos } from "../domain/rotina-acessos.ts";
 import { resumoCron, validarAtualizacaoRotina } from "../domain/rotina-texto.ts";
 import { assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
+import { acessosDeclarados } from "./criar-rotina.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -93,11 +96,16 @@ async function propor(deps: Deps, input: ContextoFerramenta, payload: PayloadPro
  * `atualizar_rotina`: NADA é aplicado — nasce proposta 'rotina_atualizacao' com o payload já
  * normalizado (sobrevive a reinício sem reinterpretar, E7.1). Diferente de pausar, mudar QUANDO ou
  * O QUE a rotina faz sozinha não é reversível em um clique, então a pessoa confirma.
+ * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): `acessos` é a lista NOVA,
+ * validada como em criar_rotina; só entra no payload se muda a declaração. Aplicar concede o que é novo.
  */
 export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = async (deps, input) => {
   try {
     const atual = await rotinaDoAgente(deps, input.agenteId, input.rotina_id);
+    const acessos = await acessosDeclarados(deps, input.acessos);
+    const mudaAcessos = acessos !== undefined && !mesmosAcessos(acessos, atual.acessos);
     const { normalizada } = validarAtualizacaoRotina({
+      mudaAcessos,
       atual,
       pedido: {
         cron: input.cron,
@@ -122,9 +130,11 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
       politicaSemDado: normalizada.politicaSemDado,
       proximaExecucao: normalizada.proximaExecucao,
       resumo: normalizada.resumo,
+      ...(mudaAcessos && acessos ? { acessos } : {}),
       antes: { resumo: resumoCron(atual.cron, atual.fusoIana), instrucao: atual.instrucao },
     };
-    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}`);
+    const precisa = payload.acessos?.length ? ` · precisa de ${payload.acessos.map((a) => `${nomeDoApp(a.conector)} (${a.nivel})`).join(", ")}` : "";
+    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}${precisa}`);
     return { data: { proposta_id: proposta.id, resumo: normalizada.resumo }, events };
   } catch (e) {
     if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };

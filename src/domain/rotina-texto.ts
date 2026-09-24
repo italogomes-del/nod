@@ -89,12 +89,14 @@ export type CamposRotinaAtualizaveis = Partial<Pick<RotinaNormalizada, "cron" | 
  * mesmo validarRotinaNormalizada. Assim um cron novo com o fuso antigo (ou o contrário) é checado
  * junto, e não há um segundo caminho de validação para divergir do primeiro.
  * `mudou` lista os campos que de fato mudam — pedido que não muda nada é `entrada_invalida`,
- * porque virar proposta vazia só gastaria a confirmação da pessoa.
+ * porque virar proposta vazia só gastaria a confirmação da pessoa. `mudaAcessos` (definido em
+ * 2026-09-24, "rotina nasce com o acesso"): a mudança que só declara acessos novos também é mudança.
  */
 export function validarAtualizacaoRotina(entrada: {
   atual: Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado">;
   pedido: CamposRotinaAtualizaveis;
   agora: number;
+  mudaAcessos?: boolean;
 }): { normalizada: RotinaNormalizada; mudou: (keyof CamposRotinaAtualizaveis)[] } {
   const chaves = ["cron", "fusoIana", "instrucao", "fonte", "entregavel", "limitesAprovacao", "politicaSemDado"] as const;
   const fundido = { ...entrada.atual };
@@ -107,6 +109,6 @@ export function validarAtualizacaoRotina(entrada: {
     fundido[k] = limpo;
     mudou.push(k);
   }
-  if (mudou.length === 0) throw new RotinaInvalida("entrada_invalida", "nenhum campo muda");
+  if (mudou.length === 0 && entrada.mudaAcessos !== true) throw new RotinaInvalida("entrada_invalida", "nenhum campo muda");
   return { normalizada: validarRotinaNormalizada({ ...fundido, agora: entrada.agora }), mudou };
 }

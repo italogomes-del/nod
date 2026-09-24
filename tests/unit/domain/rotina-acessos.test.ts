@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CapacidadeConector } from "../../../src/contracts/conector.ts";
-import { capacidadesDoPedido, conectoresCitados, faltaDeAcesso, janelasQueNaoRodaram, necessidadesDaRotina, type ConectorRegistrado } from "../../../src/domain/rotina-acessos.ts";
+import { ErroDeDominio } from "../../../src/domain/erro.ts";
+import { capacidadesDoPedido, conectoresCitados, faltaDeAcesso, janelasQueNaoRodaram, mesmosAcessos, necessidadesDaRotina, normalizarAcessosDeclarados, type ConectorRegistrado } from "../../../src/domain/rotina-acessos.ts";
 
 /**
  * Emenda da ADR-044 ("rotina se trava sozinha"): o que a rotina precisa, decidido antes de gastar um
@@ -36,6 +37,10 @@ describe("necessidadesDaRotina", () => {
     expect(necessidadesDaRotina({ fonte: "gmail", acessos: [{ conector: "slack", capacidades: ["SLACK_LIST", "SLACK_LIST"] }] }, [GMAIL, SLACK])).toEqual([{ slug: "slack", conector: SLACK, capacidades: ["SLACK_LIST"] }]);
     expect(necessidadesDaRotina({ fonte: "gmail", acessos: [] }, [GMAIL, SLACK])).toEqual([]);
     expect(necessidadesDaRotina({ fonte: "", acessos: [{ conector: "notion", capacidades: ["LER"] }] }, [GMAIL])).toEqual([{ slug: "notion", conector: null, capacidades: ["LER"] }]);
+  });
+
+  it("leitura declarada sem capacidades (app por conectar quando a rotina nasceu) pede as de leitura, como a legada", () => {
+    expect(necessidadesDaRotina({ fonte: "", acessos: [{ conector: "gmail", capacidades: [] }] }, [GMAIL])).toEqual([{ slug: "gmail", conector: GMAIL, capacidades: null }]);
   });
 
   it("o card pede as declaradas, ou as de leitura do catálogo (nunca escrita)", () => {
@@ -86,5 +91,43 @@ describe("janelasQueNaoRodaram", () => {
     // A pergunta pendente não é falta de acesso: encerra a contagem.
     expect(janelasQueNaoRodaram([e("bloqueada", "aguardando_resposta", 2), e("bloqueada", "sem_acesso", 1)])).toEqual([]);
     expect(janelasQueNaoRodaram([])).toEqual([]);
+  });
+});
+
+/** Emenda da ADR-044, "rotina nasce com o acesso" (2026-09-24): a rotina declara o que lê ou altera. */
+describe("normalizarAcessosDeclarados", () => {
+  const conectorDe = (slug: string) => [GMAIL, SLACK].find((c) => c.slug === slug) ?? null;
+  const item = (conector: string, nivel: "leitura" | "escrita" = "leitura", capacidades: string[] = []) => ({ conector, capacidades, nivel, nao_pedido: [] });
+  const erro = (fn: () => unknown): string => {
+    try {
+      fn();
+    } catch (e) {
+      if (e instanceof ErroDeDominio) return e.codigo;
+      throw e;
+    }
+    return "nada lançado";
+  };
+
+  it("leitura [] no app conectado já sai com as ferramentas de leitura; app desligado ou do marketplace vira conexão; ordem por slug", () => {
+    expect(normalizarAcessosDeclarados([item("slack"), item("gmail"), item("notion")], conectorDe)).toEqual([
+      { conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], nivel: "leitura", naoPedido: [] },
+      { conector: "notion", capacidades: [], nivel: "leitura", naoPedido: [], conectar: true },
+      { conector: "slack", capacidades: [], nivel: "leitura", naoPedido: [], conectar: true },
+    ]);
+  });
+
+  it("recusa: app inventado, capacidade fora do catálogo, escrita sem nomes, dois itens para o mesmo app", () => {
+    expect(erro(() => normalizarAcessosDeclarados([item("inventado")], conectorDe))).toBe("entrada_invalida");
+    expect(erro(() => normalizarAcessosDeclarados([item("gmail", "leitura", ["GMAIL_NAO_EXISTE"])], conectorDe))).toBe("entrada_invalida");
+    expect(erro(() => normalizarAcessosDeclarados([item("gmail", "escrita")], conectorDe))).toBe("entrada_invalida");
+    expect(erro(() => normalizarAcessosDeclarados([item("gmail"), item("gmail", "escrita", ["GMAIL_SEND_EMAIL"])], conectorDe))).toBe("entrada_invalida");
+  });
+
+  it("mesmosAcessos: mesma declaração em qualquer ordem; null (sem declaração) difere de lista vazia", () => {
+    const a = normalizarAcessosDeclarados([item("gmail"), item("slack")], conectorDe);
+    expect(mesmosAcessos(a, [...a].reverse())).toBe(true);
+    expect(mesmosAcessos(a, a.slice(0, 1))).toBe(false);
+    expect(mesmosAcessos(null, [])).toBe(false);
+    expect(mesmosAcessos(null, null)).toBe(true);
   });
 });
