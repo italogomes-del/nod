@@ -1,6 +1,7 @@
 import { nomeInteligencia } from "./inteligencia.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
+import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
@@ -9,7 +10,7 @@ import { haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
-import { renderDecisoesDaConversa } from "./sua-vez.ts";
+import { detalheAcesso, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -56,7 +57,11 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? "pedido de colaboração" : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
   }
   if (p?.kind === "passe") return `<div class="msg-passe">⏭ ${paragrafos(m.texto)} <span class="tag tag-cinza">${esc(p.motivo.replaceAll("_", " "))}</span></div>`;
-  if (p?.kind === "consentimento") return `<div class="msg-consentimento"><b>Acesso permitido · ${esc(p.slug)}</b><div>${esc(p.capacidade)}</div><details data-disclosure="consentimento-${esc(m.id)}"><summary>Ver registro de autorização</summary>${paragrafos(m.texto)}</details></div>`;
+  if (p?.kind === "consentimento") {
+    // definido em 2026-09-24 (ADR-044): um consentimento cobre um LOTE; as mensagens anteriores têm uma capacidade só.
+    const caps = "capacidades" in p ? p.capacidades : [p.capacidade];
+    return `<div class="msg-consentimento"><b>Acesso permitido · ${esc(p.slug)}</b><div>${caps.length === 1 ? esc(caps[0] ?? "") : `${caps.length} ações`}</div><details data-disclosure="consentimento-${esc(m.id)}"><summary>Ver registro de autorização</summary>${paragrafos(m.texto)}</details></div>`;
+  }
   if (p?.kind === "rotina_execucao") return `<div class="msg-rotina msg-rotina-${esc(p.desfecho)}">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "resultado_aprovacao") return `<div class="msg-resultado">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
@@ -93,7 +98,7 @@ function renderProposta(p: Proposta, estado: Estado): string {
     const slug = p.payload.conector;
     const conectado = estado.conectores.some((c) => c.slug === slug && c.habilitado);
     const nome = estado.marketplace.find((a) => a.slug === slug)?.nome ?? p.payload.conector;
-    return `<section class="connection-card"><span class="app-logo app-${esc(p.payload.conector)}">${esc(nome.slice(0, 1).toUpperCase())}</span><div><b>${conectado ? `${esc(nome)} conectado` : `Conecte o ${esc(nome)}`}</b><p>${conectado ? "Tudo pronto para continuar com seu bot." : "Para seguir com essa tarefa, preciso de acesso a este app."}</p>${conectado ? botao("retomar-conexao", "Continuar tarefa", { classe: "pri", id: p.id, dados: { slug: p.payload.conector } }) : botao("abrir-conexao", "Conectar", { classe: "pri", id: p.payload.conector })}${botao("recusar-proposta", "Agora não", { classe: "link", id: p.id })}</div></section>`;
+    return `<section class="connection-card"><span class="app-logo app-${esc(p.payload.conector)}">${esc(nome.slice(0, 1).toUpperCase())}</span><div><b>${conectado ? `${esc(nome)} conectado` : `Conecte o ${esc(nome)}`}</b><p>${conectado ? "Tudo pronto para continuar com seu bot." : "Para seguir com essa tarefa, preciso de acesso a este app."}</p>${conectado ? botao("retomar-conexao", "Continuar tarefa", { classe: "pri", id: p.id, dados: { slug: p.payload.conector, nivel: p.payload.nivel } }) : botao("abrir-conexao", "Conectar", { classe: "pri", id: p.payload.conector })}${botao("recusar-proposta", "Agora não", { classe: "link", id: p.id })}</div></section>`;
   }
   // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
   // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
@@ -123,31 +128,47 @@ function renderProposta(p: Proposta, estado: Estado): string {
     itens = `<div class="it"><b>quando</b>${esc(c.resumo)}</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it">Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</div>`;
   } else {
     const c = p.payload;
-    itens = `<div class="it"><b>conector</b>${esc(c.conector)}</div><div class="it"><b>capacidades</b>${esc(c.capacidades.join(", "))} (${esc(c.nivel)})</div><div class="it"><b>não pedido</b>${esc(c.naoPedido.join(", ") || "—")}</div>`;
+    const decisao = decisaoAbertaDoCard(p, estado);
+    // definido em 2026-09-24 (ADR-044): com a decisão de mesmo id aberta, o card é a frase do domínio e
+    // um botão; os nomes técnicos vão para o <details>. Sem ela (pedido anterior), o card de revisão.
+    itens = decisao
+      ? `<div class="it">${esc(decisao.frase)}</div>${detalheAcesso(p)}`
+      : `<div class="it"><b>conector</b>${esc(c.conector)}</div><div class="it"><b>capacidades</b>${esc(c.capacidades.join(", "))} (${esc(c.nivel)})</div><div class="it"><b>não pedido</b>${esc(c.naoPedido.join(", ") || "—")}</div><div class="it">Revise o pedido. A autorização final aparecerá aqui na conversa.</div>`;
   }
   return `<div class="card-prop" data-proposta="${esc(p.id)}">
     <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
     <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}</div>
     ${itens}
-    ${p.payload.kind === "acesso" ? '<div class="it">Revise o pedido. A autorização final aparecerá aqui na conversa.</div>' : ""}
-    <div class="ft">${acoesProposta(p)}</div>
+    <div class="ft">${acoesProposta(p, estado)}</div>
   </div>`;
+}
+
+/** A decisão de mesmo id ainda aberta em "Sua vez" (pedir-acesso.ts cria as duas juntas). */
+function decisaoAbertaDoCard(p: Proposta, estado: Estado): Decisao | null {
+  return estado.suaVez?.itens.find((i) => i.decisao.id === p.id && i.estadoColuna !== "vencido")?.decisao ?? null;
 }
 
 /** definido em 2026-09-22: mudar/excluir rotina existente se aplica pela DECISÃO (id === proposta.id),
  *  não por POST propostas/:id/confirmar, que recusa esses kinds (confirmar-proposta.ts). Mesmos
- *  botões e verbos de "Sua vez", para o chat não oferecer um Confirmar que sempre falha. */
-function acoesProposta(p: Proposta): string {
+ *  botões e verbos de "Sua vez", para o chat não oferecer um Confirmar que sempre falha.
+ *  definido em 2026-09-24 (ADR-044): acesso também — um clique concede e continua. "Revisar acesso"
+ *  fica só para o pedido anterior, cuja decisão ainda não existe. */
+function acoesProposta(p: Proposta, estado: Estado): string {
   if (p.payload.kind === "rotina_atualizacao") return `${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter como está", { id: p.id })}`;
   if (p.payload.kind === "rotina_exclusao") return `${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter rotina", { id: p.id })}`;
+  if (p.payload.kind === "acesso" && decisaoAbertaDoCard(p, estado)) {
+    const r = rotulosAcesso(p);
+    return `${botao("decidir-proposta", r.permitir, { classe: "pri", id: p.id })}${botao("recusar-decisao", r.recusar, { id: p.id })}`;
+  }
   return `${botao("confirmar-proposta", p.payload.kind === "acesso" ? "Revisar acesso" : "Confirmar", { classe: "pri", id: p.id })}${botao("recusar-proposta", "Deixar de lado", { id: p.id })}`;
 }
 
 /** A proposta de rotina existente continua 'pendente' quando a decisão dela vence (o varredor só
  *  vence decisões). Os botões do card dariam estado_invalido; sai o card e fica a decisão vencida,
- *  em cinza e com Reabrir, como em "Sua vez". Reaberta, o card volta com os botões funcionando. */
+ *  em cinza e com Reabrir, como em "Sua vez". Reaberta, o card volta com os botões funcionando.
+ *  Pedido de acesso idem desde 2026-09-24 (ADR-044): também nasce com a decisão de mesmo id. */
 function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
-  if (p.payload.kind !== "rotina_atualizacao" && p.payload.kind !== "rotina_exclusao") return false;
+  if (p.payload.kind !== "rotina_atualizacao" && p.payload.kind !== "rotina_exclusao" && p.payload.kind !== "acesso") return false;
   return estado.suaVez?.itens.some((i) => i.decisao.id === p.id && i.estadoColuna === "vencido") ?? false;
 }
 

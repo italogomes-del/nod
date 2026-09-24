@@ -1,3 +1,4 @@
+import type { ResultadoPedirAcesso } from "./acesso.ts";
 import type { MotivoPasse, MotivoSemNovidade } from "./motivos.ts";
 import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
@@ -39,10 +40,10 @@ export const FERRAMENTAS_NOD = {
   },
   pedir_acesso: {
     type: "object",
-    description: "Pede à pessoa acesso a capacidades de um conector. Vira proposta; nada é concedido aqui.",
+    description: "Pede à pessoa acesso a capacidades de um conector. Vira um pedido com botão; nada é concedido aqui: diga que pediu e encerre o turno.",
     properties: {
       conector: { type: "string", description: "Slug do conector registrado ou do marketplace.", minLength: 1 },
-      capacidades: { type: "array", items: { type: "string" }, description: "Nomes exatos das ferramentas do catálogo. Para sugerir conexão ainda ausente, envie [] sem inventar capacidades." },
+      capacidades: { type: "array", items: { type: "string" }, description: "Nomes exatos das ferramentas do catálogo. Para sugerir conexão ainda ausente, envie [] sem inventar capacidades. Numa rotina, [] com nivel leitura pede as ferramentas de leitura do app." },
       nivel: { type: "string", enum: ["leitura", "escrita"] },
       nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
     },
@@ -168,7 +169,7 @@ export type ResultadoPerguntarABot = { tarefa_id: string };
 export type ContratoFerramentaNod = {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoProposta };
-  pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoProposta };
+  pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };
   criar_rotina: { args: ArgsCriarRotina; resultado: ResultadoCriarRotina };
   listar_rotinas: { args: ArgsListarRotinas; resultado: ResultadoListarRotinas };
   pausar_rotina: { args: ArgsPausarRotina; resultado: ResultadoAlternarRotina };

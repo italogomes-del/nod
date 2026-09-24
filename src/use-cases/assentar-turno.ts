@@ -6,6 +6,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -104,7 +105,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
 
   // 0005: a sessão é do executor que a criou; o catcher não cria sessão real (devolve null).
-  if (resultado.sessaoCli && turno.origem !== "rotina" && turno.origem !== "peer") await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor);
+  // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina roda em sessão própria, como a
+  // rotina (emitir-plano-turno.ts); gravá-la trocaria a sessão da conversa pela da execução agendada.
+  const sessaoDaConversa = turno.origem !== "rotina" && turno.origem !== "peer" && !(turno.origem === "retomada" && (await rotinaDoTurno(deps.repos, turno.id)));
+  if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor);
   await deps.repos.gastos.registrar({
     turnoId: turno.id,
     executor,

@@ -538,6 +538,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "retomar-conexao": (el) => agir(async () => {
     const alvo = conversaAtual();
     if (!alvo) return;
+    // definido em 2026-09-24 (ADR-044): pedido de LEITURA vira, no lugar do card de conexão, o card de
+    // um clique com as ferramentas de leitura do app (confirmar-proposta.ts). Escrita segue pelo agente.
+    if (el.dataset.nivel === "leitura") {
+      await api!.confirmarProposta(el.dataset.id ?? "");
+      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "conectores", "sua-vez"] });
+      return;
+    }
     await api!.recusarProposta(el.dataset.id ?? "");
     const texto = `Conectei ${el.dataset.slug ?? "o app"}. Continue o pedido anterior usando o catálogo disponível e peça os acessos necessários.`;
     if (alvo.salaId) await api!.postarNaSala(alvo.salaId, texto);
@@ -618,6 +625,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ocultar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "ocultar"); },
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },
   revogar: (el) => agir(async () => void (await api!.revogar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
+  // definido em 2026-09-24 (ADR-044): o grupo (app · nível) do painel sai inteiro, com um registro só.
+  "revogar-acessos": (el) => agir(async () => void (await api!.revogarAcessos(el.dataset.agente ?? "", (el.dataset.ids ?? "").split(",").filter(Boolean)), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
   "salvar-memoria": (el) =>
     agir(async () => {
       const li = el.closest("[data-memoria]");

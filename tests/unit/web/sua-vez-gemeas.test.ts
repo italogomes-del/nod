@@ -32,6 +32,7 @@ function item(id: string, p: { tipo?: Item["decisao"]["tipo"]; frase?: string; t
     aguardandoHaMs: 1000,
     recusaAutomaticaEmMs: 86_400_000,
     itensAprovacao: [],
+    proposta: null,
   };
 }
 

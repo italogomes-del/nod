@@ -26,6 +26,10 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * salto (E12.4). pedir_a_pessoa (EMENDA 16) entra onde há pessoa para destravar: conversa, sala e
  * rotina — não em criação (o modelo pergunta em texto) nem em peer (o remetente é outro bot).
  *
+ * pedir_acesso entra na rotina desde 2026-09-24 (ADR-044): ele só PROPÕE — quem decide é a pessoa,
+ * num botão —, e sem ele a rotina sem acesso pedia por pedir_a_pessoa em texto a cada execução. No
+ * turno de rotina o domínio só aceita leitura (pedido-acesso.ts).
+ *
  * Ciclo de vida de rotina (listar/pausar/reativar, definido em 2026-09-21) só em conversa e sala,
  * onde a pessoa está presente para pedir e conferir. FORA de propósito em:
  * criação (o agente ainda não tem rotina: o inventário seria vazio), peer (quem fala é outro bot,
@@ -38,7 +42,7 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   criacao: ["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"],
   conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"],
   peer: ["lembrar"],
 };
 
@@ -89,7 +93,7 @@ export type EntradaPlano = {
   pessoaNome: string;
   colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];
   contextoConversa?: string;
-  /** Só para origem rotina: liga efeitoExternoSoPorAprovacao (EMENDA 15). */
+  /** Turno de rotina OU retomada ligada a uma rotina (ADR-044): liga efeitoExternoSoPorAprovacao (EMENDA 15). */
   rotina?: { exigeAprovacao: boolean } | null;
   /** Inventário para o modelo escolher SOBRE QUAL rotina agir; não confundir com `rotina` acima. */
   rotinasDoAgente?: readonly RotinaNoPrompt[];
@@ -163,7 +167,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,
-      efeitoExternoSoPorAprovacao: entrada.turno.origem === "rotina" && entrada.rotina?.exigeAprovacao === true,
+      // definido em 2026-09-24 (ADR-044): o gate vem da ROTINA ligada, não da origem — a retomada de um
+      // turno de rotina (origem 'retomada') perdia o gate e voltava com o catálogo da conversa.
+      efeitoExternoSoPorAprovacao: entrada.rotina?.exigeAprovacao === true,
     },
     /**
      * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado e já reduzido — a regra

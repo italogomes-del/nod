@@ -75,6 +75,11 @@ export type PayloadPropostaAcesso = {
   capacidades: string[];
   nivel: "leitura" | "escrita";
   naoPedido: string[];
+  /**
+   * definido em 2026-09-24 (ADR-044): pedido feito por um turno de rotina. Permitir roda a rotina de
+   * novo na hora; recusar pausa a rotina. Ausente = pedido da conversa, que retoma o turno.
+   */
+  rotinaId?: string;
 };
 /**
  * definido em 2026-09-18: o produto descobre a pasta e a pessoa autoriza em um clique. A proposta

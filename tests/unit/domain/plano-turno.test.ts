@@ -61,9 +61,10 @@ describe("montarPlano", () => {
     expect(p.decididoPor).toBe("regra:reducao_por_confianca");
   });
 
-  it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega e silêncio; sala tem passar/encaminhar", () => {
+  it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega, pedir acesso e silêncio; sala tem passar/encaminhar", () => {
     expect(nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"))).toEqual(["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"]);
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
+    // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
     const sala = nomes(montarPlano({ ...base, modo: "sala" }));
     expect(sala).toContain("passar");
     expect(sala).toContain("encaminhar");
@@ -89,6 +90,16 @@ describe("montarPlano", () => {
     const rotSemGate = montarPlano({ ...base, turno: { ...turno, origem: "rotina" }, modo: "rotina", rotina: { exigeAprovacao: false } });
     expect(rotSemGate.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
     expect(montarPlano(base).politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+  });
+
+  it("ADR-044: o gate vem da rotina LIGADA, não da origem — a retomada de uma rotina com gate continua com gate", () => {
+    const retomada = montarPlano({ ...base, turno: { ...turno, origem: "retomada", retomaTurnoId: "t0" }, modo: "rotina", confianca: "nao_confiavel", rotina: { exigeAprovacao: true } });
+    expect(retomada.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+    expect(nomes(retomada)).not.toContain("exemplo__enviar_email");
+    expect(nomes(retomada)).not.toContain("pausar_rotina");
+    expect(retomada.promptSistema).toContain("Você foi acordado por um agendamento");
+    // Retomada sem rotina ligada é conversa: sem gate.
+    expect(montarPlano({ ...base, turno: { ...turno, origem: "retomada" } }).politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
   });
 
   it("inventário não pronto → executor_indisponivel (nunca promove em silêncio)", () => {

@@ -17,12 +17,28 @@ export function renderDetalhes(estado: Estado): string {
   const rotinas = estado.rotinas.filter((r) => r.rotina.agenteId === a.id);
   const concessoes = estado.concessoes[a.id] ?? [];
 
-  /** Cada concessão com o conector escrito por extenso: "github · ler issues", nunca só um id. */
-  const acessos = concessoes
-    .map((g) => {
-      const c = estado.conectores.find((x) => x.id === g.conectorId);
-      const indisponivel = c?.ultimaFalha ? '<span class="tag tag-ambar" title="o conector está fora do ar">indisponível</span>' : "";
-      return `<li class="acesso"><div><b>${esc(c?.nome ?? "conector")}</b><small>${esc(g.capacidade)}</small></div>${indisponivel}${botao("revogar", "revogar", { classe: "link sm", id: g.id, dados: { agente: a.id } })}</li>`;
+  /**
+   * definido em 2026-09-24 (ADR-044): um clique concede as ferramentas de leitura de um app inteiro, e
+   * 28 linhas de nome técnico escondiam o que importa. Uma linha por app e nível ("Gmail · só leitura ·
+   * 28 ações"), os nomes no <details> e revogar tira o grupo de uma vez, com um registro só. O nível é
+   * o readOnlyHint da sonda; o que o catálogo não descreve conta como escrita — o painel não promete
+   * "só leitura" sem a sonda dizer.
+   */
+  const grupos = new Map<string, { nome: string; leitura: boolean; indisponivel: boolean; itens: typeof concessoes }>();
+  for (const g of concessoes) {
+    const c = estado.conectores.find((x) => x.id === g.conectorId);
+    const leitura = c?.catalogo.find((x) => x.nome === g.capacidade)?.readOnlyHint === true;
+    const chave = `${g.conectorId}:${leitura ? "leitura" : "escrita"}`;
+    const grupo = grupos.get(chave) ?? { nome: c?.nome ?? "conector", leitura, indisponivel: Boolean(c?.ultimaFalha), itens: [] };
+    grupo.itens.push(g);
+    grupos.set(chave, grupo);
+  }
+  const acessos = [...grupos.entries()]
+    .map(([chave, g]) => {
+      const indisponivel = g.indisponivel ? '<span class="tag tag-ambar" title="o conector está fora do ar">indisponível</span>' : "";
+      const acoes = `${g.itens.length} ${g.itens.length === 1 ? "ação" : "ações"}`;
+      const nomes = `<details data-disclosure="acessos-${esc(a.id)}-${esc(chave)}"><summary>ver ${g.itens.length === 1 ? "a ação" : "as ações"}</summary><ul>${g.itens.map((i) => `<li><code>${esc(i.capacidade)}</code></li>`).join("")}</ul></details>`;
+      return `<li class="acesso"><div><b>${esc(g.nome)}</b><small>${g.leitura ? "só leitura" : "pode alterar"} · ${acoes}</small>${nomes}</div>${indisponivel}${botao("revogar-acessos", "revogar", { classe: "link sm", dados: { agente: a.id, ids: g.itens.map((i) => i.id).join(",") }, titulo: g.itens.length === 1 ? "revoga a ação deste grupo" : `revoga as ${acoes} deste grupo` })}</li>`;
     })
     .join("");
 

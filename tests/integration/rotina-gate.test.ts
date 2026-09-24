@@ -111,7 +111,8 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
         agora: AGORA,
       });
       expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["lembrar", "pedir_a_pessoa", "pedir_aprovacao", "perguntar_a_bot", "sem_novidade"]);
+      // ADR-044: pedir_acesso entra na rotina (só propõe; a pessoa decide num botão).
+      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["lembrar", "pedir_a_pessoa", "pedir_acesso", "pedir_aprovacao", "perguntar_a_bot", "sem_novidade"]);
       // turno de conversa comum não liga a flag
       const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       expect(await rotinaDoTurno(repos, comum?.id ?? "")).toBeNull();

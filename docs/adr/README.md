@@ -52,3 +52,4 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-041](adr-041-o-relato-carrega-o-estado-tecnico-a-pessoa-so-aponta.md) | O relato carrega o estado técnico; a pessoa só aponta | novo |
 | [ADR-042](adr-042-aprovacao-permanente-e-regra-nomeada.md) | Aprovação permanente é regra nomeada da pessoa, não ausência de registro | novo |
 | [ADR-043](adr-043-ciclo-de-vida-de-rotinas-pelo-agente.md) | O agente cuida do ciclo de vida da rotina, não só do nascimento | emenda ADR-011, ADR-033, ADR-034 |
+| [ADR-044](adr-044-acesso-em-um-clique-tambem-na-rotina.md) | Acesso em um clique, também na rotina; retomada de rotina continua rotina | emenda ADR-013, ADR-035, ADR-043 |

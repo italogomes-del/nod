@@ -4,7 +4,9 @@ import type { Rotina } from "../../../src/contracts/rotina.ts";
 import { atualizarPerfil } from "../../../src/use-cases/atualizar-perfil.ts";
 import { confirmarProposta } from "../../../src/use-cases/confirmar-proposta.ts";
 import { criarAgente, NOME_INICIAL } from "../../../src/use-cases/criar-agente.ts";
+import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { recusarProposta } from "../../../src/use-cases/recusar-proposta.ts";
+import type { Deps } from "../../../src/use-cases/tipos.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
 describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
@@ -82,15 +84,70 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     expect(events.map((e) => e.kind)).toEqual(["rotina_criada", "mensagem_criada"]);
   });
 
-  it("'acesso' confirma como decisão tipo 'acesso' em Sua vez; nada é concedido aqui", async () => {
+  it("'acesso' anterior (sem decisão) confirma como decisão tipo 'acesso' em Sua vez; nada é concedido aqui", async () => {
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
-    const p = await deps.repos.propostas.criar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, payload: { kind: "acesso", conector: "exemplo", capacidades: ["listar_contatos"], nivel: "leitura", naoPedido: ["enviar_email"] } });
+    await gmailConectado(deps);
+    const p = await deps.repos.propostas.criar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", naoPedido: ["enviar_email"] } });
     const { data, events } = await executar(deps, confirmarProposta, { propostaId: p?.id ?? "" });
-    expect(data.decisao).toMatchObject({ tipo: "acesso", estado: "pendente", agenteId: criado.agente.id });
-    expect(data.decisao?.frase).toContain("listar_contatos");
-    expect(data.decisao?.frase).toContain("não pedido: enviar_email");
+    expect(data.decisao).toMatchObject({ id: p?.id, tipo: "acesso", estado: "pendente", agenteId: criado.agente.id });
+    // ADR-044: a frase é do domínio, sem nome de ferramenta; os nomes vão para o <details> do card.
+    expect(data.decisao?.frase).toBe("Vera precisa ler seu Gmail. Não inclui: enviar, apagar, arquivar.");
     expect(events.map((e) => e.kind)).toEqual(["decisao_criada", "mensagem_criada"]);
+    // "Confirmado por… A partir de agora vale" mentia: confirmar um pedido de acesso não concede.
+    expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toBe("Pedido aberto; nada foi concedido ainda.");
     expect(await deps.repos.concessoes.doAgente(criado.agente.id)).toEqual([]);
   });
+
+  it("ADR-044: pedido que já nasceu com a decisão de mesmo id → confirmar a devolve, sem conflito de chave, sem evento nem mudança", async () => {
+    const { deps, banco } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
+    await gmailConectado(deps);
+    const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "leia meus e-mails", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+    const pedido = await pedirAcesso(deps, { turnoId: turno?.id ?? "", agenteId: criado.agente.id, conversaId: criado.conversa.id, conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", nao_pedido: [] });
+    const decisoesAntes = banco.decisoes.length;
+    const { data, events } = await executar(deps, confirmarProposta, { propostaId: pedido.data.proposta_id });
+    expect(data.decisao?.id).toBe(pedido.data.proposta_id);
+    expect(events).toEqual([]);
+    expect(banco.decisoes).toHaveLength(decisoesAntes);
+    expect((await deps.repos.propostas.buscar(pedido.data.proposta_id))?.estado).toBe("pendente");
+  });
+
+  it("ADR-044: card de conexão de LEITURA com o app já conectado vira, no lugar, o card de concessão de um clique", async () => {
+    const { deps, banco } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
+    const ctx = { turnoId: "turno", agenteId: criado.agente.id, conversaId: criado.conversa.id };
+    const conectar = await pedirAcesso(deps, { ...ctx, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] });
+    const escrita = await pedirAcesso(deps, { ...ctx, conector: "gmail", capacidades: [], nivel: "escrita", nao_pedido: [] });
+    expect(banco.propostas.find((p) => p.id === conectar.data.proposta_id)?.payload).toMatchObject({ conectar: true, capacidades: [] });
+    // Ainda sem conexão: continua dizendo para conectar primeiro.
+    await esperarErro(() => confirmarProposta(deps, { propostaId: conectar.data.proposta_id }), "estado_invalido");
+
+    await gmailConectado(deps);
+    const { data } = await executar(deps, confirmarProposta, { propostaId: conectar.data.proposta_id });
+    expect((await deps.repos.propostas.buscar(conectar.data.proposta_id))?.estado).toBe("confirmada");
+    expect(data.proposta.id).not.toBe(conectar.data.proposta_id);
+    expect(data.proposta.payload).toMatchObject({ kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], nivel: "leitura", turnoId: "turno" });
+    expect(data.proposta.payload).not.toHaveProperty("conectar");
+    expect(data.decisao).toMatchObject({ id: data.proposta.id, tipo: "acesso", estado: "pendente" });
+    expect(await deps.repos.concessoes.doAgente(criado.agente.id)).toEqual([]);
+    // Escrita não vira card automático: o agente pede as capacidades exatas depois da conexão.
+    await esperarErro(() => confirmarProposta(deps, { propostaId: escrita.data.proposta_id }), "estado_invalido");
+  });
 });
+
+/** Gmail conectado e habilitado, catálogo com duas ferramentas de leitura e uma de escrita. */
+async function gmailConectado(deps: Deps): Promise<void> {
+  const conector = await deps.repos.conectores.criar({ nome: "Gmail (Composio)", slug: "gmail", transporte: "http", url: "https://example.com/mcp", declaracao: "nao-toca" });
+  if (!conector) throw new Error("conector");
+  await deps.repos.conectores.registrarSonda(conector.id, {
+    ok: true,
+    agora: deps.agora(),
+    catalogo: [
+      { nome: "GMAIL_FETCH_EMAILS", descricao: "Lê e-mails", schema: { type: "object" }, readOnlyHint: true },
+      { nome: "GMAIL_LIST_LABELS", descricao: "Lista rótulos", schema: { type: "object" }, readOnlyHint: true },
+      { nome: "GMAIL_SEND_EMAIL", descricao: "Envia e-mail", schema: { type: "object" }, readOnlyHint: false },
+    ],
+  });
+  await deps.repos.conectores.habilitar(conector.id, true);
+}

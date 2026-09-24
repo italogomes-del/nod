@@ -124,14 +124,22 @@ export async function agenteVisivel(repos: Repos, agenteId: string): Promise<Age
 }
 
 /**
+ * definido em 2026-09-24 (ADR-044): quantos saltos de `retomaTurnoId` a ligação turno → rotina segue.
+ * Rotina que pergunta, recebe resposta e pergunta de novo encadeia retomadas; cinco cobre o uso real
+ * e o teto impede que uma cadeia malformada vire laço.
+ */
+export const SALTOS_DE_RETOMADA = 5;
+
+/**
  * Liga um turno à rotina que o disparou pela janela reivindicada (rotina_janelas.turno_id, índice da
- * 0004 — pendência L7 §5 resolvida). Turno de retomada segue `retomaTurnoId` um salto.
+ * 0004 — pendência L7 §5 resolvida). Turno de retomada segue a cadeia de `retomaTurnoId` até
+ * SALTOS_DE_RETOMADA: a retomada de uma rotina continua sendo rotina (modo, confiança e gate).
  */
 export async function rotinaDoTurno(repos: Repos, turnoId: string): Promise<{ rotina: Rotina; turnoDisparado: Turno; instanteAgendado: number } | null> {
-  const turno = await repos.turnos.buscar(turnoId);
-  if (!turno) return null;
-  const idDisparado = turno.origem === "retomada" && turno.retomaTurnoId ? turno.retomaTurnoId : turno.id;
-  const disparado = idDisparado === turno.id ? turno : await repos.turnos.buscar(idDisparado);
+  let disparado = await repos.turnos.buscar(turnoId);
+  for (let saltos = 0; disparado?.origem === "retomada" && disparado.retomaTurnoId && saltos < SALTOS_DE_RETOMADA; saltos++) {
+    disparado = await repos.turnos.buscar(disparado.retomaTurnoId);
+  }
   if (!disparado || disparado.origem !== "rotina") return null;
   const janela = await repos.rotinaJanelas.buscarPorTurno(disparado.id);
   if (!janela) return null;

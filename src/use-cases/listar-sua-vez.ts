@@ -1,10 +1,18 @@
 import type { SuaVezDto } from "../contracts/api.ts";
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import { montarFila } from "../domain/fila-frota.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** O que "Sua vez" e "reabrir" precisam de Deps: a rota (e o teste) montam só isto. */
 export type DepsSuaVez = Pick<Deps, "repos" | "escopo" | "agora" | "tx">;
+
+/**
+ * Tipos cuja decisão nasce com o MESMO id de uma proposta (confirmar-proposta.ts, criar-rotina.ts,
+ * rotinas-do-agente.ts, pedir-acesso.ts). definido em 2026-09-24 (ADR-044): o item leva a proposta
+ * para a web rotular o botão ("Permitir e rodar agora" quando o pedido veio de uma rotina).
+ */
+const TIPOS_COM_PROPOSTA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(["acesso", "perfil", "rotina", "rotina_atualizacao", "rotina_exclusao"]);
 
 export type EntradaSuaVez = {
   /**
@@ -39,7 +47,8 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
       decisao = { ...decisao, vistaEm: new Date(agora).toISOString() };
     }
     const itensAprovacao: ItemAprovacao[] = decisao.tipo === "aprovacao" ? await repos.itensAprovacao.listar(decisao.id) : [];
-    itens.push({ ...item, decisao, itensAprovacao });
+    const proposta = TIPOS_COM_PROPOSTA.has(decisao.tipo) ? await repos.propostas.buscar(decisao.id) : null;
+    itens.push({ ...item, decisao, itensAprovacao, proposta });
   }
 
   const foraDoAr = (await repos.inventario.listar())
