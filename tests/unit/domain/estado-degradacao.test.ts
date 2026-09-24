@@ -9,6 +9,11 @@ describe("descreverNegacao (ADR-029: nome, causa e relógio)", () => {
       "conector Exemplo indisponível: servidor fora há 4 min",
     );
   });
+  it("tempo esgotado não se chama 'servidor fora': diz que não respondeu a tempo e o que fazer", () => {
+    const t = descreverNegacao({ classe: "conector_indisponivel", nome: "gmail__GMAIL_FETCH_EMAILS", motivo: "timeout_transporte", desde: agora, terminal: false }, agora);
+    expect(t).toBe("conector gmail__GMAIL_FETCH_EMAILS não respondeu a tempo: a chamada pode ser grande demais; tente pedir menos itens ou só metadados");
+    expect(t).not.toContain("servidor fora");
+  });
   it("ferramenta negada diz o motivo humano e marca terminal", () => {
     expect(descreverNegacao({ classe: "ferramenta_negada", nome: "exemplo__enviar_email", motivo: "capacidade_desligada", desde: agora, terminal: true }, agora)).toBe(
       "ferramenta exemplo__enviar_email negada: capacidade desligada (terminal)",

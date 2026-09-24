@@ -41,3 +41,16 @@ export const SALA_MIN = 2;
 export const SALA_MAX = 6;
 /** Frames guardados por pessoa para replay. definido em 2026-09-16: cobre ~1 min de deltas de um turno; buffer podado → resumed:false (ADR-016). */
 export const BUFFER_SSE_FRAMES = 500;
+
+/** definido em 2026-09-16: 15 s — teto de UMA requisição do servidor a um conector (initialize ou tools/call). */
+export const CHAMADA_CONECTOR_MS = 15_000;
+
+/**
+ * Quanto o proxy da máquina espera o servidor responder a uma ferramenta que não é do computador.
+ * definido em 2026-09-24: tem de cobrir o pior caso do servidor — cliente novo (initialize) mais a
+ * chamada, cada um até CHAMADA_CONECTOR_MS — com folga. Com 5 s, o proxy desistia antes: a Nina
+ * chamou GMAIL_FETCH_EMAILS (20 e-mails, verbose; 3 e-mails já levaram 4,7 s no Composio), o proxy
+ * abortou aos 5 s e respondeu "servidor fora há menos de 1 min" sem o servidor registrar nada.
+ * Fica abaixo do MCP_TOOL_TIMEOUT do filho (>= 60 s, montarEnvDoFilho).
+ */
+export const PRAZO_FERRAMENTA_PROXY_MS = 2 * CHAMADA_CONECTOR_MS + 5_000;
