@@ -5,9 +5,8 @@ import type { Executor, RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-cases/aplicar-proposta-rotina.ts";
-import { retomarAposAcesso } from "../../../use-cases/retomar-apos-acesso.ts";
-import { conceder } from "../../../use-cases/conceder.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
+import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
 import { permitirSempre } from "../../../use-cases/permitir-sempre.ts";
 import { recusarProposta } from "../../../use-cases/recusar-proposta.ts";
@@ -63,9 +62,9 @@ function eventoDecidida(deps: Deps, d: Decisao, extra: Record<string, string | n
 }
 
 /**
- * Rotas de decisão (EMENDA 4, EMENDA-L9 §4): `decidir` cobre os sete tipos que se decidem por
- * botão — aprovacao/gate_rotina (lista tipada, L5), retomar_turno (L6), acesso (conceder, L5),
- * perfil (confirmarProposta, L6), rotina (services.rotinas.ativar, L7; decisao.id === propostaId) —
+ * Rotas de decisão (EMENDA 4, EMENDA-L9 §4): `decidir` cobre os tipos que se decidem por
+ * botão — aprovacao/gate_rotina (lista tipada, L5), retomar_turno (L6), acesso (decidirAcesso,
+ * ADR-044), perfil (confirmarProposta, L6), rotina (services.rotinas.ativar, L7; decisao.id === propostaId) —
  * e recusa os três de pedir_a_pessoa, que se RESPONDEM com texto em `responder`. `retomar` é a
  * retomada por frase da pessoa de um turno interrompido.
  *
@@ -114,8 +113,21 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           return;
         }
 
-        if (atual.tipo === "acesso" || atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
-          // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, confirmar-proposta.ts).
+        if (atual.tipo === "acesso") {
+          // definido em 2026-09-24 (ADR-044): um clique concede e continua (decidir-acesso.ts). Roda como a
+          // DONA — concessão, consentimento e turno exigem owner = pessoa —, gravando quem clicou.
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirAcesso, { decisaoId: atual.id, recusar: recusada(corpo), executor: d.executor ?? "catcher", por: ctx.escopo.pessoaId }));
+          if (r.concessoes > 0) ids.concessoes = String(r.concessoes);
+          if (r.consentimentoId) ids.consentimento = r.consentimentoId;
+          if (r.rotinaId) ids.rotina = r.rotinaId;
+          if (r.turnoId) ids[r.rotinaId ? "turnoRotina" : "turnoRetomada"] = r.turnoId;
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
+          // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, rotinas-do-agente.ts).
           await comoDona(ctx.escopo, atual, async (deps) => {
             const proposta = await deps.repos.propostas.buscar(atual.id);
             const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
@@ -123,16 +135,6 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             const events: RuntimeEvent[] = [eventoDecidida(deps, decidida, { recusada: recusada(corpo) })];
             if (recusada(corpo)) {
               if (proposta && proposta.estado === "pendente") await executar(deps, recusarProposta, { propostaId: proposta.id });
-            } else if (atual.tipo === "acesso") {
-              if (!proposta || proposta.payload.kind !== "acesso") throw new ErroDeDominio("estado_invalido", { cause: "decisão de acesso sem proposta" });
-              const conector = await deps.repos.conectores.buscarPorSlug(proposta.payload.conector);
-              if (!conector) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
-              for (const capacidade of proposta.payload.capacidades) {
-                const r = await executar(deps, conceder, { agenteId: proposta.agenteId, conectorId: conector.id, capacidade, autorTipo: "pessoa" });
-                ids[`concessao_${capacidade}`] = r.concessaoId;
-              }
-              const retomada = await executar(deps, retomarAposAcesso, { decisao: decidida, proposta });
-              if (retomada.turnoId) ids.turnoRetomada = retomada.turnoId;
             } else if (atual.tipo === "rotina") {
               const rotina = await deps.tx((trx) => d.services.rotinas.ativar(trx, atual.id));
               ids.rotina = rotina.id;

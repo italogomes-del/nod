@@ -1,24 +1,64 @@
 import type { Agente } from "../contracts/agente.ts";
-import type { Proposta } from "../contracts/conversa.ts";
+import type { PayloadPropostaAcesso, Proposta } from "../contracts/conversa.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { capacidadesDeLeitura, fraseDoPedidoDeAcesso } from "../domain/pedido-acesso.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type SaidaConfirmarProposta = { proposta: Proposta; agente: Agente | null; rotina: Rotina | null; decisao: Decisao | null };
 
+/** definido em 2026-09-24 (ADR-044): confirmar um pedido de acesso NÃO concede — "Confirmado… vale" mentia. */
+export const PEDIDO_DE_ACESSO_ABERTO = "Pedido aberto; nada foi concedido ainda.";
+
+/**
+ * definido em 2026-09-24 (ADR-044): o card "Conecte o X" sai do caminho depois da conexão. App já
+ * conectado e habilitado e pedido de LEITURA: fecha o card de conexão e abre no lugar o de concessão
+ * (proposta + decisão, um clique), com as ferramentas de leitura do catálogo agora sondado. Escrita
+ * continua pelo agente, que pede as capacidades exatas depois da conexão (web/main.ts, retomar-conexao).
+ */
+async function conexaoViraPedido(deps: Deps, existente: Proposta, p: PayloadPropostaAcesso): Promise<{ data: SaidaConfirmarProposta; events: RuntimeEvent[] }> {
+  const conector = await deps.repos.conectores.buscarPorSlug(p.conector);
+  if (!conector?.habilitado || p.nivel !== "leitura") throw new ErroDeDominio("estado_invalido", { cause: "conecte pelo marketplace antes de pedir capacidades" });
+  const capacidades = capacidadesDeLeitura(conector.catalogo);
+  if (capacidades.length === 0) throw new ErroDeDominio("estado_invalido", { cause: "o app não tem ferramenta de leitura" });
+  if (!(await deps.repos.propostas.decidir(existente.id, "confirmada"))) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
+  const agora = deps.agora();
+  const autoria = autoriaPessoa(deps.escopo);
+  // O agente pode ter pedido de novo depois da conexão: o card de concessão que já está aberto serve.
+  for (const aberta of await deps.repos.propostas.pendentesDaConversa(existente.conversaId)) {
+    if (aberta.payload.kind !== "acesso" || aberta.payload.conectar || aberta.agenteId !== existente.agenteId || aberta.payload.conector !== p.conector) continue;
+    const decisao = await deps.repos.decisoes.buscar(aberta.id);
+    if (decisao && (decisao.estado === "pendente" || decisao.estado === "reaberta")) return { data: { proposta: aberta, agente: null, rotina: null, decisao }, events: [] };
+  }
+  const { conectar: _conectar, ...resto } = p;
+  const rotina = p.rotinaId ? await deps.repos.rotinas.buscar(p.rotinaId) : null;
+  const aberto = await abrirPedidoDeAcesso(deps, { conversaId: existente.conversaId, agenteId: existente.agenteId, turnoId: p.turnoId ?? null, payload: { ...resto, capacidades }, conector, rotina: rotina?.excluidoEm === null ? rotina : null, autoria });
+  const events = [...aberto.events];
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: existente.conversaId, autoria, kind: "sistema", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" });
+  if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: existente.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
+  return { data: { proposta: aberto.proposta, agente: null, rotina: null, decisao: aberto.decisao }, events };
+}
+
 /**
  * Nada vale antes daqui (E1.1). 'perfil': aplica nome/título/descrição e marca confirmado; 'rotina':
- * services.rotinas.ativar (L7) na MESMA tx; 'acesso': vira decisão tipo 'acesso' em "Sua vez" (a
- * concessão em si é o decidir da L5). Confirmar duas vezes → estado_invalido (o repositório só sai de pendente).
+ * services.rotinas.ativar (L7) na MESMA tx; 'acesso': desde 2026-09-24 (ADR-044) o pedido já nasce
+ * com a decisão de mesmo id (pedir-acesso.ts) e confirmar só a devolve — o ramo que cria a decisão
+ * fica para as propostas anteriores, que nasceram sem ela; a concessão em si é decidir-acesso.ts.
+ * Confirmar duas vezes → estado_invalido (o repositório só sai de pendente).
  */
 export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number }, SaidaConfirmarProposta> = async (deps, input) => {
   const existente = await deps.repos.propostas.buscar(input.propostaId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
-  if (existente.payload.kind === "acesso" && existente.payload.conectar) throw new ErroDeDominio("estado_invalido", { cause: "conecte pelo marketplace antes de pedir capacidades" });
+  if (existente.payload.kind === "acesso" && existente.payload.conectar) return conexaoViraPedido(deps, existente, existente.payload);
+  if (existente.payload.kind === "acesso" && existente.estado === "pendente") {
+    const jaAberta = await deps.repos.decisoes.buscar(existente.id);
+    if (jaAberta) return { data: { proposta: existente, agente: null, rotina: null, decisao: jaAberta }, events: [] };
+  }
   const proposta = await deps.repos.propostas.decidir(input.propostaId, "confirmada");
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
 
@@ -54,8 +94,10 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);
+    const conector = await deps.repos.conectores.buscarPorSlug(p.conector);
+    const daRotina = p.rotinaId ? await deps.repos.rotinas.buscar(p.rotinaId) : null;
     // definido em 2026-09-16 (L9): a decisão 'acesso' nasce com o MESMO id da proposta — mesma convenção da
-    // decisão 'rotina' (criar-rotina.ts) — para POST decisoes/:id/decidir achar o payload e chamar `conceder`.
+    // decisão 'rotina' (criar-rotina.ts) — para POST decisoes/:id/decidir achar o payload (decidir-acesso.ts).
     decisao = await deps.repos.decisoes.criar({
       id: proposta.id,
       tipo: "acesso",
@@ -63,10 +105,9 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
       agenteId: proposta.agenteId,
       conversaId: proposta.conversaId,
       prazoDecisaoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
-      frase: `Conceder a ${agenteDaProposta?.nome ?? "agente"} ${p.nivel} em ${p.conector}: ${p.capacidades.join(", ")}${p.naoPedido.length ? ` (não pedido: ${p.naoPedido.join(", ")})` : ""}`,
+      frase: fraseDoPedidoDeAcesso({ agente: agenteDaProposta?.nome ?? "O agente", slug: p.conector, nomeConector: conector?.nome ?? null, capacidades: p.capacidades, catalogo: conector?.catalogo ?? [], rotina: daRotina?.instrucao ?? null }),
     });
     if (!decisao) throw new ErroDeDominio("nao_permitido");
-    resumo = `pedido de acesso a ${p.conector} (${p.capacidades.join(", ")}) aguardando sua decisão`;
     events.push(evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: proposta.conversaId, dados: { decisao_id: decisao.id, tipo: "acesso", proposta_id: proposta.id } }));
   }
 
@@ -74,7 +115,7 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     conversaId: proposta.conversaId,
     autoria,
     kind: "sistema",
-    texto: redigir("proposta-confirmada", agora, { pessoa: nomePessoa, resumo }),
+    texto: proposta.payload.kind === "acesso" ? PEDIDO_DE_ACESSO_ABERTO : redigir("proposta-confirmada", agora, { pessoa: nomePessoa, resumo }),
     confianca: "confiavel",
   });
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));

@@ -81,6 +81,29 @@ export default tseslint.config(
     "a web só faz `import type` de src/contracts e src/shared/types.ts; dado chega pela API (ADR-018, ADR-020).",
     { allowTypeImports: true },
   ),
+  // definido em 2026-09-24 (ADR-044): conceder é ato da PESSOA. Chamam conceder/concederLote só o botão
+  // da decisão de acesso (decidir-acesso.ts) e a concessão manual por capacidade da tela Conectores
+  // (rota de pessoa); conceder-acessos-da-rotina.ts fica reservado para a concessão junto da rotina.
+  // Regra do núcleo (no-restricted-imports), não a do typescript-eslint: a mesma regra num segundo
+  // bloco SUBSTITUIRIA as fronteiras de camada acima para estes arquivos.
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts", "src/**/conceder-acessos-da-rotina.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/conceder.ts"],
+              importNames: ["conceder", "concederLote"],
+              message: "concessão nasce do clique da pessoa: decida pela decisão de acesso (decidir-acesso.ts), nunca por ferramenta, laço ou outro caso de uso (ADR-044).",
+            },
+          ],
+        },
+      ],
+    },
+  },
 
   {
     files: ["tests/**/*.ts"],

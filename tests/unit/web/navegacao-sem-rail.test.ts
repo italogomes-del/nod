@@ -16,6 +16,7 @@ const decisao = (id: string, agenteId: string, agenteNome: string, vencido = fal
   aguardandoHaMs: 0,
   recusaAutomaticaEmMs: 60_000,
   itensAprovacao: [],
+  proposta: null,
 });
 
 const comFila = (itens: SuaVezDto["itens"]): Estado => ({ ...estadoInicial, suaVez: { itens, foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });
@@ -82,7 +83,35 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     const html = renderDetalhes(estado);
     expect(html).toContain("GitHub");
     expect(html).toContain("ler_issues");
-    expect(html).toContain('data-act="revogar"');
+    expect(html).toContain('data-act="revogar-acessos"');
+    expect(html).toContain('data-ids="g1"');
+    // Sem a sonda dizer que é leitura, o painel não promete "só leitura".
+    expect(html).toContain("pode alterar · 1 ação");
+  });
+
+  it("ADR-044: agrupa por app e nível — 'Gmail · só leitura · N ações' — com os nomes técnicos só no <details>", () => {
+    const catalogo = [
+      { nome: "GMAIL_FETCH_EMAILS", readOnlyHint: true },
+      { nome: "GMAIL_LIST_LABELS", readOnlyHint: true },
+      { nome: "GMAIL_SEND_EMAIL", readOnlyHint: false },
+    ];
+    const estado: Estado = {
+      ...base,
+      conectores: [{ id: "k1", nome: "Gmail", slug: "gmail", catalogo, habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
+      concessoes: { a1: [
+        { id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_FETCH_EMAILS" } as never,
+        { id: "g2", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_LIST_LABELS" } as never,
+        { id: "g3", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_SEND_EMAIL" } as never,
+      ] },
+    };
+    const html = renderDetalhes(estado);
+    expect(html.match(/class="acesso"/g)).toHaveLength(2);
+    expect(html).toContain("só leitura · 2 ações");
+    expect(html).toContain("pode alterar · 1 ação");
+    expect(html).toContain('data-ids="g1,g2"');
+    expect(html).toContain('data-ids="g3"');
+    expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
+    expect(html).not.toContain('data-act="revogar"');
   });
 
   it("sem acessos, convida a conectar em vez de deixar a seção muda", () => {

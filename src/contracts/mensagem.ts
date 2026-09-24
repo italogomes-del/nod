@@ -23,6 +23,9 @@ export type PayloadMensagem =
   | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string }
   | { kind: "peer_pedido"; conversaOrigemId: string; turnoOrigemId: string }
   | { kind: "passe"; motivo: MotivoPasse }
+  /** definido em 2026-09-24 (ADR-044): um consentimento por LOTE de capacidades do mesmo app. */
+  | { kind: "consentimento"; conectorId: string; slug: string; capacidades: string[]; naoInclui: string[] }
+  /** Forma das mensagens gravadas antes de 2026-09-24: uma capacidade por consentimento. */
   | { kind: "consentimento"; conectorId: string; slug: string; capacidade: string; naoInclui: string[] }
   | { kind: "rotina_execucao"; rotinaId: string; instanteAgendado: EpochMs; desfecho: DesfechoRotina }
   | { kind: "resultado_aprovacao"; decisaoId: string; itens: { idx: number; desfecho: DesfechoItem }[] }

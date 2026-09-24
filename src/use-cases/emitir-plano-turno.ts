@@ -13,6 +13,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 
 export type EntradaEmitirPlano = {
@@ -28,9 +29,14 @@ export type EntradaEmitirPlano = {
 /** Motor cujo inventário decide a localidade (ADR-019/022). */
 export const MOTOR_CLI = "claude-cli";
 
-export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">): ModoTurno {
+/**
+ * `ligadoARotina`: o turno leva a uma rotina pela janela (rotinaDoTurno). definido em 2026-09-24
+ * (ADR-044): a RETOMADA de um turno de rotina continua rotina — antes ela caía em 'conversa' e voltava
+ * com o catálogo inteiro e sem o gate, depois de ter lido e-mail como entrada não confiável.
+ */
+export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false): ModoTurno {
   if (turno.profundidade >= 1 || turno.origem === "peer") return "peer";
-  if (turno.origem === "rotina") return "rotina";
+  if (turno.origem === "rotina" || ligadoARotina) return "rotina";
   if (turno.origem === "sala" || conversa?.tipo === "sala") return "sala";
   return agente.confirmado ? "conversa" : "criacao";
 }
@@ -71,23 +77,22 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     prontos: (Object.keys(input.harnesses) as IdHarness[]).filter((id) => input.harnesses?.[id]?.estado === "pronto"), preferido: input.harnessPreferido }) : null;
   const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
-  const modo = modoDoTurno(turno, conversa, agente);
+  // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6
+  // resolvida); a retomada segue a cadeia de retomaTurnoId até o turno disparado (ADR-044).
+  const ligacao = turno.origem === "rotina" || turno.origem === "retomada" ? await rotinaDoTurno(deps.repos, turno.id) : null;
+  const modo = modoDoTurno(turno, conversa, agente, ligacao !== null);
   const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, 50);
   const resposta = mensagens.find((m) => m.turnoId === turno.id && m.payload?.kind === "peer_ask");
   const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
   const original = origemId ? await deps.repos.turnos.buscar(origemId) : null;
   // definido em 2026-09-17: rotina e trabalho de colega usam sessão nova com missão e catálogo atuais; o histórico explícito preserva contexto.
-  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina também — o --resume da conversa a levaria de volta ao modo conversa.
+  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   const historico = !sessaoCli ? mensagens.slice(-20).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
-  let rotina: { exigeAprovacao: boolean } | null = null;
-  if (turno.origem === "rotina") {
-    // A janela reivindicada liga o turno à rotina (rotinaJanelas.buscarPorTurno, 0004 — pendência L5 §6 resolvida).
-    // Sem janela (turno de rotina criado fora do scheduler) = gate LIGADO (fail-closed, E7.3).
-    const janela = await deps.repos.rotinaJanelas.buscarPorTurno(turno.id);
-    const daJanela = janela ? await deps.repos.rotinas.buscar(janela.rotinaId) : null;
-    rotina = { exigeAprovacao: daJanela ? daJanela.exigeAprovacao : true };
-  }
+  // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
+  // ligada a uma rotina herda o gate DELA (ADR-044); retomada sem rotina não tem gate.
+  const rotina: { exigeAprovacao: boolean } | null = ligacao ? { exigeAprovacao: ligacao.rotina.exigeAprovacao } : turno.origem === "rotina" ? { exigeAprovacao: true } : null;
 
   // Inventário para o modelo escolher SOBRE QUAL rotina agir (o estado vem computado por COLUNAS:
   // geração antiga do agente lê como 'pausada'). resumoCron traduz o cron para o texto humano.

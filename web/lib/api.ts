@@ -124,6 +124,7 @@ export function criarApi(escopo: Escopo) {
     concessoes: (agenteId: string) => get<{ concessoes: Concessao[] }>(`agentes/${agenteId}/concessoes`),
     conceder: (agenteId: string, conectorId: string, capacidade: string) => post<{ ok: true; ids: { concessao: string; mensagem: string }; naoInclui: string[] }>(`agentes/${agenteId}/concessoes`, { conectorId, capacidade }),
     revogar: (concessaoId: string) => del<RespostaMutacao>(`concessoes/${concessaoId}`),
+    revogarAcessos: (agenteId: string, ids: string[]) => post<RespostaMutacao>(`agentes/${agenteId}/concessoes/revogar`, { ids }),
     suaVez: () => get<SuaVezDto>("sua-vez"),
     decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),

@@ -3,6 +3,7 @@ import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -52,16 +53,25 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
     const original = await deps.repos.turnos.buscar(d.turnoId);
     if (original) {
       await deps.repos.paradas.encerrarAbertas({ conversaId: d.conversaId, agora });
+      // definido em 2026-09-24 (ADR-044): a retomada de uma rotina roda como rotina, em sessão nova
+      // (emitir-plano-turno.ts), então precisa da entrada ORIGINAL da rotina para saber o que fazer.
+      const daRotina = await rotinaDoTurno(deps.repos, original.id);
       turno = await deps.repos.turnos.enfileirar({
         conversaId: d.conversaId,
         agenteId: d.agenteId,
         origem: "retomada",
         prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
         profundidade: original.profundidade,
-        entradaTexto: `Resposta de ${input.respondidaPor.nome} ao seu pedido (${d.tipo}: "${d.frase}"): ${input.texto}\nContinue a partir daqui; nada foi reenviado.`,
-        entradaConfianca: "confiavel",
+        entradaTexto: [
+          `Resposta de ${input.respondidaPor.nome} ao seu pedido (${d.tipo}: "${d.frase}"): ${input.texto}`,
+          "Continue a partir daqui; nada foi reenviado.",
+          ...(daRotina ? ["Entrada original da rotina:", daRotina.turnoDisparado.entradaTexto] : []),
+        ].join("\n"),
+        // definido em 2026-09-24 (ADR-044): a confiança é a do turno que PAROU, nunca "confiavel" fixo. A
+        // rotina que leu e-mail nasce nao_confiavel; responder por ela não limpa o que já está no contexto.
+        entradaConfianca: original.entradaConfianca,
         modelo: original.modelo,
-    harness: original.harness,
+        harness: original.harness,
         retomaTurnoId: original.id,
         reenvios: original.reenvios + 1,
         executor: input.executor ?? "catcher",

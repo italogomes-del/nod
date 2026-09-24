@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { TipoDecisao } from "../contracts/decisao.ts";
+import type { Decisao, TipoDecisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { ArgsPedirAPessoa } from "../contracts/ferramentas-nod.ts";
-import type { CasoNod } from "../contracts/servicos.ts";
+import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { redigir } from "../domain/redacao.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -49,6 +50,22 @@ function fraseDoPedido(args: ArgsPedirAPessoa, quem: string, agora: number): str
 }
 
 /**
+ * definido em 2026-09-24 (ADR-044): a rotina que dispara às 8h, 13h e 18h e esbarra no mesmo buraco
+ * perguntaria de novo a cada disparo — a Nina deixava um card por execução. Num turno de rotina, a
+ * decisão PENDENTE do mesmo agente e tipo cujo turno leva à MESMA rotina já é a pergunta: reaproveita,
+ * sem mensagem nem evento novos. Fora de rotina nada muda (cada conversa pergunta o que precisa).
+ */
+async function pedidoDaMesmaRotina(deps: Deps, input: ContextoFerramenta, tipo: TipoDecisao): Promise<Decisao | null> {
+  const daRotina = await rotinaDoTurno(deps.repos, input.turnoId);
+  if (!daRotina) return null;
+  for (const d of await deps.repos.decisoes.pendentesDaConversa(input.conversaId)) {
+    if (d.agenteId !== input.agenteId || d.tipo !== tipo || d.turnoId === null) continue;
+    if ((await rotinaDoTurno(deps.repos, d.turnoId))?.rotina.id === daRotina.rotina.id) return d;
+  }
+  return null;
+}
+
+/**
  * Nona ferramenta nod (EMENDA 16): cria uma Decisao TIPADA ('pergunta' | 'falta_de_dado' |
  * 'permissao') dirigida à pessoa nomeada (perna extra da RLS, EMENDA 1) ou à dona, escreve a
  * mensagem de parada na conversa ("parei: falta X; quem destrava: Y; não vou tentar de novo",
@@ -59,9 +76,11 @@ function fraseDoPedido(args: ArgsPedirAPessoa, quem: string, agora: number): str
 export const pedirAPessoa: CasoNod<Deps, "pedir_a_pessoa"> = async (deps, input) => {
   const agora = deps.agora();
   const args = normalizarPedidoAPessoa(input);
+  const tipo: TipoDecisao = args.tipo;
+  const repetida = await pedidoDaMesmaRotina(deps, input, tipo);
+  if (repetida) return { data: { estado: "pendente", decisao_id: repetida.id, instrucao: "encerre o turno; a resposta retoma depois" }, events: [] };
   const decisor = await resolverDecisor(deps, args.quem_destrava);
   const frase = fraseDoPedido(args, decisor.nome, agora);
-  const tipo: TipoDecisao = args.tipo;
   const decisao = await deps.repos.decisoes.criar({
     tipo,
     decisorId: decisor.id,

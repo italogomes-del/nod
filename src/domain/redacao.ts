@@ -43,7 +43,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "rotina-falhou": "A rotina falhou por erro técnico: {motivo}. Nada foi enviado; a próxima execução segue agendada.",
   handoff: "{de} passou para {para}: {motivo}.",
   passe: "{agente} passou a vez ({motivo}).",
-  consentimento: "Concedido por {pessoa} em {quando}: {slug}.{capacidade}; não inclui: {naoInclui}.",
+  // definido em 2026-09-24 (ADR-044): {escopo} é a lista `slug.capacidade` do lote; com uma só, o texto é o de antes.
+  consentimento: "Concedido por {pessoa} em {quando}: {escopo}; não inclui: {naoInclui}.",
   "executor-indisponivel": "Nenhum trabalho começa: executor indisponível ({motivo}) desde {desde}.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   "decisao-vencida": "Esta decisão venceu em {quando} sem resposta ({desfecho}). Você pode reabrir.",

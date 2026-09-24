@@ -297,7 +297,8 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
       expect(c.ids.concessao).toBeTruthy();
     }
     const consentimentos = (await conversa(vera.conversaId)).mensagens.filter((m) => m.kind === "consentimento");
-    expect(consentimentos.map((m) => m.payload?.kind === "consentimento" && m.payload.capacidade)).toEqual(["listar_contatos", "enviar_email"]);
+    // ADR-044: o consentimento carrega o LOTE (`capacidades`); aqui foram dois pedidos de uma capacidade cada.
+    expect(consentimentos.map((m) => m.payload?.kind === "consentimento" && "capacidades" in m.payload && m.payload.capacidades)).toEqual([["listar_contatos"], ["enviar_email"]]);
     expect(consentimentos[0]?.texto).toMatch(new RegExp(`^Concedido por ${NOME_PESSOA} em .* UTC: exemplo\\.listar_contatos; não inclui: enviar_email`));
     expect((await json<FrotaDto>("GET", "frota")).agentes.find((a) => a.id === vera.agenteId)?.descricaoEstado).toMatch(/^2 acessos · executou \d+ vezes$/);
 

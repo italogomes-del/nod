@@ -49,7 +49,8 @@ export type ConversaDto = {
 };
 
 export type SuaVezDto = {
-  itens: (ItemFila & { itensAprovacao: ItemAprovacao[] })[];
+  /** `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos. */
+  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null })[];
   foraDoAr: { nome: string; desde: EpochMs }[];
   vazio: boolean;
   ultimaDecisaoEm: IsoUtc | null;
@@ -96,6 +97,8 @@ export const ROTAS = [
   { metodo: "GET", caminho: "agentes/:id/concessoes", lane: "L5" },
   { metodo: "POST", caminho: "agentes/:id/concessoes", lane: "L5" },
   { metodo: "DELETE", caminho: "concessoes/:id", lane: "L5" },
+  /** definido em 2026-09-24 (ADR-044): revoga um grupo (app · nível) com UM registro escrito. */
+  { metodo: "POST", caminho: "agentes/:id/concessoes/revogar", lane: "L5" },
   { metodo: "GET", caminho: "conversas/:id/mensagens", lane: "L6" },
   { metodo: "POST", caminho: "conversas/:id/mensagens", lane: "L6" },
   { metodo: "POST", caminho: "conversas/:id/parar", lane: "L6" },

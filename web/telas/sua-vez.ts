@@ -1,4 +1,5 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
+import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
@@ -20,6 +21,27 @@ const TIPO_HUMANO: Record<Item["decisao"]["tipo"], string> = {
 };
 
 const JUSTIFICATIVA_PADRAO = "Veio de um lugar que guarda dado de aprendiz. Deixei desmarcado — só você pode marcar.";
+
+/**
+ * definido em 2026-09-24 (ADR-044): um clique concede E continua, e o botão diz isso. Pedido que veio
+ * de uma rotina a roda de novo na hora; recusar pausa a rotina, porque sem o acesso ela pediria de
+ * novo a cada disparo. Mesmos rótulos no card da conversa e em "Sua vez".
+ */
+export function rotulosAcesso(proposta: Proposta | null | undefined): { permitir: string; recusar: string } {
+  return proposta?.payload.kind === "acesso" && proposta.payload.rotinaId
+    ? { permitir: "Permitir e rodar agora", recusar: "Pausar rotina" }
+    : { permitir: "Permitir e continuar", recusar: "Não permitir" };
+}
+
+/** Os nomes técnicos do pedido existem, mas atrás do disclosure: a frase é o que a pessoa lê. */
+export function detalheAcesso(proposta: Proposta | null | undefined): string {
+  if (proposta?.payload.kind !== "acesso" || proposta.payload.capacidades.length === 0) return "";
+  const c = proposta.payload;
+  const n = c.capacidades.length;
+  return `<details class="ap-detalhe" data-disclosure="acesso-${esc(proposta.id)}"><summary>${n === 1 ? "Ver a ação pedida" : `Ver as ${n} ações pedidas`}</summary>
+    <ul class="acesso-acoes">${c.capacidades.map((cap) => `<li><code>${esc(c.conector)}.${esc(cap)}</code></li>`).join("")}</ul>${c.naoPedido.length ? `<p class="mudo">Não pedido: ${esc(c.naoPedido.join(", "))}</p>` : ""}
+  </details>`;
+}
 
 /**
  * "no Slack" a partir do slug do destino: `Conector.nome` é o rótulo que a PESSOA deu no registro e
@@ -121,8 +143,10 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
       return renderAprovacao(item, true, conectores);
     case "retomar_turno":
       return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}</div>`;
-    case "acesso":
-      return `<div class="acoes">${botao("decidir-proposta", "Permitir acesso", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Não permitir", { id: d.id })}</div>`;
+    case "acesso": {
+      const r = rotulosAcesso(item.proposta);
+      return `<div class="acoes">${botao("decidir-proposta", r.permitir, { classe: "pri", id: d.id })}${botao("recusar-decisao", r.recusar, { id: d.id })}</div>`;
+    }
     case "perfil":
     case "rotina":
       return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
@@ -146,6 +170,7 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
     <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span><b>${esc(item.agenteNome)}</b><span class="mudo">${relogio}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
     <div class="dec-frase">${esc(d.frase)}</div>
+    ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
     ${renderAcoes(item, aberta, estado.conectores)}
     ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}

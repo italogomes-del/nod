@@ -4,11 +4,11 @@ import type { Proposta } from "../../../src/contracts/conversa.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem, renderTimeline } from "../../../web/telas/conversa.ts";
-import { renderDecisoesDaConversa } from "../../../web/telas/sua-vez.ts";
+import { renderDecisoesDaConversa, renderSuaVez } from "../../../web/telas/sua-vez.ts";
 
 const item: SuaVezDto["itens"][number] = {
   decisao: { tenantId: "t", id: "d", ownerId: "p", decisorId: "p", agenteId: "a", conversaId: "c", turnoId: null, tipo: "acesso", estado: "pendente", prazoDecisaoEm: "2026-09-18T00:00:00Z", prazoExecucaoEm: null, frase: "Ler Slack <script>alert(1)</script>", desfecho: null, vistaEm: null, criadoEm: "2026-09-17T00:00:00Z" },
-  estadoColuna: "pendente", agenteNome: "Milton", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, itensAprovacao: [],
+  estadoColuna: "pendente", agenteNome: "Milton", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, itensAprovacao: [], proposta: null,
 };
 const estado: Estado = { ...estadoInicial, suaVez: { itens: [item], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } };
 const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], deltas: {}, carregadaEm: 0 };
@@ -19,7 +19,8 @@ describe("decisões no chat", () => {
     expect(html).toContain("Preciso da sua decisão para continuar");
     expect(html).toContain('data-act="decidir-proposta"');
     expect(html).toContain('data-id="d"');
-    expect(html).toContain("Permitir acesso");
+    // ADR-044: um clique concede E continua, e o botão diz isso.
+    expect(html).toContain("Permitir e continuar");
     expect(html).toContain("Não permitir");
     expect(html).not.toContain('data-act="abrir-conversa"');
     expect(html).toContain("&lt;script&gt;");
@@ -30,7 +31,7 @@ describe("decisões no chat", () => {
   it("não duplica a decisão que já tem proposta e remove o cartão quando a fila é reidratada", () => {
     expect(renderDecisoesDaConversa(estado, "c", new Set(["d"]))).toBe("");
     const atualizado = reduzir(estado, { tipo: "hidratar-sua-vez", suaVez: { itens: [], foraDoAr: [], vazio: true, ultimaDecisaoEm: "2026-09-17T00:01:00Z" } });
-    expect(renderTimeline(conversa, atualizado)).not.toContain("Permitir acesso");
+    expect(renderTimeline(conversa, atualizado)).not.toContain("Permitir e continuar");
   });
 
   it("pedido vencido oferece reabertura e não concede acesso", () => {
@@ -150,6 +151,76 @@ describe("decisões no chat", () => {
     const aberto = renderTimeline({ ...conversa, propostas: [proposta] }, reaberta);
     expect(aberto.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
     expect(aberto).toContain("Excluir rotina");
+  });
+
+  describe("pedido de acesso em um clique (ADR-044)", () => {
+    const FRASE = "Nina precisa ler seu Gmail para a rotina “E-mails às 8h, 13h e 18h”. Não inclui: enviar, apagar, arquivar.";
+    const deRotina: Proposta = { tenantId: "t", id: "d", conversaId: "c", agenteId: "a", estado: "pendente", criadoEm: 0, kind: "acesso", payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], nivel: "leitura", naoPedido: [], turnoId: "t1", rotinaId: "r1" } };
+    const comDecisao = (p: Proposta, estadoColuna: "pendente" | "vencido" = "pendente"): Estado => ({
+      ...estado,
+      suaVez: { ...estado.suaVez!, itens: [{ ...item, estadoColuna, decisao: { ...item.decisao, estado: estadoColuna === "vencido" ? "vencida" : "pendente", frase: FRASE }, proposta: p }] },
+    });
+
+    it("pedido de rotina: a frase do domínio, 'Permitir e rodar agora' / 'Pausar rotina' pela decisão, e as ferramentas só no <details>", () => {
+      const html = renderTimeline({ ...conversa, propostas: [deRotina] }, comDecisao(deRotina));
+      expect(html).toContain("Nina precisa ler seu Gmail");
+      expect(html).toContain("Permitir e rodar agora");
+      expect(html).toContain("Pausar rotina");
+      expect(html.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
+      expect(html.match(/data-act="recusar-decisao"/g)).toHaveLength(1);
+      expect(html).not.toContain('data-act="confirmar-proposta"');
+      expect(html).not.toContain("Revisar acesso");
+      // O card da proposta e o item da decisão são o MESMO pedido: aparece uma vez só.
+      expect(html).not.toContain("Preciso da sua decisão para continuar");
+      expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
+      expect(html).toContain("Ver as 2 ações pedidas");
+    });
+
+    it("pedido da conversa: 'Permitir e continuar' / 'Não permitir'", () => {
+      const daConversa: Proposta = { ...deRotina, payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", naoPedido: [], turnoId: "t1" } };
+      const html = renderTimeline({ ...conversa, propostas: [daConversa] }, comDecisao(daConversa));
+      expect(html).toContain("Permitir e continuar");
+      expect(html).toContain("Não permitir");
+      expect(html).toContain("Ver a ação pedida");
+    });
+
+    it("pedido anterior, sem decisão em Sua vez, continua com 'Revisar acesso'", () => {
+      const html = renderTimeline({ ...conversa, propostas: [deRotina] }, { ...estadoInicial });
+      expect(html).toContain('data-act="confirmar-proposta"');
+      expect(html).toContain("Revisar acesso");
+      expect(html).not.toContain('data-act="decidir-proposta"');
+    });
+
+    it("decisão de acesso vencida tira o card e deixa a decisão vencida com Reabrir", () => {
+      const html = renderTimeline({ ...conversa, propostas: [deRotina] }, comDecisao(deRotina, "vencido"));
+      expect(html).not.toContain("Pausar rotina");
+      expect(html).not.toContain('data-act="decidir-proposta"');
+      expect(html).toContain('data-act="reabrir"');
+    });
+
+    it("card de conexão leva o nível para o botão (leitura vira card de um clique; escrita volta ao agente)", () => {
+      const conectar: Proposta = { ...deRotina, id: "k", payload: { kind: "acesso", conector: "gmail", conectar: true, capacidades: [], nivel: "leitura", naoPedido: [], rotinaId: "r1" } };
+      const conectado: Estado = { ...estadoInicial, conectores: [{ tenantId: "t", id: "cx", ownerId: "p", visibility: "privado", nome: "Gmail", slug: "gmail", transporte: "http", comando: null, args: [], url: null, env: {}, declaracao: "nao-toca", habilitado: true, catalogo: [], sondadoEm: null, ultimaFalha: null, criadoEm: 0 }] };
+      const html = renderTimeline({ ...conversa, propostas: [conectar] }, conectado);
+      expect(html).toContain('data-act="retomar-conexao"');
+      expect(html).toContain('data-nivel="leitura"');
+    });
+
+    it("'Sua vez' usa os mesmos rótulos, vindos de item.proposta, e mostra as ações pedidas no <details>", () => {
+      const html = renderSuaVez(comDecisao(deRotina));
+      expect(html).toContain("Permitir e rodar agora");
+      expect(html).toContain("Pausar rotina");
+      expect(html).toContain("Ver as 2 ações pedidas");
+      expect(renderSuaVez(estado)).toContain("Permitir e continuar");
+    });
+
+    it("consentimento em lote mostra a contagem; o registro com cada ferramenta fica recolhido", () => {
+      const m: Mensagem = { tenantId: "t", id: "m", conversaId: "c", turnoId: null, kind: "consentimento", texto: "Concedido por Marlon em 2026-09-24 12:00 UTC: gmail.GMAIL_FETCH_EMAILS, gmail.GMAIL_LIST_LABELS; não inclui: …", payload: { kind: "consentimento", conectorId: "cx", slug: "gmail", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"], naoInclui: [] }, confianca: "confiavel", parcial: false, criadoEm: 0, autoria: { autor_tipo: "pessoa", autor_id: "p", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 } };
+      const html = renderMensagem(m, estado);
+      expect(html).toContain("Acesso permitido · gmail");
+      expect(html).toContain("2 ações");
+      expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
+    });
   });
 });
 

@@ -71,6 +71,30 @@ describe("montarPromptSistema", () => {
     expect(a).toContain("x".repeat(INSTRUCAO_ROTINA_NO_PROMPT));
   });
 
+  it("ADR-044: rotina sem acesso pede por pedir_acesso (leitura, capacidades []) e encerra — nunca por pedir_a_pessoa", () => {
+    const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), f("pedir_a_pessoa")], pessoaNome: "Marlon", modo: "rotina" });
+    expect(p).toContain("Se faltar acesso a um app, chame pedir_acesso com o slug, capacidades [] e nivel leitura, e encerre");
+    expect(p).toContain("a rotina roda de novo sozinha");
+    expect(p).toContain("Nunca use pedir_a_pessoa para pedir acesso");
+    expect(p).toContain("Se a consulta falhar por erro técnico, diga o erro em uma frase");
+    expect(p).not.toContain("informe o bloqueio");
+  });
+
+  it("ADR-044: na rotina entram só os slugs — o catálogo de cada conexão (~4-5 mil tokens) fica de fora", () => {
+    const conectores = [{ tenantId: "t", id: "k1", ownerId: "p", visibility: "privado" as const, nome: "Interno", slug: "interno", transporte: "stdio" as const, comando: "node", args: [], url: null, env: {}, declaracao: "nao-toca" as const, habilitado: true, catalogo: [{ nome: "LER_TUDO", descricao: "lê tudo", schema: { type: "object" as const }, readOnlyHint: true }], sondadoEm: 1, ultimaFalha: null, criadoEm: 0 }];
+    const rotina = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "Marlon", modo: "rotina", conectores });
+    expect(rotina).not.toContain("Conexões cadastradas");
+    expect(rotina).not.toContain("Apps do marketplace");
+    expect(rotina).not.toContain("LER_TUDO");
+    expect(rotina).toMatch(/Apps que você pode pedir com pedir_acesso \(slug\): [a-z_, ]*gmail[a-z_, ]*interno/);
+    const conversa = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "Marlon", modo: "conversa", conectores });
+    expect(conversa).toContain("Conexões cadastradas");
+    expect(conversa).toContain("Apps do marketplace");
+    expect(conversa).toContain("LER_TUDO");
+    // Sem pedir_acesso no catálogo, nenhuma das duas formas aparece.
+    expect(montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "rotina", conectores })).not.toContain("pedir_acesso (slug)");
+  });
+
   it("memória é limitada para o prompt não crescer sem teto", () => {
     const muitas = Array.from({ length: MEMORIAS_NO_PROMPT + 5 }, (_, i) => mem(`m${i}`, `fato ${i}`, i));
     const p = montarPromptSistema({ agente, memorias: muitas, ferramentas: [], pessoaNome: "M", modo: "conversa" });
