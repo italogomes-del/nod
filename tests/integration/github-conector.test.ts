@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { chaveDe, cifrar, decifrar } from "../../src/db/cifra.ts";
 import { configGithubNativo } from "../../src/adapters/conectores-locais/github/nativo.ts";
@@ -6,6 +6,8 @@ import { rotasConectores } from "../../src/adapters/http/rotas/conectores.ts";
 import type { DentroDeTx } from "../../src/adapters/http/rotas/dentro-de-tx.ts";
 import { rotasMarketplace } from "../../src/adapters/http/rotas/marketplace.ts";
 import { CAPACIDADES_GITHUB, COMANDO_GITHUB_NATIVO } from "../../src/contracts/github.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import { criarRepos } from "../../src/repositories/index.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
 import { criarConectoresVivos } from "../../src/services/conectores-vivos.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
@@ -16,12 +18,14 @@ import { registrarConector } from "../../src/use-cases/registrar-conector.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { expectRejected } from "../helpers/expect-rejected.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
 const CHAVE = chaveDe("teste-github-local");
 const LEITURA = CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => c.nome);
 const TODAS = CAPACIDADES_GITHUB.map((c) => c.nome);
@@ -51,7 +55,7 @@ function depsGithub(trx: Tx, escopo: Escopo, ghLogado: boolean, opcoes: { carreg
       return r.ok ? { nome: c.slug, transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, env: r.cfg.env } : null;
     },
   });
-  const deps: Deps = { ...base.deps, services: { ...base.deps.services, conectores: vivos, githubLocal: { ghLogado: async () => ghLogado } } };
+  const deps: Deps = { ...base.deps, services: { ...base.deps.services, conectores: vivos, github: { prontoSemConfiguracao: async () => (ghLogado ? "gh" : null) } } };
   return { deps, repos: base.repos, sondas };
 }
 
@@ -135,7 +139,7 @@ describeIntegracao("GitHub nativo: registro sem configuração (ADR-047)", () =>
         const sessao = await srv.entrar("marlon");
         const r = await srv.chamar(sessao, "POST", "marketplace/github/conectar");
         expect(r.status).toBe(200);
-        expect(await r.json()).toEqual({ conectado: true, conectorId: legado.id, jeito: "gh" });
+        expect(await r.json()).toEqual({ conectado: true, conectorId: legado.id });
         expect(await repos.conectores.buscar(legado.id)).toMatchObject({ transporte: "stdio", comando: COMANDO_GITHUB_NATIVO, url: null, habilitado: true, envCifrado: null });
         const lista = await (await srv.chamar(sessao, "GET", "conectores")).json() as { conectores: { slug: string; comando: string }[]; marketplace: { slug: string }[] };
         expect(lista.conectores.filter((c) => c.slug === "github")).toEqual([expect.objectContaining({ comando: COMANDO_GITHUB_NATIVO })]);
@@ -231,6 +235,69 @@ describeIntegracao("GitHub nativo: registro sem configuração (ADR-047)", () =>
       } finally {
         await srv.close();
       }
+    });
+  });
+
+  it("GitHub App da organização (0027): do tenant — a Ana lê, só quem cadastrou troca; a rota gera um token antes de guardar e nunca devolve a chave", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+      const { deps, repos } = depsGithub(trx, MARLON, false);
+      const dentro: DentroDeTx = (escopo, fn) => fn({ ...deps, escopo, repos: depsSobre(trx, escopo).repos });
+      const trocas: string[] = [];
+      let status = 201;
+      const fakeFetch: typeof fetch = async (url) => {
+        expect(String(url)).toBe("https://api.github.test/app/installations/987/access_tokens");
+        return Response.json({ token: "ghs_tokendeinstalacao1234567890", expires_at: "2099-01-01T00:00:00Z" }, { status });
+      };
+      const srv = await servidorDeTeste(rotasMarketplace({ dentro, cifrar: (s) => cifrar(s, CHAVE), decifrar: (s) => decifrar(s, CHAVE), fetchImpl: fakeFetch, apiGithub: "https://api.github.test", aoTrocarApp: (t) => trocas.push(t) }));
+      try {
+        const sessao = await srv.entrar("marlon");
+        expect(await (await srv.chamar(sessao, "GET", "marketplace/github/app")).json()).toEqual({ configurado: false });
+        expect((await srv.chamar(sessao, "POST", "marketplace/github/app", { appId: "12a", instalacaoId: "987", chavePrivada: pem })).status).toBe(400);
+        expect((await srv.chamar(sessao, "POST", "marketplace/github/app", { appId: "123", instalacaoId: "987", chavePrivada: "não é pem" })).status).toBe(400);
+        status = 404;
+        expect((await srv.chamar(sessao, "POST", "marketplace/github/app", { appId: "123", instalacaoId: "987", chavePrivada: pem })).status).toBe(403);
+        expect(await repos.githubApp.config()).toBeNull();
+        status = 201;
+        expect((await srv.chamar(sessao, "POST", "marketplace/github/app", { appId: "123", instalacaoId: "987", chavePrivada: pem })).status).toBe(200);
+        expect(trocas).toEqual([TENANT_LEAPY]);
+        const get = await (await srv.chamar(sessao, "GET", "marketplace/github/app")).text();
+        expect(JSON.parse(get)).toEqual({ configurado: true, appId: "123", instalacaoId: "987", podeTrocar: true });
+        const guardada = await repos.githubApp.config();
+        expect(guardada?.chavePrivadaCifrada).not.toContain("PRIVATE KEY");
+        expect(decifrar(guardada?.chavePrivadaCifrada ?? "", CHAVE)).toBe(pem.trim());
+      } finally {
+        await srv.close();
+      }
+
+      await vincularEscopo(trx, ANA);
+      const daAna = criarRepos(trx, ANA);
+      expect(await daAna.githubApp.config()).toMatchObject({ appId: "123", ownerId: PESSOA_MARLON });
+      await expectRejected(trx, () => daAna.githubApp.salvar({ appId: "999", instalacaoId: "1", chavePrivadaCifrada: "x" }), "42501");
+      await vincularEscopo(trx, MARLON);
+    });
+  });
+
+  it("no servidor compartilhado, com o App da organização, o GitHub também nasce sozinho — pelo jeito app, nunca pelo gh", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const base = depsSobre(trx, MARLON);
+      const jeitos: string[] = [];
+      const vivos = criarConectoresVivos({
+        agora: () => Date.now(),
+        carregar: async () => null,
+        resolverSemBanco: async (c) => {
+          const r = configGithubNativo({ onde: "servidor", envConector: {}, ghLogado: true, app: { token: "ghs_x", expiraEm: Date.now() + 3_000_000 }, ambiente: process.env });
+          if (!r.ok) return null;
+          jeitos.push(r.cfg.jeito);
+          return { nome: c.slug, transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, env: r.cfg.env, expiraEm: r.cfg.expiraEm };
+        },
+      });
+      const deps: Deps = { ...base.deps, services: { ...base.deps.services, conectores: vivos, github: { prontoSemConfiguracao: async () => "app" } } };
+      const r = await pedirAcesso(deps, { turnoId: await turnoDaConversa(base.repos, conversaId, agenteId), conversaId, agenteId, conector: "github", capacidades: ["pr_ver"], nivel: "leitura", nao_pedido: [] });
+      expect(jeitos).toEqual(["app"]);
+      expect(await base.repos.decisoes.buscar(r.data.proposta_id)).toMatchObject({ tipo: "acesso", estado: "pendente" });
     });
   });
 

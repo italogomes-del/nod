@@ -1053,6 +1053,12 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     form.reset();
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
   }),
+  "app-github": (form) => agir(async () => {
+    const d = new FormData(form);
+    await api!.appGithub({ appId: String(d.get("appId") ?? ""), instalacaoId: String(d.get("instalacaoId") ?? ""), chavePrivada: String(d.get("chavePrivada") ?? "") });
+    form.reset();
+    dispatch({ tipo: "aviso-conexao", texto: "GitHub App da organização guardado. O nod em servidor compartilhado passa a usá-lo antes das contas pessoais." });
+  }),
   "token-github": (form) => agir(async () => {
     const d = new FormData(form);
     const r = await api!.tokenGithub(String(d.get("token") ?? ""));

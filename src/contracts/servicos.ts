@@ -1,4 +1,5 @@
 import type { Conector } from "./conector.ts";
+import type { JeitoGithub } from "./github.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { ContratoFerramentaNod, NomeFerramentaNod } from "./ferramentas-nod.ts";
 import type { FrameSse, TipoFrame } from "./frame.ts";
@@ -27,11 +28,11 @@ export interface ServicesNod<Trx> {
     pastasDoHarness(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<{ ativa: string; aprovadas: string[] } | null>;
   };
   /**
-   * definido em 2026-09-24 (ADR-047): o `gh` desta máquina está logado? Só existe quando o conector
-   * roda na máquina da pessoa (servidor local); no servidor compartilhado a composição não o cria,
-   * e sem ele o GitHub nunca nasce sozinho pelo jeito `gh`.
+   * definido em 2026-09-24 (ADR-047): há um jeito de conectar o GitHub que não pede nada à pessoa?
+   * Na máquina dela, o `gh` logado; no servidor compartilhado, o GitHub App da organização (nunca o
+   * gh). null = o GitHub não nasce sozinho; segue pelo card de conexão.
    */
-  githubLocal?: { ghLogado(): Promise<boolean> };
+  github?: { prontoSemConfiguracao(): Promise<Extract<JeitoGithub, "gh" | "app"> | null> };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
   };

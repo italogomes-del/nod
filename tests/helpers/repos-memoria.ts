@@ -1,3 +1,4 @@
+import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
@@ -58,6 +59,7 @@ export type BancoMemoria = {
   membros: (MembroSala & { criadoEm: number })[];
   conectores: ConectorGuardado[];
   composioChaves: Map<string, string>;
+  githubApp: Map<string, ConfigGithubApp>;
   composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
   permissoes: PermissaoPermanente[];
@@ -96,6 +98,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     membros: [],
     conectores: [],
     composioChaves: new Map(),
+    githubApp: new Map(),
     composioSessoes: new Map(),
     concessoes: [],
     permissoes: [],
@@ -1045,6 +1048,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    githubApp: {
+      async config() { return b.githubApp.get(escopo.tenantId) ?? null; },
+      async salvar(c) { b.githubApp.set(escopo.tenantId, { ...c, ownerId: b.githubApp.get(escopo.tenantId)?.ownerId ?? escopo.pessoaId }); },
+    },
     composio: {
       async chave() { return b.composioChaves.get(escopo.tenantId + escopo.pessoaId) ?? null; },
       async salvarChave(c) { b.composioChaves.set(escopo.tenantId + escopo.pessoaId, c); },

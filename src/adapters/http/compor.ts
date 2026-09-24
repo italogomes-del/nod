@@ -27,6 +27,7 @@ import { criarConectoresVivos, type ConectoresVivos, type ConfigConectorVivo } f
 import type { Conector } from "../../contracts/conector.ts";
 import { COMANDO_GITHUB_NATIVO, type OndeRodaConector } from "../../contracts/github.ts";
 import { configGithubNativo, criarDetectorGh, type DetectorGh } from "../conectores-locais/github/nativo.ts";
+import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
@@ -216,9 +217,27 @@ export function comporApp(o: OpcoesCompor): App {
   const detectorGh = compartilhado ? null : (o.detectorGh ?? criarDetectorGh({ ambiente: env }));
   // ADR-047: a marca `nod:github` vira o servidor stdio nativo, com o jeito escolhido AGORA (gh, token,
   // Composio, App); o resto dos conectores sai como foi registrado.
-  async function configDe(conectorId: string, c: Pick<Conector, "slug" | "transporte" | "comando" | "args" | "url">, envDecifrado: Record<string, string>): Promise<ConfigConectorVivo | null> {
+  // ADR-047: o App da organização só serve ao conector que roda no servidor; no Mac, o gh da pessoa.
+  const cofreDoApp = criarCofreDeTokensDoApp<Escopo>({
+    agora: relogio,
+    async gerar(escopo) {
+      const cfg = await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config());
+      if (!cfg) return null;
+      return criarTokenDeInstalacao({ appId: cfg.appId, instalacaoId: cfg.instalacaoId, chavePem: decifrar(cfg.chavePrivadaCifrada, chave), agora: relogio() });
+    },
+  });
+  async function tokenDoApp(escopo: Escopo | null): Promise<{ token: string; expiraEm: number } | null> {
+    if (ondeRodaConector !== "servidor" || !escopo) return null;
+    try {
+      return await cofreDoApp.token(escopo);
+    } catch (e) {
+      log("aviso", "github_app_token_falhou", { codigo: e instanceof ErroDeDominio ? e.codigo : "desconhecido" });
+      return null;
+    }
+  }
+  async function configDe(conectorId: string, c: Pick<Conector, "slug" | "transporte" | "comando" | "args" | "url">, envDecifrado: Record<string, string>, escopo: Escopo | null): Promise<ConfigConectorVivo | null> {
     if (c.comando !== COMANDO_GITHUB_NATIVO) return { nome: c.slug, transporte: c.transporte, comando: c.comando, args: c.args, url: c.url, env: envDecifrado };
-    const r = configGithubNativo({ onde: ondeRodaConector, envConector: envDecifrado, ghLogado: detectorGh ? await detectorGh.logado() : false, app: null, ambiente: env });
+    const r = configGithubNativo({ onde: ondeRodaConector, envConector: envDecifrado, ghLogado: detectorGh ? await detectorGh.logado() : false, app: await tokenDoApp(escopo), ambiente: env });
     if (!r.ok) {
       log("aviso", "github_sem_jeito", { conector_id: conectorId, onde: ondeRodaConector });
       return null;
@@ -236,12 +255,12 @@ export function comporApp(o: OpcoesCompor): App {
         if (!c) continue;
         donoDoConector.set(conectorId, escopo);
         const envDecifrado = c.envCifrado ? (JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, string>) : {};
-        return configDe(conectorId, c, envDecifrado);
+        return configDe(conectorId, c, envDecifrado, escopo);
       }
       return null;
     },
     // O GitHub que acabou de nascer dentro da tx de pedir_acesso ainda não é visível a `carregar` (outra tx).
-    resolverSemBanco: (c) => configDe(c.id, c, {}),
+    resolverSemBanco: (c) => configDe(c.id, c, {}, { tenantId: c.tenantId, pessoaId: c.ownerId }),
   });
 
   const services: Services = {
@@ -280,7 +299,13 @@ export function comporApp(o: OpcoesCompor): App {
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
   if (workspaces) services.workspaces = workspaces;
-  if (detectorGh) services.githubLocal = { ghLogado: () => detectorGh.logado() };
+  services.github = {
+    // Chamado dentro da tx escopada de quem pede (pedir_acesso, Conectar): o escopo vem do contexto.
+    async prontoSemConfiguracao() {
+      if (detectorGh) return (await detectorGh.logado()) ? "gh" : null;
+      return (await tokenDoApp(escopoDoContexto())) ? "app" : null;
+    },
+  };
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
   const depsPonte: Parameters<typeof criarPonteInterna>[1] = {
@@ -498,7 +523,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
     ...rotasConcessoes({ dentro }),
-    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), onde: ondeRodaConector }),
+    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), onde: ondeRodaConector, aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     ...rotasMaquinas({ dentro }),

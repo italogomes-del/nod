@@ -2,11 +2,12 @@ import { COMANDO_GITHUB_NATIVO, ENV_TOKEN_GITHUB, SLUG_GITHUB, type OndeRodaCone
 import { APPS_MARKETPLACE } from "../../../contracts/marketplace.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { fraseSemJeito } from "../../../domain/github.ts";
-import { formatoDeTokenGithub, garantirGithubPeloGh, guardarComposioGithub, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
+import { formatoDeTokenGithub, garantirGithubSemConfiguracao, guardarComposioGithub, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
 import { API_GITHUB } from "../../conectores-locais/github/backend-rest.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
 import { criarClienteComposio } from "../../integracoes/composio.ts";
+import { chavePrivadaValida, criarTokenDeInstalacao } from "../../integracoes/github-app.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -19,6 +20,8 @@ export type OpcoesRotasMarketplace = {
   onde?: OndeRodaConector;
   /** Base da API do GitHub; só teste. */
   apiGithub?: string;
+  /** O App do tenant mudou: o token de instalação guardado em memória deixa de valer. */
+  aoTrocarApp?: (tenantId: string) => void;
 };
 
 export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
@@ -55,6 +58,28 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const s = await op.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: salvo.id }));
       ctx.json(200, { conectado: s.ok, conectorId: salvo.id, conector: s.conector });
     } },
+    /**
+     * Jeito 5 (ADR-047): o GitHub App da organização, para as rotinas no executor de servidor. A
+     * chave privada nunca volta: o GET diz só se há App e quais números. O POST gera um token de
+     * instalação ANTES de guardar — app, instalação ou chave errados não viram configuração muda.
+     */
+    { metodo: "GET", padrao: /^\/marketplace\/github\/app$/, async handler(ctx) {
+      const c = await op.dentro(ctx.escopo, (d) => d.repos.githubApp.config());
+      ctx.json(200, c ? { configurado: true, appId: c.appId, instalacaoId: c.instalacaoId, podeTrocar: c.ownerId === ctx.escopo.pessoaId } : { configurado: false });
+    } },
+    { metodo: "POST", padrao: /^\/marketplace\/github\/app$/, async handler(ctx) {
+      const body = await ctx.corpo() as { appId?: unknown; instalacaoId?: unknown; chavePrivada?: unknown } | null;
+      const appId = typeof body?.appId === "string" || typeof body?.appId === "number" ? String(body.appId).trim() : "";
+      const instalacaoId = typeof body?.instalacaoId === "string" || typeof body?.instalacaoId === "number" ? String(body.instalacaoId).trim() : "";
+      const chavePem = typeof body?.chavePrivada === "string" ? body.chavePrivada.trim() : "";
+      if (!/^[0-9]{1,12}$/.test(appId) || !/^[0-9]{1,15}$/.test(instalacaoId) || chavePem.length > 16_384 || !chavePrivadaValida(chavePem)) throw new ErroDeDominio("entrada_invalida");
+      const atual = await op.dentro(ctx.escopo, (d) => d.repos.githubApp.config());
+      if (atual && atual.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_permitido");
+      await criarTokenDeInstalacao({ appId, instalacaoId, chavePem, agora: Date.now(), base: op.apiGithub, fetchImpl: op.fetchImpl });
+      await op.dentro(ctx.escopo, (d) => d.repos.githubApp.salvar({ appId, instalacaoId, chavePrivadaCifrada: op.cifrar(chavePem) }));
+      op.aoTrocarApp?.(ctx.escopo.tenantId);
+      ctx.json(200, { configurado: true, appId, instalacaoId });
+    } },
     { metodo: "POST", padrao: /^\/marketplace\/configurar$/, async handler(ctx) {
       const body = await ctx.corpo() as { chave?: unknown } | null;
       if (typeof body?.chave !== "string" || !body.chave.trim() || body.chave.length > 4096 || /[\r\n]/.test(body.chave)) throw new ErroDeDominio("entrada_invalida");
@@ -66,9 +91,10 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
     { metodo: "POST", padrao: /^\/marketplace\/(?<slug>[a-z0-9-]+)\/conectar$/, async handler(ctx) {
       const app = acharApp(ctx.params.slug ?? "");
       if (app.slug === SLUG_GITHUB) {
-        // ADR-047: o que já está pronto ganha. gh logado nesta máquina = conectado agora, sem login nem campo.
-        const r = await op.dentro(ctx.escopo, (d) => garantirGithubPeloGh(d, { pelaPessoa: true }));
-        if (r.ok) { ctx.json(200, { conectado: true, conectorId: r.conector.id, jeito: "gh" }); return; }
+        // ADR-047: o que já está pronto ganha. gh logado nesta máquina (ou o App da organização no
+        // servidor) = conectado agora, sem login nem campo.
+        const r = await op.dentro(ctx.escopo, (d) => garantirGithubSemConfiguracao(d, { pelaPessoa: true }));
+        if (r.ok) { ctx.json(200, { conectado: true, conectorId: r.conector.id }); return; }
         // Sem gh: o token já colado serve sem nova tela; a sonda escolhe o jeito (token antes do Composio na máquina).
         const comToken = await op.dentro(ctx.escopo, async (d) => {
           const c = await d.repos.conectores.buscarPorSlug(SLUG_GITHUB);

@@ -9,7 +9,7 @@ import { SLUG_GITHUB } from "../contracts/github.ts";
 import { capacidadesDeLeitura, normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { evento } from "./autoria-evento.ts";
-import { garantirGithubPeloGh } from "./conectar-github.ts";
+import { garantirGithubSemConfiguracao } from "./conectar-github.ts";
 import { abrirDecisaoDeAcesso, eventosDoPedido, garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { Deps } from "./tipos.ts";
@@ -69,10 +69,11 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   let conector = await deps.repos.conectores.buscarPorSlug(input.conector);
   let entrada = input;
   if (input.conector === SLUG_GITHUB && !conector?.habilitado) {
-    // definido em 2026-09-24 (ADR-047): com o gh desta máquina logado, o GitHub nasce aqui mesmo e o
+    // definido em 2026-09-24 (ADR-047): com o gh desta máquina logado (ou o App da organização no
+    // servidor), o GitHub nasce aqui mesmo e o
     // card já sai com o botão de permitir — nada de card de conexão nem passo de configuração. Sem
     // capacidades nomeadas, o nível decide: leitura = as de leitura, escrita = o catálogo inteiro.
-    const r = await garantirGithubPeloGh(deps, { pelaPessoa: false });
+    const r = await garantirGithubSemConfiguracao(deps, { pelaPessoa: false });
     if (r.ok) {
       conector = r.conector;
       if (input.capacidades.length === 0) entrada = { ...input, capacidades: input.nivel === "leitura" ? capacidadesDeLeitura(r.conector.catalogo) : r.conector.catalogo.map((c) => c.nome) };
