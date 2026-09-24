@@ -13,7 +13,8 @@ describe("corte ao orçamento (ADR-013)", () => {
     expect(r.cortado).toBe(true);
     expect(r.original).toBe(100);
     expect(r.texto.startsWith("x".repeat(40))).toBe(true);
-    expect(r.texto).toContain("[cortado pelo nod: 60 de 100 caracteres ficaram de fora; orçamento do turno = 40]");
+    expect(r.texto).toContain("[cortado pelo nod: 60 de 100 caracteres ficaram de fora; orçamento do turno = 40.");
+    expect(r.texto).toContain("refaça a chamada pedindo menos itens ou só metadados]");
   });
 
   it("nunca parte um par substituto ao meio", () => {
