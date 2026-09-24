@@ -304,11 +304,19 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-executor":
       return { ...estado, executor: acao.executor };
     case "hidratar-conversa": {
-      const anterior = estado.conversas[acao.conversa.conversa.id];
-      const vivosDaConversa = new Set(Object.values(estado.turnosVivos).filter((t) => t.conversaId === acao.conversa.conversa.id).map((t) => t.turnoId));
+      const conversaId = acao.conversa.conversa.id;
+      const anterior = estado.conversas[conversaId];
+      // Turno aberto que a web não viu nascer (página recarregada no meio dele): o REST o devolve e ele
+      // volta a ser vivo, com o `desde` do banco. O frame turno.iniciado não se repete para quem chegou depois.
+      const turnosVivos = { ...estado.turnosVivos };
+      for (const t of acao.conversa.turnosEmCurso ?? []) {
+        if (turnosVivos[t.id]) continue;
+        turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde };
+      }
+      const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
       const atividades: Record<string, AtividadeTurno> = {};
       for (const [turnoId, t] of Object.entries(anterior?.atividades ?? {})) if (vivosDaConversa.has(turnoId)) atividades[turnoId] = t;
-      return { ...estado, conversas: { ...estado.conversas, [acao.conversa.conversa.id]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
+      return { ...estado, turnosVivos, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
     }
     case "hidratar-sua-vez":
       return { ...estado, suaVez: acao.suaVez };

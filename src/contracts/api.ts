@@ -46,10 +46,18 @@ export type FrotaDto = {
  */
 export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conversaId: string };
 
+/**
+ * Turno aberto da conversa (definido em 2026-09-24): a web recria o "trabalhando" ao recarregar a
+ * página no meio de um turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não
+ * se repete, e o cartão de atividade sumia até o turno acabar.
+ */
+export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number };
+
 export type ConversaDto = {
   conversa: Conversa;
   mensagens: Mensagem[];
   turnosPendentes: TurnoPendenteDto[];
+  turnosEmCurso: TurnoEmCursoDto[];
   /** Propostas PENDENTES da conversa (E1.1): o cartão da web nasce daqui, nunca de um kind de Mensagem (definido em 2026-09-16, L9). */
   propostas: Proposta[];
 };

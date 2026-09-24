@@ -119,12 +119,16 @@ export async function mensagemExecutorIndisponivel(
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
-  const [lidas, turnosPendentes, propostas] = await Promise.all([
+  const [lidas, turnosPendentes, vivos, propostas] = await Promise.all([
     deps.repos.mensagens.listarDaConversa(conversa.id, input.limite),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
+    deps.repos.turnos.vivosDaConversa(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),
   ]);
   const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id));
   const mensagens = anexos.size === 0 ? lidas : lidas.map((m) => (anexos.has(m.id) ? { ...m, anexos: anexos.get(m.id) } : m));
-  return { data: { conversa, mensagens, turnosPendentes, propostas } };
+  const turnosEmCurso = vivos
+    .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
+    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm }));
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, propostas } };
 };

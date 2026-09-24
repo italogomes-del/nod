@@ -16,6 +16,7 @@ function conversaVazia(): ConversaDto {
     conversa: { tenantId: "t", id: CONVERSA, ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 1 },
     mensagens: [],
     turnosPendentes: [],
+    turnosEmCurso: [],
     propostas: [],
   };
 }
@@ -132,6 +133,16 @@ describe("reduzir: hidratar e navegar", () => {
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: "outro", texto: "morto" }), AGORA);
     e = reduzir(e, { tipo: "hidratar-conversa", conversa: conversaVazia(), agora: AGORA });
     expect(Object.keys(e.conversas[CONVERSA]?.atividades ?? {})).toEqual([TURNO]);
+  });
+
+  it("hidratar-conversa recria o turno que a página não viu nascer (recarregou no meio dele), com o desde do banco", () => {
+    const conversa = { ...conversaVazia(), turnosEmCurso: [{ id: TURNO, estado: "despachando" as const, desde: AGORA - 14 * 60_000 }, { id: "fila", estado: "pendente" as const, desde: AGORA }] };
+    const e = reduzir(estadoInicial, { tipo: "hidratar-conversa", conversa, agora: AGORA });
+    expect(e.turnosVivos[TURNO]).toMatchObject({ conversaId: CONVERSA, estado: "rodando", desde: AGORA - 14 * 60_000 });
+    expect(e.turnosVivos.fila).toMatchObject({ estado: "na_fila" });
+    // Um vivo que a web já conhecia não é sobrescrito (guarda executor e máquina do frame).
+    const conhecido = aplicarFrame(estadoInicial, frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado", executor: "claude-cli" }), AGORA);
+    expect(reduzir(conhecido, { tipo: "hidratar-conversa", conversa, agora: AGORA }).turnosVivos[TURNO]?.executor).toBe("claude-cli");
   });
 
   it("invalidacoes-tratadas remove só as tratadas; navegar limpa erro e a faixa ao trocar de tipo de tela", () => {

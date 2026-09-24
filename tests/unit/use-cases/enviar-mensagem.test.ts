@@ -54,6 +54,8 @@ describe("enviarMensagem: mensagem + turno + outbox na mesma tx (ADR-010), local
     expect(d2.data).toMatchObject({ plano: null, motivo: "fila_vazia" });
     const lida = (await lerConversa(deps, { conversaId: criado.conversa.id })).data;
     expect(lida.turnosPendentes).toEqual([{ id: m2.data.turno.id, motivo: "agente_ocupado_em", conversaId: criado.conversa.id }]);
+    // O turno rodando também vem, para a web recriar o "trabalhando" depois de recarregar a página.
+    expect(lida.turnosEmCurso.map((t) => [t.id, t.estado])).toEqual([[m1.data.turno.id, "despachando"], [m2.data.turno.id, "pendente"]]);
     expect(lida.mensagens.map((m) => m.texto)).toEqual([expect.stringContaining("identidade"), "primeira", "segunda"]);
 
     await executar(deps, assentarTurno, {
