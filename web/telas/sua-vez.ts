@@ -162,13 +162,22 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
   }
 }
 
+/**
+ * Espelho de `podeDispensar` (src/use-cases/dispensar-decisao.ts) — a web só importa tipos de src/.
+ * Vencida sai sempre; aberta, só a que se responde com texto (as outras têm recusar próprio).
+ */
+function dispensavel(item: Item): boolean {
+  const d = item.decisao;
+  return item.estadoColuna === "vencido" || d.tipo === "pergunta" || d.tipo === "falta_de_dado" || d.tipo === "permissao";
+}
+
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
   const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · recusa automática ${emQuanto(item.recusaAutomaticaEmMs)}` : `venceu ${d.desfecho ? esc(d.desfecho.tipo.replaceAll("_", " ")) : ""}`;
   const conversa = estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
-    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span><b>${esc(item.agenteNome)}</b><span class="mudo">${relogio}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
+    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span><b>${esc(item.agenteNome)}</b><span class="mudo">${relogio}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${dispensavel(item) ? botao("dispensar", "×", { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" }) : ""}</div>
     <div class="dec-frase">${esc(d.frase)}</div>
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
@@ -232,7 +241,9 @@ export function renderDecisoesDaConversa(estado: Estado, conversaId: string, pro
   const itens = semGemeas(estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id)) ?? []);
   if (!itens.length) return "";
   const pendentes = itens.some((item) => item.estadoColuna !== "vencido");
-  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa"><h2>${pendentes ? "Preciso da sua decisão para continuar" : "Pedidos vencidos"}</h2><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${itens.map((item) => renderItem(item, estado, true)).join("")}</ul></section>`;
+  const vencidas = itens.filter((item) => item.estadoColuna === "vencido").map((item) => item.decisao.id);
+  const limpar = vencidas.length > 1 ? botao("limpar-vencidos", `Limpar vencidos (${vencidas.length})`, { classe: "sm", dados: { ids: vencidas.join(",") } }) : "";
+  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa"><div class="decisoes-chat-cab"><h2>${pendentes ? "Preciso da sua decisão para continuar" : "Pedidos vencidos"}</h2>${limpar}</div><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${itens.map((item) => renderItem(item, estado, true)).join("")}</ul></section>`;
 }
 
 /**

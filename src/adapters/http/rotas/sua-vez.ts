@@ -1,6 +1,7 @@
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { listarSuaVez, type DepsSuaVez } from "../../../use-cases/listar-sua-vez.ts";
+import { dispensarDecisao } from "../../../use-cases/dispensar-decisao.ts";
 import { reabrirDecisao } from "../../../use-cases/reabrir-decisao.ts";
 import type { Rota } from "../roteador.ts";
 
@@ -13,7 +14,7 @@ import type { Rota } from "../roteador.ts";
  */
 export type ComDeps = <T>(escopo: Escopo, fn: (deps: DepsSuaVez) => Promise<T>) => Promise<T>;
 
-/** GET sua-vez e POST decisoes/:id/reabrir (EMENDA 4: decidir/retomar/responder são da L9 em rotas/decisoes.ts). */
+/** GET sua-vez, POST decisoes/:id/reabrir e decisoes/:id/dispensar (EMENDA 4: decidir/retomar/responder são da L9 em rotas/decisoes.ts). */
 export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
   return [
     {
@@ -31,6 +32,20 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
         const decisaoId = ctx.params.id ?? "";
         const saida = await comDeps(ctx.escopo, async (deps) => {
           const r = await reabrirDecisao(deps, { decisaoId });
+          await deps.repos.events.gravarComOutbox(r.events);
+          return r;
+        });
+        const corpo: RespostaMutacao = { ok: true, ids: { decisaoId: saida.data.decisao.id } };
+        ctx.json(200, corpo);
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/decisoes\/(?<id>[^/]+)\/dispensar$/,
+      async handler(ctx) {
+        const decisaoId = ctx.params.id ?? "";
+        const saida = await comDeps(ctx.escopo, async (deps) => {
+          const r = await dispensarDecisao(deps, { decisaoId });
           await deps.repos.events.gravarComOutbox(r.events);
           return r;
         });

@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { listarSuaVez, type DepsSuaVez } from "../../src/use-cases/listar-sua-vez.ts";
+import { dispensarDecisao } from "../../src/use-cases/dispensar-decisao.ts";
 import { PRAZO_REABERTURA_MS, reabrirDecisao } from "../../src/use-cases/reabrir-decisao.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../../web/lib/relogio.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -84,6 +85,59 @@ describeIntegracao("Sua vez (listar-sua-vez + reabrir-decisao)", () => {
       await expect(reabrirDecisao(d, { decisaoId: pendente?.id ?? "" })).rejects.toMatchObject({ codigo: "estado_invalido" });
       await expect(reabrirDecisao(d, { decisaoId: antiga?.id ?? "" })).rejects.toBeInstanceOf(ErroDeDominio);
       await expect(reabrirDecisao(d, { decisaoId: "00000000-0000-4000-8000-000000000000" })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+    });
+  });
+
+  it("dispensar tira da fila a vencida (qualquer tipo) e a aberta que se responde com texto; aprovação aberta não sai pelo ×", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const vencida = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, prazoDecisaoEm: agora + 1_000, frase: "velha" });
+      await repos.decisoes.vencerPendentes(agora + 2_000);
+      const falta = await repos.decisoes.criar({ tipo: "falta_de_dado", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "falta o Gmail" });
+      const aprovacao = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "enviar" });
+      const d = deps(trx, MARLON, () => agora + 3_000);
+
+      const r = await dispensarDecisao(d, { decisaoId: vencida?.id ?? "" });
+      expect(r.data.decisao).toMatchObject({ estado: "decidida", desfecho: { tipo: "dispensada", por: PESSOA_MARLON, antes: "vencida" } });
+      expect(r.events[0]).toMatchObject({ kind: "decisao_decidida", conversaId, dados: { decisao_id: vencida?.id, dispensada: true } });
+      expect((await dispensarDecisao(d, { decisaoId: falta?.id ?? "" })).data.decisao.desfecho).toMatchObject({ tipo: "dispensada", antes: "pendente" });
+      await expect(dispensarDecisao(d, { decisaoId: aprovacao?.id ?? "" })).rejects.toMatchObject({ codigo: "estado_invalido" });
+      await expect(dispensarDecisao(d, { decisaoId: falta?.id ?? "" })).rejects.toMatchObject({ codigo: "estado_invalido" });
+      await expect(dispensarDecisao(d, { decisaoId: "00000000-0000-4000-8000-000000000000" })).rejects.toMatchObject({ codigo: "nao_encontrado" });
+
+      const { data } = await listarSuaVez(d);
+      expect(data.itens.map((i) => i.decisao.id)).toEqual([aprovacao?.id]);
+    });
+  });
+
+  it("dispensar a decisão vencida de um pedido de acesso recusa a proposta de mesmo id: o card não volta com botões mortos", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const proposta = await repos.propostas.criar({ conversaId, agenteId, payload: { kind: "acesso", conector: "exemplo", capacidades: ["listar_contatos"], nivel: "leitura", naoPedido: [] } });
+      await repos.decisoes.criar({ id: proposta?.id, tipo: "acesso", agenteId, conversaId, prazoDecisaoEm: agora + 1_000, frase: "ler contatos" });
+      await repos.decisoes.vencerPendentes(agora + 2_000);
+
+      await dispensarDecisao(deps(trx, MARLON, () => agora + 3_000), { decisaoId: proposta?.id ?? "" });
+      expect((await repos.propostas.buscar(proposta?.id ?? ""))?.estado).toBe("recusada");
+    });
+  });
+
+  it("a decisora designada dispensa o que é dela; quem não é dona nem decisora não consegue", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const paraAna = await repos.decisoes.criar({ tipo: "pergunta", decisorId: PESSOA_ANA, agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "qual CNPJ?" });
+      await vincularEscopo(trx, ANA);
+      const r = await dispensarDecisao(deps(trx, ANA, () => agora), { decisaoId: paraAna?.id ?? "" });
+      expect(r.data.decisao.desfecho).toMatchObject({ tipo: "dispensada", por: PESSOA_ANA });
+    });
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const minha = await repos.decisoes.criar({ tipo: "pergunta", agenteId, conversaId, prazoDecisaoEm: Date.now() + DIA, frase: "só minha" });
+      await vincularEscopo(trx, ANA);
+      await expect(dispensarDecisao(deps(trx, ANA, () => Date.now()), { decisaoId: minha?.id ?? "" })).rejects.toMatchObject({ codigo: "nao_encontrado" });
     });
   });
 
