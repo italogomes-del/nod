@@ -491,10 +491,14 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
   it("pergunta ≠ permissão: falta_de_dado nomeia o dado e quem destrava; args malformados viram 'pergunta' (nunca permissão); decidir → 409; responder com texto retoma o turno com --resume", { timeout: JORNADA_MS }, async () => {
     const t = await rodar(vera.conversaId, `Preciso do orçamento. [[tool: pedir_a_pessoa {"tipo":"falta_de_dado","texto":"não achei o orçamento do Q4","dado":"orçamento do Q4","quem_destrava":"${NOME_PESSOA}"}]] [[texto: parei]]`);
     const dto = await conversa(vera.conversaId);
-    expect(dto.mensagens.some((m) => m.texto === `parei: falta orçamento do Q4; quem destrava: ${NOME_PESSOA}; não vou tentar de novo.`)).toBe(true);
     const fila = await json<SuaVezDto>("GET", "sua-vez");
     const falta = fila.itens.find((i) => i.decisao.turnoId === t.id);
     expect(falta?.decisao.tipo, JSON.stringify({ t: t.id, fila: fila.itens.map((i) => [i.decisao.tipo, i.decisao.turnoId, i.estadoColuna]) })).toBe("falta_de_dado");
+    // Emenda da ADR-045: a conversa recebe a FALA do agente ligada à decisão; o molde "parei: falta X; quem
+    // destrava: Y; não vou tentar de novo" (E5.2) ficou só na frase da fila.
+    expect(dto.mensagens.find((m) => m.payload?.kind === "pedido_a_pessoa" && m.payload.decisaoId === falta?.decisao.id)?.texto).toBe("não achei o orçamento do Q4");
+    expect(falta?.decisao.frase).toBe(`parei: falta orçamento do Q4; quem destrava: ${NOME_PESSOA}; não vou tentar de novo.`);
+    expect(dto.mensagens.some((m) => m.texto.startsWith("parei: falta"))).toBe(false);
 
     const mal = await rodar(vera.conversaId, '[[tool: pedir_a_pessoa {"texto":"posso?"}]] [[texto: parei]]');
     const malformada = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.turnoId === mal.id);
@@ -508,6 +512,8 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
     const retomado = await esperarTurno(resposta.ids.turnoRetomada ?? "");
     expect(retomado).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, estado: "concluido" });
     expect(retomado.entradaTexto).toContain(`Resposta de ${NOME_PESSOA}`);
+    // A resposta leva o vínculo com a pergunta: a web rotula "respondendo à pergunta das HH:MM".
+    expect((await conversa(vera.conversaId)).mensagens.find((m) => m.id === resposta.ids.mensagem)?.payload).toMatchObject({ kind: "resposta_a_pedido", decisaoId: falta?.decisao.id, retomada: true });
     const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
     // 0005: o catcher não tem sessão para retomar — o plano da retomada leva sessaoCli nulo (a
     // continuidade real por --resume é do claude-cli; ver sessao-por-executor.test.ts).

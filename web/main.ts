@@ -26,7 +26,9 @@ import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
-import { abertasPorAgente, renderChamada, renderIncidentes, renderSuaVez } from "./telas/sua-vez.ts";
+import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, selosDoAgente, SUBTITULO_ESPERANDO } from "./telas/sua-vez.ts";
+import { aparenciaDoComposer } from "./telas/pergunta.ts";
+import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 
 /**
@@ -148,15 +150,19 @@ function relevante(q: Invalidacao): boolean {
 function renderSidebar(): string {
   const agentes = estado.frota?.agentes ?? [];
   const abertas = abertasPorAgente(estado);
+  const perguntas = perguntasPorAgente(estado);
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
   const linha = (a: (typeof agentes)[number]) => {
     const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a.conversaId);
     const dot = vivo ? `<span class="dot" title="${vivo.estado === "rodando" ? "trabalhando" : "na fila"}"></span>` : "";
     const pin = a.fixado ? '<span class="pin" title="fixado">★</span>' : "";
-    const pedindo = abertas.get(a.id) ?? 0;
-    const flag = pedindo ? `<span class="ch-badge" title="${pedindo === 1 ? "uma decisão esperando você" : `${pedindo} decisões esperando você`}">⚑${pedindo > 1 ? pedindo : ""}</span>` : "";
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b>${a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`}</span><span class="meta">${flag}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    // definido em 2026-09-24 (emenda da ADR-045): ⚑ âmbar conta decisões; o balão azul conta perguntas, e o
+    // agente que perguntou diz "esperando sua resposta" no lugar do título.
+    const perguntando = perguntas.get(a.id) ?? 0;
+    const selos = selosDoAgente(abertas.get(a.id) ?? 0, perguntando);
+    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${perguntando ? " (esperando sua resposta)" : ""}">${iconeAgente(a, "", estadoMascoteNaConversa(estado, a.conversaId))}<span class="txt"><b>${esc(a.nome)}</b>${subtitulo}</span><span class="meta">${selos}${pin}${dot}${a.naoLido ? '<span class="unread-dot" aria-label="Não lido"></span>' : ""}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";
@@ -250,12 +256,12 @@ function renderPrincipal(): void {
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(`Escreva uma mensagem para ${botGerido(t.agenteId)?.nome ?? "o bot"}…`, (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness) }) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness) }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `sala:${t.salaId}`, html: htmlComposer("Mensagem para a sala — @Nome dirige a pergunta", nomesDosMembros(estado, t.salaId)) };
+      composer = { chave: `sala:${t.salaId}`, html: htmlComposer(PLACEHOLDER_SALA, nomesDosMembros(estado, t.salaId)) };
       break;
   }
   regiao("detalhes", renderDetalhes(estado));
@@ -299,18 +305,47 @@ function renderPrincipal(): void {
   if (composer?.chave !== composerDe) {
     composerDe = composer?.chave ?? null;
     esquecerRegiao("composer");
+    esquecerRegiao("composer-pergunta");
     regiao("composer", composer?.html ?? "");
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     ta?.focus();
     redesenharAnexos();
   }
-  // definido em 2026-09-17: hidratação do nome atualiza só o placeholder; nunca recria o textarea nem perde rascunho.
-  const campoMensagem = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-  if (campoMensagem && t.tipo === "conversa") {
-    const nome = botGerido(t.agenteId)?.nome ?? "o bot";
-    campoMensagem.placeholder = `Escreva uma mensagem para ${nome}…`;
-  }
+  atualizarComposer();
   document.body.classList.toggle("ocupado", estado.ocupado);
+}
+
+const PLACEHOLDER_SALA = "Mensagem para a sala — @Nome dirige a pergunta";
+
+function placeholderPadrao(): string {
+  const t = estado.tela;
+  return t.tipo === "conversa" ? `Escreva uma mensagem para ${botGerido(t.agenteId)?.nome ?? "o bot"}…` : PLACEHOLDER_SALA;
+}
+
+/**
+ * O campo reflete o modo sem ser regravado (web/lib/regioes.ts): a faixa, os modos e a citação entram
+ * na região `composer-pergunta`; placeholder, dica, borda e clipe mudam no próprio nó. definido em
+ * 2026-09-17: hidratação do nome atualiza só o placeholder; nunca recria o textarea nem perde rascunho.
+ * definido em 2026-09-24 (emenda da ADR-045): com pergunta aberta, a próxima mensagem responde.
+ */
+function atualizarComposer(): void {
+  const alvo = conversaAtual();
+  const caixa = document.querySelector<HTMLElement>("#composer .composer");
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (!alvo || !caixa || !ta) return;
+  const nota = document.getElementById("composer-nota");
+  const a = aparenciaDoComposer(modoDoComposer(estado, alvo.conversaId), estado, { placeholder: placeholderPadrao(), nota: nota?.dataset.padrao ?? "" });
+  regiao("composer-pergunta", a.topo);
+  caixa.classList.toggle("modo-resposta", a.resposta);
+  if (ta.placeholder !== a.placeholder) ta.placeholder = a.placeholder;
+  if (nota && nota.textContent !== a.nota) nota.textContent = a.nota;
+  const clipe = caixa.querySelector<HTMLButtonElement>('[data-act="anexar"]');
+  if (clipe) {
+    clipe.disabled = a.anexoBloqueado !== null;
+    const titulo = a.anexoBloqueado ?? clipe.dataset.titulo ?? "";
+    if (titulo) clipe.title = titulo;
+    else clipe.removeAttribute("title");
+  }
 }
 
 /**
@@ -460,6 +495,16 @@ function conversaAtual(): { conversaId: string; salaId: string | null } | null {
   return null;
 }
 
+/** Anexo não vai na resposta à pergunta (a rota só leva texto): o motivo aparece escrito, nada some. */
+function recusarAnexoNaResposta(): void {
+  dispatch({ tipo: "erro", erro: { codigo: "anexo_na_resposta", mensagem: MOTIVO_SEM_ANEXO } });
+}
+
+/** O campo está respondendo a uma pergunta desta conversa (emenda da ADR-045)? */
+function emModoResposta(conversaId: string): boolean {
+  return modoDoComposer(estado, conversaId).tipo === "resposta";
+}
+
 async function enviarComposer(): Promise<void> {
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
   const alvo = conversaAtual();
@@ -470,14 +515,22 @@ async function enviarComposer(): Promise<void> {
   if (fila.some((i) => i.estado === "enviando")) return;
   const ids = fila.flatMap((i) => (i.estado === "pronto" && i.meta ? [i.meta.id] : []));
   if (!texto && ids.length === 0) return;
+  // definido em 2026-09-24 (emenda da ADR-045): com pergunta aberta, a mensagem RESPONDE por
+  // POST decisoes/:id/responder (a retomada nasce lá), salvo "Outro assunto".
+  const destino = destinoDoEnvio(modoDoComposer(estado, alvo.conversaId));
   const a = api;
   await agir(async () => {
-    if (alvo.salaId) await a.postarNaSala(alvo.salaId, texto);
-    else await a.enviar(alvo.conversaId, texto, ids);
+    const r = await enviarPeloComposer(a, alvo, destino, texto, ids);
+    if ("recusado" in r) {
+      recusarAnexoNaResposta();
+      return;
+    }
     ta.value = "";
     ta.style.height = "auto";
-    limparAnexos(alvo.conversaId);
-    dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
+    if (r.enviado === "mensagem") limparAnexos(alvo.conversaId);
+    // A escolha do campo vale até este envio: a próxima mensagem volta ao padrão.
+    dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: null });
+    dispatch({ tipo: "invalidar", quais: r.enviado === "resposta" ? [`conversa:${alvo.conversaId}`, "sua-vez", "frota"] : [`conversa:${alvo.conversaId}`] });
   });
 }
 
@@ -513,6 +566,11 @@ function adicionarArquivos(arquivos: readonly File[]): void {
   const alvo = conversaAtual();
   const input = document.getElementById("composer-arquivos") as HTMLInputElement | null;
   if (!alvo || alvo.salaId || !api || !input || arquivos.length === 0) return;
+  // Colar ou arrastar com o campo respondendo: o clipe está desligado pelo mesmo motivo.
+  if (emModoResposta(alvo.conversaId)) {
+    recusarAnexoNaResposta();
+    return;
+  }
   const aceita = (input.dataset.aceita as Aceita | undefined) ?? "tudo";
   const conversaId = alvo.conversaId;
   const fila = anexosPendentes.get(conversaId) ?? [];
@@ -542,6 +600,23 @@ function removerAnexo(chave: string): void {
   if (item?.previa) URL.revokeObjectURL(item.previa);
   anexosPendentes.set(alvo.conversaId, fila.filter((i) => i.chave !== chave));
   redesenharAnexos();
+}
+
+/** "Responder à pergunta" / "Outro assunto" / "Responder a esta": muda o que a próxima mensagem faz e volta ao campo. */
+function escolherNoComposer(outroAssunto: boolean, alvoId?: string): void {
+  const alvo = conversaAtual();
+  if (!alvo) return;
+  dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: { outroAssunto, alvoId: alvoId ?? estado.composer[alvo.conversaId]?.alvoId ?? null } });
+  document.getElementById("composer-texto")?.focus();
+}
+
+/** "Ver pergunta": leva ao balão e o realça um instante (sem animação para quem pediu menos movimento). */
+function verPergunta(decisaoId: string): void {
+  const balao = document.querySelector<HTMLElement>(`[data-pergunta="${CSS.escape(decisaoId)}"]`);
+  if (!balao) return;
+  balao.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  balao.classList.add("realce");
+  window.setTimeout(() => balao.classList.remove("realce"), 1600);
 }
 
 function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; textoFinal?: string }[] {
@@ -731,12 +806,30 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "decidir-aprovacao-nenhum": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "").map((m) => ({ ...m, selecionado: false })) }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   "recusar-decisao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde pelo campo da conversa — sem card
+  // nem caixa própria. Estes são os gestos em volta dele: o modo, o balão, o toque e a vinda de "Sua vez".
+  "composer-responder": (el) => escolherNoComposer(false, el.dataset.id),
+  "composer-outro": () => escolherNoComposer(true),
+  "ver-pergunta": (el) => verPergunta(el.dataset.id ?? ""),
+  // A resposta pronta é TEXTO da pessoa (EMENDA 16): o toque manda as palavras da opção por `responder`.
+  "responder-opcao": (el) =>
+    agir(async () => {
+      const alvo = conversaAtual();
+      await api!.responder(el.dataset.id ?? "", el.dataset.texto ?? "");
+      dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota", ...(alvo ? [`conversa:${alvo.conversaId}` as Invalidacao] : [])] });
+    }),
+  // A decisora designada que não é dona da conversa responde em "Sua vez" (não lê a conversa de outra pessoa).
   responder: (el) =>
     agir(async () => {
       const texto = document.querySelector<HTMLInputElement>(`input[data-resposta="${CSS.escape(el.dataset.id ?? "")}"]`)?.value.trim() ?? "";
       await api!.responder(el.dataset.id ?? "", texto);
       dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
     }),
+  // De "Sua vez": abre a conversa com o campo já respondendo a ESTA pergunta (mesmo abrir da barra lateral).
+  "responder-na-conversa": (el) => {
+    dispatch({ tipo: "composer", conversaId: el.dataset.conversa ?? "", escolha: { outroAssunto: false, alvoId: el.dataset.id ?? null } });
+    return ACOES["abrir-conversa"]?.(el);
+  },
   retomar: (el) =>
     agir(async () => {
       const texto = document.querySelector<HTMLInputElement>(`input[data-resposta="${CSS.escape(el.dataset.id ?? "")}"]`)?.value.trim();
@@ -896,10 +989,14 @@ function areaSoltar(visivel: boolean): void {
   if (!visivel) { area?.remove(); return; }
   if (area || !timeline) return;
   const nome = botGerido(estado.tela.tipo === "conversa" ? estado.tela.agenteId : undefined)?.nome ?? "o bot";
+  const alvo = conversaAtual();
   area = document.createElement("div");
   area.id = "anexo-soltar";
   area.className = "anexo-soltar";
-  area.innerHTML = `<div><b>Solte para mandar para ${esc(nome)}</b><span>Imagens, PDF e arquivos de texto · até 10 MB cada</span></div>`;
+  // Com o campo respondendo a uma pergunta, soltar não anexa (emenda da ADR-045): a área já diz por quê.
+  area.innerHTML = alvo && emModoResposta(alvo.conversaId)
+    ? `<div><b>Arquivos não vão na resposta à pergunta</b><span>${esc(MOTIVO_SEM_ANEXO)}</span></div>`
+    : `<div><b>Solte para mandar para ${esc(nome)}</b><span>Imagens, PDF e arquivos de texto · até 10 MB cada</span></div>`;
   timeline.parentElement?.appendChild(area);
 }
 document.addEventListener("dragenter", (ev) => {
@@ -925,6 +1022,15 @@ document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); document.getElementById("busca-bots")?.focus(); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
+  // Esc com o campo respondendo: a próxima mensagem vira mensagem comum (o mesmo "Outro assunto").
+  if (ev.key === "Escape") {
+    const alvo = conversaAtual();
+    if (alvo && emModoResposta(alvo.conversaId)) {
+      ev.preventDefault();
+      escolherNoComposer(true);
+    }
+    return;
+  }
   if (ev.key === "Enter" && !ev.shiftKey) {
     ev.preventDefault();
     void enviarComposer();

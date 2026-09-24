@@ -1,10 +1,12 @@
 import type { ResultadoPedirAcesso } from "./acesso.ts";
 import type { MotivoPasse, MotivoSemNovidade } from "./motivos.ts";
 import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
+import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
 
 import type { JsonSchema } from "./json-schema.ts";
 export type { JsonSchema } from "./json-schema.ts";
+export type { ArgsPedirAPessoa } from "./pedido.ts";
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
@@ -83,19 +85,8 @@ export const FERRAMENTAS_NOD = {
     required: ["resumo", "itens"],
     additionalProperties: false,
   },
-  pedir_a_pessoa: {
-    type: "object",
-    description:
-      "Para o turno e pergunta à pessoa. tipo é obrigatório: 'pergunta' (julgamento), 'falta_de_dado' (diga o dado e quem destrava) ou 'permissao'. Não tente de novo depois de chamar.",
-    properties: {
-      tipo: { type: "string", enum: ["pergunta", "falta_de_dado", "permissao"] },
-      texto: { type: "string", description: "A pergunta ou o que falta, em uma frase.", minLength: 1 },
-      dado: { type: "string", description: "Nome do dado que falta.", minLength: 1 },
-      quem_destrava: { type: "string", description: "Nome da pessoa que pode destravar (entre as pessoas do tenant).", minLength: 1 },
-    },
-    required: ["tipo", "texto"],
-    additionalProperties: false,
-  },
+  /** O schema mora em pedido.ts desde 2026-09-24 (emenda da ADR-045): a pergunta virou fala com respostas prontas. */
+  pedir_a_pessoa: SCHEMA_PEDIR_A_PESSOA,
   passar: {
     type: "object",
     description: "Passa a vez na sala sem falar. O motivo é tipado.",
@@ -150,7 +141,6 @@ export type ItemPedidoAprovacao = {
   origem_conector?: string;
 };
 export type ArgsPedirAprovacao = { resumo: string; itens: ItemPedidoAprovacao[] };
-export type ArgsPedirAPessoa = { tipo: "pergunta" | "falta_de_dado" | "permissao"; texto: string; dado?: string; quem_destrava?: string };
 export type ArgsPassar = { motivo: MotivoPasse };
 export type ArgsSemNovidade = { motivo: MotivoSemNovidade };
 export type ArgsEncaminhar = { para_agente: string; motivo: string };

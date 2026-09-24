@@ -105,3 +105,91 @@ O aviso do computador do bot (PR3). A volta da máquina no modo compartilhado é
 de lease (até 15 s depois do contato), não por evento. Sucesso tardio de rotina já derrubada entra no
 chat, mas a execução continua `interrompida`. As retomadas de `retomarTurno` e `assentarAprovacao`
 continuam gravando `confiavel` (ADR-044, "Não implementado").
+
+## Emenda de 2026-09-24 — perguntas viram conversa
+
+**Contexto.** A pergunta de `pedir_a_pessoa` chegava duas vezes na conversa: a mensagem com o molde da
+E5.2 ("parei: falta X; quem destrava: Y; não vou tentar de novo", ou "parei para perguntar a …") e, logo
+abaixo, um card com a MESMA frase, uma caixa de texto de rótulo técnico ("o dado que faltava", "sua
+resposta em texto") e "Responder e retomar". Dois lugares para escrever na mesma tela, e a pergunta
+lida como formulário. O dono escolheu nos mockups (fileira 6) "A + B com citação automática": a
+pergunta é uma mensagem, a próxima mensagem da pessoa responde, e respostas prováveis viram botões.
+
+**Decisão.**
+
+- **A pergunta é a fala do agente.** `pedir_a_pessoa` grava o `texto` do próprio agente, com payload
+  `pedido_a_pessoa {decisaoId, opcoes?}` (jsonb: sem migração). A web desenha um balão azul claro — o
+  azul de status, não o âmbar das decisões — com "Parei aqui até você responder" enquanto está aberta,
+  "Respondida por você · HH:MM" depois, e "Sem resposta · venceu …" com o seu Reabrir quando vence
+  (ADR-007 intacto: o balão é onde a vencida continua visível). `renderDecisoesDaConversa` não desenha
+  mais `pergunta`, `falta_de_dado` e `permissao`; os outros tipos seguem como card. O molde da E5.2
+  ficou só em `decisoes.frase`, a frase curta da fila ("Sua vez"); na conversa, "Parei aqui até você
+  responder" diz em palavras que o agente não tenta de novo.
+- **O campo responde.** Com pergunta aberta, uma faixa acima do campo diz "{agente} está esperando sua
+  resposta · há … · vence em …", com "Ver pergunta" (leva ao balão) e "Deixar pra lá" (o
+  `POST decisoes/:id/dispensar` do #46). O campo entra em modo resposta — placeholder "Responda à
+  {agente}…", borda realçada, a dica "Sua próxima mensagem responde à pergunta…" — e enviar chama
+  `POST decisoes/:id/responder`, a rota que já existia e que cria a retomada, em vez do envio comum.
+  "Outro assunto" (também Esc e o × da citação) manda mensagem comum e deixa a pergunta aberta; a
+  escolha vale até o próximo envio e é esquecida quando a conversa fica sem pergunta. Com duas ou mais
+  abertas, o campo cita a mais antiga ("Respondendo à {agente} · “…” · 1 de 2") e passa à próxima ao
+  enviar; "Responder a esta", no balão, troca a citada.
+- **Anexo não vai na resposta.** A rota `responder` só leva texto. Em modo resposta o clipe fica
+  desligado com o motivo na dica; colar ou soltar arquivo e enviar com arquivo já na fila recusam por
+  escrito ("Na resposta à pergunta vão só palavras…") — o arquivo nunca some em silêncio.
+- **Respostas prontas.** `opcoes` opcional em `pedir_a_pessoa`: até 4, até 60 caracteres cada
+  (`src/contracts/pedido.ts`, fora de `ferramentas-nod.ts` pelo gatilho de 200 linhas da EMENDA 26).
+  A normalização tira vazias, repetidas e longas — a longa SAI em vez de ser cortada, porque o toque
+  manda o texto da opção como resposta e uma frase cortada seria uma resposta que ninguém escreveu. O
+  toque usa a mesma rota `responder`; embaixo dos botões, "ou responda com suas palavras aí embaixo".
+- **A resposta cita a pergunta.** A mensagem que `retomarComResposta` grava leva
+  `resposta_a_pedido {decisaoId, agenteId, perguntaEm, retomada}`: a web rotula "respondendo à pergunta
+  das HH:MM" e, com `retomada`, escreve "{agente} retomou com a sua resposta" sem gravar outra linha.
+- **Sinais.** Na barra lateral, o agente que perguntou diz "esperando sua resposta" e ganha um selo azul
+  de balão com a contagem, separado do ⚑ âmbar, que deixa de contar pergunta. A faixa do topo conta
+  "pedidos" (decisões e perguntas). Em "Sua vez" a pergunta mostra a frase e "Responder na conversa",
+  que abre a conversa com o campo já respondendo a ela; nenhuma caixa de texto na lista. Exceção: a
+  decisora designada que não é dona da conversa (`quem_destrava`, EMENDA 1) não lê a conversa de outra
+  pessoa (RLS de `conversas` e `mensagens`), então para ela a resposta em texto continua na lista.
+- **Modelo.** A descrição de `pedir_a_pessoa` pede fala natural dirigida à pessoa, `opcoes` quando as
+  respostas forem previsíveis e que o turno encerre sem repetir a pergunta em texto; a linha do
+  inventário de rotinas manda as candidatas em `opcoes`.
+
+**EMENDA 16 continua valendo.** A resposta é texto da pessoa, sempre por `responder`; `decidir` continua
+recusando os três tipos (409). A opção pronta é uma sugestão de texto que a pessoa escolhe — o servidor
+recebe as palavras, nunca um id de botão. Deixar pra lá continua não sendo responder: fecha sem texto e
+sem retomada.
+
+**Alternativas descartadas.** Manter o card e só esconder a frase repetida: continuariam duas caixas de
+texto na tela. Responder por botão de decidir: quebra a EMENDA 16 e não serve a pergunta de julgamento.
+Adivinhar na interface se a mensagem é resposta ou outro assunto: a escolha fica explícita no campo, e
+quem distingue pedido de explicação de resposta é o agente (próximo PR).
+
+**Validação.** web `perguntas-conversa` (balão sem card nem caixa de texto, a frase uma vez, faixa, modo
+resposta, "1 de 2" e a troca da citada, opções como botões, "Outro assunto", depois de responder,
+vencida com Reabrir, "Sua vez" com "Responder na conversa", enviar chama `responder` e não o envio
+comum, anexo recusado), `decisoes-chat`, `navegacao-sem-rail` ("pedidos"; selo azul separado do ⚑);
+unit `pedir-a-pessoa` (opções, payload, a rota `responder` grava a resposta ligada e cria a retomada),
+`chamar-ferramenta`, `anti-tutorial`, `prompt-sistema`; integração `perguntas-conversa` (o jsonb das
+duas mensagens no Postgres e a retomada); concorrência `e2e-catcher`.
+
+Verde em 2026-09-24, sobre a `main` com #51–#54: lint, typecheck (4 projetos), fence:domain; unit
+119 arquivos/701 testes, integration 77/283, conformidade 8/59, concurrency 22/70 (1 pulado).
+
+**Gatilho de reversão.**
+
+- Pessoas respondendo à pergunta errada: com duas ou mais abertas, se em 14 dias aparecerem 3 relatos
+  (ADR-041) ou respostas corrigidas logo depois ("era sobre o PR 9"), a citação automática da mais
+  antiga não basta — o campo passa a pedir a escolha explícita quando houver mais de uma.
+- Confusão entre resposta e mensagem comum: se em 14 dias aparecerem 3 casos de "Outro assunto" que era
+  resposta (a mesma pessoa manda de novo, em seguida, pelo modo resposta) ou de resposta que era outro
+  assunto (a retomada recebe texto sem relação com a pergunta), o padrão deixa de ser responder e o
+  campo passa a perguntar a cada envio enquanto houver pergunta aberta.
+
+**Não implementado.** O fio da pergunta (próximo PR, migração 0024): hoje cada resposta fecha a decisão
+mesmo quando é um pedido de explicação, e a pergunta seguinte abre outro pedido do zero — `fio_id`, a
+rodada na faixa, o histórico do fio na entrada da retomada e o recolher "Pergunta resolvida · N
+mensagens" ficam para lá. Também ficam de fora a linha "Você deixou uma pergunta pra lá" ao dispensar
+e o anexo na resposta (a rota `responder` segue só com texto). Perguntas gravadas antes desta emenda não
+têm balão ligado: continuam como texto comum, e a faixa e o campo funcionam por "Sua vez" (sem "Ver
+pergunta").
