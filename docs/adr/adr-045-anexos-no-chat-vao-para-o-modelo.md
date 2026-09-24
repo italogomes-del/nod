@@ -20,7 +20,7 @@ Medido em 2026-09-24:
 
 ## Decisão
 
-**O arquivo é da mensagem e vai para o modelo daquele turno.** Tabela `anexos` (0021, RLS por
+**O arquivo é da mensagem e vai para o modelo daquele turno.** Tabela `anexos` (0023, RLS por
 `nod_escopar_tabela`, apagável por `nod_poda`): o upload (`POST conversas/:id/anexos`, corpo binário,
 nome em `x-nod-nome`) cria o anexo SOLTO; o envio (`POST conversas/:id/mensagens` com `anexos: [ids]`)
 o prende à mensagem na mesma tx da mensagem e do turno. Id de outra conversa, já enviado ou alheio
