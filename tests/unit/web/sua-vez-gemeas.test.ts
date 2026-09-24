@@ -82,7 +82,7 @@ describe("decisões da conversa: pedidos iguais aparecem uma vez, com ×N", () =
 
   it("o card da proposta do grupo leva o ×N; as propostas das gêmeas não viram card de revisão", () => {
     const proposta = (id: string): Proposta => ({ tenantId: "t1", id, conversaId: CONVERSA, agenteId: "a1", estado: "pendente", criadoEm: 0, kind: "acesso", payload: { kind: "acesso", conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", naoPedido: [], turnoId: "t-1" } });
-    const conversa: ConversaEstado = { conversa: { tenantId: "t1", id: CONVERSA, ownerId: "p1", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [proposta("primeira"), proposta("segunda"), proposta("terceira")], turnosPendentes: [], deltas: {}, carregadaEm: 0 };
+    const conversa: ConversaEstado = { conversa: { tenantId: "t1", id: CONVERSA, ownerId: "p1", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [proposta("primeira"), proposta("segunda"), proposta("terceira")], turnosPendentes: [], atividades: {}, carregadaEm: 0 };
     const html = renderTimeline(conversa, comFila([item("primeira", { gemeas: ["segunda", "terceira"] })]));
     expect(html.match(/data-proposta="/g)).toHaveLength(1);
     expect(html).toContain('data-proposta="primeira"');
