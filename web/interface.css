@@ -374,3 +374,26 @@ body { background: #fcfdff; }
 .msg-anexo-card { display: flex; align-items: center; gap: 10px; height: 56px; box-sizing: border-box; padding: 0 14px 0 10px; border-radius: 14px; border: 1px solid #e3e7ef; background: #fff; text-decoration: none; color: var(--ink); align-self: flex-end; max-width: 280px; }
 .msg-anexo-card:hover { border-color: #c9d6ee; }
 @media (max-width: 640px) { .anexo-chip { min-width: 0; max-width: 100%; flex: 1 1 100%; } .msg-anexo-img { width: 132px; height: 88px; } }
+
+/* Cartão de atividade do turno vivo (2026-09-24): o que o agente está FAZENDO, no lugar do balão com o texto corrido. */
+.atividade .bubble-wrap { width: min(100%, 600px); }
+.atividade-cartao { background: var(--panel); border: 1px solid #e3e6ec; border-radius: 17px; border-top-left-radius: 8px; box-shadow: 0 1px 2px rgba(8, 10, 14, .04); overflow: hidden; }
+.atividade-cab { display: flex; align-items: center; gap: 8px; padding: 14px 18px 0; font-size: 13px; color: var(--ink-3); }
+.atividade-cab b { font-weight: 600; color: var(--ink-2); }
+.atividade-pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; animation: pulsa 1.4s ease-in-out infinite; }
+.atividade-agora { margin: 6px 0 0; padding: 0 18px 14px 34px; font-size: 15px; line-height: 1.45; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atividade-cartao details { border-top: 1px solid var(--line); background: #f7f8fa; }
+.atividade-cartao summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; font-size: 12.5px; font-weight: 500; color: #5d6575; cursor: pointer; list-style: none; }
+.atividade-cartao summary::-webkit-details-marker { display: none; }
+.atividade-cartao summary > span:nth-child(2) { flex: 1; }
+.atividade-seta { display: inline-block; width: 12px; font-size: 16px; line-height: 1; transition: transform .15s; }
+.atividade-cartao details[open] .atividade-seta { transform: rotate(90deg); }
+.atividade-ver, .atividade-recolher { font-weight: 400; color: var(--ink-3); }
+.atividade-recolher, .atividade-cartao details[open] .atividade-ver { display: none; }
+.atividade-cartao details[open] .atividade-recolher { display: inline; }
+.atividade-cartao ol { list-style: none; margin: 0; padding: 0 18px 12px; }
+.atividade-cartao li { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-top: 1px solid #eef0f3; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.atividade-cartao li > span:nth-child(2) { flex: 1; min-width: 0; }
+.atividade-cartao li small { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.atividade-ok { width: 14px; flex: none; color: var(--ok); font-weight: 700; }
+.atividade-cartao li.atividade-anteriores { padding-left: 24px; color: var(--ink-3); font-size: 12px; border-top: 0; }

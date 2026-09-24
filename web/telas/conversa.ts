@@ -8,7 +8,8 @@ import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
-import { haQuanto } from "../lib/relogio.ts";
+import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
+import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
@@ -190,10 +191,34 @@ function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
   return estado.suaVez?.itens.some((i) => i.decisao.id === p.id && i.estadoColuna === "vencido") ?? false;
 }
 
+/** Etapas mostradas no cartão aberto; as anteriores viram "+N anteriores" (sem rolagem interna, que o re-render perderia). */
+const ETAPAS_VISIVEIS = 20;
+
+/**
+ * Cartão de atividade (definido em 2026-09-24): o turno que já chamou ferramenta deixa de ser balão.
+ * Mostra o que o agente está fazendo agora numa linha, há quanto tempo e as etapas recolhidas.
+ */
+function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string): string {
+  const visiveis = a.etapas.slice(-ETAPAS_VISIVEIS);
+  const anteriores = a.totalEtapas - visiveis.length;
+  const etapas = visiveis.map((e) => `<li title="${esc(e.texto)}"><span class="atividade-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span><small>${e.ferramentas === 1 ? "1 ferramenta" : `${e.ferramentas} ferramentas`}</small></li>`).join("");
+  return `<article class="message bot atividade" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
+    <div class="atividade-cab"><span class="atividade-pulso" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
+    <p class="atividade-agora">${esc(linhaAtual(a))}</p>
+    <details data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-seta" aria-hidden="true">›</span><span>${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}</span><span class="atividade-ver">Ver etapas</span><span class="atividade-recolher">Recolher</span></summary>
+      <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
+    </details>
+  </section></div></article>`;
+}
+
 function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
-  const delta = c.deltas[t.turnoId];
-  if (delta) {
-    return `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(delta)}<span class="cursor">▍</span></div></div></article>`;
+  const atividade = c.atividades[t.turnoId];
+  if (atividade && atividade.ferramentas > 0) {
+    const nome = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId)?.nome ?? "O agente" : "O agente";
+    return renderCartaoAtividade(t, atividade, estado, nome);
+  }
+  if (atividade?.atual) {
+    return `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(atividade.atual)}<span class="cursor">▍</span></div></div></article>`;
   }
   const pendente = c.turnosPendentes.find((p) => p.id === t.turnoId);
   if (pendente && pendente.conversaId !== c.conversa.id) {

@@ -49,12 +49,28 @@ describe("aplicarFrame por TipoFrame", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Olá, " }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "mundo" }), AGORA);
-    expect(e.conversas[CONVERSA]?.deltas[TURNO]).toBe("Olá, mundo");
+    expect(e.conversas[CONVERSA]?.atividades[TURNO]?.atual).toBe("Olá, mundo");
     expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
     e = aplicarFrame(e, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
-    expect(e.conversas[CONVERSA]?.deltas).toEqual({});
+    expect(e.conversas[CONVERSA]?.atividades).toEqual({});
     expect(e.turnosVivos[TURNO]).toBeUndefined();
     expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota"]);
+  });
+
+  it("turno.atividade fecha a narração numa etapa: o texto de antes e o de depois da ferramenta nunca se colam ('lote.44')", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Continuando com o próximo lote." }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "mcp__nod__gmail__search_threads", rotulo: "Consultou Gmail" }), AGORA);
+    expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "mcp__nod__gmail__label_thread", rotulo: "Alterou Gmail" }), AGORA);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "44 processados." }), AGORA);
+    expect(e.conversas[CONVERSA]?.atividades[TURNO]).toEqual({
+      atual: "44 processados.",
+      etapas: [{ texto: "Continuando com o próximo lote.", ferramentas: 2 }],
+      totalEtapas: 1,
+      ferramentas: 2,
+      ultimaFerramenta: "Alterou Gmail",
+    });
   });
 
   it("turno.interrompido limpa o vivo e invalida conversa, frota e sua-vez (pode ter nascido 'retomar?')", () => {
@@ -115,7 +131,7 @@ describe("reduzir: hidratar e navegar", () => {
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "x" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: "outro", texto: "morto" }), AGORA);
     e = reduzir(e, { tipo: "hidratar-conversa", conversa: conversaVazia(), agora: AGORA });
-    expect(e.conversas[CONVERSA]?.deltas).toEqual({ [TURNO]: "x" });
+    expect(Object.keys(e.conversas[CONVERSA]?.atividades ?? {})).toEqual([TURNO]);
   });
 
   it("invalidacoes-tratadas remove só as tratadas; navegar limpa erro e a faixa ao trocar de tipo de tela", () => {
