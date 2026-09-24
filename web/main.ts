@@ -35,6 +35,8 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
  * exige o app aberto: sem executor a tela continua respondendo (web-sem-app).
  */
 let estado: Estado = estadoInicial;
+/** Janela do Desfazer ao cancelar uma mensagem da fila. */
+const CANCELAR_DESFAZER_MS = 5_000;
 let api: Api | null = null;
 let live: LiveEvents | null = null;
 let composerDe: string | null = null;
@@ -707,6 +709,26 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },
   revogar: (el) => agir(async () => void (await api!.revogar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
   // definido em 2026-09-24 (ADR-045): "Entendi" no aviso de queda do Mac.
+  // definido em 2026-09-24: Cancelar de UMA mensagem da fila. Fica 5 s em "Cancelando… Desfazer" só na
+  // web; depois disso vai ao servidor. Desfazer antes do prazo não toca o servidor (nada a reenfileirar).
+  "cancelar-turno": (el) => {
+    const turnoId = el.dataset.id ?? "";
+    if (!turnoId) return;
+    dispatch({ tipo: "cancelando-turno", turnoId, agora: Date.now() });
+    window.setTimeout(() => {
+      if (!(turnoId in estado.cancelando)) return;
+      void agir(async () => {
+        try {
+          await api!.cancelarTurno(turnoId);
+        } finally {
+          dispatch({ tipo: "desfazer-cancelamento", turnoId });
+          const alvo = conversaAtual();
+          if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
+        }
+      });
+    }, CANCELAR_DESFAZER_MS);
+  },
+  "desfazer-cancelamento": (el) => dispatch({ tipo: "desfazer-cancelamento", turnoId: el.dataset.id ?? "" }),
   "dispensar-incidente": (el) => agir(async () => void (await api!.dispensarIncidente(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   // definido em 2026-09-24 (ADR-044): o grupo (app · nível) do painel sai inteiro, com um registro só.
   "revogar-acessos": (el) => agir(async () => void (await api!.revogarAcessos(el.dataset.agente ?? "", (el.dataset.ids ?? "").split(",").filter(Boolean)), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),

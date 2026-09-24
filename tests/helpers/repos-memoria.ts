@@ -519,6 +519,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           modelo: t.modelo,
           harness: t.harness ?? "auto",
           criadoEm: agora() + b.turnos.length / 1000,
+          mensagemOrigemId: t.mensagemOrigemId ?? null,
+          absorvidoPor: null,
         };
         b.turnos.push(turno);
         return turno;
@@ -587,6 +589,31 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (!t) return null;
         t.estado = "interrompido";
         t.motivoInterrupcao = motivo;
+        t.leaseAte = null;
+        return t;
+      },
+      async absorverPendentes(turno, entrada) {
+        if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return { turno, absorvidos: [] };
+        const absorvidos = doTenant(b.turnos)
+          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && (t.origem === "conversa" || t.origem === "sala") && t.mensagemOrigemId)
+          .sort((x, y) => x.criadoEm - y.criadoEm);
+        for (const t of absorvidos) {
+          t.estado = "interrompido";
+          t.motivoInterrupcao = "absorvido";
+          t.absorvidoPor = turno.id;
+          t.leaseAte = null;
+        }
+        if (absorvidos.length === 0) return { turno, absorvidos };
+        const alvo = doTenant(b.turnos).find((t) => t.id === turno.id) ?? turno;
+        alvo.entradaTexto = entrada([turno.entradaTexto, ...absorvidos.map((a) => a.entradaTexto)]);
+        alvo.entradaAnexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
+        return { turno: alvo, absorvidos };
+      },
+      async cancelarPendente(id) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");
+        if (!t) return null;
+        t.estado = "interrompido";
+        t.motivoInterrupcao = "parado_pela_pessoa";
         t.leaseAte = null;
         return t;
       },

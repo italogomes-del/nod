@@ -17,6 +17,7 @@ function conversaVazia(): ConversaDto {
     mensagens: [],
     turnosPendentes: [],
     turnosEmCurso: [],
+    turnosCancelados: [],
     propostas: [],
   };
 }
@@ -136,7 +137,7 @@ describe("reduzir: hidratar e navegar", () => {
   });
 
   it("hidratar-conversa recria o turno que a página não viu nascer (recarregou no meio dele), com o desde do banco", () => {
-    const conversa = { ...conversaVazia(), turnosEmCurso: [{ id: TURNO, estado: "despachando" as const, desde: AGORA - 14 * 60_000 }, { id: "fila", estado: "pendente" as const, desde: AGORA }] };
+    const conversa = { ...conversaVazia(), turnosEmCurso: [{ id: TURNO, estado: "despachando" as const, desde: AGORA - 14 * 60_000, mensagemId: null }, { id: "fila", estado: "pendente" as const, desde: AGORA, mensagemId: null }] };
     const e = reduzir(estadoInicial, { tipo: "hidratar-conversa", conversa, agora: AGORA });
     expect(e.turnosVivos[TURNO]).toMatchObject({ conversaId: CONVERSA, estado: "rodando", desde: AGORA - 14 * 60_000 });
     expect(e.turnosVivos.fila).toMatchObject({ estado: "na_fila" });

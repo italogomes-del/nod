@@ -112,6 +112,7 @@ export function criarApi(escopo: Escopo) {
     pararConversa: (conversaId: string) => post<FaixaParada>(`conversas/${conversaId}/parar`),
     pararTudo: () => post<FaixaParada>("parar"),
     turno: (id: string) => get<{ turno: Turno }>(`turnos/${id}`),
+    cancelarTurno: (id: string) => post<RespostaMutacao>(`turnos/${id}/cancelar`),
     relatar: (entrada: EntradaRelato) => post<RespostaMutacao>("relatos", entrada),
     relatos: () => get<{ relatos: Relato[] }>("relatos"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),

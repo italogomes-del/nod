@@ -72,6 +72,7 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
     profundidade: 0,
     entradaTexto: texto,
+    mensagemOrigemId: mensagem.id,
     entradaAnexos: anexos.map((a) => a.id),
     entradaConfianca: "confiavel",
     modelo: agente.modelo,
@@ -127,8 +128,13 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   ]);
   const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id));
   const mensagens = anexos.size === 0 ? lidas : lidas.map((m) => (anexos.has(m.id) ? { ...m, anexos: anexos.get(m.id) } : m));
+  // Cancelado antes de rodar = interrompido pela pessoa sem nunca ter sido reivindicado (attempted
+  // nasce false e só o reivindicar o liga). Um Parar no meio da execução não entra: aquele rodou.
+  const turnosCancelados = (await deps.repos.turnos.listarDaConversa(conversa.id))
+    .filter((t) => t.estado === "interrompido" && t.motivoInterrupcao === "parado_pela_pessoa" && !t.sinais.attempted && t.mensagemOrigemId)
+    .map((t) => ({ id: t.id, mensagemId: t.mensagemOrigemId as string }));
   const turnosEmCurso = vivos
     .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
-    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm }));
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, propostas } };
+    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null }));
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas } };
 };

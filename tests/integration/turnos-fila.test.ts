@@ -60,10 +60,10 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       const deps = depsSobreTrx(trx, MARLON);
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
       const m1 = (await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "primeira", inventario: PRONTO })).data;
-      const m2 = (await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "segunda", inventario: PRONTO })).data;
       const maquina = randomUUID();
-
+      // A 2ª chega com a 1ª já rodando (duas pendentes juntas seriam lidas num turno só: fila-lida-junta).
       const d1 = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data;
+      const m2 = (await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "segunda", inventario: PRONTO })).data;
       expect(d1.plano).toMatchObject({ turnoId: m1.turno.id, machineId: maquina, tokenDeTurno: `tok-${m1.turno.id}`, entrada: { texto: "primeira", sessaoCli: null } });
       expect((await deps.repos.turnos.buscar(m1.turno.id))?.estado).toBe("despachando");
       expect((await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data).toMatchObject({ plano: null, motivo: "fila_vazia" });

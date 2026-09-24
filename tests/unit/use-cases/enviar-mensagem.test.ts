@@ -44,10 +44,10 @@ describe("enviarMensagem: mensagem + turno + outbox na mesma tx (ADR-010), local
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
     const m1 = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "primeira", inventario: PRONTO });
-    const m2 = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "segunda", inventario: PRONTO });
     const maquina = randomUUID();
-
+    // A 2ª chega com a 1ª já rodando (duas pendentes juntas seriam lidas num turno só: fila-lida-junta).
     const d1 = await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO });
+    const m2 = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "segunda", inventario: PRONTO });
     expect(d1.data.plano?.turnoId).toBe(m1.data.turno.id);
     expect(d1.data.plano?.entrada.texto).toBe("primeira");
     const d2 = await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO });

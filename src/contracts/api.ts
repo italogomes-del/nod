@@ -51,13 +51,15 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  * página no meio de um turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não
  * se repete, e o cartão de atividade sumia até o turno acabar.
  */
-export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number };
+export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null };
 
 export type ConversaDto = {
   conversa: Conversa;
   mensagens: Mensagem[];
   turnosPendentes: TurnoPendenteDto[];
   turnosEmCurso: TurnoEmCursoDto[];
+  /** Turnos que a pessoa cancelou antes de rodar: a mensagem que os disparou mostra "Cancelada · não rodou". */
+  turnosCancelados: { id: string; mensagemId: string }[];
   /** Propostas PENDENTES da conversa (E1.1): o cartão da web nasce daqui, nunca de um kind de Mensagem (definido em 2026-09-16, L9). */
   propostas: Proposta[];
 };

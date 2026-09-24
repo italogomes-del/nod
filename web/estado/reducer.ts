@@ -62,6 +62,8 @@ export type Estado = {
   executor: EstadoExecutor | null;
   conversas: Record<string, ConversaEstado>;
   turnosVivos: Record<string, TurnoVivo>;
+  /** Cancelar da fila tem 5 s de Desfazer antes de ir ao servidor (turnoId → instante do clique). */
+  cancelando: Record<string, number>;
   salas: { sala: Sala; membros: MembroSala[] }[];
   suaVez: SuaVezDto | null;
   rotinas: RotinaDto[];
@@ -98,6 +100,8 @@ export type Acao =
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
   | { tipo: "tick"; agora: number }
+  | { tipo: "cancelando-turno"; turnoId: string; agora: number }
+  | { tipo: "desfazer-cancelamento"; turnoId: string }
   | { tipo: "conexao"; estado: EstadoConexao; tentativa: number; proximaEmMs: number | null }
   | { tipo: "frame"; frame: FrameSse; agora: number }
   | { tipo: "hidratar-gestao"; gestao: FrotaDto }
@@ -129,6 +133,7 @@ export const estadoInicial: Estado = {
   executor: null,
   conversas: {},
   turnosVivos: {},
+  cancelando: {},
   salas: [],
   suaVez: null,
   rotinas: [],
@@ -285,6 +290,14 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
       };
+    case "cancelando-turno":
+      return { ...estado, cancelando: { ...estado.cancelando, [acao.turnoId]: acao.agora } };
+    case "desfazer-cancelamento": {
+      if (!(acao.turnoId in estado.cancelando)) return estado;
+      const cancelando = { ...estado.cancelando };
+      delete cancelando[acao.turnoId];
+      return { ...estado, cancelando };
+    }
     case "tick": {
       // definido em 2026-09-24 (ADR-045): nenhum evento diz que o Mac voltou (o fechamento do aviso é do
       // varredor, no modo compartilhado). Enquanto houver aviso EM CURSO, cada tick relê "Sua vez".

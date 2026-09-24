@@ -33,6 +33,8 @@ export const MOTIVOS_INTERRUPCAO = [
   "turno_travado",
   /** definido em 2026-09-18: produziu trabalho e não concluiu — não confundir com sem_progresso. */
   "trabalho_incompleto",
+  /** definido em 2026-09-24: mensagem da fila lida junto com outra no mesmo turno (`absorvido_por`); nada se perdeu. */
+  "absorvido",
 ] as const;
 export type MotivoInterrupcao = (typeof MOTIVOS_INTERRUPCAO)[number];
 
