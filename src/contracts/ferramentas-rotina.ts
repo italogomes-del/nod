@@ -1,3 +1,4 @@
+import type { ArgsPedirAcesso } from "./ferramentas-nod.ts";
 import type { CodigoErro } from "./motivos.ts";
 import type { JsonSchema } from "./json-schema.ts";
 
@@ -11,6 +12,28 @@ import type { JsonSchema } from "./json-schema.ts";
  */
 const ROTINA_ID: JsonSchema = { type: "string", description: "Id da rotina, exatamente como veio do inventário ou de listar_rotinas.", minLength: 1 };
 
+/**
+ * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): os apps que a rotina lê ou
+ * altera, na forma dos argumentos de pedir_acesso. A pessoa está na criação: confirmar a rotina é o
+ * consentimento, e o card mostra o que será liberado. Espelha FERRAMENTAS_NOD.pedir_acesso sem importá-lo
+ * (ferramentas-nod.ts já importa este arquivo; o ciclo de VALORES quebraria o módulo).
+ */
+const ACESSOS: JsonSchema = {
+  type: "array",
+  description: "Apps que a rotina lê ou altera, um item por app. A pessoa permite junto com a rotina.",
+  items: {
+    type: "object",
+    properties: {
+      conector: { type: "string", description: "Slug do app registrado ou do marketplace.", minLength: 1 },
+      capacidades: { type: "array", items: { type: "string" }, description: "Com nivel leitura, [] pede as ferramentas de leitura do app. Escrita exige os nomes exatos do catálogo." },
+      nivel: { type: "string", enum: ["leitura", "escrita"] },
+      nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
+    },
+    required: ["conector", "capacidades", "nivel", "nao_pedido"],
+    additionalProperties: false,
+  },
+};
+
 export const FERRAMENTAS_ROTINA = {
   criar_rotina: {
     type: "object",
@@ -23,6 +46,7 @@ export const FERRAMENTAS_ROTINA = {
       entregavel: { type: "string", description: "O que sai ao final.", minLength: 1 },
       limites_aprovacao: { type: "string", description: "O que exige aprovação antes de sair.", minLength: 1 },
       politica_sem_dado: { type: "string", description: "O que fazer quando não houver dado.", minLength: 1 },
+      acessos: ACESSOS,
     },
     required: ["cron", "fuso_iana", "instrucao", "fonte", "entregavel", "limites_aprovacao", "politica_sem_dado"],
     additionalProperties: false,
@@ -60,6 +84,7 @@ export const FERRAMENTAS_ROTINA = {
       entregavel: { type: "string", description: "Novo entregável.", minLength: 1 },
       limites_aprovacao: { type: "string", description: "Novo limite do que exige aprovação.", minLength: 1 },
       politica_sem_dado: { type: "string", description: "Nova política para quando não houver dado.", minLength: 1 },
+      acessos: { ...ACESSOS, description: "A lista NOVA e inteira de apps que a rotina lê ou altera." },
     },
     required: ["rotina_id"],
     additionalProperties: false,
@@ -81,6 +106,7 @@ export type ArgsCriarRotina = {
   entregavel: string;
   limites_aprovacao: string;
   politica_sem_dado: string;
+  acessos?: ArgsPedirAcesso[];
 };
 /** Sem argumentos: o agente só pode listar as rotinas DELE, que vêm do contexto do turno. */
 export type ArgsListarRotinas = object;
@@ -102,6 +128,7 @@ export type ArgsAtualizarRotina = {
   entregavel?: string;
   limites_aprovacao?: string;
   politica_sem_dado?: string;
+  acessos?: ArgsPedirAcesso[];
 };
 export type ArgsExcluirRotina = { rotina_id: string };
 

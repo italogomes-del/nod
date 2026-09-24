@@ -454,6 +454,8 @@ body { background: #fcfdff; }
 
 /* Barra lateral: quem perguntou diz "esperando sua resposta" no subtítulo, em azul como o ponto do mascote. */
 .sub-esperando { color: var(--blue) !important; }
+/* definido em 2026-09-24 (emenda da ADR-044): a rotina do bot parou por falta de acesso — âmbar de "precisa de você". */
+.sub-rotina-parada { color: var(--amber) !important; }
 @media (prefers-reduced-motion: reduce) { .message.pergunta.realce .bubble { transition: none; } }
 
 /* definido em 2026-09-24 (revisão da interface): o chat é a tela principal. Cabeçalho só com o bot e o

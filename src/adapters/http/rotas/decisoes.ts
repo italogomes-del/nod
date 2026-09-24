@@ -136,6 +136,8 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             if (recusada(corpo)) {
               if (proposta && proposta.estado === "pendente") await executar(deps, recusarProposta, { propostaId: proposta.id });
             } else if (atual.tipo === "rotina") {
+              // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): ativar concede os
+              // acessos declarados dos apps conectados NESTA transação (conceder-acessos-da-rotina.ts).
               const rotina = await deps.tx((trx) => d.services.rotinas.ativar(trx, atual.id));
               ids.rotina = rotina.id;
             } else if (atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {

@@ -65,12 +65,13 @@ it("proposta já resolvida não bloqueia pedir de novo: a guarda olha só o que 
 
 /**
  * ADR-044: a rotina das 8h, 13h e 18h pede de novo a cada disparo — outro turno, e o modelo pode
- * mandar [] numa execução e a lista exata na outra. Na rotina a chave é (agente, conector, rotina).
+ * mandar [] numa execução e a lista exata na outra. Na rotina a chave é (agente, conector) desde a
+ * emenda de 2026-09-24 (índice único da 0026). A fonte não cita o app, senão o pré-voo pararia as janelas.
  */
 it("rotina: o pedido pendente vale para os disparos seguintes, ignorando turno e capacidades", async () => {
   const c = await cenario();
   const agora = c.deps.agora();
-  const rotina = await c.deps.repos.rotinas.criar({ agenteId: c.bot.agente.id, conversaId: c.bot.conversa.id, cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: "E-mails às 8h, 13h e 18h", fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: agora });
+  const rotina = await c.deps.repos.rotinas.criar({ agenteId: c.bot.agente.id, conversaId: c.bot.conversa.id, cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: "E-mails às 8h, 13h e 18h", fonte: "a caixa de entrada", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: agora });
   if (!rotina) throw new Error("rotina");
   const disparo = async (instante: number) => {
     const r = await dispararRotina(c.deps, { rotina, instanteAgendado: instante, machineId: "m", executor: "catcher" });

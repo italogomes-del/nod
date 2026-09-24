@@ -44,6 +44,9 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   // Mesmo frame de propósito: a execução silenciosa não escreve no chat, mas o painel de rotinas
   // precisa saber que ela rodou para o histórico aparecer sem recarregar a página.
   rotina_sem_novidade: "rotina.executou",
+  // definido em 2026-09-24 (emenda da ADR-044): a janela bloqueada entra no histórico sem escrever no
+  // chat — o mesmo frame faz a lista de rotinas e o histórico relerem, como a execução silenciosa.
+  rotina_bloqueada: "rotina.executou",
   sala_handoff: "sala.handoff",
   negacao: "negacao",
   concessao_criada: "agente.mudou",

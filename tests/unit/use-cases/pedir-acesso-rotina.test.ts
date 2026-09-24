@@ -29,7 +29,9 @@ async function cenario(opcoes: { gmailConectado?: boolean } = {}) {
     });
     await deps.repos.conectores.habilitar(conector.id, true);
   }
-  const rotina = await deps.repos.rotinas.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: INSTRUCAO, fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: deps.agora() });
+  // A fonte NÃO cita o app: com "Gmail" na fonte o pré-voo (emenda da ADR-044) pararia a janela antes do
+  // turno. Aqui o turno roda e descobre no meio que precisa do Gmail — o caminho do pedir_acesso.
+  const rotina = await deps.repos.rotinas.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: INSTRUCAO, fonte: "a caixa de entrada", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: deps.agora() });
   if (!rotina) throw new Error("rotina");
   const r = await dispararRotina(deps, { rotina, instanteAgendado: deps.agora(), machineId: "m", executor: "catcher" });
   if (!("turno" in r.data)) throw new Error("sem turno");

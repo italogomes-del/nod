@@ -1,21 +1,42 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
-import type { DesfechoRotina, MotivoFalha, MotivoSemNovidade } from "../contracts/motivos.ts";
+import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoSemNovidade } from "../contracts/motivos.ts";
 import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
+import { conectoresCitados } from "../domain/rotina-acessos.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
+import { preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
-export type EntradaDisparo = { rotina: Rotina; instanteAgendado: number; machineId: string; executor: Executor; preservarAgenda?: boolean };
-/** `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045). */
-export type SaidaDisparo = { turno: Turno; proximaExecucao: number } | { janelaDeOutro: true } | { pulada: true; turnoAbertoId: string; proximaExecucao: number };
+export type EntradaDisparo = {
+  rotina: Rotina;
+  instanteAgendado: number;
+  machineId: string;
+  executor: Executor;
+  preservarAgenda?: boolean;
+  /**
+   * definido em 2026-09-24 (emenda da ADR-044): o disparo que decidir-acesso.ts faz logo depois de a
+   * pessoa conceder não passa pelo pré-voo — ela acabou de clicar "Permitir e rodar agora".
+   */
+  aposConceder?: boolean;
+};
+/**
+ * `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045).
+ * `bloqueada` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno — o
+ * motivo, o card de acesso que a destrava (null quando é a pergunta que espera) e a próxima execução.
+ */
+export type SaidaDisparo =
+  | { turno: Turno; proximaExecucao: number }
+  | { janelaDeOutro: true }
+  | { pulada: true; turnoAbertoId: string; proximaExecucao: number }
+  | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number };
 
 /**
  * Entrada de um turno de rotina é a instrução normalizada mais o contexto fixo (fonte, entregável,
@@ -38,12 +59,32 @@ export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): s
  * reduz o catálogo (ADR-026). Não é interpretação de intenção: é casar nomes de conectores.
  */
 export async function confiancaDaFonte(deps: Pick<Deps, "repos">, fonte: string): Promise<Confianca> {
-  const f = fonte.toLowerCase();
-  for (const c of await deps.repos.conectores.listarHabilitados()) {
-    const citado = f.includes(c.slug.toLowerCase()) || f.includes(c.nome.toLowerCase());
-    if (citado && conectorTocaAprendiz(c)) return "nao_confiavel";
+  // definido em 2026-09-24 (emenda da ADR-044): o casamento mora em conectoresCitados, o mesmo do pré-voo.
+  for (const c of conectoresCitados(fonte, await deps.repos.conectores.listarHabilitados())) {
+    if (conectorTocaAprendiz(c)) return "nao_confiavel";
   }
   return "confiavel";
+}
+
+/**
+ * A janela que o pré-voo parou (definido em 2026-09-24, emenda da ADR-044): UMA execução 'bloqueada' com
+ * o motivo e SEM turno — nenhum modelo rodou —, poda para as 20, evento para o histórico e a lista de
+ * rotinas relerem, e NENHUMA mensagem no chat (o card de acesso já está lá; uma linha por janela era o
+ * ruído que esta emenda tira). A agenda anda como num disparo normal: a próxima janela tenta de novo.
+ */
+async function registrarBloqueio(deps: Deps, input: EntradaDisparo, bloqueio: BloqueioDoPreVoo, agora: number): Promise<{ data: SaidaDisparo; events: RuntimeEvent[] }> {
+  const { rotina, instanteAgendado } = input;
+  const execucao = await deps.repos.rotinaExecucoes.registrar({ rotinaId: rotina.id, instanteAgendado, turnoId: null, desfecho: "bloqueada", motivo: bloqueio.motivo, em: agora });
+  if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução bloqueada não registrada" });
+  await deps.repos.rotinaExecucoes.podar(rotina.id);
+  const proximaExecucao = input.preservarAgenda ? rotina.proximaExecucao : proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
+  if (!input.preservarAgenda) await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
+  const autoria = autoriaPessoa(deps.escopo.pessoaId, REGRA_PRE_VOO);
+  const dados = { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: "bloqueada", motivo: bloqueio.motivo, propostaId: bloqueio.propostaId, instanteAgendado };
+  return {
+    data: { bloqueada: bloqueio.motivo, propostaId: bloqueio.propostaId, proximaExecucao },
+    events: [...bloqueio.events, evento(deps, "rotina_bloqueada", autoria, dados, { conversaId: rotina.conversaId })],
+  };
 }
 
 /**
@@ -54,6 +95,7 @@ export async function confiancaDaFonte(deps: Pick<Deps, "repos">, fonte: string)
  * (servidor fora do ar) NÃO são repostas — uma rotina das 8h que só rodou às 14h é uma execução,
  * não seis. A execução em `rotina_execucoes` só nasce com desfecho (executou | falhou |
  * passou_em_branco): o enum não tem 'pendente', e a janela com turno_id é o registro do "em curso".
+ * A janela que o pré-voo para nasce 'bloqueada', sem turno (registrarBloqueio).
  */
 export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (deps, input) => {
   const { rotina, instanteAgendado } = input;
@@ -73,6 +115,11 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   if (!ganhou) return { data: { janelaDeOutro: true } };
   const agente = await agenteVisivel(deps.repos, rotina.agenteId);
   const agora = deps.agora();
+  // definido em 2026-09-24 (emenda da ADR-044): o pré-voo, depois de reivindicar a janela (ADR-011
+  // inalterado) e antes do turno — no agendador e no "executar agora"; a pergunta pendente só trava o
+  // agendador, porque "executar agora" é ato da pessoa.
+  const bloqueio = input.aposConceder ? null : await preVooDaRotina(deps, rotina, { agendada: !input.preservarAgenda });
+  if (bloqueio) return registrarBloqueio(deps, input, bloqueio, agora);
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,

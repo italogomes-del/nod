@@ -19,6 +19,7 @@ const decisao = (id: string, agenteId: string, agenteNome: string, vencido = fal
   itensAprovacao: [],
   proposta: null,
   fio: null,
+  rotinaParada: null,
 });
 
 const comFila = (itens: SuaVezDto["itens"], incidentes: SuaVezDto["incidentes"] = []): Estado => ({ ...estadoInicial, suaVez: { itens, incidentes, foraDoAr: [], vazio: itens.length === 0, ultimaDecisaoEm: null } });

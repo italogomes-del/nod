@@ -4,6 +4,7 @@ import {
   DESFECHOS_ITEM,
   DESFECHOS_ROTINA,
   MOTIVOS_APROVACAO_MANUAL,
+  MOTIVOS_BLOQUEIO_ROTINA,
   MOTIVOS_FALHA,
   MOTIVOS_FALHA_COMPUTADOR,
   MOTIVOS_INATIVIDADE_PERMISSAO,
@@ -63,6 +64,18 @@ describeIntegracao("gate: enums de motivo (motivos.ts) == pg_enum", () => {
       expect(await rotulos(tipo)).toEqual([...lista]);
     });
   }
+
+  // Emenda da ADR-044 (0026): o motivo da janela 'bloqueada' NÃO é enum — vai em rotina_execucoes.motivo,
+  // text com CHECK. O gate aqui é que cada valor da lista TS passe no CHECK que o banco aplica.
+  it("MOTIVOS_BLOQUEIO_ROTINA passam no CHECK de rotina_execucoes.motivo (text, sem enum)", async () => {
+    const [c] = await db<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'rotina_execucoes'::regclass and conname = 'rotina_execucoes_motivo_sem_texto_livre'`;
+    expect(c?.def).toContain("'^[a-z_]+$'");
+    for (const motivo of MOTIVOS_BLOQUEIO_ROTINA) {
+      const [r] = await db<{ ok: boolean }[]>`select ${motivo}::text ~ '^[a-z_]+$' as ok`;
+      expect(r?.ok, motivo).toBe(true);
+    }
+  });
 
   it("nenhuma coluna de motivo em events/turnos/mensagens/rotina_execucoes/trilha é texto livre sem CHECK", async () => {
     const linhas = await db<{ table_name: string; column_name: string; udt_name: string }[]>`

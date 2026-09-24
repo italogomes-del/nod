@@ -424,7 +424,9 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam
   // chegar junto com ela — não só na tela dedicada.
   if ((t.tipo === "rotinas" || t.tipo === "conversa") && estado.rotinas.length === 0) faltas.push("rotinas");
-  if ((t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala") && estado.marketplace.length === 0) faltas.push("conectores");
+  // definido em 2026-09-24 ("rotina nasce com o acesso"): "Sua vez" também, porque o card da rotina proposta
+  // diz se o app que ela precisa já está conectado ("Conectar {App}" ou "Criar rotina e permitir leitura").
+  if ((t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "sua-vez") && estado.marketplace.length === 0) faltas.push("conectores");
   // A fila alimenta o badge ⚑ da sidebar e a faixa de chamada em QUALQUER tela: sem o rail, ela é o
   // único aviso de que há decisão parada.
   if (!estado.suaVez) faltas.push("sua-vez");

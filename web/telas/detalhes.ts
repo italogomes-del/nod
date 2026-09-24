@@ -1,7 +1,7 @@
 import type { Estado } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
-import { rotuloExecucao } from "../lib/execucao.ts";
+import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
 
@@ -83,13 +83,17 @@ export function renderDetalhes(estado: Estado): string {
 
   // definido em 2026-09-24 (revisão da interface): um cartão por rotina — nome e chave liga/desliga no
   // topo, quando roda embaixo, Testar e Histórico no rodapé. A chave é o mesmo pausar/ativar de antes.
-  const linhaRotina = ({ rotina: r, proximaExecucao }: (typeof rotinas)[number]) => {
+  // definido em 2026-09-24 (emenda da ADR-044): a rotina parada por falta de acesso diz qual app falta e
+  // traz o mesmo botão de um clique do card, sem a pessoa procurar o card na conversa.
+  const linhaRotina = ({ rotina: r, proximaExecucao, bloqueio }: (typeof rotinas)[number]) => {
     const ativa = r.estado === "ativa";
     const quando = ativa ? `próxima ${dataHora(proximaExecucao, r.fusoIana)} · ${interpolar(proximaExecucao, estado.agora)}` : "Pausada";
+    const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
     const chave = `<button type="button" class="chave" role="switch" aria-checked="${ativa}" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}" aria-label="${ativa ? "Pausar" : "Ativar"} a rotina ${esc(r.instrucao)}"><span></span></button>`;
     return `<li class="detalhe-rotina rotina-${esc(r.estado)}">
       <div class="dr-cab"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b>${chave}</div>
       <small>${esc(quando)}</small>
+      ${parada}
       <div class="dr-acoes">${botao("executar-rotina", "Testar", { classe: "link sm", id: r.id, dados: { agente: r.agenteId }, desabilitado: estado.ocupado })}${historico(r)}</div>
     </li>`;
   };

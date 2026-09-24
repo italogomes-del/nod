@@ -2,9 +2,11 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
+import { desdeDaParada, linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, contarFios, ehPergunta, umPorFio } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
+import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -26,15 +28,22 @@ const recusaAutomatica = (em: string): string => `recusa automática ${em}`;
 const nadaMudaSemVoce = (em: string): string => `vence ${em} · nada muda sem você`;
 const vence = (em: string): string => `vence ${em}`;
 
+/** O pedido de acesso veio de uma rotina (payload.rotinaId): permitir a roda, e vencer a pausa. */
+export function pedidoDeRotina(proposta: Proposta | null | undefined): boolean {
+  return proposta?.payload.kind === "acesso" && proposta.payload.rotinaId !== undefined;
+}
+
 /**
  * definido em 2026-09-24: o relógio do card diz o que ACONTECE quando o prazo passa — antes era
  * "recusa automática" para todo tipo, inclusive onde nada é recusado. Aprovação (nada é executado) e
  * acesso (nada é concedido) recusam; o gate da rotina passa em branco; proposta vence e nada muda; o
- * resto só vence. Record exaustivo: um tipo novo não compila sem dizer o seu.
+ * resto só vence. Record exaustivo: um tipo novo não compila sem dizer o seu. Desde 2026-09-24 (emenda
+ * da ADR-044) cada entrada recebe também o item: o acesso pedido por uma ROTINA não é só recusado —
+ * vencido, ele pausa a rotina (varredor-expiracao.ts), e o relógio diz isso.
  */
-const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string) => string> = {
+const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = {
   aprovacao: recusaAutomatica,
-  acesso: recusaAutomatica,
+  acesso: (em, item) => (pedidoDeRotina(item.proposta) ? `a rotina pausa sozinha ${em}` : recusaAutomatica(em)),
   gate_rotina: (em) => `passa em branco ${em}`,
   perfil: nadaMudaSemVoce,
   rotina: nadaMudaSemVoce,
@@ -52,6 +61,8 @@ const REGRA_HUMANA: Readonly<Record<string, string>> = {
   "regra:gemea_resolvida": "resolvido junto do pedido igual",
   "regra:retomada_substituida": "fechado: uma retomada mais nova tomou o lugar",
   "regra:aprovacao_permanente": "aprovado pela regra que você criou",
+  // definido em 2026-09-24 (emenda da ADR-044, migração 0026): a sobra de um pedido de rotina repetido.
+  "regra:pedido_de_acesso_unico": "fechado: o mesmo acesso já estava pedido",
 };
 
 /**
@@ -105,6 +116,17 @@ export function rotulosAcesso(proposta: Proposta | null | undefined): { permitir
   return proposta?.payload.kind === "acesso" && proposta.payload.rotinaId
     ? { permitir: "Permitir e rodar agora", recusar: "Pausar rotina" }
     : { permitir: "Permitir e continuar", recusar: "Não permitir" };
+}
+
+/**
+ * definido em 2026-09-24 (emenda da ADR-044): o card do acesso que uma rotina pediu diz que ela está
+ * PARADA, desde quando, e — na linha de baixo (linhaNaoRodaram) — quais janelas não rodaram sem gastar
+ * crédito. Mesmo cabeçalho no card da conversa e em "Sua vez".
+ */
+export function marcaRotinaParada(proposta: Proposta | null | undefined, parada: Item["rotinaParada"] | undefined, agora: number): string {
+  if (!pedidoDeRotina(proposta)) return "";
+  const desde = parada ? `<span class="mudo">${esc(desdeDaParada(parada, agora))}</span>` : "";
+  return `<span class="tag tag-ambar dec-rotina-parada" title="a rotina não roda até você decidir; nenhuma janela parada gastou crédito">rotina parada</span>${desde}`;
 }
 
 /** Os nomes técnicos do pedido existem, mas atrás do disclosure: a frase é o que a pessoa lê. */
@@ -212,8 +234,9 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores"], daMinhaConversa: boolean): string {
+function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace">, daMinhaConversa: boolean): string {
   const d = item.decisao;
+  const conectores = estado.conectores;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
   switch (d.tipo) {
     case "aprovacao":
@@ -226,11 +249,20 @@ function renderAcoes(item: Item, aberta: boolean, conectores: Estado["conectores
       const r = rotulosAcesso(item.proposta);
       return `<div class="acoes">${botao("decidir-proposta", r.permitir, { classe: "pri", id: d.id })}${botao("recusar-decisao", r.recusar, { id: d.id })}</div>`;
     }
-    case "perfil":
-    case "rotina":
+    // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a rotina que declara acessos
+    // diz no botão que confirmar também libera; app por conectar vem primeiro (web/telas/rotina-precisa.ts).
+    case "rotina": {
+      const comAcesso = acoesComAcesso(item.proposta, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Deixar de lado" });
+      if (comAcesso) return `<div class="acoes">${comAcesso.botoes}</div>${comAcesso.ajuda}`;
       return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
-    case "rotina_atualizacao":
+    }
+    case "perfil":
+      return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    case "rotina_atualizacao": {
+      const comAcesso = acoesComAcesso(item.proposta, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Manter como está" });
+      if (comAcesso) return `<div class="acoes">${comAcesso.botoes}</div>${comAcesso.ajuda}`;
       return `<div class="acoes">${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter como está", { id: d.id })}</div>`;
+    }
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
@@ -263,7 +295,8 @@ function dispensavel(item: Item): boolean {
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
-  const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs))}` : rotuloVencido(d, estado.agora);
+  const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs), item)}` : rotuloVencido(d, estado.agora);
+  const parada = d.tipo === "acesso" && aberta ? { marca: marcaRotinaParada(item.proposta, item.rotinaParada, estado.agora), linha: linhaNaoRodaram(item.rotinaParada, estado.agora) } : { marca: "", linha: "" };
   // O "Retomar" aberto já tem "Dispensar" nas ações: o × repetiria o mesmo gesto no mesmo card.
   const pergunta = aberta && ehPergunta(d.tipo);
   const daMinhaConversa = d.ownerId === estado.sessao?.pessoaId;
@@ -273,11 +306,12 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   // A pergunta aberta já abre a conversa pelo "Responder na conversa": "abrir conversa" repetiria o gesto.
   const conversa = pergunta && daMinhaConversa ? undefined : estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
-    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span>${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
-    <div class="dec-frase">${esc(d.frase)}</div>
+    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
+    <div class="dec-frase">${esc(d.frase)}</div>${parada.linha}
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
+    ${(d.tipo === "rotina" || d.tipo === "rotina_atualizacao") && aberta ? linhasPrecisa(item.proposta, estado) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
-    ${renderAcoes(item, aberta, estado.conectores, daMinhaConversa)}
+    ${renderAcoes(item, aberta, estado, daMinhaConversa)}
     ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}
   </li>`;
 }
@@ -317,12 +351,23 @@ function contarAbertas(estado: Estado, conta: (tipo: TipoDecisao) => boolean): M
 /** O subtítulo do agente que perguntou, no lugar do título (definido em 2026-09-24, emenda da ADR-045). */
 export const SUBTITULO_ESPERANDO = '<span class="sub-esperando">esperando sua resposta</span>';
 
+/**
+ * definido em 2026-09-24 (emenda da ADR-044): o agente com uma rotina parada por falta de acesso — um
+ * pedido de acesso ABERTO que veio de rotina — diz "rotina parada" em âmbar no lugar do título. Vencido
+ * não conta: o vencimento já pausou a rotina, e a lista de rotinas diz "pausada".
+ */
+export function rotinasParadasPorAgente(estado: Estado): ReadonlySet<string> {
+  return new Set((estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido" && pedidoDeRotina(i.proposta)).map((i) => i.decisao.agenteId));
+}
+
+export const SUBTITULO_ROTINA_PARADA = '<span class="sub-rotina-parada">rotina parada</span>';
+
 const SINO = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3z"/><path d="M6.5 14a1.6 1.6 0 0 0 3 0"/></svg>';
 
 /**
  * Sino ao lado do título da sidebar: some quando não há nada aberto. definido em 2026-09-24 (revisão da
- * interface): substituiu a faixa âmbar, que ocupava o topo da lista inteira; o selo ⚑ na linha do
- * agente continua dizendo QUEM espera. Um pedido: o sino leva à conversa dele (`itens` já vem ordenado
+ * interface): substituiu a faixa âmbar, que ocupava o topo da lista inteira; o ponto do mascote na
+ * linha do agente continua dizendo QUEM espera. Um pedido: o sino leva à conversa dele (`itens` já vem ordenado
  * pelo servidor, ADR-007). Vários: leva à fila completa e mostra a contagem. Conta "pedidos" —
  * decisões e perguntas —, porque as duas esperam pela pessoa (emenda da ADR-045).
  */

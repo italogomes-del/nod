@@ -234,7 +234,18 @@ body.ocupado { cursor: progress; }
 .card-prop .ttl { padding: 0 12px 10px; font-size: 16px; font-weight: 600; }
 .card-prop .it { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 13.5px; line-height: 1.45; }
 .card-prop .it b { display: block; font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
-.card-prop .ft { padding: 10px 12px; display: flex; gap: 8px; border-top: 1px solid var(--line); background: #fafbfc; }
+.card-prop .ft { padding: 10px 12px; display: flex; gap: 8px; border-top: 1px solid var(--line); background: #fafbfc; flex-wrap: wrap; }
+/* definido em 2026-09-24 ("rotina nasce com o acesso"): o app que a rotina lê ou altera, em destaque. */
+.rotina-precisa { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--amber-line);
+  background: var(--amber-bg); font-size: 13.5px; line-height: 1.45; }
+.decisao .rotina-precisa { border: 1px solid var(--amber-line); border-radius: 10px; margin-top: 8px; }
+.rotina-precisa .app-logo { width: 32px; height: 32px; min-width: 32px; border-radius: 9px; font-size: 16px; }
+.rotina-precisa .rp-corpo { min-width: 0; }
+.rotina-precisa .rp-rotulo { display: block; font-size: 11px; color: var(--amber); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.rotina-precisa .rp-oque { font-weight: 600; }
+.rotina-precisa .rp-fora { display: block; color: var(--ink-3); font-size: 12.5px; margin-top: 2px; }
+.rp-liberado { margin: 0; padding: 0 12px 10px; font-size: 12.5px; }
+.card-prop .rp-liberado { background: #fafbfc; }
 
 /* ---- composer ---- */
 .composer .box { max-width: 100%; margin: 0 auto; border: 1px solid var(--line-2); border-radius: 14px;
@@ -346,6 +357,12 @@ body.ocupado { cursor: progress; }
 /* interrompida (ADR-045): a máquina parou no meio — não é erro da rotina (vermelho) nem falta de
    resposta (âmbar). Cinza como sem_novidade: é registro; o aviso único já contou o que houve. */
 .exec-interrompida, .exec-interrompida b { color: var(--ink-3); }
+/* bloqueada (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem gastar turno. Âmbar
+   como passou_em_branco — espera por você (o card de acesso) —, sem o vermelho de erro. */
+.exec-bloqueada b { color: var(--amber); }
+.rotina-parada .acoes .pri, .detalhe-rotina .dr-parada { margin-top: 4px; }
+.dr-parada { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; }
+.dec-nao-rodaram { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .dr-execucoes { list-style: none; margin: 6px 0 0; padding: 0; font-size: 11.5px; color: var(--ink-3); }
 .dr-execucoes .exec { padding: 3px 0; }
 .catalogo { list-style: none; padding: 0; margin: 8px 0; font-size: 13px; } .catalogo li { padding: 3px 0; }

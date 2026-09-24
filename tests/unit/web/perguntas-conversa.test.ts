@@ -33,7 +33,7 @@ function item(id: string, p: { tipo?: TipoDecisao; criadoEm?: number; vencido?: 
       desfecho: p.vencido ? { tipo: "expirou_sem_ninguem_ver", em: new Date(AGORA - 3 * H).toISOString() } : null,
       vistaEm: null, criadoEm: new Date(criadoEm).toISOString(), fioId: null,
     },
-    estadoColuna: p.vencido ? "vencido" : "pendente", agenteNome: "Nina", aguardandoHaMs: 0, recusaAutomaticaEmMs: 0, gemeas: [], itensAprovacao: [], proposta: null, fio: null,
+    estadoColuna: p.vencido ? "vencido" : "pendente", agenteNome: "Nina", aguardandoHaMs: 0, recusaAutomaticaEmMs: 0, gemeas: [], itensAprovacao: [], proposta: null, fio: null, rotinaParada: null,
   };
 }
 
