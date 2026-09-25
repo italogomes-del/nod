@@ -106,7 +106,7 @@ export function criarApi(escopo: Escopo) {
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
     enviar: (conversaId: string, texto: string, anexos: readonly string[] = []) => post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, anexos.length ? { texto, anexos } : { texto }),
-    /** ADR-045: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
+    /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,
     pararConversa: (conversaId: string) => post<FaixaParada>(`conversas/${conversaId}/parar`),

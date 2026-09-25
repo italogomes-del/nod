@@ -85,7 +85,7 @@ export type NovoTurno = {
   entradaTexto: string;
   /** Fala da pessoa que disparou o turno; a web põe "Na fila" e Cancelar embaixo dela. */
   mensagemOrigemId?: string | null;
-  /** ADR-045: anexos da mensagem que abriu o turno; o plano leva os metadados. */
+  /** ADR-046: anexos da mensagem que abriu o turno; o plano leva os metadados. */
   entradaAnexos?: readonly string[];
   entradaConfianca: Confianca;
   modelo: string;

@@ -58,7 +58,7 @@ export type PlanoTurno = {
   catalogo: { ferramentas: FerramentaPlano[]; servidores: ServidorPlano[] };
   promptSistema: string;
   /**
-   * `anexos` (ADR-045): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
+   * `anexos` (ADR-046): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
   entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[] };

@@ -26,7 +26,7 @@ const paraAnexo = (l: Linha): AnexoGuardado => ({
 const meta = (a: AnexoGuardado): AnexoMeta => ({ id: a.id, nome: a.nome, mime: a.mime, tamanho: a.tamanho });
 
 /**
- * Anexos de mensagem (ADR-045). Nasce solto (mensagem_id nulo) no upload e é preso à mensagem no
+ * Anexos de mensagem (ADR-046). Nasce solto (mensagem_id nulo) no upload e é preso à mensagem no
  * envio — só a dona prende (RLS de escrita é owner_id). Os bytes só saem por `conteudo`, nunca junto
  * dos metadados: listar uma conversa não arrasta megabytes.
  */

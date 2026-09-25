@@ -3,7 +3,7 @@ import { ANEXOS_POR_MENSAGEM, MIME_PDF as MIME_PDF_SRC, MIMES_IMAGEM as IMAGEM_S
 import { MIME_PDF, MIMES_IMAGEM, MIMES_TEXTO, mimeDe, motivoRecusa, POR_MENSAGEM, renderAnexosDaMensagem, renderItens, resumo, TAMANHO_MAX } from "../../../web/lib/anexos.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
 
-describe("anexos na web (ADR-045)", () => {
+describe("anexos na web (ADR-046)", () => {
   it("o espelho da web é igual ao contrato do servidor", () => {
     expect(TAMANHO_MAX).toBe(TAMANHO_MAX_ANEXO);
     expect(POR_MENSAGEM).toBe(ANEXOS_POR_MENSAGEM);

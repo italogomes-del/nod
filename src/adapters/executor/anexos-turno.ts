@@ -5,7 +5,7 @@ import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { tipoDoAnexo } from "../../domain/anexo.ts";
 
 /**
- * Anexos do turno no DRIVER (ADR-045): o plano traz só metadados; aqui os bytes descem pela rota
+ * Anexos do turno no DRIVER (ADR-046): o plano traz só metadados; aqui os bytes descem pela rota
  * interna com o token do turno e viram a entrada no formato de cada CLI. Falha ao baixar não some em
  * silêncio (ADR-029): o arquivo vira uma linha dizendo que não pôde ser lido, e o modelo avisa.
  */

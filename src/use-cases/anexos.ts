@@ -7,7 +7,7 @@ import type { CasoDeUso } from "./tipos.ts";
 export type EntradaReceberAnexo = { conversaId: string; nome: string; mime: string; conteudo: Uint8Array };
 
 /**
- * Upload (ADR-045): o arquivo nasce SOLTO na conversa e só vira parte de uma mensagem no envio. Tipo e
+ * Upload (ADR-046): o arquivo nasce SOLTO na conversa e só vira parte de uma mensagem no envio. Tipo e
  * tamanho são conferidos aqui e de novo pelos CHECKs da 0023 — o navegador valida antes só por
  * conforto. Conversa que a pessoa não enxerga é nao_encontrado (RLS), como em qualquer rota.
  */
