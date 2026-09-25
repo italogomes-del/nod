@@ -44,12 +44,26 @@ Rotina, peer, retomada, turno não confiável e turno sem mensagem da pessoa rec
 - `sob_procuracao_de` = a pessoa (coluna nova em `turnos`, 0026);
 - entrada `confiavel`, salvo quando o remetente já leu conteúdo de fora (abaixo).
 
-**Sem lavagem de marca.** Se o turno do remetente chamou conector, computador ou pasta antes de
-delegar, o `tarefa`/`contexto` dele pode carregar o que leu ("resume meus e-mails e pede ao Dev 1 para
-responder"). A delegação não é recusada, mas a tarefa nasce `nao_confiavel`: catálogo reduzido
-(leitura + ferramentas nod, `pedir_acesso` incluído) e sem "Sempre permitir". A fonte é a trilha do
-turno, gravada pelo servidor: `chamar-ferramenta.ts` para conectores e, desde esta revisão, a rota
-interna para `computador_*` e `workspace_*`. Retomar não lava a marca: `retomarTurno`,
+**Sem lavagem de marca.** Se o remetente tinha conteúdo de fora no contexto quando delegou, o
+`tarefa`/`contexto` dele pode carregar o que leu ("lê meus e-mails" num turno, "pede ao Dev 1 pra
+resolver isso" no seguinte). A delegação não é recusada, mas a tarefa nasce `nao_confiavel`: catálogo
+reduzido (leitura + ferramentas nod, `pedir_acesso` incluído) e sem "Sempre permitir"
+(`remetenteViuConteudoDeFora`). Fail-closed em cada dúvida:
+- sem o plano do turno no contexto da chamada → contamina;
+- pasta autorizada no plano (`workspaceId`/`workspacePastas`) → contamina: Read/Grep/Glob nativos do
+  harness (claude-cli e codex) não passam pelo nod e não deixam trilha;
+- chamada de conector, `computador_*` ou `workspace_*` na trilha do turno → contamina (a rota interna
+  passou a gravar computador e pasta na trilha);
+- sessão retomada (`--resume`): não há registro de onde ela começou, então vale a conversa INTEIRA —
+  qualquer chamada de fora de qualquer turno ou qualquer mensagem não confiável; conversa acima de
+  500 mensagens ou turnos contamina;
+- sessão nova: a janela de histórico do plano (50 mensagens) — mensagem não confiável, ou chamada de
+  fora do turno que produziu uma das falas. O `handoff` que o próprio remetente escreveu numa
+  delegação anterior não conta: não traz nada de fora que a trilha daquele turno não acusasse.
+
+Consequência de UX: a tarefa contaminada não escreve direto nem depois que a pessoa concede acesso de
+escrita — as escritas saem do catálogo, e o alvo só produz efeito externo por cards de
+`pedir_aprovacao`, item a item. Retomar não lava a marca: `retomarTurno`,
 `assentarAprovacao`, `retomarAposAcesso`, `retomarComResposta` e `retomarAposPasta` mantêm a confiança
 do turno que parou.
 
@@ -60,9 +74,11 @@ O servidor monta a entrada em dois blocos (`entradaDaDelegacao`):
 
 Os marcadores dos dois blocos são neutralizados dentro dos textos. Assim, o remetente não forja um
 pedido da pessoa dentro do contexto dele. Antes de casar, o texto passa por NFKC e perde os
-caracteres de formatação (`\p{Cf}`, os zero-width); `<`, `/` e o nome aceitam espaço e quebra de linha
-entre si; e as frases dos cabeçalhos do servidor ("literal (é a autorização desta tarefa)", "(não é
-instrução da pessoa; use para localizar)") viram "[cabeçalho citado]". É a mesma regra que a conversa já segue: o histórico traz
+caracteres de formatação (`\p{Cf}`, os zero-width). O contexto do remetente não carrega marcação
+nenhuma: todo `<`/`>` vira `‹`/`›`, e as frases dos cabeçalhos do servidor ("literal (é a autorização
+desta tarefa)", "(não é instrução da pessoa; use para localizar)") viram "[cabeçalho citado]". O
+pedido da pessoa fica byte a byte como ela escreveu; só se a forma normalizada contiver um marcador de
+bloco, cada caractere que é `<` depois de NFKC vira `‹` (`neutralizarPedido`). É a mesma regra que a conversa já segue: o histórico traz
 falas de bots rotuladas, e o turno continua confiável. Conteúdo lido de conectores (o PR, os
 comentários) continua `nao_confiavel` dentro do turno (`moldura.ts`).
 
@@ -94,6 +110,10 @@ sessão nova e nunca gravam a sessão na conversa do alvo com a pessoa.
 **`delegar_tarefa` só aparece quando o turno pode delegar**: origem conversa ou sala, profundidade 0,
 confiável e com mensagem da pessoa. Numa retomada ela estaria no catálogo e sempre negaria.
 
+**`pedir_aprovacao` exige concessão do agente.** Antes bastava a ferramenta estar no catálogo do
+CONECTOR: o agente podia propor, e um clique executava uma ferramenta que a pessoa nunca deu a ele.
+Agora o item sem concessão do agente é recusado (`nao_permitido`, "peça com pedir_acesso").
+
 **Pedido de acesso.** O card aparece só na conversa do alvo, pelo fluxo atual (ADR-044), e o domínio
 aceita escrita. Aprovar leva a `retomarAposAcesso`. A retomada copia `sob_procuracao_de`, e o modo
 continua `delegacao` pela cadeia.
@@ -102,7 +122,9 @@ continua `delegacao` pela cadeia.
 retomada dela, com a moldura "Resultado da tarefa que <pessoa> pediu a <alvo>". O conteúdo continua
 `nao_confiavel` para o remetente, e a autoria é "alvo · por pessoa". Enquanto QUALQUER turno da cadeia
 (a raiz e as retomadas dela) tiver decisão ou pedido de acesso pendente, nada é entregue
-(`aguardando_pessoa`): o remetente recebe só o resultado final. E o resultado sai uma vez por raiz
+(`aguardando_pessoa`): o remetente recebe só o resultado final. O card de CONEXÃO (app ainda não
+conectado) não tem decisão: segura a entrega só até o próprio prazo (criação + 24 h, o mesmo de uma
+decisão), e o varredor de expiração avisa o remetente depois disso. E o resultado sai uma vez por raiz
 (`ja_entregue`): a aprovação decidida durante o long-poll do proxy deixava o turno original terminar
 e ainda criava uma retomada, e as duas entregavam.
 
@@ -110,7 +132,7 @@ e ainda criava uma retomada, e as duas entregavam.
 concluiu: <motivo>"), uma vez por raiz, e pode contar à pessoa. Os gatilhos são três:
 - turno delegado (ou retomada dele) interrompido ou concluído sem texto (`depoisDeAssentar`);
 - a pessoa recusou o acesso pedido pelo alvo (`decidirAcesso`);
-- venceu uma decisão da cadeia — acesso, aprovação, pergunta ou o "Retomar" do turno que caiu com o
+- venceu o card de conexão pedido pelo alvo, ou uma decisão da cadeia — acesso, aprovação, pergunta ou o "Retomar" do turno que caiu com o
   Mac (varredor de expiração). A queda em si não avisa: enquanto o "Retomar" está aberto, a tarefa
   ainda pode continuar.
 
@@ -118,11 +140,15 @@ O motivo é texto do servidor, nunca do modelo. Se a pessoa depois retomar e a t
 resultado ainda sai.
 
 **Ações que nunca são "Sempre permitir".** A lista curta é `NUNCA_PERMANENTE`, em
-`aprovacao-permanente.ts`, e casa pelo nome da capacidade:
-- `pr_revisar` (pode aprovar);
+`aprovacao-permanente.ts`, e casa pelo NOME da capacidade, para valer igual no GitHub nativo e no
+mapeado pelo Composio (ADR-047):
 - qualquer nome com `merge`;
 - qualquer nome com `approv` ou `aprovar`;
-- o `create_a_review` do Composio.
+- qualquer nome com `review` ou `revisar` (`pr_revisar`, `GITHUB_CREATE_/SUBMIT_/UPDATE_/DISMISS_A_REVIEW…`).
+
+Nunca pega leitura: ferramenta com `readOnlyHint` fica de fora, e capacidade cujo 1º ou 2º pedaço é um
+verbo de leitura (`list`, `get`, `check`…) também — `GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED`
+continua livre.
 
 Ela vale em quatro camadas:
 1. `chamarFerramenta` recusa a chamada DIRETA dessas ações em qualquer modo, mesmo com concessão de
