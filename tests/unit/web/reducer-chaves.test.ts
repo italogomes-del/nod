@@ -19,7 +19,7 @@ describe("reducer: Minhas chaves (ADR-031)", () => {
     expect(comChave.invalidacoes).toContain("chaves");
     expect(reduzir(comChave, { tipo: "navegar", tela: { tipo: "chaves" } }).chaveEmitida).not.toBeNull();
     expect(reduzir(comChave, { tipo: "chave-emitida", emitida: null }).chaveEmitida).toBeNull();
-    expect(reduzir(comChave, { tipo: "navegar", tela: { tipo: "frota" } }).chaveEmitida).toBeNull();
+    expect(reduzir(comChave, { tipo: "navegar", tela: { tipo: "rotinas" } }).chaveEmitida).toBeNull();
     expect(reduzir(comChave, { tipo: "sessao", escopo: { tenantId: "t", pessoaId: "outra" } }).chaveEmitida).toBeNull();
   });
 });

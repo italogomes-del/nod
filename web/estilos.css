@@ -283,9 +283,6 @@ body.ocupado { cursor: progress; }
 .form.linha { grid-template-columns: auto 1fr auto; align-items: end; }
 .criar { display: flex; gap: 8px; margin: 12px 0 18px; max-width: 560px; } .criar input { flex: 1; }
 .cartoes { display: grid; gap: 8px; }
-.cartao-agente { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); width: 100%; }
-.cartao-agente:hover { border-color: var(--line-2); box-shadow: var(--shadow); }
-.ca-txt { display: flex; flex-direction: column; min-width: 0; flex: 1; } .ca-txt b { font-size: 14.5px; } .ca-txt span { color: var(--ink-2); font-size: 13px; } .ca-txt small { color: var(--ink-3); }
 .inventario { font-size: 13px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
 .inv-linha, .ex-linha { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ex-linha { padding-top: 6px; border-top: 1px dashed var(--line); }

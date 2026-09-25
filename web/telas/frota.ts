@@ -1,10 +1,8 @@
 import type { IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
-import { estadoMascoteNaConversa } from "../lib/mascote.ts";
+import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
-import { renderNegacoes } from "./negacao.ts";
 
 /** Inventário ESCRITO (ADR-019/029): estado, versão, motivo e relógio — nunca só um ícone. */
 export function textoInventario(inv: Inventario | null, agora: number): string {
@@ -56,34 +54,3 @@ export function renderInventario(estado: Estado): string {
   </div>`;
 }
 
-/**
- * Início (E1.1, tela inicial): boas-vindas, os agentes em cartão e as negações vivas por classe com
- * relógio. Criação com UM campo (nome opcional): nasce 'Novo agente' e o modelo propõe o perfil na
- * conversa (EMENDA 17).
- *
- * Desde 2026-09-18 ela NÃO repete o inventário do motor: conexão e harness são da conta e moram em
- * "Seu espaço" (`renderInventario` continua exportado e é usado lá). Aqui ficou só o que a sidebar
- * não mostra — o convite e as negações. Deixou de ser uma entrada de navegação: chega-se pela marca.
- */
-export function renderFrota(estado: Estado): string {
-  const frota = estado.frota;
-  const agentes = frota?.agentes ?? [];
-  const cartoes = agentes
-    .map((a) => {
-      const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === a.conversaId);
-      const trabalhando = vivos.some((t) => t.estado === "rodando") ? `<span class="tag tag-cinza">trabalhando</span>` : vivos.length ? `<span class="tag tag-cinza">na fila</span>` : "";
-      return `<button class="cartao-agente" data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}">
-        ${iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId))}
-        <span class="ca-txt"><b>${esc(a.nome)}${a.fixado ? " 📌" : ""}</b><span>${esc(a.titulo || a.descricao || "sem perfil confirmado")}</span><small>${esc(a.descricaoEstado)}${a.confirmado ? "" : " · perfil não confirmado"}</small></span>
-        ${trabalhando}
-      </button>`;
-    })
-    .join("");
-  const vazio = agentes.length === 0 ? `<p class="mudo">Nenhum agente ainda. Crie o primeiro: ele já chega com um nome e uma mensagem de boas-vindas — você diz o que ele faz na conversa.</p>` : "";
-  return `<section class="tela tela-frota">
-    <header class="tela-cab"><h1>Meus agentes</h1><span class="chip">${agentes.length} bots no seu espaço</span></header>
-    <div class="boas-vindas"><div><div class="eyebrow">SEU ESPAÇO DE TRABALHO</div><h2>Uma equipe de bots.<br>Um lugar para fazer acontecer.</h2><p class="intro">Converse, reúna especialistas e transforme tarefas em rotinas.</p></div>${botao("criar-rapido", "+ Criar bot", { classe: "pri" })}</div>
-        <div class="cartoes">${cartoes}${vazio}</div>
-    ${renderNegacoes([...(frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")], estado.agora)}
-  </section>`;
-}
