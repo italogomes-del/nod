@@ -139,15 +139,16 @@ Ao terminar, pausar rotinas UAT, resolver/cancelar pedidos pendentes explicitame
 
 A restrição de consulta ao colega quando o agente é acordado por rotina foi corrigida. O UAT das 16:05 comprovou Gmail → consulta ao Gestor ClickUp → leitura real ClickUp → retorno ao Triador. Sessões de rotina/peer foram separadas da sessão interativa. O fluxo de duas tarefas autônomas ainda não está aprovado: nenhum acesso de escrita foi concedido e a execução de efeito em turno peer continua restrita. Veja [resultados e evidências](uat-composio-execucao-2026-09-17.md).
 
-## Casos do GitHub nativo (ADR-047, 2026-09-24)
+## Casos do GitHub nativo (ADR-048, 2026-09-24)
 
 O GitHub deixou de ser um app do Composio. Agora é o conector nativo `github`, com nomes estáveis (`github__pr_ver`, `github__pr_comentar`…); o Composio virou um dos jeitos de conectar.
 
 | Caso | Preparação | Esperado |
 |---|---|---|
-| GH01 | `gh auth status` ok no Mac; `NOD_EXECUTOR=claude-cli`; sem conector `github` | O agente chama `pedir_acesso("github")` e o card de permitir aparece direto, sem card de conexão. O conector nasce habilitado com 9 capacidades. |
-| GH02 | Como GH01, com leitura permitida | `pr_ver`, `pr_diff` e `pr_comentarios` de um PR de teste voltam resumidos. O diff grande vem cortado, com a marca de corte. |
-| GH03 | Escrita permitida | `pr_comentar` publica num PR de TESTE, nunca no de outra pessoa antes de validar, em nome da conta do gh. |
-| GH04 | `gh auth logout` | A chamada volta "rode `gh auth login` nesta máquina". Com um token no campo avançado, a chamada seguinte sai pelo token, sem regra nova. |
-| GH05 | Sem gh e sem token, com Composio | Conectar abre o login do Composio; depois de Verificar, `pr_diff` e `pr_checks` aparecem como indisponíveis neste jeito. |
-| GH06 | `NOD_MODO=compartilhado` sem App | Conectar GitHub diz "para rotinas noturnas, conecte o GitHub da organização". Com o App cadastrado, o conector nasce pelo jeito app. |
+| GH01 | Servidor compartilhado; app nod aberto no Mac com `gh auth status` ok; sem conector `github` | O agente chama `pedir_acesso("github")` e o card de permitir aparece direto, sem card de conexão. O conector nasce habilitado com 9 capacidades. |
+| GH02 | Como GH01, com leitura permitida | `pr_ver`, `pr_diff` e `pr_comentarios` de um PR de teste rodam no gh do Mac (trilha `execucao_local`) e voltam resumidos; o diff grande vem cortado. |
+| GH03 | Escrita permitida | `pr_comentar` publica num PR de TESTE, nunca no de outra pessoa antes de validar, em nome da conta do gh do Mac. |
+| GH04 | Rotina com gate aprova `pr_comentar`; o app nod FECHADO na hora da aprovação | O item mostra "aguardando seu Mac"; ao abrir o app, o comentário sai em até 5 s e a rotina retoma. Sem Mac em 24 h, o item vira "falhou na execução". |
+| GH05 | Colega B no mesmo servidor, sem gh | As ferramentas do GitHub de B nunca rodam no Mac de A; B conecta por token ou Composio. |
+| GH06 | Sem gh e sem token, com Composio | Conectar abre o login do Composio; depois de Verificar, `pr_diff` e `pr_checks` aparecem como indisponíveis neste jeito. |
+| GH07 | GitHub App cadastrado por um admin (`NOD_ADMINS`) | Rotina de pessoa sem gh/token/Composio usa o App (autor `app[bot]`); turno interativo nunca usa o App. |
