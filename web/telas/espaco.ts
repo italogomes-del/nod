@@ -2,12 +2,15 @@ import type { Estado } from "../estado/reducer.ts";
 import { botao, esc } from "../lib/render.ts";
 import { renderInventario } from "./frota.ts";
 import { renderChaves } from "./chaves.ts";
+import { renderNegacoes } from "./negacao.ts";
 
 /**
  * "Seu espaço" (definido em 2026-09-18): o que é da CONTA, não de um bot. Nasceu ao derrubar o rail —
  * conexão/harness (que ocupava o topo da Frota), computadores (a antiga entrada "Chaves") e os dois
  * links de administração. É configuração: visitada raramente, por isso sai do caminho de todo dia e
  * fica atrás do rodapé da sidebar. O ambiente do banco vem junto porque também é da instância.
+ * definido em 2026-09-24: sem a página inicial, as negações vivas (ADR-029: fail-closed escrito, com
+ * relógio) moram aqui, junto da conexão; o conector fora do ar também aparece no painel do bot.
  */
 export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?: number | null } | null): string {
   const amb = ambiente
@@ -20,6 +23,7 @@ export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?:
       <h2>Conexão</h2>
       <p class="intro">Quem executa o trabalho dos seus bots: a sua conta de IA ou a simulação sem custo.</p>
       ${renderInventario(estado)}
+      ${renderNegacoes([...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")], estado.agora)}
     </section>
 
     <section class="espaco-secao">

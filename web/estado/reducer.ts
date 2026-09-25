@@ -24,7 +24,8 @@ import { conversasComPergunta } from "../lib/perguntas.ts";
  * Date.now(): `agora` chega pela ação `tick`.
  */
 export type Tela =
-  | { tipo: "frota" }
+  /** Ainda sem conversa escolhida: assim que a frota chega, `resolverInicio` troca pela conversa certa. */
+  | { tipo: "inicio" }
   | { tipo: "conversa"; conversaId: string; agenteId: string }
   | { tipo: "sala"; salaId: string; conversaId: string }
   | { tipo: "gestao" }
@@ -142,7 +143,7 @@ export type Acao =
 
 export const estadoInicial: Estado = {
   sessao: null,
-  tela: { tipo: "frota" },
+  tela: { tipo: "inicio" },
   frota: null,
   inventario: null,
   executor: null,
@@ -299,14 +300,14 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
       return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null };
     case "navegar":
-      return {
+      return resolverInicio({
         ...estado,
         tela: acao.tela,
         erro: null,
         faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
         // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
-      };
+      });
     case "cancelando-turno":
       return { ...estado, cancelando: { ...estado.cancelando, [acao.turnoId]: acao.agora } };
     case "desfazer-cancelamento": {
@@ -328,7 +329,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-gestao":
       return { ...estado, gestao: acao.gestao };
     case "hidratar-frota":
-      return { ...estado, frota: acao.frota, inventario: acao.frota.inventario };
+      return resolverInicio({ ...estado, frota: acao.frota, inventario: acao.frota.inventario });
     case "hidratar-inventario":
       return { ...estado, inventario: acao.inventario };
     case "hidratar-executor":
@@ -408,6 +409,19 @@ export function conversaDaTela(estado: Estado): ConversaEstado | null {
   const t = estado.tela;
   if (t.tipo !== "conversa" && t.tipo !== "sala") return null;
   return estado.conversas[t.conversaId] ?? null;
+}
+
+/**
+ * definido em 2026-09-24: não há página inicial — o app abre na conversa do primeiro agente da pessoa
+ * (fixados primeiro, na ordem da barra lateral) e, sem nenhum, em "Novo bot". Enquanto a frota não chega
+ * a tela fica "inicio" (vazia); qualquer navegação para "inicio" resolve do mesmo jeito.
+ */
+export function resolverInicio(estado: Estado): Estado {
+  if (estado.tela.tipo !== "inicio" || !estado.frota) return estado;
+  const meus = estado.frota.agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId && a.conversaId);
+  const primeiro = meus.find((a) => a.fixado) ?? meus[0];
+  const tela: Tela = primeiro ? { tipo: "conversa", conversaId: primeiro.conversaId, agenteId: primeiro.id } : { tipo: "novo-bot" };
+  return { ...estado, tela };
 }
 
 /** O que a tela atual precisa ter carregado (o main busca o que faltar). */

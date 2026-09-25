@@ -21,7 +21,7 @@ import { renderRelatos } from "./telas/relatos.ts";
 import { renderEspaco } from "./telas/espaco.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
-import { inventarioEmUso, renderFrota } from "./telas/frota.ts";
+import { inventarioEmUso } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
@@ -270,8 +270,7 @@ function renderPrincipal(): void {
     case "nova-rotina":
       corpo = renderNovaRotina(estado, t.agenteId);
       break;
-    case "frota":
-      corpo = renderFrota(estado);
+    case "inicio":
       break;
     case "sua-vez":
       corpo = renderSuaVez(estado);
@@ -703,7 +702,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "frota" || tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
+    if (tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
   },
   "conectar-composio": (el) => agir(async () => {
     if (!estado.composioConfigurado) {
@@ -729,7 +728,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "voltar-conexao": () => {
     const t = estado.tela;
     if (t.tipo === "conectores" && t.voltar) navegar(t.voltar);
-    else navegar({ tipo: "frota" });
+    else navegar({ tipo: "inicio" });
   },
   "retomar-conexao": (el) => agir(async () => {
     const alvo = conversaAtual();

@@ -100,14 +100,7 @@ body { background: #fcfdff; }
 .tela-cab .pri { margin-left: auto; }
 .eyebrow { font-size: 10px; letter-spacing: 1.8px; font-weight: 600; color: #7b91ad; margin-bottom: 16px; }
 .intro { color: var(--ink-3); line-height: 1.7; font-size: 14px; margin-bottom: 25px; }
-.boas-vindas { display: flex; justify-content: space-between; align-items: center; padding: 38px 0 18px; gap: 20px; }
-.boas-vindas h2 { font-size: 28px; line-height: 1.3; letter-spacing: -1px; margin: 0; font-weight: 600; }
-.boas-vindas .intro { margin-bottom: 0; }
 .cartoes { grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 14px; margin-top: 18px; }
-.cartao-agente { align-items: flex-start; padding: 23px 20px; min-height: 118px; border-radius: 17px; }
-.ca-txt b { font-size: 16px; margin-bottom: 5px; }
-.ca-txt span { font-size: 12px; line-height: 1.5; }
-.ca-txt small { font-size: 10px; margin-top: 8px; }
 .inventario { padding: 13px 17px; border-color: #e7edf5; background: #fafcfe; }
 .inv-linha { font-size: 11px; color: var(--ink-3); }
 .ex-linha { border: 0; padding: 0; font-size: 12px; }
@@ -165,9 +158,6 @@ body { background: #fcfdff; }
   .msg-handoff, .msg-peer { margin-left: 0; }
   .composer-wrap { padding: 8px 12px 12px; }
   .tela { padding: 8px 2px; }
-  .boas-vindas { display: block; padding-top: 25px; }
-  .boas-vindas h2 { font-size: 24px; }
-  .boas-vindas .pri { margin-top: 20px; }
   .form-dupla { gap: 12px; }
   .tela-cab h1 { font-size: 22px; }
 }
@@ -207,7 +197,6 @@ body { background: #fcfdff; }
 /* definido em 2026-09-18: compensar margem do viewBox Bloub (316 unidades para corpo de ~200). */
 .icon.mascote{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .icon.mascote>svg{width:140%;height:140%;flex-shrink:0;max-width:none}
-.cartao-agente .icon.mascote.lg{width:68px;height:68px}
 .mascote-catalogo .icon.mascote>svg{width:100%;height:100%}
 
 /* definido em 2026-09-18: escolha automática em primeiro plano, detalhes técnicos sob demanda. */

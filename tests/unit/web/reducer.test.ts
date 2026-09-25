@@ -33,11 +33,22 @@ const frota: FrotaDto = {
 
 /** O reducer da web é reescrito por frames SSE (L9); a hidratação por REST continua sendo a fonte da verdade. */
 describe("reducer: hidratação e o que cada tela precisa", () => {
-  it("hidratar-frota guarda a frota e o inventário; a tela inicial é a frota", () => {
+  it("hidratar-frota guarda a frota e o inventário; sem página inicial, sem agentes próprios abre 'Novo bot'", () => {
     const e = reduzir(estadoInicial, { tipo: "hidratar-frota", frota });
     expect(e.frota?.agentes.map((a) => a.nome)).toEqual(["LGPD"]);
     expect(e.inventario).toEqual({ estado: "pronto", versao: "catcher", em: 1 });
-    expect(e.tela).toEqual({ tipo: "frota" });
+    expect(estadoInicial.tela).toEqual({ tipo: "inicio" });
+    expect(e.tela).toEqual({ tipo: "novo-bot" });
+  });
+
+  it("o app abre na conversa do primeiro agente da pessoa, fixado primeiro (definido em 2026-09-24)", () => {
+    const base = frota.agentes[0]!;
+    const comSessao = reduzir(estadoInicial, { tipo: "sessao", escopo: { tenantId: "t", pessoaId: base.ownerId } });
+    const dois = { ...frota, agentes: [base, { ...base, id: "a2", nome: "Fixo", conversaId: "c2", fixado: true }] };
+    const e = reduzir(comSessao, { tipo: "hidratar-frota", frota: dois });
+    expect(e.tela).toEqual({ tipo: "conversa", conversaId: "c2", agenteId: "a2" });
+    // Navegar para "inicio" (ex.: voltar sem destino) resolve do mesmo jeito.
+    expect(reduzir({ ...e, tela: { tipo: "rotinas" } }, { tipo: "navegar", tela: { tipo: "inicio" } }).tela).toEqual({ tipo: "conversa", conversaId: "c2", agenteId: "a2" });
   });
 
   it("invalidacoesDaTela diz o que falta buscar para a tela atual (sem repetir o que já está marcado)", () => {
