@@ -101,7 +101,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
   const extras = (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
   const args = [
     "-p",
-    // ADR-045: com anexo, a entrada é uma linha stream-json com blocos de imagem/PDF em vez de texto puro.
+    // ADR-046: com anexo, a entrada é uma linha stream-json com blocos de imagem/PDF em vez de texto puro.
     ...(entrada.streamJson ? ["--input-format", "stream-json"] : []),
     "--output-format",
     "stream-json",

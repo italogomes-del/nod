@@ -1,4 +1,4 @@
--- definido em 2026-09-24 (ADR-045): a pessoa manda arquivos na conversa para o MODELO ler naquele
+-- definido em 2026-09-24 (ADR-046): a pessoa manda arquivos na conversa para o MODELO ler naquele
 -- turno — imagem, PDF ou texto. O arquivo nasce solto (mensagem_id nulo) quando o upload termina e é
 -- preso à mensagem no envio. Os bytes ficam aqui, não no disco da máquina: o servidor é a fonte
 -- da verdade da conversa e o driver baixa pela rota interna com o token do turno.

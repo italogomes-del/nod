@@ -41,7 +41,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       },
     },
     {
-      // ADR-045: corpo BINÁRIO (o arquivo), tipo no content-type e nome em x-nod-nome. O cabeçalho próprio
+      // ADR-046: corpo BINÁRIO (o arquivo), tipo no content-type e nome em x-nod-nome. O cabeçalho próprio
       // força preflight num POST de outra origem — defesa a mais sobre o cookie SameSite=Strict.
       metodo: "POST",
       padrao: new RegExp(`^/conversas/${ID}/anexos$`),

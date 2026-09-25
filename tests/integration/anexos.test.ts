@@ -11,10 +11,10 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2
 const PDF = new TextEncoder().encode("%PDF-1.4 conteúdo");
 
 /**
- * Anexos no chat (ADR-045) no Postgres de verdade: nasce solto, é preso à mensagem no envio, entra no
+ * Anexos no chat (ADR-046) no Postgres de verdade: nasce solto, é preso à mensagem no envio, entra no
  * turno e volta nos metadados da conversa. A RLS separa pessoas; o CHECK da 0021 segura tipo e tamanho.
  */
-describeIntegracao("anexos no chat (ADR-045)", () => {
+describeIntegracao("anexos no chat (ADR-046)", () => {
   it("upload → envio: o anexo é preso à mensagem, entra no turno e aparece na conversa só com metadados", async () => {
     await withRollback(MARLON, async (trx) => {
       const { conversaId } = await agenteComConversa(trx, MARLON);

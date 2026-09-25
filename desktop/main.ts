@@ -1,5 +1,5 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
-import { app, BrowserWindow, ipcMain, Menu, safeStorage, session, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, Notification, safeStorage, session, shell, type IpcMainInvokeEvent } from "electron";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, dirname } from "node:path";
@@ -11,6 +11,8 @@ import { criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
+import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop } from "../src/contracts/desktop.ts";
+import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 
 type Config = { url: string; chave: string };
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +35,68 @@ const mensagens: Record<string, string> = {
   resposta_invalida: "Confira o endereço HTTPS do servidor do seu time.",
 };
 function caminhoConfig() { return join(app.getPath("userData"), "conexao.enc"); }
+
+// ---- Avisos no Mac (definido em 2026-09-24) ----------------------------------------------------------
+// A preferência mora em userData/preferencias.json: o localStorage da janela web é apagado a cada
+// conexão (clearStorageData abaixo). O aviso sai daqui, do processo principal — a página continua sem
+// permissão nenhuma (proteger) —, e só com a janela fora de foco.
+let preferencias = { avisos: true };
+/** O último aviso falhou ao aparecer (o macOS bloqueou); o próximo que aparecer desfaz. */
+let bloqueados = false;
+let contadorAtual = 0;
+/** Referência viva de cada aviso: sem ela o coletor leva o objeto e o clique se perde. */
+const avisosVivos: Notification[] = [];
+const MAX_AVISOS_VIVOS = 20;
+function caminhoPreferencias() { return join(app.getPath("userData"), "preferencias.json"); }
+function estadoPreferencias(): PreferenciasDesktop { return { avisos: preferencias.avisos, bloqueados }; }
+async function carregarPreferencias() {
+  preferencias = lerPreferencias(await readFile(caminhoPreferencias(), "utf8").catch(() => null));
+}
+async function gravarPreferencias() {
+  await mkdir(app.getPath("userData"), { recursive: true });
+  const tmp = `${caminhoPreferencias()}.tmp`;
+  await writeFile(tmp, JSON.stringify(preferencias), { mode: 0o600 });
+  await rename(tmp, caminhoPreferencias());
+}
+/** Desligado, o Dock também apaga: o número é parte dos avisos. */
+function aplicarContador() { app.setBadgeCount(preferencias.avisos ? contadorAtual : 0); }
+async function definirAvisos(ligado: boolean): Promise<PreferenciasDesktop> {
+  preferencias = { avisos: ligado };
+  montarMenu(); aplicarContador();
+  await gravarPreferencias();
+  return estadoPreferencias();
+}
+function montarMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: "nod", submenu: [{ label: "Conexão / verificar conta de IA", click: () => { void parar().then(mostrarSetup); } }, { type: "separator" }, { label: "Avisos no Mac", type: "checkbox", checked: preferencias.avisos, click: (item) => { void definirAvisos(item.checked); } }, { type: "separator" }, { role: "quit" }] }, { role: "editMenu" }, { role: "viewMenu" }]));
+}
+/** A janela aberta é a do nod web, na origem do servidor configurado (e não a tela de conexão). */
+function janelaWeb(): BrowserWindow | null {
+  const w = janela;
+  const origem = origemDe(configuracao?.url);
+  return w && !w.isDestroyed() && origem !== null && origemDe(w.webContents.getURL()) === origem ? w : null;
+}
+function avisar(aviso: AvisoDesktop): boolean {
+  const w = janelaWeb();
+  if (!preferencias.avisos || !w || w.isFocused() || !Notification.isSupported()) return false;
+  const n = new Notification({ title: aviso.titulo, body: aviso.corpo, groupId: "nod-sua-vez" });
+  const soltar = () => { const i = avisosVivos.indexOf(n); if (i >= 0) avisosVivos.splice(i, 1); };
+  avisosVivos.push(n);
+  if (avisosVivos.length > MAX_AVISOS_VIVOS) avisosVivos.shift();
+  n.on("show", () => { bloqueados = false; });
+  n.on("failed", () => { bloqueados = true; soltar(); });
+  n.on("close", soltar);
+  n.on("click", () => {
+    soltar();
+    const web = janelaWeb();
+    if (!web) return;
+    if (web.isMinimized()) web.restore();
+    web.show(); web.focus();
+    const alvo: AlvoAviso = aviso.alvo;
+    web.webContents.send(CANAIS_DESKTOP.abrir, alvo);
+  });
+  n.show();
+  return true;
+}
 async function guardar(c: Config) {
   if (!safeStorage.isEncryptionAvailable()) throw new Error("keychain_indisponivel");
   await mkdir(app.getPath("userData"), { recursive: true });
@@ -62,6 +126,8 @@ function proteger(w: BrowserWindow, origem?: string) {
 }
 async function mostrarSetup() {
   const anterior = janela;
+  // Sem a janela web, o número do Dock ficaria parado no último valor.
+  contadorAtual = 0; aplicarContador();
   const nova = new BrowserWindow({ width: 580, height: 850, minWidth: 500, title: "Conectar ao nod", webPreferences: { preload: join(dir, "preload.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova);
   nova.on("closed", () => { if (janela === nova) janela = null; });
@@ -109,7 +175,8 @@ async function conectar(c: Config) {
   const reg = registry;
   laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); } }), cliente.ponte);
   const anterior = janela;
-  const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", webPreferences: { partition: "nod-web", nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
+  const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova, c.url);
   nova.on("closed", () => { if (janela === nova) janela = null; });
   nova.webContents.on("did-fail-load", (_e, code, _description, _url, main) => { if (main && code !== -3) { mensagem = mensagens.servidor_fora!; void mostrarSetup(); } });
@@ -118,6 +185,11 @@ async function conectar(c: Config) {
 }
 function validarRemetente(event: IpcMainInvokeEvent) {
   if (event.senderFrame?.url !== setupUrl || event.sender !== janela?.webContents) throw new Error("origem_invalida");
+}
+/** A janela web: a principal, frame de topo, na origem do servidor configurado. */
+function validarRemetenteWeb(event: IpcMainInvokeEvent) {
+  const frame = event.senderFrame;
+  if (event.sender !== janela?.webContents || !remetenteWebValido({ frameUrl: frame?.url, frameDeTopo: !!frame && frame.parent === null, servidor: configuracao?.url })) throw new Error("origem_invalida");
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -129,7 +201,24 @@ else {
     void parar().finally(() => app.quit());
   });
   void app.whenReady().then(async () => {
-    Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: "nod", submenu: [{ label: "Conexão / verificar conta de IA", click: () => { void parar().then(mostrarSetup); } }, { role: "quit" }] }, { role: "editMenu" }, { role: "viewMenu" }]));
+    await carregarPreferencias();
+    montarMenu();
+    ipcMain.handle(CANAIS_DESKTOP.avisar, (e, dados: unknown) => {
+      validarRemetenteWeb(e);
+      const aviso = lerAviso(dados);
+      return aviso ? avisar(aviso) : false;
+    });
+    ipcMain.handle(CANAIS_DESKTOP.contador, (e, n: unknown) => {
+      validarRemetenteWeb(e);
+      const lido = lerContador(n);
+      if (lido !== null) { contadorAtual = lido; aplicarContador(); }
+    });
+    ipcMain.handle(CANAIS_DESKTOP.preferencias, (e) => { validarRemetenteWeb(e); return estadoPreferencias(); });
+    ipcMain.handle(CANAIS_DESKTOP.definirAvisos, (e, ligado: unknown) => {
+      validarRemetenteWeb(e);
+      if (typeof ligado !== "boolean") throw new Error("entrada_invalida");
+      return definirAvisos(ligado);
+    });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? "", mensagem }; });
     ipcMain.handle("nod:login", async (e, valor: unknown) => {
       validarRemetente(e);

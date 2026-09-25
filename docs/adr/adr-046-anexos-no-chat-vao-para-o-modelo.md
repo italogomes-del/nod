@@ -1,4 +1,4 @@
-# ADR-045 — Anexos no chat vão para o modelo
+# ADR-046 — Anexos no chat vão para o modelo
 
 Status: aceito · Data: 2026-09-24 · Emenda ADR-012 (SPI do executor) e ADR-021 (rotas internas por token de turno).
 

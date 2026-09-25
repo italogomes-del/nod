@@ -289,6 +289,23 @@ body { background: #fcfdff; }
 .bt.espaco-link { padding: 13px 15px; border: 1px solid #e9ebf3; border-radius: 14px; background: #fff;
   color: #263149; font-size: 14px; }
 .bt.espaco-link:hover { background: #f5f6fa; }
+/* definido em 2026-09-24 ("aviso no Mac"): o interruptor dos avisos, a situação escrita ao lado e as
+   regras em palavras embaixo. */
+.avisos-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 4px 0 12px; }
+.avisos-interruptor { display: inline-flex; align-items: center; gap: 10px; border: 0; background: none; padding: 4px 0;
+  font: inherit; font-size: 14px; color: var(--ink); cursor: pointer; text-align: left; }
+.avisos-interruptor:disabled { cursor: default; color: var(--ink-3); }
+.avisos-interruptor:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 8px; }
+.avisos-trilho { position: relative; flex: none; width: 34px; height: 20px; border-radius: 10px; background: #d9dde6; transition: background .15s; }
+.avisos-trilho::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(23, 29, 45, .25); transition: transform .15s; }
+.avisos-interruptor[aria-checked="true"] .avisos-trilho { background: var(--blue); }
+.avisos-interruptor[aria-checked="true"] .avisos-trilho::after { transform: translateX(14px); }
+@media (prefers-reduced-motion: reduce) { .avisos-trilho, .avisos-trilho::after { transition: none; } }
+.avisos-situacao { font-size: 12px; color: var(--ink-3); }
+.avisos-situacao.situacao-ligados { color: #2f7a4a; }
+.avisos-situacao.situacao-bloqueados { color: #a85b22; }
+.avisos-regras { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
 .me-falha small { color: #c0682a; }
 .me-falha .av-me { background: #fbead8; color: #a85b22; }
 /* A marca e o título formam um par à esquerda; as ações de criar ficam na ponta direita. */
@@ -307,7 +324,7 @@ body { background: #fcfdff; }
 .computador-tecnico{font-family:var(--fm);font-size:12px;line-height:1.8;margin-top:6px!important}
 .computador-atividade .tag{margin-left:4px}
 
-/* ---- anexos no chat (ADR-045; mockup de 2026-09-24) ---- */
+/* ---- anexos no chat (ADR-046; mockup de 2026-09-24) ---- */
 .stage { position: relative; }
 .composer .box.com-anexos { flex-wrap: wrap; align-items: center; padding-left: 8px; }
 .composer .clipe { width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: #41495c; display: grid; place-items: center; flex: none; cursor: pointer; }

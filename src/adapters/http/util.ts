@@ -26,7 +26,7 @@ export async function lerCorpo(req: IncomingMessage): Promise<unknown> {
 }
 
 /**
- * Corpo binário (ADR-045, upload de anexo): lê até `max` bytes e recusa acima disso sem guardar o
+ * Corpo binário (ADR-046, upload de anexo): lê até `max` bytes e recusa acima disso sem guardar o
  * resto. Separado de lerCorpo porque o teto de 1 MiB de JSON continua valendo para todas as outras rotas.
  */
 export async function lerBruto(req: IncomingMessage, max: number): Promise<Buffer> {

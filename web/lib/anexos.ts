@@ -2,7 +2,7 @@ import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import { esc } from "./render.ts";
 
 /**
- * Anexos no composer (ADR-045). Espelho de src/contracts/anexo.ts — a web só importa TIPOS de src/
+ * Anexos no composer (ADR-046). Espelho de src/contracts/anexo.ts — a web só importa TIPOS de src/
  * (eslint); tests/unit/web/anexos.test.ts falha se os dois lados divergirem. O servidor confere de novo:
  * isto aqui é só para a pessoa saber na hora, sem esperar o upload.
  */

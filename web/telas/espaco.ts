@@ -1,4 +1,5 @@
 import type { Estado } from "../estado/reducer.ts";
+import type { EstadoAvisos } from "../lib/avisos.ts";
 import { botao, esc } from "../lib/render.ts";
 import { renderInventario } from "./frota.ts";
 import { renderChaves } from "./chaves.ts";
@@ -12,7 +13,7 @@ import { renderNegacoes } from "./negacao.ts";
  * definido em 2026-09-24: sem a página inicial, as negações vivas (ADR-029: fail-closed escrito, com
  * relógio) moram aqui, junto da conexão; o conector fora do ar também aparece no painel do bot.
  */
-export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?: number | null } | null): string {
+export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?: number | null } | null, avisos: EstadoAvisos): string {
   const amb = ambiente
     ? `<p class="mudo">Banco desta instância: ${esc(ambiente.regime === "persistente" ? "persistente" : ambiente.regime === "efemero" ? "efêmero" : "não identificado")}${ambiente.porta ? ` · porta ${esc(String(ambiente.porta))}` : ""}.</p>`
     : "";
@@ -25,6 +26,8 @@ export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?:
       ${renderInventario(estado)}
       ${renderNegacoes([...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")], estado.agora)}
     </section>
+
+    ${renderAvisos(avisos)}
 
     <section class="espaco-secao">
       <h2>Computadores</h2>
@@ -41,4 +44,44 @@ export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?:
       ${amb}
     </section>
   </section>`;
+}
+
+const SITUACAO: Record<EstadoAvisos["onde"], Record<EstadoAvisos["situacao"], string>> = {
+  mac: {
+    ligados: "Ligados",
+    desligados: "Desligados",
+    bloqueados: "Bloqueados pelo macOS: libere em Ajustes do Sistema → Notificações → nod",
+    indisponiveis: "Este Mac não mostra avisos do nod.",
+  },
+  navegador: {
+    ligados: "Ligados",
+    desligados: "Desligados",
+    bloqueados: "Bloqueados pelo navegador: libere as notificações deste site nos ajustes do navegador.",
+    indisponiveis: "Este navegador não mostra avisos.",
+  },
+};
+
+/**
+ * definido em 2026-09-24 ("aviso no Mac"): o interruptor dos avisos e as regras dele em palavras, para
+ * a pessoa saber quando o nod vai (e não vai) chamá-la. No app, liga "Avisos no Mac" (o mesmo item do
+ * menu); no navegador, pede a permissão no clique. Bloqueado no navegador, o clique não resolve — o
+ * interruptor fica desligado e a linha diz onde liberar.
+ */
+export function renderAvisos(a: EstadoAvisos): string {
+  const ligado = a.situacao === "ligados" || (a.onde === "mac" && a.situacao === "bloqueados");
+  const travado = a.situacao === "indisponiveis" || (a.onde === "navegador" && a.situacao === "bloqueados");
+  const numero = a.onde === "mac" ? "O número no ícone do Dock mostra quantos pedidos estão abertos." : "O título da aba mostra quantos pedidos estão abertos.";
+  return `<section class="espaco-secao espaco-avisos">
+      <h2>Avisos</h2>
+      <div class="avisos-linha">
+        <button type="button" class="avisos-interruptor" data-act="alternar-avisos" role="switch" aria-checked="${ligado ? "true" : "false"}"${travado ? " disabled" : ""}><span class="avisos-trilho" aria-hidden="true"></span><span>Avisar quando algo precisar de você</span></button>
+        <span class="avisos-situacao situacao-${esc(a.situacao)}" role="status">${esc(SITUACAO[a.onde][a.situacao])}</span>
+      </div>
+      <ul class="avisos-regras">
+        <li>Só quando o nod não está na frente: com ele aberto, o pedido já aparece na tela.</li>
+        <li>No máximo um aviso por minuto; pedidos que chegam juntos viram um aviso só.</li>
+        <li>Nunca para quedas que se resolvem sozinhas, como o Mac sem contato, nem para pedidos vencidos.</li>
+        <li>${numero}</li>
+      </ul>
+    </section>`;
 }
