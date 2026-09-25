@@ -1,6 +1,7 @@
 import "./lib/mascote-elemento.ts";
 import { abrirComputador } from "./telas/computador.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
+import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
@@ -360,6 +361,8 @@ function renderPrincipal(): void {
   const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
   const abertos = [...document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
   const buscas = ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" }));
+  // A pasta marcada no card de pasta sobrevive a um frame que re-renderiza a conversa no meio da escolha.
+  const pastasMarcadas = [...document.querySelectorAll<HTMLInputElement>("input[data-pasta-de]:checked")].map((el) => ({ de: el.dataset.pastaDe ?? "", valor: el.value, foco: document.activeElement === el }));
   const respostas = [...document.querySelectorAll<HTMLInputElement>("[data-decisao] input")].map((el) => ({
     decisao: el.closest<HTMLElement>("[data-decisao]")?.dataset.decisao ?? "",
     atributo: el.hasAttribute("data-resposta") ? "data-resposta" : el.hasAttribute("data-item-texto") ? "data-item-texto" : "data-item",
@@ -384,6 +387,12 @@ function renderPrincipal(): void {
   for (const busca of buscas) {
     const campo = document.getElementById(busca.id) as HTMLInputElement | null;
     if (campo) campo.value = busca.valor;
+  }
+  for (const marcada of pastasMarcadas) {
+    const el = [...document.querySelectorAll<HTMLInputElement>(`input[data-pasta-de="${CSS.escape(marcada.de)}"]`)].find((x) => x.value === marcada.valor);
+    if (!el) continue;
+    el.checked = true;
+    if (marcada.foco) el.focus({ preventScroll: true });
   }
   filtrarBots((document.getElementById("busca-destinatario") as HTMLInputElement | null)?.value ?? "", ".contact-picker");
   filtrarApps((document.getElementById("busca-marketplace") as HTMLInputElement | null)?.value ?? "");
@@ -906,12 +915,26 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "abrir-workspace": (el) => { const a = botGerido(el.dataset.id); const c = conversaAtual(); if (a && api && a.ownerId === estado.sessao?.pessoaId && c && !c.salaId) abrirWorkspace(api, c.conversaId); },
   // Um clique: autoriza a pasta proposta e a tarefa retoma sozinha, sem a pessoa remandar a mensagem.
-  "permitir-pasta": (el) => agir(async () => {
+  // definido em 2026-09-25 (card de pasta simplificado): com a lista aberta, a pasta é a opção marcada. O
+  // segundo clique enquanto o primeiro corre é ignorado: com a lista, ele podia conceder OUTRA pasta.
+  "permitir-pasta": (el) => estado.ocupado ? undefined : agir(async () => {
     const alvo = conversaAtual();
-    if (!alvo || alvo.salaId || !el.dataset.pasta) return;
-    await api!.permitirPasta(el.dataset.id ?? "", el.dataset.pasta);
+    const pasta = el.dataset.pasta ?? el.closest("[data-proposta]")?.querySelector<HTMLInputElement>("input[data-pasta-de]:checked")?.value;
+    if (!alvo || alvo.salaId || !pasta) return;
+    await api!.permitirPasta(el.dataset.id ?? "", pasta);
     dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   }),
+  // A re-renderização troca o botão clicado: o foco vai para a opção marcada (ao abrir a lista) ou para a
+  // primeira que "Mostrar mais" revelou, para o teclado e o leitor de tela não caírem no começo da página.
+  "lista-de-pasta": (el) => {
+    const id = el.dataset.id;
+    if (!id) return;
+    const todas = el.dataset.lista === "todas";
+    dispatch({ tipo: "lista-de-pasta", propostaId: id, lista: todas ? "todas" : "curta" });
+    const card = document.querySelector(`[data-proposta="${CSS.escape(id)}"]`);
+    const alvo = todas ? card?.querySelectorAll<HTMLElement>("input[data-pasta-de]")[CURTA] : card?.querySelector<HTMLElement>("input[data-pasta-de]:checked");
+    alvo?.focus({ preventScroll: true });
+  },
   anexar: () => document.getElementById("composer-arquivos")?.click(),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),
@@ -978,7 +1001,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
     }),
   "confirmar-proposta": (el) => agir(async () => void (await api!.confirmarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota", "rotinas", "sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
-  "recusar-proposta": (el) => agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  // definido em 2026-09-25: como em "permitir-pasta", o clique que chega com outro pedido correndo é ignorado.
+  "recusar-proposta": (el) => estado.ocupado ? undefined : agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   fixar: (el) => agir(async () => void (await api!.fixar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
   ocultar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "ocultar"); },
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },

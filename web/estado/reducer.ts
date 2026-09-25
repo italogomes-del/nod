@@ -87,6 +87,11 @@ export type Estado = {
   execucoes: Record<string, ExecucaoRotina[]>;
   /** Rotinas com o histórico aberto no painel. Separado de `execucoes`: um evento recarrega a lista, mas não a reabre. */
   historicoAberto: Record<string, boolean>;
+  /**
+   * Card de pasta com a lista aberta ("Não é essa"), por proposta: `curta` mostra as primeiras, `todas`
+   * mostra tudo; ausente = só a sugerida. definido em 2026-09-25: estado de tela, não vai ao servidor.
+   */
+  listaDePasta: Record<string, "curta" | "todas">;
   conectores: Conector[];
   marketplace: AppComLogo[];
   composioConfigurado: boolean;
@@ -142,6 +147,7 @@ export type Acao =
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
   | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
   | { tipo: "alternar-historico"; rotinaId: string }
+  | { tipo: "lista-de-pasta"; propostaId: string; lista: "curta" | "todas" }
   | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
@@ -170,6 +176,7 @@ export const estadoInicial: Estado = {
   rotinas: [],
   execucoes: {},
   historicoAberto: {},
+  listaDePasta: {},
   conectores: [],
   marketplace: [],
   composioConfigurado: false,
@@ -387,6 +394,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "dar-acesso":
       return { ...estado, dandoAcesso: acao.agenteId };
+    case "lista-de-pasta":
+      return { ...estado, listaDePasta: { ...estado.listaDePasta, [acao.propostaId]: acao.lista } };
     case "aviso-conexao":
       return { ...estado, avisoConexao: acao.texto };
     case "hidratar-conectores":

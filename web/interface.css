@@ -582,8 +582,7 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
 .marketplace-bt:hover, .marketplace-bt:focus-visible { background: var(--panel-soft); outline: none; }
 .marketplace-bt[aria-current="true"] { border-color: var(--blue); color: var(--blue); }
 
-/* ============================================================================================
-   Jornadas de conexão (definido em 2026-09-25): card de acesso do chat, marketplace com gaveta,
+/* =====================================================================================   Jornadas de conexão (definido em 2026-09-25): card de acesso do chat, marketplace com gaveta,
    "+ Dar acesso" do painel do bot. Mesma linguagem do canvas "Nod — tela do agente", página Conectores.
    ============================================================================================ */
 .acesso-card{width:min(620px,100%);margin:8px 0 18px 46px;border:1px solid #e3e3df;border-radius:16px;background:#fff;box-shadow:0 1px 3px rgba(20,20,30,.05);overflow:hidden}
@@ -704,3 +703,48 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
 .da-linha .app-logo{width:26px;height:26px;min-width:26px;border-radius:7px;font-size:13px}
 .da-nome{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}.da-nome b{font-size:12.5px;font-weight:500}
 @media(max-width:760px){.acesso-card{margin-left:0}.acesso-card .pode-nao,.acesso-card .ac-grupos,.acesso-card .passos,.acesso-card .esperando,.acesso-card .conexao-falhou,.acesso-card .ap-detalhe,.acesso-card .ac-conectado{margin-left:20px}}
+=======
+/* definido em 2026-09-25 (card de pasta simplificado): uma sugestão e um botão; a lista só em "Não é essa". */
+.card-pasta { margin: 12px 0 24px 64px; max-width: 560px; border: 1px solid #e3e6ee; border-radius: 16px; background: #fff;
+  box-shadow: 0 1px 3px rgba(20, 20, 30, .05); overflow: hidden; }
+.cp-corpo { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; }
+.cp-cabeca { display: flex; align-items: center; gap: 14px; }
+.cp-icone { display: grid; place-items: center; width: 40px; height: 40px; min-width: 40px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); }
+.cp-icone.mudo { background: var(--panel-soft); color: var(--ink-3); }
+.cp-titulo { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.cp-sub { margin: 2px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+/* Em tela estreita a linha quebra: o nome nunca some atrás do "mudou hoje". */
+.cp-pasta, .cp-opcao { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 12px 14px; border: 1px solid #e3e6ee; border-radius: 12px; color: var(--ink-3); }
+.cp-pasta { margin-left: 54px; background: #fafafb; }
+.cp-nome { flex: 1; min-width: 96px; display: flex; flex-direction: column; gap: 2px; }
+.cp-nome b { font-size: 14px; font-weight: 600; color: var(--ink); }
+/* O local é o que separa homônimas: quebra linha em vez de cortar o fim, e tem contraste de texto. */
+.cp-nome small { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-quando { font-size: 11.5px; white-space: nowrap; color: #2f7a44; background: #e8f4ec; border-radius: 6px; padding: 3px 8px; }
+.cp-lista { margin: 0 0 0 54px; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-opcao { padding: 10px 14px; background: #fff; cursor: pointer; }
+.cp-opcao:hover { background: #fafafb; }
+.cp-opcao:has(input:checked) { border-color: var(--ink); background: #f6f6f8; }
+.cp-opcao input { accent-color: var(--ink); width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+.cp-opcao .cp-quando { background: none; padding: 0; color: var(--ink-2); font-size: 12px; }
+.cp-links { margin-left: 54px; display: flex; flex-wrap: wrap; gap: 0 18px; }
+.cp-links .bt.link, .pasta-aberta .bt.link { min-height: 32px; font-size: 12.5px; font-weight: 500; padding: 0 2px; }
+.cp-links .bt.link:hover, .cp-links .bt.link:focus-visible, .pasta-aberta .bt.link:hover, .pasta-aberta .bt.link:focus-visible { text-decoration: underline; }
+.cp-acesso { margin: 0 0 0 54px; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
+.cp-acesso svg { flex-shrink: 0; }
+/* Quebra em vez de cortar: com a barra lateral aberta num celular, três botões não cabem numa linha. */
+.cp-rodape { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 20px; background: #fafafb; border-top: 1px solid #eff0f4; }
+.cp-rodape .bt { border-radius: 10px; padding: 9px 16px; font-size: 13px; font-weight: 600; }
+.cp-rodape .bt.pri { padding: 10px 16px; }
+.cp-rodape .bt.link.cp-agora-nao { margin-left: auto; padding: 9px 8px; color: var(--ink-2); font-weight: 500; }
+.pasta-aberta { margin: 4px 0 16px 64px; width: fit-content; max-width: 560px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 14px;
+  border: 1px solid #e3e6ee; border-radius: 12px; background: #fff; font-size: 13px; }
+.pasta-aberta b { font-weight: 600; }
+.pasta-aberta small { color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; min-width: 0; }
+.pa-ok { display: grid; place-items: center; width: 20px; height: 20px; min-width: 20px; border-radius: 10px; background: #e6f4ea; color: var(--ok); }
+@media (max-width: 760px) {
+  .card-pasta, .pasta-aberta { margin-left: 0; }
+  .cp-pasta, .cp-lista, .cp-links, .cp-acesso { margin-left: 0; }
+  .cp-rodape .bt { min-height: 44px; }
+  .cp-rodape .bt.link.cp-agora-nao { margin-left: 0; }
+}
