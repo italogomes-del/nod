@@ -146,6 +146,27 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
     });
   });
 
+  it("ADR-047 × ADR-048: aprovar PR marcado para a máquina é recusado antes do executarLocal; turno não confiável só leva leitura para a máquina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const { deps, repos, chamadas } = depsGithub(trx, MARLON, true);
+      const conectorId = await githubComAcesso(deps, repos, conversaId, agenteId);
+
+      const plano = await planoDoTurno(deps, await turnoDaConversa(repos, conversaId, agenteId), true);
+      expect(plano.catalogo.ferramentas.find((f) => f.nome === "github__pr_revisar")?.execucao).toBe("maquina");
+      const r = await chamarFerramenta(deps, { turnoId: plano.turnoId, agenteId, nome: "github__pr_revisar", argumentos: { repositorio: "leapy/nod", numero: 466, evento: "approve" }, plano });
+      expect(r.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+      expect(r.data).not.toHaveProperty("executarLocal");
+      expect(chamadas).toEqual([]);
+
+      const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "veio de fora", entradaConfianca: "nao_confiavel", modelo: "m" });
+      const reduzido = await planoDoTurno(deps, t?.id ?? "", true);
+      const doGithub = reduzido.catalogo.ferramentas.filter((f) => f.conectorId === conectorId);
+      expect(doGithub.map((f) => f.nome).sort()).toEqual(CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => `github__${c.nome}`).sort());
+      expect(doGithub.every((f) => f.execucao === "maquina")).toBe(true);
+    });
+  });
+
   it("pedido de leitura sem capacidades nomeadas entra só com as de leitura", async () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON);
