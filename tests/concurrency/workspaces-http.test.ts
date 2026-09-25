@@ -83,7 +83,9 @@ describeIntegracao("pastas locais pela conversa", () => {
     const p = await plano();
     const r = await chamar(p, "workspace_propor_pasta", { projeto: "documentos", motivo: "para escrever o relatório" });
     expect(r).toMatchObject({ ok: true, conteudo: expect.stringContaining("proposta_criada") });
-    expect(JSON.stringify(r)).toContain(pasta);
+    // definido em 2026-09-25: o modelo recebe o nome da sugerida, não o caminho absoluto — o card o mostra.
+    expect(JSON.stringify(r)).toContain("documentos");
+    expect(JSON.stringify(r)).not.toContain(pasta);
     // O modelo propôs; nada foi autorizado.
     expect(await srv.json("GET", caminho())).toMatchObject({ vinculo: null });
     const propostas = await srv.app.dentro(srv.pessoa, d => d.repos.propostas.pendentesDaConversa(bot.conversa.id));
@@ -108,6 +110,11 @@ describeIntegracao("pastas locais pela conversa", () => {
     expect(t?.origem).toBe("retomada");
     expect(t?.entradaTexto).toContain("Prepare o relatório");
     expect(t?.entradaTexto).toContain(pasta);
+    // O card some; o registro de que a pasta foi aberta fica na conversa.
+    const mensagens = await srv.app.dentro(srv.pessoa, d => d.repos.mensagens.listarDaConversa(bot.conversa.id));
+    expect(mensagens.filter(m => m.payload?.kind === "pasta_aberta" && m.payload.propostaId === daPasta.id)).toEqual([
+      expect.objectContaining({ kind: "sistema", payload: expect.objectContaining({ pasta, nome: "documentos", agenteId: bot.agente.id }) }),
+    ]);
     // O turno novo já nasce com o catálogo completo.
     const p = await plano();
     expect(p.catalogo.ferramentas.filter(f => f.origem === "workspace").map(f => f.nome)).toContain("workspace_gravar_texto");

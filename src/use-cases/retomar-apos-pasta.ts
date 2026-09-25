@@ -13,12 +13,29 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
   if (p.kind !== "pasta") throw new ErroDeDominio("estado_invalido");
   const confirmada = await deps.repos.propostas.decidir(proposta.id, "confirmada");
   if (!confirmada) throw new ErroDeDominio("estado_invalido");
+  const agora = deps.agora();
+  const autoria = autoriaPessoa(deps.escopo);
+  // definido em 2026-09-25 (card de pasta simplificado): o card some ao permitir; o registro fica na
+  // conversa como "leapy aberta para o Dev 1", com o caminho inteiro no texto para quem auditar. O texto
+  // começa pelo nome porque é ele que a prévia da barra lateral mostra até o agente responder.
+  const escolhida = p.candidatas.find((c) => c.caminho === pasta);
+  const nome = escolhida?.nome ?? pasta.split(/[\\/]/).filter(Boolean).pop() ?? pasta;
+  const registro = await deps.repos.mensagens.criar({
+    conversaId: proposta.conversaId,
+    turnoId: null,
+    autoria,
+    kind: "sistema",
+    texto: `Pasta ${nome} aberta: ${pasta}`,
+    payload: { kind: "pasta_aberta", propostaId: proposta.id, agenteId: proposta.agenteId, pasta, nome, ...(escolhida?.onde !== undefined ? { onde: escolhida.onde } : {}) },
+    confianca: "confiavel",
+  });
+  if (!registro) throw new Error("registro da pasta aberta não criado");
+  const events = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, turnoId: null, dados: { mensagem_id: registro.id, kind: "sistema" } })];
   const turnoId = p.turnoId;
-  if (!turnoId) return { data: { turnoId: null } };
+  if (!turnoId) return { data: { turnoId: null }, events };
   const original = await deps.repos.turnos.buscar(turnoId);
   if (!original || original.agenteId !== proposta.agenteId || original.conversaId !== proposta.conversaId) throw new ErroDeDominio("estado_invalido");
-  if (await deps.repos.agentes.execucaoBloqueada(original.id)) return { data: { turnoId: null } };
-  const agora = deps.agora();
+  if (await deps.repos.agentes.execucaoBloqueada(original.id)) return { data: { turnoId: null }, events };
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: original.conversaId,
     agenteId: original.agenteId,
@@ -41,6 +58,6 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
   });
   return {
     data: { turnoId: turno?.id ?? null },
-    events: turno ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo), agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, proposta_id: proposta.id } })] : [],
+    events: turno ? [...events, evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, proposta_id: proposta.id } })] : events,
   };
 };

@@ -100,11 +100,13 @@ export type PayloadPropostaAcesso = {
  * definido em 2026-09-18: o produto descobre a pasta e a pessoa autoriza em um clique. A proposta
  * carrega os caminhos encontrados; conceder continua sendo ato dela, por rota autenticada.
  * candidatas vazio = busca sem resultado, e o card oferece escolher manualmente.
+ * `onde` e `modificadoEm` (definido em 2026-09-25, card de pasta simplificado): a pasta-mãe relativa à
+ * pasta pessoal e o último uso visto pela busca. Propostas gravadas antes não os têm.
  */
 export type PayloadPropostaPasta = {
   kind: "pasta";
   turnoId?: string;
-  candidatas: { caminho: string; nome: string; git: boolean }[];
+  candidatas: { caminho: string; nome: string; git: boolean; onde?: string; modificadoEm?: EpochMs | null }[];
   motivo: string;
   buscaTermo: string;
 };

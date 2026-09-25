@@ -43,7 +43,8 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
       return { ok: true, conteudo: JSON.stringify({ estado: "ja_proposto", instrucao: "O botão já está na conversa. Encerre o turno e aguarde a pessoa permitir." }), confianca: "confiavel" };
     }
     const { candidatas, truncado } = await pastas.buscar(termo);
-    const achadas = candidatas.map(c => ({ caminho: c.caminho, nome: c.nome, git: c.git }));
+    const achadas = candidatas.map(c => ({ caminho: c.caminho, nome: c.nome, git: c.git, onde: c.onde, modificadoEm: c.modificadoEm }));
+    const sugerida = achadas[0];
     const proposta = await o.dentro(e, async d => {
       const p = await d.repos.propostas.criar({
         conversaId: plano.conversaId,
@@ -57,8 +58,10 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
     log("info", "workspace_pasta_proposta", { tenant_id: e.tenantId, pessoa_id: e.pessoaId, conversa_id: plano.conversaId, turno_id: plano.turnoId, candidatas: achadas.length, truncado });
     return {
       ok: true,
-      conteudo: JSON.stringify(achadas.length > 0
-        ? { estado: "proposta_criada", proposta_id: proposta.id, candidatas: achadas.map(c => c.caminho), instrucao: "Encerre o turno com uma frase curta dizendo qual pasta você encontrou. A tarefa é retomada sozinha quando a pessoa permitir." }
+      // definido em 2026-09-25 (card de pasta simplificado): o modelo recebia os caminhos absolutos e os
+      // repetia na conversa, em cima do card que já os mostra. Agora recebe só o nome e o local da sugerida.
+      conteudo: JSON.stringify(sugerida
+        ? { estado: "proposta_criada", proposta_id: proposta.id, encontradas: achadas.length, sugerida: { nome: sugerida.nome, onde: sugerida.onde }, instrucao: "Encerre o turno com uma frase curta citando o projeto pelo nome, sem caminhos: o card na conversa já mostra a pasta sugerida e as outras. A tarefa é retomada sozinha quando a pessoa permitir." }
         : { estado: "nao_encontrado", proposta_id: proposta.id, instrucao: "Diga em uma frase que não encontrou a pasta por esse nome e que o botão para escolher já está na conversa. Não sugira caminhos nem peça para procurar no Finder." }),
       confianca: "confiavel",
     };
