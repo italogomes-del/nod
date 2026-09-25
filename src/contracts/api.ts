@@ -33,8 +33,10 @@ export type FrotaDto = {
   /**
    * `computadorForaDoAr` (definido em 2026-09-24, emenda da ADR-037): o computador do bot deixou de
    * responder — a barra lateral, o cabeçalho e o painel dizem isso sem abrir o computador.
+   * `ultimaMensagem` (definido em 2026-09-24, sidebar no estilo do Grok): a prévia de uma linha da
+   * última mensagem da conversa própria, para a linha do agente; null sem conversa ou sem texto.
    */
-  agentes: (Agente & { conversaId: string; descricaoEstado: string; computadorForaDoAr: { desde: EpochMs; motivo: MotivoFalhaComputador } | null })[];
+  agentes: (Agente & { conversaId: string; descricaoEstado: string; computadorForaDoAr: { desde: EpochMs; motivo: MotivoFalhaComputador } | null; ultimaMensagem: { previa: string; em: EpochMs } | null })[];
   inventario: Inventario;
   negacoes: Negacao[];
 };

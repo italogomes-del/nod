@@ -1,7 +1,7 @@
 import type { FrotaDto } from "../contracts/api.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Negacao } from "../contracts/negacao.ts";
-import { descricaoEstado } from "../domain/descricao-agente.ts";
+import { descricaoEstado, previaDaMensagem } from "../domain/descricao-agente.ts";
 import { inventarioAusente } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -24,7 +24,15 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
     const concessoes = await deps.repos.concessoes.doAgente(agente.id);
     const turnos = conversa ? await deps.repos.turnos.listarDaConversa(conversa.id, TURNOS_CONTADOS) : [];
     const execucoes = turnos.filter((t) => t.estado === "concluido").length;
-    linhas.push({ ...agente, conversaId: conversa?.id ?? "", descricaoEstado: descricaoEstado(agente, { concessoes: concessoes.length, execucoes }), computadorForaDoAr: foraDoAr.get(agente.id) ?? null });
+    const ultima = conversa ? await deps.repos.mensagens.ultimaDaConversa(conversa.id) : null;
+    const previa = ultima ? previaDaMensagem(ultima.texto) : null;
+    linhas.push({
+      ...agente,
+      conversaId: conversa?.id ?? "",
+      descricaoEstado: descricaoEstado(agente, { concessoes: concessoes.length, execucoes }),
+      computadorForaDoAr: foraDoAr.get(agente.id) ?? null,
+      ultimaMensagem: ultima && previa ? { previa, em: ultima.criadoEm } : null,
+    });
   }
 
   const motores = await deps.repos.inventario.listar();

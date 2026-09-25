@@ -50,6 +50,23 @@ let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, r
 // definido em 2026-09-24 (revisão da interface): a tela principal é o chat; quem esconde o painel do
 // bot espera achá-lo escondido na próxima conversa e no próximo carregamento.
 const CHAVE_PAINEL_OCULTO = "nod.painelOculto";
+// A busca da sidebar fica fechada até ser pedida (ícone ou ⌘K); aberta, fecha no Esc ou ao perder o foco vazia.
+let buscaAberta = false;
+const termoBusca = (): string => (document.getElementById("busca-bots") as HTMLInputElement | null)?.value ?? "";
+function abrirBusca(): void {
+  buscaAberta = true;
+  render();
+  document.getElementById("busca-bots")?.focus();
+}
+function fecharBusca(): void {
+  const campo = document.getElementById("busca-bots") as HTMLInputElement | null;
+  if (campo) campo.value = "";
+  buscaAberta = false;
+  render();
+}
+const LUPA = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>';
+const LOJA = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 4.5 3h11L17 7.5"/><path d="M3 7.5a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.7 0"/><path d="M4.2 10v7h11.6v-7"/><path d="M8 17v-4h4v4"/></svg>';
+
 function painelOculto(): boolean {
   try { return localStorage.getItem(CHAVE_PAINEL_OCULTO) === "1"; } catch { return false; }
 }
@@ -173,13 +190,27 @@ function renderSidebar(): string {
     const rotuloAviso = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const estadoVisual = aviso && mascote === "disponivel" ? "aguardando" : mascote;
-    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span>${esc(a.titulo || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><b>${esc(a.nome)}</b>${subtitulo}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    // definido em 2026-09-24 (sidebar no estilo do Grok): o título vira um chip ao lado do nome e a linha de
+    // baixo é a última mensagem; os estados que pedem ação (fora do ar, pergunta, rotina parada) ganham dela.
+    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    const chip = a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "";
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
-  const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)} <span>${lista.length}</span></h3>${lista.map(linha).join("")}</section>` : "";
+  const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)}</h3>${lista.map(linha).join("")}</section>` : "";
+  // definido em 2026-09-24 (sidebar no estilo do Grok): fixados em grade de 4 — avatar grande, nome e o
+  // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
+  const bloco = (a: (typeof agentes)[number]) => {
+    const perguntando = perguntas.get(a.id) ?? 0;
+    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : a.naoLido ? "nao-lido" : "";
+    const mascote = estadoMascoteNaConversa(estado, a.conversaId);
+    const rotulo = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
+    return `<div class="fixado" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+  };
   const secoes = [...new Set(meus.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
-  const bots = grupo("Fixados", meus.filter((a) => a.fixado)) + grupo("Meus agentes", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, meus.filter((a) => !a.fixado && a.secao === s))).join("");
+  const fixados = meus.filter((a) => a.fixado);
+  const grade = fixados.length ? `<section class="fixados" aria-label="Fixados">${fixados.map(bloco).join("")}</section>` : "";
+  const bots = grupo("Meus agentes", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, meus.filter((a) => !a.fixado && a.secao === s))).join("");
   const equipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId).map(linha).join("");
   const salas = estado.salas
     .map(
@@ -204,19 +235,26 @@ function renderSidebar(): string {
       : estado.executor.atual === "catcher"
         ? "Modo de simulação"
         : "Sua IA conectada";
-  // A marca voltou do rail para cá: é o único lugar dela agora, e continua levando ao início.
+  // definido em 2026-09-24 (sidebar no estilo do Grok): sem marca e sem título — o topo tem só busca,
+  // sino e +. A busca é um ícone; o campo aparece ao clicar, com ⌘K, ou enquanto tem texto.
+  const buscando = buscaAberta || termoBusca() !== "";
   return `<div class="search-wrap">
-      <div class="sh"><button class="marca" data-act="navegar" data-tela="frota" aria-label="nod início">n<span>·</span></button><b>Meus agentes</b>${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
-      <label class="search"><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>⌘ K</kbd></label>
+      <div class="sh"><button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
     <div class="list">
-      ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
+      ${grade}
+      ${bots || (grade ? "" : '<p class="mudo">Nenhum agente visível.</p>')}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
       <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
     ${ambiente}
-    <button class="me${falhaMotor ? " me-falha" : ""}" data-act="navegar" data-tela="espaco" aria-current="${t.tipo === "espaco" ? "true" : "false"}" aria-label="Seu espaço: conexão, computadores e administração"><span class="av-me">eu</span><div><b>Seu espaço</b><small>${esc(situacaoMotor)}</small></div><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}">●</span></button>`;
+    ${falhaMotor ? `<p class="me-aviso" role="status">${esc(situacaoMotor)}</p>` : ""}
+    <div class="rodape">
+      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="navegar" data-tela="espaco" aria-current="${t.tipo === "espaco" ? "true" : "false"}" aria-label="Seu espaço: ${esc(situacaoMotor)}" title="Seu espaço · ${esc(situacaoMotor)}"><span class="av-me">eu</span><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
+      <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}">${LOJA}Marketplace</button>
+    </div>`;
 }
 
 function renderPrincipal(): void {
@@ -738,6 +776,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   anexar: () => document.getElementById("composer-arquivos")?.click(),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
+  "abrir-busca": () => abrirBusca(),
   "alternar-detalhes": () => {
     const app = document.querySelector(".app");
     if (!app) return;
@@ -1066,8 +1105,18 @@ document.addEventListener("drop", (ev) => {
   adicionarArquivos([...(ev.dataTransfer?.files ?? [])]);
 });
 
+// Busca vazia que perde o foco some sem re-render: trocar o DOM entre o mousedown e o click engoliria o
+// clique na linha que a pessoa foi abrir.
+document.addEventListener("focusout", (ev) => {
+  const campo = ev.target as HTMLInputElement;
+  if (campo.id !== "busca-bots" || campo.value.trim()) return;
+  buscaAberta = false;
+  campo.closest("label")?.setAttribute("hidden", "");
+});
+
 document.addEventListener("keydown", (ev) => {
-  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); document.getElementById("busca-bots")?.focus(); return; }
+  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
+  if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
   // Esc com o campo respondendo: a próxima mensagem vira mensagem comum (o mesmo "Outro assunto").
