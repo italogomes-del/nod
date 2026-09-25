@@ -61,6 +61,22 @@ export function quandoCurto(instante: EpochMs, agora: number, fusoIana = "UTC"):
   return `${d}/${mes} ${hora}`;
 }
 
+/**
+ * 'mudou hoje', 'mudou ontem', 'há 5 dias', 'há 3 semanas', 'há 4 meses' — o último uso de uma pasta no
+ * card de pasta, em dias de calendário no fuso dado, como `quandoCurto`. definido em 2026-09-25: dias até
+ * duas semanas, semanas até dois meses, meses até um ano — o bastante para separar a cópia em uso do clone
+ * esquecido, sem data exata.
+ */
+export function mudouQuando(instante: EpochMs, agora: number, fusoIana = "UTC"): string {
+  const dias = Math.max(0, Math.round((Date.parse(diaNoFuso(agora, fusoIana)) - Date.parse(diaNoFuso(instante, fusoIana))) / DIA));
+  if (dias === 0) return "mudou hoje";
+  if (dias === 1) return "mudou ontem";
+  if (dias < 14) return `há ${dias} dias`;
+  if (dias < 60) return `há ${Math.floor(dias / 7)} semanas`;
+  if (dias < 365) return `há ${Math.floor(dias / 30)} meses`;
+  return "há mais de um ano";
+}
+
 /** 'desde ontem 13:00' — o card da rotina parada (emenda da ADR-044). */
 export function desdeQuando(instante: EpochMs, agora: number, fusoIana = "UTC"): string {
   return `desde ${quandoCurto(instante, agora, fusoIana)}`;

@@ -55,7 +55,13 @@ export type PayloadMensagem =
    * (definido em 2026-09-24, fio da pergunta): QUAL turno — é por ele que o fio sabe se o agente ainda
    * está lendo a resposta. Respostas gravadas antes não o têm: o fio as dá por resolvidas.
    */
-  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean; turnoRetomadaId?: string };
+  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean; turnoRetomadaId?: string }
+  /**
+   * definido em 2026-09-25 (card de pasta simplificado): o registro de que a pessoa abriu uma pasta
+   * para o agente. O card da proposta some ao permitir; esta linha fica na conversa ("leapy aberta
+   * para o Dev 1 · Trocar"). `onde` é a pasta-mãe relativa à pasta pessoal, quando a busca a deu.
+   */
+  | { kind: "pasta_aberta"; propostaId: string; agenteId: string; pasta: string; nome: string; onde?: string };
 
 export type Mensagem = {
   tenantId: TenantId;

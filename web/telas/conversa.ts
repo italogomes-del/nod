@@ -15,6 +15,7 @@ import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotulo
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
+import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -62,6 +63,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     const acoes = aindaFora && dono ? `<div class="mcf-acoes">${botao("religar-computador", "Tentar de novo", { id: p.agenteId, classe: "pri sm" })}${botao("abrir-computador", "Abrir computador", { id: p.agenteId, classe: "sm" })}</div>` : bot && !aindaFora ? '<p class="mudo sm">O computador voltou a responder.</p>' : "";
     return `<div class="msg-computador-fora" role="status"><div class="mcf-titulo"><b>Computador do bot fora do ar</b><span class="mudo">desde ${esc(dataHora(p.desde))}</span></div><p>${paragrafos(m.texto)}</p>${acoes}</div>`;
   }
+  if (p?.kind === "pasta_aberta") return renderPastaAberta(p, estado, agenteDe(estado, p.agenteId));
   if (m.kind === "sistema") return `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
@@ -168,16 +170,7 @@ function renderProposta(p: Proposta, estado: Estado): string {
   }
   // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
   // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
-  if (p.payload.kind === "pasta") {
-    const c = p.payload;
-    const escolher = botao("abrir-workspace", c.candidatas.length ? "Escolher outra" : "Escolher pasta", { classe: c.candidatas.length ? "link" : "pri", id: p.agenteId });
-    const recusar = botao("recusar-proposta", "Agora não", { classe: "link", id: p.id });
-    if (c.candidatas.length === 0) {
-      return `<section class="connection-card"><span class="app-logo">📁</span><div><b>Não encontrei "${esc(c.buscaTermo)}" no seu computador</b><p>Escolha a pasta do projeto para eu continuar.</p>${escolher}${recusar}</div></section>`;
-    }
-    const lista = c.candidatas.map((cand) => `<div class="it"><code>${esc(cand.caminho)}</code>${cand.git ? " · projeto Git" : ""} ${botao("permitir-pasta", "Permitir", { classe: "pri", id: p.id, dados: { pasta: cand.caminho } })}</div>`).join("");
-    return `<section class="connection-card"><span class="app-logo">📁</span><div><b>${c.candidatas.length === 1 ? "Usar esta pasta?" : "Qual destas pastas?"}</b><p>${esc(c.motivo)}</p>${lista}${escolher}${recusar}</div></section>`;
-  }
+  if (p.payload.kind === "pasta") return renderCardPasta(p, p.payload, estado, a);
   let itens = "";
   if (p.payload.kind === "perfil") {
     const c = p.payload;
@@ -340,9 +333,12 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
 /** definido em 2026-09-24: a partir de quantas linhas de sistema SEGUIDAS a conversa as recolhe. */
 const AVISOS_PARA_RECOLHER = 3;
 
-/** Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar tem botões e fica à vista. */
+/**
+ * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
+ * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista.
+ */
 function linhaDeSistema(m: Mensagem): boolean {
-  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar") || m.kind === "rotina_execucao";
+  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta") || m.kind === "rotina_execucao";
 }
 
 /**
