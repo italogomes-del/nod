@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Concessao } from "../contracts/concessao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
@@ -49,6 +50,7 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
   if (!Array.isArray(input.itens) || input.itens.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "itens vazios" });
   const propostas: PropostaItem[] = [];
   const conectorIdPorIdx: (string | null)[] = [];
+  let concessoes: Concessao[] | undefined;
   for (const item of input.itens) {
     if (item.destino.conector === "computador") {
       if (!computador) throw new ErroDeDominio("nao_permitido");
@@ -65,6 +67,12 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     if (!conector) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${item.destino.conector} não registrado` });
     if (!conector.catalogo.some((c) => c.nome === item.destino.ferramenta)) {
       throw new ErroDeDominio("entrada_invalida", { cause: `ferramenta ${item.destino.ferramenta} fora do catálogo de ${conector.slug}` });
+    }
+    // definido em 2026-09-24 (revisão da ADR-047): o catálogo do CONECTOR não é o do agente. Sem concessão,
+    // um clique em "Pode fazer" executava uma ferramenta que a pessoa nunca deu a ele; pede acesso antes.
+    concessoes ??= await deps.repos.concessoes.doAgente(input.agenteId);
+    if (!concessoes.some((c) => c.conectorId === conector.id && c.capacidade === item.destino.ferramenta)) {
+      throw new ErroDeDominio("nao_permitido", { cause: `sem concessão de ${conector.slug}.${item.destino.ferramenta}: peça com pedir_acesso` });
     }
     let origemSensivel = false;
     if (CLASSIFICAR_ORIGEM_SENSIVEL && item.origem_conector) {

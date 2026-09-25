@@ -8,6 +8,7 @@ import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { concederLote } from "./conceder.ts";
 import { dispararRotina } from "./disparar-rotina.ts";
+import { avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
 import { recusarProposta } from "./recusar-proposta.ts";
@@ -91,6 +92,11 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
 
   if (input.recusar) {
     if (proposta.estado === "pendente") events.push(...((await recusarProposta(deps, { propostaId: proposta.id })).events ?? []));
+    // Revisão da ADR-047: o alvo de uma tarefa delegada não vai seguir sem o acesso — o remetente fica sabendo.
+    if (decisao.turnoId) {
+      const pessoa = (await deps.repos.pessoas.buscar(deps.escopo.pessoaId))?.nome ?? "a pessoa";
+      events.push(...((await avisarFalhaDelegacao(deps, { turnoId: decisao.turnoId, motivo: `${pessoa} não permitiu o acesso a ${p.conector}` })).events ?? []));
+    }
     if (rotina) await pausarRotina(deps, { rotinaId: rotina.id, estado: "pausada" });
     return { data: { decisao, concessoes: 0, consentimentoId: null, rotinaId: rotina?.id ?? null, turnoId: null }, events };
   }

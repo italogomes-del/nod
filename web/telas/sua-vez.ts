@@ -167,14 +167,19 @@ function detalheTecnico(i: Item["itensAprovacao"][number]): string {
  * indistinguível de bug (ADR-029). Item sensível e destino 'computador' não entram na regra: o
  * primeiro porque o CHECK do banco recusaria honrá-la, o segundo porque a aprovação é vinculada à
  * ação cifrada (ADR-037). A regra vale para a FERRAMENTA inteira, qualquer destino — o título diz.
+ * Aprovar PR e merge também não (definido em 2026-09-24, ADR-047): o servidor manda os ids em
+ * `nuncaPermanente`, porque a lista mora no domínio e a web só importa tipos.
  */
 function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
-  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador");
+  const nunca = new Set(item.nuncaPermanente ?? []);
+  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && !nunca.has(i.id));
   const nomes = [...new Set(elegiveis.map((i) => `${i.destino.conector}.${i.destino.ferramenta}`))];
   if (nomes.length === 0) {
     const motivo = item.itensAprovacao.some((i) => i.destino.conector === "computador")
       ? "Ação no computador é aprovada uma a uma: ela está presa à tela que o bot observou."
-      : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
+      : item.itensAprovacao.some((i) => nunca.has(i.id))
+        ? "Aprovar ou fazer merge de PR sempre passa por você — não dá para permitir de uma vez."
+        : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
     return botao("decidir-aprovacao-sempre", "Sempre permitir", { id: item.decisao.id, desabilitado: true, titulo: motivo });
   }
   const comNome = nomes.map((n) => {

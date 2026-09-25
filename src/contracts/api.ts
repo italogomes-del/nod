@@ -74,8 +74,10 @@ export type SuaVezDto = {
    * `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos.
    * `fio` (definido em 2026-09-24): o fio e a rodada dos três tipos de pedir_a_pessoa; null nos outros.
    * `rotinaParada` (mesma data, emenda da ADR-044): o pedido de acesso aberto que veio de uma rotina — desde quando e o que não rodou.
+   * `nuncaPermanente` (definido em 2026-09-24, ADR-047): ids dos itens de aprovação que não podem virar
+   * "Sempre permitir" (aprovar PR, merge). A lista mora no domínio; a web só importa tipos, então lê daqui.
    */
-  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null; rotinaParada: ParadaDaRotina | null })[];
+  itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null; rotinaParada: ParadaDaRotina | null; nuncaPermanente?: string[] })[];
   /** Avisos de infraestrutura (ADR-045): um por queda do Mac, nunca um card por turno. Não são decisões. */
   incidentes: IncidenteDto[];
   foraDoAr: { nome: string; desde: EpochMs }[];

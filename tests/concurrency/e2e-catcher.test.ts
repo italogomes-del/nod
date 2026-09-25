@@ -39,7 +39,7 @@ type Sessao = { cookie: string; tenantId: string; pessoaId: string };
 /** definido em 2026-09-16: 60 s por jornada — cada uma encadeia vários turnos do catcher (20 ms/evento) e espera laços de fundo a 200 ms. */
 const JORNADA_MS = 60_000;
 
-describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI e sem custo", () => {
+describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CLI e sem custo", () => {
   let srv: ServidorCompleto;
   let dirTmp: string;
   let arquivoEmails: string;
@@ -427,6 +427,54 @@ describeIntegracao("e2e com catcher: as dez jornadas do fluxo de aceite, sem CLI
     expect(ferramentas).toContain("mcp__nod__lembrar");
     expect(ferramentas).not.toContain("mcp__nod__perguntar_a_bot");
     expect(frames.slice(desde).filter((f) => f.tipo === "turno.iniciado").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("tarefa delegada (ADR-047): delegar_tarefa leva a mensagem da pessoa; o alvo roda em 'delegacao' com pedir_acesso e sem delegar de novo; o resultado volta ao remetente como 'Resultado'", { timeout: JORNADA_MS }, async () => {
+    // Remetente novo: a conversa da Vera já tem a resposta não confiável do bot-a-bot no histórico, e isso
+    // contaminaria a delegação (revisão da ADR-047) — aqui a jornada é a do pedido limpo.
+    const criadoTaga = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Taga", descricao: "Coordena o time." });
+    criados.agentes.push(criadoTaga.agente.id);
+    criados.conversas.push(criadoTaga.conversa.id);
+    const taga = { agenteId: criadoTaga.agente.id, conversaId: criadoTaga.conversa.id };
+    const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/leapy/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
+    const t = await rodar(taga.conversaId, pedido);
+    expect(t.estado).toBe("concluido");
+    const resultado = await esperarOu(tuca.conversaId, () =>
+      srv.esperar(async () => {
+        const dto = await conversa(taga.conversaId);
+        return dto.mensagens.find((m) => m.kind === "peer_ask" && m.payload?.kind === "peer_ask" && m.payload.delegada === true) ?? null;
+      }, { nome: "resultado da tarefa delegada", timeoutMs: 15_000 }),
+    );
+    expect(resultado).toMatchObject({ confianca: "nao_confiavel", texto: "PR 466 revisado: dois comentários" });
+    expect(resultado.autoria.sob_procuracao_de).toBe(srv.pessoa.pessoaId);
+    const tarefa = await turno(resultado.payload?.kind === "peer_ask" ? resultado.payload.tarefaId : "");
+    expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: srv.pessoa.pessoaId, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
+    // Na conversa do Tuca, o pedido é a mensagem LITERAL da pessoa, assinada "Taga · por <pessoa>".
+    const naConversaDoAlvo = (await conversa(tuca.conversaId)).mensagens.find((m) => m.turnoId === tarefa.id && m.payload?.kind === "peer_pedido");
+    expect(naConversaDoAlvo).toMatchObject({ texto: pedido, confianca: "confiavel" });
+    expect(naConversaDoAlvo?.autoria).toMatchObject({ autor_id: taga.agenteId, sob_procuracao_de: srv.pessoa.pessoaId });
+    const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+    const doAlvo = dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === tarefa.id)?.dados.ferramentas as string[];
+    expect(doAlvo).toContain("mcp__nod__pedir_acesso");
+    expect(doAlvo).not.toContain("mcp__nod__delegar_tarefa");
+    expect(doAlvo).not.toContain("mcp__nod__perguntar_a_bot");
+    const continuacao = await srv.esperar(async () => {
+      const d = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+      return d.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === resultado.turnoId) ?? null;
+    }, { nome: "plano da continuação do remetente", timeoutMs: 15_000 });
+    expect(continuacao.dados.ferramentas as string[]).not.toContain("mcp__nod__delegar_tarefa");
+    await esperarTurno(resultado.turnoId ?? "");
+
+    // Revisão da ADR-047: a tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
+    await rodar(taga.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
+    const aviso = await esperarOu(tuca.conversaId, () =>
+      srv.esperar(async () => {
+        const dto = await conversa(taga.conversaId);
+        return dto.mensagens.find((m) => m.payload?.kind === "peer_ask" && m.payload.falhou === true) ?? null;
+      }, { nome: "aviso de tarefa não concluída", timeoutMs: 15_000 }),
+    );
+    expect(aviso.texto).toMatch(/^Tuca não concluiu: /);
+    await esperarTurno(aviso.turnoId ?? "");
   });
 
   it("parar: durante o streaming, POST parar interrompe em < 2 s com faixa {interrompidas:1}, fala parcial e motivo parado_pela_pessoa; sem nada rodando → nadaRodando; máquina some (lease vencido) → 'maquina_sem_contato' + decisão retomar → turno novo", { timeout: JORNADA_MS }, async () => {

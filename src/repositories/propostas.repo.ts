@@ -1,6 +1,6 @@
 import type { EstadoProposta, KindProposta, PayloadProposta, PayloadPropostaAcesso, Proposta } from "../contracts/conversa.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
-import { ms } from "./conversao.ts";
+import { data, ms } from "./conversao.ts";
 
 interface Linha {
   tenant_id: string;
@@ -85,6 +85,14 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
     async pendentesDaConversa(conversaId: string): Promise<Proposta[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' order by criado_em`;
+      return linhas.map(paraProposta);
+    },
+
+    /** Pendentes de acesso criadas em [desde, ate): o varredor acha o card de conexão que venceu (ADR-047). */
+    async acessosPendentesCriadosEntre(desde: number, ate: number): Promise<Proposta[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'pendente' and kind = 'acesso'
+          and criado_em >= ${data(desde)} and criado_em < ${data(ate)} order by criado_em`;
       return linhas.map(paraProposta);
     },
 

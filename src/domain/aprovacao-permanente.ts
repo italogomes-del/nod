@@ -30,6 +30,35 @@ export const VERSAO_APROVACAO_PERMANENTE = 2 as const;
  */
 export type RegraAprovacao = typeof REGRA_CONSULTA_SEM_DECISAO | typeof REGRA_APROVACAO_PERMANENTE;
 
+/**
+ * Ações que NUNCA viram "Sempre permitir" (definido em 2026-09-24, ADR-047): aprovar e fazer merge
+ * mudam o estado de um trabalho de OUTRAS pessoas e não se desfazem com um comentário. Com a delegação,
+ * um texto injetado num PR pode induzir o agente a pedir a ação; comentar sem pergunta é o risco aceito,
+ * aprovar e fazer merge não — esses sempre pedem clique. Casa pelo nome da CAPACIDADE (a parte depois
+ * de `slug__`), porque a regra é gravada por capacidade (ADR-042) e o jeito de conectar não muda o nome
+ * (ADR-047). Lista curta e explícita, não classificação: o que não está aqui segue a regra da pessoa.
+ */
+export const NUNCA_PERMANENTE: readonly RegExp[] = [
+  /merge/i, // pr_merge, GITHUB_MERGE_A_PULL_REQUEST, qualquer merge
+  /approv|aprovar/i, // aprovar em qualquer conector
+  // Revisão de PR pode APROVAR: pr_revisar (nativo), GITHUB_CREATE_/SUBMIT_A_REVIEW…, UPDATE/DISMISS_A_REVIEW…
+  /review|revisar/i,
+];
+
+/**
+ * `nome` = `${slug}__${capacidade}` (catálogo do plano) ou só a capacidade (item de aprovação).
+ * definido em 2026-09-24 (revisão da ADR-047): casa pelo NOME, para valer igual no GitHub nativo e no
+ * mapeado pelo Composio (ADR do conector GitHub, Parte B). Leitura fica livre SÓ pelo `readOnlyHint === true` do catálogo
+ * sondado (`GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED` declara leitura); sem a declaração, o nome
+ * que casa é tratado como escrita — fail-closed, nunca inferido de verbo no nome (ADR-042).
+ */
+export function nuncaPermanente(nome: string, readOnlyHint?: boolean): boolean {
+  if (readOnlyHint === true) return false;
+  const i = nome.indexOf("__");
+  const capacidade = i >= 0 ? nome.slice(i + 2) : nome;
+  return NUNCA_PERMANENTE.some((r) => r.test(capacidade));
+}
+
 export type DecisaoAutomatica =
   | { automatico: true; regra: RegraAprovacao; versao: number }
   | { automatico: false; motivo: MotivoAprovacaoManual };
@@ -58,8 +87,9 @@ export type EntradaAprovacao = {
  *                                  linha torna a intenção explícita e testável em vez de emergente)
  *  5. fora do catálogo do plano  → perguntar (readOnlyHint NUNCA se infere de nome de ferramenta)
  *  6. readOnlyHint do CONECTOR   → AUTOMÁTICO por `consulta_sem_decisao`
- *  7. ferramenta em semprePermitir → AUTOMÁTICO por `aprovacao_permanente`
- *  8. senão                      → perguntar
+ *  7. ação que nunca é permanente → perguntar (ADR-047: aprovar PR, merge)
+ *  8. ferramenta em semprePermitir → AUTOMÁTICO por `aprovacao_permanente`
+ *  9. senão                      → perguntar
  *
  * O passo 5 exigir `origem === "conector"` é o que mantém a feature honesta: só
  * `ferramentasDeConectores` (plano-turno.ts) lê `readOnlyHint` da SONDA. Ferramenta nod tem o campo
@@ -82,6 +112,7 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   // A regra da PESSOA cai inteira em turno contaminado; a do CONECTOR (acima) não, porque
   // catalogoReduzido já deixa readOnly passar direto e executá-la aqui não amplia nada.
   if (plano.confiancaEntrada === "nao_confiavel") return { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
+  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
   return { automatico: false, motivo: "sem_regra_permanente" };
 }

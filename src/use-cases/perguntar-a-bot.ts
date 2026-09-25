@@ -1,7 +1,6 @@
 import type { CasoNod } from "../contracts/servicos.ts";
-import { autorizarDelegacao } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { agenteVisivel, autoriaAgente, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
+import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, resolverAlvo } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
 
 /** definido em 2026-09-16: classe de procuração que autoriza bot-a-bot entre donos diferentes (ADR-025). */
@@ -19,28 +18,15 @@ export function moldurarPergunta(remetenteNome: string, pergunta: string): strin
  * conversa própria dele, origem 'peer', profundidade 1 (o plano tira perguntar_a_bot/encaminhar
  * estruturalmente), entrada nao_confiavel (veio de outro modelo, ADR-026). A pergunta é gravada na
  * conversa do alvo como mensagem do remetente (autor_id = remetente, turno_id = tarefa): é essa
- * ligação TIPADA que entregarRespostaPeer usa para achar a quem devolver a resposta.
- * definido em 2026-09-16: gastoHoje = 0 — sem rota de procuração nesta rodada, o teto diário não
- * é contado (registrado como pendência).
+ * ligação TIPADA que entregarRespostaPeer usa para achar a quem devolver a resposta. Alvo e procuração
+ * moram em apoio-l7.ts (resolverAlvo/autorizarAlvo), compartilhados com delegar_tarefa (ADR-047).
  */
 export const perguntarABot: CasoNod<Deps, "perguntar_a_bot"> = async (deps, input) => {
   const remetente = await agenteVisivel(deps.repos, input.agenteId);
-  const identificador = input.agente.trim().replace(/^@/, "");
-  const porId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identificador);
-  const candidatos = porId ? [] : (await deps.repos.agentes.listar()).filter((a) => a.nome.toLocaleLowerCase() === identificador.toLocaleLowerCase());
-  const proprios = candidatos.filter((a) => a.ownerId === remetente.ownerId);
-  const alvos = proprios.length ? proprios : candidatos;
-  if (!porId && alvos.length > 1) throw new ErroDeDominio("entrada_invalida", { cause: "nome ambíguo: use o id do diretório" });
-  const alvo = porId ? await deps.repos.agentes.buscar(identificador) : alvos[0];
-  if (!alvo) throw new ErroDeDominio("nao_encontrado", { cause: "bot alvo" });
-  if (alvo.id === remetente.id) throw new ErroDeDominio("entrada_invalida", { cause: "perguntar a si mesmo" });
+  const alvo = await resolverAlvo(deps.repos, remetente, input.agente);
   const pergunta = input.pergunta.trim();
   if (pergunta === "") throw new ErroDeDominio("texto_vazio");
-  if (alvo.ownerId !== remetente.ownerId) {
-    const procuracoes = await deps.repos.procuracoes.listarDoBeneficiario(remetente.id);
-    const r = autorizarDelegacao(procuracoes, { agenteConcedenteId: alvo.id, agenteBeneficiarioId: remetente.id, classe: CLASSE_PERGUNTAR_A_BOT, gastoHoje: 0 });
-    if (!r.autorizado) throw new ErroDeDominio("nao_permitido", { cause: r.motivo });
-  }
+  await autorizarAlvo(deps.repos, remetente, alvo, CLASSE_PERGUNTAR_A_BOT);
   const conversaAlvo = await deps.repos.conversas.buscarPropriaDoAgente(alvo.id);
   if (!conversaAlvo) throw new ErroDeDominio("nao_encontrado", { cause: "conversa própria do alvo" });
   const agora = deps.agora();

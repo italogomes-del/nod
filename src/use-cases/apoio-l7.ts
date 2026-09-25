@@ -3,6 +3,7 @@ import type { Agente } from "../contracts/agente.ts";
 import type { Autoria, DadosEvento, KindEvento, RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { autorizarDelegacao } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { assentar, HANDOFFS_POR_RODADA, type DesfechoRodada, type Fala } from "../domain/rodada-sala.ts";
@@ -121,6 +122,49 @@ export function exigir<T>(valor: T | null | undefined, codigo: "nao_encontrado" 
 
 export async function agenteVisivel(repos: Repos, agenteId: string): Promise<Agente> {
   return exigir(await repos.agentes.buscar(agenteId), "nao_encontrado", "agente");
+}
+
+/**
+ * Alvo de perguntar_a_bot e delegar_tarefa (extraído em 2026-09-24, ADR-047, para as duas não
+ * divergirem): id do diretório ou nome único entre os agentes visíveis, preferindo os do mesmo dono.
+ * Nome repetido = entrada_invalida (o modelo usa o id); a si mesmo = entrada_invalida.
+ */
+export async function resolverAlvo(repos: Repos, remetente: Agente, agente: string): Promise<Agente> {
+  const identificador = agente.trim().replace(/^@/, "");
+  const porId = UUID.test(identificador);
+  const candidatos = porId ? [] : (await repos.agentes.listar()).filter((a) => a.nome.toLocaleLowerCase() === identificador.toLocaleLowerCase());
+  const proprios = candidatos.filter((a) => a.ownerId === remetente.ownerId);
+  const alvos = proprios.length ? proprios : candidatos;
+  if (!porId && alvos.length > 1) throw new ErroDeDominio("entrada_invalida", { cause: "nome ambíguo: use o id do diretório" });
+  const alvo = porId ? await repos.agentes.buscar(identificador) : alvos[0];
+  if (!alvo) throw new ErroDeDominio("nao_encontrado", { cause: "bot alvo" });
+  if (alvo.id === remetente.id) throw new ErroDeDominio("entrada_invalida", { cause: "pedir a si mesmo" });
+  return alvo;
+}
+
+/**
+ * Mesmo dono passa; dono diferente só com procuração prévia da CLASSE pedida (autorizarDelegacao,
+ * fail-closed → nao_permitido, ADR-025). definido em 2026-09-16: gastoHoje = 0 — sem rota de
+ * procuração nesta rodada, o teto diário não é contado (registrado como pendência).
+ */
+export async function autorizarAlvo(repos: Repos, remetente: Agente, alvo: Agente, classe: string): Promise<void> {
+  if (alvo.ownerId === remetente.ownerId) return;
+  const procuracoes = await repos.procuracoes.listarDoBeneficiario(remetente.id);
+  const r = autorizarDelegacao(procuracoes, { agenteConcedenteId: alvo.id, agenteBeneficiarioId: remetente.id, classe, gastoHoje: 0 });
+  if (!r.autorizado) throw new ErroDeDominio("nao_permitido", { cause: r.motivo });
+}
+
+/**
+ * O turno de delegação (ADR-047) de onde este descende: ele mesmo, ou a raiz da cadeia de retomadas —
+ * o pedido de acesso aprovado volta como origem 'retomada' e continua sendo a tarefa delegada (modo,
+ * `sob_procuracao_de`, a quem devolver o resultado). Mesmo teto de saltos de rotinaDoTurno.
+ */
+export async function delegacaoDoTurno(repos: Repos, turno: Turno): Promise<Turno | null> {
+  let atual: Turno | null = turno;
+  for (let saltos = 0; atual?.origem === "retomada" && atual.retomaTurnoId && saltos < SALTOS_DE_RETOMADA; saltos++) {
+    atual = await repos.turnos.buscar(atual.retomaTurnoId);
+  }
+  return atual?.origem === "delegacao" ? atual : null;
 }
 
 /**

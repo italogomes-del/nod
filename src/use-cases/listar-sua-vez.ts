@@ -1,6 +1,7 @@
 import type { SuaVezDto } from "../contracts/api.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
+import { nuncaPermanente as ehNuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { montarFila } from "../domain/fila-frota.ts";
 import { incidentesVisiveis } from "./dispensar-incidente.ts";
 import { fiosDosItens } from "./fios-da-pergunta.ts";
@@ -62,7 +63,8 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     // definido em 2026-09-24 (emenda da ADR-044): o pedido aberto de uma rotina diz desde quando ela está
     // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.
     const rotinaParada = proposta && aberta && decisao.tipo === "acesso" ? await paradaDoPedido(repos, proposta) : null;
-    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada });
+    const nuncaPermanente = itensAprovacao.filter((i) => ehNuncaPermanente(i.destino.ferramenta)).map((i) => i.id);
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente });
   }
 
   const foraDoAr = (await repos.inventario.listar())

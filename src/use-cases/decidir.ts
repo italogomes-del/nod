@@ -161,12 +161,15 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       agenteId: decisao.agenteId,
       origem: "retomada",
       prazoEm: agora + PRAZO_DECISAO_MS,
-      profundidade: 0,
+      // definido em 2026-09-24 (revisão da ADR-047): profundidade e confiança do turno que pediu. Com 0 e
+      // "confiavel" fixos, a retomada de uma tarefa delegada saía do salto e lavava a marca.
+      profundidade: original?.profundidade ?? 0,
       entradaTexto,
-      entradaConfianca: "confiavel",
+      entradaConfianca: original?.entradaConfianca ?? "confiavel",
       modelo: original?.modelo ?? MODELO_AGENTE_PADRAO,
       harness: original?.harness,
       retomaTurnoId: decisao.turnoId,
+      sobProcuracaoDe: original?.sobProcuracaoDe ?? null,
     });
     turnoRetomadaId = turno?.id ?? null;
     if (turno) {
@@ -241,6 +244,7 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
     modelo: original.modelo,
     harness: original.harness,
     retomaTurnoId: original.id,
+    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   const events: RuntimeEvent[] = turno

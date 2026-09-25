@@ -8,6 +8,8 @@ import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
 import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
+import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
+import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -81,8 +83,23 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
           events.push(...(r.events ?? []));
         }
       }
+      // Revisão da ADR-047: venceu uma decisão de que a tarefa delegada dependia (acesso, aprovação, pergunta,
+      // ou o "Retomar" de um turno que caiu com o Mac) — avisa o remetente. Turno fora de delegação: ignorado.
+      if (d.turnoId) {
+        const motivo = d.tipo === "acesso" ? "o pedido de acesso venceu sem resposta" : d.tipo === "retomar_turno" ? "o turno parou e ninguém retomou" : "a decisão pedida à pessoa venceu sem resposta";
+        const r = await avisarFalhaDelegacao(deps, { turnoId: d.turnoId, motivo });
+        events.push(...(r.events ?? []));
+      }
       await repos.events.gravarComOutbox(events);
       log("info", "decisao_vencida_varrida", { decisao_id: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atraso_ms: agora - Date.parse(d.prazoDecisaoEm) });
+    }
+    // Revisão da ADR-047: o card de CONEXÃO não tem decisão e nunca vence sozinho. Passado o prazo dele,
+    // a tarefa delegada que esperava por ele avisa o remetente. Janela de um prazo depois do vencimento:
+    // o aviso é uma vez por raiz, e a janela só limita quantas vezes o varredor pergunta.
+    for (const p of await repos.propostas.acessosPendentesCriadosEntre(agora - 2 * PRAZO_DECISAO_PADRAO_MS, agora - PRAZO_DECISAO_PADRAO_MS)) {
+      if (p.payload.kind !== "acesso" || typeof p.payload.turnoId !== "string" || (await repos.decisoes.buscar(p.id))) continue;
+      const r = await avisarFalhaDelegacao(deps, { turnoId: p.payload.turnoId, motivo: "o pedido de conexão venceu sem resposta" });
+      if (r.events?.length) await repos.events.gravarComOutbox(r.events);
     }
     return resultado;
   });

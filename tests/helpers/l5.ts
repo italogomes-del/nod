@@ -109,6 +109,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     encaminhar: async () => ({ data: { ok: true } }),
     semNovidade: async () => ({ data: { ok: true } }),
     perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    delegarTarefa: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     ...sobrescrita,
   };
 }

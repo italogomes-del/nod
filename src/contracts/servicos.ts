@@ -75,7 +75,7 @@ export type SaidaCasoDeUso<O> = { data: O; events?: RuntimeEvent[] };
  * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema,
  * aplica gate de parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps`
  * pelo mesmo motivo de ServicesNod. lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/
- * perguntarABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
+ * perguntarABot/delegarTarefa ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
  */
 export type CasoNod<Deps, N extends NomeFerramentaNod> = (
   deps: Deps,
@@ -98,6 +98,7 @@ export interface UseCasesNod<Deps> {
   encaminhar: CasoNod<Deps, "encaminhar">;
   semNovidade: CasoNod<Deps, "sem_novidade">;
   perguntarABot: CasoNod<Deps, "perguntar_a_bot">;
+  delegarTarefa: CasoNod<Deps, "delegar_tarefa">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -117,4 +118,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   encaminhar: "encaminhar",
   sem_novidade: "semNovidade",
   perguntar_a_bot: "perguntarABot",
+  delegar_tarefa: "delegarTarefa",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;
