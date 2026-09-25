@@ -30,6 +30,8 @@ describe("tarefa delegada na conversa (ADR-046)", () => {
   it("o resultado volta como 'Resultado de Dev 1'", () => {
     const m: Mensagem = { tenantId: "t", id: "m3", conversaId: "c-taga", turnoId: "cont", autoria: { ...autoria, autor_id: "dev1" }, kind: "peer_ask", texto: "Revisei", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
     expect(renderMensagem(m, estado)).toContain("Resultado de Dev 1");
+    const aviso: Mensagem = { ...m, texto: "Dev 1 não concluiu: você pediu para parar", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true, falhou: true } };
+    expect(renderMensagem(aviso, estado)).toContain("Tarefa não concluída por Dev 1");
   });
 });
 

@@ -458,6 +458,17 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     }, { nome: "plano da continuação do remetente", timeoutMs: 15_000 });
     expect(continuacao.dados.ferramentas as string[]).not.toContain("mcp__nod__delegar_tarefa");
     await esperarTurno(resultado.turnoId ?? "");
+
+    // Revisão da ADR-046: a tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
+    await rodar(vera.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
+    const aviso = await esperarOu(tuca.conversaId, () =>
+      srv.esperar(async () => {
+        const dto = await conversa(vera.conversaId);
+        return dto.mensagens.find((m) => m.payload?.kind === "peer_ask" && m.payload.falhou === true) ?? null;
+      }, { nome: "aviso de tarefa não concluída", timeoutMs: 15_000 }),
+    );
+    expect(aviso.texto).toMatch(/^Tuca não concluiu: /);
+    await esperarTurno(aviso.turnoId ?? "");
   });
 
   it("parar: durante o streaming, POST parar interrompe em < 2 s com faixa {interrompidas:1}, fala parcial e motivo parado_pela_pessoa; sem nada rodando → nadaRodando; máquina some (lease vencido) → 'maquina_sem_contato' + decisão retomar → turno novo", { timeout: JORNADA_MS }, async () => {

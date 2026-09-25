@@ -1,0 +1,175 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import type { CapacidadeConector } from "../../src/contracts/conector.ts";
+import type { Repos } from "../../src/repositories/tipos.ts";
+import type { Tx } from "../../src/shared/types.ts";
+import { chamarFerramenta } from "../../src/use-cases/chamar-ferramenta.ts";
+import { concederLote } from "../../src/use-cases/conceder.ts";
+import { assentarAprovacao } from "../../src/use-cases/decidir.ts";
+import { decidirAcesso } from "../../src/use-cases/decidir-acesso.ts";
+import { delegarTarefa } from "../../src/use-cases/delegar-tarefa.ts";
+import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
+import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
+import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
+import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
+import { depsSobre } from "../helpers/deps-l7.ts";
+import { agenteComConversa } from "../helpers/fabricas.ts";
+import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const AGORA = Date.parse("2026-09-24T15:00:00Z");
+const PRONTO = { estado: "pronto" as const, versao: "t", em: 0 };
+const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome, schema: { type: "object" }, readOnlyHint });
+
+async function conectorGithub(repos: Repos) {
+  const criado = await repos.conectores.criar({ nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
+  const sondado = await repos.conectores.registrarSonda(criado?.id ?? "", { ok: true, catalogo: [cap("pr_ver", true), cap("pr_comentar", false), cap("pr_revisar", false), cap("pr_merge", false)], agora: AGORA });
+  if (!sondado) throw new Error("conector");
+  return sondado;
+}
+
+/** Taga delega ao Dev 1 a partir da fala de Marlon; o Dev 1 tem o GitHub concedido com escrita. */
+async function cenario(trx: Tx, pedido = "Taga, pede ao Dev 1 para revisar o PR 466") {
+  const taga = await agenteComConversa(trx, MARLON, { nome: "Taga" });
+  const dev1 = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
+  const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => AGORA });
+  for (const a of [taga, dev1]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
+  const github = await conectorGithub(repos);
+  const { data } = await enviarMensagem(deps, { conversaId: taga.conversaId, texto: pedido, inventario: PRONTO });
+  const delegar = () => delegarTarefa(deps, { turnoId: data.turno.id, agenteId: taga.agenteId, conversaId: taga.conversaId, agente: "Dev 1", tarefa: "revisar o PR 466", contexto: "pull/466" });
+  return { taga, dev1, deps, repos, chamadas, github, turnoTaga: data.turno, delegar };
+}
+
+describeIntegracao("delegar_tarefa — revisão independente (ADR-046)", () => {
+  it("[1] aprovar PR e merge nunca rodam por chamada direta, nem com concessão de escrita num turno delegado confiável; comentar roda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { dev1, deps, chamadas, github, delegar } = await cenario(trx);
+      await concederLote(deps, { agenteId: dev1.agenteId, conectorId: github.id, capacidades: ["pr_ver", "pr_comentar", "pr_revisar", "pr_merge"], autorTipo: "pessoa" });
+      const { data } = await delegar();
+      const plano = (await emitirPlanoTurno(deps, { turnoId: data.tarefa_id, machineId: randomUUID(), executor: "catcher" })).data;
+      expect(plano.confiancaEntrada).toBe("confiavel");
+      expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+      for (const nome of ["github__pr_revisar", "github__pr_merge"]) {
+        const r = await chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome, argumentos: {}, plano });
+        expect(r.data, nome).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+      }
+      expect(chamadas.conectores).toEqual([]);
+      expect((await chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano })).data).toMatchObject({ ok: true });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_comentar"]);
+    });
+  });
+
+  it("[2] o remetente leu conector antes de delegar: a tarefa nasce nao_confiavel, com catálogo reduzido (leitura + pedir_acesso) e sem 'Sempre permitir'", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, github, turnoTaga, delegar } = await cenario(trx, "resume meus e-mails e pede ao Dev 1 para responder o que for de PR");
+      await concederLote(deps, { agenteId: taga.agenteId, conectorId: github.id, capacidades: ["pr_ver"], autorTipo: "pessoa" });
+      await concederLote(deps, { agenteId: dev1.agenteId, conectorId: github.id, capacidades: ["pr_ver", "pr_comentar"], autorTipo: "pessoa" });
+      const planoTaga = (await emitirPlanoTurno(deps, { turnoId: turnoTaga.id, machineId: randomUUID(), executor: "catcher" })).data;
+      expect((await chamarFerramenta(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, nome: "github__pr_ver", argumentos: {}, plano: planoTaga })).data).toMatchObject({ ok: true, confianca: "nao_confiavel" });
+
+      const { data } = await delegar();
+      expect(await repos.turnos.buscar(data.tarefa_id)).toMatchObject({ origem: "delegacao", entradaConfianca: "nao_confiavel", sobProcuracaoDe: PESSOA_MARLON });
+      const plano = (await emitirPlanoTurno(deps, { turnoId: data.tarefa_id, machineId: randomUUID(), executor: "catcher" })).data;
+      const nomes = plano.catalogo.ferramentas.map((f) => f.nome);
+      expect(nomes).toEqual(expect.arrayContaining(["pedir_acesso", "pedir_aprovacao", "github__pr_ver"]));
+      expect(nomes).not.toContain("github__pr_comentar");
+      expect(plano.semprePermitir).toEqual([]);
+    });
+  });
+
+  it("[2] computador ou pasta no turno do remetente também contamina (a rota interna grava a chamada na trilha)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, repos, turnoTaga, delegar } = await cenario(trx);
+      await repos.trilha.registrar({ agenteId: taga.agenteId, turnoId: turnoTaga.id, ferramenta: "computador_observar", kind: "tool_call", regra: "regra:chamar_ferramenta", regraVersao: 1 });
+      const { data } = await delegar();
+      expect((await repos.turnos.buscar(data.tarefa_id))?.entradaConfianca).toBe("nao_confiavel");
+    });
+  });
+
+  it("[4] entrega uma vez por raiz: o turno original e a retomada da aprovação não entregam duas vezes", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, delegar } = await cenario(trx);
+      const { data } = await delegar();
+      await repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
+      const primeira = await entregarRespostaPeer(deps, { tarefaId: data.tarefa_id, texto: "Revisei." });
+      expect("mensagem" in primeira.data).toBe(true);
+      const retomada = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "aprovação decidida", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
+      await repos.turnos.assentar(retomada?.id ?? "", { estado: "concluido" });
+      expect((await entregarRespostaPeer(deps, { tarefaId: retomada?.id ?? "", texto: "Revisei de novo." })).data).toEqual({ ignorado: "ja_entregue" });
+      expect((await repos.mensagens.listarDaConversa(taga.conversaId)).filter((m) => m.kind === "peer_ask")).toHaveLength(1);
+    });
+  });
+
+  it("[5] pedido pendente em QUALQUER turno da cadeia segura a entrega, não só no turno que assentou", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { dev1, deps, repos, delegar } = await cenario(trx);
+      const { data } = await delegar();
+      await pedirAcesso(deps, { turnoId: data.tarefa_id, conversaId: dev1.conversaId, agenteId: dev1.agenteId, conector: "github", capacidades: ["pr_ver"], nivel: "leitura", nao_pedido: [] });
+      await repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
+      const irma = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
+      await repos.turnos.assentar(irma?.id ?? "", { estado: "concluido" });
+      expect((await entregarRespostaPeer(deps, { tarefaId: irma?.id ?? "", texto: "Parcial" })).data).toEqual({ ignorado: "aguardando_pessoa" });
+    });
+  });
+
+  it("[6] fail-closed: além do teto de saltos a retomada continua delegação (sem --resume da conversa); a retomada da aprovação mantém profundidade e confiança", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { dev1, deps, repos, delegar } = await cenario(trx);
+      await repos.conversas.atualizarSessaoCli(dev1.conversaId, randomUUID(), "catcher");
+      const { data } = await delegar();
+      let anterior = data.tarefa_id;
+      for (let i = 0; i < 12; i++) {
+        const t = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "de novo", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: anterior, sobProcuracaoDe: PESSOA_MARLON });
+        await repos.turnos.assentar(t?.id ?? "", { estado: "concluido" });
+        anterior = t?.id ?? "";
+      }
+      const plano = await emitirPlanoTurno(deps, { turnoId: anterior, machineId: randomUUID(), executor: "catcher" });
+      expect(plano.events?.[0]?.dados.modo).toBe("delegacao");
+      expect(plano.data.entrada.sessaoCli).toBeNull();
+      expect(plano.data.catalogo.ferramentas.map((f) => f.nome)).not.toContain("criar_rotina");
+
+      const d = await repos.decisoes.criar({ tipo: "aprovacao", agenteId: dev1.agenteId, conversaId: dev1.conversaId, turnoId: data.tarefa_id, prazoDecisaoEm: AGORA + 86_400_000, frase: "Comentar no PR" });
+      await trx`update turnos set entrada_confianca = 'nao_confiavel' where id = ${data.tarefa_id}`;
+      const r = await assentarAprovacao(deps, { decisaoId: d?.id ?? "", desfechos: [] });
+      expect(await repos.turnos.buscar(r.data.turnoRetomadaId ?? "")).toMatchObject({ origem: "retomada", profundidade: 1, entradaConfianca: "nao_confiavel", sobProcuracaoDe: PESSOA_MARLON });
+    });
+  });
+
+  it("[8] acesso recusado ou turno interrompido: o remetente recebe UM aviso curto; o resultado posterior ainda sai", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, delegar } = await cenario(trx);
+      const { data } = await delegar();
+      const pedido = await pedirAcesso(deps, { turnoId: data.tarefa_id, conversaId: dev1.conversaId, agenteId: dev1.agenteId, conector: "github", capacidades: ["pr_ver"], nivel: "leitura", nao_pedido: [] });
+      await repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
+      await decidirAcesso(deps, { decisaoId: pedido.data.proposta_id, recusar: true, executor: "catcher" });
+      const avisos = () => repos.mensagens.listarDaConversa(taga.conversaId).then((ms) => ms.filter((m) => m.payload?.kind === "peer_ask" && m.payload.falhou));
+      const [aviso] = await avisos();
+      expect(aviso?.texto).toMatch(/^Dev 1 não concluiu: .* não permitiu o acesso a github$/);
+      expect(aviso?.payload).toMatchObject({ kind: "peer_ask", tarefaId: data.tarefa_id, delegada: true, falhou: true });
+
+      // Um segundo motivo (o turno parou) não repete o aviso.
+      await repos.turnos.interromper(data.tarefa_id, "parado_pela_pessoa");
+      expect((await avisarFalhaDelegacao(deps, { turnoId: data.tarefa_id, motivo: "você pediu para parar" })).data).toEqual({ ignorado: "ja_entregue" });
+      expect(await avisos()).toHaveLength(1);
+      // A pessoa retoma e a tarefa conclui: o resultado sai mesmo depois do aviso.
+      const retomada = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "retome", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
+      await repos.turnos.assentar(retomada?.id ?? "", { estado: "concluido" });
+      expect("mensagem" in (await entregarRespostaPeer(deps, { tarefaId: retomada?.id ?? "", texto: "Revisei." })).data).toBe(true);
+    });
+  });
+
+  it("[8] o pedido de acesso do alvo vence sem resposta: o varredor avisa o remetente", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, delegar } = await cenario(trx);
+      const { data } = await delegar();
+      await pedirAcesso(deps, { turnoId: data.tarefa_id, conversaId: dev1.conversaId, agenteId: dev1.agenteId, conector: "github", capacidades: ["pr_ver"], nivel: "leitura", nao_pedido: [] });
+      await repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
+      await varrerPessoa(MARLON, (fn) => fn(trx), { services: deps.services, useCases: deps.useCases, agora: () => AGORA + 30 * 86_400_000 });
+      const avisos = (await repos.mensagens.listarDaConversa(taga.conversaId)).filter((m) => m.payload?.kind === "peer_ask" && m.payload.falhou);
+      expect(avisos.map((m) => m.texto)).toEqual(["Dev 1 não concluiu: o pedido de acesso venceu sem resposta"]);
+    });
+  });
+});
