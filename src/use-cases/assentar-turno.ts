@@ -126,7 +126,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // rotina (emitir-plano-turno.ts); gravá-la trocaria a sessão da conversa pela da execução agendada.
   // definido em 2026-09-24 (ADR-046): a tarefa delegada roda em sessão própria (emitir-plano-turno) e não
   // pode virar a sessão da conversa do alvo com a pessoa.
-  const sessaoDaConversa = turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao"
+  const sessaoDaConversa = turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
   if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor);
   await deps.repos.gastos.registrar({

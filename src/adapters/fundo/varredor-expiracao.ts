@@ -8,6 +8,7 @@ import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
 import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
+import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -80,6 +81,13 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
           resultado.mensagens += 1;
           events.push(...(r.events ?? []));
         }
+      }
+      // Revisão da ADR-046: venceu uma decisão de que a tarefa delegada dependia (acesso, aprovação, pergunta,
+      // ou o "Retomar" de um turno que caiu com o Mac) — avisa o remetente. Turno fora de delegação: ignorado.
+      if (d.turnoId) {
+        const motivo = d.tipo === "acesso" ? "o pedido de acesso venceu sem resposta" : d.tipo === "retomar_turno" ? "o turno parou e ninguém retomou" : "a decisão pedida à pessoa venceu sem resposta";
+        const r = await avisarFalhaDelegacao(deps, { turnoId: d.turnoId, motivo });
+        events.push(...(r.events ?? []));
       }
       await repos.events.gravarComOutbox(events);
       log("info", "decisao_vencida_varrida", { decisao_id: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atraso_ms: agora - Date.parse(d.prazoDecisaoEm) });

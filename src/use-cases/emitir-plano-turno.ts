@@ -86,7 +86,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // resolvida); a retomada segue a cadeia de retomaTurnoId até o turno disparado (ADR-044).
   const ligacao = turno.origem === "rotina" || turno.origem === "retomada" ? await rotinaDoTurno(deps.repos, turno.id) : null;
   const delegacao = turno.origem === "delegacao" || turno.origem === "retomada" ? await delegacaoDoTurno(deps.repos, turno) : null;
-  const modo = modoDoTurno(turno, conversa, agente, ligacao !== null, delegacao !== null);
+  // Fail-closed (revisão da ADR-046): toda retomada copia `sob_procuracao_de`; se a cadeia passou do teto
+  // de saltos e a raiz não foi achada, o turno continua delegação — nunca cai em conversa com --resume.
+  const ehDelegacao = delegacao !== null || Boolean(turno.sobProcuracaoDe);
+  const modo = modoDoTurno(turno, conversa, agente, ligacao !== null, ehDelegacao);
   const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, 50);
   const resposta = mensagens.find((m) => m.turnoId === turno.id && m.payload?.kind === "peer_ask");
   const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
@@ -94,7 +97,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-17: rotina e trabalho de colega usam sessão nova com missão e catálogo atuais; o histórico explícito preserva contexto.
   // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina também — o --resume da conversa a levaria de volta ao modo conversa.
   // definido em 2026-09-24 (ADR-046): a tarefa delegada também — a sessão da conversa é do alvo com a pessoa.
-  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && delegacao === null && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   const historico = !sessaoCli ? mensagens.slice(-20).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
   // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
@@ -152,7 +155,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     rotinasDoAgente,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
     // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
-    delegacao: delegacao ? { pessoaNome: pessoaDelegante?.nome ?? "A pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
+    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "A pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
     semprePermitir: permissoes.flatMap((p) => {
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];

@@ -36,8 +36,11 @@ export type PayloadMensagem =
   | { kind: "resultado_aprovacao"; decisaoId: string; itens: { idx: number; desfecho: DesfechoItem }[] }
   | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
-  /** `delegada` (ADR-046): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não confiável. */
-  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true }
+  /**
+   * `delegada` (ADR-046): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não
+   * confiável. `falhou`: aviso de que a tarefa não vai terminar (texto do servidor, não do alvo).
+   */
+  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true }
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
   | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador }
   /**

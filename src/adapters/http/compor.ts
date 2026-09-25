@@ -36,7 +36,8 @@ import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgen
 import { registrarDesfechoRotina } from "../../use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../use-cases/emitir-plano-turno.ts";
 import { encaminhar } from "../../use-cases/encaminhar.ts";
-import { entregarRespostaPeer } from "../../use-cases/entregar-resposta-peer.ts";
+import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../use-cases/entregar-resposta-peer.ts";
+import { motivoEmPortugues } from "../../domain/redacao.ts";
 import { lembrar } from "../../use-cases/lembrar.ts";
 import { passar } from "../../use-cases/passar.ts";
 import { semNovidade } from "../../use-cases/sem-novidade.ts";
@@ -286,6 +287,11 @@ export function comporApp(o: OpcoesCompor): App {
       // também devolve o resultado ao remetente; entregarRespostaPeer segue a cadeia e ignora o resto.
       if ((turno.origem === "peer" || turno.origem === "delegacao" || turno.origem === "retomada") && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {
         const r = await entregarRespostaPeer(d, { tarefaId: turno.id, texto: entrega.fala.texto });
+        if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
+      } else if (turno.origem === "delegacao" || (turno.origem === "retomada" && turno.sobProcuracaoDe)) {
+        // Revisão da ADR-046: tarefa delegada que parou ou terminou calada avisa o remetente (uma vez por raiz).
+        const motivo = turno.estado === "interrompido" ? motivoEmPortugues(turno.motivoFalha ?? turno.motivoInterrupcao ?? "sem_progresso") : "terminou sem resposta";
+        const r = await avisarFalhaDelegacao(d, { turnoId: turno.id, motivo });
         if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
       }
       return events;
