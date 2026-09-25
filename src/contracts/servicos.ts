@@ -28,11 +28,19 @@ export interface ServicesNod<Trx> {
     pastasDoHarness(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<{ ativa: string; aprovadas: string[] } | null>;
   };
   /**
-   * definido em 2026-09-24 (ADR-047): há um jeito de conectar o GitHub que não pede nada à pessoa?
-   * Na máquina dela, o `gh` logado; no servidor compartilhado, o GitHub App da organização (nunca o
-   * gh). null = o GitHub não nasce sozinho; segue pelo card de conexão.
+   * definido em 2026-09-24 (ADR-048, revisto no mesmo dia): o GitHub pelo gh que a PESSOA já tem logado
+   * no próprio Mac (anunciado pelo app ao conectar; no modo local, o deste processo e só para a dona
+   * da máquina). null = o GitHub não nasce sozinho; segue pelo card de conexão.
    */
-  github?: { prontoSemConfiguracao(): Promise<Extract<JeitoGithub, "gh" | "app"> | null> };
+  github?: {
+    /** O gh já logado no Mac conectado da pessoa do contexto: o registro automático nasce dele. */
+    prontoSemConfiguracao(): Promise<Extract<JeitoGithub, "gh"> | null>;
+    /**
+     * Só no modo local (o servidor É o Mac): executa um item aprovado pelo gh desta máquina, se ela é da
+     * dona (`escopo`). null = esta máquina não pode; o item espera o Mac da dona pela ponte.
+     */
+    executarNaMaquina?(escopo: { tenantId: string; pessoaId: string }, capacidade: string, argumentos: Record<string, unknown>): Promise<{ conteudo: string; isError: boolean } | null>;
+  };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
   };
@@ -50,7 +58,8 @@ export interface ServicesNod<Trx> {
   };
   rotinas: { ativar(trx: Trx, propostaId: string): Promise<Rotina> };
   conectores: {
-    chamar(conectorId: string, tool: string, args: Record<string, unknown>): Promise<{ conteudo: string; isError: boolean }>;
+    /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. */
+    chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean }): Promise<{ conteudo: string; isError: boolean }>;
     sondar(conector: Conector): Promise<ResultadoSonda>;
   };
   interruptor: {

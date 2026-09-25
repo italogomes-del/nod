@@ -20,7 +20,7 @@ const ORDEM = new Map(APPS_MARKETPLACE.map((a, i) => [a.slug, i]));
  * no painel entra no fim da grade, não no meio dela.
  */
 export function mesclarCatalogo(doProvedor: readonly AppDoProvedor[]): AppComLogo[] {
-  // definido em 2026-09-24 (ADR-047): app nativo entra mesmo sem auth config no provedor.
+  // definido em 2026-09-24 (ADR-048): app nativo entra mesmo sem auth config no provedor.
   const nativos = APPS_MARKETPLACE.filter((a) => a.nativo && !doProvedor.some((p) => p.slug === a.slug)).map((a) => ({ slug: a.slug, nome: a.nome, logo: null }));
   const apps = [...doProvedor, ...nativos].map((p) => {
     const c = CURADORIA.get(p.slug);

@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { criarConectoresVivos } from "../../../src/services/conectores-vivos.ts";
 import { CAMINHO_MCP_SOMAR } from "../../helpers/l5.ts";
 
-it("credencial com validade (token de instalação do App, ADR-047): depois de expiraEm o cliente vivo é trocado por um recarregado", async () => {
+it("credencial com validade (token de instalação do App, ADR-048): depois de expiraEm o cliente vivo é trocado por um recarregado", async () => {
   let agora = 0;
   let cargas = 0;
   const vivos = criarConectoresVivos({

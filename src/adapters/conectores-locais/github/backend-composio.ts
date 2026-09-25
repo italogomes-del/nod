@@ -23,13 +23,15 @@ function codigoDoTexto(texto: string): CodigoErroGithub {
 }
 
 /**
- * Jeito 2 (ADR-047): o login OAuth do Composio, que já existia, por trás dos nomes estáveis. Cada
+ * Jeito 2 (ADR-048): o login OAuth do Composio, que já existia, por trás dos nomes estáveis. Cada
  * capacidade vira as ferramentas GITHUB_* da tabela em integracoes/composio.ts; capacidade sem par
  * fica fora de tools/list (indisponível neste jeito) em vez de adivinhada.
  */
 export function criarBackendComposio(o: OpcoesBackendComposio): BackendGithub {
   let cliente: ClienteMcp | null = null;
-  const mcp = () => (cliente ??= criarClienteMcp({ nome: "github-composio", transporte: "http", url: o.url, env: { "x-api-key": o.chave }, timeoutMs: o.timeoutMs ?? 12_000, fetchImpl: o.fetchImpl }));
+  // definido em 2026-09-24: 6 s por ferramenta — pr_comentarios faz duas (o cliente MCP serializa) e
+  // as duas cabem nos 12 s da capacidade, abaixo dos 15 s de CHAMADA_CONECTOR_MS do servidor.
+  const mcp = () => (cliente ??= criarClienteMcp({ nome: "github-composio", transporte: "http", url: o.url, env: { "x-api-key": o.chave }, timeoutMs: o.timeoutMs ?? 6_000, fetchImpl: o.fetchImpl }));
   return {
     disponiveis: TODAS.filter((c: NomeCapacidadeGithub) => GITHUB_PELO_COMPOSIO[c] !== null),
     async executar(args: ArgsGithub) {

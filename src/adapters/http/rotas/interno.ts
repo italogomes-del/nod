@@ -6,7 +6,7 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
 import type { Relogio } from "../../../shared/types.ts";
-import { chamarFerramenta } from "../../../use-cases/chamar-ferramenta.ts";
+import { chamarFerramenta, registrarExecucaoLocal } from "../../../use-cases/chamar-ferramenta.ts";
 import { registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import type { Rota } from "../roteador.ts";
 import { bytes } from "../util.ts";
@@ -117,6 +117,8 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             if (!decisao || decisao.turnoId !== turnoId) return { estado: "inexistente" as const };
             if (decisao.estado === "decidida" || decisao.estado === "vencida") {
               const itens = await d.repos.itensAprovacao.listar(decisaoId);
+              // ADR-048: item aprovado que roda no Mac ainda sem desfecho = a execução não acabou.
+              if (decisao.estado === "decidida" && itens.some((i) => i.selecionado && i.desfecho === null && i.destino.execucao === "maquina")) return { estado: "pendente" as const };
               return { estado: "decidida" as const, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho })) };
             }
             return { estado: "pendente" as const };
@@ -135,6 +137,20 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           }
           await dormir(intervalo + Math.floor(Math.random() * 250));
         }
+      },
+    },
+    {
+      // ADR-048: o proxy relata o desfecho de uma ferramenta que rodou no gh do Mac (código fechado).
+      metodo: "POST",
+      padrao: /^\/execucoes-locais$/,
+      interno: true,
+      async handler(ctx) {
+        const c = (await ctx.corpo()) as { nome?: unknown; codigo?: unknown } | null;
+        if (typeof c?.nome !== "string" || typeof c.codigo !== "string") throw new ErroDeDominio("entrada_invalida");
+        const turnoId = ctx.params.turnoId ?? "";
+        const ok = await deps.dentro(ctx.escopo, (d) => registrarExecucaoLocal(d, { turnoId, agenteId: ctx.params.agenteId ?? "", plano: deps.tokens.planoDe(turnoId), nome: c.nome as string, codigo: c.codigo as string }));
+        if (!ok) throw new ErroDeDominio("nao_permitido");
+        ctx.json(200, { ok: true });
       },
     },
     {

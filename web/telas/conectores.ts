@@ -5,7 +5,7 @@ import { haQuanto } from "../lib/relogio.ts";
 import type { NomeCapacidadeGithub } from "../../src/contracts/github.ts";
 
 /**
- * definido em 2026-09-24 (ADR-047): o que o GitHub nativo sabe fazer, para dizer o que o jeito de
+ * definido em 2026-09-24 (ADR-048): o que o GitHub nativo sabe fazer, para dizer o que o jeito de
  * conectar em uso NÃO cumpre (o Composio não tem diff nem checks). Record: faltar um nome não compila.
  */
 const CAPACIDADES_GITHUB: Record<NomeCapacidadeGithub, true> = { pr_ver: true, pr_diff: true, pr_arquivos: true, pr_comentarios: true, pr_checks: true, arquivo_ler: true, issue_ver: true, pr_comentar: true, pr_revisar: true };

@@ -2,7 +2,7 @@ import type { Conn, Escopo } from "../shared/types.ts";
 
 export type ConfigGithubApp = { appId: string; instalacaoId: string; chavePrivadaCifrada: string; ownerId: string };
 
-/** GitHub App da organização (ADR-047, 0027): do TENANT, lido por todos, escrito por quem cadastrou. */
+/** GitHub App da organização (ADR-048, 0029): do TENANT, lido por todos, escrito por quem cadastrou. */
 export function githubAppRepo(conn: Conn, escopo: Escopo) {
   return {
     async config(): Promise<ConfigGithubApp | null> {

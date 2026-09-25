@@ -66,6 +66,24 @@ export function concessoesRepo(conn: Conn, escopo: Escopo) {
       await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`acesso:${agenteId}:${conectorId}`}))`;
     },
 
+    /**
+     * definido em 2026-09-24 (ADR-048): o conector trocou de nomes (Composio → GitHub nativo, mesmo id).
+     * Cada concessão com nome antigo vira as capacidades novas COM A MESMA mensagem de consentimento
+     * (é o mesmo acesso, dado pela mesma pessoa) e a linha antiga sai — ela nomeia o que não existe mais.
+     */
+    async migrarCapacidades(conectorId: string, mapa: Readonly<Record<string, readonly string[]>>): Promise<number> {
+      const pares = Object.entries(mapa).flatMap(([antiga, novas]) => novas.map((nova) => [antiga, nova] as const));
+      if (pares.length === 0) return 0;
+      const criadas = await conn`
+        insert into concessoes (tenant_id, owner_id, agente_id, conector_id, capacidade, mensagem_id)
+        select c.tenant_id, ${escopo.pessoaId}, c.agente_id, c.conector_id, m.nova, c.mensagem_id
+        from concessoes c join unnest(${pares.map((p) => p[0])}::text[], ${pares.map((p) => p[1])}::text[]) as m(antiga, nova) on m.antiga = c.capacidade
+        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.conector_id = ${conectorId}
+        on conflict (tenant_id, agente_id, conector_id, capacidade) do nothing`;
+      await conn`delete from concessoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conector_id = ${conectorId} and capacidade = any(${Object.keys(mapa)}::text[])`;
+      return criadas.count;
+    },
+
     async revogar(id: string): Promise<boolean> {
       const r = await conn`delete from concessoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;

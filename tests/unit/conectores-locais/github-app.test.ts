@@ -6,7 +6,7 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 20
 const PEM = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 const AGORA = Date.parse("2026-09-24T23:00:00Z");
 
-describe("GitHub App da organização (ADR-047, jeito 5)", () => {
+describe("GitHub App da organização (ADR-048, jeito 5)", () => {
   it("JWT RS256 verificável pela chave pública, com iss = app id e janela iat-60s..exp+9min", () => {
     const jwt = jwtDoApp("123456", PEM, AGORA);
     const [cabeca, corpo, assinatura] = jwt.split(".");

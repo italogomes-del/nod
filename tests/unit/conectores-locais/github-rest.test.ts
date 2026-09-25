@@ -12,7 +12,7 @@ import { criarClienteMcp } from "../../../src/adapters/mcp-proxy/cliente-mcp.ts"
  */
 type Pedido = { metodo: string; url: string; auth: string | undefined; accept: string | undefined; corpo: string };
 const pedidos: Pedido[] = [];
-let modo: "ok" | "401" | "403" | "cota" | "404" = "ok";
+let modo: "ok" | "401" | "403" | "cota" | "404" | "301" = "ok";
 let srv: Server;
 let base: string;
 
@@ -31,6 +31,7 @@ beforeAll(async () => {
     if (modo === "403") { res.writeHead(403).end("{}"); return; }
     if (modo === "cota") { res.writeHead(403, { "x-ratelimit-remaining": "0" }).end("{}"); return; }
     if (modo === "404") { res.writeHead(404).end("{}"); return; }
+    if (modo === "301") { res.writeHead(301, { location: "https://api.github.com/repositories/1/pulls/7" }).end(); return; }
     const u = req.url ?? "";
     if (u === "/repos/leapy/nod/pulls/7" && req.headers.accept === "application/vnd.github.diff") { res.end("diff --git a/x b/x\n+oi\n"); return; }
     if (u === "/repos/leapy/nod/pulls/7") { res.end(JSON.stringify({ number: 7, title: "PR", state: "open", user: { login: "bruno" }, head: { ref: "f", sha: "abcdef1" }, base: { ref: "main" } })); return; }
@@ -59,7 +60,7 @@ async function chamar(nome: string, args: Record<string, unknown>, jeito: "token
  */
 const PROCESSO = { timeout: 20_000 };
 
-describe("backend REST do conector github (ADR-047)", PROCESSO, () => {
+describe("backend REST do conector github (ADR-048)", PROCESSO, () => {
   it("token no cabeçalho, nunca na URL; checks seguem o head do PR; revisão manda o evento em maiúsculas", async () => {
     modo = "ok";
     pedidos.length = 0;
@@ -82,11 +83,16 @@ describe("backend REST do conector github (ADR-047)", PROCESSO, () => {
     expect((await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 })).texto).toContain("rate limit");
     modo = "404";
     expect((await chamar("issue_ver", { repositorio: "leapy/nod", numero: 9 })).texto).toContain("não encontrado");
+    // Repositório renomeado: não segue o redirect (o token não vai a outra URL) e diz o que houve.
+    modo = "301";
+    pedidos.length = 0;
+    expect((await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 })).texto).toContain("renomeado ou transferido");
+    expect(pedidos).toHaveLength(1);
   });
 
   it("o processo de verdade, montado pela composição com o token do env cifrado, fala com a mesma API", async () => {
     modo = "ok";
-    const r = configGithubNativo({ onde: "maquina_da_pessoa", envConector: { GITHUB_TOKEN: "ghp_segredo" }, ghLogado: false, app: null, ambiente: { PATH: "/usr/bin:/bin", HOME: "/tmp" }, apiBase: base });
+    const r = configGithubNativo({ envConector: { GITHUB_TOKEN: "ghp_segredo" }, app: null, rotina: false, ambiente: { PATH: "/usr/bin:/bin", HOME: "/tmp" }, apiBase: base });
     if (!r.ok) throw new Error("jeito");
     expect(r.cfg.jeito).toBe("token");
     const cliente = criarClienteMcp({ nome: "github", transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, env: r.cfg.env, timeoutMs: 10_000 });

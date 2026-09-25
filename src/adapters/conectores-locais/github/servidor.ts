@@ -8,13 +8,12 @@ import { cortar } from "../../mcp-proxy/corte.ts";
 import { CODIGO, erro, interpretar, resposta } from "../../mcp-proxy/jsonrpc.ts";
 import { criarLineSplitter } from "../../mcp-proxy/line-splitter.ts";
 import { criarBackendComposio } from "./backend-composio.ts";
-import { criarBackendGh } from "./backend-gh.ts";
 import { criarBackendRest } from "./backend-rest.ts";
 import type { BackendGithub } from "./capacidades.ts";
 import { ErroGithub, mensagemErroGithub } from "./erros.ts";
 
 /**
- * Servidor MCP stdio do conector nativo `github` (ADR-047). JSON-RPC 2.0 puro, sem SDK, no mesmo
+ * Servidor MCP stdio do conector nativo `github` (ADR-048). JSON-RPC 2.0 puro, sem SDK, no mesmo
  * estilo do proxy: uma linha por mensagem, respostas em ordem. O servidor do nod o spawna como
  * qualquer conector stdio (cliente-mcp.ts), então a sonda, a concessão, a aprovação e a moldura de
  * não confiável continuam no caminho de sempre — este processo só sabe falar com o GitHub.
@@ -96,12 +95,11 @@ export function criarServidorGithub(backend: BackendGithub | null, orcamentoChar
 }
 
 /**
- * O backend a partir do ambiente que o servidor do nod montou (nativo.ts). O que não é do jeito
- * escolhido não é lido: com NOD_GITHUB_JEITO=gh, um NOD_GITHUB_TOKEN esquecido no ambiente não vale.
+ * O backend a partir do ambiente que o servidor do nod montou (nativo.ts). Só os jeitos DO SERVIDOR
+ * (token, App, Composio): o gh roda na máquina do turno (maquina.ts), nunca neste processo.
  */
 export function backendDoAmbiente(env: Readonly<Record<string, string | undefined>>): BackendGithub | null {
   const jeito = env.NOD_GITHUB_JEITO;
-  if (jeito === "gh") return criarBackendGh({ env: Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined && !e[0].startsWith("NOD_"))) });
   if ((jeito === "token" || jeito === "app") && env.NOD_GITHUB_TOKEN) return criarBackendRest({ jeito, token: env.NOD_GITHUB_TOKEN, base: env.NOD_GITHUB_API });
   if (jeito === "composio" && env.NOD_COMPOSIO_URL && env.NOD_COMPOSIO_CHAVE) return criarBackendComposio({ url: env.NOD_COMPOSIO_URL, chave: env.NOD_COMPOSIO_CHAVE });
   return null;

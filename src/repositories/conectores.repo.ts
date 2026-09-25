@@ -94,7 +94,7 @@ export function conectoresRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * definido em 2026-09-24 (ADR-047): o GitHub vira UM conector nativo (stdio, `comando` = marca
+     * definido em 2026-09-24 (ADR-048): o GitHub vira UM conector nativo (stdio, `comando` = marca
      * `nod:github`). Quem já tinha o `github` do Composio por HTTP é convertido no lugar — mesmo id,
      * para a linha de composio_sessoes continuar apontando para ele. Nasce desabilitado: a sonda habilita.
      */

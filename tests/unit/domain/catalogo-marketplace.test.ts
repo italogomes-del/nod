@@ -8,7 +8,7 @@ describe("catálogo do marketplace (ADR-041)", () => {
     expect(apps.map((a) => a.slug)).toEqual(["slack", "github"]);
   });
 
-  it("o GitHub é nativo (ADR-047): aparece sem auth config no Composio e não duplica quando há", () => {
+  it("o GitHub é nativo (ADR-048): aparece sem auth config no Composio e não duplica quando há", () => {
     expect(mesclarCatalogo([]).map((a) => a.slug)).toEqual(["github"]);
     const comComposio = mesclarCatalogo([{ slug: "github", nome: "Github", logo: "https://logos.composio.dev/github.png" }]);
     expect(comComposio).toEqual([expect.objectContaining({ slug: "github", nome: "GitHub", logo: "https://logos.composio.dev/github.png" })]);

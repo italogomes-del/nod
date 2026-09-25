@@ -2,12 +2,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { configGithubNativo, criarDetectorGh } from "../../../src/adapters/conectores-locais/github/nativo.ts";
+import { configGithubNativo, criarDetectorGh, sondaGithubNativa } from "../../../src/adapters/conectores-locais/github/nativo.ts";
 
 /**
- * A escolha do jeito já traduzida em processo (ADR-047): o que a composição spawna para cada
- * combinação de onde roda × o que está pronto. O domínio escolhe; aqui se confere que a escolha
- * vira o ambiente certo — e que o ambiente de um jeito não carrega a credencial de outro.
+ * O lado do SERVIDOR do conector github (ADR-048): o processo que a composição spawna para os jeitos
+ * que rodam no servidor (token, Composio, App) e a "sonda" estática. O gh nunca aparece aqui.
  */
 const AMBIENTE = { PATH: "/usr/bin:/bin", HOME: "/Users/m", USER: "m", NOD_CREDENTIAL_KEY: "chave-do-servidor", DATABASE_URL: "postgres://x" };
 const COMPOSIO = { COMPOSIO_URL: "https://backend.composio.dev/tool_router/v3/trs/mcp", COMPOSIO_API_KEY: "ak_x" };
@@ -20,33 +19,34 @@ const APP = { token: "ghs_instalacao", expiraEm: 1_000 };
  */
 const PROCESSO = { timeout: 20_000 };
 
-describe("configGithubNativo: onde roda × jeitos prontos", () => {
-  it("máquina com gh: gh, sem token no ambiente mesmo com token guardado, e com PATH aumentado para o Homebrew", () => {
-    const r = configGithubNativo({ onde: "maquina_da_pessoa", envConector: { GITHUB_TOKEN: "ghp_x", ...COMPOSIO }, ghLogado: true, app: APP, ambiente: AMBIENTE });
+describe("configGithubNativo: jeitos do servidor, por turno", () => {
+  it("token da pessoa primeiro, sem nada do Composio nem segredo do servidor no ambiente", () => {
+    const r = configGithubNativo({ envConector: { GITHUB_TOKEN: "ghp_x", ...COMPOSIO }, app: APP, rotina: true, ambiente: AMBIENTE });
     if (!r.ok) throw new Error("jeito");
-    expect(r.cfg.jeito).toBe("gh");
-    expect(r.cfg.env).toMatchObject({ NOD_GITHUB_JEITO: "gh", HOME: "/Users/m", USER: "m" });
-    expect(r.cfg.env.PATH).toContain("/opt/homebrew/bin");
-    expect(Object.values(r.cfg.env).join(" ")).not.toMatch(/ghp_x|ak_x|ghs_|chave-do-servidor|postgres/);
+    expect(r.cfg).toMatchObject({ jeito: "token", env: { NOD_GITHUB_JEITO: "token", NOD_GITHUB_TOKEN: "ghp_x" } });
+    expect(Object.values(r.cfg.env).join(" ")).not.toMatch(/ak_x|ghs_|chave-do-servidor|postgres/);
   });
 
-  it("máquina sem gh: token, depois Composio; o App nunca", () => {
-    const token = configGithubNativo({ onde: "maquina_da_pessoa", envConector: { GITHUB_TOKEN: "ghp_x", ...COMPOSIO }, ghLogado: false, app: APP, ambiente: AMBIENTE });
-    expect(token.ok && token.cfg.env).toMatchObject({ NOD_GITHUB_JEITO: "token", NOD_GITHUB_TOKEN: "ghp_x" });
-    const composio = configGithubNativo({ onde: "maquina_da_pessoa", envConector: COMPOSIO, ghLogado: false, app: APP, ambiente: AMBIENTE });
-    expect(composio.ok && composio.cfg.env).toMatchObject({ NOD_GITHUB_JEITO: "composio", NOD_COMPOSIO_CHAVE: "ak_x" });
-    expect(configGithubNativo({ onde: "maquina_da_pessoa", envConector: {}, ghLogado: false, app: APP, ambiente: AMBIENTE }).ok).toBe(false);
+  it("B: sem token, o Composio da pessoa ganha do App mesmo em rotina", () => {
+    const r = configGithubNativo({ envConector: COMPOSIO, app: APP, rotina: true, ambiente: AMBIENTE });
+    expect(r.ok && r.cfg.env).toMatchObject({ NOD_GITHUB_JEITO: "composio", NOD_COMPOSIO_CHAVE: "ak_x" });
   });
 
-  it("servidor: App (com validade), depois Composio, depois token — e NUNCA gh, mesmo com o gh do servidor logado", () => {
-    const app = configGithubNativo({ onde: "servidor", envConector: { GITHUB_TOKEN: "ghp_x", ...COMPOSIO }, ghLogado: true, app: APP, ambiente: AMBIENTE });
-    expect(app.ok && app.cfg).toMatchObject({ jeito: "app", expiraEm: 1_000, env: { NOD_GITHUB_JEITO: "app", NOD_GITHUB_TOKEN: "ghs_instalacao" } });
-    const composio = configGithubNativo({ onde: "servidor", envConector: { GITHUB_TOKEN: "ghp_x", ...COMPOSIO }, ghLogado: true, app: null, ambiente: AMBIENTE });
-    expect(composio.ok && composio.cfg.jeito).toBe("composio");
-    const token = configGithubNativo({ onde: "servidor", envConector: { GITHUB_TOKEN: "ghp_x" }, ghLogado: true, app: null, ambiente: AMBIENTE });
-    expect(token.ok && token.cfg.jeito).toBe("token");
-    const nada = configGithubNativo({ onde: "servidor", envConector: {}, ghLogado: true, app: null, ambiente: AMBIENTE });
-    expect(nada).toEqual({ ok: false, frase: expect.stringContaining("para rotinas noturnas, conecte o GitHub da organização") });
+  it("B: o App só em rotina e só sem credencial da pessoa; em turno interativo, nunca", () => {
+    const rotina = configGithubNativo({ envConector: {}, app: APP, rotina: true, ambiente: AMBIENTE });
+    expect(rotina.ok && rotina.cfg).toMatchObject({ jeito: "app", expiraEm: 1_000, env: { NOD_GITHUB_JEITO: "app", NOD_GITHUB_TOKEN: "ghs_instalacao" } });
+    const interativo = configGithubNativo({ envConector: {}, app: APP, rotina: false, ambiente: AMBIENTE });
+    expect(interativo).toEqual({ ok: false, frase: expect.stringContaining("gh auth login") });
+  });
+});
+
+describe("sonda estática do conector nativo", () => {
+  it("gh do Mac, token ou App = catálogo inteiro; só Composio = sem diff nem checks; nada = indisponível", () => {
+    const nomes = (r: ReturnType<typeof sondaGithubNativa>) => (r.ok ? r.ferramentas.map((f) => f.nome) : r.motivo);
+    expect(nomes(sondaGithubNativa({ ghNaMaquina: true, envChaves: [], appConfigurado: false }))).toHaveLength(9);
+    expect(nomes(sondaGithubNativa({ ghNaMaquina: false, envChaves: ["GITHUB_TOKEN"], appConfigurado: false }))).toHaveLength(9);
+    expect(nomes(sondaGithubNativa({ ghNaMaquina: false, envChaves: ["COMPOSIO_API_KEY", "COMPOSIO_URL"], appConfigurado: false }))).toEqual(["pr_ver", "pr_arquivos", "pr_comentarios", "arquivo_ler", "issue_ver", "pr_comentar", "pr_revisar"]);
+    expect(nomes(sondaGithubNativa({ ghNaMaquina: false, envChaves: [], appConfigurado: false }))).toBe("conector_indisponivel");
   });
 });
 
@@ -57,7 +57,7 @@ describe("detector do gh desta máquina", PROCESSO, () => {
     dir = null;
   });
 
-  it("`gh auth status` com saída 0 = logado; o resultado fica em cache curto e o deslogado expira antes", async () => {
+  it("`gh auth status` com saída 0 = logado; cache curto, o deslogado expira antes; chamadas juntas viram uma", async () => {
     dir = mkdtempSync(join(tmpdir(), "nod-ghdet-"));
     const gh = join(dir, "gh");
     writeFileSync(gh, `#!/bin/sh\necho "$@" >> "${dir}/chamadas"\n[ "$1 $2" = "auth status" ] && exit $(cat "${dir}/saida")\nexit 9\n`);
@@ -65,7 +65,7 @@ describe("detector do gh desta máquina", PROCESSO, () => {
     writeFileSync(join(dir, "saida"), "1");
     let agora = 0;
     const d = criarDetectorGh({ ambiente: { PATH: "/usr/bin:/bin", HOME: dir }, bin: gh, agora: () => agora });
-    expect(await d.logado()).toBe(false);
+    expect(await Promise.all([d.logado(), d.logado(), d.logado()])).toEqual([false, false, false]);
     writeFileSync(join(dir, "saida"), "0");
     agora = 5_000;
     expect(await d.logado()).toBe(false);

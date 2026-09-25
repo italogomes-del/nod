@@ -5,7 +5,7 @@ import { GITHUB_PELO_COMPOSIO } from "../../../src/adapters/integracoes/composio
 import { CAPACIDADES_GITHUB } from "../../../src/contracts/github.ts";
 
 /**
- * O jeito Composio (ADR-047): os nomes estáveis viram as ferramentas GITHUB_* pela tabela explícita;
+ * O jeito Composio (ADR-048): os nomes estáveis viram as ferramentas GITHUB_* pela tabela explícita;
  * o que não tem par sai de tools/list. O MCP do Composio é FALSO: um fetch que responde JSON-RPC.
  */
 function composioFalso(responder: (nome: string, args: Record<string, unknown>) => { texto: string; isError?: boolean }) {
@@ -26,7 +26,7 @@ async function chamar(s: ReturnType<typeof criarServidorGithub>, metodo: string,
   return (JSON.parse((await s.tratarLinha(JSON.stringify({ jsonrpc: "2.0", id: 1, method: metodo, params }))) ?? "{}") as { result: Record<string, unknown> }).result;
 }
 
-describe("conector github pelo Composio (ADR-047)", () => {
+describe("conector github pelo Composio (ADR-048)", () => {
   it("toda capacidade tem uma decisão escrita na tabela; diff e checks ficam sem par", () => {
     expect(Object.keys(GITHUB_PELO_COMPOSIO).sort()).toEqual(CAPACIDADES_GITHUB.map((c) => c.nome).sort());
     expect(Object.entries(GITHUB_PELO_COMPOSIO).filter(([, v]) => v === null).map(([k]) => k)).toEqual(["pr_diff", "pr_checks"]);

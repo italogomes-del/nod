@@ -14,9 +14,18 @@ export type RequisicaoGithub = {
   aceitar?: "json" | "diff" | "raw";
 };
 
-export type PedirGithub = (r: RequisicaoGithub) => Promise<string>;
+/** `timeoutMs` = o que sobra do prazo da CAPACIDADE, não um teto por requisição. */
+export type PedirGithub = (r: RequisicaoGithub, timeoutMs: number) => Promise<string>;
 
-/** Backend = um jeito de conectar atrás da mesma interface (ADR-047). */
+/**
+ * definido em 2026-09-24: 12 s para a capacidade INTEIRA, abaixo dos 15 s de CHAMADA_CONECTOR_MS do
+ * servidor. pr_checks faz duas requisições em sequência (o SHA do head, depois os checks) e divide
+ * este prazo; pr_comentarios faz as duas em paralelo. Antes cada requisição tinha 12 s próprios e as
+ * duas somavam 24 s — o servidor desistia antes e o modelo lia "conector indisponível".
+ */
+export const PRAZO_CAPACIDADE_GITHUB_MS = 12_000;
+
+/** Backend = um jeito de conectar atrás da mesma interface (ADR-048). */
 export interface BackendGithub {
   /** As capacidades que este jeito sabe cumprir; as outras aparecem como indisponíveis. */
   readonly disponiveis: readonly NomeCapacidadeGithub[];
@@ -61,8 +70,10 @@ function resumoPr(p: Obj): Obj {
 }
 
 /** Executa uma capacidade sobre `pedir` (gh api ou fetch): mesma rota REST, mesmo resultado. */
-export async function executarPorRest(args: ArgsGithub, pedir: PedirGithub): Promise<string> {
+export async function executarPorRest(args: ArgsGithub, pedirComPrazo: PedirGithub, prazoMs = PRAZO_CAPACIDADE_GITHUB_MS, agora: () => number = Date.now): Promise<string> {
   const base = repo(args.alvo);
+  const fim = agora() + prazoMs;
+  const pedir = (r: RequisicaoGithub) => pedirComPrazo(r, Math.max(1, fim - agora()));
   switch (args.capacidade) {
     case "pr_ver":
       return JSON.stringify(resumoPr(obj(json(await pedir({ metodo: "GET", caminho: `${base}/pulls/${args.numero}` })))));
@@ -73,8 +84,12 @@ export async function executarPorRest(args: ArgsGithub, pedir: PedirGithub): Pro
       return JSON.stringify(arquivos.map((f) => ({ arquivo: f.filename, estado: f.status, adicoes: f.additions, remocoes: f.deletions })));
     }
     case "pr_comentarios": {
-      const conversa = lista(json(await pedir({ metodo: "GET", caminho: `${base}/issues/${args.numero}/comments?per_page=100` })));
-      const linhas = lista(json(await pedir({ metodo: "GET", caminho: `${base}/pulls/${args.numero}/comments?per_page=100` })));
+      const [daConversa, dasLinhas] = await Promise.all([
+        pedir({ metodo: "GET", caminho: `${base}/issues/${args.numero}/comments?per_page=100` }),
+        pedir({ metodo: "GET", caminho: `${base}/pulls/${args.numero}/comments?per_page=100` }),
+      ]);
+      const conversa = lista(json(daConversa));
+      const linhas = lista(json(dasLinhas));
       return JSON.stringify({
         conversa: conversa.map((c) => ({ autor: login(c.user), em: c.created_at, texto: c.body })),
         linhas: linhas.map((c) => ({ autor: login(c.user), arquivo: c.path, linha: c.line ?? c.original_line, em: c.created_at, texto: c.body })),

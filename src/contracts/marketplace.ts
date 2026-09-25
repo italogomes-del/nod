@@ -9,7 +9,7 @@ export type AppMarketplace = {
    */
   naoIncluiNaLeitura?: readonly string[];
   /**
-   * definido em 2026-09-24 (ADR-047): app que o próprio nod conecta (hoje só o GitHub). Aparece na
+   * definido em 2026-09-24 (ADR-048): app que o próprio nod conecta (hoje só o GitHub). Aparece na
    * grade mesmo sem auth config no Composio — o Composio é só um dos jeitos de conectá-lo.
    */
   nativo?: true;

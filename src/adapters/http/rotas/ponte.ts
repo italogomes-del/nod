@@ -17,7 +17,17 @@ import { versaoAceita } from "../../../domain/versao-app.ts";
  * o app roda um turno por agente em paralelo; antes era um `plano` só e a renovação do segundo turno
  * voltava {ativo:false}, matando a CLI. `recebidas` guarda a última entrega de cada turno (idempotência).
  */
-type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number> };
+type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean };
+
+/** Um item aprovado que roda no Mac da dona (ADR-048): o que a máquina recebe ao puxar `itens-locais`. */
+export type ItemLocal = { itemId: string; capacidade: string; argumentos: Record<string, unknown> };
+export type DesfechoLocal = "executado" | "falhou_na_execucao";
+/**
+ * definido em 2026-09-24: um item entregue a uma máquina fica reservado para ela por 2 min — duas
+ * máquinas da mesma pessoa não executam o mesmo comentário. Reserva vencida volta para a fila (o
+ * resultado que chegar depois ainda é aceito uma vez: o desfecho só é gravado se estava aberto).
+ */
+const RESERVA_ITEM_MS = 120_000;
 const RECEBIDAS_GUARDADAS = 64;
 export function criarPonteHttpServidor(d: {
   criar(escopo: Escopo): PonteInternaNod;
@@ -29,8 +39,12 @@ export function criarPonteHttpServidor(d: {
   delta(plano: PlanoTurno, texto: string): void;
   ferramenta(plano: PlanoTurno, nome: string): void;
   longpollMs?: number;
+  /** ADR-048: itens aprovados que esperam o gh do Mac desta pessoa, e o desfecho que o Mac relata. */
+  itensLocais?(escopo: Escopo): Promise<ItemLocal[]>;
+  concluirItemLocal?(escopo: Escopo, itemId: string, desfecho: DesfechoLocal): Promise<void>;
 }) {
   const conexoes = new Map<string, Conexao>();
+  const reservas = new Map<string, { machineId: string; ate: number }>();
   const ausente = (): Inventario => ({ estado: "ausente", motivo: "Abra o app nod e conecte sua conta de IA no seu computador", em: d.agora() });
   function atual(pessoaId: string): Inventario {
     const vivas = [...conexoes.values()].filter((c) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000);
@@ -59,7 +73,7 @@ export function criarPonteHttpServidor(d: {
       const id = ctx.params.chaveId!;
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map() };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false };
         conexoes.set(id, c);
       }
       if (c.planos.size > 0) {
@@ -67,6 +81,8 @@ export function criarPonteHttpServidor(d: {
         c.planos.clear();
       }
       c.inv = inventario(b.inventario, d.agora()); c.ultimo = d.agora();
+      // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
+      c.gh = objeto(b.github ?? {}).gh === true;
       const motores: Partial<Record<IdHarness, Inventario>> = {};
       if (b.harnesses !== undefined) {
         const anunciados = objeto(b.harnesses);
@@ -121,6 +137,33 @@ export function criarPonteHttpServidor(d: {
       c.planos.delete(e.turnoId);
       ctx.json(200, { ok: true });
     }),
+    /**
+     * ADR-048: a máquina PUXA os itens aprovados que rodam no gh dela — o servidor nunca disca (ADR-021).
+     * Só a máquina que anunciou o gh recebe; a pessoa é a da chave, nunca do corpo.
+     */
+    rota("itens-locais", async (ctx) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      if (!c.gh || !d.itensLocais) { ctx.json(200, { itens: [] }); return; }
+      const agora = d.agora();
+      const livres = (await d.itensLocais(ctx.escopo)).filter((i) => {
+        const r = reservas.get(i.itemId);
+        return !r || r.ate <= agora || r.machineId === ctx.params.chaveId;
+      }).slice(0, 10);
+      for (const i of livres) reservas.set(i.itemId, { machineId: ctx.params.chaveId!, ate: agora + RESERVA_ITEM_MS });
+      ctx.json(200, { itens: livres });
+    }),
+    rota("itens-locais/resultado", async (ctx, b) => {
+      const c = conexao(ctx);
+      const itemId = uuid(b.itemId);
+      exigir(b.desfecho === "executado" || b.desfecho === "falhou_na_execucao");
+      const r = reservas.get(itemId);
+      if (!r || r.machineId !== ctx.params.chaveId) throw new ErroDeDominio("nao_permitido");
+      c.ultimo = d.agora();
+      await d.concluirItemLocal?.(ctx.escopo, itemId, b.desfecho as DesfechoLocal);
+      reservas.delete(itemId);
+      ctx.json(200, { ok: true });
+    }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);
       await c.ponte.desconectar(ctx.params.chaveId!);
@@ -153,5 +196,14 @@ export function criarPonteHttpServidor(d: {
   function ultimoContato(machineId: string): number | null {
     return conexoes.get(machineId)?.ultimo ?? null;
   }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato };
+  /** ADR-048: a máquina do turno anunciou o gh e é da pessoa do escopo (a chave é por pessoa). */
+  function ghDaMaquina(escopo: Escopo, machineId: string): boolean {
+    const c = conexoes.get(machineId);
+    return !!c && c.gh && c.escopo.pessoaId === escopo.pessoaId && c.escopo.tenantId === escopo.tenantId && d.agora() - c.ultimo < 60_000;
+  }
+  /** Alguma máquina viva da pessoa tem o gh: o registro automático do GitHub pode nascer dele. */
+  function ghDaPessoa(pessoaId: string): boolean {
+    return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && ghDaMaquina(c.escopo, id));
+  }
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa };
 }

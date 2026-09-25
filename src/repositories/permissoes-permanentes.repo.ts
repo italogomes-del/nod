@@ -90,6 +90,26 @@ export function permissoesPermanentesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraPermissao(l) : null;
     },
 
+    /**
+     * definido em 2026-09-24 (ADR-048): o mesmo "Sempre permitir" sob o nome novo (Composio → GitHub
+     * nativo, mesmo conector). A regra nova carrega o MESMO consentimento e o mesmo item de origem; a
+     * antiga fica inativa com motivo, nunca some (ADR-042).
+     */
+    async migrarCapacidades(conectorId: string, mapa: Readonly<Record<string, string>>, agora: number): Promise<number> {
+      const antigas = Object.keys(mapa);
+      if (antigas.length === 0) return 0;
+      const criadas = await conn`
+        insert into permissoes_permanentes (tenant_id, owner_id, agente_id, conector_id, capacidade, item_origem_id, mensagem_id, regra_versao)
+        select p.tenant_id, p.owner_id, p.agente_id, p.conector_id, m.nova, p.item_origem_id, p.mensagem_id, p.regra_versao
+        from permissoes_permanentes p join unnest(${antigas}::text[], ${antigas.map((a) => mapa[a] ?? a)}::text[]) as m(antiga, nova) on m.antiga = p.capacidade
+        where p.tenant_id = ${escopo.tenantId} and p.owner_id = ${escopo.pessoaId} and p.conector_id = ${conectorId} and p.inativo_em is null
+        on conflict do nothing`;
+      await conn`
+        update permissoes_permanentes set inativo_em = ${dataOuNull(agora)}, inativo_motivo = 'capacidade_fora_do_catalogo'
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conector_id = ${conectorId} and inativo_em is null and capacidade = any(${antigas}::text[])`;
+      return criadas.count;
+    },
+
     /** Marca UMA regra como inativa. Só a dona; segunda chamada devolve false (idempotência na rota). */
     async desativar(id: string, motivo: MotivoInatividadePermissao, agora: number): Promise<boolean> {
       const r = await conn`

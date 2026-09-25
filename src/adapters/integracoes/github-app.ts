@@ -2,7 +2,7 @@ import { createPrivateKey, createSign } from "node:crypto";
 import { ErroDeDominio } from "../../domain/erro.ts";
 
 /**
- * GitHub App da organização (ADR-047, jeito 5): o executor de servidor, com o Mac da pessoa
+ * GitHub App da organização (ADR-048, jeito 5): o executor de servidor, com o Mac da pessoa
  * desligado, gera um token de instalação e o entrega ao conector nativo pelo backend REST.
  * JWT RS256 com node:crypto — sem dependência nova. O token de instalação vale 1 h; o JWT, 10 min
  * no máximo (docs do GitHub), e aqui 9 min com 60 s de folga para relógio adiantado.
@@ -61,12 +61,19 @@ export async function criarTokenDeInstalacao(p: { appId: string; instalacaoId: s
  */
 export function criarCofreDeTokensDoApp<E extends { tenantId: string }>(o: { agora: () => number; gerar: (escopo: E) => Promise<TokenDeInstalacao | null> }) {
   const postos = new Map<string, TokenDeInstalacao>();
+  const emCurso = new Map<string, Promise<TokenDeInstalacao | null>>();
   return {
     async token(escopo: E): Promise<TokenDeInstalacao | null> {
       const tenantId = escopo.tenantId;
       const posto = postos.get(tenantId);
       if (posto && posto.expiraEm - 5 * 60_000 > o.agora()) return { token: posto.token, expiraEm: posto.expiraEm - 5 * 60_000 };
-      const novo = await o.gerar(escopo);
+      // Uma geração por tenant por vez: dez rotinas que acordam juntas pedem UM token ao GitHub.
+      let pedido = emCurso.get(tenantId);
+      if (!pedido) {
+        pedido = o.gerar(escopo).finally(() => emCurso.delete(tenantId));
+        emCurso.set(tenantId, pedido);
+      }
+      const novo = await pedido;
       if (!novo) {
         postos.delete(tenantId);
         return null;

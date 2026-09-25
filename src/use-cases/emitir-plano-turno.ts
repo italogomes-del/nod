@@ -8,7 +8,9 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
+import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
@@ -26,6 +28,11 @@ export type EntradaEmitirPlano = {
   permitirResume?: boolean;
   harnesses?: Partial<Record<IdHarness, Inventario>>;
   harnessPreferido?: IdHarness | null;
+  /**
+   * definido em 2026-09-24 (ADR-048): a máquina DESTE turno tem o gh logado e é da pessoa do turno.
+   * As ferramentas do GitHub nativo DELA vão marcadas para rodar na máquina (o proxy executa).
+   */
+  ghNaMaquina?: boolean;
 };
 
 /** Motor cujo inventário decide a localidade (ADR-019/022). */
@@ -150,6 +157,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   });
 
   parcial.workspaceId = workspaceId;
+  if (input.ghNaMaquina) {
+    // O login do gh serve à dona: só o conector github DELA roda na máquina; o de outra pessoa, nunca.
+    const meu = guardados.find((c) => c.slug === SLUG_GITHUB && c.comando === COMANDO_GITHUB_NATIVO && c.ownerId === deps.escopo.pessoaId);
+    parcial.catalogo.ferramentas = marcarExecucaoNaMaquina(parcial.catalogo.ferramentas, meu?.id ?? null);
+  }
   parcial.workspacePastas = workspaceId ? await deps.services.workspaces?.pastasDoHarness({ ...deps.escopo, conversaId: turno.conversaId }) ?? null : null;
 
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });

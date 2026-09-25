@@ -7,7 +7,7 @@ import type { CasoDeUso } from "./tipos.ts";
 export const atualizarCredenciaisConector: CasoDeUso<{ conectorId: string; env: unknown; cifrar: (s: string) => string }, Conector> = async (deps, input) => {
   const c = await deps.repos.conectores.buscar(input.conectorId);
   if (!c || c.ownerId !== deps.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado");
-  // definido em 2026-09-24 (ADR-047): o env do conector nativo tem chaves próprias (token, login do
+  // definido em 2026-09-24 (ADR-048): o env do conector nativo tem chaves próprias (token, login do
   // Composio) e cada uma tem a sua rota; trocar o JSON inteiro apagaria as outras.
   if (c.comando?.startsWith("nod:")) throw new ErroDeDominio("entrada_invalida", { cause: "conector nativo" });
   const env = validarCredenciais(input.env, c.transporte);

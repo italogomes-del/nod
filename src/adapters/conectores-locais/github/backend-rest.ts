@@ -12,22 +12,21 @@ export type OpcoesBackendRest = {
   /** Base da API; default api.github.com. O teste aponta para um servidor HTTP local. */
   base?: string;
   fetchImpl?: typeof fetch;
-  timeoutMs?: number;
+  /** Prazo da capacidade inteira; default PRAZO_CAPACIDADE_GITHUB_MS (capacidades.ts). */
+  prazoMs?: number;
 };
 
 /** definido em 2026-09-24: 16 MiB, o mesmo teto do stdout do `gh`; acima disso é falha, não corte. */
 const TETO_BYTES = 16 * 1024 * 1024;
 
 /**
- * Jeitos 3 e 5 (ADR-047): a mesma rota REST do `gh api`, por fetch com o token no cabeçalho. O token
+ * Jeitos 3 e 5 (ADR-048): a mesma rota REST do `gh api`, por fetch com o token no cabeçalho. O token
  * nunca vai para a URL nem para a mensagem de erro; redirect é recusado para ele não seguir a outro host.
  */
 export function criarBackendRest(o: OpcoesBackendRest): BackendGithub {
   const base = (o.base ?? API_GITHUB).replace(/\/+$/, "");
   const f = o.fetchImpl ?? fetch;
-  const timeout = o.timeoutMs ?? 12_000;
-
-  async function pedir(r: RequisicaoGithub): Promise<string> {
+  async function pedir(r: RequisicaoGithub, timeout: number): Promise<string> {
     if (!r.caminho.startsWith("repos/")) throw new ErroGithub("falha", o.jeito);
     let resp: Response;
     try {
@@ -41,12 +40,14 @@ export function criarBackendRest(o: OpcoesBackendRest): BackendGithub {
           ...(r.corpo ? { "content-type": "application/json" } : {}),
         },
         ...(r.corpo ? { body: JSON.stringify(r.corpo) } : {}),
-        redirect: "error",
+        // 301/302/307: repositório renomeado ou transferido. Não segue (o token não vai a outra URL) e diz o que houve.
+        redirect: "manual",
         signal: AbortSignal.timeout(timeout),
       });
     } catch {
       throw new ErroGithub("falha", o.jeito);
     }
+    if (resp.status >= 300 && resp.status < 400) throw new ErroGithub("movido", o.jeito);
     if (!resp.ok) throw new ErroGithub(codigoDoStatus(resp.status, resp.headers.get("x-ratelimit-remaining") === "0"), o.jeito);
     const bytes = await resp.arrayBuffer();
     if (bytes.byteLength > TETO_BYTES) throw new ErroGithub("falha", o.jeito);
@@ -55,6 +56,6 @@ export function criarBackendRest(o: OpcoesBackendRest): BackendGithub {
 
   return {
     disponiveis: TODAS,
-    executar: (args: ArgsGithub) => executarPorRest(args, pedir),
+    executar: (args: ArgsGithub) => executarPorRest(args, pedir, o.prazoMs),
   };
 }

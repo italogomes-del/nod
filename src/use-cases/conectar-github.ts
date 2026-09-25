@@ -1,6 +1,7 @@
 import type { ConectorGuardado } from "../contracts/conector.ts";
 import { COMANDO_GITHUB_NATIVO, ENV_COMPOSIO_CHAVE, ENV_COMPOSIO_URL, ENV_TOKEN_GITHUB, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { migracaoDoComposio } from "../domain/github.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -10,10 +11,40 @@ export type ResultadoGithubSemConfiguracao =
    * `sem_jeito`: nem gh logado aqui nem App da organização no servidor; `legado`: há o github do
    * Composio por HTTP; `desligado`: a pessoa desligou o conector. Os dois últimos só a pessoa muda.
    */
-  | { ok: false; motivo: "sem_jeito" | "legado" | "desligado" | "sonda_falhou" };
+  | { ok: false; motivo: "sem_jeito" | "legado" | "manual" | "desligado" | "sonda_falhou" };
+
+/** Hosts do Composio: só o `github` que veio de lá é trocado pelo nativo (ADR-041, probe.ts). */
+const HOSTS_COMPOSIO = ["app.composio.dev", "backend.composio.dev"];
 
 /**
- * Registro sem configuração (ADR-047): se o `gh` desta máquina está logado (ou, no servidor
+ * definido em 2026-09-24 (revisão da ADR-048): o `github` que a PESSOA registrou à mão (stdio ou
+ * HTTP fora do Composio) nunca é trocado — só o que o próprio nod criou (Composio ou nativo).
+ */
+function doComposio(c: Pick<ConectorGuardado, "transporte" | "url">): boolean {
+  if (c.transporte !== "http" || !c.url) return false;
+  try {
+    return HOSTS_COMPOSIO.includes(new URL(c.url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Troca o `github` do Composio pelo nativo NO LUGAR (mesmo id) e leva junto os acessos que a pessoa
+ * já tinha dado (migracaoDoComposio): concessões pelos nomes estáveis, com o mesmo consentimento, e o
+ * "Sempre permitir" do par exato. Sem isto o agente perdia o GitHub no dia da troca.
+ */
+async function converterDoComposio(deps: Deps, antigo: ConectorGuardado, env: { envCifrado: string | null; envChaves: string[] }): Promise<ConectorGuardado | null> {
+  const migracao = migracaoDoComposio(antigo.catalogo);
+  const novo = await deps.repos.conectores.tornarNativo(antigo.id, { comando: COMANDO_GITHUB_NATIVO, ...env });
+  if (!novo) return null;
+  await deps.repos.concessoes.migrarCapacidades(antigo.id, migracao.concessoes);
+  await deps.repos.permissoesPermanentes.migrarCapacidades(antigo.id, migracao.permanentes, deps.agora());
+  return novo;
+}
+
+/**
+ * Registro sem configuração (ADR-048): se o `gh` desta máquina está logado (ou, no servidor
  * compartilhado, se o tenant tem o GitHub App), o conector `github` nasce (ou é trocado para) o
  * nativo e é sondado na hora — habilitado, com o catálogo de nomes estáveis, sem a pessoa preencher
  * nada. Chamado quando a pessoa abre "Conectar GitHub" e quando um agente pede acesso ao GitHub
@@ -31,6 +62,7 @@ export async function garantirGithubSemConfiguracao(deps: Deps, opcoes: { pelaPe
   const meu = achado && achado.ownerId === deps.escopo.pessoaId ? achado : null;
   // Pedido de agente com o GitHub já pronto: nada a fazer. O clique da pessoa ("Reconectar") ressonda.
   if (meu?.comando === COMANDO_GITHUB_NATIVO && meu.habilitado && !opcoes.pelaPessoa) return { ok: true, conector: meu };
+  if (meu && meu.comando !== COMANDO_GITHUB_NATIVO && !doComposio(meu)) return { ok: false, motivo: "manual" };
   if (meu && meu.comando !== COMANDO_GITHUB_NATIVO && !opcoes.pelaPessoa) return { ok: false, motivo: "legado" };
   // Catálogo sondado e desligado = a pessoa desligou; catálogo vazio = nunca sondou com sucesso.
   if (meu && !meu.habilitado && meu.catalogo.length > 0 && !opcoes.pelaPessoa) return { ok: false, motivo: "desligado" };
@@ -39,7 +71,7 @@ export async function garantirGithubSemConfiguracao(deps: Deps, opcoes: { pelaPe
   const nativo = meu?.comando === COMANDO_GITHUB_NATIVO
     ? meu
     : meu
-      ? await deps.repos.conectores.tornarNativo(meu.id, { comando: COMANDO_GITHUB_NATIVO, envCifrado: null, envChaves: [] })
+      ? await converterDoComposio(deps, meu, { envCifrado: null, envChaves: [] })
       // 'toca' como o github do Composio: código e issues podem citar pessoas (ADR-002, default fechado).
       : await deps.repos.conectores.criar({ nome: "GitHub", slug: SLUG_GITHUB, transporte: "stdio", comando: COMANDO_GITHUB_NATIVO, declaracao: "toca" });
   if (!nativo) return { ok: false, motivo: "sonda_falhou" };
@@ -74,16 +106,17 @@ async function mesclarEnvGithub(deps: Deps, extra: Record<string, string>, cifra
   const env = { ...anterior, ...extra };
   const envCifrado = cifra.cifrar(JSON.stringify(env));
   const envChaves = Object.keys(env).sort();
+  if (meu && !nativo && !doComposio(meu)) throw new ErroDeDominio("estado_invalido", { cause: "github registrado à mão" });
   const salvo = nativo
     ? ((await deps.repos.conectores.atualizarEnv(nativo.id, { envCifrado, envChaves })) ? await deps.repos.conectores.buscar(nativo.id) : null)
     : meu
-      ? await deps.repos.conectores.tornarNativo(meu.id, { comando: COMANDO_GITHUB_NATIVO, envCifrado, envChaves })
+      ? await converterDoComposio(deps, meu, { envCifrado, envChaves })
       : await deps.repos.conectores.criar({ nome: "GitHub", slug: SLUG_GITHUB, transporte: "stdio", comando: COMANDO_GITHUB_NATIVO, envCifrado, envChaves, declaracao: "toca" });
   if (!salvo) throw new ErroDeDominio("nao_encontrado", { cause: "conector github" });
   return salvo;
 }
 
-/** Jeito 3 (ADR-047): o token pessoal colado no campo avançado, cifrado no env (GITHUB_TOKEN). */
+/** Jeito 3 (ADR-048): o token pessoal colado no campo avançado, cifrado no env (GITHUB_TOKEN). */
 export async function guardarTokenGithub(deps: Deps, input: { token: string; cifrar: (s: string) => string; decifrar: (s: string) => string }): Promise<ConectorGuardado> {
   const token = input.token.trim();
   if (!formatoDeTokenGithub(token)) throw new ErroDeDominio("entrada_invalida", { cause: "token do GitHub" });
@@ -91,7 +124,7 @@ export async function guardarTokenGithub(deps: Deps, input: { token: string; cif
 }
 
 /**
- * Jeito 2 (ADR-047): o login do Composio vira um jeito DENTRO do conector nativo — a URL da sessão
+ * Jeito 2 (ADR-048): o login do Composio vira um jeito DENTRO do conector nativo — a URL da sessão
  * e a chave do tenant vão cifradas no env (COMPOSIO_URL, COMPOSIO_API_KEY) e o catálogo continua o
  * dos nomes estáveis, menos o que o Composio não tem.
  */

@@ -5,7 +5,7 @@ import type { JeitoGithub } from "../../../contracts/github.ts";
  * resultado de ferramenta com isError — nunca erro JSON-RPC, que o cliente trataria como queda do
  * conector e respawnaria à toa. `falha` é o resto: sem detalhe do provedor, que pode ecoar o token.
  */
-export type CodigoErroGithub = "gh_ausente" | "sem_login" | "sem_permissao" | "nao_encontrado" | "limite" | "falha";
+export type CodigoErroGithub = "gh_ausente" | "sem_login" | "sem_permissao" | "nao_encontrado" | "movido" | "limite" | "falha";
 
 export class ErroGithub extends Error {
   readonly codigo: CodigoErroGithub;
@@ -34,6 +34,8 @@ export function mensagemErroGithub(e: ErroGithub): string {
       return "Sem permissão neste repositório: a conta conectada não tem esse acesso (ou o token não tem o escopo). Não tente outro caminho; diga à pessoa qual acesso falta.";
     case "nao_encontrado":
       return "Repositório, pull request, issue ou arquivo não encontrado. Se o repositório é privado, a conta conectada pode não ter acesso a ele.";
+    case "movido":
+      return "O repositório foi renomeado ou transferido: confira o dono/nome atual no GitHub e chame de novo com ele.";
     case "limite":
       return "O GitHub limitou as chamadas desta conta por agora (rate limit). Tente mais tarde.";
     case "falha":
@@ -46,5 +48,6 @@ export function codigoDoStatus(status: number, semCota = false): CodigoErroGithu
   if (status === 401) return "sem_login";
   if (status === 403 || status === 429) return semCota || status === 429 ? "limite" : "sem_permissao";
   if (status === 404 || status === 410) return "nao_encontrado";
+  if (status === 301 || status === 302 || status === 307 || status === 308) return "movido";
   return "falha";
 }

@@ -21,6 +21,12 @@ export type FerramentaPlano = {
   readOnlyHint: boolean;
   tocaAprendiz: boolean;
   schema: JsonSchema;
+  /**
+   * definido em 2026-09-24 (ADR-048): "maquina" = a ferramenta roda NA MÁQUINA do turno (o gh logado
+   * no Mac da dona do conector). O servidor decide tudo (parada, concessão, schema, trilha) e devolve
+   * `executarLocal`; o proxy executa. Ausente = o servidor executa, como sempre.
+   */
+  execucao?: "maquina";
 };
 
 export type ServidorPlano = {

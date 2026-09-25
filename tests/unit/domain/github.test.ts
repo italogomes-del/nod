@@ -1,27 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { CAPACIDADES_GITHUB } from "../../../src/contracts/github.ts";
-import { ArgumentoGithubInvalido, escolherJeitoGithub, validarArgsGithub, validarRepositorio } from "../../../src/domain/github.ts";
+import { ArgumentoGithubInvalido, escolherJeitoGithub, marcarExecucaoNaMaquina, migracaoDoComposio, validarArgsGithub, validarRepositorio } from "../../../src/domain/github.ts";
 
-describe("escolha do jeito de conectar o GitHub (ADR-047)", () => {
-  it("na máquina da pessoa, o gh logado ganha de tudo", () => {
-    expect(escolherJeitoGithub("maquina_da_pessoa", { gh: true, token: true, composio: true, app: true })).toEqual({ ok: true, jeito: "gh" });
+describe("escolha do jeito de conectar o GitHub, por turno (ADR-048)", () => {
+  it("o gh da máquina do turno (já cruzado com a posse) ganha de tudo, inclusive do App em rotina", () => {
+    expect(escolherJeitoGithub({ ghNaMaquina: true, prontos: { token: true, composio: true, app: true }, rotina: true })).toEqual({ ok: true, jeito: "gh" });
   });
 
-  it("na máquina sem gh: token, depois Composio — e o App da organização nunca é usado ali", () => {
-    expect(escolherJeitoGithub("maquina_da_pessoa", { gh: false, token: true, composio: true })).toEqual({ ok: true, jeito: "token" });
-    expect(escolherJeitoGithub("maquina_da_pessoa", { composio: true, app: true })).toEqual({ ok: true, jeito: "composio" });
-    const nada = escolherJeitoGithub("maquina_da_pessoa", { app: true });
-    expect(nada.ok).toBe(false);
-    if (!nada.ok) expect(nada.frase).toContain("gh auth login");
+  it("sem gh: token da pessoa → Composio da pessoa → App só em rotina", () => {
+    expect(escolherJeitoGithub({ ghNaMaquina: false, prontos: { token: true, composio: true, app: true }, rotina: true })).toEqual({ ok: true, jeito: "token" });
+    expect(escolherJeitoGithub({ ghNaMaquina: false, prontos: { composio: true, app: true }, rotina: true })).toEqual({ ok: true, jeito: "composio" });
+    expect(escolherJeitoGithub({ ghNaMaquina: false, prontos: { app: true }, rotina: true })).toEqual({ ok: true, jeito: "app" });
   });
 
-  it("no servidor: App → Composio → token, e NUNCA o gh, mesmo logado", () => {
-    expect(escolherJeitoGithub("servidor", { gh: true, token: true, composio: true, app: true })).toEqual({ ok: true, jeito: "app" });
-    expect(escolherJeitoGithub("servidor", { gh: true, token: true, composio: true })).toEqual({ ok: true, jeito: "composio" });
-    expect(escolherJeitoGithub("servidor", { gh: true, token: true })).toEqual({ ok: true, jeito: "token" });
-    const soGh = escolherJeitoGithub("servidor", { gh: true });
-    expect(soGh.ok).toBe(false);
-    if (!soGh.ok) expect(soGh.frase).toContain("para rotinas noturnas, conecte o GitHub da organização");
+  it("B: o App da organização NUNCA atende turno interativo, nem como último recurso", () => {
+    const r = escolherJeitoGithub({ ghNaMaquina: false, prontos: { app: true }, rotina: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.frase).toContain("gh auth login");
+    const rotina = escolherJeitoGithub({ ghNaMaquina: false, prontos: {}, rotina: true });
+    if (!rotina.ok) expect(rotina.frase).toContain("conecte o GitHub da organização");
+  });
+
+  it("marca para a máquina só as ferramentas do conector github indicado", () => {
+    const f = (nome: string, conectorId: string | null, origem: "nod" | "conector" = "conector") => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem, conectorId, readOnlyHint: true, tocaAprendiz: true, schema: {} });
+    const marcadas = marcarExecucaoNaMaquina([f("github__pr_ver", "g1"), f("gmail__GMAIL_FETCH", "m1"), f("lembrar", null, "nod")], "g1");
+    expect(marcadas.map((x) => x.execucao ?? null)).toEqual(["maquina", null, null]);
+    expect(marcarExecucaoNaMaquina([f("github__pr_ver", "g1")], null)[0]?.execucao).toBeUndefined();
+  });
+
+  it("G: acessos do github do Composio viram os nomes estáveis — par direto, nível para o que não tem par, e 'Sempre permitir' só do par exato", () => {
+    const m = migracaoDoComposio([
+      { nome: "GITHUB_GET_A_PULL_REQUEST", readOnlyHint: true },
+      { nome: "GITHUB_LIST_ISSUE_COMMENTS", readOnlyHint: true },
+      { nome: "GITHUB_CREATE_AN_ISSUE_COMMENT", readOnlyHint: false },
+      { nome: "GITHUB_LIST_BRANCHES", readOnlyHint: true },
+      { nome: "GITHUB_MERGE_A_PULL_REQUEST", readOnlyHint: false },
+    ]);
+    expect(m.concessoes).toEqual({
+      GITHUB_GET_A_PULL_REQUEST: ["pr_ver"],
+      GITHUB_LIST_ISSUE_COMMENTS: ["pr_comentarios"],
+      GITHUB_CREATE_AN_ISSUE_COMMENT: ["pr_comentar"],
+      GITHUB_LIST_BRANCHES: ["pr_ver", "pr_diff", "pr_arquivos", "pr_comentarios", "pr_checks", "arquivo_ler", "issue_ver"],
+      GITHUB_MERGE_A_PULL_REQUEST: ["pr_comentar", "pr_revisar"],
+    });
+    expect(m.permanentes).toEqual({ GITHUB_CREATE_AN_ISSUE_COMMENT: "pr_comentar" });
   });
 });
 
@@ -31,7 +53,7 @@ describe("argumentos do conector github", () => {
     expect(validarRepositorio("marlonwlv/nod.git")).toEqual({ dono: "marlonwlv", repo: "nod" });
   });
 
-  it.each(["foo/bar;rm -rf ~", "--repo=x", "--repo=x/y", "foo", "a/b/c", "-x/y", "foo/..", "foo/ bar", "foo/bar$(id)", "foo/`id`", "", "foo/bar\nbaz"])("recusa repositório %j antes de qualquer processo", (r) => {
+  it.each(["x/...git", "x/..git", "x/.git", "x/.", "x/..", "foo/bar;rm -rf ~", "--repo=x", "--repo=x/y", "foo", "a/b/c", "-x/y", "foo/..", "foo/ bar", "foo/bar$(id)", "foo/`id`", "", "foo/bar\nbaz"])("recusa repositório %j antes de qualquer processo", (r) => {
     expect(() => validarRepositorio(r)).toThrow(ArgumentoGithubInvalido);
   });
 

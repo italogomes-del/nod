@@ -1,29 +1,11 @@
-import type { NomeCapacidadeGithub } from "../../contracts/github.ts";
+import { COMPOSIO_POR_CAPACIDADE_GITHUB } from "../../contracts/github.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import type { ArgsGithub } from "../../domain/github.ts";
 
 export type ChamadaComposio = { slug: string; argumentos: Record<string, unknown> };
 
-/**
- * definido em 2026-09-24 (ADR-047): as capacidades estáveis do conector `github` → ferramentas
- * GITHUB_* do Composio. Slugs e parâmetros conferidos em https://docs.composio.dev/toolkits/github.md
- * no mesmo dia (GITHUB_GET_A_PULL_REQUEST, GITHUB_LIST_PULL_REQUESTS_FILES, GITHUB_LIST_ISSUE_COMMENTS,
- * GITHUB_LIST_REVIEW_COMMENTS_ON_A_PULL_REQUEST, GITHUB_GET_REPOSITORY_CONTENT, GITHUB_GET_AN_ISSUE,
- * GITHUB_CREATE_AN_ISSUE_COMMENT, GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST). `null` = sem par:
- * o diff unificado não existe lá, e os checks pediriam o SHA do head lido de um `data` em texto
- * livre — aparecem como indisponíveis neste jeito, em vez de adivinhados.
- */
-export const GITHUB_PELO_COMPOSIO: Readonly<Record<NomeCapacidadeGithub, readonly string[] | null>> = {
-  pr_ver: ["GITHUB_GET_A_PULL_REQUEST"],
-  pr_diff: null,
-  pr_arquivos: ["GITHUB_LIST_PULL_REQUESTS_FILES"],
-  pr_comentarios: ["GITHUB_LIST_ISSUE_COMMENTS", "GITHUB_LIST_REVIEW_COMMENTS_ON_A_PULL_REQUEST"],
-  pr_checks: null,
-  arquivo_ler: ["GITHUB_GET_REPOSITORY_CONTENT"],
-  issue_ver: ["GITHUB_GET_AN_ISSUE"],
-  pr_comentar: ["GITHUB_CREATE_AN_ISSUE_COMMENT"],
-  pr_revisar: ["GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST"],
-};
+/** A tabela capacidade → GITHUB_* mora em src/contracts/github.ts (a migração dos acessos antigos também a lê). */
+export const GITHUB_PELO_COMPOSIO = COMPOSIO_POR_CAPACIDADE_GITHUB;
 
 /** As chamadas ao Composio de uma capacidade já validada pelo domínio; null = indisponível neste jeito. */
 export function chamadasComposioGithub(a: ArgsGithub): ChamadaComposio[] | null {

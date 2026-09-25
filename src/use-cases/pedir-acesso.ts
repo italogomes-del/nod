@@ -69,7 +69,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   let conector = await deps.repos.conectores.buscarPorSlug(input.conector);
   let entrada = input;
   if (input.conector === SLUG_GITHUB && !conector?.habilitado) {
-    // definido em 2026-09-24 (ADR-047): com o gh desta máquina logado (ou o App da organização no
+    // definido em 2026-09-24 (ADR-048): com o gh desta máquina logado (ou o App da organização no
     // servidor), o GitHub nasce aqui mesmo e o
     // card já sai com o botão de permitir — nada de card de conexão nem passo de configuração. Sem
     // capacidades nomeadas, o nível decide: leitura = as de leitura, escrita = o catálogo inteiro.

@@ -8,6 +8,7 @@ import type { Relogio } from "../../shared/types.ts";
 import { ferramentaDoPlano, ferramentasMcp, validadeDoPlano } from "./catalogo.ts";
 import { criarClienteNod, ehFalhaTransporte, type ClienteNod } from "../executor/cliente-nod.ts";
 import { PROTOCOLO_MCP } from "./cliente-mcp.ts";
+import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
 import { cortar } from "./corte.ts";
 import { CODIGO, erro, interpretar, resposta, type IdJsonRpc } from "./jsonrpc.ts";
 import { criarLineSplitter } from "./line-splitter.ts";
@@ -34,6 +35,9 @@ export type OpcoesProxy = {
   longpollMs?: number;
   versao?: string;
   diagnostico?: (evento: string, campos?: Record<string, string | number | boolean | null>) => void;
+  /** ADR-048: ambiente desta máquina para o gh (default process.env) e quem executa (injetável no teste). */
+  ambiente?: Readonly<Record<string, string | undefined>>;
+  executarNaMaquina?: typeof executarGithubNaMaquina;
 };
 
 export type Proxy = {
@@ -110,6 +114,22 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
         return resposta(id, texto(JSON.stringify({ estado: "decidida", itens: a.itens })));
       }
       return resposta(id, texto(JSON.stringify({ estado: "pendente", decisao_id: r.aguardar, instrucao: INSTRUCAO_PENDENTE })));
+    }
+    if ("executarLocal" in r) {
+      // ADR-048: o servidor já decidiu tudo; aqui só o EFEITO, pelo gh desta máquina. O plano puxado
+      // tem de concordar (ferramenta marcada "maquina" e a mesma capacidade) — senão nada roda.
+      const capacidade = r.executarLocal.capacidade;
+      if (ferramenta.execucao !== "maquina" || !ferramenta.nome.endsWith(`__${capacidade}`)) {
+        const n = negacaoFerramenta(nome, "fora_do_catalogo", agora());
+        await cliente.negacao(n).catch(() => undefined);
+        return resposta(id, conteudoNegado(n, agora()));
+      }
+      const local = await (opcoes.executarNaMaquina ?? executarGithubNaMaquina)({ capacidade, argumentos: r.executarLocal.argumentos, ambiente: opcoes.ambiente ?? process.env, orcamentoChars: v.plano.politicaExecucao.orcamentoResultadoChars || ORCAMENTO_RESULTADO_CHARS });
+      diag("execucao_local", { nome, codigo: local.codigo });
+      await cliente.execucaoLocal?.(nome, local.codigo).catch(() => undefined);
+      const origem = v.plano.catalogo.servidores.find((s) => s.conectorId === ferramenta.conectorId)?.nome ?? nome;
+      const texto = envolverNaoConfiavel(neutralizarDelimitadores(local.conteudo), origem, false);
+      return resposta(id, { content: [{ type: "text", text: texto }], ...(local.isError ? { isError: true } : {}) });
     }
     if (!r.ok) {
       diag("negacao_servidor", { nome, motivo: r.negacao.motivo, terminal: r.negacao.terminal });

@@ -1,31 +1,50 @@
-import type { EventoRevisao, JeitoGithub, NomeCapacidadeGithub, OndeRodaConector } from "../contracts/github.ts";
-import { CAPACIDADES_GITHUB } from "../contracts/github.ts";
+import type { FerramentaPlano } from "../contracts/plano-turno.ts";
+import type { EventoRevisao, JeitoGithub, NomeCapacidadeGithub } from "../contracts/github.ts";
+import { CAPACIDADES_GITHUB, COMPOSIO_POR_CAPACIDADE_GITHUB } from "../contracts/github.ts";
 
 /**
- * definido em 2026-09-24 (ADR-047): a ordem de preferência depende de ONDE o conector roda.
- * Na máquina da pessoa o que já está pronto ganha (gh logado → token colado → Composio). No
- * servidor o gh nunca entra — o gh logado é o do Mac da pessoa, não o do servidor — e a conta da
- * organização (App) vem antes das contas pessoais.
+ * revisto em 2026-09-24 (ADR-048, revisão): o jeito é decidido POR TURNO, nesta ordem —
+ *   1. o gh logado na MÁQUINA do turno, e só se ela é da dona do conector (o login do gh serve a
+ *      quem o fez; um colega no mesmo servidor nunca usa o gh de outra pessoa);
+ *   2. o token pessoal da dona; 3. o login Composio da dona;
+ *   4. o GitHub App da organização, SÓ em turno de rotina (sem ninguém olhando). Em turno interativo
+ *      o App nunca entra: ele publicaria como `app[bot]` no lugar da pessoa, e uma revisão do App
+ *      não conta como aprovação dela no PR.
+ * O gh nunca roda no servidor: quando vence, a ferramenta vai marcada `execucao: "maquina"` no plano.
  */
-export const ORDEM_DOS_JEITOS: Readonly<Record<OndeRodaConector, readonly JeitoGithub[]>> = {
-  maquina_da_pessoa: ["gh", "token", "composio"],
-  servidor: ["app", "composio", "token"],
-};
+export type JeitoDoServidor = Exclude<JeitoGithub, "gh">;
+export const ORDEM_DO_SERVIDOR: readonly JeitoDoServidor[] = ["token", "composio", "app"];
 
 export type JeitosProntos = Readonly<Partial<Record<JeitoGithub, boolean>>>;
 
 export type EscolhaJeitoGithub = { ok: true; jeito: JeitoGithub } | { ok: false; frase: string };
 
 /** A frase quando nenhum jeito serve: diz o que a PESSOA faz, nunca o nome de uma variável. */
-export function fraseSemJeito(onde: OndeRodaConector): string {
-  return onde === "servidor"
-    ? "Nenhum jeito de conectar o GitHub serve no servidor: para rotinas noturnas, conecte o GitHub da organização (GitHub App) ou entre pelo Composio."
-    : "Nenhum jeito de conectar o GitHub está pronto: rode `gh auth login` nesta máquina, cole um token pessoal no campo avançado ou entre pelo Composio.";
+export function fraseSemJeito(rotina: boolean): string {
+  return rotina
+    ? "Nenhum jeito de conectar o GitHub serve a esta rotina: deixe o app nod aberto no seu Mac com o gh logado, cole um token pessoal, entre pelo Composio ou, para rotinas com o Mac desligado, conecte o GitHub da organização."
+    : "Nenhum jeito de conectar o GitHub está pronto: abra o app nod no seu Mac com o gh logado (`gh auth login`), cole um token pessoal no campo avançado ou entre pelo Composio.";
 }
 
-export function escolherJeitoGithub(onde: OndeRodaConector, prontos: JeitosProntos): EscolhaJeitoGithub {
-  for (const jeito of ORDEM_DOS_JEITOS[onde]) if (prontos[jeito] === true) return { ok: true, jeito };
-  return { ok: false, frase: fraseSemJeito(onde) };
+/**
+ * `ghNaMaquina` já vem cruzado com a posse: true só quando a máquina do turno anunciou o gh E a
+ * pessoa do turno é a dona do conector. `rotina` = turno de rotina (o único que o App atende).
+ */
+export function escolherJeitoGithub(p: { ghNaMaquina: boolean; prontos: JeitosProntos; rotina: boolean }): EscolhaJeitoGithub {
+  if (p.ghNaMaquina) return { ok: true, jeito: "gh" };
+  for (const jeito of ORDEM_DO_SERVIDOR) {
+    if (jeito === "app" && !p.rotina) continue;
+    if (p.prontos[jeito] === true) return { ok: true, jeito };
+  }
+  return { ok: false, frase: fraseSemJeito(p.rotina) };
+}
+
+/**
+ * As ferramentas do conector nativo `github` de QUEM roda o turno passam a rodar na máquina do turno
+ * quando ela tem o gh. `conectorId` null = não há o que marcar (sem gh, ou o conector é de outra pessoa).
+ */
+export function marcarExecucaoNaMaquina(ferramentas: readonly FerramentaPlano[], conectorId: string | null): FerramentaPlano[] {
+  return ferramentas.map((f) => (conectorId !== null && f.origem === "conector" && f.conectorId === conectorId ? { ...f, execucao: "maquina" as const } : f));
 }
 
 export type AlvoGithub = { dono: string; repo: string };
@@ -61,9 +80,11 @@ export const TETO_TEXTO_GITHUB = 65_536;
 export function validarRepositorio(v: unknown): AlvoGithub {
   if (typeof v !== "string") throw new ArgumentoGithubInvalido("repositorio");
   const partes = v.trim().split("/");
-  const [dono, repo] = partes;
+  const [dono, bruto] = partes;
+  // revisto em 2026-09-24: tira o `.git` ANTES de recusar "", "." e ".." — senão `x/..git` virava `x/.`.
+  const repo = bruto?.endsWith(".git") ? bruto.slice(0, -4) : bruto;
   if (partes.length !== 2 || !dono || !repo || !DONO.test(dono) || !REPO.test(repo) || repo === "." || repo === "..") throw new ArgumentoGithubInvalido("repositorio");
-  return { dono, repo: repo.endsWith(".git") ? repo.slice(0, -4) : repo };
+  return { dono, repo };
 }
 
 export function validarNumero(v: unknown): number {
@@ -113,4 +134,36 @@ export function validarArgsGithub(capacidade: NomeCapacidadeGithub, bruto: Reado
     default:
       return { capacidade, alvo, numero: validarNumero(bruto.numero) };
   }
+}
+
+export type MigracaoDoComposio = {
+  /** Nome antigo (GITHUB_*) → capacidades estáveis que a concessão passa a cobrir. */
+  concessoes: Readonly<Record<string, readonly NomeCapacidadeGithub[]>>;
+  /** "Sempre permitir": só o par EXATO de escrita; regra permanente nunca alarga (ADR-042). */
+  permanentes: Readonly<Record<string, NomeCapacidadeGithub>>;
+};
+
+/**
+ * definido em 2026-09-24 (ADR-048): ao trocar o `github` do Composio pelo nativo, os acessos que a
+ * pessoa já tinha dado seguem valendo pelos nomes novos. A tabela COMPOSIO_POR_CAPACIDADE_GITHUB é
+ * lida ao contrário; ferramenta GITHUB_* sem par vira o NÍVEL que ela tinha (leitura → as capacidades
+ * de leitura; escrita → as de escrita), pelo readOnlyHint do catálogo antigo. Ferramenta que o
+ * catálogo antigo não descreve não vira nada. "Sempre permitir" só migra o par exato de escrita.
+ */
+export function migracaoDoComposio(catalogoAntigo: readonly { nome: string; readOnlyHint: boolean }[]): MigracaoDoComposio {
+  const direto = new Map<string, NomeCapacidadeGithub[]>();
+  for (const [cap, slugs] of Object.entries(COMPOSIO_POR_CAPACIDADE_GITHUB) as [NomeCapacidadeGithub, readonly string[] | null][]) {
+    for (const slug of slugs ?? []) direto.set(slug, [...(direto.get(slug) ?? []), cap]);
+  }
+  const leitura = CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => c.nome);
+  const escrita = CAPACIDADES_GITHUB.filter((c) => !c.readOnlyHint).map((c) => c.nome);
+  const concessoes: Record<string, readonly NomeCapacidadeGithub[]> = {};
+  const permanentes: Record<string, NomeCapacidadeGithub> = {};
+  for (const antiga of catalogoAntigo) {
+    const par = direto.get(antiga.nome);
+    concessoes[antiga.nome] = par ?? (antiga.readOnlyHint ? leitura : escrita);
+    const unico = par?.length === 1 ? par[0] : undefined;
+    if (unico && escrita.includes(unico)) permanentes[antiga.nome] = unico;
+  }
+  return { concessoes, permanentes };
 }

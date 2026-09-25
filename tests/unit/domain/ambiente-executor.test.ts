@@ -51,7 +51,7 @@ describe("montarAmbiente", () => {
     expect(chaveNegada("PATH")).toBe(false);
   });
 
-  it("conector nativo (ADR-047) ganha só o que o gh precisa para achar a conta logada; segredo do servidor fica", () => {
+  it("conector nativo (ADR-048) ganha só o que o gh precisa para achar a conta logada; segredo do servidor fica", () => {
     const r = montarAmbienteConectorNativo({ PATH: "/bin", HOME: "/Users/m", USER: "m", GH_CONFIG_DIR: "/c", NOD_CREDENTIAL_KEY: "x", DATABASE_URL: "postgres://", GITHUB_TOKEN: "ghp_x" });
     expect(r).toEqual({ PATH: "/bin", HOME: "/Users/m", USER: "m", GH_CONFIG_DIR: "/c" });
   });

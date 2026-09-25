@@ -7,6 +7,7 @@ import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
 import { decidirLote, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
 import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens } from "./decidir.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -72,9 +73,12 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
       // Origem desconhecida = fail-closed: trata como sensível (ADR-002: não declarou = toca).
       origemSensivel = origem ? conectorTocaAprendiz(origem) : true;
     }
+    // ADR-048: carimbado na criação pelo plano JÁ PUXADO — a ferramenta que roda no gh do Mac deste
+    // turno roda lá também quando aprovada; o agente não escolhe onde.
+    const naMaquina = input.plano?.catalogo.ferramentas.some((f) => f.nome === `${conector.slug}__${item.destino.ferramenta}` && f.conectorId === conector.id && f.execucao === "maquina") === true;
     propostas.push({
       texto: item.texto,
-      destino: { conector: conector.slug, ferramenta: item.destino.ferramenta, argumentos: item.destino.argumentos ?? {} },
+      destino: { conector: conector.slug, ferramenta: item.destino.ferramenta, argumentos: item.destino.argumentos ?? {}, ...(naMaquina ? { execucao: "maquina" as const } : {}) },
       origemSensivel,
     });
     conectorIdPorIdx.push(conector.id);
@@ -106,7 +110,8 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     decisao.id,
     itens.map((i) => ({ idx: i.idx, texto: i.textoOriginal, destino: i.destino, origemSensivel: i.origemSensivel, justificativa: i.justificativa })),
   );
-  const desfechos = await executarItens(deps.services, criados.map((item, idx) => ({ item, conectorId: conectorIdPorIdx[idx] ?? null })));
+  const rotina = (await rotinaDoTurno(deps.repos, input.turnoId)) !== null;
+  const desfechos = await executarItens(deps.services, criados.map((item, idx) => ({ item, conectorId: conectorIdPorIdx[idx] ?? null, dono: deps.escopo, rotina })));
   for (const d of desfechos) await deps.repos.itensAprovacao.registrarDesfecho(d.itemId, d.desfecho);
   // decidida_por fica NULO: nenhuma PESSOA decidiu. Quem decidiu está em decidido_por da autoria,
   // com a versão da regra (ADR-023: autoria não se infere de outro campo).
@@ -116,6 +121,12 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
   const regra = daPessoa?.automatico ? daPessoa.regra : primeiraRegra(porItem);
   const regraVersao = daPessoa?.automatico ? daPessoa.versao : primeiraVersao(porItem);
   await deps.repos.decisoes.fecharPorRegra(decisao.id, { regra, regraVersao, agora });
+  // ADR-048: item que roda no gh do Mac (servidor compartilhado) ainda não tem desfecho: o turno espera
+  // pelo long-poll de `aguardar` enquanto o app desktop da pessoa executa; a fala "Fiz sem perguntar"
+  // sai quando o Mac relatar (itens-na-maquina.ts).
+  if (criados.some((i) => i.selecionado && i.destino.execucao === "maquina" && !desfechos.some((d) => d.itemId === i.id))) {
+    return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [] };
+  }
 
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId, { decididoPor: regra, regraVersao });
   const mensagem = await deps.repos.mensagens.criar({
@@ -155,7 +166,7 @@ const primeiraVersao = (ds: readonly DecisaoAutomatica[]): number => {
 };
 
 /** Fala na conversa do que saiu sem perguntar: "precisa ficar no chat" foi requisito explícito. */
-function textoAutomatico(itens: readonly ItemAprovacao[], desfechos: readonly { itemId: string; desfecho: DesfechoItem }[]): string {
+export function textoAutomatico(itens: readonly ItemAprovacao[], desfechos: readonly { itemId: string; desfecho: DesfechoItem }[]): string {
   const linhas = itens.map((i) => {
     const d = desfechos.find((x) => x.itemId === i.id)?.desfecho ?? "falhou_na_execucao";
     return `- ${i.textoFinal} (${i.destino.conector}.${i.destino.ferramenta}): ${d.replaceAll("_", " ")}`;
