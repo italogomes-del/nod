@@ -199,7 +199,7 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   // definido em 2026-09-24 (revisão da ADR-046): aprovar PR e merge NUNCA rodam por chamada direta, em
   // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
   // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".
-  if (nuncaPermanente(ferramenta.nome)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  if (nuncaPermanente(ferramenta.nome, ferramenta.readOnlyHint)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
 

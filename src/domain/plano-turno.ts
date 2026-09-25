@@ -204,7 +204,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
      * estado, a recusa é a explicação que a pessoa lê). Ação que nunca é permanente (ADR-046: aprovar
      * PR, merge) sai mesmo com linha ativa — uma regra gravada antes da lista não vale.
      */
-    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => !nuncaPermanente(n) && ferramentas.some((f) => f.nome === n && f.origem === "conector")),
+    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector" && !nuncaPermanente(n, f.readOnlyHint))),
     expiraEm: Math.min(entrada.turno.prazoEm, entrada.agora + PLANO_VALIDADE_MS),
   };
 }

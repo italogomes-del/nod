@@ -39,16 +39,31 @@ export type RegraAprovacao = typeof REGRA_CONSULTA_SEM_DECISAO | typeof REGRA_AP
  * (ADR-047). Lista curta e explícita, não classificação: o que não está aqui segue a regra da pessoa.
  */
 export const NUNCA_PERMANENTE: readonly RegExp[] = [
-  /^pr_revisar$/, // GitHub nativo: revisar pode APROVAR o PR
   /merge/i, // pr_merge, GITHUB_MERGE_A_PULL_REQUEST, qualquer merge
   /approv|aprovar/i, // aprovar em qualquer conector
-  /create_a_review/i, // Composio: GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST pode aprovar
+  // Revisão de PR pode APROVAR: pr_revisar (nativo), GITHUB_CREATE_/SUBMIT_A_REVIEW…, UPDATE/DISMISS_A_REVIEW…
+  /review|revisar/i,
 ];
 
-/** `nome` = `${slug}__${capacidade}` (catálogo do plano) ou só a capacidade (item de aprovação). */
-export function nuncaPermanente(nome: string): boolean {
+/**
+ * Verbo de LEITURA no começo da capacidade — `list_reviews`, `GITHUB_LIST_REVIEWS…`,
+ * `GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED`: consultar não aprova nada e continua livre. Olha o
+ * 1º e o 2º pedaço porque o Composio prefixa o app (`GITHUB_`).
+ */
+const VERBO_DE_LEITURA = new Set(["list", "get", "check", "fetch", "search", "find", "read", "ver", "ler", "listar", "consultar", "buscar"]);
+
+/**
+ * `nome` = `${slug}__${capacidade}` (catálogo do plano) ou só a capacidade (item de aprovação).
+ * definido em 2026-09-24 (revisão da ADR-046): casa pelo NOME, para valer igual no GitHub nativo e no
+ * mapeado pelo Composio (ADR-047), e nunca pega ferramenta de leitura — por `readOnlyHint` quando o
+ * catálogo diz, e pelo verbo quando quem chama só tem o nome.
+ */
+export function nuncaPermanente(nome: string, readOnlyHint = false): boolean {
+  if (readOnlyHint) return false;
   const i = nome.indexOf("__");
   const capacidade = i >= 0 ? nome.slice(i + 2) : nome;
+  const pedacos = capacidade.toLowerCase().split("_");
+  if (pedacos.slice(0, 2).some((p) => VERBO_DE_LEITURA.has(p))) return false;
   return NUNCA_PERMANENTE.some((r) => r.test(capacidade));
 }
 
@@ -105,7 +120,7 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   // A regra da PESSOA cai inteira em turno contaminado; a do CONECTOR (acima) não, porque
   // catalogoReduzido já deixa readOnly passar direto e executá-la aqui não amplia nada.
   if (plano.confiancaEntrada === "nao_confiavel") return { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
-  if (nuncaPermanente(nome)) return { automatico: false, motivo: "sem_regra_permanente" };
+  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
   return { automatico: false, motivo: "sem_regra_permanente" };
 }
