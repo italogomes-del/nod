@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
+import { previaDaMensagem } from "../../src/domain/descricao-agente.ts";
 import { criarAgente, NOME_INICIAL } from "../../src/use-cases/criar-agente.ts";
 import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
@@ -23,6 +24,9 @@ describeIntegracao("agentes (E1.1/E1.2/E1.3, Grok Bot Pin/Hide/Duplicate) no Pos
 
       const frota = (await listarFrota(deps, {})).data;
       expect(frota.agentes.find((a) => a.id === data.agente.id)).toMatchObject({ conversaId: data.conversa.id, descricaoEstado: "sem acessos · nunca executou" });
+      // A linha da sidebar mostra a prévia da última mensagem da conversa própria (definido em 2026-09-24).
+      const [boasVindas] = await deps.repos.mensagens.listarDaConversa(data.conversa.id);
+      expect(frota.agentes.find((a) => a.id === data.agente.id)?.ultimaMensagem).toEqual({ previa: previaDaMensagem(boasVindas!.texto), em: boasVindas!.criadoEm });
 
       const eventos = await trx<{ kind: string }[]>`select kind from events where conversa_id = ${data.conversa.id}`;
       expect(eventos.map((e) => e.kind).sort()).toEqual(["agente_atualizado", "mensagem_criada"]);

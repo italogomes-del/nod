@@ -11,7 +11,7 @@ const H = 3_600_000;
 const T0 = Date.parse("2026-09-22T18:01:00-03:00");
 const registro = (extra: Partial<RegistroComputador>): RegistroComputador => ({ id: "r", computadorId: "c", turnoId: null, autor: "bot", tipo: "observar", estado: "falhou", motivo: "navegador_nao_abriu", em: T0, ...extra });
 type AgenteFrota = FrotaDto["agentes"][number];
-const nina = (fora: AgenteFrota["computadorForaDoAr"]): AgenteFrota => ({ tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "Assistente de e-mail", descricao: "", dono: "pessoa", forma: "shape-square", cor: "c-purple", fixado: false, oculto: false, confirmado: true, modelo: "m", duplicadoDe: null, criadoEm: 0, conversaId: "c1", descricaoEstado: "", computadorForaDoAr: fora });
+const nina = (fora: AgenteFrota["computadorForaDoAr"]): AgenteFrota => ({ tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "Assistente de e-mail", descricao: "", dono: "pessoa", forma: "shape-square", cor: "c-purple", fixado: false, oculto: false, confirmado: true, modelo: "m", duplicadoDe: null, criadoEm: 0, conversaId: "c1", descricaoEstado: "", computadorForaDoAr: fora, ultimaMensagem: null });
 const comFrota = (a: AgenteFrota): Estado => ({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [a], inventario: { estado: "pronto", versao: "catcher", em: 0 }, negacoes: [] }, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } } as Estado);
 const FORA = { desde: T0, motivo: "navegador_nao_abriu" as const };
 
