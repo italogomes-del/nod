@@ -24,4 +24,4 @@ it("credencial com validade (token de instalação do App, ADR-047): depois de e
   } finally {
     await vivos.fechar();
   }
-});
+}, 20_000); // processo de verdade: ver o teto em tests/unit/conectores-locais/github-gh.test.ts

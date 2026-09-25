@@ -52,7 +52,14 @@ async function chamar(nome: string, args: Record<string, unknown>, jeito: "token
   return { texto: r.content[0]?.text ?? "", isError: r.isError === true };
 }
 
-describe("backend REST do conector github (ADR-047)", () => {
+/**
+ * medido em 2026-09-24: sob a suíte inteira com outra suíte rodando na mesma máquina, spawnar o
+ * servidor stdio + o gh falso passou dos 5 s padrão do projeto unit (4 de 779 testes, uma rodada em
+ * três). O teto por teste sobe só aqui, onde há processo de verdade.
+ */
+const PROCESSO = { timeout: 20_000 };
+
+describe("backend REST do conector github (ADR-047)", PROCESSO, () => {
   it("token no cabeçalho, nunca na URL; checks seguem o head do PR; revisão manda o evento em maiúsculas", async () => {
     modo = "ok";
     pedidos.length = 0;

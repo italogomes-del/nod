@@ -50,7 +50,14 @@ afterEach(async () => {
   rmSync(casa, { recursive: true, force: true });
 });
 
-describe("conector github nativo pelo gh (ADR-047)", () => {
+/**
+ * medido em 2026-09-24: sob a suíte inteira com outra suíte rodando na mesma máquina, spawnar o
+ * servidor stdio + o gh falso passou dos 5 s padrão do projeto unit (4 de 779 testes, uma rodada em
+ * três). O teto por teste sobe só aqui, onde há processo de verdade.
+ */
+const PROCESSO = { timeout: 20_000 };
+
+describe("conector github nativo pelo gh (ADR-047)", PROCESSO, () => {
   it("lista os nomes estáveis com readOnlyHint e lê o PR resumido, por `gh api` com argv separado", async () => {
     const ferramentas = await cliente.listar();
     expect(ferramentas.map((f) => [f.name, f.annotations?.readOnlyHint])).toEqual([

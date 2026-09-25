@@ -13,6 +13,13 @@ const AMBIENTE = { PATH: "/usr/bin:/bin", HOME: "/Users/m", USER: "m", NOD_CREDE
 const COMPOSIO = { COMPOSIO_URL: "https://backend.composio.dev/tool_router/v3/trs/mcp", COMPOSIO_API_KEY: "ak_x" };
 const APP = { token: "ghs_instalacao", expiraEm: 1_000 };
 
+/**
+ * medido em 2026-09-24: sob a suíte inteira com outra suíte rodando na mesma máquina, spawnar o
+ * servidor stdio + o gh falso passou dos 5 s padrão do projeto unit (4 de 779 testes, uma rodada em
+ * três). O teto por teste sobe só aqui, onde há processo de verdade.
+ */
+const PROCESSO = { timeout: 20_000 };
+
 describe("configGithubNativo: onde roda × jeitos prontos", () => {
   it("máquina com gh: gh, sem token no ambiente mesmo com token guardado, e com PATH aumentado para o Homebrew", () => {
     const r = configGithubNativo({ onde: "maquina_da_pessoa", envConector: { GITHUB_TOKEN: "ghp_x", ...COMPOSIO }, ghLogado: true, app: APP, ambiente: AMBIENTE });
@@ -43,7 +50,7 @@ describe("configGithubNativo: onde roda × jeitos prontos", () => {
   });
 });
 
-describe("detector do gh desta máquina", () => {
+describe("detector do gh desta máquina", PROCESSO, () => {
   let dir: string | null = null;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
