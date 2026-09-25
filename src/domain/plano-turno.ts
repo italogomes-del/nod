@@ -134,7 +134,10 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // definido em 2026-09-24 (ADR-046): a delegação também roda em profundidade 1 (não repassa), mas não é
   // peer — a autoridade é o pedido da pessoa, e virar peer apagava isso (catálogo só `lembrar`).
   const modo: ModoTurno = entrada.profundidade >= 1 && entrada.modo !== "delegacao" ? "peer" : entrada.modo;
-  const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
+  // definido em 2026-09-24 (revisão da ADR-046): delegar_tarefa só aparece quando o turno PODE delegar
+  // (as mesmas condições de delegar-tarefa.ts) — numa retomada ela estaria no catálogo e sempre negaria.
+  const podeDelegar = (entrada.turno.origem === "conversa" || entrada.turno.origem === "sala") && entrada.profundidade === 0 && entrada.confianca === "confiavel" && Boolean(entrada.turno.mensagemOrigemId);
+  const nod = FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n !== "delegar_tarefa" || podeDelegar).map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-046): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   const temComputador = entrada.computador === true && modo !== "peer" && modo !== "criacao" && modo !== "delegacao";
