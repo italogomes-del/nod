@@ -38,8 +38,10 @@ async function cenario(trx: Tx) {
   return { taga, dev1, deps, repos, turnoTaga: data.turno };
 }
 
-function delegar(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1") {
-  return delegarTarefa(deps, { ...p, agente, tarefa: "revisar o PR 466", contexto: "https://github.com/leapy/app/pull/466" });
+/** Como o proxy chama: com o plano do turno do remetente no contexto (revisão da ADR-046: sem plano, contamina). */
+async function delegar(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1") {
+  const plano = await emitirPlanoTurno(deps, { turnoId: p.turnoId, machineId: randomUUID(), executor: "catcher" }).then((r) => r.data, () => undefined);
+  return delegarTarefa(deps, { ...p, plano, agente, tarefa: "revisar o PR 466", contexto: "https://github.com/leapy/app/pull/466" });
 }
 
 async function conectorGithub(repos: Repos) {

@@ -130,6 +130,12 @@ describe("ações que nunca são permanentes (ADR-046)", () => {
     for (const nome of ["github__pr_comentar", "github__pr_ver", "slack__send_message", "pr_comentar"]) expect(nuncaPermanente(nome), nome).toBe(false);
   });
 
+  it("revisão: variantes de review do Composio entram; leitura (list/get/check e readOnlyHint) nunca", () => {
+    for (const nome of ["github__GITHUB_SUBMIT_A_REVIEW_FOR_A_PULL_REQUEST", "github__GITHUB_UPDATE_A_REVIEW_FOR_A_PULL_REQUEST", "github__GITHUB_DISMISS_A_REVIEW_FOR_A_PULL_REQUEST", "GITHUB_PELO_COMPOSIO__pr_revisar"]) expect(nuncaPermanente(nome), nome).toBe(true);
+    for (const nome of ["github__GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED", "github__GITHUB_LIST_REVIEWS_FOR_A_PULL_REQUEST", "github__GITHUB_GET_A_REVIEW_FOR_A_PULL_REQUEST", "github__list_reviews"]) expect(nuncaPermanente(nome), nome).toBe(false);
+    expect(nuncaPermanente("github__pr_merge", true)).toBe(false);
+  });
+
   it("mesmo com a linha na lista da pessoa, aprovar PR pergunta — a regra gravada antes da lista não vale", () => {
     const p = plano({ catalogo: { ferramentas: [ferramenta("github__pr_revisar"), ferramenta("github__pr_comentar")], servidores: [] }, semprePermitir: ["github__pr_revisar", "github__pr_comentar"] });
     expect(decidirAprovacao({ plano: p, destino: { conector: "github", ferramenta: "pr_revisar", argumentos: { evento: "APPROVE" } }, origemSensivel: false })).toEqual({ automatico: false, motivo: "sem_regra_permanente" });

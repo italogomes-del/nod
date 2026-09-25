@@ -509,6 +509,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async pendentesDaConversa(conversaId) {
         return doTenant(b.propostas).filter((p) => p.conversaId === conversaId && p.estado === "pendente");
       },
+      async acessosPendentesCriadosEntre(desde, ate) {
+        return doTenant(b.propostas).filter((p) => p.estado === "pendente" && p.kind === "acesso" && p.criadoEm >= desde && p.criadoEm < ate);
+      },
       async decidir(id, estado) {
         const p = doTenant(b.propostas).find((x) => x.id === id && x.estado === "pendente");
         if (!p) return null;
@@ -1319,6 +1322,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async doTurno(turnoId) {
         return doTenant(b.trilha).filter((l) => l.turnoId === turnoId);
+      },
+      async doTurnos(turnoIds) {
+        return doTenant(b.trilha).filter((l) => l.turnoId !== null && turnoIds.includes(l.turnoId));
       },
       async filtrar(f = {}) {
         return doTenant(b.trilha)

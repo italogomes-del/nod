@@ -430,12 +430,18 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
   });
 
   it("tarefa delegada (ADR-046): delegar_tarefa leva a mensagem da pessoa; o alvo roda em 'delegacao' com pedir_acesso e sem delegar de novo; o resultado volta ao remetente como 'Resultado'", { timeout: JORNADA_MS }, async () => {
+    // Remetente novo: a conversa da Vera já tem a resposta não confiável do bot-a-bot no histórico, e isso
+    // contaminaria a delegação (revisão da ADR-046) — aqui a jornada é a do pedido limpo.
+    const criadoTaga = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Taga", descricao: "Coordena o time." });
+    criados.agentes.push(criadoTaga.agente.id);
+    criados.conversas.push(criadoTaga.conversa.id);
+    const taga = { agenteId: criadoTaga.agente.id, conversaId: criadoTaga.conversa.id };
     const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/leapy/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
-    const t = await rodar(vera.conversaId, pedido);
+    const t = await rodar(taga.conversaId, pedido);
     expect(t.estado).toBe("concluido");
     const resultado = await esperarOu(tuca.conversaId, () =>
       srv.esperar(async () => {
-        const dto = await conversa(vera.conversaId);
+        const dto = await conversa(taga.conversaId);
         return dto.mensagens.find((m) => m.kind === "peer_ask" && m.payload?.kind === "peer_ask" && m.payload.delegada === true) ?? null;
       }, { nome: "resultado da tarefa delegada", timeoutMs: 15_000 }),
     );
@@ -443,10 +449,10 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect(resultado.autoria.sob_procuracao_de).toBe(srv.pessoa.pessoaId);
     const tarefa = await turno(resultado.payload?.kind === "peer_ask" ? resultado.payload.tarefaId : "");
     expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: srv.pessoa.pessoaId, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
-    // Na conversa do Tuca, o pedido é a mensagem LITERAL da pessoa, assinada "Vera · por <pessoa>".
+    // Na conversa do Tuca, o pedido é a mensagem LITERAL da pessoa, assinada "Taga · por <pessoa>".
     const naConversaDoAlvo = (await conversa(tuca.conversaId)).mensagens.find((m) => m.turnoId === tarefa.id && m.payload?.kind === "peer_pedido");
     expect(naConversaDoAlvo).toMatchObject({ texto: pedido, confianca: "confiavel" });
-    expect(naConversaDoAlvo?.autoria).toMatchObject({ autor_id: vera.agenteId, sob_procuracao_de: srv.pessoa.pessoaId });
+    expect(naConversaDoAlvo?.autoria).toMatchObject({ autor_id: taga.agenteId, sob_procuracao_de: srv.pessoa.pessoaId });
     const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
     const doAlvo = dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === tarefa.id)?.dados.ferramentas as string[];
     expect(doAlvo).toContain("mcp__nod__pedir_acesso");
@@ -460,10 +466,10 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     await esperarTurno(resultado.turnoId ?? "");
 
     // Revisão da ADR-046: a tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
-    await rodar(vera.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
+    await rodar(taga.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
     const aviso = await esperarOu(tuca.conversaId, () =>
       srv.esperar(async () => {
-        const dto = await conversa(vera.conversaId);
+        const dto = await conversa(taga.conversaId);
         return dto.mensagens.find((m) => m.payload?.kind === "peer_ask" && m.payload.falhou === true) ?? null;
       }, { nome: "aviso de tarefa não concluída", timeoutMs: 15_000 }),
     );
