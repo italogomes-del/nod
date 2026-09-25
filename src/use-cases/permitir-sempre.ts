@@ -7,7 +7,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-/** O mesmo filtro que a web aplica ao botão (via `nuncaPermanente` do DTO): sensível, computador e ADR-046 ficam de fora. */
+/** O mesmo filtro que a web aplica ao botão (via `nuncaPermanente` do DTO): sensível, computador e ADR-047 ficam de fora. */
 export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino">): boolean {
   return !i.origemSensivel && i.destino.conector !== "computador" && !nuncaPermanente(i.destino.ferramenta);
 }
@@ -23,7 +23,7 @@ export type SaidaPermitirSempre = { criadas: string[]; mensagemId: string | null
  *
  * Item de origem sensível e destino 'computador' NUNCA viram regra: o primeiro porque o CHECK do
  * banco recusaria honrá-la, o segundo porque a aprovação é vinculada à ação cifrada (ADR-037). Nem
- * aprovar PR ou merge (definido em 2026-09-24, ADR-046, `nuncaPermanente`): o item é aprovado, a regra não nasce.
+ * aprovar PR ou merge (definido em 2026-09-24, ADR-047, `nuncaPermanente`): o item é aprovado, a regra não nasce.
  */
 export const permitirSempre: CasoDeUso<EntradaPermitirSempre, SaidaPermitirSempre> = async (deps, input) => {
   const decisao = await deps.repos.decisoes.buscar(input.decisaoId);

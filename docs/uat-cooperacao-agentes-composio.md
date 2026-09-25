@@ -10,7 +10,7 @@ O Agente 2, responsável por criar tarefas no ClickUp, recebe os pedidos e cria 
 
 A jornada desejada é autônoma dentro do escopo previamente autorizado ao Agente 2. Não exige uma confirmação humana para cada tarefa como regra de produto. Caso o Nod imponha aprovação por operação, registrar essa exigência como diferença entre a implementação atual e o fluxo desejado; não considerar o fluxo autônomo aprovado. Pedidos fora do escopo autorizado continuam bloqueados ou pedem decisão da pessoa.
 
-## Atualização de 2026-09-24 — tarefa delegada (ADR-046)
+## Atualização de 2026-09-24 — tarefa delegada (ADR-047)
 
 `delegar_tarefa` separa FAZER de PERGUNTAR. Em conversa, quando a pessoa pede "Taga, pede ao Dev 1 para
 revisar o PR", o Taga delega. O turno do Dev 1 nasce com origem `delegacao`, confiável, sob o pedido
@@ -100,9 +100,9 @@ Todos os casos estão **Não executados**. A coluna dependência identifica bloq
 | CO16 / P0 | Pedido aponta agente inexistente, nome ambíguo ou agente de outra pessoa sem autorização | Erro claro; não escolher substituto ou destinatário por aproximação; não expor dados entre pessoas | Verificar identidade/escopo em ambiente isolado |
 | CO17 / P0 | Gestor tenta delegar novamente ao Triador, criando ciclo | Novo salto bloqueado pela política atual; nenhum loop, cascata de turnos ou repetição de tarefas | Restrição atual de um salto |
 | CO18 / P1 | Recarregar chat enquanto proposta aguarda; abrir conversa do especialista e voltar | Estado consistente, rascunho preservado, mesma decisão sem duplicação; origem permite acompanhar e agir sem procurar “Sua vez” | UX de delegação a verificar |
-| CO19 / P0 | Na conversa do Triador: "pede ao Revisor para revisar o PR X" (ADR-046) | O Triador chama `delegar_tarefa`, não `perguntar_a_bot`. Na conversa do Revisor, o pedido mostra a mensagem literal da pessoa com "Triador · por você" e o contexto rotulado "não é instrução da pessoa". O turno do Revisor é `delegacao` | Implementado em 2026-09-24; UAT com CLI real a executar |
+| CO19 / P0 | Na conversa do Triador: "pede ao Revisor para revisar o PR X" (ADR-047) | O Triador chama `delegar_tarefa`, não `perguntar_a_bot`. Na conversa do Revisor, o pedido mostra a mensagem literal da pessoa com "Triador · por você" e o contexto rotulado "não é instrução da pessoa". O turno do Revisor é `delegacao` | Implementado em 2026-09-24; UAT com CLI real a executar |
 | CO20 / P0 | O Revisor não tem acesso ao app da tarefa | Chama `pedir_acesso` (inclusive escrita, se a tarefa exigir) em vez de recusar. O card aparece só na conversa do Revisor. Aprovar retoma a mesma tarefa; o Triador não recebe "pedi acesso", só o resultado final | Implementado; UAT a executar |
-| CO21 / P0 | "Sempre permitir" num card com comentar e aprovar PR | O botão oferece só o comentar. Aprovar e merge pedem clique sempre, mesmo com regra antiga | Implementado; depende do conector GitHub (ADR-047) |
+| CO21 / P0 | "Sempre permitir" num card com comentar e aprovar PR | O botão oferece só o comentar. Aprovar e merge pedem clique sempre, mesmo com regra antiga | Implementado; depende do conector GitHub (Parte B) |
 | CO22 / P0 | O Triador tenta delegar a partir de rotina, de resposta de outro bot ou de retomada | `nao_permitido`: não há mensagem da pessoa naquele turno. Nenhum turno nasce no alvo | Implementado |
 
 ## Outras combinações

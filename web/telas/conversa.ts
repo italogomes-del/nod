@@ -64,7 +64,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   }
   if (m.kind === "sistema") return `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
-    // definido em 2026-09-24 (ADR-046): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
+    // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
     const para = agenteDe(estado, p.para)?.nome ?? "agente";
     const alvo = agenteDe(estado, p.para);
@@ -137,7 +137,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}</div>`;
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
-  // Autoria composta (ADR-023) aparece inteira: o pedido delegado é "Taga · por você" (ADR-046).
+  // Autoria composta (ADR-023) aparece inteira: o pedido delegado é "Taga · por você" (ADR-047).
   const autor = ehPessoa ? "Você" : m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agente?.nome ?? assinatura(m.autoria, nomesDe(estado));
   const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time></div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;

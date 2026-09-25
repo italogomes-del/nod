@@ -41,7 +41,7 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * rotina que se desliga por conta própria, e o modo rotina já é explicitamente "a própria execução",
  * não a hora de reconfigurar. Quem reconfigura é a pessoa, na conversa.
  *
- * delegacao (definido em 2026-09-24, ADR-046): o turno de quem cumpre uma tarefa que a pessoa pediu por
+ * delegacao (definido em 2026-09-24, ADR-047): o turno de quem cumpre uma tarefa que a pessoa pediu por
  * meio de outro bot. Tem pedir_acesso (inclusive escrita: quem pediu foi a pessoa) e os caminhos de
  * aprovação; não tem salto (profundidade 1), nem rotina, nem delegar de novo. delegar_tarefa só entra
  * onde há mensagem da pessoa para carregar: conversa e sala.
@@ -116,7 +116,7 @@ export type EntradaPlano = {
   rotinasDoAgente?: readonly RotinaNoPrompt[];
   /** Nomes `${slug}__${tool}` das regras ATIVAS da pessoa para este agente (ADR-042). */
   semprePermitir?: readonly string[];
-  /** Turno de delegação (ADR-046): quem pediu e por meio de quem, para a linha do prompt. */
+  /** Turno de delegação (ADR-047): quem pediu e por meio de quem, para a linha do prompt. */
   delegacao?: { pessoaNome: string; remetenteNome: string } | null;
   agora: number;
 };
@@ -131,15 +131,15 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaAprendiz, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
 
-  // definido em 2026-09-24 (ADR-046): a delegação também roda em profundidade 1 (não repassa), mas não é
+  // definido em 2026-09-24 (ADR-047): a delegação também roda em profundidade 1 (não repassa), mas não é
   // peer — a autoridade é o pedido da pessoa, e virar peer apagava isso (catálogo só `lembrar`).
   const modo: ModoTurno = entrada.profundidade >= 1 && entrada.modo !== "delegacao" ? "peer" : entrada.modo;
-  // definido em 2026-09-24 (revisão da ADR-046): delegar_tarefa só aparece quando o turno PODE delegar
+  // definido em 2026-09-24 (revisão da ADR-047): delegar_tarefa só aparece quando o turno PODE delegar
   // (as mesmas condições de delegar-tarefa.ts) — numa retomada ela estaria no catálogo e sempre negaria.
   const podeDelegar = (entrada.turno.origem === "conversa" || entrada.turno.origem === "sala") && entrada.profundidade === 0 && entrada.confianca === "confiavel" && Boolean(entrada.turno.mensagemOrigemId);
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n !== "delegar_tarefa" || podeDelegar).map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
-  // definido em 2026-09-24 (ADR-046): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
+  // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   const temComputador = entrada.computador === true && modo !== "peer" && modo !== "criacao" && modo !== "delegacao";
   const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
   /**
@@ -201,7 +201,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
      * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado e já reduzido — a regra
      * evita a pergunta, nunca amplia alcance (ADR-038). Turno não confiável recebe lista VAZIA: o
      * domínio também recusa por confiança, e as duas camadas são de propósito (a lista vazia é o
-     * estado, a recusa é a explicação que a pessoa lê). Ação que nunca é permanente (ADR-046: aprovar
+     * estado, a recusa é a explicação que a pessoa lê). Ação que nunca é permanente (ADR-047: aprovar
      * PR, merge) sai mesmo com linha ativa — uma regra gravada antes da lista não vale.
      */
     semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector" && !nuncaPermanente(n, f.readOnlyHint))),

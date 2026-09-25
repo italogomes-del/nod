@@ -124,7 +124,7 @@ describe("lote misto", () => {
   });
 });
 
-describe("ações que nunca são permanentes (ADR-046)", () => {
+describe("ações que nunca são permanentes (ADR-047)", () => {
   it("aprovar PR e merge nunca viram regra; comentar vira", () => {
     for (const nome of ["github__pr_revisar", "github__pr_merge", "pr_merge", "github__GITHUB_MERGE_A_PULL_REQUEST", "github__GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST", "x__aprovar_despesa", "x__approve"]) expect(nuncaPermanente(nome), nome).toBe(true);
     for (const nome of ["github__pr_comentar", "github__pr_ver", "slack__send_message", "pr_comentar"]) expect(nuncaPermanente(nome), nome).toBe(false);

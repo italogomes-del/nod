@@ -31,7 +31,7 @@ export const VERSAO_APROVACAO_PERMANENTE = 2 as const;
 export type RegraAprovacao = typeof REGRA_CONSULTA_SEM_DECISAO | typeof REGRA_APROVACAO_PERMANENTE;
 
 /**
- * Ações que NUNCA viram "Sempre permitir" (definido em 2026-09-24, ADR-046): aprovar e fazer merge
+ * Ações que NUNCA viram "Sempre permitir" (definido em 2026-09-24, ADR-047): aprovar e fazer merge
  * mudam o estado de um trabalho de OUTRAS pessoas e não se desfazem com um comentário. Com a delegação,
  * um texto injetado num PR pode induzir o agente a pedir a ação; comentar sem pergunta é o risco aceito,
  * aprovar e fazer merge não — esses sempre pedem clique. Casa pelo nome da CAPACIDADE (a parte depois
@@ -47,8 +47,8 @@ export const NUNCA_PERMANENTE: readonly RegExp[] = [
 
 /**
  * `nome` = `${slug}__${capacidade}` (catálogo do plano) ou só a capacidade (item de aprovação).
- * definido em 2026-09-24 (revisão da ADR-046): casa pelo NOME, para valer igual no GitHub nativo e no
- * mapeado pelo Composio (ADR-047). Leitura fica livre SÓ pelo `readOnlyHint === true` do catálogo
+ * definido em 2026-09-24 (revisão da ADR-047): casa pelo NOME, para valer igual no GitHub nativo e no
+ * mapeado pelo Composio (ADR do conector GitHub, Parte B). Leitura fica livre SÓ pelo `readOnlyHint === true` do catálogo
  * sondado (`GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED` declara leitura); sem a declaração, o nome
  * que casa é tratado como escrita — fail-closed, nunca inferido de verbo no nome (ADR-042).
  */
@@ -87,7 +87,7 @@ export type EntradaAprovacao = {
  *                                  linha torna a intenção explícita e testável em vez de emergente)
  *  5. fora do catálogo do plano  → perguntar (readOnlyHint NUNCA se infere de nome de ferramenta)
  *  6. readOnlyHint do CONECTOR   → AUTOMÁTICO por `consulta_sem_decisao`
- *  7. ação que nunca é permanente → perguntar (ADR-046: aprovar PR, merge)
+ *  7. ação que nunca é permanente → perguntar (ADR-047: aprovar PR, merge)
  *  8. ferramenta em semprePermitir → AUTOMÁTICO por `aprovacao_permanente`
  *  9. senão                      → perguntar
  *

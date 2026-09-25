@@ -25,7 +25,7 @@ export function autorizarDelegacao(procuracoes: readonly Procuracao[], pedido: P
   return { autorizado: true, procuracaoId: comTeto.id };
 }
 
-/** Rótulos dos dois blocos da entrada da tarefa delegada (ADR-046). */
+/** Rótulos dos dois blocos da entrada da tarefa delegada (ADR-047). */
 const BLOCOS = ["pedido_da_pessoa", "contexto_do_remetente"] as const;
 
 /** Os cabeçalhos que o servidor escreve fora dos blocos; dentro de um texto, são citação forjada. */
@@ -40,7 +40,7 @@ function formaVista(texto: string): string {
 }
 
 /**
- * O contexto do REMETENTE não carrega marcação nenhuma (definido em 2026-09-24, revisão da ADR-046): todo
+ * O contexto do REMETENTE não carrega marcação nenhuma (definido em 2026-09-24, revisão da ADR-047): todo
  * `<`/`>` vira `‹`/`›`, depois de NFKC e sem \p{Cf} — neutralizar só os nomes conhecidos deixava passar
  * variações. As frases dos cabeçalhos do servidor viram "[cabeçalho citado]". Mesma disciplina da moldura
  * do proxy (ADR-026), sem atalho de "já neutralizado".
@@ -61,7 +61,7 @@ export function neutralizarPedido(texto: string): string {
 }
 
 /**
- * Entrada do turno de delegação, montada pelo SERVIDOR (definido em 2026-09-24, ADR-046): (1) a
+ * Entrada do turno de delegação, montada pelo SERVIDOR (definido em 2026-09-24, ADR-047): (1) a
  * mensagem literal da pessoa, que é a autorização; (2) o que o remetente disse, rotulado como NÃO
  * instrução — serve para localizar (link, número). O modelo do remetente não escreve no bloco 1.
  */

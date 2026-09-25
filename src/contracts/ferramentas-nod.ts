@@ -13,7 +13,7 @@ export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsLista
  * As DEZESSEIS ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
  * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; delegar_tarefa entra em 2026-09-24,
- * ADR-046). Lista FECHADA: cada nome tem um
+ * ADR-047). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
  * `${slug}__${tool}` e não mora aqui.
@@ -120,7 +120,7 @@ export const FERRAMENTAS_NOD = {
     additionalProperties: false,
   },
   /**
-   * definido em 2026-09-24 (ADR-046): o que autoriza é a mensagem da PESSOA que abriu este turno, que o
+   * definido em 2026-09-24 (ADR-047): o que autoriza é a mensagem da PESSOA que abriu este turno, que o
    * servidor lê do banco — por isso nenhum campo carrega o pedido dela nem o id da mensagem.
    */
   delegar_tarefa: {

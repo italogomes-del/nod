@@ -92,7 +92,7 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
 
   if (input.recusar) {
     if (proposta.estado === "pendente") events.push(...((await recusarProposta(deps, { propostaId: proposta.id })).events ?? []));
-    // Revisão da ADR-046: o alvo de uma tarefa delegada não vai seguir sem o acesso — o remetente fica sabendo.
+    // Revisão da ADR-047: o alvo de uma tarefa delegada não vai seguir sem o acesso — o remetente fica sabendo.
     if (decisao.turnoId) {
       const pessoa = (await deps.repos.pessoas.buscar(deps.escopo.pessoaId))?.nome ?? "a pessoa";
       events.push(...((await avisarFalhaDelegacao(deps, { turnoId: decisao.turnoId, motivo: `${pessoa} não permitiu o acesso a ${p.conector}` })).events ?? []));

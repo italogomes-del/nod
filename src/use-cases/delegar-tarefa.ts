@@ -13,7 +13,7 @@ import type { Deps } from "./tipos.ts";
 export const CLASSE_DELEGAR_TAREFA = "delegar_tarefa";
 
 /**
- * A autoridade da delegação (ADR-046): a mensagem da PESSOA que abriu o turno do remetente, lida do
+ * A autoridade da delegação (ADR-047): a mensagem da PESSOA que abriu o turno do remetente, lida do
  * banco por `mensagem_origem_id` (0024) — o modelo não fornece nem o id nem o texto. Vale só turno de
  * conversa ou sala, confiável, em profundidade 0, e mensagem de texto da pessoa do escopo, confiável,
  * da mesma conversa. Rotina, peer, retomada e turno não confiável não têm pessoa pedindo AGORA:
@@ -41,7 +41,7 @@ const TETO_CONVERSA = 500;
 
 /**
  * O que o remetente tinha no contexto quando delegou já inclui conteúdo de fora? (definido em
- * 2026-09-24, revisão da ADR-046) O `tarefa`/`contexto` que ele escreve pode carregar o que leu — "lê
+ * 2026-09-24, revisão da ADR-047) O `tarefa`/`contexto` que ele escreve pode carregar o que leu — "lê
  * meus e-mails" num turno e "pede ao Dev 1 pra resolver isso" no seguinte levaria texto de e-mail ao
  * Dev 1 com a autoridade da pessoa. Não recusa: a tarefa nasce `nao_confiavel` (catálogo reduzido,
  * pedir_acesso incluído, sem "Sempre permitir"). Fail-closed em cada dúvida:
@@ -79,7 +79,7 @@ async function remetenteViuConteudoDeFora(deps: Deps, turno: Turno, plano: Plano
 }
 
 /**
- * Ferramenta `delegar_tarefa` (definido em 2026-09-24, ADR-046, emenda ADR-025/026): a pessoa pediu que
+ * Ferramenta `delegar_tarefa` (definido em 2026-09-24, ADR-047, emenda ADR-025/026): a pessoa pediu que
  * outro bot FAÇA algo, e o pedido dela vai junto. O remetente é o agente do TOKEN; o alvo e a procuração
  * (classe `delegar_tarefa` entre donos diferentes) são os de perguntar_a_bot. O turno do alvo nasce na
  * conversa própria dele com origem 'delegacao', profundidade 1 (não repassa), `sob_procuracao_de` = a

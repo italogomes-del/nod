@@ -161,7 +161,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       agenteId: decisao.agenteId,
       origem: "retomada",
       prazoEm: agora + PRAZO_DECISAO_MS,
-      // definido em 2026-09-24 (revisão da ADR-046): profundidade e confiança do turno que pediu. Com 0 e
+      // definido em 2026-09-24 (revisão da ADR-047): profundidade e confiança do turno que pediu. Com 0 e
       // "confiavel" fixos, a retomada de uma tarefa delegada saía do salto e lavava a marca.
       profundidade: original?.profundidade ?? 0,
       entradaTexto,

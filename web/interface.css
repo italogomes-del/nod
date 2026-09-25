@@ -70,7 +70,7 @@ body { background: #fcfdff; }
 .handoff-titulo { display: flex; gap: 8px; align-items: center; color: #315da1; font-size: 12px; flex-wrap: wrap; }
 .handoff-titulo span { color: var(--ink-3); font-size: 11px; }
 .msg-handoff p, .msg-peer p { margin: 8px 0; line-height: 1.6; }
-/* definido em 2026-09-24 (ADR-046): o contexto do remetente fica fora do balão da pessoa, rotulado. */
+/* definido em 2026-09-24 (ADR-047): o contexto do remetente fica fora do balão da pessoa, rotulado. */
 .msg-contexto-delegado { border-left: 2px solid #e5eaf4; padding: 2px 0 2px 10px; margin: 6px 0 0; overflow-wrap: anywhere; }
 .msg-contexto-delegado p { margin: 4px 0; font-size: 13px; color: var(--ink-2); }
 .composer-wrap { border-top: 0; padding: 12px 24px 17px; }

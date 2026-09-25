@@ -14,7 +14,7 @@ export function moldurarResposta(alvoNome: string, texto: string): string {
 }
 
 /**
- * Moldura do resultado de tarefa delegada (definido em 2026-09-24, ADR-046). Quem pediu foi a pessoa,
+ * Moldura do resultado de tarefa delegada (definido em 2026-09-24, ADR-047). Quem pediu foi a pessoa,
  * mas o texto é de outro modelo, que leu conteúdo de conector: continua NÃO confiável para o remetente.
  */
 export function moldurarResultado(pessoaNome: string, alvoNome: string, texto: string): string {
@@ -22,7 +22,7 @@ export function moldurarResultado(pessoaNome: string, alvoNome: string, texto: s
 }
 
 /**
- * O turno delegado e toda retomada que descende dele (definido em 2026-09-24, revisão da ADR-046): o
+ * O turno delegado e toda retomada que descende dele (definido em 2026-09-24, revisão da ADR-047): o
  * pedido pendente pode ser de QUALQUER um deles — o turno que assentou agora pode ser a continuação de
  * uma aprovação decidida no long-poll, enquanto o pedido de acesso é da raiz.
  */
@@ -46,8 +46,8 @@ async function cadeiaDaDelegacao(deps: Deps, raiz: Turno): Promise<Turno[]> {
 /**
  * A tarefa delegada deixou algo para a pessoa decidir (acesso, aprovação, pergunta)? Então o turno que
  * terminou não é o fim: a decisão abre uma retomada, e é ELA que entrega. Sem isto o remetente recebia
- * "pedi acesso" como se fosse o resultado (o plano da ADR-046: "o remetente só recebe o resultado final").
- * Olha a CADEIA inteira, não só o turno que assentou (revisão da ADR-046).
+ * "pedi acesso" como se fosse o resultado (o plano da ADR-047: "o remetente só recebe o resultado final").
+ * Olha a CADEIA inteira, não só o turno que assentou (revisão da ADR-047).
  */
 async function aguardandoPessoa(deps: Deps, cadeia: readonly Turno[]): Promise<boolean> {
   for (const t of cadeia) {
@@ -70,7 +70,7 @@ type Entrega = { tarefa: Turno; texto: string; falha: boolean };
 
 /**
  * Escreve a entrega na conversa do remetente e abre a continuação dele. Tarefa delegada entrega UMA vez
- * por raiz (revisão da ADR-046): a aprovação decidida durante o long-poll do proxy deixava o turno
+ * por raiz (revisão da ADR-047): a aprovação decidida durante o long-poll do proxy deixava o turno
  * original terminar E criava uma retomada, e as duas entregavam. O aviso de falha também sai uma vez, e
  * não sai se o resultado já saiu; um resultado depois de um aviso (a pessoa retomou) sai normalmente.
  */
@@ -140,12 +140,12 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
  * kind 'peer_ask' nao_confiavel {agenteId, nome, naoSupervisionado: true, tarefaId} na conversa do
  * remetente, e o remetente ganha um turno de CONTINUAÇÃO em profundidade 1 (sem perguntar_a_bot —
  * o eixo 1 corta a segunda pergunta estruturalmente). Turno peer sem pergunta ligada é a própria
- * continuação: nada a entregar. Tarefa delegada (ADR-046) segue o mesmo caminho com a moldura de
+ * continuação: nada a entregar. Tarefa delegada (ADR-047) segue o mesmo caminho com a moldura de
  * resultado, e a autoria da entrega fica "alvo · por pessoa" — quem pediu foi ela, não o remetente.
  */
 export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }, SaidaEntregaPeer> = async (deps, input) => {
   const assentado = exigir(await deps.repos.turnos.buscar(input.tarefaId), "nao_encontrado", "tarefa");
-  // definido em 2026-09-24 (ADR-046): tarefa delegada entrega também — ela mesma ou a retomada dela.
+  // definido em 2026-09-24 (ADR-047): tarefa delegada entrega também — ela mesma ou a retomada dela.
   const tarefa = assentado.origem === "peer" ? assentado : await delegacaoDoTurno(deps.repos, assentado);
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
   if (tarefa.origem === "delegacao" && (await aguardandoPessoa(deps, await cadeiaDaDelegacao(deps, tarefa)))) return { data: { ignorado: "aguardando_pessoa" } };
@@ -153,7 +153,7 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
 };
 
 /**
- * A tarefa delegada não vai terminar (definido em 2026-09-24, revisão da ADR-046): o turno do alvo foi
+ * A tarefa delegada não vai terminar (definido em 2026-09-24, revisão da ADR-047): o turno do alvo foi
  * interrompido ou terminou sem resposta, ou a pessoa recusou (ou deixou vencer) o acesso que ele pediu.
  * O remetente recebe um aviso curto, uma vez por raiz, para contar à pessoa — antes ele esperava calado.
  * `motivo` é texto do SERVIDOR (motivoEmPortugues ou frase fixa), nunca do modelo.

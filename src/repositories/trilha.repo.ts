@@ -61,7 +61,7 @@ export function trilhaRepo(conn: Conn, escopo: Escopo) {
       return l ? paraLinha(l) : null;
     },
 
-    /** As linhas de UM turno, na ordem em que aconteceram (ADR-046: o turno leu conteúdo de fora?). */
+    /** As linhas de UM turno, na ordem em que aconteceram (ADR-047: o turno leu conteúdo de fora?). */
     async doTurno(turnoId: string): Promise<LinhaTrilha[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from trilha where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} order by em, id`;

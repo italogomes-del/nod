@@ -30,7 +30,7 @@ export type EntradaEmitirPlano = {
 
 /**
  * definido em 2026-09-16: sem --resume, o modelo vê as últimas HISTORICO_NO_PLANO falas, tiradas das
- * MENSAGENS_DO_PLANO mais recentes. Exportados porque delegar_tarefa confere a mesma janela (ADR-046).
+ * MENSAGENS_DO_PLANO mais recentes. Exportados porque delegar_tarefa confere a mesma janela (ADR-047).
  */
 export const MENSAGENS_DO_PLANO = 50;
 export const HISTORICO_NO_PLANO = 20;
@@ -42,7 +42,7 @@ export const MOTOR_CLI = "claude-cli";
  * `ligadoARotina`: o turno leva a uma rotina pela janela (rotinaDoTurno). definido em 2026-09-24
  * (ADR-044): a RETOMADA de um turno de rotina continua rotina — antes ela caía em 'conversa' e voltava
  * com o catálogo inteiro e sem o gate, depois de ter lido e-mail como entrada não confiável.
- * `ligadoADelegacao` (definido em 2026-09-24, ADR-046): a tarefa delegada e as retomadas dela são
+ * `ligadoADelegacao` (definido em 2026-09-24, ADR-047): a tarefa delegada e as retomadas dela são
  * 'delegacao' ANTES da regra de profundidade — ela roda em profundidade 1 e caía em 'peer'.
  */
 export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false, ligadoADelegacao = false): ModoTurno {
@@ -93,7 +93,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // resolvida); a retomada segue a cadeia de retomaTurnoId até o turno disparado (ADR-044).
   const ligacao = turno.origem === "rotina" || turno.origem === "retomada" ? await rotinaDoTurno(deps.repos, turno.id) : null;
   const delegacao = turno.origem === "delegacao" || turno.origem === "retomada" ? await delegacaoDoTurno(deps.repos, turno) : null;
-  // Fail-closed (revisão da ADR-046): toda retomada copia `sob_procuracao_de`; se a cadeia passou do teto
+  // Fail-closed (revisão da ADR-047): toda retomada copia `sob_procuracao_de`; se a cadeia passou do teto
   // de saltos e a raiz não foi achada, o turno continua delegação — nunca cai em conversa com --resume.
   const ehDelegacao = delegacao !== null || Boolean(turno.sobProcuracaoDe);
   const modo = modoDoTurno(turno, conversa, agente, ligacao !== null, ehDelegacao);
@@ -103,7 +103,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const original = origemId ? await deps.repos.turnos.buscar(origemId) : null;
   // definido em 2026-09-17: rotina e trabalho de colega usam sessão nova com missão e catálogo atuais; o histórico explícito preserva contexto.
   // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina também — o --resume da conversa a levaria de volta ao modo conversa.
-  // definido em 2026-09-24 (ADR-046): a tarefa delegada também — a sessão da conversa é do alvo com a pessoa.
+  // definido em 2026-09-24 (ADR-047): a tarefa delegada também — a sessão da conversa é do alvo com a pessoa.
   const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   const historico = !sessaoCli ? mensagens.slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
@@ -132,7 +132,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       : computadorDoAgente.indisponivelDesde !== null ? { estado: "fora_do_ar", motivo: MOTIVO_FALHA_EM_PORTUGUES[computadorDoAgente.falhaMotivo ?? "sem_resposta"] }
         : null;
 
-  // Quem pediu e por meio de quem (ADR-046): a pessoa vem de `sob_procuracao_de` da tarefa; o remetente,
+  // Quem pediu e por meio de quem (ADR-047): a pessoa vem de `sob_procuracao_de` da tarefa; o remetente,
   // do peer_pedido ligado a ela. Fora da janela de mensagens, o prompt cai no genérico.
   const pedidoDelegado = delegacao ? mensagens.find((m) => m.turnoId === delegacao.id && m.payload?.kind === "peer_pedido") : undefined;
   const sobProcuracaoDe = turno.sobProcuracaoDe ?? delegacao?.sobProcuracaoDe ?? null;

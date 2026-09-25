@@ -19,7 +19,7 @@ export function moldurarPergunta(remetenteNome: string, pergunta: string): strin
  * estruturalmente), entrada nao_confiavel (veio de outro modelo, ADR-026). A pergunta é gravada na
  * conversa do alvo como mensagem do remetente (autor_id = remetente, turno_id = tarefa): é essa
  * ligação TIPADA que entregarRespostaPeer usa para achar a quem devolver a resposta. Alvo e procuração
- * moram em apoio-l7.ts (resolverAlvo/autorizarAlvo), compartilhados com delegar_tarefa (ADR-046).
+ * moram em apoio-l7.ts (resolverAlvo/autorizarAlvo), compartilhados com delegar_tarefa (ADR-047).
  */
 export const perguntarABot: CasoNod<Deps, "perguntar_a_bot"> = async (deps, input) => {
   const remetente = await agenteVisivel(deps.repos, input.agenteId);

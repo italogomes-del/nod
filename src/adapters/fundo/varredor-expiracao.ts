@@ -83,7 +83,7 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
           events.push(...(r.events ?? []));
         }
       }
-      // Revisão da ADR-046: venceu uma decisão de que a tarefa delegada dependia (acesso, aprovação, pergunta,
+      // Revisão da ADR-047: venceu uma decisão de que a tarefa delegada dependia (acesso, aprovação, pergunta,
       // ou o "Retomar" de um turno que caiu com o Mac) — avisa o remetente. Turno fora de delegação: ignorado.
       if (d.turnoId) {
         const motivo = d.tipo === "acesso" ? "o pedido de acesso venceu sem resposta" : d.tipo === "retomar_turno" ? "o turno parou e ninguém retomou" : "a decisão pedida à pessoa venceu sem resposta";
@@ -93,7 +93,7 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
       await repos.events.gravarComOutbox(events);
       log("info", "decisao_vencida_varrida", { decisao_id: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atraso_ms: agora - Date.parse(d.prazoDecisaoEm) });
     }
-    // Revisão da ADR-046: o card de CONEXÃO não tem decisão e nunca vence sozinho. Passado o prazo dele,
+    // Revisão da ADR-047: o card de CONEXÃO não tem decisão e nunca vence sozinho. Passado o prazo dele,
     // a tarefa delegada que esperava por ele avisa o remetente. Janela de um prazo depois do vencimento:
     // o aviso é uma vez por raiz, e a janela só limita quantas vezes o varredor pergunta.
     for (const p of await repos.propostas.acessosPendentesCriadosEntre(agora - 2 * PRAZO_DECISAO_PADRAO_MS, agora - PRAZO_DECISAO_PADRAO_MS)) {

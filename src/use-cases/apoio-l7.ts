@@ -125,7 +125,7 @@ export async function agenteVisivel(repos: Repos, agenteId: string): Promise<Age
 }
 
 /**
- * Alvo de perguntar_a_bot e delegar_tarefa (extraído em 2026-09-24, ADR-046, para as duas não
+ * Alvo de perguntar_a_bot e delegar_tarefa (extraído em 2026-09-24, ADR-047, para as duas não
  * divergirem): id do diretório ou nome único entre os agentes visíveis, preferindo os do mesmo dono.
  * Nome repetido = entrada_invalida (o modelo usa o id); a si mesmo = entrada_invalida.
  */
@@ -155,7 +155,7 @@ export async function autorizarAlvo(repos: Repos, remetente: Agente, alvo: Agent
 }
 
 /**
- * O turno de delegação (ADR-046) de onde este descende: ele mesmo, ou a raiz da cadeia de retomadas —
+ * O turno de delegação (ADR-047) de onde este descende: ele mesmo, ou a raiz da cadeia de retomadas —
  * o pedido de acesso aprovado volta como origem 'retomada' e continua sendo a tarefa delegada (modo,
  * `sob_procuracao_de`, a quem devolver o resultado). Mesmo teto de saltos de rotinaDoTurno.
  */

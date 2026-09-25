@@ -38,7 +38,7 @@ async function cenario(trx: Tx) {
   return { taga, dev1, deps, repos, turnoTaga: data.turno };
 }
 
-/** Como o proxy chama: com o plano do turno do remetente no contexto (revisão da ADR-046: sem plano, contamina). */
+/** Como o proxy chama: com o plano do turno do remetente no contexto (revisão da ADR-047: sem plano, contamina). */
 async function delegar(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1") {
   const plano = await emitirPlanoTurno(deps, { turnoId: p.turnoId, machineId: randomUUID(), executor: "catcher" }).then((r) => r.data, () => undefined);
   return delegarTarefa(deps, { ...p, plano, agente, tarefa: "revisar o PR 466", contexto: "https://github.com/leapy/app/pull/466" });
@@ -51,7 +51,7 @@ async function conectorGithub(repos: Repos) {
   return sondado;
 }
 
-describeIntegracao("delegar_tarefa (ADR-046): a tarefa carrega o pedido da pessoa", () => {
+describeIntegracao("delegar_tarefa (ADR-047): a tarefa carrega o pedido da pessoa", () => {
   it("o turno do alvo nasce 'delegacao', confiável, sob o pedido de Marlon; peer_pedido 'Taga · por Marlon' na conversa do Dev 1 e handoff na do Taga", async () => {
     await withRollback(MARLON, async (trx) => {
       const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);

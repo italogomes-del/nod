@@ -196,7 +196,7 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const concessoes = await deps.repos.concessoes.doAgente(input.agenteId);
   if (!concessoes.some((c) => c.conectorId === conectorId && c.capacidade === tool)) return negar("capacidade_desligada", "ferramenta_negada", conectorId);
   if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && !ferramenta.readOnlyHint) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
-  // definido em 2026-09-24 (revisão da ADR-046): aprovar PR e merge NUNCA rodam por chamada direta, em
+  // definido em 2026-09-24 (revisão da ADR-047): aprovar PR e merge NUNCA rodam por chamada direta, em
   // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
   // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".
   if (nuncaPermanente(ferramenta.nome, ferramenta.readOnlyHint)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);

@@ -1,4 +1,4 @@
-# ADR-046 — Tarefa delegada carrega o pedido da pessoa
+# ADR-047 — Tarefa delegada carrega o pedido da pessoa
 
 Status: aceito · Data: 2026-09-24 · Emenda ADR-025 e ADR-026. ADR-042 ganha uma lista de ações que
 nunca são permanentes.
@@ -41,7 +41,7 @@ Rotina, peer, retomada, turno não confiável e turno sem mensagem da pessoa rec
 
 **O turno do alvo tem origem própria, `delegacao`.** Os valores são estes:
 - profundidade 1, então não repassa (`delegar_tarefa` entrou em `FERRAMENTAS_DE_SALTO`);
-- `sob_procuracao_de` = a pessoa (coluna nova em `turnos`, 0026);
+- `sob_procuracao_de` = a pessoa (coluna nova em `turnos`, 0028);
 - entrada `confiavel`, salvo quando o remetente já leu conteúdo de fora (abaixo).
 
 **Sem lavagem de marca.** Se o remetente tinha conteúdo de fora no contexto quando delegou, o
@@ -142,7 +142,7 @@ resultado ainda sai.
 
 **Ações que nunca são "Sempre permitir".** A lista curta é `NUNCA_PERMANENTE`, em
 `aprovacao-permanente.ts`, e casa pelo NOME da capacidade, para valer igual no GitHub nativo e no
-mapeado pelo Composio (ADR-047):
+mapeado pelo Composio (ADR do conector GitHub, Parte B):
 - qualquer nome com `merge`;
 - qualquer nome com `approv` ou `aprovar`;
 - qualquer nome com `review` ou `revisar` (`pr_revisar`, `GITHUB_CREATE_/SUBMIT_/UPDATE_/DISMISS_A_REVIEW…`).

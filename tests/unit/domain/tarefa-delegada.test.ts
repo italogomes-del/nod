@@ -21,7 +21,7 @@ const concessoes: Concessao[] = ["pr_ver", "pr_comentar", "pr_revisar"].map((cap
 const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [github], modo: "delegacao", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, delegacao: { pessoaNome: "Marlon", remetenteNome: "Taga" } };
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
-describe("tarefa delegada (ADR-046): o plano carrega o pedido da pessoa", () => {
+describe("tarefa delegada (ADR-047): o plano carrega o pedido da pessoa", () => {
   it("profundidade 1 NÃO vira peer: pedir_acesso e os caminhos de aprovação entram, e as escritas concedidas também", () => {
     const p = montarPlano({ ...base, computador: true });
     expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"]);
@@ -89,7 +89,7 @@ describe("conversa e sala oferecem delegar_tarefa; o prompt separa fazer de perg
     expect(nomes(montarPlano({ ...entrada, modo: "rotina" }))).not.toContain("delegar_tarefa");
   });
 
-  it("ferramenta morta não entra: retomada, turno sem fala da pessoa ou não confiável não veem delegar_tarefa (revisão da ADR-046)", () => {
+  it("ferramenta morta não entra: retomada, turno sem fala da pessoa ou não confiável não veem delegar_tarefa (revisão da ADR-047)", () => {
     const conversaTurno: Turno = { ...turno, origem: "conversa", profundidade: 0, sobProcuracaoDe: null, mensagemOrigemId: "m0" };
     const entrada = { ...base, turno: conversaTurno, profundidade: 0 as const, delegacao: null, modo: "conversa" as const };
     expect(nomes(montarPlano({ ...entrada, turno: { ...conversaTurno, origem: "retomada", retomaTurnoId: "t0" } }))).not.toContain("delegar_tarefa");

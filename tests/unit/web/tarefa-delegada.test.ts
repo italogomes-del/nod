@@ -8,7 +8,7 @@ import { renderMensagem, renderMensagensAgrupadas, renderTimeline } from "../../
 const autoria = { autor_tipo: "agente" as const, autor_id: "taga", sob_procuracao_de: "marlon", conta_de_execucao: "marlon", executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
 const estado: Estado = { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marlon" } };
 
-describe("tarefa delegada na conversa (ADR-046)", () => {
+describe("tarefa delegada na conversa (ADR-047)", () => {
   it("o pedido na conversa do Dev 1 assina '<remetente> · por você' (sem frota, o nome cai no genérico), mostra a mensagem da pessoa e o contexto do remetente rotulado", () => {
     const m: Mensagem = { tenantId: "t", id: "m1", conversaId: "c-dev1", turnoId: "tarefa", autoria, kind: "texto", texto: "pede ao Dev 1 para revisar o PR 466", payload: { kind: "peer_pedido", conversaOrigemId: "c-taga", turnoOrigemId: "t-taga", delegacao: { tarefa: "revisar o PR 466", contexto: "<b>pull/466</b>" } }, confianca: "confiavel", parcial: false, criadoEm: 0 };
     const html = renderMensagem(m, estado);
@@ -35,11 +35,11 @@ describe("tarefa delegada na conversa (ADR-046)", () => {
   });
 });
 
-describe("'Sempre permitir' não é oferecido para aprovar PR (ADR-046)", () => {
+describe("'Sempre permitir' não é oferecido para aprovar PR (ADR-047)", () => {
   const item = (id: string, ferramenta: string): ItemAprovacao => ({ tenantId: "t", id, decisaoId: "d", idx: 0, textoOriginal: ferramenta, textoFinal: ferramenta, destino: { conector: "github", ferramenta, argumentos: {} }, selecionado: true, origemSensivel: false, justificativa: null, marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null });
   const base: SuaVezDto["itens"][number] = {
     decisao: { tenantId: "t", id: "d", ownerId: "marlon", decisorId: "marlon", agenteId: "a", conversaId: "c", turnoId: null, tipo: "aprovacao", estado: "pendente", prazoDecisaoEm: "2026-09-25T00:00:00Z", prazoExecucaoEm: null, frase: "Revisar o PR", desfecho: null, vistaEm: null, criadoEm: "2026-09-24T00:00:00Z", fioId: null },
-    estadoColuna: "pendente", agenteNome: "Dev 1", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, gemeas: [], itensAprovacao: [], proposta: null, fio: null,
+    estadoColuna: "pendente", agenteNome: "Dev 1", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, gemeas: [], itensAprovacao: [], proposta: null, fio: null, rotinaParada: null,
   };
   const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "marlon", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
   const com = (i: SuaVezDto["itens"][number]): Estado => ({ ...estado, suaVez: { itens: [i], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } });

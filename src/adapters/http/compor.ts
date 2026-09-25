@@ -283,13 +283,13 @@ export function comporApp(o: OpcoesCompor): App {
         const r = await registrarDesfechoRotina(d, { turnoId: turno.id, desfecho, motivo: silencioso ? turno.semNovidadeMotivo : desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
         if ("execucao" in r.data) events.push(...(r.events ?? []));
       }
-      // definido em 2026-09-24 (ADR-046): a tarefa delegada (e a retomada dela, depois de um acesso aprovado)
+      // definido em 2026-09-24 (ADR-047): a tarefa delegada (e a retomada dela, depois de um acesso aprovado)
       // também devolve o resultado ao remetente; entregarRespostaPeer segue a cadeia e ignora o resto.
       if ((turno.origem === "peer" || turno.origem === "delegacao" || turno.origem === "retomada") && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {
         const r = await entregarRespostaPeer(d, { tarefaId: turno.id, texto: entrega.fala.texto });
         if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
       } else if (turno.origem === "delegacao" || (turno.origem === "retomada" && turno.sobProcuracaoDe)) {
-        // Revisão da ADR-046: tarefa delegada que parou ou terminou calada avisa o remetente (uma vez por raiz).
+        // Revisão da ADR-047: tarefa delegada que parou ou terminou calada avisa o remetente (uma vez por raiz).
         const motivo = turno.estado === "interrompido" ? motivoEmPortugues(turno.motivoFalha ?? turno.motivoInterrupcao ?? "sem_progresso") : "terminou sem resposta";
         const r = await avisarFalhaDelegacao(d, { turnoId: turno.id, motivo });
         if (!("ignorado" in r.data)) events.push(...(r.events ?? []));

@@ -88,7 +88,7 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraProposta);
     },
 
-    /** Pendentes de acesso criadas em [desde, ate): o varredor acha o card de conexão que venceu (ADR-046). */
+    /** Pendentes de acesso criadas em [desde, ate): o varredor acha o card de conexão que venceu (ADR-047). */
     async acessosPendentesCriadosEntre(desde: number, ate: number): Promise<Proposta[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'pendente' and kind = 'acesso'

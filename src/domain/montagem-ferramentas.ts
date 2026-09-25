@@ -3,7 +3,7 @@ import type { Profundidade } from "../contracts/turno.ts";
 
 /**
  * Ferramentas que abrem outro salto: some ESTRUTURALMENTE em profundidade 1 (E12.4, sem flag de bypass).
- * delegar_tarefa desde 2026-09-24 (ADR-046): quem cumpre uma tarefa delegada não a repassa.
+ * delegar_tarefa desde 2026-09-24 (ADR-047): quem cumpre uma tarefa delegada não a repassa.
  */
 export const FERRAMENTAS_DE_SALTO = ["perguntar_a_bot", "encaminhar", "delegar_tarefa"] as const;
 

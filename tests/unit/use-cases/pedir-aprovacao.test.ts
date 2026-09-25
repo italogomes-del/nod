@@ -14,7 +14,7 @@ async function cenario(deps: Deps) {
     // O conector DECLARA o que é só-leitura na sonda; é este valor que o ADR-042 lê.
     { nome: "buscar", descricao: "busca", schema: { type: "object" }, readOnlyHint: true },
   ], agora: 1 });
-  // Revisão da ADR-046: pedir_aprovacao exige concessão do AGENTE, não só a ferramenta no catálogo.
+  // Revisão da ADR-047: pedir_aprovacao exige concessão do AGENTE, não só a ferramenta no catálogo.
   for (const capacidade of ["enviar", "buscar"]) await deps.repos.concessoes.conceder({ agenteId: agente?.id ?? "", conectorId: email?.id ?? "", capacidade, mensagemId: "m" });
   const crm = await deps.repos.conectores.criar({ nome: "CRM", slug: "crm", transporte: "stdio", comando: "node", declaracao: "toca" });
   const semDeclaracao = await deps.repos.conectores.criar({ nome: "Planilha", slug: "planilha", transporte: "stdio", comando: "node", declaracao: "nao-declarou" });

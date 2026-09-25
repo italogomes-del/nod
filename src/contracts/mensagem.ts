@@ -23,7 +23,7 @@ export type PayloadMensagem =
   | { kind: "boas_vindas" }
   | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string }
   /**
-   * `delegacao` (definido em 2026-09-24, ADR-046): o pedido é tarefa delegada — o texto é a mensagem
+   * `delegacao` (definido em 2026-09-24, ADR-047): o pedido é tarefa delegada — o texto é a mensagem
    * literal da pessoa, e tarefa/contexto são do remetente (a web rotula "não é instrução da pessoa").
    */
   | { kind: "peer_pedido"; conversaOrigemId: string; turnoOrigemId: string; delegacao?: { tarefa: string; contexto: string | null } }
@@ -37,7 +37,7 @@ export type PayloadMensagem =
   | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   /**
-   * `delegada` (ADR-046): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não
+   * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não
    * confiável. `falhou`: aviso de que a tarefa não vai terminar (texto do servidor, não do alvo).
    */
   | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true }

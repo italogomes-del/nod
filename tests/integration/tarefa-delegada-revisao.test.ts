@@ -48,7 +48,7 @@ async function cenario(trx: Tx, pedido = "Taga, pede ao Dev 1 para revisar o PR 
   return { taga, dev1, deps, repos, chamadas, github, turnoTaga: data.turno, delegar };
 }
 
-describeIntegracao("delegar_tarefa — revisão independente (ADR-046)", () => {
+describeIntegracao("delegar_tarefa — revisão independente (ADR-047)", () => {
   it("[1] aprovar PR e merge nunca rodam por chamada direta, nem com concessão de escrita num turno delegado confiável; comentar roda", async () => {
     await withRollback(MARLON, async (trx) => {
       const { dev1, deps, chamadas, github, delegar } = await cenario(trx);

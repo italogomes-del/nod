@@ -84,7 +84,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const corpo = (await ctx.corpo()) as { argumentos?: unknown };
         const turnoId = ctx.params.turnoId ?? "";
         const plano = deps.tokens.planoDe(turnoId);
-        // definido em 2026-09-24 (revisão da ADR-046): computador e pasta também deixam a chamada na trilha —
+        // definido em 2026-09-24 (revisão da ADR-047): computador e pasta também deixam a chamada na trilha —
         // o que eles devolvem é conteúdo de fora, e delegar_tarefa lê a trilha do turno para saber disso.
         if (plano && ((ctx.params.nome?.startsWith("workspace_") && deps.workspaces) || (ctx.params.nome?.startsWith("computador_") && deps.computadores))) {
           await deps.dentro(ctx.escopo, (d) => d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(ctx.params.nome ?? ""), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA }));

@@ -429,9 +429,9 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect(frames.slice(desde).filter((f) => f.tipo === "turno.iniciado").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("tarefa delegada (ADR-046): delegar_tarefa leva a mensagem da pessoa; o alvo roda em 'delegacao' com pedir_acesso e sem delegar de novo; o resultado volta ao remetente como 'Resultado'", { timeout: JORNADA_MS }, async () => {
+  it("tarefa delegada (ADR-047): delegar_tarefa leva a mensagem da pessoa; o alvo roda em 'delegacao' com pedir_acesso e sem delegar de novo; o resultado volta ao remetente como 'Resultado'", { timeout: JORNADA_MS }, async () => {
     // Remetente novo: a conversa da Vera já tem a resposta não confiável do bot-a-bot no histórico, e isso
-    // contaminaria a delegação (revisão da ADR-046) — aqui a jornada é a do pedido limpo.
+    // contaminaria a delegação (revisão da ADR-047) — aqui a jornada é a do pedido limpo.
     const criadoTaga = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Taga", descricao: "Coordena o time." });
     criados.agentes.push(criadoTaga.agente.id);
     criados.conversas.push(criadoTaga.conversa.id);
@@ -465,7 +465,7 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect(continuacao.dados.ferramentas as string[]).not.toContain("mcp__nod__delegar_tarefa");
     await esperarTurno(resultado.turnoId ?? "");
 
-    // Revisão da ADR-046: a tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
+    // Revisão da ADR-047: a tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
     await rodar(taga.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
     const aviso = await esperarOu(tuca.conversaId, () =>
       srv.esperar(async () => {

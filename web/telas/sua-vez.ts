@@ -167,7 +167,7 @@ function detalheTecnico(i: Item["itensAprovacao"][number]): string {
  * indistinguível de bug (ADR-029). Item sensível e destino 'computador' não entram na regra: o
  * primeiro porque o CHECK do banco recusaria honrá-la, o segundo porque a aprovação é vinculada à
  * ação cifrada (ADR-037). A regra vale para a FERRAMENTA inteira, qualquer destino — o título diz.
- * Aprovar PR e merge também não (definido em 2026-09-24, ADR-046): o servidor manda os ids em
+ * Aprovar PR e merge também não (definido em 2026-09-24, ADR-047): o servidor manda os ids em
  * `nuncaPermanente`, porque a lista mora no domínio e a web só importa tipos.
  */
 function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
