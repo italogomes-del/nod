@@ -106,7 +106,7 @@ export function criarConectoresVivos(opcoes: OpcoesConectoresVivos): ConectoresV
     },
 
     async fechar() {
-      for (const id of [...clientes.keys()]) await descartar(id);
+      for (const k of [...clientes.keys()]) await descartarChave(k);
     },
 
     vivos() {

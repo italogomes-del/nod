@@ -21,6 +21,11 @@ it("credencial com validade (token de instalação do App, ADR-048): depois de e
     await vivos.chamar("c1", "somar", { a: 1, b: 2 });
     expect(cargas).toBe(2);
     expect(vivos.vivos()).toBe(1);
+    // Rotina e turno interativo têm clientes separados (só a rotina pode usar o App); fechar fecha os dois.
+    await vivos.chamar("c1", "somar", { a: 1, b: 2 }, { rotina: true });
+    expect(vivos.vivos()).toBe(2);
+    await vivos.fechar();
+    expect(vivos.vivos()).toBe(0);
   } finally {
     await vivos.fechar();
   }
