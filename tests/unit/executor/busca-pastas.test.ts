@@ -157,8 +157,9 @@ it("usadas no mesmo dia, a mais rasa vence mesmo mexida antes", async () => {
   const rasa = join(raiz, "code", "nod");
   const funda = join(raiz, "code", "velho", "backup", "nod");
   for (const p of [rasa, funda]) await mkdir(p, { recursive: true });
-  await utimes(rasa, new Date("2026-09-01T08:00:00Z"), new Date("2026-09-01T08:00:00Z"));
-  await utimes(funda, new Date("2026-09-01T18:00:00Z"), new Date("2026-09-01T18:00:00Z"));
+  // 12:30Z e 13:00Z caem no mesmo dia civil em qualquer fuso (UTC-12 a +14): o dia é o do processo.
+  await utimes(rasa, new Date("2026-09-01T12:30:00Z"), new Date("2026-09-01T12:30:00Z"));
+  await utimes(funda, new Date("2026-09-01T13:00:00Z"), new Date("2026-09-01T13:00:00Z"));
   expect((await buscarPastas("nod", { ...tudoAutorizavel, base: raiz })).candidatas.map(c => c.caminho)).toEqual([rasa, funda]);
 });
 

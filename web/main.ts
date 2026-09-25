@@ -1,6 +1,7 @@
 import "./lib/mascote-elemento.ts";
 import { abrirComputador } from "./telas/computador.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
+import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
@@ -848,15 +849,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.permitirPasta(el.dataset.id ?? "", pasta);
     dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   }),
-  // A re-renderização troca o botão clicado: o foco vai para a opção marcada (ao abrir a lista) ou volta
-  // para o "Mostrar mais/menos", para o teclado e o leitor de tela não caírem no começo da página.
+  // A re-renderização troca o botão clicado: o foco vai para a opção marcada (ao abrir a lista) ou para a
+  // primeira que "Mostrar mais" revelou, para o teclado e o leitor de tela não caírem no começo da página.
   "lista-de-pasta": (el) => {
     const id = el.dataset.id;
     if (!id) return;
-    const abrindo = !el.closest(".cp-links");
-    dispatch({ tipo: "lista-de-pasta", propostaId: id, lista: el.dataset.lista === "todas" ? "todas" : "curta" });
+    const todas = el.dataset.lista === "todas";
+    dispatch({ tipo: "lista-de-pasta", propostaId: id, lista: todas ? "todas" : "curta" });
     const card = document.querySelector(`[data-proposta="${CSS.escape(id)}"]`);
-    const alvo = abrindo ? card?.querySelector<HTMLElement>("input[data-pasta-de]:checked") : card?.querySelector<HTMLElement>('.cp-links [data-act="lista-de-pasta"]');
+    const alvo = todas ? card?.querySelectorAll<HTMLElement>("input[data-pasta-de]")[CURTA] : card?.querySelector<HTMLElement>("input[data-pasta-de]:checked");
     alvo?.focus({ preventScroll: true });
   },
   anexar: () => document.getElementById("composer-arquivos")?.click(),
@@ -925,7 +926,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
     }),
   "confirmar-proposta": (el) => agir(async () => void (await api!.confirmarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota", "rotinas", "sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
-  "recusar-proposta": (el) => agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  // definido em 2026-09-25: como em "permitir-pasta", o clique que chega com outro pedido correndo é ignorado.
+  "recusar-proposta": (el) => estado.ocupado ? undefined : agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   fixar: (el) => agir(async () => void (await api!.fixar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
   ocultar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "ocultar"); },
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },

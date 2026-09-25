@@ -59,9 +59,10 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
     return {
       ok: true,
       // definido em 2026-09-25 (card de pasta simplificado): o modelo recebia os caminhos absolutos e os
-      // repetia na conversa, em cima do card que já os mostra. Agora recebe só o nome e o local da sugerida.
+      // repetia na conversa, em cima do card que já os mostra. Agora recebe só quantas achou: nome e local
+      // de pasta vêm do disco, e este resultado vai ao modelo como confiável.
       conteudo: JSON.stringify(sugerida
-        ? { estado: "proposta_criada", proposta_id: proposta.id, encontradas: achadas.length, sugerida: { nome: sugerida.nome, onde: sugerida.onde }, instrucao: "Encerre o turno com uma frase curta citando o projeto pelo nome, sem caminhos: o card na conversa já mostra a pasta sugerida e as outras. A tarefa é retomada sozinha quando a pessoa permitir." }
+        ? { estado: "proposta_criada", proposta_id: proposta.id, encontradas: achadas.length, instrucao: "Encerre o turno com uma frase curta citando o projeto pelo nome que a pessoa usou, sem caminhos: o card na conversa já mostra a pasta sugerida e as outras. A tarefa é retomada sozinha quando a pessoa permitir." }
         : { estado: "nao_encontrado", proposta_id: proposta.id, instrucao: "Diga em uma frase que não encontrou a pasta por esse nome e que o botão para escolher já está na conversa. Não sugira caminhos nem peça para procurar no Finder." }),
       confianca: "confiavel",
     };

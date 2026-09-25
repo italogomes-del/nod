@@ -94,7 +94,8 @@ export async function buscarPastas(termo: string, opcoes: { podeAutorizar: (cami
     // Relógio adiantado ou arquivo extraído com data futura não ganha a disputa: conta como agora.
     c.modificadoEm = t === null ? null : Math.min(t, fim);
   }));
-  const dia = (c: Candidata) => c.modificadoEm === null ? -1 : Math.floor(c.modificadoEm / DIA_MS);
+  // Dia civil no fuso do processo — o servidor da busca roda no Mac da pessoa, e é esse o dia do "mudou hoje".
+  const dia = (c: Candidata) => c.modificadoEm === null ? -1 : Math.floor((c.modificadoEm - new Date(c.modificadoEm).getTimezoneOffset() * 60_000) / DIA_MS);
   const candidatas = porRelevancia.sort((a, b) =>
     b.pontuacao - a.pontuacao || dia(b) - dia(a) || a.nivel - b.nivel || a.caminho.length - b.caminho.length);
   return { candidatas: candidatas.slice(0, RESULTADOS_MAX), truncado: truncado || candidatas.length > RESULTADOS_MAX };

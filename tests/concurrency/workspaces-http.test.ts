@@ -84,7 +84,10 @@ describeIntegracao("pastas locais pela conversa", () => {
     const r = await chamar(p, "workspace_propor_pasta", { projeto: "documentos", motivo: "para escrever o relatório" });
     expect(r).toMatchObject({ ok: true, conteudo: expect.stringContaining("proposta_criada") });
     // definido em 2026-09-25: o modelo recebe o nome da sugerida, não o caminho absoluto — o card o mostra.
-    expect(JSON.parse("conteudo" in r ? r.conteudo : "{}")).toMatchObject({ estado: "proposta_criada", encontradas: 1, sugerida: { nome: "documentos", onde: "" } });
+    const conteudo = JSON.parse("conteudo" in r ? r.conteudo : "{}") as Record<string, unknown>;
+    expect(conteudo).toMatchObject({ estado: "proposta_criada", encontradas: 1 });
+    expect(conteudo).not.toHaveProperty("candidatas");
+    expect(conteudo).not.toHaveProperty("sugerida");
     expect(JSON.stringify(r)).not.toContain(raiz);
     // O modelo propôs; nada foi autorizado.
     expect(await srv.json("GET", caminho())).toMatchObject({ vinculo: null });

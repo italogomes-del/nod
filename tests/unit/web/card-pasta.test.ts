@@ -66,7 +66,8 @@ describe("card de pasta", () => {
     expect(html).not.toContain("data-pasta=");
     const todas = renderTimeline(conversa([proposta(candidatas)]), reduzir(curta, { tipo: "lista-de-pasta", propostaId: "pp", lista: "todas" }));
     expect(quantas(todas, 'type="radio"')).toBe(5);
-    expect(todas).toContain('aria-expanded="true">Mostrar menos');
+    // Aberta, a lista fica aberta: "Mostrar menos" escondia a marcada e armava outra pasta.
+    expect(todas).not.toContain('data-act="lista-de-pasta"');
     expect(todas).toContain("code · sem Git");
     expect(todas).toContain("há 4 meses");
   });

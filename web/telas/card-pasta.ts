@@ -74,9 +74,10 @@ export function renderCardPasta(p: Proposta, c: PayloadPropostaPasta, estado: Es
   const visiveis = lista === "todas" ? c.candidatas : c.candidatas.slice(0, CURTA);
   // A lista só abre depois de "Não é essa": a marcada é a próxima mais provável, não a que a pessoa recusou.
   const opcoes = visiveis.map((x, i) => `<label class="cp-opcao" title="${esc(x.caminho)}"><input type="radio" name="pasta-${esc(p.id)}" value="${esc(x.caminho)}" data-pasta-de="${esc(p.id)}"${i === 1 ? " checked" : ""}>${miolo(x, estado.agora, algumGit)}</label>`).join("");
+  // Sem "Mostrar menos": recolher escondia a opção marcada e armava outra pasta sem a pessoa ver.
   const resto = c.candidatas.length - CURTA;
-  const mais = resto > 0
-    ? botao("lista-de-pasta", lista === "todas" ? "Mostrar menos" : `Mostrar mais ${resto}`, { classe: "link", id: p.id, dados: { lista: lista === "todas" ? "curta" : "todas" }, expandido: lista === "todas" })
+  const mais = resto > 0 && lista !== "todas"
+    ? botao("lista-de-pasta", `Mostrar mais ${resto}`, { classe: "link", id: p.id, dados: { lista: "todas" }, expandido: false })
     : "";
   const corpo = `<fieldset class="cp-lista" aria-labelledby="cp-titulo-${esc(p.id)}">${opcoes}</fieldset>
     <div class="cp-links">${mais}${procurar("Procurar em outro lugar…", "link")}</div>`;
