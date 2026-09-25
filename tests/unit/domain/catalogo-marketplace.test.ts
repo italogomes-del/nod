@@ -3,13 +3,19 @@ import { catalogoDoPiso, mesclarCatalogo } from "../../../src/domain/catalogo-ma
 import { CATEGORIA_PADRAO, DESCRICAO_PADRAO } from "../../../src/contracts/marketplace.ts";
 
 describe("catálogo do marketplace (ADR-041)", () => {
-  it("quem diz o que existe é o provedor: app curado e ausente lá não aparece", () => {
+  it("quem diz o que existe é o provedor: app curado e ausente lá não aparece (o nativo, sim)", () => {
     const apps = mesclarCatalogo([{ slug: "slack", nome: "Slack", logo: null }]);
-    expect(apps.map((a) => a.slug)).toEqual(["slack"]);
+    expect(apps.map((a) => a.slug)).toEqual(["slack", "github"]);
+  });
+
+  it("o GitHub é nativo (ADR-048): aparece sem auth config no Composio e não duplica quando há", () => {
+    expect(mesclarCatalogo([]).map((a) => a.slug)).toEqual(["github"]);
+    const comComposio = mesclarCatalogo([{ slug: "github", nome: "Github", logo: "https://logos.composio.dev/github.png" }]);
+    expect(comComposio).toEqual([expect.objectContaining({ slug: "github", nome: "GitHub", logo: "https://logos.composio.dev/github.png" })]);
   });
 
   it("a curadoria dá nome e descrição em português ao que o provedor entrega cru", () => {
-    const [app] = mesclarCatalogo([{ slug: "sentry", nome: "Sentry", logo: "https://logos.composio.dev/sentry.png" }]);
+    const app = mesclarCatalogo([{ slug: "sentry", nome: "Sentry", logo: "https://logos.composio.dev/sentry.png" }]).find((a) => a.slug === "sentry");
     expect(app).toMatchObject({
       nome: "Sentry",
       categoria: "Desenvolvimento",
@@ -19,7 +25,7 @@ describe("catálogo do marketplace (ADR-041)", () => {
   });
 
   it("app sem curadoria aparece com o nome do provedor e a descrição padrão", () => {
-    const [app] = mesclarCatalogo([{ slug: "hubspot", nome: "Hubspot", logo: null }]);
+    const app = mesclarCatalogo([{ slug: "hubspot", nome: "Hubspot", logo: null }]).find((a) => a.slug === "hubspot");
     expect(app).toEqual({
       slug: "hubspot",
       nome: "Hubspot",
@@ -36,7 +42,7 @@ describe("catálogo do marketplace (ADR-041)", () => {
       { slug: "airtable", nome: "Airtable", logo: null },
       { slug: "slack", nome: "Slack", logo: null },
     ]);
-    expect(apps.map((a) => a.slug)).toEqual(["slack", "gmail", "airtable", "zendesk"]);
+    expect(apps.map((a) => a.slug)).toEqual(["slack", "github", "gmail", "airtable", "zendesk"]);
   });
 
   it("o piso é a curadoria inteira, sem logo: grade velha é melhor que grade vazia", () => {

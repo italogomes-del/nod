@@ -41,6 +41,9 @@ const paraItem = (l: Linha): ItemAprovacao => ({
   motivoManual: l.motivo_manual,
 });
 
+/** Item aprovado que espera a máquina da dona (ADR-048): com quando a decisão fechou e se foi por regra. */
+export type ItemNaMaquina = { item: ItemAprovacao; decididaEm: number; porRegra: boolean };
+
 export type NovoItemAprovacao = {
   id?: string;
   idx: number;
@@ -98,6 +101,28 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
           and (owner_id = ${escopo.pessoaId} or exists (
             select 1 from decisoes d where d.tenant_id = itens_aprovacao.tenant_id and d.id = itens_aprovacao.decisao_id and d.decisor_id = ${escopo.pessoaId}))
         returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraItem(l) : null;
+    },
+
+    /**
+     * definido em 2026-09-24 (ADR-048): os itens APROVADOS desta pessoa que rodam no gh do Mac dela e
+     * ainda não têm desfecho. A execução é derivada, sem coluna nova: decisão decidida + item marcado
+     * + `destino.execucao = 'maquina'` + desfecho nulo.
+     */
+    async pendentesNaMaquina(): Promise<ItemNaMaquina[]> {
+      const linhas = await conn<(Linha & { decidida_em: Date | null; tipo_desfecho: string | null })[]>`
+        select ${conn.unsafe(COLUNAS.split(", ").map((c) => `i.${c}`).join(", "))}, d.decidida_em, d.desfecho->>'tipo' as tipo_desfecho
+        from itens_aprovacao i join decisoes d on d.tenant_id = i.tenant_id and d.id = i.decisao_id
+        where i.tenant_id = ${escopo.tenantId} and i.owner_id = ${escopo.pessoaId} and d.estado = 'decidida'
+          and i.selecionado and i.desfecho is null and i.destino->>'execucao' = 'maquina'
+        order by d.decidida_em, i.idx`;
+      return linhas.map((l) => ({ item: paraItem(l), decididaEm: l.decidida_em ? l.decidida_em.getTime() : 0, porRegra: l.tipo_desfecho === "decidida_por_regra" }));
+    },
+
+    /** Grava o desfecho só se ainda não havia um: o relato repetido da máquina não sobrescreve. */
+    async registrarDesfechoSeAberto(id: string, desfecho: DesfechoItem): Promise<ItemAprovacao | null> {
+      const [l] = await conn<Linha[]>`
+        update itens_aprovacao set desfecho = ${desfecho} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and desfecho is null returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraItem(l) : null;
     },
 

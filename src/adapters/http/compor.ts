@@ -23,7 +23,13 @@ import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas } from "../../repositories/pessoas.repo.ts";
 import { criarBarramento, type Barramento } from "../../services/barramento.ts";
-import { criarConectoresVivos, type ConectoresVivos } from "../../services/conectores-vivos.ts";
+import { criarConectoresVivos, type ConectoresVivos, type ConfigConectorVivo } from "../../services/conectores-vivos.ts";
+import type { Conector } from "../../contracts/conector.ts";
+import { COMANDO_GITHUB_NATIVO } from "../../contracts/github.ts";
+import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
+import { concluirItemNaMaquina, itensParaAMaquina } from "../../use-cases/itens-na-maquina.ts";
+import { configGithubNativo, criarDetectorGh, sondaGithubNativa, type DetectorGh } from "../conectores-locais/github/nativo.ts";
+import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
@@ -109,6 +115,8 @@ export type OpcoesCompor = {
   relogio?: Relogio;
   /** Fonte das pessoas (tenant de um pessoaId); só em teste. Default: tabela pessoas. */
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
+  /** Quem responde se o `gh` desta máquina está logado (ADR-048); só em teste. Default: `gh auth status`. */
+  detectorGh?: DetectorGh;
 };
 
 export type App = {
@@ -207,21 +215,76 @@ export function comporApp(o: OpcoesCompor): App {
   // Conectores vivos (L5): quem carrega e DECIFRA o env é este callback — o conector é da pessoa que o
   // registrou, então a busca corre as pessoas do servidor (ids são uuid: acha em uma).
   const donoDoConector = new Map<string, Escopo>();
+  /**
+   * revisto em 2026-09-24 (ADR-048): o gh roda na MÁQUINA do turno, e só para a dona dela. No modo
+   * compartilhado quem diz é o anúncio do app desktop (ponte HTTP, por chave de máquina = pessoa); no
+   * modo local o servidor É o Mac, e a dona é quem NOD_DONO_DA_MAQUINA nomeia (e-mail ou id) — sem ela o gh
+   * não serve a ninguém, porque o login do gh deste Mac não é de todas as pessoas do cadastro.
+   */
+  const detectorGh = compartilhado ? null : (o.detectorGh ?? criarDetectorGh({ ambiente: env }));
+  let donoLocal: Promise<string | null> | null = null;
+  const donoDaMaquinaLocal = (): Promise<string | null> => (donoLocal ??= (async () => {
+    const dono = (env.NOD_DONO_DA_MAQUINA ?? "").trim().toLowerCase();
+    if (!dono) return null;
+    if (/^[0-9a-f-]{36}$/.test(dono)) return dono;
+    return (await listarTodas(db)).find((p) => p.email?.toLowerCase() === dono)?.id ?? null;
+  })());
+  async function ghDaPessoa(escopo: Escopo, machineId?: string): Promise<boolean> {
+    if (compartilhado) return machineId ? ponteHttp.ghDaMaquina(escopo, machineId) : ponteHttp.ghDaPessoa(escopo.pessoaId);
+    if (!detectorGh || (await donoDaMaquinaLocal()) !== escopo.pessoaId) return false;
+    return detectorGh.logado();
+  }
+  // ADR-048: o App da organização só atende turno de ROTINA (ninguém olhando); em turno interativo, nunca.
+  const cofreDoApp = criarCofreDeTokensDoApp<Escopo>({
+    agora: relogio,
+    async gerar(escopo) {
+      const cfg = await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config());
+      if (!cfg) return null;
+      return criarTokenDeInstalacao({ appId: cfg.appId, instalacaoId: cfg.instalacaoId, chavePem: decifrar(cfg.chavePrivadaCifrada, chave), agora: relogio() });
+    },
+  });
+  async function tokenDoApp(escopo: Escopo): Promise<{ token: string; expiraEm: number } | null> {
+    try {
+      return await cofreDoApp.token(escopo);
+    } catch (e) {
+      log("aviso", "github_app_token_falhou", { codigo: e instanceof ErroDeDominio ? e.codigo : "desconhecido" });
+      return null;
+    }
+  }
+  // ADR-048: a marca `nod:github` vira o servidor stdio nativo com o jeito DO SERVIDOR escolhido agora
+  // (token → Composio → App só em rotina); o resto dos conectores sai como foi registrado.
+  async function configDe(conectorId: string, c: Pick<Conector, "slug" | "transporte" | "comando" | "args" | "url">, envDecifrado: Record<string, string>, escopo: Escopo, rotina: boolean): Promise<ConfigConectorVivo | null> {
+    if (c.comando !== COMANDO_GITHUB_NATIVO) return { nome: c.slug, transporte: c.transporte, comando: c.comando, args: c.args, url: c.url, env: envDecifrado };
+    const r = configGithubNativo({ envConector: envDecifrado, app: rotina ? await tokenDoApp(escopo) : null, rotina, ambiente: env });
+    if (!r.ok) {
+      log("aviso", "github_sem_jeito", { conector_id: conectorId, rotina });
+      return null;
+    }
+    log("info", "github_jeito_escolhido", { conector_id: conectorId, jeito: r.cfg.jeito, rotina });
+    return { nome: c.slug, transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, url: null, env: r.cfg.env, ...(r.cfg.expiraEm !== undefined ? { expiraEm: r.cfg.expiraEm } : {}) };
+  }
   const conectoresVivos = criarConectoresVivos({
     agora: relogio,
     ambiente: env,
-    async carregar(conectorId) {
+    async carregar(conectorId, contexto) {
       const escopos = donoDoConector.has(conectorId) ? [donoDoConector.get(conectorId) as Escopo] : (await listar()).map((p) => ({ tenantId: p.tenantId, pessoaId: p.id }));
       for (const escopo of escopos) {
         const c = await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).conectores.buscar(conectorId));
         if (!c) continue;
         donoDoConector.set(conectorId, escopo);
         const envDecifrado = c.envCifrado ? (JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, string>) : {};
-        return { nome: c.slug, transporte: c.transporte, comando: c.comando, args: c.args, url: c.url, env: envDecifrado };
+        return configDe(conectorId, c, envDecifrado, escopo, contexto.rotina);
       }
       return null;
     },
+    async sondarNativo(c) {
+      const escopo = { tenantId: c.tenantId, pessoaId: c.ownerId };
+      const appConfigurado = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config())) !== null;
+      return sondaGithubNativa({ ghNaMaquina: await ghDaPessoa(escopo), envChaves: Object.keys(c.env), appConfigurado });
+    },
   });
+  // O detector aquece no boot: o primeiro pedir_acesso não espera o `gh auth status` dentro da transação.
+  if (detectorGh) void detectorGh.logado().catch(() => false);
 
   const services: Services = {
     relogio,
@@ -229,7 +292,7 @@ export function comporApp(o: OpcoesCompor): App {
     planos: {
       async emitir(trx, turnoId, machineIdDoPlano) {
         const d = depsSobre(trx);
-        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado,
+        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
           harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
@@ -259,6 +322,20 @@ export function comporApp(o: OpcoesCompor): App {
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
   if (workspaces) services.workspaces = workspaces;
+  services.github = {
+    // Chamado dentro da tx escopada de quem pede (pedir_acesso, Conectar): o escopo vem do contexto.
+    async prontoSemConfiguracao() {
+      return (await ghDaPessoa(escopoDoContexto())) ? "gh" : null;
+    },
+    ...(compartilhado ? {} : {
+      // Modo local: o servidor É o Mac, então o item aprovado roda aqui mesmo — só se é da dona dele.
+      async executarNaMaquina(escopo: Escopo, capacidade: string, argumentos: Record<string, unknown>) {
+        if (!(await ghDaPessoa(escopo))) return null;
+        const r = await executarGithubNaMaquina({ capacidade, argumentos, ambiente: env });
+        return { conteudo: r.conteudo, isError: r.isError };
+      },
+    }),
+  };
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
   const depsPonte: Parameters<typeof criarPonteInterna>[1] = {
@@ -310,6 +387,12 @@ export function comporApp(o: OpcoesCompor): App {
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
     ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
+    // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
+    itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
+    concluirItemLocal: (escopo, itemId, desfecho) => dentro(escopo, async (d) => {
+      const r = await concluirItemNaMaquina(d, { itemId, desfecho });
+      if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
+    }),
   });
 
   const varredorMaquinas = compartilhado ? setInterval(() => {
@@ -483,7 +566,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
     ...rotasConcessoes({ dentro }),
-    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
+    ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
     ...rotasMaquinas({ dentro }),

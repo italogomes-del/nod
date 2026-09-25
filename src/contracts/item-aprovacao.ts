@@ -5,6 +5,11 @@ export type DestinoItem = {
   conector: string;
   ferramenta: string;
   argumentos: Record<string, unknown>;
+  /**
+   * definido em 2026-09-24 (ADR-048): o item roda na máquina da pessoa (gh do Mac dela), carimbado na
+   * criação a partir do plano. Aprovado, espera o Mac puxar pela ponte ("aguardando seu Mac").
+   */
+  execucao?: "maquina";
 };
 
 /**

@@ -56,3 +56,4 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-045](adr-045-queda-do-mac-vira-um-aviso.md) | A queda do Mac vira um aviso, não um card por turno | emenda ADR-007, ADR-010, ADR-011, ADR-017 |
 | [ADR-046](adr-046-anexos-no-chat-vao-para-o-modelo.md) | Anexos no chat vão para o modelo (era ADR-045 até 24/09: o número já pertencia à queda do Mac) | emenda ADR-012, ADR-021 |
 | [ADR-047](adr-047-tarefa-delegada-carrega-o-pedido-da-pessoa.md) | Tarefa delegada carrega o pedido da pessoa; aprovar PR e merge nunca são permanentes | emenda ADR-025, ADR-026, ADR-042 |
+| [ADR-048](adr-048-github-um-conector-varios-jeitos-de-conectar.md) | GitHub: um conector, vários jeitos de conectar; o gh roda no Mac de quem o logou | emenda ADR-013, ADR-015, ADR-021, ADR-041, ADR-042, ADR-044 |

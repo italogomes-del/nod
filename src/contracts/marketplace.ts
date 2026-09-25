@@ -8,6 +8,11 @@ export type AppMarketplace = {
    * pessoa reconhece. Curado à mão; app sem curadoria cai na contagem das ações de escrita do catálogo.
    */
   naoIncluiNaLeitura?: readonly string[];
+  /**
+   * definido em 2026-09-24 (ADR-048): app que o próprio nod conecta (hoje só o GitHub). Aparece na
+   * grade mesmo sem auth config no Composio — o Composio é só um dos jeitos de conectá-lo.
+   */
+  nativo?: true;
 };
 
 /**
@@ -19,7 +24,7 @@ export type AppMarketplace = {
  */
 export const APPS_MARKETPLACE: readonly AppMarketplace[] = [
   { slug: "slack", nome: "Slack", descricao: "Encontre conversas, acompanhe sua equipe e prepare mensagens.", categoria: "Comunicação" },
-  { slug: "github", nome: "GitHub", descricao: "Explore repositórios, revise pull requests e acompanhe issues.", categoria: "Desenvolvimento" },
+  { slug: "github", nome: "GitHub", descricao: "Revise pull requests, leia código e acompanhe issues. Usa o gh já logado nesta máquina quando houver.", categoria: "Desenvolvimento", naoIncluiNaLeitura: ["comentar", "revisar pull requests"], nativo: true },
   { slug: "gmail", nome: "Gmail", descricao: "Leia e organize emails, prepare respostas e acompanhe sua caixa de entrada.", categoria: "Comunicação", naoIncluiNaLeitura: ["enviar", "apagar", "arquivar"] },
   { slug: "notion", nome: "Notion", descricao: "Encontre documentos e mantenha as informações do time organizadas.", categoria: "Conhecimento" },
   { slug: "linear", nome: "Linear", descricao: "Acompanhe projetos, organize issues e descubra o que está bloqueado.", categoria: "Projetos" },

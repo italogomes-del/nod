@@ -7,6 +7,7 @@ import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { autoriaPessoa, carimbo, evento } from "../../use-cases/apoio-l7.ts";
 import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
+import { expirarItensNaMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
@@ -101,6 +102,10 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
       const r = await avisarFalhaDelegacao(deps, { turnoId: p.payload.turnoId, motivo: "o pedido de conexão venceu sem resposta" });
       if (r.events?.length) await repos.events.gravarComOutbox(r.events);
     }
+    // ADR-048: item aprovado que o Mac da dona não buscou no prazo vira falha e a decisão fecha.
+    const noMac = await expirarItensNaMaquina(deps);
+    if (noMac.events.length) await repos.events.gravarComOutbox(noMac.events);
+    if (noMac.expirados > 0) log("info", "itens_na_maquina_expirados", { quantos: noMac.expirados });
     return resultado;
   });
 }

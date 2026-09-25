@@ -29,7 +29,9 @@ export type RespostaPlano =
 export type RespostaFerramenta =
   | { ok: true; conteudo: string; confianca: Confianca; isError?: boolean; imagem?: { mimeType: "image/png"; data: string }; audio?: { mimeType: "audio/wav"; data: string } }
   | { ok: false; negacao: Negacao }
-  | { aguardar: string };
+  | { aguardar: string }
+  /** ADR-048: o servidor decidiu e a ferramenta roda NESTA máquina (gh do Mac); o proxy executa e relata. */
+  | { executarLocal: { capacidade: string; argumentos: Record<string, unknown> } };
 
 export type RespostaAguardar =
   | { estado: "decidida"; itens: { idx: number; desfecho: DesfechoItem | null }[] }
@@ -45,6 +47,8 @@ export interface ClienteNod {
   aguardar(decisaoId: string, fatiaMs: number): Promise<RespostaAguardar | FalhaTransporte>;
   /** Negação decidida LOCALMENTE pelo proxy (fora do catálogo): o servidor grava trilha e pede interrupção. */
   negacao(n: Negacao): Promise<void>;
+  /** ADR-048: desfecho (código fechado) de uma ferramenta executada nesta máquina, para a trilha. */
+  execucaoLocal?(nome: string, codigo: string): Promise<void>;
   /** Atalho do catcher: ferramenta + (aguardar) + negação resolvidos em texto, isError quando negado/fora. */
   chamarFerramenta(nome: string, argumentos: Record<string, unknown>): Promise<ConteudoFerramenta>;
 }
@@ -122,7 +126,7 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
       if (ehFalha(r)) return r;
       const c = obj(r.json);
       if (r.status === 200 && c) {
-        if ("ok" in c || "aguardar" in c) return r.json as RespostaFerramenta;
+        if ("ok" in c || "aguardar" in c || "executarLocal" in c) return r.json as RespostaFerramenta;
         // Servidor de teste sem chamar-ferramenta: {conteudo, isError} cru vira resposta ok (confiança do chamador).
         if (typeof c["conteudo"] === "string") return c["isError"] === true ? { ok: true, conteudo: `erro: ${c["conteudo"]}`, confianca: "confiavel" } : { ok: true, conteudo: c["conteudo"], confianca: "confiavel" };
       }
@@ -141,6 +145,10 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
       await chamar("POST", "/api/interno/negacoes", n);
     },
 
+    async execucaoLocal(nome, codigo) {
+      await chamar("POST", "/api/interno/execucoes-locais", { nome, codigo });
+    },
+
     async chamarFerramenta(nome, argumentos) {
       const r = await chamar("POST", `/api/interno/ferramentas/${encodeURIComponent(nome)}`, { argumentos }, prazoFerramenta(nome));
       if (ehFalha(r)) {
@@ -157,6 +165,8 @@ export function criarClienteNod(opcoes: OpcoesClienteNod): ClienteNod {
         return { conteudo: JSON.stringify({ estado: "pendente", decisao_id: c["aguardar"], instrucao: "encerre o turno; a decisão retoma depois" }), isError: false };
       }
       if (c["ok"] === false && obj(c["negacao"])) return { conteudo: redigirNegacao(c["negacao"] as Negacao, agora()), isError: true };
+      // O catcher não tem gh nem executa nada fora: registra que a ferramenta rodaria na máquina.
+      if (obj(c["executarLocal"])) return { conteudo: JSON.stringify({ executaria_na_maquina: c["executarLocal"] }), isError: false };
       if (typeof c["conteudo"] === "string") return { conteudo: c["conteudo"], isError: c["isError"] === true };
       return { conteudo: JSON.stringify(r.json), isError: false };
     },

@@ -11,6 +11,7 @@ import type { conversasRepo } from "./conversas.repo.ts";
 import type { decisoesRepo } from "./decisoes.repo.ts";
 import type { eventsRepo } from "./events.repo.ts";
 import type { gastosRepo } from "./gastos.repo.ts";
+import type { githubAppRepo } from "./github-app.repo.ts";
 import type { incidentesRepo } from "./incidentes.repo.ts";
 import type { inventarioRepo } from "./inventario.repo.ts";
 import type { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
@@ -43,6 +44,7 @@ export type Fabrica<R> = (conn: Conn, escopo: Escopo) => R;
 export interface Repos {
   computadores: ReturnType<typeof computadoresRepo>;
   composio: ReturnType<typeof composioRepo>;
+  githubApp: ReturnType<typeof githubAppRepo>;
   pessoas: ReturnType<typeof pessoasRepo>;
   events: ReturnType<typeof eventsRepo>;
   outbox: ReturnType<typeof outboxRepo>;

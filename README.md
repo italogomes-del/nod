@@ -87,6 +87,7 @@ Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (conf
 - **Cadastro autônomo**: o login Google usa allowlist previamente cadastrada (ADR-030). Para desenvolvimento local, `NOD_LOGIN=stub` usa cookie assinado e recusa `NOD_HOST` fora de 127.0.0.1.
 - **Execução de rotina "em curso"**: `DesfechoRotina` não tem `pendente` — `rotina_execucoes` só ganha linha ao assentar; o "em curso" é a janela com `turno_id` (EMENDA-L9 §5, registrado).
 - **Executor de servidor**: `custo_servidor_mes` é 0 por construção; `gastosRepo.somarMes(agora, executor)` já filtra para o dia em que existir.
+- **GitHub pelo gh: troca de login sem reconectar e UAT real** (ADR-048): o gh roda no Mac de quem o logou (proxy do turno e app desktop), mas o app só anuncia o gh ao conectar — quem roda `gh auth login` depois usa "Conexão / verificar conta de IA". A tela do GitHub App só cadastra (só `NOD_ADMINS`) e não mostra se o tenant já tem App. Não houve UAT com dois Macs nem gh real contra um PR.
 - Deliberadamente fora (lista NÃO CONSTRUIR dos ADRs): policy só por tenant, store JSON, cache de catálogo, endpoint síncrono de decisão, heartbeat, requeue automático, regex de intenção, DELETE em teste fora de concurrency, seed no CI, SDK MCP, workspaces.
 
 ## Desvios registrados

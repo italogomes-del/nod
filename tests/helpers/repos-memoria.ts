@@ -1,3 +1,4 @@
+import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
@@ -58,6 +59,7 @@ export type BancoMemoria = {
   membros: (MembroSala & { criadoEm: number })[];
   conectores: ConectorGuardado[];
   composioChaves: Map<string, string>;
+  githubApp: Map<string, ConfigGithubApp>;
   composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
   permissoes: PermissaoPermanente[];
@@ -96,6 +98,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     membros: [],
     conectores: [],
     composioChaves: new Map(),
+    githubApp: new Map(),
     composioSessoes: new Map(),
     concessoes: [],
     permissoes: [],
@@ -829,6 +832,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar(decisaoId) {
         return doTenant(b.itens).filter((i) => i.decisaoId === decisaoId).sort((x, y) => x.idx - y.idx);
       },
+      async pendentesNaMaquina() {
+        return doTenant(b.itens).flatMap((item) => {
+          const d = doTenant(b.decisoes).find((x) => x.id === item.decisaoId);
+          if (!d || d.estado !== "decidida" || !item.selecionado || item.desfecho !== null || item.destino.execucao !== "maquina") return [];
+          return [{ item, decididaEm: d.desfecho ? Date.parse(d.desfecho.em) : 0, porRegra: d.desfecho?.tipo === "decidida_por_regra" }];
+        });
+      },
+      async registrarDesfechoSeAberto(id, desfecho) {
+        const i = doTenant(b.itens).find((x) => x.id === id && x.desfecho === null);
+        if (!i) return null;
+        i.desfecho = desfecho;
+        return i;
+      },
       async buscar(id) {
         return doTenant(b.itens).find((i) => i.id === id) ?? null;
       },
@@ -1049,6 +1065,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    githubApp: {
+      async config() { return b.githubApp.get(escopo.tenantId) ?? null; },
+      async salvar(c) { b.githubApp.set(escopo.tenantId, { ...c, ownerId: b.githubApp.get(escopo.tenantId)?.ownerId ?? escopo.pessoaId }); },
+    },
     composio: {
       async chave() { return b.composioChaves.get(escopo.tenantId + escopo.pessoaId) ?? null; },
       async salvarChave(c) { b.composioChaves.set(escopo.tenantId + escopo.pessoaId, c); },
@@ -1060,6 +1080,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const c = b.conectores.find((c) => c.id === id && c.ownerId === escopo.pessoaId);
         if (!c) return null;
         Object.assign(c, { url, envCifrado, env: Object.fromEntries(envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
+        return c;
+      },
+      async tornarNativo(id, p) {
+        const c = b.conectores.find((c) => c.id === id && c.ownerId === escopo.pessoaId);
+        if (!c) return null;
+        Object.assign(c, { transporte: "stdio", comando: p.comando, args: [], url: null, envCifrado: p.envCifrado, env: Object.fromEntries(p.envChaves.map((k) => [k, true])), habilitado: false, catalogo: [], sondadoEm: null, ultimaFalha: null });
         return c;
       },
       async criar(c) {
@@ -1150,6 +1176,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // Sem concorrência em memória: a trava advisory não tem o que serializar.
       async travar() {
         return undefined;
+      },
+      async migrarCapacidades(conectorId, mapa) {
+        let n = 0;
+        for (const c of doTenant(b.concessoes).filter((x) => x.conectorId === conectorId && x.capacidade in mapa)) {
+          for (const nova of mapa[c.capacidade] ?? []) {
+            if (doTenant(b.concessoes).some((x) => x.agenteId === c.agenteId && x.conectorId === conectorId && x.capacidade === nova)) continue;
+            b.concessoes.push({ ...c, id: randomUUID(), capacidade: nova });
+            n += 1;
+          }
+        }
+        b.concessoes = b.concessoes.filter((x) => !(x.tenantId === escopo.tenantId && x.conectorId === conectorId && x.capacidade in mapa));
+        return n;
       },
       async revogar(id) {
         const i = b.concessoes.findIndex((c) => c.tenantId === escopo.tenantId && c.id === id);
@@ -1455,6 +1493,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         p.inativoEm = quando;
         p.inativoMotivo = motivo;
         return true;
+      },
+      async migrarCapacidades(conectorId, mapa, quando) {
+        let n = 0;
+        for (const p of doTenant(b.permissoes).filter((x) => x.conectorId === conectorId && x.inativoEm === null && x.capacidade in mapa)) {
+          b.permissoes.push({ ...p, id: randomUUID(), capacidade: mapa[p.capacidade] ?? p.capacidade });
+          p.inativoEm = quando;
+          p.inativoMotivo = "capacidade_fora_do_catalogo";
+          n += 1;
+        }
+        return n;
       },
       async desativarPor(filtro, motivo, quando) {
         const alvos = doTenant(b.permissoes).filter((p) => p.inativoEm === null

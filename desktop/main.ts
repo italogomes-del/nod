@@ -13,6 +13,7 @@ import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop } from "../src/contracts/desktop.ts";
 import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } from "./avisos-mac.ts";
+import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 
 type Config = { url: string; chave: string };
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,25 @@ let mensagem = "";
 let conectando = false;
 let encerrando = false;
 let falhando = false;
+let itensGithub: ReturnType<typeof setInterval> | null = null;
+/**
+ * definido em 2026-09-24 (ADR-048): de 5 em 5 s o app puxa os itens aprovados que rodam no gh deste
+ * Mac (um comentário que a pessoa aprovou no celular sai assim que o Mac estiver aberto). Um por vez.
+ */
+const INTERVALO_ITENS_GITHUB_MS = 5_000;
+function vigiarItensGithub(c: ReturnType<typeof criarPonteHttp>) {
+  let ocupado = false;
+  itensGithub = setInterval(() => {
+    if (ocupado) return;
+    ocupado = true;
+    void (async () => {
+      for (const item of await c.itensLocais()) {
+        const r = await executarGithubNaMaquina({ capacidade: item.capacidade, argumentos: item.argumentos, ambiente: process.env });
+        await c.resultadoItemLocal(item.itemId, r.isError ? "falhou_na_execucao" : "executado").catch(() => undefined);
+      }
+    })().finally(() => { ocupado = false; });
+  }, INTERVALO_ITENS_GITHUB_MS);
+}
 const mensagens: Record<string, string> = {
   servidor_fora: "O servidor não respondeu. Confira sua conexão; o app tentará novamente.",
   chave_invalida: "Esta chave não é mais válida. Gere uma nova em Chaves no navegador.",
@@ -135,6 +155,8 @@ async function mostrarSetup() {
   anterior?.close();
 }
 async function parar() {
+  if (itensGithub) clearInterval(itensGithub);
+  itensGithub = null;
   const anterior = laco; laco = null;
   cliente?.cancelar();
   if (anterior) await anterior.parar().catch(() => undefined);
@@ -167,7 +189,10 @@ async function conectar(c: Config) {
   registry = criado.registry;
   const inv = Object.values(criado.inventarios).find((i) => i?.estado === "pronto") ?? criado.inventarios["claude-cli"] ?? { estado: "ausente" as const, motivo: "Conecte sua conta de IA", em: Date.now() };
   cliente = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
-  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1, harnesses: criado.inventarios });
+  // ADR-048: o gh já logado neste Mac vira o jeito de conectar o GitHub da pessoa, sem ela configurar nada.
+  const gh = await criarDetectorGh({ ambiente: process.env }).logado();
+  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1, harnesses: criado.inventarios, github: { gh } });
+  if (gh) vigiarItensGithub(cliente);
   if (inv.estado !== "pronto") {
     mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta do Claude Code ou Codex e conecte novamente." : "Instale o Claude Code ou Codex neste Mac e conecte novamente.";
     throw new Error("harness_indisponivel");

@@ -142,7 +142,7 @@ resultado ainda sai.
 
 **Ações que nunca são "Sempre permitir".** A lista curta é `NUNCA_PERMANENTE`, em
 `aprovacao-permanente.ts`, e casa pelo NOME da capacidade, para valer igual no GitHub nativo e no
-mapeado pelo Composio (ADR do conector GitHub, Parte B):
+mapeado pelo Composio (ADR-048):
 - qualquer nome com `merge`;
 - qualquer nome com `approv` ou `aprovar`;
 - qualquer nome com `review` ou `revisar` (`pr_revisar`, `GITHUB_CREATE_/SUBMIT_/UPDATE_/DISMISS_A_REVIEW…`).
