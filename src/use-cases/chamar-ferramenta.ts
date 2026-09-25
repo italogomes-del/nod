@@ -5,6 +5,7 @@ import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
+import { nuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { nomeParaTrilha, registrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -195,6 +196,10 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const concessoes = await deps.repos.concessoes.doAgente(input.agenteId);
   if (!concessoes.some((c) => c.conectorId === conectorId && c.capacidade === tool)) return negar("capacidade_desligada", "ferramenta_negada", conectorId);
   if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && !ferramenta.readOnlyHint) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  // definido em 2026-09-24 (revisão da ADR-046): aprovar PR e merge NUNCA rodam por chamada direta, em
+  // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
+  // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".
+  if (nuncaPermanente(ferramenta.nome)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
 
