@@ -3,6 +3,7 @@ import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
+import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "ja_entregue" };
@@ -55,11 +56,12 @@ async function aguardandoPessoa(deps: Deps, cadeia: readonly Turno[]): Promise<b
   }
   const ids = new Set(cadeia.map((t) => t.id));
   // A proposta de acesso tem decisão de MESMO id (ADR-044); vencida a decisão, a proposta segue "pendente"
-  // mas ninguém mais vai decidir. Proposta sem decisão é o card de conexão: esse ainda espera a pessoa.
+  // mas ninguém mais vai decidir. Proposta sem decisão é o card de conexão: espera a pessoa só até o
+  // PRÓPRIO prazo (criação + PRAZO_DECISAO_PADRAO_MS, o mesmo de uma decisão); depois, o varredor avisa.
   for (const p of await deps.repos.propostas.pendentesDaConversa(cadeia[0]?.conversaId ?? "")) {
     if (p.payload.kind !== "acesso" || typeof p.payload.turnoId !== "string" || !ids.has(p.payload.turnoId)) continue;
     const d = await deps.repos.decisoes.buscar(p.id);
-    if (!d || d.estado === "pendente" || d.estado === "reaberta") return true;
+    if (d ? d.estado === "pendente" || d.estado === "reaberta" : deps.agora() < p.criadoEm + PRAZO_DECISAO_PADRAO_MS) return true;
   }
   return false;
 }
