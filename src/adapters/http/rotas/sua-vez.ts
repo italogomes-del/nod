@@ -22,7 +22,11 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
       metodo: "GET",
       padrao: /^\/sua-vez$/,
       async handler(ctx) {
-        const saida = await comDeps(ctx.escopo, (deps) => listarSuaVez(deps, {}));
+        // definido em 2026-09-24 ("aviso no Mac"): `?ver=0` é a leitura da janela escondida ou fora de
+        // foco — o selo do Dock e o aviso precisam da fila, mas ninguém a viu; carimbar vista_em ali
+        // trocaria "ninguém chegou a ver" por "alguém viu" (ADR-007, ADR-017 #2). Sem o parâmetro, listar = ver.
+        const ver = new URL(ctx.req.url ?? "/", "http://127.0.0.1").searchParams.get("ver") !== "0";
+        const saida = await comDeps(ctx.escopo, (deps) => listarSuaVez(deps, { marcarVista: ver }));
         ctx.json(200, saida.data);
       },
     },

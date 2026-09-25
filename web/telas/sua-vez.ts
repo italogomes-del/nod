@@ -2,8 +2,9 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
+import { pedidosAbertos } from "../lib/avisos.ts";
 import { desdeDaParada, linhaNaoRodaram } from "../lib/execucao.ts";
-import { chaveDoItem, contarFios, ehPergunta, umPorFio } from "../lib/perguntas.ts";
+import { chaveDoItem, contarFios, ehPergunta } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
@@ -372,7 +373,8 @@ const SINO = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke
  * decisões e perguntas —, porque as duas esperam pela pessoa (emenda da ADR-045).
  */
 export function renderChamada(estado: Estado): string {
-  const abertos = umPorFio((estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido"));
+  // definido em 2026-09-24 ("aviso no Mac"): a mesma lista que o número do Dock conta (web/lib/avisos.ts).
+  const abertos = pedidosAbertos(estado.suaVez);
   const primeiro = abertos[0];
   if (!primeiro) return "";
   const d = primeiro.decisao;
