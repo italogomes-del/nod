@@ -3,6 +3,7 @@ import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import {
   decidirAprovacao,
   decidirLote,
+  nuncaPermanente,
   REGRA_APROVACAO_PERMANENTE,
   REGRA_CONSULTA_SEM_DECISAO,
   VERSAO_APROVACAO_PERMANENTE,
@@ -120,5 +121,28 @@ describe("lote misto", () => {
 
   it("lote vazio não é automático (nada a executar não é permissão)", () => {
     expect(decidirLote([]).automatico).toBe(false);
+  });
+});
+
+describe("ações que nunca são permanentes (ADR-047)", () => {
+  it("aprovar PR e merge nunca viram regra; comentar vira", () => {
+    for (const nome of ["github__pr_revisar", "github__pr_merge", "pr_merge", "github__GITHUB_MERGE_A_PULL_REQUEST", "github__GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST", "x__aprovar_despesa", "x__approve"]) expect(nuncaPermanente(nome), nome).toBe(true);
+    for (const nome of ["github__pr_comentar", "github__pr_ver", "slack__send_message", "pr_comentar"]) expect(nuncaPermanente(nome), nome).toBe(false);
+  });
+
+  it("revisão: variantes de review do Composio entram; leitura só fica livre pelo readOnlyHint do catálogo, nunca pelo nome", () => {
+    for (const nome of ["github__GITHUB_SUBMIT_A_REVIEW_FOR_A_PULL_REQUEST", "github__GITHUB_UPDATE_A_REVIEW_FOR_A_PULL_REQUEST", "github__GITHUB_DISMISS_A_REVIEW_FOR_A_PULL_REQUEST", "GITHUB_PELO_COMPOSIO__pr_revisar"]) expect(nuncaPermanente(nome), nome).toBe(true);
+    // Sem a declaração, nome que casa é escrita (fail-closed) — verbo de leitura no nome não libera.
+    expect(nuncaPermanente("github__GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED")).toBe(true);
+    expect(nuncaPermanente("github__GITHUB_LIST_REVIEWS_FOR_A_PULL_REQUEST", false)).toBe(true);
+    // Com readOnlyHint: true (o que o catálogo sondado declara), fica livre.
+    expect(nuncaPermanente("github__GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED", true)).toBe(false);
+    expect(nuncaPermanente("github__GITHUB_LIST_REVIEWS_FOR_A_PULL_REQUEST", true)).toBe(false);
+  });
+
+  it("mesmo com a linha na lista da pessoa, aprovar PR pergunta — a regra gravada antes da lista não vale", () => {
+    const p = plano({ catalogo: { ferramentas: [ferramenta("github__pr_revisar"), ferramenta("github__pr_comentar")], servidores: [] }, semprePermitir: ["github__pr_revisar", "github__pr_comentar"] });
+    expect(decidirAprovacao({ plano: p, destino: { conector: "github", ferramenta: "pr_revisar", argumentos: { evento: "APPROVE" } }, origemSensivel: false })).toEqual({ automatico: false, motivo: "sem_regra_permanente" });
+    expect(decidirAprovacao({ plano: p, destino: { conector: "github", ferramenta: "pr_comentar", argumentos: {} }, origemSensivel: false })).toMatchObject({ automatico: true, regra: REGRA_APROVACAO_PERMANENTE });
   });
 });

@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { MotivoInatividadePermissao } from "../contracts/motivos.ts";
-import { VERSAO_APROVACAO_PERMANENTE } from "../domain/aprovacao-permanente.ts";
+import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
+import { nuncaPermanente, VERSAO_APROVACAO_PERMANENTE } from "../domain/aprovacao-permanente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import type { CasoDeUso } from "./tipos.ts";
+
+/** O mesmo filtro que a web aplica ao botão (via `nuncaPermanente` do DTO): sensível, computador e ADR-047 ficam de fora. */
+export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino">): boolean {
+  return !i.origemSensivel && i.destino.conector !== "computador" && !nuncaPermanente(i.destino.ferramenta);
+}
 
 export type EntradaPermitirSempre = { decisaoId: string; itemIds: readonly string[] };
 export type SaidaPermitirSempre = { criadas: string[]; mensagemId: string | null };
@@ -16,13 +22,14 @@ export type SaidaPermitirSempre = { criadas: string[]; mensagemId: string | null
  * de conceder.ts, que é o que torna a autorização citável seis meses depois.
  *
  * Item de origem sensível e destino 'computador' NUNCA viram regra: o primeiro porque o CHECK do
- * banco recusaria honrá-la, o segundo porque a aprovação é vinculada à ação cifrada (ADR-037).
+ * banco recusaria honrá-la, o segundo porque a aprovação é vinculada à ação cifrada (ADR-037). Nem
+ * aprovar PR ou merge (definido em 2026-09-24, ADR-047, `nuncaPermanente`): o item é aprovado, a regra não nasce.
  */
 export const permitirSempre: CasoDeUso<EntradaPermitirSempre, SaidaPermitirSempre> = async (deps, input) => {
   const decisao = await deps.repos.decisoes.buscar(input.decisaoId);
   if (!decisao) throw new ErroDeDominio("nao_encontrado", { cause: "decisão" });
   const itens = await deps.repos.itensAprovacao.listar(input.decisaoId);
-  const alvos = itens.filter((i) => input.itemIds.includes(i.id) && !i.origemSensivel && i.destino.conector !== "computador");
+  const alvos = itens.filter((i) => input.itemIds.includes(i.id) && podeVirarRegra(i));
   if (alvos.length === 0) return { data: { criadas: [], mensagemId: null } };
 
   // Uma regra por FERRAMENTA distinta: o mesmo conector.ferramenta em dois itens é uma regra só.

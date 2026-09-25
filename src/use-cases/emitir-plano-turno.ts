@@ -8,14 +8,16 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
+import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
-import { rotinaDoTurno } from "./apoio-l7.ts";
+import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 
 export type EntradaEmitirPlano = {
@@ -26,7 +28,19 @@ export type EntradaEmitirPlano = {
   permitirResume?: boolean;
   harnesses?: Partial<Record<IdHarness, Inventario>>;
   harnessPreferido?: IdHarness | null;
+  /**
+   * definido em 2026-09-24 (ADR-048): a máquina DESTE turno tem o gh logado e é da pessoa do turno.
+   * As ferramentas do GitHub nativo DELA vão marcadas para rodar na máquina (o proxy executa).
+   */
+  ghNaMaquina?: boolean;
 };
+
+/**
+ * definido em 2026-09-16: sem --resume, o modelo vê as últimas HISTORICO_NO_PLANO falas, tiradas das
+ * MENSAGENS_DO_PLANO mais recentes. Exportados porque delegar_tarefa confere a mesma janela (ADR-047).
+ */
+export const MENSAGENS_DO_PLANO = 50;
+export const HISTORICO_NO_PLANO = 20;
 
 /** Motor cujo inventário decide a localidade (ADR-019/022). */
 export const MOTOR_CLI = "claude-cli";
@@ -35,8 +49,11 @@ export const MOTOR_CLI = "claude-cli";
  * `ligadoARotina`: o turno leva a uma rotina pela janela (rotinaDoTurno). definido em 2026-09-24
  * (ADR-044): a RETOMADA de um turno de rotina continua rotina — antes ela caía em 'conversa' e voltava
  * com o catálogo inteiro e sem o gate, depois de ter lido e-mail como entrada não confiável.
+ * `ligadoADelegacao` (definido em 2026-09-24, ADR-047): a tarefa delegada e as retomadas dela são
+ * 'delegacao' ANTES da regra de profundidade — ela roda em profundidade 1 e caía em 'peer'.
  */
-export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false): ModoTurno {
+export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false, ligadoADelegacao = false): ModoTurno {
+  if (turno.origem === "delegacao" || ligadoADelegacao) return "delegacao";
   if (turno.profundidade >= 1 || turno.origem === "peer") return "peer";
   if (turno.origem === "rotina" || ligadoARotina) return "rotina";
   if (turno.origem === "sala" || conversa?.tipo === "sala") return "sala";
@@ -82,15 +99,20 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6
   // resolvida); a retomada segue a cadeia de retomaTurnoId até o turno disparado (ADR-044).
   const ligacao = turno.origem === "rotina" || turno.origem === "retomada" ? await rotinaDoTurno(deps.repos, turno.id) : null;
-  const modo = modoDoTurno(turno, conversa, agente, ligacao !== null);
-  const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, 50);
+  const delegacao = turno.origem === "delegacao" || turno.origem === "retomada" ? await delegacaoDoTurno(deps.repos, turno) : null;
+  // Fail-closed (revisão da ADR-047): toda retomada copia `sob_procuracao_de`; se a cadeia passou do teto
+  // de saltos e a raiz não foi achada, o turno continua delegação — nunca cai em conversa com --resume.
+  const ehDelegacao = delegacao !== null || Boolean(turno.sobProcuracaoDe);
+  const modo = modoDoTurno(turno, conversa, agente, ligacao !== null, ehDelegacao);
+  const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, MENSAGENS_DO_PLANO);
   const resposta = mensagens.find((m) => m.turnoId === turno.id && m.payload?.kind === "peer_ask");
   const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
   const original = origemId ? await deps.repos.turnos.buscar(origemId) : null;
   // definido em 2026-09-17: rotina e trabalho de colega usam sessão nova com missão e catálogo atuais; o histórico explícito preserva contexto.
   // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina também — o --resume da conversa a levaria de volta ao modo conversa.
-  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
-  const historico = !sessaoCli ? mensagens.slice(-20).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  // definido em 2026-09-24 (ADR-047): a tarefa delegada também — a sessão da conversa é do alvo com a pessoa.
+  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const historico = !sessaoCli ? mensagens.slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
   // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
   // ligada a uma rotina herda o gate DELA (ADR-044); retomada sem rotina não tem gate.
@@ -117,12 +139,17 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       : computadorDoAgente.indisponivelDesde !== null ? { estado: "fora_do_ar", motivo: MOTIVO_FALHA_EM_PORTUGUES[computadorDoAgente.falhaMotivo ?? "sem_resposta"] }
         : null;
 
+  // Quem pediu e por meio de quem (ADR-047): a pessoa vem de `sob_procuracao_de` da tarefa; o remetente,
+  // do peer_pedido ligado a ela. Fora da janela de mensagens, o prompt cai no genérico.
+  const pedidoDelegado = delegacao ? mensagens.find((m) => m.turnoId === delegacao.id && m.payload?.kind === "peer_pedido") : undefined;
+  const sobProcuracaoDe = turno.sobProcuracaoDe ?? delegacao?.sobProcuracaoDe ?? null;
+  const pessoaDelegante = sobProcuracaoDe && sobProcuracaoDe !== pessoa?.id ? await deps.repos.pessoas.buscar(sobProcuracaoDe) : pessoa;
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
     workspaceVinculado: workspaceId !== null,
     computador: Boolean(deps.services.computadores),
     computadorFora,
-    turno: escolha ? { ...turno, modelo: escolha.modelo } : turno,
+    turno: { ...turno, sobProcuracaoDe, ...(escolha ? { modelo: escolha.modelo } : {}) },
     agente,
     memorias,
     concessoes,
@@ -142,6 +169,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     rotinasDoAgente,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
     // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
+    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "A pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
     semprePermitir: permissoes.flatMap((p) => {
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];
@@ -150,6 +178,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   });
 
   parcial.workspaceId = workspaceId;
+  if (input.ghNaMaquina) {
+    // O login do gh serve à dona: só o conector github DELA roda na máquina; o de outra pessoa, nunca.
+    const meu = guardados.find((c) => c.slug === SLUG_GITHUB && c.comando === COMANDO_GITHUB_NATIVO && c.ownerId === deps.escopo.pessoaId);
+    parcial.catalogo.ferramentas = marcarExecucaoNaMaquina(parcial.catalogo.ferramentas, meu?.id ?? null);
+  }
   parcial.workspacePastas = workspaceId ? await deps.services.workspaces?.pastasDoHarness({ ...deps.escopo, conversaId: turno.conversaId }) ?? null : null;
 
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });

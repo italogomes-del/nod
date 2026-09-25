@@ -1,4 +1,38 @@
+import { COMPOSIO_POR_CAPACIDADE_GITHUB } from "../../contracts/github.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import type { ArgsGithub } from "../../domain/github.ts";
+
+export type ChamadaComposio = { slug: string; argumentos: Record<string, unknown> };
+
+/** A tabela capacidade → GITHUB_* mora em src/contracts/github.ts (a migração dos acessos antigos também a lê). */
+export const GITHUB_PELO_COMPOSIO = COMPOSIO_POR_CAPACIDADE_GITHUB;
+
+/** As chamadas ao Composio de uma capacidade já validada pelo domínio; null = indisponível neste jeito. */
+export function chamadasComposioGithub(a: ArgsGithub): ChamadaComposio[] | null {
+  const repo = { owner: a.alvo.dono, repo: a.alvo.repo };
+  switch (a.capacidade) {
+    case "pr_ver":
+      return [{ slug: "GITHUB_GET_A_PULL_REQUEST", argumentos: { ...repo, pull_number: a.numero } }];
+    case "pr_arquivos":
+      return [{ slug: "GITHUB_LIST_PULL_REQUESTS_FILES", argumentos: { ...repo, pull_number: a.numero, per_page: 100 } }];
+    case "pr_comentarios":
+      return [
+        { slug: "GITHUB_LIST_ISSUE_COMMENTS", argumentos: { ...repo, issue_number: a.numero, per_page: 100 } },
+        { slug: "GITHUB_LIST_REVIEW_COMMENTS_ON_A_PULL_REQUEST", argumentos: { ...repo, pull_number: a.numero, per_page: 100 } },
+      ];
+    case "arquivo_ler":
+      return [{ slug: "GITHUB_GET_REPOSITORY_CONTENT", argumentos: { ...repo, path: a.caminho, ...(a.ref ? { ref: a.ref } : {}) } }];
+    case "issue_ver":
+      return [{ slug: "GITHUB_GET_AN_ISSUE", argumentos: { ...repo, issue_number: a.numero } }];
+    case "pr_comentar":
+      return [{ slug: "GITHUB_CREATE_AN_ISSUE_COMMENT", argumentos: { ...repo, issue_number: a.numero, body: a.texto } }];
+    case "pr_revisar":
+      return [{ slug: "GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST", argumentos: { ...repo, pull_number: a.numero, event: a.evento === "approve" ? "APPROVE" : a.evento === "request_changes" ? "REQUEST_CHANGES" : "COMMENT", ...(a.texto ? { body: a.texto } : {}) } }];
+    case "pr_diff":
+    case "pr_checks":
+      return null;
+  }
+}
 
 function urlDoProvedor(valor: string, hosts: string[]): URL {
   let url: URL;

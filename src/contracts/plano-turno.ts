@@ -8,7 +8,7 @@ import type { JsonSchema } from "./ferramentas-nod.ts";
 import type { TransporteConector } from "./conector.ts";
 
 /** Modo do turno decide quais ferramentas nod entram no catálogo (src/domain/plano-turno.ts). */
-export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer";
+export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer" | "delegacao";
 
 export type FerramentaPlano = {
   /** 'lembrar' | 'exemplo__enviar_email' (conector = `${slug}__${tool}`). */
@@ -21,6 +21,12 @@ export type FerramentaPlano = {
   readOnlyHint: boolean;
   tocaAprendiz: boolean;
   schema: JsonSchema;
+  /**
+   * definido em 2026-09-24 (ADR-048): "maquina" = a ferramenta roda NA MÁQUINA do turno (o gh logado
+   * no Mac da dona do conector). O servidor decide tudo (parada, concessão, schema, trilha) e devolve
+   * `executarLocal`; o proxy executa. Ausente = o servidor executa, como sempre.
+   */
+  execucao?: "maquina";
 };
 
 export type ServidorPlano = {

@@ -7,6 +7,7 @@ import type { DesfechoItem } from "../contracts/motivos.ts";
 import { redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
@@ -17,7 +18,15 @@ export type MarcacaoItem = { id: string; selecionado: boolean; textoFinal?: stri
 export type EntradaDecidir = { decisaoId: string; itens?: MarcacaoItem[] };
 
 /** Item pronto para executar FORA da transação (conector resolvido por slug ainda dentro dela). */
-export type ItemAExecutar = { item: ItemAprovacao; conectorId: string | null; computador?: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string } };
+export type ItemAExecutar = {
+  item: ItemAprovacao;
+  conectorId: string | null;
+  computador?: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string };
+  /** ADR-048: a dona da decisão — item `execucao: "maquina"` só roda no gh do Mac DELA. */
+  dono?: { tenantId: string; pessoaId: string };
+  /** ADR-048: a decisão veio de turno de rotina; só então o GitHub App da organização pode atender. */
+  rotina?: boolean;
+};
 
 export type SaidaMarcarEDecidir = { decisao: Decisao; itens: ItemAprovacao[]; aExecutar: ItemAExecutar[] };
 
@@ -57,6 +66,8 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: "decisão já decidida" });
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
   const aExecutar: ItemAExecutar[] = [];
+  const dono = { tenantId: decisao.tenantId, pessoaId: decisao.ownerId };
+  const rotina = decisao.turnoId ? (await rotinaDoTurno(deps.repos, decisao.turnoId)) !== null : false;
   for (const item of itens) {
     if (item.destino.conector === "computador") {
       if (decisao.ownerId !== deps.escopo.pessoaId || !decisao.turnoId || typeof item.destino.argumentos.acaoId !== "string") throw new ErroDeDominio("nao_permitido");
@@ -65,7 +76,7 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
       continue;
     }
     const conector = item.selecionado ? await deps.repos.conectores.buscarPorSlug(item.destino.conector) : null;
-    aExecutar.push({ item, conectorId: conector?.id ?? null });
+    aExecutar.push({ item, conectorId: conector?.id ?? null, dono, rotina });
   }
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
@@ -94,11 +105,18 @@ export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unk
  * (E4.1); desmarcado sensível = sensivel_nao_aprovado, desmarcado comum = retirado_pela_pessoa,
  * erro ou isError do conector = falhou_na_execucao (E4.5: nunca "enviado" quando falhou).
  */
-export async function executarItens(services: Pick<Services, "conectores" | "computadores">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
+export async function executarItens(services: Pick<Services, "conectores" | "computadores" | "github">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
   const desfechos: DesfechoExecutado[] = [];
-  for (const { item, conectorId, computador } of aExecutar) {
+  for (const { item, conectorId, computador, dono, rotina } of aExecutar) {
     if (!item.selecionado) {
       desfechos.push({ itemId: item.id, desfecho: item.origemSensivel ? "sensivel_nao_aprovado" : "retirado_pela_pessoa" });
+      continue;
+    }
+    if (item.destino.execucao === "maquina") {
+      // ADR-048: roda no gh do Mac da dona. No modo local o servidor É esse Mac e executa agora; no
+      // compartilhado o item fica SEM desfecho e o app desktop da dona o puxa pela ponte (itens-na-maquina.ts).
+      const local = dono && services.github?.executarNaMaquina ? await services.github.executarNaMaquina(dono, item.destino.ferramenta, argumentosComTextoFinal(item)).catch(() => null) : null;
+      if (local) desfechos.push({ itemId: item.id, desfecho: local.isError ? "falhou_na_execucao" : "executado" });
       continue;
     }
     if (computador) {
@@ -114,7 +132,7 @@ export async function executarItens(services: Pick<Services, "conectores" | "com
       continue;
     }
     try {
-      const r = await services.conectores.chamar(conectorId, item.destino.ferramenta, argumentosComTextoFinal(item));
+      const r = await services.conectores.chamar(conectorId, item.destino.ferramenta, argumentosComTextoFinal(item), { rotina: rotina === true });
       desfechos.push({ itemId: item.id, desfecho: r.isError ? "falhou_na_execucao" : "executado" });
     } catch {
       desfechos.push({ itemId: item.id, desfecho: "falhou_na_execucao" });
@@ -137,6 +155,22 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
   if (!decisao) throw new ErroDeDominio("nao_encontrado", { cause: "decisão" });
   for (const d of input.desfechos) await deps.repos.itensAprovacao.registrarDesfecho(d.itemId, d.desfecho);
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
+  const noMac = itens.filter((i) => i.selecionado && i.desfecho === null && i.destino.execucao === "maquina");
+  if (noMac.length > 0) {
+    // ADR-048: aprovado, mas o efeito é do gh do Mac da dona — o resultado e a retomada saem quando
+    // ele relatar (itens-na-maquina.ts), ou por expiração. Enquanto isso a conversa diz o que espera.
+    const autoriaEspera = autoriaDaPessoa(deps.escopo);
+    const espera = await deps.repos.mensagens.criar({
+      conversaId: decisao.conversaId,
+      turnoId: decisao.turnoId,
+      autoria: autoriaEspera,
+      kind: "sistema",
+      texto: `Aprovado. ${noMac.length === 1 ? "1 ação aguarda" : `${noMac.length} ações aguardam`} seu Mac: com o app nod aberto e o gh logado, o GitHub recebe em instantes e o resultado aparece aqui.`,
+      confianca: "confiavel",
+    });
+    const aviso: RuntimeEvent[] = espera ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "mensagem_criada", autoria: autoriaEspera, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { mensagem_id: espera.id, kind: "sistema", decisao_id: decisao.id, aguardando_maquina: noMac.length } }] : [];
+    return { data: { mensagemId: espera?.id ?? null, turnoRetomadaId: null, itens }, events: aviso };
+  }
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
   const aprovadorNome = pessoa?.nome ?? "A pessoa";
   const texto = redigirDesfechoAprovacao({ itens, aprovadorNome, agora });
@@ -161,12 +195,15 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       agenteId: decisao.agenteId,
       origem: "retomada",
       prazoEm: agora + PRAZO_DECISAO_MS,
-      profundidade: 0,
+      // definido em 2026-09-24 (revisão da ADR-047): profundidade e confiança do turno que pediu. Com 0 e
+      // "confiavel" fixos, a retomada de uma tarefa delegada saía do salto e lavava a marca.
+      profundidade: original?.profundidade ?? 0,
       entradaTexto,
-      entradaConfianca: "confiavel",
+      entradaConfianca: original?.entradaConfianca ?? "confiavel",
       modelo: original?.modelo ?? MODELO_AGENTE_PADRAO,
       harness: original?.harness,
       retomaTurnoId: decisao.turnoId,
+      sobProcuracaoDe: original?.sobProcuracaoDe ?? null,
     });
     turnoRetomadaId = turno?.id ?? null;
     if (turno) {
@@ -241,6 +278,7 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
     modelo: original.modelo,
     harness: original.harness,
     retomaTurnoId: original.id,
+    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   const events: RuntimeEvent[] = turno

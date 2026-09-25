@@ -35,3 +35,20 @@ export function montarAmbiente(regime: RegimeAmbiente, source: Readonly<Record<s
 }
 
 export const ALLOWLIST_AMBIENTE_SERVIDOR = ALLOWLIST_SERVIDOR;
+
+/**
+ * definido em 2026-09-24 (ADR-048): conector NATIVO do nod (hoje só o GitHub, `comando` = marca
+ * `nod:…`) recebe, além da allowlist do servidor, o mínimo que o `gh` precisa para achar a conta já
+ * logada: o usuário (o Keychain do macOS é por usuário) e onde a configuração do gh mora. Conector de
+ * terceiro continua só com a allowlist do servidor mais o próprio env: esta lista não vale para ele.
+ */
+const ALLOWLIST_NATIVO_EXTRA = ["USER", "LOGNAME", "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST"] as const;
+
+export function montarAmbienteConectorNativo(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const out = montarAmbiente("servidor", source);
+  for (const k of ALLOWLIST_NATIVO_EXTRA) {
+    const v = source[k];
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}

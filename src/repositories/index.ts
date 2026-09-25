@@ -11,6 +11,7 @@ import { conversasRepo } from "./conversas.repo.ts";
 import { decisoesRepo } from "./decisoes.repo.ts";
 import { eventsRepo } from "./events.repo.ts";
 import { gastosRepo } from "./gastos.repo.ts";
+import { githubAppRepo } from "./github-app.repo.ts";
 import { incidentesRepo } from "./incidentes.repo.ts";
 import { inventarioRepo } from "./inventario.repo.ts";
 import { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
@@ -53,6 +54,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     rotinaExecucoes: rotinaExecucoesRepo(conn, escopo),
     salas: salasRepo(conn, escopo),
     composio: composioRepo(conn, escopo),
+    githubApp: githubAppRepo(conn, escopo),
     conectores: conectoresRepo(conn, escopo),
     concessoes: concessoesRepo(conn, escopo),
     permissoesPermanentes: permissoesPermanentesRepo(conn, escopo),

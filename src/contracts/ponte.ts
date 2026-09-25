@@ -12,6 +12,11 @@ export type AnuncioMaquina = {
   inventario: Inventario;
   versaoContrato: number;
   harnesses?: Partial<Record<IdHarness, Inventario>>;
+  /**
+   * definido em 2026-09-24 (ADR-048): `gh auth status` NESTA máquina. O servidor só usa o gh para a
+   * pessoa dona da chave desta máquina — o login do gh serve a quem o fez, nunca a um colega.
+   */
+  github?: { gh: boolean };
 };
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */

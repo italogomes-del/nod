@@ -767,14 +767,16 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
   },
   "conectar-composio": (el) => agir(async () => {
-    if (!estado.composioConfigurado) {
+    // ADR-048: o GitHub não depende do Composio — o servidor tenta o gh desta máquina e o token antes.
+    if (!estado.composioConfigurado && el.dataset.id !== "github") {
       dispatch({ tipo: "aviso-conexao", texto: "Adicione a chave do seu Composio acima para conectar os apps." });
       document.querySelector<HTMLInputElement>('input[name="chave"]')?.focus();
       return;
     }
     const slug = el.dataset.id ?? "";
     const r = await api!.conectarApp(slug);
-    dispatch({ tipo: "autorizacao-app", slug, url: r.url });
+    if (r.url) dispatch({ tipo: "autorizacao-app", slug, url: r.url });
+    else dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "GitHub conectado. Seus bots pedem o acesso de que precisam, e você permite com um clique." : (r.frase ?? "Não foi possível conectar agora.") });
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
   }),
   "verificar-composio": (el) => agir(async () => {
@@ -1049,6 +1051,19 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     const d = new FormData(form);
     await api!.configurarComposio(String(d.get("chave") ?? ""));
     form.reset();
+    dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
+  "app-github": (form) => agir(async () => {
+    const d = new FormData(form);
+    await api!.appGithub({ appId: String(d.get("appId") ?? ""), instalacaoId: String(d.get("instalacaoId") ?? ""), chavePrivada: String(d.get("chavePrivada") ?? "") });
+    form.reset();
+    dispatch({ tipo: "aviso-conexao", texto: "GitHub App da organização guardado. As rotinas de quem não conectou o próprio GitHub passam a usá-lo." });
+  }),
+  "token-github": (form) => agir(async () => {
+    const d = new FormData(form);
+    const r = await api!.tokenGithub(String(d.get("token") ?? ""));
+    form.reset();
+    dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "Token guardado. O GitHub usa o gh desta máquina quando ele está logado, e o token nos outros casos." : "Token guardado, mas o GitHub não respondeu. Tente Conectar de novo em instantes." });
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
   }),
   "credenciais-conector": (form) => agir(async () => {

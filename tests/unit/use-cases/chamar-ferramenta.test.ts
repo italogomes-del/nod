@@ -109,6 +109,7 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     const c = await cenario();
     const email = await c.deps.repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
     await c.deps.repos.conectores.registrarSonda(email?.id ?? "", { ok: true, agora: AGORA, catalogo: [{ nome: "enviar", descricao: "", schema: { type: "object" }, readOnlyHint: false }] });
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: c.consentimentoId });
     const r = await c.chamar("pedir_aprovacao", { resumo: "enviar", itens: [{ texto: "a", destino: { conector: "email", ferramenta: "enviar", argumentos: {} } }] });
     expect(r.data).toHaveProperty("aguardar");
     const decisaoId = (r.data as { aguardar: string }).aguardar;

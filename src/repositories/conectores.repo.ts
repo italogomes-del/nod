@@ -93,6 +93,17 @@ export function conectoresRepo(conn: Conn, escopo: Escopo) {
       return l ? paraConector(l) : null;
     },
 
+    /**
+     * definido em 2026-09-24 (ADR-048): o GitHub vira UM conector nativo (stdio, `comando` = marca
+     * `nod:github`). Quem já tinha o `github` do Composio por HTTP é convertido no lugar — mesmo id,
+     * para a linha de composio_sessoes continuar apontando para ele. Nasce desabilitado: a sonda habilita.
+     */
+    async tornarNativo(id: string, p: { comando: string; envCifrado: string | null; envChaves: string[] }): Promise<ConectorGuardado | null> {
+      const [l] = await conn<Linha[]>`update conectores set transporte = 'stdio', comando = ${p.comando}, args = '{}', url = null, env_cifrado = ${p.envCifrado}, env_chaves = ${p.envChaves}::text[], habilitado = false, catalogo = '[]', sondado_em = null, ultima_falha = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraConector(l) : null;
+    },
+
     async buscar(id: string): Promise<ConectorGuardado | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from conectores where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? paraConector(l) : null;

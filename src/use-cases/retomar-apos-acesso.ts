@@ -30,6 +30,8 @@ export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta
     harness: original.harness,
     modelo: original.modelo,
     retomaTurnoId: original.id,
+    // ADR-047: a retomada de uma tarefa delegada continua sob o pedido da mesma pessoa.
+    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   return {

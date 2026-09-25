@@ -151,6 +151,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     const negada = (await (await interno("POST", "ferramentas/somar__gravar", { argumentos: {} })).json()) as { ok: boolean; negacao: { motivo: string } };
     expect(negada).toMatchObject({ ok: false, negacao: { motivo: "fora_do_catalogo" } });
 
+    await repos.concessoes.conceder({ agenteId, conectorId, capacidade: "gravar", mensagemId: "m" });
     const pedido = (await (await interno("POST", "ferramentas/pedir_aprovacao", { argumentos: { resumo: "r", itens: [{ texto: "a", destino: { conector: "somar", ferramenta: "gravar", argumentos: { texto: "a" } } }] } })).json()) as { aguardar: string };
     expect(typeof pedido.aguardar).toBe("string");
     const inicio = Date.now();

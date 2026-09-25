@@ -99,6 +99,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
       modelo: original.modelo,
       harness: original.harness,
       retomaTurnoId: original.id,
+      sobProcuracaoDe: original.sobProcuracaoDe ?? null,
       reenvios: original.reenvios + 1,
       executor: input.executor ?? "catcher",
     });

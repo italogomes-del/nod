@@ -10,6 +10,7 @@ import type { Confianca } from "../contracts/mensagem.ts";
 import type { FerramentaPlano, ModoTurno, PlanoTurno, ServidorPlano } from "../contracts/plano-turno.ts";
 import type { Profundidade, Turno } from "../contracts/turno.ts";
 import { ORCAMENTO_RESULTADO_CHARS } from "../shared/constantes.ts";
+import { nuncaPermanente } from "./aprovacao-permanente.ts";
 import { catalogoReduzido, REGRA_REDUCAO_POR_CONFIANCA } from "./confianca.ts";
 import { conectorTocaAprendiz } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
@@ -39,13 +40,19 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * é o caso perigoso: um turno acordado por agendamento que pudesse se pausar sozinho viraria uma
  * rotina que se desliga por conta própria, e o modo rotina já é explicitamente "a própria execução",
  * não a hora de reconfigurar. Quem reconfigura é a pessoa, na conversa.
+ *
+ * delegacao (definido em 2026-09-24, ADR-047): o turno de quem cumpre uma tarefa que a pessoa pediu por
+ * meio de outro bot. Tem pedir_acesso (inclusive escrita: quem pediu foi a pessoa) e os caminhos de
+ * aprovação; não tem salto (profundidade 1), nem rotina, nem delegar de novo. delegar_tarefa só entra
+ * onde há mensagem da pessoa para carregar: conversa e sala.
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
   criacao: ["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "pedir_a_pessoa"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "passar", "encaminhar"],
   rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"],
   peer: ["lembrar"],
+  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"],
 };
 
 /** definido em 2026-09-16: 1 h = janela do cache ephemeral_1h do CLI (mapa-cli); plano mais velho que isso é fail-closed. */
@@ -109,6 +116,8 @@ export type EntradaPlano = {
   rotinasDoAgente?: readonly RotinaNoPrompt[];
   /** Nomes `${slug}__${tool}` das regras ATIVAS da pessoa para este agente (ADR-042). */
   semprePermitir?: readonly string[];
+  /** Turno de delegação (ADR-047): quem pediu e por meio de quem, para a linha do prompt. */
+  delegacao?: { pessoaNome: string; remetenteNome: string } | null;
   agora: number;
 };
 
@@ -122,10 +131,16 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaAprendiz, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
 
-  const modo: ModoTurno = entrada.profundidade >= 1 ? "peer" : entrada.modo;
-  const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
+  // definido em 2026-09-24 (ADR-047): a delegação também roda em profundidade 1 (não repassa), mas não é
+  // peer — a autoridade é o pedido da pessoa, e virar peer apagava isso (catálogo só `lembrar`).
+  const modo: ModoTurno = entrada.profundidade >= 1 && entrada.modo !== "delegacao" ? "peer" : entrada.modo;
+  // definido em 2026-09-24 (revisão da ADR-047): delegar_tarefa só aparece quando o turno PODE delegar
+  // (as mesmas condições de delegar-tarefa.ts) — numa retomada ela estaria no catálogo e sempre negaria.
+  const podeDelegar = (entrada.turno.origem === "conversa" || entrada.turno.origem === "sala") && entrada.profundidade === 0 && entrada.confianca === "confiavel" && Boolean(entrada.turno.mensagemOrigemId);
+  const nod = FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n !== "delegar_tarefa" || podeDelegar).map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
-  const temComputador = entrada.computador === true && modo !== "peer" && modo !== "criacao";
+  // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
+  const temComputador = entrada.computador === true && modo !== "peer" && modo !== "criacao" && modo !== "delegacao";
   const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
   /**
    * definido em 2026-09-18: sem projeto autorizado o agente só enxerga consultar e propor. Ver um
@@ -149,7 +164,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const autoria: Autoria = {
     autor_tipo: "agente",
     autor_id: entrada.agente.id,
-    sob_procuracao_de: null,
+    sob_procuracao_de: entrada.turno.sobProcuracaoDe ?? null,
     conta_de_execucao: entrada.turno.ownerId,
     executor: entrada.executor,
     locality: "local",
@@ -173,7 +188,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     confiancaEntrada: entrada.confianca,
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}) },
     politicaExecucao: {
       prazoMs,
@@ -186,9 +201,10 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
      * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado e já reduzido — a regra
      * evita a pergunta, nunca amplia alcance (ADR-038). Turno não confiável recebe lista VAZIA: o
      * domínio também recusa por confiança, e as duas camadas são de propósito (a lista vazia é o
-     * estado, a recusa é a explicação que a pessoa lê).
+     * estado, a recusa é a explicação que a pessoa lê). Ação que nunca é permanente (ADR-047: aprovar
+     * PR, merge) sai mesmo com linha ativa — uma regra gravada antes da lista não vale.
      */
-    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector")),
+    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector" && !nuncaPermanente(n, f.readOnlyHint))),
     expiraEm: Math.min(entrada.turno.prazoEm, entrada.agora + PLANO_VALIDADE_MS),
   };
 }

@@ -1,8 +1,11 @@
 import type { FerramentaPlano } from "../contracts/plano-turno.ts";
 import type { Profundidade } from "../contracts/turno.ts";
 
-/** Ferramentas que abrem outro salto: some ESTRUTURALMENTE em profundidade 1 (E12.4, sem flag de bypass). */
-export const FERRAMENTAS_DE_SALTO = ["perguntar_a_bot", "encaminhar"] as const;
+/**
+ * Ferramentas que abrem outro salto: some ESTRUTURALMENTE em profundidade 1 (E12.4, sem flag de bypass).
+ * delegar_tarefa desde 2026-09-24 (ADR-047): quem cumpre uma tarefa delegada não a repassa.
+ */
+export const FERRAMENTAS_DE_SALTO = ["perguntar_a_bot", "encaminhar", "delegar_tarefa"] as const;
 
 /**
  * catálogo ∩ allowlist do agente ∩ alcance do canal, depois a poda por profundidade (ADR-013).

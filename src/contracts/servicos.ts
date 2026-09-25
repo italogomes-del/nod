@@ -1,4 +1,5 @@
 import type { Conector } from "./conector.ts";
+import type { JeitoGithub } from "./github.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { ContratoFerramentaNod, NomeFerramentaNod } from "./ferramentas-nod.ts";
 import type { FrameSse, TipoFrame } from "./frame.ts";
@@ -26,6 +27,20 @@ export interface ServicesNod<Trx> {
     /** Pasta onde o harness abre e as que ele alcança; null quando não há projeto autorizado. */
     pastasDoHarness(i: { tenantId: string; pessoaId: string; conversaId: string }): Promise<{ ativa: string; aprovadas: string[] } | null>;
   };
+  /**
+   * definido em 2026-09-24 (ADR-048, revisto no mesmo dia): o GitHub pelo gh que a PESSOA já tem logado
+   * no próprio Mac (anunciado pelo app ao conectar; no modo local, o deste processo e só para a dona
+   * da máquina). null = o GitHub não nasce sozinho; segue pelo card de conexão.
+   */
+  github?: {
+    /** O gh já logado no Mac conectado da pessoa do contexto: o registro automático nasce dele. */
+    prontoSemConfiguracao(): Promise<Extract<JeitoGithub, "gh"> | null>;
+    /**
+     * Só no modo local (o servidor É o Mac): executa um item aprovado pelo gh desta máquina, se ela é da
+     * dona (`escopo`). null = esta máquina não pode; o item espera o Mac da dona pela ponte.
+     */
+    executarNaMaquina?(escopo: { tenantId: string; pessoaId: string }, capacidade: string, argumentos: Record<string, unknown>): Promise<{ conteudo: string; isError: boolean } | null>;
+  };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
   };
@@ -43,7 +58,8 @@ export interface ServicesNod<Trx> {
   };
   rotinas: { ativar(trx: Trx, propostaId: string): Promise<Rotina> };
   conectores: {
-    chamar(conectorId: string, tool: string, args: Record<string, unknown>): Promise<{ conteudo: string; isError: boolean }>;
+    /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. */
+    chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean }): Promise<{ conteudo: string; isError: boolean }>;
     sondar(conector: Conector): Promise<ResultadoSonda>;
   };
   interruptor: {
@@ -75,7 +91,7 @@ export type SaidaCasoDeUso<O> = { data: O; events?: RuntimeEvent[] };
  * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema,
  * aplica gate de parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps`
  * pelo mesmo motivo de ServicesNod. lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/
- * perguntarABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
+ * perguntarABot/delegarTarefa ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
  */
 export type CasoNod<Deps, N extends NomeFerramentaNod> = (
   deps: Deps,
@@ -98,6 +114,7 @@ export interface UseCasesNod<Deps> {
   encaminhar: CasoNod<Deps, "encaminhar">;
   semNovidade: CasoNod<Deps, "sem_novidade">;
   perguntarABot: CasoNod<Deps, "perguntar_a_bot">;
+  delegarTarefa: CasoNod<Deps, "delegar_tarefa">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -117,4 +134,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   encaminhar: "encaminhar",
   sem_novidade: "semNovidade",
   perguntar_a_bot: "perguntarABot",
+  delegar_tarefa: "delegarTarefa",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

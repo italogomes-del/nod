@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { decidir } from "../../src/use-cases/decidir.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { agenteComConversa } from "../helpers/fabricas.ts";
+import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste, type ChamadaConector } from "../helpers/l5.ts";
@@ -22,6 +22,8 @@ describeIntegracao("aprovação em lista tipada: pedir → decidir → executar 
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const email = await repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
       await repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
+      const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "consentimento", texto: "ok", confianca: "confiavel" });
+      await repos.concessoes.conceder({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: consentimento?.id ?? "" });
       await repos.conectores.criar({ nome: "CRM", slug: "crm", transporte: "stdio", comando: "node", declaracao: "toca" });
       const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const chamadas: ChamadaConector[] = [];

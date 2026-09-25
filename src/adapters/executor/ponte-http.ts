@@ -79,6 +79,21 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
   }
   return {
     ponte,
+    /**
+     * ADR-048: os itens aprovados que rodam no gh DESTE Mac. A máquina puxa (o servidor nunca disca,
+     * ADR-021), executa e relata; falha de rede devolve lista vazia e a próxima volta tenta de novo.
+     */
+    async itensLocais(): Promise<{ itemId: string; capacidade: string; argumentos: Record<string, unknown> }[]> {
+      try {
+        const r = await chamar<{ itens?: unknown }>("itens-locais", {});
+        return Array.isArray(r.itens) ? (r.itens as { itemId: string; capacidade: string; argumentos: Record<string, unknown> }[]) : [];
+      } catch {
+        return [];
+      }
+    },
+    async resultadoItemLocal(itemId: string, desfecho: "executado" | "falhou_na_execucao"): Promise<void> {
+      await chamar("itens-locais/resultado", { itemId, desfecho });
+    },
     delta(turnoId: string, texto: string) {
       const fila = trechos.get(turnoId) ?? [];
       const ultimo = fila[fila.length - 1];

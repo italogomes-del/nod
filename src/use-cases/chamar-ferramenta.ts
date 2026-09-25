@@ -5,6 +5,8 @@ import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
+import { nuncaPermanente } from "../domain/aprovacao-permanente.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { nomeParaTrilha, registrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -13,7 +15,13 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 export type ResultadoChamada =
   | { ok: true; conteudo: string; confianca: Confianca; isError?: boolean; imagem?: { mimeType: "image/png"; data: string }; audio?: { mimeType: "audio/wav"; data: string } }
   | { ok: false; negacao: Negacao }
-  | { aguardar: string };
+  | { aguardar: string }
+  /**
+   * definido em 2026-09-24 (ADR-048): o servidor decidiu (parada, catálogo, concessão, gate de rotina,
+   * schema, trilha) e a ferramenta roda NA MÁQUINA do turno — o proxy executa pelo gh do Mac e relata
+   * o desfecho em POST interno/execucoes-locais. O conteúdo que voltar é não confiável (ADR-026).
+   */
+  | { executarLocal: { capacidade: string; argumentos: Record<string, unknown> } };
 
 export type EntradaChamarFerramenta = {
   /** Identidade derivada do TOKEN (rota interna), nunca do corpo (ADR-024). */
@@ -101,6 +109,7 @@ const DESPACHO: Despacho = {
   encaminhar: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.encaminhar](deps, { ...ctx, ...args }),
   sem_novidade: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.sem_novidade](deps, { ...ctx, ...args }),
   perguntar_a_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.perguntar_a_bot](deps, { ...ctx, ...args }),
+  delegar_tarefa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.delegar_tarefa](deps, { ...ctx, ...args }),
 };
 
 function ehNomeNod(nome: string): nome is NomeFerramentaNod {
@@ -194,13 +203,21 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const concessoes = await deps.repos.concessoes.doAgente(input.agenteId);
   if (!concessoes.some((c) => c.conectorId === conectorId && c.capacidade === tool)) return negar("capacidade_desligada", "ferramenta_negada", conectorId);
   if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && !ferramenta.readOnlyHint) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  // definido em 2026-09-24 (revisão da ADR-047): aprovar PR e merge NUNCA rodam por chamada direta, em
+  // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
+  // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".
+  if (nuncaPermanente(ferramenta.nome, ferramenta.readOnlyHint)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
 
   await registrarChamada(conectorId);
   if (plano.executor === "catcher") await deps.repos.catcher.registrar({ turnoId: input.turnoId, tipo: "tool_call", dados: { nome: input.nome, origem: "conector", conector_id: conectorId } });
+  // ADR-048: todos os portões acima valem igual; só o EFEITO muda de lugar — o gh é o do Mac do turno.
+  if (ferramenta.execucao === "maquina") return { data: { executarLocal: { capacidade: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> } }, events };
+  // O GitHub App da organização só atende turno de rotina (ADR-048): ninguém olhando, nada em nome da pessoa.
+  const rotina = (await rotinaDoTurno(deps.repos, input.turnoId)) !== null;
   try {
-    const r = await deps.services.conectores.chamar(conectorId, tool, (input.argumentos ?? {}) as Record<string, unknown>);
+    const r = await deps.services.conectores.chamar(conectorId, tool, (input.argumentos ?? {}) as Record<string, unknown>, { rotina });
     const conteudo = r.isError ? `erro do conector ${conector.slug}: ${r.conteudo}` : r.conteudo;
     return { data: { ok: true, conteudo, confianca: "nao_confiavel" }, events };
   } catch (e) {
@@ -209,3 +226,17 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
     return negar(motivo, "conector_indisponivel", conectorId);
   }
 };
+
+export const REGRA_EXECUCAO_LOCAL = "regra:execucao_local" as const;
+
+/**
+ * O desfecho de uma ferramenta que rodou NA MÁQUINA (ADR-048), relatado pelo proxy: vai à trilha como
+ * `execucao_local` com o código fechado (null = ok). Só vale para ferramenta do plano marcada
+ * `execucao: "maquina"`; qualquer outra é recusada — a máquina não inventa linha de trilha.
+ */
+export async function registrarExecucaoLocal(deps: Deps, input: { turnoId: string; agenteId: string; plano: PlanoTurno | null; nome: string; codigo: string }): Promise<boolean> {
+  const f = input.plano?.turnoId === input.turnoId ? input.plano.catalogo.ferramentas.find((x) => x.nome === input.nome) : undefined;
+  if (!f || f.execucao !== "maquina" || !/^[a-z_]{1,40}$/.test(input.codigo)) return false;
+  await deps.repos.trilha.registrar({ agenteId: input.agenteId, turnoId: input.turnoId, conectorId: f.conectorId, ferramenta: nomeParaTrilha(input.nome), kind: "execucao_local", motivo: input.codigo === "ok" ? null : input.codigo, regra: REGRA_EXECUCAO_LOCAL, regraVersao: 1, em: deps.agora() });
+  return true;
+}

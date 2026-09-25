@@ -71,6 +71,16 @@ const REGRA_HUMANA: Readonly<Record<string, string>> = {
  * ("venceu expirou com alguem ciente"). Mesmas frases da mensagem do varredor
  * (src/adapters/fundo/varredor-expiracao.ts). Switch exaustivo: desfecho novo não compila sem rótulo.
  */
+/**
+ * definido em 2026-09-24 (ADR-048): aprovado e marcado, sem desfecho, rodando no gh do Mac = "aguardando
+ * seu Mac" — o item sai quando o app nod da pessoa estiver aberto, ou vence como as decisões vencem.
+ */
+function tagDesfecho(i: { selecionado: boolean; desfecho: string | null; destino: { execucao?: "maquina" } }, aberta: boolean): string {
+  if (i.desfecho) return `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>`;
+  if (!aberta && i.selecionado && i.destino.execucao === "maquina") return '<span class="tag tag-ambar" title="Abra o app nod no seu Mac com o gh logado">aguardando seu Mac</span>';
+  return "";
+}
+
 export function rotuloVencido(d: Item["decisao"], agora: number): string {
   const venceu = `venceu ${haQuanto(Math.max(0, agora - Date.parse(d.prazoDecisaoEm)))}`;
   const desfecho = d.desfecho;
@@ -167,14 +177,19 @@ function detalheTecnico(i: Item["itensAprovacao"][number]): string {
  * indistinguível de bug (ADR-029). Item sensível e destino 'computador' não entram na regra: o
  * primeiro porque o CHECK do banco recusaria honrá-la, o segundo porque a aprovação é vinculada à
  * ação cifrada (ADR-037). A regra vale para a FERRAMENTA inteira, qualquer destino — o título diz.
+ * Aprovar PR e merge também não (definido em 2026-09-24, ADR-047): o servidor manda os ids em
+ * `nuncaPermanente`, porque a lista mora no domínio e a web só importa tipos.
  */
 function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
-  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador");
+  const nunca = new Set(item.nuncaPermanente ?? []);
+  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && !nunca.has(i.id));
   const nomes = [...new Set(elegiveis.map((i) => `${i.destino.conector}.${i.destino.ferramenta}`))];
   if (nomes.length === 0) {
     const motivo = item.itensAprovacao.some((i) => i.destino.conector === "computador")
       ? "Ação no computador é aprovada uma a uma: ela está presa à tela que o bot observou."
-      : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
+      : item.itensAprovacao.some((i) => nunca.has(i.id))
+        ? "Aprovar ou fazer merge de PR sempre passa por você — não dá para permitir de uma vez."
+        : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
     return botao("decidir-aprovacao-sempre", "Sempre permitir", { id: item.decisao.id, desabilitado: true, titulo: motivo });
   }
   const comNome = nomes.map((n) => {
@@ -210,7 +225,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
       <div class="ap-onde">${esc(ondeAcontece(conectores, i.destino.conector))}</div>
       ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}
       ${aberta ? detalheTecnico(i) : ""}
-      ${i.desfecho ? `<span class="tag tag-cinza">${esc(i.desfecho.replaceAll("_", " "))}</span>` : ""}
+      ${tagDesfecho(i, aberta)}
     </div>
   </li>`;
   // Contagem só quando ela informa: com item sensível desmarcado, "1 de 2" é a própria explicação.
@@ -228,7 +243,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
     return `<div class="ap-unico">
       ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
       ${aberta ? detalheTecnico(unico) : ""}
-      ${unico.desfecho ? `<span class="tag tag-cinza">${esc(unico.desfecho.replaceAll("_", " "))}</span>` : ""}
+      ${tagDesfecho(unico, aberta)}
     </div>
     ${aberta ? `<div class="acoes">${botao("decidir-aprovacao", "Pode fazer", { classe: "pri", id: item.decisao.id })}${botao("decidir-aprovacao-nenhum", "Agora não", { id: item.decisao.id })}${botaoSempre(item, conectores)}</div>` : ""}`;
   }
