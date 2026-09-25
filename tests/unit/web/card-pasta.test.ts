@@ -11,12 +11,13 @@ import { renderMensagem, renderTimeline } from "../../../web/telas/conversa.ts";
  * oito caminhos absolutos, cada um com o seu "Permitir", e "Escolher outraAgora não" colados. Agora: a
  * sugerida com um botão só, a lista atrás de "Não é essa" e um registro que fica depois de permitir.
  */
-const AGORA = Date.parse("2026-09-25T15:00:00Z");
+// O card usa o fuso do navegador: 15:30Z menos 10 min cai no mesmo dia civil em qualquer fuso (UTC-12 a +14).
+const AGORA = Date.parse("2026-09-25T15:30:00Z");
 const DIA = 86_400_000;
 const HOME = "/Users/marlon";
 
 const candidatas: PayloadPropostaPasta["candidatas"] = [
-  { caminho: `${HOME}/code/leapy/main-repos/leapy`, nome: "leapy", git: true, onde: "code/leapy/main-repos", modificadoEm: AGORA - 2 * 3_600_000 },
+  { caminho: `${HOME}/code/leapy/main-repos/leapy`, nome: "leapy", git: true, onde: "code/leapy/main-repos", modificadoEm: AGORA - 10 * 60_000 },
   { caminho: `${HOME}/Inhouse/leapy`, nome: "leapy", git: true, onde: "Inhouse", modificadoEm: AGORA - 2 * DIA },
   { caminho: `${HOME}/conductor/workspaces/leapy`, nome: "leapy", git: true, onde: "conductor/workspaces", modificadoEm: AGORA - 21 * DIA },
   { caminho: `${HOME}/code/leapy`, nome: "leapy", git: false, onde: "code", modificadoEm: AGORA - 40 * DIA },
@@ -55,14 +56,17 @@ describe("card de pasta", () => {
     expect(html).toContain("Achei 5 pastas com esse nome.");
     expect(quantas(html, 'type="radio"')).toBe(3);
     expect(quantas(html, " checked")).toBe(1);
-    expect(html).toContain(`value="${HOME}/code/leapy/main-repos/leapy" data-pasta-de="pp" checked`);
-    expect(html).toContain("Mostrar mais 2");
+    // A recusada continua na lista, mas a marcada é a próxima: "Não é essa" não volta para ela.
+    expect(html).toContain(`value="${HOME}/Inhouse/leapy" data-pasta-de="pp" checked`);
+    expect(html).toContain("Marquei a próxima mais provável.");
+    expect(html).toContain('aria-expanded="false">Mostrar mais 2');
+    expect(html).toContain('aria-labelledby="cp-titulo-pp"');
     expect(html).toContain("Procurar em outro lugar…");
     // Com a lista aberta, o botão lê a opção marcada: não carrega pasta fixa.
     expect(html).not.toContain("data-pasta=");
     const todas = renderTimeline(conversa([proposta(candidatas)]), reduzir(curta, { tipo: "lista-de-pasta", propostaId: "pp", lista: "todas" }));
     expect(quantas(todas, 'type="radio"')).toBe(5);
-    expect(todas).toContain("Mostrar menos");
+    expect(todas).toContain('aria-expanded="true">Mostrar menos');
     expect(todas).toContain("code · sem Git");
     expect(todas).toContain("há 4 meses");
   });
@@ -88,17 +92,37 @@ describe("card de pasta", () => {
     expect(html).not.toContain("mudou");
   });
 
-  it("escapa nome e motivo vindos da busca e do modelo", () => {
+  it("lista curta com duas pastas de nomes diferentes, sem Git e sem data", () => {
+    const duas: PayloadPropostaPasta["candidatas"] = [
+      { caminho: `${HOME}/code/leapy`, nome: "leapy", git: false, onde: "code", modificadoEm: null },
+      { caminho: `${HOME}/code/leapy-web`, nome: "leapy-web", git: false, onde: "code", modificadoEm: null },
+    ];
+    const html = renderTimeline(conversa([proposta(duas)]), reduzir(estado, { tipo: "lista-de-pasta", propostaId: "pp", lista: "curta" }));
+    expect(quantas(html, 'type="radio"')).toBe(2);
+    expect(html).not.toContain("Mostrar mais");
+    expect(html).toContain("Qual destas pastas?");
+    expect(html).toContain("Achei 2 pastas parecidas.");
+    expect(html).not.toContain("sem Git");
+    expect(html).not.toContain("cp-quando");
+  });
+
+  it("escapa o que vem da busca, do modelo e do sistema de arquivos", () => {
     const p = proposta([{ ...candidatas[0]!, nome: "<img src=x>" }]);
     const html = renderTimeline(conversa([{ ...p, payload: { ...(p.payload as PayloadPropostaPasta), motivo: "<script>x</script>" } }]), estado);
     expect(html).not.toContain("<img src=x>");
     expect(html).not.toContain("<script>");
+    const vazia = proposta([]);
+    const nada = renderTimeline(conversa([{ ...vazia, payload: { ...(vazia.payload as PayloadPropostaPasta), buscaTermo: "<img src=x onerror=alert(1)>" } }]), estado);
+    expect(nada).not.toContain("<img src=x");
+    const hostil = proposta([{ ...candidatas[0]!, caminho: '/Users/m/a"><svg onload=1>' }, candidatas[1]!]);
+    const lista = renderTimeline(conversa([hostil]), reduzir(estado, { tipo: "lista-de-pasta", propostaId: "pp", lista: "curta" }));
+    expect(lista).not.toContain("<svg onload");
   });
 });
 
 describe("registro da pasta aberta", () => {
   const autoria = { autor_tipo: "pessoa", autor_id: "p", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 } as const;
-  const registro: Mensagem = { tenantId: "t", id: "m1", conversaId: "c", turnoId: null, autoria, kind: "sistema", texto: `Pasta leapy aberta: ${HOME}/code/leapy/main-repos/leapy`, payload: { kind: "pasta_aberta", propostaId: "pp", agenteId: "a", pasta: `${HOME}/code/leapy/main-repos/leapy`, nome: "leapy", onde: "code/leapy/main-repos" }, confianca: "confiavel", parcial: false, criadoEm: AGORA };
+  const registro: Mensagem = { tenantId: "t", id: "m1", conversaId: "c", turnoId: null, autoria, kind: "sistema", texto: "Pasta do projeto aberta para o agente.", payload: { kind: "pasta_aberta", propostaId: "pp", agenteId: "a", pasta: `${HOME}/code/leapy/main-repos/leapy`, nome: "leapy", onde: "code/leapy/main-repos" }, confianca: "confiavel", parcial: false, criadoEm: AGORA };
 
   it("fica na conversa como uma linha, com o local e o Trocar para quem é dona", () => {
     const html = renderMensagem(registro, estado);
@@ -108,8 +132,22 @@ describe("registro da pasta aberta", () => {
     expect(html).not.toContain("msg-sistema");
   });
 
+  it("não some dentro de \"N avisos do sistema\" quando cai entre avisos", () => {
+    const aviso = (id: string): Mensagem => ({ ...registro, id, texto: `aviso ${id}`, payload: null });
+    const html = renderTimeline(conversa([], [aviso("a1"), aviso("a2"), registro, aviso("a3")]), estado);
+    expect(html).not.toContain("avisos do sistema");
+    expect(html).toContain("<b>leapy</b> aberta para Dev 1");
+  });
+
   it("quem não é dona do bot não vê o Trocar", () => {
     expect(renderMensagem(registro, { ...estado, sessao: { tenantId: "t", pessoaId: "outra" } })).not.toContain('data-act="abrir-workspace"');
+  });
+
+  it("escapa nome, local e caminho do registro", () => {
+    const html = renderMensagem({ ...registro, payload: { kind: "pasta_aberta", propostaId: "pp", agenteId: "a", pasta: '/Users/m/"><svg onload=1>', nome: "<b>x</b>", onde: "<i>y" } }, estado);
+    expect(html).not.toContain("<svg onload");
+    expect(html).not.toContain("<b>x</b>");
+    expect(html).not.toContain("<i>y");
   });
 });
 
@@ -129,5 +167,16 @@ describe("textos de apoio", () => {
     expect(mudouQuando(agora - 21 * DIA, agora, fuso)).toBe("há 3 semanas");
     expect(mudouQuando(agora - 130 * DIA, agora, fuso)).toBe("há 4 meses");
     expect(mudouQuando(agora - 400 * DIA, agora, fuso)).toBe("há mais de um ano");
+  });
+
+  it("o último uso nas bordas das faixas e com o relógio do Mac adiantado", () => {
+    const agora = Date.parse("2026-09-25T15:00:00Z");
+    expect(mudouQuando(agora - 13 * DIA, agora)).toBe("há 13 dias");
+    expect(mudouQuando(agora - 14 * DIA, agora)).toBe("há 2 semanas");
+    expect(mudouQuando(agora - 59 * DIA, agora)).toBe("há 8 semanas");
+    expect(mudouQuando(agora - 60 * DIA, agora)).toBe("há 2 meses");
+    expect(mudouQuando(agora - 364 * DIA, agora)).toBe("há 12 meses");
+    expect(mudouQuando(agora - 365 * DIA, agora)).toBe("há mais de um ano");
+    expect(mudouQuando(agora + 3 * DIA, agora)).toBe("mudou hoje");
   });
 });

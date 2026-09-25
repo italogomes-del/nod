@@ -51,11 +51,11 @@ export function dataHora(instante: number | string, fusoIana?: string): string {
 
 /** `rotulo` NÃO é escapado (aceita svg/span); `aria` dá nome acessível a botão só-ícone, onde o
  *  `title` sozinho não basta — várias combinações de leitor de tela não o anunciam. */
-export function botao(act: string, rotulo: string, extra: { id?: string; classe?: string; dados?: Record<string, string>; desabilitado?: boolean; titulo?: string; aria?: string } = {}): string {
+export function botao(act: string, rotulo: string, extra: { id?: string; classe?: string; dados?: Record<string, string>; desabilitado?: boolean; titulo?: string; aria?: string; expandido?: boolean } = {}): string {
   const dados = Object.entries(extra.dados ?? {})
     .map(([k, v]) => ` data-${k}="${esc(v)}"`)
     .join("");
-  return `<button type="button" class="bt ${extra.classe ?? ""}" data-act="${esc(act)}"${extra.id ? ` data-id="${esc(extra.id)}"` : ""}${dados}${extra.desabilitado ? " disabled" : ""}${extra.titulo ? ` title="${esc(extra.titulo)}"` : ""}${extra.aria ? ` aria-label="${esc(extra.aria)}"` : ""}>${rotulo}</button>`;
+  return `<button type="button" class="bt ${extra.classe ?? ""}" data-act="${esc(act)}"${extra.id ? ` data-id="${esc(extra.id)}"` : ""}${dados}${extra.desabilitado ? " disabled" : ""}${extra.titulo ? ` title="${esc(extra.titulo)}"` : ""}${extra.aria ? ` aria-label="${esc(extra.aria)}"` : ""}${extra.expandido !== undefined ? ` aria-expanded="${extra.expandido}"` : ""}>${rotulo}</button>`;
 }
 
 /** Texto multilinha escapado com quebras preservadas. */

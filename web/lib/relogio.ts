@@ -63,12 +63,12 @@ export function quandoCurto(instante: EpochMs, agora: number, fusoIana = "UTC"):
 
 /**
  * 'mudou hoje', 'mudou ontem', 'há 5 dias', 'há 3 semanas', 'há 4 meses' — o último uso de uma pasta no
- * card de pasta. definido em 2026-09-25: em dias de calendário no fuso da pessoa, como `quandoCurto`;
- * sem fuso, o do navegador.
+ * card de pasta, em dias de calendário no fuso dado, como `quandoCurto`. definido em 2026-09-25: dias até
+ * duas semanas, semanas até dois meses, meses até um ano — o bastante para separar a cópia em uso do clone
+ * esquecido, sem data exata.
  */
-export function mudouQuando(instante: EpochMs, agora: number, fusoIana?: string): string {
-  const fuso = fusoIana ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const dias = Math.max(0, Math.round((Date.parse(diaNoFuso(agora, fuso)) - Date.parse(diaNoFuso(instante, fuso))) / DIA));
+export function mudouQuando(instante: EpochMs, agora: number, fusoIana = "UTC"): string {
+  const dias = Math.max(0, Math.round((Date.parse(diaNoFuso(agora, fusoIana)) - Date.parse(diaNoFuso(instante, fusoIana))) / DIA));
   if (dias === 0) return "mudou hoje";
   if (dias === 1) return "mudou ontem";
   if (dias < 14) return `há ${dias} dias`;

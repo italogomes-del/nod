@@ -839,15 +839,26 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "abrir-workspace": (el) => { const a = botGerido(el.dataset.id); const c = conversaAtual(); if (a && api && a.ownerId === estado.sessao?.pessoaId && c && !c.salaId) abrirWorkspace(api, c.conversaId); },
   // Um clique: autoriza a pasta proposta e a tarefa retoma sozinha, sem a pessoa remandar a mensagem.
-  // definido em 2026-09-25 (card de pasta simplificado): com a lista aberta, a pasta é a opção marcada.
-  "permitir-pasta": (el) => agir(async () => {
+  // definido em 2026-09-25 (card de pasta simplificado): com a lista aberta, a pasta é a opção marcada. O
+  // segundo clique enquanto o primeiro corre é ignorado: com a lista, ele podia conceder OUTRA pasta.
+  "permitir-pasta": (el) => estado.ocupado ? undefined : agir(async () => {
     const alvo = conversaAtual();
     const pasta = el.dataset.pasta ?? el.closest("[data-proposta]")?.querySelector<HTMLInputElement>("input[data-pasta-de]:checked")?.value;
     if (!alvo || alvo.salaId || !pasta) return;
     await api!.permitirPasta(el.dataset.id ?? "", pasta);
     dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   }),
-  "lista-de-pasta": (el) => { if (el.dataset.id) dispatch({ tipo: "lista-de-pasta", propostaId: el.dataset.id, lista: el.dataset.lista === "todas" ? "todas" : "curta" }); },
+  // A re-renderização troca o botão clicado: o foco vai para a opção marcada (ao abrir a lista) ou volta
+  // para o "Mostrar mais/menos", para o teclado e o leitor de tela não caírem no começo da página.
+  "lista-de-pasta": (el) => {
+    const id = el.dataset.id;
+    if (!id) return;
+    const abrindo = !el.closest(".cp-links");
+    dispatch({ tipo: "lista-de-pasta", propostaId: id, lista: el.dataset.lista === "todas" ? "todas" : "curta" });
+    const card = document.querySelector(`[data-proposta="${CSS.escape(id)}"]`);
+    const alvo = abrindo ? card?.querySelector<HTMLElement>("input[data-pasta-de]:checked") : card?.querySelector<HTMLElement>('.cp-links [data-act="lista-de-pasta"]');
+    alvo?.focus({ preventScroll: true });
+  },
   anexar: () => document.getElementById("composer-arquivos")?.click(),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),

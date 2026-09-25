@@ -16,8 +16,8 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
   // definido em 2026-09-25 (card de pasta simplificado): o card some ao permitir; o registro fica na
-  // conversa como "leapy aberta para o Dev 1", com o caminho inteiro no texto para quem auditar. O texto
-  // começa pelo nome porque é ele que a prévia da barra lateral mostra até o agente responder.
+  // conversa como "leapy aberta para o Dev 1", desenhada do payload. O texto é fixo: ele vai ao histórico
+  // do plano como fala da pessoa (emitir-plano-turno.ts), e nome de pasta vem do disco, não dela.
   const escolhida = p.candidatas.find((c) => c.caminho === pasta);
   const nome = escolhida?.nome ?? pasta.split(/[\\/]/).filter(Boolean).pop() ?? pasta;
   const registro = await deps.repos.mensagens.criar({
@@ -25,7 +25,7 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
     turnoId: null,
     autoria,
     kind: "sistema",
-    texto: `Pasta ${nome} aberta: ${pasta}`,
+    texto: "Pasta do projeto aberta para o agente.",
     payload: { kind: "pasta_aberta", propostaId: proposta.id, agenteId: proposta.agenteId, pasta, nome, ...(escolhida?.onde !== undefined ? { onde: escolhida.onde } : {}) },
     confianca: "confiavel",
   });

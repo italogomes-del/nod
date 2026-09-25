@@ -21,8 +21,10 @@ export function rotasWorkspaces(w?: Workspaces, dentro?: DentroDeTx): Rota[] {
       const candidatas = proposta.payload.candidatas.map((x) => x.caminho);
       // Só um caminho que a própria busca ofereceu: a proposta não vira porta para uma pasta qualquer.
       if (candidatas.length > 0 && !candidatas.includes(pasta)) throw new ErroDeDominio("nao_permitido");
-      await w.escolher(c.escopo, proposta.conversaId, pasta);
-      const r = await dentro(c.escopo, (deps) => executar(deps, retomarAposPasta, { proposta, pasta }));
+      // definido em 2026-09-25: o registro e a retomada citam a pasta CONCEDIDA (canônica, como escolher a
+      // resolveu), não o texto cru do corpo — sem candidatas, "a/../.." chegaria assim à conversa.
+      const { projeto } = await w.escolher(c.escopo, proposta.conversaId, pasta);
+      const r = await dentro(c.escopo, (deps) => executar(deps, retomarAposPasta, { proposta, pasta: projeto.pasta }));
       c.json(200, { ok: true, ids: { proposta: proposta.id, ...(r.turnoId ? { turnoRetomada: r.turnoId } : {}) } });
     } },
     { metodo: "GET", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) { c.json(200, { disponivel: Boolean(w), vinculo: w ? await w.consultar(c.escopo, c.params.id!) : null }); } },

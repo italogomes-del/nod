@@ -6,8 +6,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
  * definido em 2026-09-18: o produto descobre a pasta do projeto em vez de mandar a pessoa procurar
  * no Finder — o agente chutava "~/Projetos/nod" para um repositório que mora em "~/code/nod".
  * A varredura lê SÓ nomes de diretório, nunca conteúdo de arquivo, e nunca sai da pasta pessoal.
- */
-/**
+ *
  * definido em 2026-09-25 (card de pasta simplificado): `onde` é a pasta-mãe relativa à base ("" quando
  * mora direto nela), para o card mostrar "code › leapy" e não o caminho absoluto; `modificadoEm` é o uso
  * mais recente que um stat enxerga, para ordenar homônimas e dizer "mudou hoje". Só metadado: nenhum
@@ -26,6 +25,9 @@ export const PROFUNDIDADE_MAX = 4;
 export const ENTRADAS_MAX = 20_000;
 export const MS_MAX = 2_500;
 export const RESULTADOS_MAX = 8;
+/** Quantas candidatas empatadas no corte têm o último uso lido: um termo curto ("app") casa milhares. */
+export const USO_LIDOS_MAX = 64;
+const DIA_MS = 86_400_000;
 
 /** Sem acento e sem caixa: "Relatório" e "relatorio" devem casar. */
 function normalizar(s: string): string {
@@ -71,7 +73,7 @@ export async function buscarPastas(termo: string, opcoes: { podeAutorizar: (cami
         const git = await existe(join(caminho, ".git"));
         const marca = git || (await Promise.all(MARCAS_PROJETO.map(m => existe(join(caminho, m))))).some(Boolean);
         const onde = relative(raiz, dir).split(sep).join("/");
-        achadas.set(caminho, { caminho, nome: item.name, git, onde, modificadoEm: await ultimaMudanca(caminho, git), nivel, pontuacao: pontuacaoNome + (git ? 25 : 0) + (marca ? 10 : 0) });
+        achadas.set(caminho, { caminho, nome: item.name, git, onde, modificadoEm: null, nivel, pontuacao: pontuacaoNome + (git ? 25 : 0) + (marca ? 10 : 0) });
       }
     }
     if (truncado) break;
@@ -80,10 +82,21 @@ export async function buscarPastas(termo: string, opcoes: { podeAutorizar: (cami
   }
 
   // definido em 2026-09-25: entre candidatas de mesma relevância, a usada por último vem antes — a cópia em
-  // que a pessoa trabalha, não o clone esquecido. Sem uso para comparar, a mais rasa vence:
-  // ~/code/nod antes de ~/code/velho/backup/nod.
-  const candidatas = [...achadas.values()].sort((a, b) =>
-    b.pontuacao - a.pontuacao || (b.modificadoEm ?? 0) - (a.modificadoEm ?? 0) || a.nivel - b.nivel || a.caminho.length - b.caminho.length);
+  // que a pessoa trabalha, não o clone esquecido. O uso conta por DIA: no mesmo dia, a mais rasa vence
+  // (~/code/nod antes de ~/code/velho/backup/nod); comparado ao milissegundo, a profundidade nunca decidia.
+  // O último uso é lido DEPOIS da varredura, só para quem ainda disputa as RESULTADOS_MAX vagas e com teto
+  // de USO_LIDOS_MAX: dentro do laço, cada homônima gastava o orçamento de tempo.
+  const porRelevancia = [...achadas.values()].sort((a, b) => b.pontuacao - a.pontuacao || a.nivel - b.nivel);
+  const corte = porRelevancia[RESULTADOS_MAX - 1]?.pontuacao ?? 0;
+  const fim = agora();
+  await Promise.all(porRelevancia.filter(c => c.pontuacao >= corte).slice(0, USO_LIDOS_MAX).map(async (c) => {
+    const t = await ultimaMudanca(c.caminho, c.git);
+    // Relógio adiantado ou arquivo extraído com data futura não ganha a disputa: conta como agora.
+    c.modificadoEm = t === null ? null : Math.min(t, fim);
+  }));
+  const dia = (c: Candidata) => c.modificadoEm === null ? -1 : Math.floor(c.modificadoEm / DIA_MS);
+  const candidatas = porRelevancia.sort((a, b) =>
+    b.pontuacao - a.pontuacao || dia(b) - dia(a) || a.nivel - b.nivel || a.caminho.length - b.caminho.length);
   return { candidatas: candidatas.slice(0, RESULTADOS_MAX), truncado: truncado || candidatas.length > RESULTADOS_MAX };
 }
 
@@ -95,12 +108,15 @@ function ordenarPorProbabilidade(caminhos: string[]): string[] {
   return [...caminhos].sort((a, b) => peso(a) - peso(b));
 }
 
-/** A própria pasta e, no repositório, o índice e o HEAD do Git: o que muda quando alguém trabalha nela. */
+/**
+ * No repositório, o índice e o HEAD do Git: mudam quando alguém trabalha nele. A data da própria pasta é
+ * só o plano B (pasta comum, worktree com `.git` em arquivo): o Finder a muda ao gravar um .DS_Store.
+ */
 async function ultimaMudanca(caminho: string, git: boolean): Promise<number | null> {
-  const alvos = git ? [caminho, join(caminho, ".git", "index"), join(caminho, ".git", "HEAD")] : [caminho];
-  const tempos = await Promise.all(alvos.map(async (a) => { try { return (await stat(a)).mtimeMs; } catch { return null; } }));
-  const vistos = tempos.filter((t): t is number => t !== null);
-  return vistos.length > 0 ? Math.round(Math.max(...vistos)) : null;
+  const mtime = async (a: string) => { try { return (await stat(a)).mtimeMs; } catch { return null; } };
+  const doGit = git ? (await Promise.all([mtime(join(caminho, ".git", "index")), mtime(join(caminho, ".git", "HEAD"))])).filter((t): t is number => t !== null) : [];
+  const t = doGit.length > 0 ? Math.max(...doGit) : await mtime(caminho);
+  return t === null ? null : Math.round(t);
 }
 
 async function existe(caminho: string): Promise<boolean> {

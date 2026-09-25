@@ -333,9 +333,12 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
 /** definido em 2026-09-24: a partir de quantas linhas de sistema SEGUIDAS a conversa as recolhe. */
 const AVISOS_PARA_RECOLHER = 3;
 
-/** Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar tem botões e fica à vista. */
+/**
+ * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
+ * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista.
+ */
 function linhaDeSistema(m: Mensagem): boolean {
-  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar") || m.kind === "rotina_execucao";
+  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta") || m.kind === "rotina_execucao";
 }
 
 /**

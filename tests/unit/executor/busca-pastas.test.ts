@@ -81,6 +81,8 @@ it("limita o número de resultados e marca truncado", async () => {
   const r = await buscarPastas("alvo", { ...tudoAutorizavel, base: raiz });
   expect(r.candidatas).toHaveLength(RESULTADOS_MAX);
   expect(r.truncado).toBe(true);
+  // O último uso é lido depois da varredura, mas toda candidata devolvida o traz.
+  expect(r.candidatas.every(c => typeof c.modificadoEm === "number")).toBe(true);
 });
 
 it("devolve parcial quando estoura o orçamento de tempo, sem travar", async () => {
@@ -133,14 +135,42 @@ it("entre homônimas do mesmo tipo, a usada por último vem primeiro", async () 
   expect(r.candidatas[0]!.modificadoEm).toBe(hoje.getTime());
 });
 
-it("sem uso para desempatar, a mais rasa vence", async () => {
+it("no repositório, o índice do Git conta como uso mesmo com a pasta parada", async () => {
+  const raiz = await base();
+  const a = join(raiz, "a", "proj");
+  const b = join(raiz, "b", "proj");
+  for (const p of [a, b]) await mkdir(join(p, ".git"), { recursive: true });
+  await writeFile(join(b, ".git", "index"), "");
+  const velho = new Date("2026-01-01T00:00:00Z");
+  const medio = new Date("2026-06-01T00:00:00Z");
+  const novo = new Date("2026-09-25T12:00:00Z");
+  for (const p of [a, join(a, ".git")]) await utimes(p, medio, medio);
+  for (const p of [b, join(b, ".git")]) await utimes(p, velho, velho);
+  await utimes(join(b, ".git", "index"), novo, novo);
+  const r = await buscarPastas("proj", { ...tudoAutorizavel, base: raiz });
+  expect(r.candidatas.map(c => c.caminho)).toEqual([b, a]);
+  expect(r.candidatas[0]!.modificadoEm).toBe(novo.getTime());
+});
+
+it("usadas no mesmo dia, a mais rasa vence mesmo mexida antes", async () => {
   const raiz = await base();
   const rasa = join(raiz, "code", "nod");
   const funda = join(raiz, "code", "velho", "backup", "nod");
   for (const p of [rasa, funda]) await mkdir(p, { recursive: true });
-  const mesmo = new Date("2026-09-01T12:00:00Z");
-  for (const p of [rasa, funda]) await utimes(p, mesmo, mesmo);
+  await utimes(rasa, new Date("2026-09-01T08:00:00Z"), new Date("2026-09-01T08:00:00Z"));
+  await utimes(funda, new Date("2026-09-01T18:00:00Z"), new Date("2026-09-01T18:00:00Z"));
   expect((await buscarPastas("nod", { ...tudoAutorizavel, base: raiz })).candidatas.map(c => c.caminho)).toEqual([rasa, funda]);
+});
+
+it("data no futuro conta como agora, não como vitória garantida", async () => {
+  const raiz = await base();
+  await mkdir(join(raiz, "futuro", "proj"), { recursive: true });
+  const daqui = new Date(Date.now() + 400 * 86_400_000);
+  await utimes(join(raiz, "futuro", "proj"), daqui, daqui);
+  const antes = Date.now();
+  const [c] = (await buscarPastas("proj", { ...tudoAutorizavel, base: raiz })).candidatas;
+  expect(c!.modificadoEm).toBeGreaterThanOrEqual(antes);
+  expect(c!.modificadoEm).toBeLessThanOrEqual(Date.now());
 });
 
 it("orçamento de entradas é finito", () => {
