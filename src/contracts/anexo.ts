@@ -1,5 +1,5 @@
 /**
- * Anexo de mensagem (ADR-045): arquivo que a pessoa manda na conversa para o MODELO ler naquele turno.
+ * Anexo de mensagem (ADR-046): arquivo que a pessoa manda na conversa para o MODELO ler naquele turno.
  * Não vai para o computador do bot nem para a pasta autorizada. Os bytes ficam no servidor; o plano
  * leva só estes metadados e o driver baixa o conteúdo pela rota interna com o token do turno.
  */

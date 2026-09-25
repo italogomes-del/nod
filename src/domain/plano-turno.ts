@@ -98,7 +98,7 @@ export type EntradaPlano = {
   inventario: Inventario;
   executor: Executor;
   sessaoCli: string | null;
-  /** ADR-045: metadados dos anexos da mensagem do turno, lidos pelo caso de uso. */
+  /** ADR-046: metadados dos anexos da mensagem do turno, lidos pelo caso de uso. */
   anexos?: readonly AnexoMeta[];
   pessoaNome: string;
   colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];

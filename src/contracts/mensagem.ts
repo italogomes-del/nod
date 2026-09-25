@@ -62,6 +62,6 @@ export type Mensagem = {
   /** Turno interrompido no meio do streaming deixa a fala parcial marcada (ADR-010). */
   parcial: boolean;
   criadoEm: EpochMs;
-  /** ADR-045: arquivos que a pessoa mandou com esta mensagem (só metadados; bytes por rota própria). */
+  /** ADR-046: arquivos que a pessoa mandou com esta mensagem (só metadados; bytes por rota própria). */
   anexos?: AnexoMeta[];
 };

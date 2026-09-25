@@ -15,7 +15,7 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 export type EntradaEnviarMensagem = {
   conversaId: string;
   texto: string;
-  /** ADR-045: ids de anexos já enviados (soltos) desta conversa. Com anexo, o texto pode vir vazio. */
+  /** ADR-046: ids de anexos já enviados (soltos) desta conversa. Com anexo, o texto pode vir vazio. */
   anexos?: readonly string[];
   /** Só para conversa de SALA (a própria já sabe o agente): quem responde, decidido por postarNaSala (L7). */
   agenteId?: string;

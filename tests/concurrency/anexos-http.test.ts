@@ -15,11 +15,11 @@ import { limparPessoaE2E } from "./limpeza-e2e.ts";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7]);
 
 /**
- * Anexos pela HTTP de verdade (ADR-045): upload cru com x-nod-nome, envio com os ids, o plano do turno
+ * Anexos pela HTTP de verdade (ADR-046): upload cru com x-nod-nome, envio com os ids, o plano do turno
  * com os metadados e o driver baixando os bytes pela rota interna com o token DO TURNO — e só os dele.
  * Mora em tests/concurrency porque o servidor completo commita; a limpeza é por pessoa.
  */
-describeIntegracao("anexos no chat pela HTTP (ADR-045)", () => {
+describeIntegracao("anexos no chat pela HTTP (ADR-046)", () => {
   let srv: ServidorCompleto;
   const baixados: { plano: PlanoTurno; bytes: (number[] | null)[]; alheio: number }[] = [];
   let idAlheio = "00000000-0000-4000-8000-000000000000";

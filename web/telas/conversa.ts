@@ -89,7 +89,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
  * esquerda (cinza). Os demais kinds (sistema, handoff, negação, rotina…) seguem como linhas discretas.
  * `mostrarAutor` liga o nome do bot dentro do balão — útil em salas com vários agentes.
  */
-/** ADR-045: arquivos que a pessoa mandou, acima do balão. URL escopada pelo tenant da sessão. */
+/** ADR-046: arquivos que a pessoa mandou, acima do balão. URL escopada pelo tenant da sessão. */
 function anexosDe(m: Mensagem, estado: Estado): string {
   const tenant = estado.sessao?.tenantId;
   if (!m.anexos?.length || !tenant) return "";
@@ -418,7 +418,7 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
 
 /**
  * Composer criado UMA vez por conversa (main.ts não o regrava): textarea + enviar. Com `anexos`
- * (ADR-045, só conversa própria) ganha o clipe, a fila de arquivos e o input escondido; a fila é
+ * (ADR-046, só conversa própria) ganha o clipe, a fila de arquivos e o input escondido; a fila é
  * preenchida por web/lib/anexos.ts direto no DOM, porque o composer não se regrava.
  *
  * definido em 2026-09-24 (emenda da ADR-045): `composer-pergunta` recebe a faixa, os modos e a citação

@@ -647,7 +647,7 @@ async function enviarComposer(): Promise<void> {
   });
 }
 
-// ---- anexos (ADR-045) ----------------------------------------------------------------------------
+// ---- anexos (ADR-046) ----------------------------------------------------------------------------
 // A fila vive fora do reducer: são File e objectURL do navegador, não estado da API. Por conversa,
 // para o rascunho de anexos sobreviver a ir e voltar entre conversas como o texto sobrevive.
 const anexosPendentes = new Map<string, ItemAnexo[]>();

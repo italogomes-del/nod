@@ -335,7 +335,7 @@ body { background: #fcfdff; }
 .computador-tecnico{font-family:var(--fm);font-size:12px;line-height:1.8;margin-top:6px!important}
 .computador-atividade .tag{margin-left:4px}
 
-/* ---- anexos no chat (ADR-045; mockup de 2026-09-24) ---- */
+/* ---- anexos no chat (ADR-046; mockup de 2026-09-24) ---- */
 .stage { position: relative; }
 .composer .box.com-anexos { flex-wrap: wrap; align-items: center; padding-left: 8px; }
 .composer .clipe { width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: #41495c; display: grid; place-items: center; flex: none; cursor: pointer; }

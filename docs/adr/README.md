@@ -54,3 +54,4 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-043](adr-043-ciclo-de-vida-de-rotinas-pelo-agente.md) | O agente cuida do ciclo de vida da rotina, não só do nascimento | emenda ADR-011, ADR-033, ADR-034 |
 | [ADR-044](adr-044-acesso-em-um-clique-tambem-na-rotina.md) | Acesso em um clique, também na rotina; retomada de rotina continua rotina; emendas: a rotina se trava sozinha (pré-voo, um card por agente e app) e nasce com o acesso (acessos declarados, concedidos ao confirmar) | emenda ADR-013, ADR-035, ADR-043 |
 | [ADR-045](adr-045-queda-do-mac-vira-um-aviso.md) | A queda do Mac vira um aviso, não um card por turno | emenda ADR-007, ADR-010, ADR-011, ADR-017 |
+| [ADR-046](adr-046-anexos-no-chat-vao-para-o-modelo.md) | Anexos no chat vão para o modelo (era ADR-045 até 24/09: o número já pertencia à queda do Mac) | emenda ADR-012, ADR-021 |

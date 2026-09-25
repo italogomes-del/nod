@@ -55,7 +55,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       },
     },
     {
-      // ADR-045: o driver baixa os bytes de um anexo DESTE turno. O plano em memória do token diz quais
+      // ADR-046: o driver baixa os bytes de um anexo DESTE turno. O plano em memória do token diz quais
       // ids o turno pode ler; qualquer outro é 404, mesmo sendo da mesma pessoa.
       metodo: "GET",
       padrao: /^\/anexos\/(?<aid>[^/]+)$/,
