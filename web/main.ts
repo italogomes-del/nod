@@ -6,9 +6,12 @@ import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
+import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { criarAvisador } from "./lib/avisador.ts";
+import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
@@ -71,6 +74,29 @@ function painelOculto(): boolean {
   try { return localStorage.getItem(CHAVE_PAINEL_OCULTO) === "1"; } catch { return false; }
 }
 
+/**
+ * Avisos (definido em 2026-09-24, "aviso no Mac"): depois de cada leitura de "Sua vez" o avisador decide
+ * se chama a pessoa (web/lib/avisador.ts) e o canal mostra — notificação do macOS e Dock no app,
+ * Notification API e título da aba no navegador (web/lib/canal-avisos.ts).
+ */
+const canalAvisos = criarCanalAvisos((alvo) => abrirAlvoDoAviso(alvo), () => { if (estado.sessao) render(); });
+const avisador = criarAvisador({
+  relogio: { agora: () => Date.now(), esperar: (ms, fn) => { const t = window.setTimeout(fn, ms); return () => window.clearTimeout(t); } },
+  temFoco: () => document.hasFocus(),
+  ligado: () => canalAvisos.ligado(),
+  pessoaId: () => estado.sessao?.pessoaId ?? null,
+  mostrar: (aviso) => canalAvisos.mostrar(aviso),
+});
+/** A última leitura de "Sua vez" foi com a janela atrás (`?ver=0`): ao voltar, relê para carimbar vista_em. */
+let suaVezSemVer = false;
+/** A decisora designada que não é dona não recebe frames (ADR-016): a cada 4 ticks (60 s) "Sua vez" é relida. */
+const TICKS_POR_RELEITURA = 4;
+
+/** A janela está na frente da pessoa: visível E com foco. */
+function naFrente(): boolean {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
 function dispatch(acao: Acao): void {
   estado = reduzir(estado, acao);
   render();
@@ -86,6 +112,8 @@ function erroDe(e: unknown): { codigo: string; mensagem: string; correlationId?:
 
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
 async function agir(fn: () => Promise<void>): Promise<void> {
+  // O que nasce do próprio clique ela já sabe: nenhum aviso nos próximos 5 s (web/lib/avisador.ts).
+  avisador.acaoPropria();
   dispatch({ tipo: "erro", erro: null });
   dispatch({ tipo: "ocupado", valor: true });
   try {
@@ -109,7 +137,13 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "frota") return { tipo: "hidratar-frota", frota: await api.frota() };
   if (q === "inventario") return { tipo: "hidratar-inventario", inventario: await api.inventario() };
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
-  if (q === "sua-vez") return { tipo: "hidratar-sua-vez", suaVez: await api.suaVez() };
+  if (q === "sua-vez") {
+    // definido em 2026-09-24 ("aviso no Mac"): atrás, a leitura serve ao Dock e ao aviso, e não conta como vista.
+    const ver = naFrente();
+    const suaVez = await api.suaVez(ver);
+    suaVezSemVer = !ver;
+    return { tipo: "hidratar-sua-vez", suaVez };
+  }
   if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
   if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
@@ -136,6 +170,7 @@ async function reidratar(): Promise<void> {
       try {
         const acao = await buscar(q);
         if (acao) estado = reduzir(estado, acao);
+        if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
       } catch (e) {
         if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
       }
@@ -301,7 +336,7 @@ function renderPrincipal(): void {
       corpo = renderRelatos(estado);
       break;
     case "espaco":
-      corpo = renderEspaco(estado, ambienteBanco);
+      corpo = renderEspaco(estado, ambienteBanco, canalAvisos.estado());
       break;
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
@@ -444,6 +479,9 @@ function render(): void {
 
 async function iniciarSessao(escopo: Escopo): Promise<void> {
   api = criarApi(escopo);
+  // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
+  avisador.reiniciar();
+  canalAvisos.contador(0);
   ambienteBanco = await api.ambiente();
   dispatch({ tipo: "sessao", escopo });
   live?.disconnect();
@@ -460,7 +498,15 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
 
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
-  window.setInterval(() => dispatch({ tipo: "tick", agora: Date.now() }), 15_000);
+  let ticks = 0;
+  window.setInterval(() => {
+    ticks += 1;
+    // definido em 2026-09-24 ("aviso no Mac"): a decisora designada que não é dona não recebe frame
+    // decisao.* (o outbox manda à dona); sem isto o pedido dela só aparecia — e só avisava — quando
+    // outra coisa relesse "Sua vez".
+    if (ticks % TICKS_POR_RELEITURA === 0 && estado.sessao) estado = reduzir(estado, { tipo: "invalidar", quais: ["sua-vez"] });
+    dispatch({ tipo: "tick", agora: Date.now() });
+  }, 15_000);
   const url = new URL(window.location.href);
   if (url.searchParams.get("entrar") === "recusado") {
     entrada = { ...entrada, recusado: true };
@@ -486,6 +532,8 @@ async function boot(): Promise<void> {
 // Ações (delegação por data-act e data-form). A web só pede; o servidor decide.
 
 function navegar(tela: Tela): void {
+  // O menu "Avisos no Mac" muda a preferência sem passar pela página: "Seu espaço" relê ao abrir.
+  if (tela.tipo === "espaco") void canalAvisos.reler();
   dispatch({ tipo: "navegar", tela });
   if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
@@ -528,6 +576,20 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
     }); return;
   }
   executar(() => acao === "fixar" ? api!.fixar(a.id, !a.fixado) : acao === "nao-lido" ? api!.organizarAgente(a.id, { naoLido: !a.naoLido }) : acao === "restaurar" ? api!.restaurarAgente(a.id) : api!.ocultar(a.id, false));
+}
+
+/**
+ * Clique no aviso: um pedido abre a conversa dele (ou a sala); vários, ou a conversa de outra pessoa
+ * (a decisora designada não a lê), abrem "Sua vez".
+ */
+function abrirAlvoDoAviso(alvo: AlvoAviso): void {
+  if (!estado.sessao) return;
+  const conversaId = alvo.tipo === "conversa" ? alvo.conversaId : null;
+  const agente = estado.frota?.agentes.find((a) => a.conversaId === conversaId && a.ownerId === estado.sessao?.pessoaId);
+  const sala = estado.salas.find((s) => s.sala.conversaId === conversaId);
+  if (agente) navegar({ tipo: "conversa", conversaId: agente.conversaId, agenteId: agente.id });
+  else if (sala) navegar({ tipo: "sala", salaId: sala.sala.id, conversaId: sala.sala.conversaId });
+  else navegar({ tipo: "sua-vez" });
 }
 
 function botGerido(id: string | undefined): BotGerido | undefined {
@@ -815,6 +877,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
   "ir-memoria": (el) => navegar({ tipo: "memoria", agenteId: el.dataset.id ?? "" }),
   "fechar-erro": () => dispatch({ tipo: "erro", erro: null }),
+  // Sem agir(): no navegador, o pedido de permissão precisa sair direto do clique.
+  "alternar-avisos": () => canalAvisos.alternar(),
   "fechar-faixa": () => dispatch({ tipo: "faixa", faixa: null }),
   enviar: () => enviarComposer(),
   "sondar-inventario": () => agir(async () => dispatch({ tipo: "hidratar-inventario", inventario: await api!.inventario(true) })),
@@ -1174,6 +1238,17 @@ document.addEventListener("mousedown", (ev) => {
   if (caixa) caixa.hidden = true;
   ta.focus();
 });
+
+// definido em 2026-09-24 ("aviso no Mac"): a leitura feita com a janela atrás não carimbou vista_em
+// (?ver=0); quando a pessoa volta, "Sua vez" é relida já contando como vista. O menu do app também pode
+// ter mudado a preferência dos avisos.
+function aoVoltarParaFrente(): void {
+  if (!naFrente()) return;
+  void canalAvisos.reler();
+  if (suaVezSemVer && estado.sessao) dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
+}
+window.addEventListener("focus", aoVoltarParaFrente);
+document.addEventListener("visibilitychange", aoVoltarParaFrente);
 
 void boot();
 

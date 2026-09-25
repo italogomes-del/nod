@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { criarRotasSuaVez } from "../../src/adapters/http/rotas/sua-vez.ts";
+import type { SuaVezDto } from "../../src/contracts/api.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
@@ -10,6 +12,7 @@ import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../../web/lib/
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
@@ -179,6 +182,40 @@ describeIntegracao("Sua vez (listar-sua-vez + reabrir-decisao)", () => {
       // E é o que separa os dois rótulos de expiração: a aberta, agora vista, vence como 'com alguém ciente'.
       const vencidas = await repos.decisoes.vencerPendentes(agora + 2 * DIA);
       expect(vencidas.map((v) => v.desfecho?.tipo)).toEqual(["expirou_com_alguem_ciente"]);
+    });
+  });
+
+  // definido em 2026-09-24 ("aviso no Mac"): a janela escondida ou fora de foco lê a fila para o Dock e o
+  // aviso, mas ninguém viu — `?ver=0` não carimba, senão "ninguém chegou a ver" viraria "alguém viu".
+  it("HTTP: GET sua-vez?ver=0 não carimba vista_em (nem na gêmea); sem o parâmetro, listar continua sendo ver", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const srv = await servidorDeTeste(criarRotasSuaVez(async (escopo, fn) => {
+        await vincularEscopo(trx, escopo);
+        return fn(deps(trx, escopo, () => agora));
+      }));
+      try {
+        const marlon = await srv.entrar("marlon");
+        const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+        const pergunta = await repos.decisoes.criar({ tipo: "pergunta", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "qual CNPJ?" });
+        const acesso = await repos.decisoes.criar({ tipo: "acesso", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "ler contatos" });
+        const gemea = await repos.decisoes.criar({ tipo: "acesso", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "ler contatos" });
+
+        const atras = await srv.chamar(marlon, "GET", "sua-vez?ver=0");
+        expect(atras.status).toBe(200);
+        const fila = (await atras.json()) as SuaVezDto;
+        expect(fila.itens.map((i) => [i.decisao.id, i.gemeas, i.decisao.vistaEm])).toEqual([
+          [pergunta?.id, [], null],
+          [acesso?.id, [gemea?.id], null],
+        ]);
+        for (const id of [pergunta?.id, acesso?.id, gemea?.id]) expect((await repos.decisoes.buscar(id ?? ""))?.vistaEm).toBeNull();
+
+        const naFrente = (await (await srv.chamar(marlon, "GET", "sua-vez")).json()) as SuaVezDto;
+        expect(naFrente.itens.map((i) => i.decisao.vistaEm)).toEqual([new Date(agora).toISOString(), new Date(agora).toISOString()]);
+        expect((await repos.decisoes.buscar(gemea?.id ?? ""))?.vistaEm).not.toBeNull();
+      } finally {
+        await srv.close();
+      }
     });
   });
 

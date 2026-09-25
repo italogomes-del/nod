@@ -162,6 +162,13 @@ O proxy usa o runtime do app com ELECTRON_RUN_AS_NODE somente em seu mcp.json.
 Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.mjs` testa JSON-RPC
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
 
+Definido em 2026-09-24 (aviso no Mac): a janela web carrega `preload-web.cjs`, que expõe SÓ
+`window.nodDesktop` (avisar, contador, preferências); a tela de conexão carrega `preload.cjs`
+(`window.nod`, com `conectar`). Nunca dê o segundo à página remota. A página continua sem permissão
+nenhuma (`proteger`): o aviso sai do processo principal, que confere remetente e argumentos
+(`desktop/avisos-mac.ts`). `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`)
+confere as duas pontes sem empacotar.
+
 ## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
 
 `harness` identifica o driver; `executor` continua indicando `local`/`catcher` nos eventos existentes.
