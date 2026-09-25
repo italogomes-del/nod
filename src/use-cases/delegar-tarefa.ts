@@ -1,9 +1,12 @@
 import type { Mensagem } from "../contracts/mensagem.ts";
+import type { PlanoTurno } from "../contracts/plano-turno.ts";
+import type { LinhaTrilha } from "../db/schema/trilha.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { entradaDaDelegacao } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, resolverAlvo } from "./apoio-l7.ts";
+import { MENSAGENS_DO_PLANO } from "./emitir-plano-turno.ts";
 import type { Deps } from "./tipos.ts";
 
 /** definido em 2026-09-24: classe de procuração que autoriza delegar tarefa entre donos diferentes (ADR-025/046). */
@@ -30,18 +33,44 @@ async function pedidoDaPessoa(deps: Deps, turnoId: string, remetenteId: string):
   return { turno, mensagens: [principal, ...outras].sort((a, b) => a.criadoEm - b.criadoEm) };
 }
 
+/** Chamada que trouxe conteúdo de fora: conector, computador ou pasta (ADR-026). */
+const deFora = (l: LinhaTrilha): boolean => l.kind === "tool_call" && (l.conectorId !== null || /^(computador|workspace)_/.test(l.ferramenta));
+
+/** definido em 2026-09-24: teto da leitura da conversa inteira; bateu no teto = não dá para provar, contamina. */
+const TETO_CONVERSA = 500;
+
 /**
- * O turno do remetente já leu conteúdo de fora antes de delegar? (definido em 2026-09-24, revisão da
- * ADR-046) Conector, computador e pasta devolvem conteúdo não confiável (ADR-026), e o `tarefa`/
- * `contexto` que o remetente escreve depois disso pode carregar o que ele leu — "resume meus e-mails e
- * pede ao Dev 1 para responder" levaria texto de e-mail ao Dev 1 com a autoridade da pessoa. Não recusa:
- * a tarefa nasce `nao_confiavel`, com o catálogo reduzido (leitura + ferramentas nod, pedir_acesso
- * incluído) e sem "Sempre permitir". A trilha é a fonte porque é o registro de toda chamada, gravado
- * pelo servidor (chamar-ferramenta.ts e a rota interna do computador e da pasta).
+ * O que o remetente tinha no contexto quando delegou já inclui conteúdo de fora? (definido em
+ * 2026-09-24, revisão da ADR-046) O `tarefa`/`contexto` que ele escreve pode carregar o que leu — "lê
+ * meus e-mails" num turno e "pede ao Dev 1 pra resolver isso" no seguinte levaria texto de e-mail ao
+ * Dev 1 com a autoridade da pessoa. Não recusa: a tarefa nasce `nao_confiavel` (catálogo reduzido,
+ * pedir_acesso incluído, sem "Sempre permitir"). Fail-closed em cada dúvida:
+ *  - sem o plano do turno → contamina (não se sabe o que ele viu);
+ *  - pasta autorizada no plano → contamina: Read/Grep/Glob nativos do harness nem passam pelo nod;
+ *  - chamada de fora na trilha DESTE turno → contamina;
+ *  - sessão retomada (--resume): não há registro de onde ela começou, então vale a conversa INTEIRA —
+ *    qualquer chamada de fora de qualquer turno, ou qualquer mensagem não confiável; conversa maior que
+ *    o teto contamina;
+ *  - sessão nova: a janela de histórico do plano (MENSAGENS_DO_PLANO) — mensagem não confiável, ou
+ *    chamada de fora do turno que produziu uma das falas.
  */
-async function remetenteLeuConteudoDeFora(deps: Deps, turnoId: string): Promise<boolean> {
-  const linhas = await deps.repos.trilha.doTurno(turnoId);
-  return linhas.some((l) => l.kind === "tool_call" && (l.conectorId !== null || /^(computador|workspace)_/.test(l.ferramenta)));
+async function remetenteViuConteudoDeFora(deps: Deps, turno: Turno, plano: PlanoTurno | undefined): Promise<boolean> {
+  if (!plano || plano.turnoId !== turno.id) return true;
+  if (plano.workspaceId || plano.workspacePastas) return true;
+  if ((await deps.repos.trilha.doTurno(turno.id)).some(deFora)) return true;
+  const retomada = plano.entrada.sessaoCli !== null;
+  const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, retomada ? TETO_CONVERSA : MENSAGENS_DO_PLANO);
+  // O handoff que o PRÓPRIO remetente escreveu numa delegação anterior é nao_confiavel por ser fala de
+  // modelo, mas não traz nada de fora que ele já não tivesse: se trouxesse, a trilha daquele turno acusa.
+  const proprioHandoff = (m: Mensagem) => m.kind === "handoff" && m.autoria.autor_tipo === "agente" && m.autoria.autor_id === turno.agenteId;
+  if (mensagens.some((m) => m.confianca === "nao_confiavel" && !proprioHandoff(m))) return true;
+  let turnoIds = mensagens.flatMap((m) => (m.turnoId ? [m.turnoId] : []));
+  if (retomada) {
+    const turnos = await deps.repos.turnos.listarDaConversa(turno.conversaId, TETO_CONVERSA);
+    if (mensagens.length >= TETO_CONVERSA || turnos.length >= TETO_CONVERSA) return true;
+    turnoIds = turnos.map((t) => t.id);
+  }
+  return (await deps.repos.trilha.doTurnos([...new Set(turnoIds)])).some(deFora);
 }
 
 /**
@@ -59,8 +88,8 @@ export const delegarTarefa: CasoNod<Deps, "delegar_tarefa"> = async (deps, input
   const tarefa = input.tarefa.trim();
   if (tarefa === "") throw new ErroDeDominio("texto_vazio");
   const contexto = input.contexto?.trim() || null;
-  const { mensagens } = await pedidoDaPessoa(deps, input.turnoId, remetente.id);
-  const confianca = (await remetenteLeuConteudoDeFora(deps, input.turnoId)) ? "nao_confiavel" : "confiavel";
+  const { turno: turnoRemetente, mensagens } = await pedidoDaPessoa(deps, input.turnoId, remetente.id);
+  const confianca = (await remetenteViuConteudoDeFora(deps, turnoRemetente, input.plano)) ? "nao_confiavel" : "confiavel";
   const alvo = await resolverAlvo(deps.repos, remetente, input.agente);
   await autorizarAlvo(deps.repos, remetente, alvo, CLASSE_DELEGAR_TAREFA);
   const conversaAlvo = await deps.repos.conversas.buscarPropriaDoAgente(alvo.id);

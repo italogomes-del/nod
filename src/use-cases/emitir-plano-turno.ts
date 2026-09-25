@@ -28,6 +28,13 @@ export type EntradaEmitirPlano = {
   harnessPreferido?: IdHarness | null;
 };
 
+/**
+ * definido em 2026-09-16: sem --resume, o modelo vê as últimas HISTORICO_NO_PLANO falas, tiradas das
+ * MENSAGENS_DO_PLANO mais recentes. Exportados porque delegar_tarefa confere a mesma janela (ADR-046).
+ */
+export const MENSAGENS_DO_PLANO = 50;
+export const HISTORICO_NO_PLANO = 20;
+
 /** Motor cujo inventário decide a localidade (ADR-019/022). */
 export const MOTOR_CLI = "claude-cli";
 
@@ -90,7 +97,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // de saltos e a raiz não foi achada, o turno continua delegação — nunca cai em conversa com --resume.
   const ehDelegacao = delegacao !== null || Boolean(turno.sobProcuracaoDe);
   const modo = modoDoTurno(turno, conversa, agente, ligacao !== null, ehDelegacao);
-  const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, 50);
+  const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, MENSAGENS_DO_PLANO);
   const resposta = mensagens.find((m) => m.turnoId === turno.id && m.payload?.kind === "peer_ask");
   const origemId = resposta?.payload?.kind === "peer_ask" ? resposta.payload.turnoOrigemId : undefined;
   const original = origemId ? await deps.repos.turnos.buscar(origemId) : null;
@@ -98,7 +105,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina também — o --resume da conversa a levaria de volta ao modo conversa.
   // definido em 2026-09-24 (ADR-046): a tarefa delegada também — a sessão da conversa é do alvo com a pessoa.
   const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
-  const historico = !sessaoCli ? mensagens.slice(-20).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  const historico = !sessaoCli ? mensagens.slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
   // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
   // ligada a uma rotina herda o gate DELA (ADR-044); retomada sem rotina não tem gate.
