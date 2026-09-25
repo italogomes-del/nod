@@ -61,9 +61,14 @@ async function remetenteViuConteudoDeFora(deps: Deps, turno: Turno, plano: Plano
   const retomada = plano.entrada.sessaoCli !== null;
   const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, retomada ? TETO_CONVERSA : MENSAGENS_DO_PLANO);
   // O handoff que o PRÓPRIO remetente escreveu numa delegação anterior é nao_confiavel por ser fala de
-  // modelo, mas não traz nada de fora que ele já não tivesse: se trouxesse, a trilha daquele turno acusa.
-  const proprioHandoff = (m: Mensagem) => m.kind === "handoff" && m.autoria.autor_tipo === "agente" && m.autoria.autor_id === turno.agenteId;
-  if (mensagens.some((m) => m.confianca === "nao_confiavel" && !proprioHandoff(m))) return true;
+  // modelo; ele só fica de fora se a tarefa que criou nasceu confiável — aí aquela checagem já provou que
+  // não havia nada de fora. Tarefa contaminada, ou que não se acha mais, contamina esta também.
+  for (const m of mensagens) {
+    if (m.confianca !== "nao_confiavel") continue;
+    const proprio = m.kind === "handoff" && m.autoria.autor_tipo === "agente" && m.autoria.autor_id === turno.agenteId && m.payload?.kind === "handoff" && m.payload.tarefaId;
+    const tarefa = proprio && m.payload?.kind === "handoff" && m.payload.tarefaId ? await deps.repos.turnos.buscar(m.payload.tarefaId) : null;
+    if (tarefa?.entradaConfianca !== "confiavel") return true;
+  }
   let turnoIds = mensagens.flatMap((m) => (m.turnoId ? [m.turnoId] : []));
   if (retomada) {
     const turnos = await deps.repos.turnos.listarDaConversa(turno.conversaId, TETO_CONVERSA);
