@@ -63,7 +63,9 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
     profundidade: original.profundidade,
     entradaTexto: texto,
-    entradaConfianca: "confiavel",
+    // definido em 2026-09-24 (revisão da ADR-046): retomar não lava a marca — a tarefa delegada que nasceu
+    // não confiável volta não confiável (era "confiavel" fixo, pendência da ADR-044).
+    entradaConfianca: original.entradaConfianca,
     modelo: original.modelo,
     harness: original.harness,
     retomaTurnoId: original.id,

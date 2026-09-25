@@ -6,7 +6,8 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
 import type { Relogio } from "../../../shared/types.ts";
-import { chamarFerramenta } from "../../../use-cases/chamar-ferramenta.ts";
+import { chamarFerramenta, REGRA_CHAMADA, VERSAO_REGRA_CHAMADA } from "../../../use-cases/chamar-ferramenta.ts";
+import { nomeParaTrilha } from "../../../use-cases/registrar-negacao.ts";
 import { registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import type { Rota } from "../roteador.ts";
 import { bytes } from "../util.ts";
@@ -83,6 +84,11 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const corpo = (await ctx.corpo()) as { argumentos?: unknown };
         const turnoId = ctx.params.turnoId ?? "";
         const plano = deps.tokens.planoDe(turnoId);
+        // definido em 2026-09-24 (revisão da ADR-046): computador e pasta também deixam a chamada na trilha —
+        // o que eles devolvem é conteúdo de fora, e delegar_tarefa lê a trilha do turno para saber disso.
+        if (plano && ((ctx.params.nome?.startsWith("workspace_") && deps.workspaces) || (ctx.params.nome?.startsWith("computador_") && deps.computadores))) {
+          await deps.dentro(ctx.escopo, (d) => d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(ctx.params.nome ?? ""), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA }));
+        }
         if (ctx.params.nome?.startsWith("workspace_") && plano && deps.workspaces) {
           ctx.json(200, await deps.workspaces.chamar(ctx.escopo, plano, ctx.params.nome, corpo?.argumentos ?? {}));
           return;

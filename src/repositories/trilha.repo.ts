@@ -61,6 +61,13 @@ export function trilhaRepo(conn: Conn, escopo: Escopo) {
       return l ? paraLinha(l) : null;
     },
 
+    /** As linhas de UM turno, na ordem em que aconteceram (ADR-046: o turno leu conteúdo de fora?). */
+    async doTurno(turnoId: string): Promise<LinhaTrilha[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from trilha where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} order by em, id`;
+      return linhas.map(paraLinha);
+    },
+
     /**
      * GET trilha?dia&agente&conector (E8.4). `dia` é 'AAAA-MM-DD' no fuso dado (default UTC):
      * a comparação é feita no banco com a coluna em timestamptz.

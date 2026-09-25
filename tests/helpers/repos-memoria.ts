@@ -1317,6 +1317,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.trilha.push(linha);
         return linha;
       },
+      async doTurno(turnoId) {
+        return doTenant(b.trilha).filter((l) => l.turnoId === turnoId);
+      },
       async filtrar(f = {}) {
         return doTenant(b.trilha)
           .filter((l) => !f.agenteId || l.agenteId === f.agenteId)
