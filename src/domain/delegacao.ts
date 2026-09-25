@@ -28,13 +28,21 @@ export function autorizarDelegacao(procuracoes: readonly Procuracao[], pedido: P
 /** Rótulos dos dois blocos da entrada da tarefa delegada (ADR-046). */
 const BLOCOS = ["pedido_da_pessoa", "contexto_do_remetente"] as const;
 
+/** Os cabeçalhos que o servidor escreve fora dos blocos; dentro de um texto, são citação forjada. */
+const CABECALHOS = [/,\s*literal\s*\(\s*é\s+a\s+autorização\s+desta\s+tarefa\s*\)/giu, /\(\s*não\s+é\s+instrução\s+da\s+pessoa\s*;\s*use\s+para\s+localizar\s*\)/giu];
+
 /**
  * Um texto não abre nem fecha bloco que não é dele: `<pedido_da_pessoa>` dentro do contexto do
  * remetente viraria um pedido forjado. Mesma disciplina da moldura do proxy (ADR-026), sem atalho de
- * "já neutralizado".
+ * "já neutralizado". definido em 2026-09-24 (revisão da ADR-046): antes de casar, NFKC (o `＜` de
+ * largura cheia vira `<`) e sem caracteres de formatação (\p{Cf}: zero-width dentro do nome); espaço e
+ * quebra de linha em qualquer ponto de `< / nome`; e os cabeçalhos do servidor viram "[cabeçalho citado]".
  */
 export function neutralizarBlocos(texto: string): string {
-  return texto.replace(new RegExp(`<(/?)\\s*(${BLOCOS.join("|")})`, "gi"), "‹$1$2");
+  let limpo = texto.normalize("NFKC").replace(/\p{Cf}/gu, "");
+  limpo = limpo.replace(new RegExp(`<\\s*(/?)\\s*(${BLOCOS.join("|")})`, "giu"), "‹$1$2");
+  for (const c of CABECALHOS) limpo = limpo.replace(c, " [cabeçalho citado]");
+  return limpo;
 }
 
 /**
