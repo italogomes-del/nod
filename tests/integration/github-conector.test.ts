@@ -222,7 +222,8 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
         await srv.close();
       }
       const concessoes = await repos.concessoes.doAgente(agenteId);
-      expect(concessoes.map((c) => c.capacidade).sort()).toEqual([...LEITURA, "pr_comentar"].sort());
+      // Revisão 2026-09-25: GITHUB_LIST_BRANCHES não tem par e não vira as 7 leituras; a concessão antiga some.
+      expect(concessoes.map((c) => c.capacidade).sort()).toEqual(["pr_comentar", "pr_ver"]);
       expect(new Set(concessoes.map((c) => c.mensagemId))).toEqual(new Set([concedido.data.consentimentoId]));
       const regras = await repos.permissoesPermanentes.listar(agenteId);
       expect(regras.filter((p) => p.inativoEm === null).map((p) => p.capacidade)).toEqual(["pr_comentar"]);

@@ -72,9 +72,14 @@ pessoa faz.
   conversa diz "aguarda seu Mac". Na tela, o item aparece como "aguardando seu Mac".
 - **O Mac puxa.** O app desktop pergunta a cada 5 s, pelo verbo novo `itens-locais` da ponte, pelos
   itens aprovados da própria pessoa. O servidor continua sem discar a máquina (ADR-021).
-  - O item fica reservado 2 min para a máquina que o puxou.
-  - O Mac executa pelo gh e relata em `itens-locais/resultado`.
-  - Só a máquina que anunciou o gh recebe itens, e só quem puxou relata.
+  - O item fica reservado 2 min para a máquina que o puxou. Enquanto a reserva vive, ninguém o
+    recebe de novo, nem a própria máquina (revisto em 2026-09-25: comentar e revisar no GitHub não
+    são idempotentes, e o mesmo Mac repuxava e comentava duas vezes quando o relato falhava).
+  - O Mac executa pelo gh e relata em `itens-locais/resultado`. O app guarda o desfecho até o
+    servidor aceitar o relato e, a cada volta, reenvia só o relato; item que já rodou naquele Mac
+    nunca roda de novo. Limite: fechar o app entre rodar e relatar perde essa memória.
+  - Só a máquina que anunciou o gh recebe itens e relata. Reserva perdida (o servidor reiniciou)
+    não recusa o relato; só a reserva viva de outra máquina recusa.
 - **O fechamento.** Com todos os itens relatados, a decisão fecha como fecharia no servidor: mensagem
   de resultado + turno de retomada. Relato repetido não sobrescreve.
 - **O prazo.** O Mac que não aparece em 24 h (o mesmo prazo de decidir), contadas da decisão,
@@ -111,8 +116,9 @@ ou HTTP fora do Composio) nunca é trocado.
 
 A troca mantém o id e leva junto os acessos (`migracaoDoComposio`):
 - cada concessão com nome GITHUB_* vira os nomes estáveis, com o MESMO consentimento. O par direto
-  vem da tabela; ferramenta sem par vira o nível que tinha (leitura → as sete de leitura, escrita →
-  as duas de escrita);
+  vem da tabela e só ele migra. Ferramenta sem par perde a concessão, e o agente pede de novo com
+  `pedir_acesso` (revisto em 2026-09-25: virar o nível inteiro alargava — "ver quem sou eu" virava
+  as sete leituras, arquivo_ler inclusive, e "dar estrela" virava comentar em PR sem clique);
 - "Sempre permitir" só migra o par exato de escrita, e a regra antiga fica inativa com motivo
   (ADR-042: regra permanente nunca alarga).
 

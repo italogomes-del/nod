@@ -28,7 +28,7 @@ describe("escolha do jeito de conectar o GitHub, por turno (ADR-048)", () => {
     expect(marcarExecucaoNaMaquina([f("github__pr_ver", "g1")], null)[0]?.execucao).toBeUndefined();
   });
 
-  it("G: acessos do github do Composio viram os nomes estáveis — par direto, nível para o que não tem par, e 'Sempre permitir' só do par exato", () => {
+  it("G: acessos do github do Composio viram os nomes estáveis — só o par direto migra (sem par não vira o nível inteiro), e 'Sempre permitir' só do par exato", () => {
     const m = migracaoDoComposio([
       { nome: "GITHUB_GET_A_PULL_REQUEST", readOnlyHint: true },
       { nome: "GITHUB_LIST_ISSUE_COMMENTS", readOnlyHint: true },
@@ -40,8 +40,8 @@ describe("escolha do jeito de conectar o GitHub, por turno (ADR-048)", () => {
       GITHUB_GET_A_PULL_REQUEST: ["pr_ver"],
       GITHUB_LIST_ISSUE_COMMENTS: ["pr_comentarios"],
       GITHUB_CREATE_AN_ISSUE_COMMENT: ["pr_comentar"],
-      GITHUB_LIST_BRANCHES: ["pr_ver", "pr_diff", "pr_arquivos", "pr_comentarios", "pr_checks", "arquivo_ler", "issue_ver"],
-      GITHUB_MERGE_A_PULL_REQUEST: ["pr_comentar", "pr_revisar"],
+      GITHUB_LIST_BRANCHES: [],
+      GITHUB_MERGE_A_PULL_REQUEST: [],
     });
     expect(m.permanentes).toEqual({ GITHUB_CREATE_AN_ISSUE_COMMENT: "pr_comentar" });
   });

@@ -34,17 +34,30 @@ let itensGithub: ReturnType<typeof setInterval> | null = null;
  * Mac (um comentário que a pessoa aprovou no celular sai assim que o Mac estiver aberto). Um por vez.
  */
 const INTERVALO_ITENS_GITHUB_MS = 5_000;
+/**
+ * revisto em 2026-09-25: item que já rodou neste Mac nunca roda de novo (comentar e revisar no GitHub
+ * não são idempotentes). O desfecho fica guardado até o servidor aceitar o relato; a cada volta o app
+ * reenvia só o relato. Limite: fechar o app entre rodar e relatar perde esta memória.
+ */
+const relatosPendentes = new Map<string, "executado" | "falhou_na_execucao">();
 function vigiarItensGithub(c: ReturnType<typeof criarPonteHttp>) {
   let ocupado = false;
+  const relatar = async (itemId: string, desfecho: "executado" | "falhou_na_execucao") => {
+    relatosPendentes.set(itemId, desfecho);
+    await c.resultadoItemLocal(itemId, desfecho).then(() => relatosPendentes.delete(itemId), () => undefined);
+  };
   itensGithub = setInterval(() => {
     if (ocupado) return;
     ocupado = true;
     void (async () => {
+      for (const [itemId, desfecho] of [...relatosPendentes]) await relatar(itemId, desfecho);
       for (const item of await c.itensLocais()) {
+        const jaRodou = relatosPendentes.get(item.itemId);
+        if (jaRodou) { await relatar(item.itemId, jaRodou); continue; }
         const r = await executarGithubNaMaquina({ capacidade: item.capacidade, argumentos: item.argumentos, ambiente: process.env });
-        await c.resultadoItemLocal(item.itemId, r.isError ? "falhou_na_execucao" : "executado").catch(() => undefined);
+        await relatar(item.itemId, r.isError ? "falhou_na_execucao" : "executado");
       }
-    })().finally(() => { ocupado = false; });
+    })().catch(() => undefined).finally(() => { ocupado = false; });
   }, INTERVALO_ITENS_GITHUB_MS);
 }
 const mensagens: Record<string, string> = {

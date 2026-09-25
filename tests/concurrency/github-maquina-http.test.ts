@@ -88,7 +88,9 @@ describeIntegracao("GitHub na máquina pela ponte HTTP (modo compartilhado)", ()
     expect(await (await pedir("itens-locais", {}, semGh)).json()).toEqual({ itens: [] });
     const puxados = await (await pedir("itens-locais", {}, comGh)).json() as { itens: { itemId: string; capacidade: string; argumentos: Record<string, unknown> }[] };
     expect(puxados.itens).toEqual([{ itemId, capacidade: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 466, texto: "Faltou teste" } }]);
-    // Reservado para quem puxou: o outro Mac nem vê, nem relata.
+    // Reservado para quem puxou: o outro Mac nem vê, nem relata. Nem o próprio Mac recebe de novo
+    // enquanto a reserva vive (revisão 2026-09-25: comentar duas vezes no PR).
+    expect(await (await pedir("itens-locais", {}, comGh)).json()).toEqual({ itens: [] });
     expect((await pedir("itens-locais/resultado", { itemId, desfecho: "executado" }, semGh)).status).toBe(403);
     expect((await pedir("itens-locais/resultado", { itemId, desfecho: "executado" }, comGh)).status).toBe(200);
     expect(await dentro((d) => d.repos.itensAprovacao.buscar(itemId))).toMatchObject({ desfecho: "executado" });

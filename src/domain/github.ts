@@ -146,22 +146,23 @@ export type MigracaoDoComposio = {
 /**
  * definido em 2026-09-24 (ADR-048): ao trocar o `github` do Composio pelo nativo, os acessos que a
  * pessoa já tinha dado seguem valendo pelos nomes novos. A tabela COMPOSIO_POR_CAPACIDADE_GITHUB é
- * lida ao contrário; ferramenta GITHUB_* sem par vira o NÍVEL que ela tinha (leitura → as capacidades
- * de leitura; escrita → as de escrita), pelo readOnlyHint do catálogo antigo. Ferramenta que o
- * catálogo antigo não descreve não vira nada. "Sempre permitir" só migra o par exato de escrita.
+ * lida ao contrário e só o par EXATO migra.
+ * revisto em 2026-09-25: ferramenta GITHUB_* sem par não vira mais o nível inteiro — "ver quem sou eu"
+ * virava as 7 leituras (arquivo_ler inclusive) e "dar estrela" virava comentar em PR sem clique.
+ * Sem par, a concessão fica sem capacidade e o agente pede com pedir_acesso. "Sempre permitir" só
+ * migra o par exato de escrita.
  */
 export function migracaoDoComposio(catalogoAntigo: readonly { nome: string; readOnlyHint: boolean }[]): MigracaoDoComposio {
   const direto = new Map<string, NomeCapacidadeGithub[]>();
   for (const [cap, slugs] of Object.entries(COMPOSIO_POR_CAPACIDADE_GITHUB) as [NomeCapacidadeGithub, readonly string[] | null][]) {
     for (const slug of slugs ?? []) direto.set(slug, [...(direto.get(slug) ?? []), cap]);
   }
-  const leitura = CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => c.nome);
   const escrita = CAPACIDADES_GITHUB.filter((c) => !c.readOnlyHint).map((c) => c.nome);
   const concessoes: Record<string, readonly NomeCapacidadeGithub[]> = {};
   const permanentes: Record<string, NomeCapacidadeGithub> = {};
   for (const antiga of catalogoAntigo) {
     const par = direto.get(antiga.nome);
-    concessoes[antiga.nome] = par ?? (antiga.readOnlyHint ? leitura : escrita);
+    concessoes[antiga.nome] = par ?? [];
     const unico = par?.length === 1 ? par[0] : undefined;
     if (unico && escrita.includes(unico)) permanentes[antiga.nome] = unico;
   }

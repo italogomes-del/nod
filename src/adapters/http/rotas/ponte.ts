@@ -146,9 +146,11 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       if (!c.gh || !d.itensLocais) { ctx.json(200, { itens: [] }); return; }
       const agora = d.agora();
+      // revisto em 2026-09-25: reserva viva não volta nem para a máquina que a segura — comentar e
+      // revisar no GitHub não são idempotentes; se o relato falhou, a máquina reenvia só o relato.
       const livres = (await d.itensLocais(ctx.escopo)).filter((i) => {
         const r = reservas.get(i.itemId);
-        return !r || r.ate <= agora || r.machineId === ctx.params.chaveId;
+        return !r || r.ate <= agora;
       }).slice(0, 10);
       for (const i of livres) reservas.set(i.itemId, { machineId: ctx.params.chaveId!, ate: agora + RESERVA_ITEM_MS });
       ctx.json(200, { itens: livres });
@@ -157,8 +159,10 @@ export function criarPonteHttpServidor(d: {
       const c = conexao(ctx);
       const itemId = uuid(b.itemId);
       exigir(b.desfecho === "executado" || b.desfecho === "falhou_na_execucao");
+      // Reserva perdida (servidor reiniciou) não recusa o relato: sem ele a máquina puxaria e rodaria de
+      // novo. Recusa só a reserva viva de OUTRA máquina; o desfecho é gravado uma vez (se aberto).
       const r = reservas.get(itemId);
-      if (!r || r.machineId !== ctx.params.chaveId) throw new ErroDeDominio("nao_permitido");
+      if (!c.gh || (r && r.ate > d.agora() && r.machineId !== ctx.params.chaveId)) throw new ErroDeDominio("nao_permitido");
       c.ultimo = d.agora();
       await d.concluirItemLocal?.(ctx.escopo, itemId, b.desfecho as DesfechoLocal);
       reservas.delete(itemId);
