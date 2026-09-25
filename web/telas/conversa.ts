@@ -14,6 +14,7 @@ import { renderFaixaParada } from "./faixa-parada.ts";
 import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
+import { renderCardAcesso } from "./card-acesso.ts";
 import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 
@@ -162,12 +163,9 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
 
 function renderProposta(p: Proposta, estado: Estado): string {
   const a = agenteDe(estado, p.agenteId);
-  if (p.payload.kind === "acesso" && p.payload.conectar) {
-    const slug = p.payload.conector;
-    const conectado = estado.conectores.some((c) => c.slug === slug && c.habilitado);
-    const nome = estado.marketplace.find((a) => a.slug === slug)?.nome ?? p.payload.conector;
-    return `<section class="connection-card"><span class="app-logo app-${esc(p.payload.conector)}">${esc(nome.slice(0, 1).toUpperCase())}</span><div><b>${conectado ? `${esc(nome)} conectado` : `Conecte o ${esc(nome)}`}</b><p>${conectado ? "Tudo pronto para continuar com seu bot." : "Para seguir com essa tarefa, preciso de acesso a este app."}</p>${conectado ? botao("retomar-conexao", "Continuar tarefa", { classe: "pri", id: p.id, dados: { slug: p.payload.conector, nivel: p.payload.nivel } }) : botao("abrir-conexao", "Conectar", { classe: "pri", id: p.payload.conector })}${botao("recusar-proposta", "Agora não", { classe: "link", id: p.id })}</div></section>`;
-  }
+  // definido em 2026-09-25 (jornadas de conexão): conectar e permitir no mesmo card (card-acesso.ts).
+  const cardAcesso = renderCardAcesso(p, itemAbertoDoCard(p, estado), estado);
+  if (cardAcesso !== null) return cardAcesso;
   // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
   // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
   if (p.payload.kind === "pasta") return renderCardPasta(p, p.payload, estado, a);

@@ -46,8 +46,9 @@ export const FERRAMENTAS_NOD = {
     description: "Pede à pessoa acesso a capacidades de um conector. Vira um pedido com botão; nada é concedido aqui: diga que pediu e encerre o turno.",
     properties: {
       conector: { type: "string", description: "Slug do conector registrado ou do marketplace.", minLength: 1 },
-      capacidades: { type: "array", items: { type: "string" }, description: "Nomes exatos das ferramentas do catálogo. Para sugerir conexão ainda ausente, envie [] sem inventar capacidades. Numa rotina, [] com nivel leitura pede as ferramentas de leitura do app." },
+      capacidades: { type: "array", items: { type: "string" }, description: "Nomes exatos das ferramentas do catálogo, ou [] para pedir pelo nível: leitura = as ferramentas de leitura do app; escrita = ler, criar, editar e comentar (apagar, desfazer e ações sem verbo claro ficam de fora). Nunca invente nomes." },
       nivel: { type: "string", enum: ["leitura", "escrita"] },
+      para: { type: "string", description: "Para que você precisa do acesso, numa frase curta que começa com verbo no infinitivo, sem citar a pessoa. Ex.: \"Listar as tarefas atrasadas do time\"." },
       nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
     },
     required: ["conector", "capacidades", "nivel", "nao_pedido"],
@@ -150,7 +151,7 @@ export const NOMES_FERRAMENTAS_NOD = [
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
 export type ArgsAtualizarPerfil = { nome?: string; titulo?: string; descricao?: string };
-export type ArgsPedirAcesso = { conector: string; capacidades: string[]; nivel: "leitura" | "escrita"; nao_pedido: string[] };
+export type ArgsPedirAcesso = { conector: string; capacidades: string[]; nivel: "leitura" | "escrita"; nao_pedido: string[]; para?: string };
 export type ItemPedidoAprovacao = {
   texto: string;
   destino: { conector: string; ferramenta: string; argumentos: Record<string, unknown> };

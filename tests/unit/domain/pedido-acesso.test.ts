@@ -34,10 +34,21 @@ describe("normalizarPedidoAcesso (ADR-044)", () => {
     expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_FETCH_EMAILS"] }), conector: null, emRotina: false }))).toBe("entrada_invalida");
   });
 
-  it("conversa: capacidade fora do catálogo é recusada antes de chegar à pessoa; [] com o app pronto também", () => {
+  it("conversa: capacidade fora do catálogo é recusada antes de chegar à pessoa", () => {
     expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_FETCH_EMAILS", "INVENTADA"] }), conector: pronto, emRotina: false }))).toBe("entrada_invalida");
-    expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido(), conector: pronto, emRotina: false }))).toBe("entrada_invalida");
     expect(normalizarPedidoAcesso({ pedido: pedido({ capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_FETCH_EMAILS"] }), conector: pronto, emRotina: false })).toEqual({ conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", naoPedido: [] });
+  });
+
+  // revisto em 2026-09-25: [] com o app pronto pede PELO NÍVEL também na conversa (antes era erro e o
+  // modelo gastava outro turno copiando nomes): leitura = as de leitura; escrita = sem o grupo apagar.
+  it("conversa: [] com o app pronto pede pelo nível — leitura as de leitura; escrita sem apagar; e leva o 'para'", () => {
+    const comApagar = { habilitado: true, catalogo: [...pronto.catalogo, cap("GMAIL_DELETE_MESSAGE", false)] };
+    expect(normalizarPedidoAcesso({ pedido: pedido(), conector: pronto, emRotina: false }).capacidades).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"]);
+    const escrita = normalizarPedidoAcesso({ pedido: pedido({ nivel: "escrita", para: "  Responder   o cliente " }), conector: comApagar, emRotina: false });
+    expect(escrita.capacidades).toContain("GMAIL_SEND_EMAIL");
+    expect(escrita.capacidades).not.toContain("GMAIL_DELETE_MESSAGE");
+    expect(escrita.para).toBe("Responder o cliente");
+    expect(codigo(() => normalizarPedidoAcesso({ pedido: pedido(), conector: { habilitado: true, catalogo: [cap("GMAIL_SEND_EMAIL", false)] }, emRotina: false }))).toBe("entrada_invalida");
   });
 
   it("o nível segue o que é pedido de fato: 'leitura' com ferramenta de escrita dentro sobe para 'escrita'", () => {

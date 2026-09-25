@@ -35,6 +35,9 @@ const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
 const CHAVE = chaveDe("teste-github-local");
 const LEITURA = CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => c.nome);
 const TODAS = CAPACIDADES_GITHUB.map((c) => c.nome);
+// revisto em 2026-09-25 (ADR-049, revisão do PR #68): "escrita" pelo nível não leva pr_revisar (aprovar PR não
+// diz que só edita: grupo "outras"); ela continua podendo ser pedida pelo nome.
+const DA_ESCRITA = TODAS.filter((n) => n !== "pr_revisar");
 const HORA = 3_600_000;
 
 type Opcoes = { carregarDaTx?: boolean; executarNaMaquina?: NonNullable<Deps["services"]["github"]>["executarNaMaquina"] };
@@ -76,7 +79,7 @@ async function turnoDaConversa(repos: Repos, conversaId: string, agenteId: strin
 
 /** GitHub nativo pronto pelo gh + acesso de escrita permitido pela pessoa (o caminho de pedir_acesso). */
 async function githubComAcesso(deps: Deps, repos: Repos, conversaId: string, agenteId: string): Promise<string> {
-  const pedido = await pedirAcesso(deps, { turnoId: await turnoDaConversa(repos, conversaId, agenteId), conversaId, agenteId, conector: "github", capacidades: [], nivel: "escrita", nao_pedido: [] });
+  const pedido = await pedirAcesso(deps, { turnoId: await turnoDaConversa(repos, conversaId, agenteId), conversaId, agenteId, conector: "github", capacidades: TODAS, nivel: "escrita", nao_pedido: [] });
   await decidirAcesso(deps, { decisaoId: pedido.data.proposta_id, recusar: false, executor: "catcher" });
   return (await repos.conectores.buscarPorSlug("github"))?.id ?? "";
 }
@@ -86,7 +89,7 @@ async function planoDoTurno(deps: Deps, turnoId: string, ghNaMaquina: boolean): 
 }
 
 describeIntegracao("GitHub nativo: registro sem configuração e execução na máquina (ADR-048)", () => {
-  it("gh do Mac: pedir_acesso cria o conector nativo habilitado e o card já sai com o botão de permitir (escrita = catálogo inteiro)", async () => {
+  it("gh do Mac: pedir_acesso cria o conector nativo habilitado e o card já sai com o botão de permitir (escrita = o nível, sem aprovar PR)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
       const { deps, repos } = depsGithub(trx, MARLON, true);
@@ -97,9 +100,9 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       const conector = await repos.conectores.buscarPorSlug("github");
       expect(conector).toMatchObject({ transporte: "stdio", comando: COMANDO_GITHUB_NATIVO, habilitado: true, env: {}, envCifrado: null, declaracao: "toca" });
       expect(conector?.catalogo.map((c) => [c.nome, c.readOnlyHint])).toEqual(CAPACIDADES_GITHUB.map((c) => [c.nome, c.readOnlyHint]));
-      expect((await repos.propostas.buscar(r.data.proposta_id))?.payload).toEqual({ kind: "acesso", turnoId, conector: "github", capacidades: TODAS, nivel: "escrita", naoPedido: [] });
-      expect(await repos.decisoes.buscar(r.data.proposta_id)).toMatchObject({ tipo: "acesso", estado: "pendente", frase: "Dev 1 precisa ler e alterar seu GitHub (9 ações)." });
-      expect((await decidirAcesso(deps, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ concessoes: 9 });
+      expect((await repos.propostas.buscar(r.data.proposta_id))?.payload).toEqual({ kind: "acesso", turnoId, conector: "github", capacidades: DA_ESCRITA, nivel: "escrita", naoPedido: [] });
+      expect(await repos.decisoes.buscar(r.data.proposta_id)).toMatchObject({ tipo: "acesso", estado: "pendente", frase: "Dev 1 precisa ler e alterar seu GitHub (8 ações). Não inclui a outra ação do GitHub." });
+      expect((await decidirAcesso(deps, { decisaoId: r.data.proposta_id, recusar: false, executor: "catcher" })).data).toMatchObject({ concessoes: 8 });
 
       // O segundo pedido não recria nada: o conector já está pronto.
       await pedirAcesso(deps, { turnoId: await turnoDaConversa(repos, conversaId, agenteId), conversaId, agenteId, conector: "github", capacidades: ["pr_ver"], nivel: "leitura", nao_pedido: [] });

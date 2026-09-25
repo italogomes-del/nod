@@ -22,6 +22,11 @@ export type EntradaDecidirAcesso = {
   executor: Executor;
   /** Quem clicou; a rota roda como a DONA (comoDona), mas grava a pessoa da sessão. Default: o escopo. */
   por?: string;
+  /**
+   * definido em 2026-09-25: os grupos que a pessoa deixou marcados no card. Só estreita — tem de ser
+   * parte do que o pedido mostrou, nunca algo a mais; ausente = tudo o que foi pedido.
+   */
+  capacidades?: readonly string[];
 };
 
 export type SaidaDecidirAcesso = { decisao: Decisao; concessoes: number; consentimentoId: string | null; rotinaId: string | null; turnoId: string | null };
@@ -79,6 +84,10 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
   // do clique via "sem concessão" e "sem card pendente" ao mesmo tempo e abria um card novo.
   const doPedido = proposta?.payload.kind === "acesso" ? await deps.repos.conectores.buscarPorSlug(proposta.payload.conector) : null;
   if (proposta && doPedido) await deps.repos.concessoes.travar(proposta.agenteId, doPedido.id);
+  if (input.capacidades && !input.recusar) {
+    const pedidas = new Set(proposta?.payload.kind === "acesso" ? proposta.payload.capacidades : []);
+    if (input.capacidades.length === 0 || input.capacidades.some((c) => !pedidas.has(c))) throw new ErroDeDominio("entrada_invalida", { cause: "capacidades fora do pedido" });
+  }
   const decisao = await deps.repos.decisoes.decidir(input.decisaoId, { por: input.por ?? deps.escopo.pessoaId, agora });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão já fechada ou inexistente" });
   if (decisao.tipo !== "acesso" || !proposta || proposta.payload.kind !== "acesso" || proposta.payload.conectar) throw new ErroDeDominio("estado_invalido", { cause: "decisão de acesso sem proposta" });
@@ -104,7 +113,7 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
   if (proposta.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "confirmada");
   const conector = doPedido;
   if (!conector) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
-  const lote = await concederLote(deps, { agenteId: proposta.agenteId, conectorId: conector.id, capacidades: p.capacidades, autorTipo: "pessoa" });
+  const lote = await concederLote(deps, { agenteId: proposta.agenteId, conectorId: conector.id, capacidades: input.capacidades ?? p.capacidades, autorTipo: "pessoa" });
   events.push(...(lote.events ?? []));
 
   let turnoId: string | null = null;

@@ -4,7 +4,8 @@ import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { capacidadesDeLeitura, fraseDoPedidoDeAcesso } from "../domain/pedido-acesso.ts";
+import { capacidadesDoNivel } from "../domain/grupos-de-acesso.ts";
+import { fraseDoPedidoDeAcesso } from "../domain/pedido-acesso.ts";
 import { redigir } from "../domain/redacao.ts";
 import type { ConectorGuardado } from "../contracts/conector.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -19,31 +20,32 @@ export const PEDIDO_DE_ACESSO_ABERTO = "Pedido aberto; nada foi concedido ainda.
 
 /**
  * definido em 2026-09-24 (ADR-044): o card "Conecte o X" sai do caminho depois da conexão. App já
- * conectado e habilitado e pedido de LEITURA: fecha o card de conexão e abre no lugar o de concessão
- * (proposta + decisão, um clique), com as ferramentas de leitura do catálogo agora sondado. Escrita
- * continua pelo agente, que pede as capacidades exatas depois da conexão (web/main.ts, retomar-conexao).
+ * conectado e habilitado: fecha o card de conexão e abre no lugar o de concessão (proposta + decisão,
+ * um clique), com as ferramentas do NÍVEL pedido no catálogo agora sondado.
+ * revisto em 2026-09-25: escrita também (capacidadesDoNivel: ler, criar, editar e comentar; apagar
+ * fica de fora) — antes a web postava "Conectei…" em nome da pessoa e o agente gastava outro turno para
+ * copiar nomes do catálogo. E sem a mensagem "Pedido aberto…": o próprio card mostra o passo seguinte.
  */
-async function conexaoViraPedido(deps: Deps, existente: Proposta, p: PayloadPropostaAcesso): Promise<{ data: SaidaConfirmarProposta; events: RuntimeEvent[] }> {
+export async function conexaoViraPedido(deps: Deps, existente: Proposta, p: PayloadPropostaAcesso): Promise<{ data: SaidaConfirmarProposta; events: RuntimeEvent[] }> {
   const conector = await deps.repos.conectores.buscarPorSlug(p.conector);
-  if (!conector?.habilitado || p.nivel !== "leitura") throw new ErroDeDominio("estado_invalido", { cause: "conecte pelo marketplace antes de pedir capacidades" });
-  const capacidades = capacidadesDeLeitura(conector.catalogo);
-  if (capacidades.length === 0) throw new ErroDeDominio("estado_invalido", { cause: "o app não tem ferramenta de leitura" });
-  const agora = deps.agora();
+  if (!conector?.habilitado) throw new ErroDeDominio("estado_invalido", { cause: "conecte o app antes de pedir capacidades" });
+  const capacidades = capacidadesDoNivel(conector.catalogo, p.rotinaId ? "leitura" : p.nivel);
+  if (capacidades.length === 0) throw new ErroDeDominio("estado_invalido", { cause: "o app não tem ferramenta para esse nível" });
   const autoria = autoriaPessoa(deps.escopo);
   if (p.rotinaId) return conexaoDaRotinaViraPedido(deps, existente, { ...p, rotinaId: p.rotinaId }, conector);
   if (!(await deps.repos.propostas.decidir(existente.id, "confirmada"))) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
   // O agente pode ter pedido de novo depois da conexão: o card de concessão que já está aberto serve.
   for (const aberta of await deps.repos.propostas.pendentesDaConversa(existente.conversaId)) {
+    // revisto em 2026-09-25: só serve o card que já cobre o que este pede — um de leitura não responde a um pedido de escrita.
     if (aberta.payload.kind !== "acesso" || aberta.payload.conectar || aberta.agenteId !== existente.agenteId || aberta.payload.conector !== p.conector) continue;
+    const cobre = new Set(aberta.payload.capacidades);
+    if (!capacidades.every((c) => cobre.has(c))) continue;
     const decisao = await deps.repos.decisoes.buscar(aberta.id);
     if (decisao && (decisao.estado === "pendente" || decisao.estado === "reaberta")) return { data: { proposta: aberta, agente: null, rotina: null, decisao }, events: [] };
   }
   const { conectar: _conectar, ...resto } = p;
   const aberto = await abrirPedidoDeAcesso(deps, { conversaId: existente.conversaId, agenteId: existente.agenteId, turnoId: p.turnoId ?? null, payload: { ...resto, capacidades }, conector, autoria });
-  const events = [...aberto.events];
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: existente.conversaId, autoria, kind: "sistema", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" });
-  if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: existente.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
-  return { data: { proposta: aberto.proposta, agente: null, rotina: null, decisao: aberto.decisao }, events };
+  return { data: { proposta: aberto.proposta, agente: null, rotina: null, decisao: aberto.decisao }, events: aberto.events };
 }
 
 /**

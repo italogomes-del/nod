@@ -116,7 +116,11 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
         if (atual.tipo === "acesso") {
           // definido em 2026-09-24 (ADR-044): um clique concede e continua (decidir-acesso.ts). Roda como a
           // DONA — concessão, consentimento e turno exigem owner = pessoa —, gravando quem clicou.
-          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirAcesso, { decisaoId: atual.id, recusar: recusada(corpo), executor: d.executor ?? "catcher", por: ctx.escopo.pessoaId }));
+          // definido em 2026-09-25: `capacidades` = os grupos que a pessoa deixou marcados no card; ausente = tudo o que foi pedido.
+          const bruto = typeof corpo === "object" && corpo !== null ? (corpo as { capacidades?: unknown }).capacidades : undefined;
+          if (bruto !== undefined && (!Array.isArray(bruto) || !bruto.every((c): c is string => typeof c === "string"))) throw new ErroDeDominio("entrada_invalida", { cause: "capacidades" });
+          const capacidades = bruto as string[] | undefined;
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirAcesso, { decisaoId: atual.id, recusar: recusada(corpo), executor: d.executor ?? "catcher", por: ctx.escopo.pessoaId, ...(capacidades ? { capacidades } : {}) }));
           if (r.concessoes > 0) ids.concessoes = String(r.concessoes);
           if (r.consentimentoId) ids.consentimento = r.consentimentoId;
           if (r.rotinaId) ids.rotina = r.rotinaId;

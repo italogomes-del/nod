@@ -4,6 +4,7 @@ import { catalogoDoPiso, mesclarCatalogo } from "../../../domain/catalogo-market
 import { criarClienteComposio } from "../../integracoes/composio.ts";
 import { atualizarCredenciaisConector } from "../../../use-cases/atualizar-credenciais-conector.ts";
 import type { SensibilidadeDeclarada, TransporteConector } from "../../../contracts/conector.ts";
+import { grupoDaCapacidade } from "../../../domain/grupos-de-acesso.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
 import { habilitarConector } from "../../../use-cases/habilitar-conector.ts";
@@ -137,7 +138,12 @@ export function rotasConectores(deps: DepsRotasConectores): Rota[] {
       metodo: "GET",
       padrao: /^\/conectores$/,
       async handler(ctx) {
-        const conectores = await deps.dentro(ctx.escopo, async (d) => (await d.repos.conectores.listar()).map(conectorPublico));
+        // definido em 2026-09-25: cada ação sai com o grupo (ler, criar, editar, comentar, apagar) — a web
+        // mostra "Ler e alterar" e os grupos do card sem refazer a classificação (src/domain/grupos-de-acesso.ts).
+        const conectores = await deps.dentro(ctx.escopo, async (d) => (await d.repos.conectores.listar()).map((c) => {
+          const p = conectorPublico(c);
+          return { ...p, catalogo: p.catalogo.map((cap) => ({ ...cap, grupo: grupoDaCapacidade(cap) })) };
+        }));
         const cifrada = await deps.dentro(ctx.escopo, (d) => d.repos.composio.chave());
         const marketplace = await catalogo(ctx.escopo.tenantId, cifrada);
         ctx.json(200, { conectores, marketplace, composioConfigurado: !!cifrada });

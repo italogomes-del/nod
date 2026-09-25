@@ -17,7 +17,7 @@ describe("decisões no chat", () => {
   it("mostra a autorização na conversa de origem com as mesmas ações da fila", () => {
     const html = renderTimeline(conversa, estado);
     expect(html).toContain("Preciso da sua decisão para continuar");
-    expect(html).toContain('data-act="decidir-proposta"');
+    expect(html).toContain('data-act="permitir-acesso"');
     expect(html).toContain('data-id="d"');
     // ADR-044: um clique concede E continua, e o botão diz isso.
     expect(html).toContain("Permitir e continuar");
@@ -167,7 +167,8 @@ describe("decisões no chat", () => {
       expect(html).toContain("Nina precisa ler seu Gmail");
       expect(html).toContain("Permitir e rodar agora");
       expect(html).toContain("Pausar rotina");
-      expect(html.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
+      // revisto em 2026-09-25: o card de acesso permite pelo próprio botão (card-acesso.ts), que leva os grupos marcados.
+      expect(html.match(/data-act="permitir-acesso"/g)).toHaveLength(1);
       expect(html.match(/data-act="recusar-decisao"/g)).toHaveLength(1);
       expect(html).not.toContain('data-act="confirmar-proposta"');
       expect(html).not.toContain("Revisar acesso");
@@ -199,12 +200,53 @@ describe("decisões no chat", () => {
       expect(html).toContain('data-act="reabrir"');
     });
 
-    it("card de conexão leva o nível para o botão (leitura vira card de um clique; escrita volta ao agente)", () => {
-      const conectar: Proposta = { ...deRotina, id: "k", payload: { kind: "acesso", conector: "gmail", conectar: true, capacidades: [], nivel: "leitura", naoPedido: [], rotinaId: "r1" } };
-      const conectado: Estado = { ...estadoInicial, conectores: [{ tenantId: "t", id: "cx", ownerId: "p", visibility: "privado", nome: "Gmail", slug: "gmail", transporte: "http", comando: null, args: [], url: null, env: {}, declaracao: "nao-toca", habilitado: true, catalogo: [], sondadoEm: null, ultimaFalha: null, criadoEm: 0 }] };
-      const html = renderTimeline({ ...conversa, propostas: [conectar] }, conectado);
-      expect(html).toContain('data-act="retomar-conexao"');
-      expect(html).toContain('data-nivel="leitura"');
+    // revisto em 2026-09-25 (jornadas de conexão): o card conecta ali mesmo e espera o login sozinho; quando o
+    // servidor ainda não virou o card (login por outro caminho), "Continuar" abre o de permitir — leitura E escrita.
+    const conectar: Proposta = { ...deRotina, id: "k", payload: { kind: "acesso", conector: "gmail", conectar: true, capacidades: [], nivel: "leitura", naoPedido: [], para: "Resumir os e-mails da manhã" } };
+    const gmail = { tenantId: "t", id: "cx", ownerId: "p", visibility: "privado" as const, nome: "Gmail", slug: "gmail", transporte: "http" as const, comando: null, args: [], url: null, env: {}, declaracao: "nao-toca" as const, habilitado: true, catalogo: [], sondadoEm: null, ultimaFalha: null, criadoEm: 0 };
+
+    it("card de conexão: 'Conectar Gmail' abre o login ali mesmo (sem ir ao marketplace) e mostra o para quê e os dois passos", () => {
+      const html = renderTimeline({ ...conversa, propostas: [conectar] }, { ...estadoInicial });
+      expect(html).toContain('data-act="conectar-app" data-id="gmail"');
+      expect(html).toContain("Para resumir os e-mails da manhã");
+      expect(html).toContain("Entrar no gmail");
+      expect(html).not.toContain("abrir-conexao");
+      expect(html).not.toContain("retomar-conexao");
+    });
+
+    it("card de conexão com o login em andamento espera sozinho, com Cancelar e o link para reabrir o login", () => {
+      const html = renderTimeline({ ...conversa, propostas: [conectar] }, { ...estadoInicial, conectando: { gmail: { url: "https://login.exemplo/x", falhou: null } } });
+      expect(html).toContain("Esperando você entrar no gmail");
+      expect(html).toContain('href="https://login.exemplo/x"');
+      expect(html).toContain('data-act="cancelar-conexao" data-id="gmail"');
+      expect(html).not.toContain('data-act="conectar-app"');
+    });
+
+    it("card de conexão com o app já conectado: 'Continuar' (confirmar-proposta) para leitura e para escrita", () => {
+      for (const nivel of ["leitura", "escrita"] as const) {
+        const p: Proposta = { ...conectar, payload: { ...conectar.payload, kind: "acesso", nivel } as Proposta["payload"] };
+        const html = renderTimeline({ ...conversa, propostas: [p] }, { ...estadoInicial, conectores: [gmail] });
+        expect(html).toContain('data-act="confirmar-proposta" data-id="k"');
+        expect(html).toContain("Gmail conectado");
+      }
+    });
+
+    it("pedido de escrita com o catálogo à mão: um checkbox por grupo, apagar fora e Permitir leva os grupos", () => {
+      const catalogo = [
+        { nome: "CLICKUP_GET_TASKS", descricao: "", schema: {}, readOnlyHint: true, grupo: "ler" as const },
+        { nome: "CLICKUP_CREATE_TASK", descricao: "", schema: {}, readOnlyHint: false, grupo: "criar" as const },
+        { nome: "CLICKUP_DELETE_TASK", descricao: "", schema: {}, readOnlyHint: false, grupo: "apagar" as const },
+      ];
+      const clickup = { ...gmail, id: "cu", nome: "ClickUp", slug: "clickup", catalogo };
+      const p: Proposta = { ...deRotina, id: "d", payload: { kind: "acesso", conector: "clickup", capacidades: ["CLICKUP_GET_TASKS", "CLICKUP_CREATE_TASK"], nivel: "escrita", naoPedido: [], turnoId: "t1" } };
+      const base = comDecisao(p);
+      const html = renderTimeline({ ...conversa, propostas: [p] }, { ...base, conectores: [clickup] });
+      expect(html).toContain("quer ler e alterar seu ClickUp");
+      expect(html).toContain('data-caps="CLICKUP_GET_TASKS"');
+      expect(html).toContain('data-caps="CLICKUP_CREATE_TASK"');
+      expect(html).not.toContain('data-caps="CLICKUP_DELETE_TASK"');
+      expect(html).toContain("Ficam de fora: 1 ação de apagar, desfazer e outras");
+      expect(html).toContain('data-act="permitir-acesso"');
     });
 
     it("'Sua vez' usa os mesmos rótulos, vindos de item.proposta, e mostra as ações pedidas no <details>", () => {

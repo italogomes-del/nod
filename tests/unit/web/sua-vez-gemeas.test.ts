@@ -59,7 +59,7 @@ describe("decisões da conversa: pedidos iguais aparecem uma vez, com ×N", () =
     expect(quantosCards(html)).toBe(1);
     expect(html).toContain(">×3</span>");
     expect(html).toContain('title="3 pedidos iguais; decidir aqui resolve todos"');
-    expect(html).toContain('data-act="decidir-proposta" data-id="primeira"');
+    expect(html).toContain('data-act="permitir-acesso" data-id="primeira"');
     expect(html).not.toContain("segunda");
   });
 
@@ -91,6 +91,6 @@ describe("decisões da conversa: pedidos iguais aparecem uma vez, com ×N", () =
     expect(html).toContain('data-proposta="primeira"');
     expect(html).toContain(">×3</span>");
     expect(html).not.toContain("Revisar acesso");
-    expect(html.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
+    expect(html.match(/data-act="permitir-acesso"/g)).toHaveLength(1);
   });
 });

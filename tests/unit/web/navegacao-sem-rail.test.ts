@@ -93,6 +93,7 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" },
     frota: { agentes: [agente], negacoes: [] } as never,
   };
+  const dona: Estado = { ...base, sessao: { tenantId: "t", pessoaId: "p" } };
 
   it("traz rotinas com controle real, sem exigir a tela cheia", () => {
     const estado: Estado = {
@@ -174,9 +175,26 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     expect(renderDetalhes(fechadoDeNovo)).not.toContain("nunca executou");
   });
 
-  it("sem acessos, convida a conectar em vez de deixar a seção muda", () => {
-    const html = renderDetalhes(base);
+  it("sem acessos, convida a dar acesso em vez de deixar a seção muda", () => {
+    const html = renderDetalhes(dona);
     expect(html).toContain("ainda não usa nenhuma ferramenta externa");
-    expect(html).toContain('data-act="abrir-conexao"');
+    expect(html).toContain('data-act="dar-acesso" data-id="a1"');
+  });
+
+  // definido em 2026-09-25 (jornadas de conexão): "+ Dar acesso" abre, no próprio painel, os apps já
+  // conectados com o nível deste bot e os que faltam conectar com "Conectar" ali mesmo.
+  it("'+ Dar acesso' aberto: conectados com Nenhum / Ler / Ler e alterar; os outros com Conectar", () => {
+    const slack = { tenantId: "t", id: "cs", ownerId: "p", visibility: "privado" as const, nome: "Slack", slug: "slack", transporte: "http" as const, comando: null, args: [], url: null, env: {}, declaracao: "toca" as const, habilitado: true, catalogo: [{ nome: "SLACK_READ", descricao: "", schema: {}, readOnlyHint: true, grupo: "ler" as const }], sondadoEm: 1, ultimaFalha: null, criadoEm: 0 };
+    const html = renderDetalhes({
+      ...dona,
+      dandoAcesso: "a1",
+      conectores: [slack],
+      marketplace: [{ slug: "slack", nome: "Slack", descricao: "", categoria: "", logo: null }, { slug: "notion", nome: "Notion", descricao: "", categoria: "", logo: null }],
+      concessoes: { a1: [] },
+    });
+    expect(html).toContain("Dar a ");
+    expect(html).toContain('data-act="nivel-bot" data-id="a1" data-conector="cs" data-nivel="leitura"');
+    expect(html).toContain('data-act="conectar-app" data-id="notion"');
+    expect(html).not.toContain('data-act="conectar-app" data-id="slack"');
   });
 });

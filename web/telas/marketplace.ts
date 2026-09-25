@@ -1,5 +1,9 @@
+import type { AppComLogo } from "../../src/contracts/marketplace.ts";
+import type { Conector } from "../../src/contracts/conector.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { botao, esc } from "../lib/render.ts";
+import { botao, esc, iconeAgente } from "../lib/render.ts";
+import { haQuanto } from "../lib/relogio.ts";
+import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type NivelAtual, type SituacaoApp } from "./app-acesso.ts";
 
 /**
  * revisto em 2026-09-21 (ADR-041): app novo no painel não tem símbolo escrito à mão aqui, então o
@@ -17,27 +21,171 @@ export function logoApp(slug: string, nome: string, temLogo = false): string {
 }
 
 /**
- * definido em 2026-09-24 (ADR-048): o GitHub conecta sozinho pelo gh desta máquina; o token pessoal
- * fica recolhido em "Avançado" para quem não tem gh. O valor nunca volta: só a marca de que existe.
+ * O marketplace (revisto em 2026-09-25, jornadas de conexão). A tela antiga misturava ✓ e erro no mesmo
+ * cartão, três botões sem dizer o estado, o login em dois cliques mais um "Verificar" manual e, embaixo,
+ * o catálogo cru de cada MCP e a concessão ação por ação. Agora:
+ * - cada app tem UM estado (não conectado, conectando, conectado, precisa de atenção) e UMA ação;
+ * - "Conectar" no cartão já abre o login, e o cartão espera sozinho (web/lib/conexao.ts);
+ * - o login termina e a gaveta abre em "Quem pode usar o {App}?": Nenhum / Ler / Ler e alterar por bot;
+ * - clicar no resto do cartão abre a gaveta para ler antes, ou gerenciar;
+ * - a parte técnica (chave do Composio, MCP próprio, catálogos, concessão por ação) foi para "Avançado".
  */
-function avancadoGithub(temToken: boolean): string {
-  return `<details class="github-avancado"><summary>Avançado: token pessoal${temToken ? " · ✓ guardado" : ""}</summary><form class="form" data-form="token-github"><label>Token do GitHub<input type="password" name="token" required autocomplete="off" placeholder="ghp_… ou github_pat_…" /></label><button class="bt" type="submit">Guardar e verificar</button></form><small>Use quando esta máquina não tem o gh logado. O token fica cifrado neste servidor e os comentários saem em nome da conta dele.</small></details><details class="github-avancado"><summary>Avançado: GitHub da organização (rotinas no servidor)</summary><form class="form" data-form="app-github"><label>App ID<input name="appId" inputmode="numeric" required autocomplete="off" /></label><label>ID da instalação<input name="instalacaoId" inputmode="numeric" required autocomplete="off" /></label><label>Chave privada (.pem)<textarea name="chavePrivada" rows="3" required autocomplete="off" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></label><button class="bt" type="submit">Guardar e verificar</button></form><small>Só para quem administra o GitHub da organização (NOD_ADMINS). Só ROTINAS usam o App, e só de quem não tem gh, token nem Composio; os comentários saem em nome do App. A chave fica cifrada e nunca volta para a tela.</small></details>`;
+
+type Filtro = "todos" | "conectados" | "atencao";
+
+const PILULA: Record<SituacaoApp, { texto: string; classe: string }> = {
+  nao_conectado: { texto: "Não conectado", classe: "neutra" },
+  conectando: { texto: "Conectando", classe: "ambar" },
+  conectado: { texto: "Conectado", classe: "ok" },
+  atencao: { texto: "Precisa de atenção", classe: "ambar" },
+};
+
+function pilula(s: SituacaoApp): string {
+  const p = PILULA[s];
+  return `<span class="pilula pilula-${p.classe}">${esc(p.texto)}</span>`;
 }
+
+function avataresQueUsam(estado: Estado, c: Conector): string {
+  const bots = botsQueUsam(estado, c);
+  if (bots.length === 0) return '<span class="mkt-uso mudo">Nenhum bot usa ainda</span>';
+  const rostos = bots.slice(0, 4).map((b) => iconeAgente(b.agente, "sm")).join("");
+  return `<span class="mkt-uso"><span class="mkt-rostos">${rostos}</span>${bots.length === 1 ? `${esc(bots[0]!.agente.nome)} usa` : `${bots.length} bots usam`}</span>`;
+}
+
+function acaoDoCartao(estado: Estado, app: AppComLogo, s: SituacaoApp): string {
+  const login = estado.conectando[app.slug];
+  if (s === "conectando") return `${blocoEsperando(app.nome, login?.url ?? null, true)}${botao("cancelar-conexao", "Cancelar", { classe: "link sm", id: app.slug })}`;
+  if (login?.falhou) return `${blocoFalhou(login.falhou)}${botao("conectar-app", "Tentar de novo", { classe: "sm", id: app.slug })}`;
+  if (s === "atencao") return botao("conectar-app", "Entrar de novo", { classe: "pri sm", id: app.slug });
+  if (s === "conectado") {
+    const c = conectorDoApp(estado, app.slug);
+    return c ? avataresQueUsam(estado, c) : "";
+  }
+  return botao("conectar-app", "Conectar", { classe: "sm", id: app.slug });
+}
+
+function cartao(estado: Estado, app: AppComLogo, s: SituacaoApp, selecionado: boolean): string {
+  return `<article class="app-card sit-${s}${selecionado ? " selected" : ""}" data-app-busca="${esc(`${app.nome} ${app.categoria} ${app.descricao}`.toLowerCase())}" id="app-${esc(app.slug)}">
+    <button type="button" class="app-card-abrir" data-act="abrir-app" data-id="${esc(app.slug)}" aria-label="${esc(`Ver ${app.nome}`)}"></button>
+    <div class="app-card-heading">${logoApp(app.slug, app.nome, !!app.logo)}<span class="app-card-nome"><h3>${esc(app.nome)}</h3><small>${esc(app.categoria)}</small></span>${pilula(s)}</div>
+    <p>${esc(app.descricao)}</p>
+    <div class="app-card-actions">${acaoDoCartao(estado, app, s)}</div>
+  </article>`;
+}
+
+function motivoDaFalha(c: Conector | undefined): string {
+  const m = c?.ultimaFalha?.motivo;
+  if (m === "timeout_transporte") return "parou de responder";
+  return "não está respondendo";
+}
+
+function faixaAtencao(estado: Estado, apps: readonly AppComLogo[]): string {
+  const linhas = apps.map((app) => {
+    const c = conectorDoApp(estado, app.slug);
+    const bots = c ? botsQueUsam(estado, c).map((b) => b.agente.nome) : [];
+    const quem = bots.length === 0 ? "Nenhum bot depende dele agora." : `${bots.length === 1 ? bots[0] : `${bots.slice(0, -1).join(", ")} e ${bots.at(-1)}`} ${bots.length === 1 ? "não consegue" : "não conseguem"} usar o ${app.nome}${c?.ultimaFalha ? ` desde ${haQuanto(estado.agora - c.ultimaFalha.em)}` : ""}.`;
+    return `<div class="atencao-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div><b>O ${esc(app.nome)} ${esc(motivoDaFalha(c))}</b><small>${esc(quem)} Entrar de novo costuma resolver.</small></div>${botao("conectar-app", "Entrar de novo", { classe: "pri sm", id: app.slug })}</div>`;
+  });
+  return linhas.length ? `<section class="mkt-atencao" aria-label="Precisam de atenção">${linhas.join("")}</section>` : "";
+}
+
+function filtros(atual: Filtro, conectados: number, atencao: number): string {
+  const f = (id: Filtro, rotulo: string) => botao("filtro-marketplace", rotulo, { classe: `chip-filtro${id === atual ? " ativo" : ""}`, id, ...(id === atual ? { aria: `${rotulo} (selecionado)` } : {}) });
+  return `<div class="mkt-filtros" role="group" aria-label="Filtrar apps">${f("todos", "Todos")}${f("conectados", `Conectados · ${conectados}`)}${atencao ? f("atencao", `Precisam de atenção · ${atencao}`) : ""}</div>`;
+}
+
+// ------------------------------------------------------------------------------------ gaveta
+
+function seletorNivel(agenteId: string, conectorId: string, atual: NivelAtual, nome: string): string {
+  const op = (n: Nivel) => `<button type="button" class="seg${n === atual ? " ativo" : ""}" data-act="nivel-bot" data-id="${esc(agenteId)}" data-conector="${esc(conectorId)}" data-nivel="${n}" aria-pressed="${n === atual}">${esc(ROTULO_NIVEL[n])}</button>`;
+  return `<div class="segmentado" role="group" aria-label="${esc(`Acesso de ${nome}`)}">${op("nenhum")}${op("leitura")}${op("escrita")}</div>`;
+}
+
+function quemPodeUsar(estado: Estado, c: Conector, titulo: string): string {
+  const bots = meusBots(estado);
+  const linhas = bots.map((a) => {
+    const nivel = nivelDoBot(estado, a.id, c);
+    // "Personalizado": ações dadas uma a uma (pela rotina, pelo card, na tela avançada). Nenhum botão aceso —
+    // escolher um nível mexe só em ler, criar, editar e comentar; apagar e o resto ficam como estão.
+    const sub = nivel === "personalizado" ? "Personalizado · ações escolhidas uma a uma" : a.titulo || "Seu bot";
+    return `<div class="quem-linha">${iconeAgente(a, "sm")}<div class="quem-nome"><b>${esc(a.nome)}</b><small>${esc(sub)}</small></div>${seletorNivel(a.id, c.id, nivel, a.nome)}</div>`;
+  }).join("");
+  return `<section class="gaveta-secao"><h3>${esc(titulo)}</h3>${bots.length ? `<div class="quem-lista">${linhas}</div>` : '<p class="mudo">Você ainda não tem bots.</p>'}<p class="mudo">Quem ficar sem acesso pode pedir na conversa quando precisar; você decide ali, com um clique. Apagar fica sempre de fora de "Ler e alterar".</p></section>`;
+}
+
+function oQueLibera(estado: Estado, slug: string): string {
+  const leitura = podeENao(estado, slug, "leitura");
+  return `<section class="gaveta-secao"><h3>O que os bots podem fazer</h3>
+    <div class="nivel-caixa"><b>Ler</b><p>${esc(leitura.pode[0] ?? "")}. ${esc(leitura.nao[0] ?? "")}.</p></div>
+    <div class="nivel-caixa"><b>Ler e alterar</b><p>Também criar, editar e comentar. Apagar fica sempre de fora.</p></div>
+  </section>`;
+}
+
+function comoFunciona(nome: string): string {
+  return `<section class="gaveta-secao"><h3>Como funciona</h3><ol class="como"><li>Você entra no ${esc(nome)} numa janela. O Nod não vê sua senha.</li><li>Escolhe quais bots podem usar, e com qual nível.</li><li>Cada pessoa do time conecta a própria conta.</li></ol></section>`;
+}
+
+function detalhesTecnicos(c: Conector): string {
+  const grupos = gruposDe(c.catalogo, c.catalogo.map((x) => x.nome));
+  return `<details class="gaveta-tecnico" data-disclosure="gaveta-tecnico-${esc(c.id)}"><summary>Detalhes técnicos (${esc(acoes(c.catalogo.length))})</summary><ul>${grupos.map((g) => `<li><b>${esc(g.rotulo)}</b> · ${esc(acoes(g.capacidades.length))}</li>`).join("")}</ul>${botao("abrir-avancado", "Ver na tela avançada", { classe: "link sm" })}</details>`;
+}
+
+function gaveta(estado: Estado, app: AppComLogo, passo: "detalhes" | "quem-usa"): string {
+  const s = situacaoDoApp(estado, app.slug);
+  const c = conectorDoApp(estado, app.slug);
+  const login = estado.conectando[app.slug];
+  let corpo: string;
+  let rodape: string;
+  if (s === "conectando") {
+    corpo = `${blocoEsperando(app.nome, login?.url ?? null)}${oQueLibera(estado, app.slug)}`;
+    rodape = botao("cancelar-conexao", "Cancelar", { classe: "link", id: app.slug });
+  } else if ((s === "conectado" || s === "atencao") && c) {
+    const status = s === "atencao"
+      ? `<div class="gaveta-status atencao">${blocoFalhou(`O ${app.nome} ${motivoDaFalha(c)}. Entrar de novo costuma resolver.`)}</div>`
+      : `<div class="gaveta-status"><span class="bolinha-ok" aria-hidden="true"></span><div><b>Conectado</b><small>${c.sondadoEm ? `Funcionando · verificado ${esc(haQuanto(estado.agora - c.sondadoEm))}` : "Funcionando"}</small></div></div>`;
+    corpo = `${status}${quemPodeUsar(estado, c, passo === "quem-usa" ? `Quem pode usar o ${app.nome}?` : "Quem usa")}${detalhesTecnicos(c)}`;
+    rodape = passo === "quem-usa"
+      ? botao("fechar-gaveta", "Pronto", { classe: "pri" })
+      // revisto em 2026-09-25 (revisão do PR #68): "Entrar de novo" só com o app em atenção — refazer o login
+      // desliga o conector até o novo terminar, e num app que funciona isso só tira o acesso dos bots.
+      : `${s === "atencao" ? botao("conectar-app", "Entrar de novo", { classe: "pri", id: app.slug }) : ""}${botao("desconectar-app", `Desconectar ${esc(app.nome)}`, { classe: "link perigo", id: c.id })}`;
+  } else {
+    const falha = login?.falhou ? blocoFalhou(login.falhou) : "";
+    corpo = `${falha}<p class="gaveta-desc">${esc(app.descricao)}</p>${oQueLibera(estado, app.slug)}${comoFunciona(app.nome)}`;
+    rodape = botao("conectar-app", `${login?.falhou ? "Tentar de novo" : `Conectar ${esc(app.nome)}`} ${SETA_EXTERNA}`, { classe: "pri largo", id: app.slug });
+  }
+  return `<div class="gaveta-fundo" data-act="fechar-gaveta"></div>
+  <aside class="gaveta" role="dialog" aria-modal="true" aria-label="${esc(app.nome)}">
+    <div class="gaveta-cab">${logoApp(app.slug, app.nome, !!app.logo)}<div><h2>${esc(app.nome)}</h2><small>${esc(app.categoria)}</small></div>${botao("fechar-gaveta", "×", { classe: "gaveta-fechar", aria: "Fechar" })}</div>
+    <div class="gaveta-corpo">${corpo}</div>
+    <div class="gaveta-rodape">${rodape}</div>
+  </aside>`;
+}
+
+// ------------------------------------------------------------------------------------ tela
 
 export function renderMarketplace(estado: Estado): string {
   const tela = estado.tela.tipo === "conectores" ? estado.tela : null;
-  const instalados = estado.conectores.filter((c) => c.habilitado).length;
+  const filtro: Filtro = tela?.filtro ?? "todos";
+  const situacoes = estado.marketplace.map((app) => ({ app, s: situacaoDoApp(estado, app.slug) }));
+  const conectados = situacoes.filter((x) => x.s === "conectado").length;
+  const atencao = situacoes.filter((x) => x.s === "atencao");
+  const visiveis = situacoes.filter((x) => filtro === "todos" || (filtro === "conectados" ? x.s === "conectado" : x.s === "atencao"));
   const retorno = tela?.voltar ? botao("voltar-conexao", "← Voltar para a conversa", { classe: "link" }) : "";
-  return `<div class="marketplace-hero">${retorno}<div class="marketplace-title"><div><span class="eyebrow">MAIS POSSIBILIDADES PARA SEUS BOTS</span><h1>Marketplace</h1></div><span class="chip">${instalados} ${instalados === 1 ? "conectado" : "conectados"}</span></div><p class="intro">Seus apps, trabalhando com você. Conecte uma vez e escolha o que cada bot pode fazer.</p>
-    <label class="search marketplace-search"><span>⌕</span><input id="busca-marketplace" aria-label="Buscar apps e ferramentas" placeholder="Buscar apps e ferramentas" /></label></div>
-    <details class="composio-setup"${estado.composioConfigurado ? "" : " open"}><summary>${estado.composioConfigurado ? "✓ Composio configurado · alterar chave" : "Comece conectando seu Composio"}</summary><p>Adicione a chave do seu projeto uma vez. Depois, entre nos apps pelo navegador.</p><form class="form composio-form" data-form="configurar-composio"><label>Chave do projeto<input type="password" name="chave" required autocomplete="off" placeholder="Cole sua chave Composio" /></label><button class="bt pri" type="submit">Salvar e verificar</button></form><a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer">Abrir Composio ↗</a><small>A chave fica cifrada neste servidor. O Composio gerencia os logins dos apps.</small></details>
-    <h2 class="marketplace-heading">Para o seu dia a dia</h2>
-    <div class="apps-grid">${estado.marketplace.map((app) => {
-      const c = estado.conectores.find((c) => c.slug === app.slug && c.ownerId === estado.sessao?.pessoaId);
-      const selecionado = tela?.app === app.slug;
-      const auth = estado.autorizacaoApp?.slug === app.slug ? estado.autorizacaoApp : null;
-      return `<article class="app-card${selecionado ? " selected" : ""}" data-app-busca="${esc(`${app.nome} ${app.categoria} ${app.descricao}`.toLowerCase())}" id="app-${esc(app.slug)}"><div class="app-card-heading">${logoApp(app.slug, app.nome, !!app.logo)}<span><h3>${esc(app.nome)}</h3><small>${esc(app.categoria)}</small></span>${c?.habilitado ? '<span class="connected-dot" title="Conectado">✓</span>' : ""}</div><p>${esc(app.descricao)}</p><div class="app-card-actions">${botao("conectar-composio", c?.habilitado ? "Reconectar" : c ? "Refazer conexão" : "Conectar", { id: app.slug, classe: selecionado ? "pri" : "" })}${c ? botao("verificar-composio", "Verificar conexão", { id: app.slug }) : ""}</div>${auth ? `<div class="auth-pending"><a class="bt pri" href="${esc(auth.url)}" target="_blank" rel="noopener noreferrer">Entrar no ${esc(app.nome)} ↗</a><p>Conclua o login na aba que abrir e clique em Verificar conexão.</p></div>` : ""}${c?.ultimaFalha ? '<p class="connection-error" role="status">Não foi possível acessar as ferramentas. Verifique o login e tente novamente.</p>' : ""}${c?.habilitado && selecionado && tela?.voltar ? botao("voltar-conexao", "Voltar e continuar tarefa", { classe: "pri" }) : ""}${app.slug === "github" ? avancadoGithub(c?.env.GITHUB_TOKEN === true) : ""}</article>`;
-    }).join("")}</div>
-    <p id="marketplace-vazio" class="mudo" hidden>Nenhum app encontrado. Tente outro nome ou conecte seu próprio MCP abaixo.</p>
-    ${estado.avisoConexao ? `<p class="connection-notice" role="status">${esc(estado.avisoConexao)}</p>` : ""}`;
+  const semComposio = estado.composioConfigurado ? "" : `<p class="mkt-aviso">Para conectar a maioria dos apps, o Composio do time precisa estar configurado. ${botao("abrir-avancado", "Configurar", { classe: "link" })}</p>`;
+  const aviso = estado.avisoConexao ? `<p class="connection-notice" role="status">${esc(estado.avisoConexao)}</p>` : "";
+  const aberta = tela?.gaveta ? estado.marketplace.find((a) => a.slug === tela.gaveta?.slug) : undefined;
+  return `<div class="mkt">
+    ${retorno}
+    <div class="mkt-topo"><div><h1>Marketplace</h1><p>Conecte um app uma vez e escolha quais bots podem usar.</p></div>
+      <label class="search mkt-busca"><span aria-hidden="true">⌕</span><input id="busca-marketplace" aria-label="Buscar apps" placeholder="Buscar apps" /></label></div>
+    ${aviso}${semComposio}
+    ${filtros(filtro, conectados, atencao.length)}
+    ${filtro === "todos" ? faixaAtencao(estado, atencao.map((x) => x.app)) : ""}
+    <div class="apps-grid">${visiveis.map((x) => cartao(estado, x.app, x.s, tela?.gaveta?.slug === x.app.slug || tela?.app === x.app.slug)).join("")}</div>
+    <p id="marketplace-vazio" class="mudo" hidden>Nenhum app encontrado.</p>
+    <p class="mkt-rodape mudo">Não achou o app? ${botao("abrir-avancado", "Conectar um servidor MCP próprio", { classe: "link" })} · ${botao("abrir-avancado", "Configurações avançadas", { classe: "link" })}</p>
+  </div>
+  ${aberta && tela?.gaveta ? gaveta(estado, aberta, tela.gaveta.passo) : ""}`;
 }
+

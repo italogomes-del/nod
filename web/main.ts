@@ -24,6 +24,9 @@ import { renderChaves } from "./telas/chaves.ts";
 import { renderRelatos } from "./telas/relatos.ts";
 import { renderEspaco } from "./telas/espaco.ts";
 import { renderConectores } from "./telas/conectores.ts";
+import { appsQueFaltam } from "./telas/rotina-precisa.ts";
+import { criarConexoes } from "./lib/conexao.ts";
+import type { Proposta } from "../src/contracts/conversa.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
@@ -486,6 +489,7 @@ function render(): void {
 // Sessão, SSE e relógio.
 
 async function iniciarSessao(escopo: Escopo): Promise<void> {
+  conexoes.cancelarTodas();
   api = criarApi(escopo);
   // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
   avisador.reiniciar();
@@ -534,6 +538,54 @@ async function boot(): Promise<void> {
       }
     } else dispatch({ tipo: "erro", erro: erroDe(e) });
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Conexão de apps (definido em 2026-09-25, jornadas de conexão): uma espera por app, e o que fazer quando
+// o login termina. Sem um `depois` da própria tentativa, o padrão: no marketplace a gaveta abre em
+// "Quem pode usar"; no chat, o card já virou o de permitir no servidor e a conversa só relê.
+
+const conexoes = criarConexoes({
+  conectar: (slug) => api!.conectarApp(slug),
+  verificar: (slug) => api!.verificarApp(slug),
+  mudou: (slug, valor) => dispatch({ tipo: "conexao-app", slug, valor }),
+  conectado: (slug) => {
+    const conversa = conversaAtual();
+    dispatch({ tipo: "invalidar", quais: ["conectores", "sua-vez", "frota", ...(conversa ? [`conversa:${conversa.conversaId}` as Invalidacao] : [])] });
+    const t = estado.tela;
+    if (t.tipo === "conectores" && !t.avancado) navegar({ ...t, gaveta: { slug, passo: "quem-usa" } });
+  },
+  abrirJanela: (nome) => {
+    try {
+      const janela = window.open("", nome, "popup,width=560,height=720");
+      // Ainda about:blank, da nossa origem: cortar o opener impede a página do provedor de navegar o Nod.
+      if (janela) janela.opener = null;
+      return janela;
+    } catch { return null; }
+  },
+  esperar: (ms) => new Promise((r) => window.setTimeout(r, ms)),
+  agora: () => Date.now(),
+});
+
+/** Chamado DENTRO do clique (a janela de login só abre sem bloqueio no gesto da pessoa). `depois` morre com a tentativa. */
+function iniciarConexao(slug: string, depois: (() => Promise<void>) | null = null): void {
+  if (!slug) return;
+  // O GitHub não depende do Composio (ADR-048): o servidor tenta o gh desta máquina e o token antes.
+  if (!estado.composioConfigurado && slug !== "github") {
+    navegar({ tipo: "conectores", avancado: true });
+    dispatch({ tipo: "aviso-conexao", texto: "Para conectar apps, adicione a chave do Composio do time abaixo." });
+    return;
+  }
+  dispatch({ tipo: "erro", erro: null });
+  void conexoes.iniciar(slug, depois).catch((e: unknown) => dispatch({ tipo: "erro", erro: erroDe(e) }));
+}
+
+function propostaDoEstado(id: string): Proposta | null {
+  for (const c of Object.values(estado.conversas)) {
+    const p = c.propostas.find((x) => x.id === id);
+    if (p) return p;
+  }
+  return estado.suaVez?.itens.find((i) => i.proposta?.id === id)?.proposta ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -775,50 +827,73 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
     if (tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
   },
-  "conectar-composio": (el) => agir(async () => {
-    // ADR-048: o GitHub não depende do Composio — o servidor tenta o gh desta máquina e o token antes.
-    if (!estado.composioConfigurado && el.dataset.id !== "github") {
-      dispatch({ tipo: "aviso-conexao", texto: "Adicione a chave do seu Composio acima para conectar os apps." });
-      document.querySelector<HTMLInputElement>('input[name="chave"]')?.focus();
-      return;
-    }
-    const slug = el.dataset.id ?? "";
-    const r = await api!.conectarApp(slug);
-    if (r.url) dispatch({ tipo: "autorizacao-app", slug, url: r.url });
-    else dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "GitHub conectado. Seus bots pedem o acesso de que precisam, e você permite com um clique." : (r.frase ?? "Não foi possível conectar agora.") });
-    dispatch({ tipo: "invalidar", quais: ["conectores"] });
-  }),
-  "verificar-composio": (el) => agir(async () => {
-    const r = await api!.verificarApp(el.dataset.id ?? "");
-    dispatch({ tipo: "aviso-conexao", texto: r.conectado ? "Conexão concluída. Escolha as ferramentas que seu bot pode usar abaixo, ou volte à conversa para ele pedir o acesso necessário." : "Login ainda não concluído ou conexão indisponível. Termine a autorização na outra aba e tente novamente." });
-    dispatch({ tipo: "invalidar", quais: ["conectores"] });
-  }),
-  "abrir-conexao": (el) => {
+  // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
+  // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha
+  // (web/lib/conexao.ts). Sem "Verificar conexão" e sem ir ao marketplace no meio de uma conversa.
+  "conectar-app": (el) => iniciarConexao(el.dataset.id ?? ""),
+  "abrir-conexao": (el) => iniciarConexao(el.dataset.id ?? ""),
+  "cancelar-conexao": (el) => conexoes.cancelar(el.dataset.id ?? ""),
+  "abrir-app": (el) => {
     const t = estado.tela;
-    navegar({ tipo: "conectores", app: el.dataset.id, voltar: t.tipo === "conversa" || t.tipo === "sala" ? t : undefined });
+    if (t.tipo === "conectores") navegar({ ...t, gaveta: { slug: el.dataset.id ?? "", passo: "detalhes" } });
+  },
+  "fechar-gaveta": () => {
+    const t = estado.tela;
+    if (t.tipo === "conectores") { const { gaveta: _g, ...resto } = t; navegar(resto); }
+  },
+  "filtro-marketplace": (el) => {
+    const t = estado.tela;
+    const f = el.dataset.id;
+    if (t.tipo === "conectores" && (f === "todos" || f === "conectados" || f === "atencao")) navegar({ ...t, filtro: f });
+  },
+  "abrir-avancado": () => navegar({ tipo: "conectores", avancado: true }),
+  "navegar-marketplace": () => navegar({ tipo: "conectores" }),
+  "nivel-bot": (el) => agir(async () => {
+    const agenteId = el.dataset.id ?? "";
+    const nivel = el.dataset.nivel;
+    if (nivel !== "nenhum" && nivel !== "leitura" && nivel !== "escrita") return;
+    await api!.definirNivel(agenteId, el.dataset.conector ?? "", nivel);
+    dispatch({ tipo: "invalidar", quais: [`concessoes:${agenteId}`, "frota"] });
+  }),
+  "desconectar-app": (el) => agir(async () => {
+    await api!.habilitarConector(el.dataset.id ?? "", false);
     dispatch({ tipo: "invalidar", quais: ["conectores"] });
+  }),
+  // definido em 2026-09-25: Permitir leva só os grupos marcados no card (card-acesso.ts); sem grupos, tudo o que foi pedido.
+  "permitir-acesso": (el) => agir(async () => {
+    const id = el.dataset.id ?? "";
+    const card = el.closest<HTMLElement>("[data-decisao]");
+    const grupos = [...(card?.querySelectorAll<HTMLInputElement>("input[data-caps]") ?? [])];
+    const capacidades = grupos.filter((g) => g.checked).flatMap((g) => (g.dataset.caps ?? "").split(",").filter(Boolean));
+    if (grupos.length > 0 && capacidades.length === 0) { dispatch({ tipo: "erro", erro: { codigo: "entrada_invalida", mensagem: "Marque pelo menos um grupo para permitir." } }); return; }
+    await api!.decidir(id, grupos.length > 0 ? { capacidades } : {});
+    dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "conectores", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  }),
+  "dar-acesso": (el) => dispatch({ tipo: "dar-acesso", agenteId: estado.dandoAcesso === el.dataset.id ? null : el.dataset.id ?? null }),
+  // definido em 2026-09-25: a rotina que lê um app ainda desconectado — um botão conecta e, quando o login
+  // termina, cria a rotina (o confirmar concede o que ela declarou, conceder-acessos-da-rotina.ts).
+  "conectar-e-confirmar": (el) => {
+    const slug = el.dataset.id ?? "";
+    const propostaId = el.dataset.proposta ?? "";
+    const ato = el.dataset.ato;
+    iniciarConexao(slug, async () => {
+      const r = await api!.conectores();
+      dispatch({ tipo: "hidratar-conectores", conectores: r.conectores, marketplace: r.marketplace, composioConfigurado: r.composioConfigurado });
+      // A proposta ainda tem de estar à vista e pendente: sumiu (decidida, recusada, de outra sessão), nada é confirmado.
+      const proposta = propostaDoEstado(propostaId);
+      if (!proposta || proposta.estado !== "pendente" || appsQueFaltam(proposta, estado).length > 0) return;
+      await agir(async () => {
+        if (ato === "decidir-proposta") await api!.decidir(propostaId, {});
+        else await api!.confirmarProposta(propostaId);
+        dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+      });
+    });
   },
   "voltar-conexao": () => {
     const t = estado.tela;
     if (t.tipo === "conectores" && t.voltar) navegar(t.voltar);
     else navegar({ tipo: "inicio" });
   },
-  "retomar-conexao": (el) => agir(async () => {
-    const alvo = conversaAtual();
-    if (!alvo) return;
-    // definido em 2026-09-24 (ADR-044): pedido de LEITURA vira, no lugar do card de conexão, o card de
-    // um clique com as ferramentas de leitura do app (confirmar-proposta.ts). Escrita segue pelo agente.
-    if (el.dataset.nivel === "leitura") {
-      await api!.confirmarProposta(el.dataset.id ?? "");
-      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "conectores", "sua-vez"] });
-      return;
-    }
-    await api!.recusarProposta(el.dataset.id ?? "");
-    const texto = `Conectei ${el.dataset.slug ?? "o app"}. Continue o pedido anterior usando o catálogo disponível e peça os acessos necessários.`;
-    if (alvo.salaId) await api!.postarNaSala(alvo.salaId, texto);
-    else await api!.enviar(alvo.conversaId, texto);
-    dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "conectores"] });
-  }),
   "criar-rapido": () => agir(async () => {
     const r = await api!.criarAgente(undefined, { interativo: true });
     dispatch({ tipo: "invalidar", quais: ["frota"] });
@@ -1219,6 +1294,9 @@ document.addEventListener("focusout", (ev) => {
 document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
+  // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
+  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
+  if (ev.key === "Escape" && estado.dandoAcesso) { ev.preventDefault(); dispatch({ tipo: "dar-acesso", agenteId: null }); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
   // Esc com o campo respondendo: a próxima mensagem vira mensagem comum (o mesmo "Outro assunto").

@@ -493,6 +493,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.propostas.push(proposta);
         return proposta;
       },
+      async conexoesPendentes(conector) {
+        return doTenant(b.propostas).filter((p) => p.estado === "pendente" && p.payload.kind === "acesso" && p.payload.conector === conector && p.payload.conectar === true).sort((x, y) => x.criadoEm - y.criadoEm);
+      },
       async criarAcessoDeRotina(p) {
         const existente = acessoDeRotinaAberto(p.agenteId, p.payload.conector);
         if (existente) return { proposta: existente, criada: false };

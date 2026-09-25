@@ -6,7 +6,8 @@ import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { SLUG_GITHUB } from "../contracts/github.ts";
-import { capacidadesDeLeitura, normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
+import { capacidadesDoNivel } from "../domain/grupos-de-acesso.ts";
+import { normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { evento } from "./autoria-evento.ts";
 import { garantirGithubSemConfiguracao } from "./conectar-github.ts";
@@ -47,7 +48,8 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
   const mesmas = [...pedido.capacidades].sort().join(",");
   for (const p of await deps.repos.propostas.pendentesDaConversa(ctx.conversaId)) {
     if (p.payload.kind !== "acesso" || p.agenteId !== ctx.agenteId || p.payload.conector !== pedido.conector || p.payload.rotinaId) continue;
-    const repete = p.payload.turnoId === ctx.turnoId && [...new Set(p.payload.capacidades)].sort().join(",") === mesmas;
+    // revisto em 2026-09-25: o nível também — com [] as capacidades são iguais e um pedido de escrita virava o card de leitura.
+    const repete = p.payload.turnoId === ctx.turnoId && p.payload.nivel === pedido.nivel && [...new Set(p.payload.capacidades)].sort().join(",") === mesmas;
     if (!repete) continue;
     const decisao = await deps.repos.decisoes.buscar(p.id);
     if (decisao && decisao.estado !== "pendente" && decisao.estado !== "reaberta") continue;
@@ -76,7 +78,8 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     const r = await garantirGithubSemConfiguracao(deps, { pelaPessoa: false });
     if (r.ok) {
       conector = r.conector;
-      if (input.capacidades.length === 0) entrada = { ...input, capacidades: input.nivel === "leitura" ? capacidadesDeLeitura(r.conector.catalogo) : r.conector.catalogo.map((c) => c.nome) };
+      // revisto em 2026-09-25 (ADR-049): o mesmo nível de todo app — escrita sem o grupo apagar.
+      if (input.capacidades.length === 0) entrada = { ...input, capacidades: capacidadesDoNivel(r.conector.catalogo, input.nivel) };
     }
   }
   // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a escrita que a rotina
@@ -114,6 +117,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     capacidades: pedido.capacidades,
     nivel: pedido.nivel,
     naoPedido: pedido.naoPedido,
+    ...(pedido.para ? { para: pedido.para } : {}),
   };
   if (pedido.conectar || !conector) {
     // O app ainda não está pronto: só o card de conexão. A concessão vem depois (confirmar-proposta.ts).
