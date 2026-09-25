@@ -47,7 +47,8 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
   const mesmas = [...pedido.capacidades].sort().join(",");
   for (const p of await deps.repos.propostas.pendentesDaConversa(ctx.conversaId)) {
     if (p.payload.kind !== "acesso" || p.agenteId !== ctx.agenteId || p.payload.conector !== pedido.conector || p.payload.rotinaId) continue;
-    const repete = p.payload.turnoId === ctx.turnoId && [...new Set(p.payload.capacidades)].sort().join(",") === mesmas;
+    // revisto em 2026-09-25: o nível também — com [] as capacidades são iguais e um pedido de escrita virava o card de leitura.
+    const repete = p.payload.turnoId === ctx.turnoId && p.payload.nivel === pedido.nivel && [...new Set(p.payload.capacidades)].sort().join(",") === mesmas;
     if (!repete) continue;
     const decisao = await deps.repos.decisoes.buscar(p.id);
     if (decisao && decisao.estado !== "pendente" && decisao.estado !== "reaberta") continue;
@@ -114,6 +115,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     capacidades: pedido.capacidades,
     nivel: pedido.nivel,
     naoPedido: pedido.naoPedido,
+    ...(pedido.para ? { para: pedido.para } : {}),
   };
   if (pedido.conectar || !conector) {
     // O app ainda não está pronto: só o card de conexão. A concessão vem depois (confirmar-proposta.ts).

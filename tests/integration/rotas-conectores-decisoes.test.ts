@@ -171,4 +171,25 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     expect(memoria.banco.trilha.some((l) => l.ferramenta === "x__y" && l.kind === "negacao")).toBe(true);
     expect((await interno("POST", "negacoes", { nome: "x", motivo: "inventado", classe: "ferramenta_negada" })).status).toBe(400);
   });
+
+  // definido em 2026-09-25 (jornadas de conexão): "Quem pode usar o X?" — o nível escolhido vira exatamente o conjunto concedido.
+  it("POST agentes/:id/acessos: escrita concede o que falta num lote; leitura revoga a escrita; nenhum revoga tudo; nível inválido → 400", async () => {
+    const lista = async () => ((await (await srv.chamar(sessao, "GET", `agentes/${agenteId}/concessoes`)).json()) as { concessoes: { capacidade: string }[] }).concessoes.map((c) => c.capacidade).sort();
+    // Começa do zero: os testes anteriores deixam concessões neste bot.
+    expect((await srv.chamar(sessao, "POST", `agentes/${agenteId}/acessos`, { conectorId, nivel: "nenhum" })).status).toBe(200);
+    expect(await lista()).toEqual([]);
+    const escrita = await srv.chamar(sessao, "POST", `agentes/${agenteId}/acessos`, { conectorId, nivel: "escrita" });
+    expect(escrita.status).toBe(200);
+    expect(((await escrita.json()) as { ids: Record<string, string> }).ids).toEqual({ concedidas: "2", revogadas: "0" });
+    expect(memoria.banco.mensagens.filter((m) => m.kind === "consentimento").length).toBeGreaterThan(0);
+    expect(await lista()).toEqual(["gravar", "somar"]);
+    const leitura = (await (await srv.chamar(sessao, "POST", `agentes/${agenteId}/acessos`, { conectorId, nivel: "leitura" })).json()) as { ids: Record<string, string> };
+    expect(leitura.ids).toEqual({ concedidas: "0", revogadas: "1" });
+    expect(await lista()).toEqual(["somar"]);
+    expect((await srv.chamar(sessao, "POST", `agentes/${agenteId}/acessos`, { conectorId, nivel: "tudo" })).status).toBe(400);
+    const catalogo = ((await (await srv.chamar(sessao, "GET", "conectores")).json()) as { conectores: { catalogo: { nome: string; grupo: string }[] }[] }).conectores[0]?.catalogo;
+    expect(catalogo?.map((c) => [c.nome, c.grupo])).toEqual([["somar", "ler"], ["gravar", "alterar"]]);
+    expect((await srv.chamar(sessao, "POST", `agentes/${agenteId}/acessos`, { conectorId, nivel: "nenhum" })).status).toBe(200);
+    expect(await lista()).toEqual([]);
+  });
 });

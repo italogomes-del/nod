@@ -4,6 +4,32 @@ import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
+import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type Nivel } from "./app-acesso.ts";
+import { logoApp } from "./marketplace.ts";
+
+/**
+ * "+ Dar acesso" do painel do bot (definido em 2026-09-25, jornadas de conexão): em cima, os apps que a
+ * pessoa já conectou, com o nível deste bot (Nenhum / Ler / Ler e alterar); embaixo, os que faltam
+ * conectar, com "Conectar" ali mesmo. Conectou, o app sobe para a lista de cima e a pessoa escolhe o nível.
+ */
+function popoverDarAcesso(estado: Estado, agenteId: string, nomeBot: string): string {
+  const seg = (conectorId: string, atual: Nivel) => `<div class="segmentado sm" role="group" aria-label="${esc(`Acesso de ${nomeBot}`)}">${(["nenhum", "leitura", "escrita"] as const).map((n) => `<button type="button" class="seg${n === atual ? " ativo" : ""}" data-act="nivel-bot" data-id="${esc(agenteId)}" data-conector="${esc(conectorId)}" data-nivel="${n}" aria-pressed="${n === atual}">${esc(ROTULO_NIVEL[n])}</button>`).join("")}</div>`;
+  const conectados = estado.marketplace.flatMap((app) => {
+    const c = conectorDoApp(estado, app.slug);
+    return c?.habilitado ? [`<div class="da-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div class="da-nome"><b>${esc(app.nome)}</b>${seg(c.id, nivelDoBot(estado, agenteId, c))}</div></div>`] : [];
+  });
+  const faltam = estado.marketplace.filter((app) => situacaoDoApp(estado, app.slug) !== "conectado").slice(0, 6).map((app) => {
+    const login = estado.conectando[app.slug];
+    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
+    return `<div class="da-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div class="da-nome"><b>${esc(app.nome)}</b></div>${acao}</div>`;
+  });
+  return `<div class="dar-acesso" role="dialog" aria-label="${esc(`Dar a ${nomeBot} acesso a um app`)}">
+    <div class="da-cab"><b>Dar a ${esc(nomeBot)} acesso a…</b>${botao("dar-acesso", "×", { classe: "link", id: agenteId, aria: "Fechar" })}</div>
+    ${conectados.length ? `<div class="da-grupo"><small>Já conectados por você</small>${conectados.join("")}</div>` : ""}
+    ${faltam.length ? `<div class="da-grupo"><small>Conectar e dar acesso</small>${faltam.join("")}</div>` : ""}
+    ${botao("navegar", "Ver todos no Marketplace", { classe: "link sm", dados: { tela: "conectores" } })}
+  </div>`;
+}
 
 /**
  * Painel do bot (ADR-032: "painel de detalhes com perfil, colegas e rotinas"). Desde 2026-09-18 ele é
@@ -116,8 +142,9 @@ export function renderDetalhes(estado: Estado): string {
       ${rotinas.length ? `<ul class="lista-cartoes">${rotinas.slice(0, 4).map(linhaRotina).join("")}</ul>` : '<p class="mudo">Uma tarefa que se repete? Programe aqui ou peça na conversa.</p>'}
       ${rotinas.length > 4 ? botao("navegar", `ver todas as ${rotinas.length}`, { classe: "link sm", dados: { tela: "rotinas" } }) : ""}
     </section>
-    <section class="detalhes-secao"><div class="secao-titulo"><h3>Acessos</h3>${botao("abrir-conexao", "+ Conectar", { classe: "link" })}</div>
-      ${acessos ? `<ul class="lista-cartoes">${acessos}</ul>` : '<p class="mudo">Este bot ainda não usa nenhuma ferramenta externa. Ele pede o acesso quando precisar — ou conecte você mesmo.</p>'}
+    <section class="detalhes-secao secao-acessos"><div class="secao-titulo"><h3>Acessos</h3>${dona ? botao("dar-acesso", "+ Dar acesso", { classe: "link", id: a.id, aria: `Dar a ${a.nome} acesso a um app` }) : ""}</div>
+      ${dona && estado.dandoAcesso === a.id ? popoverDarAcesso(estado, a.id, a.nome) : ""}
+      ${acessos ? `<ul class="lista-cartoes">${acessos}</ul>` : '<p class="mudo">Este bot ainda não usa nenhuma ferramenta externa. Ele pede o acesso quando precisar — ou dê você mesmo.</p>'}
     </section>
     <section class="detalhes-secao"><div class="secao-titulo"><h3>Colabora com</h3>${botao("navegar", "Criar sala", { classe: "link", dados: { tela: "nova-sala" } })}</div>
       ${colegas.length ? colegas.slice(0, 8).map((b) => `<button class="colega" data-act="preencher-prompt" data-texto="Consulte @${esc(b.nome)} sobre: ">${iconeAgente(b)}<div><b>${esc(b.nome)}</b><small>${esc(b.titulo || "Bot da sua equipe")}</small></div></button>`).join("") : '<p class="mudo">Crie outro bot para eles trabalharem juntos.</p>'}

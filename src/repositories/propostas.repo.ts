@@ -82,6 +82,19 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraProposta);
     },
 
+    /**
+     * definido em 2026-09-25: os cards "Conecte o X" desta pessoa ainda abertos, em qualquer conversa —
+     * quando o login do app termina, cada um vira o card de permitir sem a pessoa voltar a ele (ao-conectar-app.ts).
+     */
+    async conexoesPendentes(conector: string): Promise<Proposta[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from propostas
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and kind = 'acesso' and estado = 'pendente'
+          and payload->>'conector' = ${conector} and payload ? 'conectar'
+        order by criado_em, id`;
+      return linhas.map(paraProposta);
+    },
+
     async pendentesDaConversa(conversaId: string): Promise<Proposta[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' order by criado_em`;

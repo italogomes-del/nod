@@ -3,6 +3,7 @@ import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc } from "../lib/render.ts";
 import { logoApp } from "./marketplace.ts";
+import { blocoEsperando, SETA_EXTERNA } from "./app-acesso.ts";
 
 /**
  * "Rotina nasce com o acesso" (definido em 2026-09-24, emenda da ADR-044): o card da rotina proposta diz,
@@ -14,7 +15,7 @@ import { logoApp } from "./marketplace.ts";
  * nomeDoApp e fraseDoPedidoDeAcesso (src/domain/pedido-acesso.ts) com o que o estado já tem.
  */
 
-type Contexto = Pick<Estado, "conectores" | "marketplace">;
+type Contexto = Pick<Estado, "conectores" | "marketplace"> & Partial<Pick<Estado, "conectando">>;
 
 /** Os acessos que a proposta declara: nascimento ('rotina') ou mudança que traz a lista nova. */
 export function acessosDaProposta(p: Proposta | null | undefined): readonly AcessoPedido[] {
@@ -84,10 +85,27 @@ export function acoesComAcesso(p: Proposta | null | undefined, ctx: Contexto, at
   const linhas = acessosDaProposta(p).map((a) => linha(a, ctx, p.id));
   if (linhas.length === 0) return null;
   const inicio = p.payload.kind === "rotina_atualizacao" ? "Aplicar mudança" : "Criar rotina";
-  const rotulo = `${inicio} e permitir ${linhas.some((l) => l.escrita) ? "acesso" : "leitura"}`;
+  const recusar = botao(atos.recusar, atos.rotuloRecusar, { id: p.id });
   const faltam = linhas.filter((l) => !l.conectado);
-  const liberado = faltam.length > 0 ? `Liberado assim que ${listaDeApps(faltam.map((l) => l.nome))} ${faltam.length === 1 ? "conectar" : "conectarem"}.` : "";
-  const conectar = faltam.map((l) => botao("abrir-conexao", `Conectar ${esc(l.nome)}`, { classe: "pri", id: l.slug })).join("");
-  const principal = botao(atos.confirmar, rotulo, { classe: faltam.length > 0 ? "" : "pri", id: p.id, desabilitado: faltam.length > 0, ...(liberado ? { titulo: liberado } : {}) });
-  return { botoes: `${conectar}${principal}${botao(atos.recusar, atos.rotuloRecusar, { id: p.id })}`, ajuda: liberado ? `<p class="rp-liberado mudo">${esc(liberado)}</p>` : "" };
+  const primeiro = faltam[0];
+  if (primeiro) {
+    // revisto em 2026-09-25 (jornadas de conexão): um botão só conecta e, quando o login termina, cria a
+    // rotina (main.ts, conectar-e-confirmar). Antes o criar ficava desabilitado e "Conectar" levava ao marketplace.
+    const login = ctx.conectando?.[primeiro.slug];
+    const depois = faltam.length > 1 ? `Depois, falta conectar ${listaDeApps(faltam.slice(1).map((l) => l.nome))}.` : "";
+    const ajuda = depois ? `<p class="rp-liberado mudo">${esc(depois)}</p>` : "";
+    if (login && !login.falhou) return { botoes: `${blocoEsperando(primeiro.nome, login.url, true)}${botao("cancelar-conexao", "Cancelar", { classe: "link", id: primeiro.slug })}`, ajuda };
+    const rotulo = `Conectar ${esc(primeiro.nome)} e ${inicio === "Criar rotina" ? "criar rotina" : "aplicar mudança"} ${SETA_EXTERNA}`;
+    const conectar = botao("conectar-e-confirmar", rotulo, { classe: "pri", id: primeiro.slug, dados: { proposta: p.id, ato: atos.confirmar } });
+    const falhou = login?.falhou ? `<p class="conexao-falhou" role="status">${esc(login.falhou)}</p>` : "";
+    return { botoes: `${conectar}${recusar}`, ajuda: `${falhou}${ajuda}` };
+  }
+  const rotulo = `${inicio} e permitir ${linhas.some((l) => l.escrita) ? "acesso" : "leitura"}`;
+  return { botoes: `${botao(atos.confirmar, rotulo, { classe: "pri", id: p.id })}${recusar}`, ajuda: "" };
+}
+
+/** Os apps que a proposta declara e ainda não estão conectados (main.ts cria a rotina quando fica vazio). */
+export function appsQueFaltam(p: Proposta | null | undefined, ctx: Contexto): string[] {
+  if (!p) return [];
+  return acessosDaProposta(p).map((a) => linha(a, ctx, p.id)).filter((l) => !l.conectado).map((l) => l.slug);
 }

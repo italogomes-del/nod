@@ -34,13 +34,20 @@ export type Tela =
   | { tipo: "rotinas" }
   | { tipo: "nova-rotina"; agenteId?: string }
   | { tipo: "novo-bot" }
-  | { tipo: "conectores"; app?: string; voltar?: { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sala"; salaId: string; conversaId: string } }
+  /**
+   * definido em 2026-09-25 (jornada do marketplace): `gaveta` é a gaveta do app aberta por cima da grade —
+   * "detalhes" (o que o app libera; gerenciar, se já conectado) ou "quem-usa" (abre sozinha quando o login
+   * termina). `avancado` mostra a tela técnica: chave do Composio, MCP próprio, catálogos e concessão por ação.
+   */
+  | { tipo: "conectores"; app?: string; gaveta?: { slug: string; passo: "detalhes" | "quem-usa" }; avancado?: true; filtro?: "todos" | "conectados" | "atencao"; voltar?: { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sala"; salaId: string; conversaId: string } }
   | { tipo: "sua-vez" }
   | { tipo: "nova-sala" }
   | { tipo: "chaves" }
   | { tipo: "relatos" }
   /** Configuração da conta: conexão, computadores e administração (substituiu o rail em 2026-09-18). */
   | { tipo: "espaco" };
+
+export type ConexaoApp = { url: string | null; falhou: string | null };
 
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
@@ -83,7 +90,14 @@ export type Estado = {
   conectores: Conector[];
   marketplace: AppComLogo[];
   composioConfigurado: boolean;
-  autorizacaoApp: { slug: string; url: string } | null;
+  /**
+   * definido em 2026-09-25: os apps com login em andamento (a janela do provedor aberta e a web
+   * perguntando ao servidor, sozinha, se terminou). `falhou` = a frase do que deu errado; o card oferece
+   * tentar de novo. Some quando conecta ou quando a pessoa cancela.
+   */
+  conectando: Record<string, ConexaoApp>;
+  /** O bot cujo "+ Dar acesso" do painel está aberto. */
+  dandoAcesso: string | null;
   avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
   memorias: Record<string, Memoria[]>;
@@ -109,7 +123,8 @@ export type Estado = {
 };
 
 export type Acao =
-  | { tipo: "autorizacao-app"; slug: string; url: string }
+  | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
+  | { tipo: "dar-acesso"; agenteId: string | null }
   | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
@@ -158,7 +173,8 @@ export const estadoInicial: Estado = {
   conectores: [],
   marketplace: [],
   composioConfigurado: false,
-  autorizacaoApp: null,
+  conectando: {},
+  dandoAcesso: null,
   avisoConexao: null,
   concessoes: {},
   memorias: {},
@@ -304,6 +320,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         ...estado,
         tela: acao.tela,
         erro: null,
+        dandoAcesso: null,
         faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
         // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
@@ -362,8 +379,14 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, execucoes: { ...estado.execucoes, [acao.rotinaId]: acao.execucoes } };
     case "alternar-historico":
       return { ...estado, historicoAberto: { ...estado.historicoAberto, [acao.rotinaId]: !estado.historicoAberto[acao.rotinaId] } };
-    case "autorizacao-app":
-      return { ...estado, autorizacaoApp: { slug: acao.slug, url: acao.url }, avisoConexao: null };
+    case "conexao-app": {
+      const conectando = { ...estado.conectando };
+      if (acao.valor) conectando[acao.slug] = acao.valor;
+      else delete conectando[acao.slug];
+      return { ...estado, conectando, avisoConexao: acao.valor ? null : estado.avisoConexao };
+    }
+    case "dar-acesso":
+      return { ...estado, dandoAcesso: acao.agenteId };
     case "aviso-conexao":
       return { ...estado, avisoConexao: acao.texto };
     case "hidratar-conectores":
@@ -435,6 +458,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "nova-sala" && estado.salas.length === 0) faltas.push("salas");
   if (t.tipo === "memoria" && !estado.memorias[t.agenteId]) faltas.push(`memoria:${t.agenteId}`);
   if ((t.tipo === "perfil" || t.tipo === "conversa") && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
+  // definido em 2026-09-25: o marketplace diz quais bots usam cada app, então precisa das concessões de todos os bots da pessoa.
+  if (t.tipo === "conectores") for (const a of estado.frota?.agentes ?? []) if (a.ownerId === estado.sessao?.pessoaId && !estado.concessoes[a.id]) faltas.push(`concessoes:${a.id}`);
   // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam
   // chegar junto com ela — não só na tela dedicada.
   if ((t.tipo === "rotinas" || t.tipo === "conversa") && estado.rotinas.length === 0) faltas.push("rotinas");

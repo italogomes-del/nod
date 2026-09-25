@@ -9,6 +9,8 @@ export type AcessoPedido = {
   nivel: "leitura" | "escrita";
   naoPedido: string[];
   conectar?: true;
+  /** definido em 2026-09-25: para que o agente quer o acesso, em uma linha ("Para listar as tarefas atrasadas"). */
+  para?: string;
 };
 
 /**

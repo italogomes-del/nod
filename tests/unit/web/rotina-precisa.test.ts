@@ -41,20 +41,22 @@ describe("card da rotina proposta com acessos (chat)", () => {
     expect(html).not.toContain("Liberado assim que");
   });
 
-  it("Gmail por conectar: 'Conectar Gmail' (abrir-conexao) vem primeiro e o botão de criar fica desabilitado, com 'Liberado assim que o Gmail conectar.'", () => {
+  // revisto em 2026-09-25 (jornadas de conexão): um botão só conecta e, quando o login termina, cria a
+  // rotina (main.ts, conectar-e-confirmar) — antes o criar ficava desabilitado e "Conectar" levava ao marketplace.
+  it("Gmail por conectar: UM botão 'Conectar Gmail e criar rotina' leva a proposta e o ato; conectando, espera com Cancelar", () => {
     const declarado = [{ conector: "gmail", capacidades: [], nivel: "leitura" as const, naoPedido: [], conectar: true as const }];
     const html = renderTimeline(conversa(proposta(declarado)), estado([]));
     expect(html).toContain("Ler seu Gmail");
-    const conectar = html.indexOf('data-act="abrir-conexao" data-id="gmail">Conectar Gmail</button>');
-    const criar = html.indexOf('data-act="confirmar-proposta" data-id="pr" disabled title="Liberado assim que o Gmail conectar.">Criar rotina e permitir leitura</button>');
-    expect(conectar).toBeGreaterThan(-1);
-    expect(criar).toBeGreaterThan(conectar);
-    expect(html).toContain('<p class="rp-liberado mudo">Liberado assim que o Gmail conectar.</p>');
+    expect(html).toMatch(/class="bt pri" data-act="conectar-e-confirmar" data-id="gmail" data-proposta="pr" data-ato="confirmar-proposta">Conectar Gmail e criar rotina/);
+    expect(html).not.toContain('data-act="confirmar-proposta" data-id="pr"');
+    const esperando = renderTimeline(conversa(proposta(declarado)), { ...estado([]), conectando: { gmail: { url: null, falhou: null } } });
+    expect(esperando).toContain("Esperando você entrar no Gmail");
+    expect(esperando).toContain('data-act="cancelar-conexao" data-id="gmail"');
     // Conectou: o mesmo card libera o botão, com as ferramentas de leitura do catálogo de agora.
     const depois = renderTimeline(conversa(proposta(declarado)), estado([gmail(true)]));
     expect(depois).toMatch(/class="bt pri" data-act="confirmar-proposta" data-id="pr">Criar rotina e permitir leitura/);
     expect(depois).toContain("Ver as 2 ações");
-    expect(depois).not.toContain("Liberado assim que");
+    expect(depois).not.toContain("conectar-e-confirmar");
   });
 
   it("escrita declarada: 'Ler e alterar seu Gmail', o que fica de fora e 'Criar rotina e permitir acesso'", () => {
@@ -84,8 +86,7 @@ describe("card da rotina proposta com acessos (Sua vez)", () => {
     expect(html).toContain('class="bt pri" data-act="decidir-proposta" data-id="pr">Criar rotina e permitir leitura</button>');
     expect(html).toContain('data-act="recusar-decisao" data-id="pr">Deixar de lado</button>');
     const semGmail = renderSuaVez({ ...pronto, conectores: [gmail(false)] });
-    expect(semGmail).toContain('data-act="abrir-conexao" data-id="gmail">Conectar Gmail</button>');
-    expect(semGmail).toContain('data-act="decidir-proposta" data-id="pr" disabled');
-    expect(semGmail).toContain("Liberado assim que o Gmail conectar.");
+    expect(semGmail).toContain('data-act="conectar-e-confirmar" data-id="gmail" data-proposta="pr" data-ato="decidir-proposta">Conectar Gmail e criar rotina');
+    expect(semGmail).not.toContain('data-act="decidir-proposta" data-id="pr"');
   });
 });

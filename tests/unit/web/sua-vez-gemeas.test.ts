@@ -91,6 +91,6 @@ describe("decisões da conversa: pedidos iguais aparecem uma vez, com ×N", () =
     expect(html).toContain('data-proposta="primeira"');
     expect(html).toContain(">×3</span>");
     expect(html).not.toContain("Revisar acesso");
-    expect(html.match(/data-act="decidir-proposta"/g)).toHaveLength(1);
+    expect(html.match(/data-act="permitir-acesso"/g)).toHaveLength(1);
   });
 });

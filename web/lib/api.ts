@@ -150,12 +150,14 @@ export function criarApi(escopo: Escopo) {
     concessoes: (agenteId: string) => get<{ concessoes: Concessao[] }>(`agentes/${agenteId}/concessoes`),
     conceder: (agenteId: string, conectorId: string, capacidade: string) => post<{ ok: true; ids: { concessao: string; mensagem: string }; naoInclui: string[] }>(`agentes/${agenteId}/concessoes`, { conectorId, capacidade }),
     revogar: (concessaoId: string) => del<RespostaMutacao>(`concessoes/${concessaoId}`),
+    // definido em 2026-09-25: Nenhum / Ler / Ler e alterar por bot e app (marketplace e painel do bot).
+    definirNivel: (agenteId: string, conectorId: string, nivel: "nenhum" | "leitura" | "escrita") => post<RespostaMutacao>(`agentes/${agenteId}/acessos`, { conectorId, nivel }),
     revogarAcessos: (agenteId: string, ids: string[]) => post<RespostaMutacao>(`agentes/${agenteId}/concessoes/revogar`, { ids }),
     // definido em 2026-09-24 ("aviso no Mac"): `ver: false` → `?ver=0`, a leitura da janela escondida ou
     // fora de foco, que não carimba vista_em (ADR-007, refinamento da mesma data).
     suaVez: (ver = true) => get<SuaVezDto>(ver ? "sua-vez" : "sua-vez?ver=0"),
     dispensarIncidente: (id: string) => post<RespostaMutacao>(`incidentes/${id}/dispensar`),
-    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
+    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),
     reabrir: (id: string) => post<RespostaMutacao>(`decisoes/${id}/reabrir`),

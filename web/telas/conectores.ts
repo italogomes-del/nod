@@ -24,7 +24,27 @@ function indisponiveis(tem: readonly string[]): string {
   return faltam.length ? `<p class="mudo">Indisponível neste jeito de conectar: ${faltam.map((n) => `<code>${esc(n)}</code>`).join(", ")}. Com o gh desta máquina ou um token pessoal, tudo fica disponível.</p>` : "";
 }
 
+/**
+ * definido em 2026-09-24 (ADR-048): o GitHub conecta sozinho pelo gh desta máquina; o token pessoal
+ * fica recolhido em "Avançado" para quem não tem gh. O valor nunca volta: só a marca de que existe.
+ * revisto em 2026-09-25: mora na tela avançada, junto da chave do Composio.
+ */
+function avancadoGithub(temToken: boolean): string {
+  return `<details class="github-avancado"><summary>GitHub: token pessoal${temToken ? " · ✓ guardado" : ""}</summary><form class="form" data-form="token-github"><label>Token do GitHub<input type="password" name="token" required autocomplete="off" placeholder="ghp_… ou github_pat_…" /></label><button class="bt" type="submit">Guardar e verificar</button></form><small>Use quando esta máquina não tem o gh logado. O token fica cifrado neste servidor e os comentários saem em nome da conta dele.</small></details><details class="github-avancado"><summary>GitHub da organização (rotinas no servidor)</summary><form class="form" data-form="app-github"><label>App ID<input name="appId" inputmode="numeric" required autocomplete="off" /></label><label>ID da instalação<input name="instalacaoId" inputmode="numeric" required autocomplete="off" /></label><label>Chave privada (.pem)<textarea name="chavePrivada" rows="3" required autocomplete="off" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></label><button class="bt" type="submit">Guardar e verificar</button></form><small>Só para quem administra o GitHub da organização (NOD_ADMINS). Só ROTINAS usam o App, e só de quem não tem gh, token nem Composio; os comentários saem em nome do App. A chave fica cifrada e nunca volta para a tela.</small></details>`;
+}
+
+function composio(configurado: boolean): string {
+  return `<details class="composio-setup"${configurado ? "" : " open"}><summary>${configurado ? "✓ Composio configurado · alterar chave" : "Chave do Composio do time"}</summary><p>A chave do projeto Composio é do time: uma pessoa configura e todos conectam os próprios apps.</p><form class="form composio-form" data-form="configurar-composio"><label>Chave do projeto<input type="password" name="chave" required autocomplete="off" placeholder="Cole a chave do Composio" /></label><button class="bt pri" type="submit">Salvar e verificar</button></form><a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer">Abrir Composio ↗</a><small>A chave fica cifrada neste servidor. O Composio gerencia os logins dos apps.</small></details>`;
+}
+
+/**
+ * Marketplace (a tela de sempre) ou a tela AVANÇADA (definido em 2026-09-25): chave do Composio, GitHub
+ * por token ou App, MCP próprio, catálogos e concessão por ação — o que antes ficava embaixo da grade.
+ */
 export function renderConectores(estado: Estado): string {
+  const t = estado.tela.tipo === "conectores" ? estado.tela : null;
+  if (!t?.avancado) return `<section class="tela tela-conectores">${renderMarketplace(estado)}</section>`;
+  const temToken = estado.conectores.some((c) => c.slug === "github" && c.ownerId === estado.sessao?.pessoaId && c.env.GITHUB_TOKEN === true);
   const agentes = estado.frota?.agentes ?? [];
   const cartoes = estado.conectores
     .map((c) => {
@@ -55,8 +75,12 @@ export function renderConectores(estado: Estado): string {
       </li>`;
     })
     .join("");
-  return `<section class="tela tela-conectores">
-    ${renderMarketplace(estado)}
+  return `<section class="tela tela-conectores tela-avancado">
+    ${botao("navegar-marketplace", "← Marketplace", { classe: "link" })}
+    <h1>Configurações avançadas</h1>
+    ${estado.avisoConexao ? `<p class="connection-notice" role="status">${esc(estado.avisoConexao)}</p>` : ""}
+    ${composio(estado.composioConfigurado)}
+    ${avancadoGithub(temToken)}
     <h2 class="marketplace-heading">Seus MCPs e permissões</h2>
     <details class="registrar"><summary>＋ Adicionar servidor MCP próprio</summary>
       <form class="form" data-form="registrar-conector">

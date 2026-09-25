@@ -24,6 +24,11 @@ export type CapacidadeConector = {
   descricao: string;
   schema: JsonSchema;
   readOnlyHint: boolean;
+  /**
+   * definido em 2026-09-25: só na resposta de GET /conectores — o grupo que a pessoa lê no card
+   * (grupoDaCapacidade, src/domain/grupos-de-acesso.ts). Nunca gravado: o banco guarda o que a sonda viu.
+   */
+  grupo?: "ler" | "criar" | "alterar" | "comentar" | "apagar";
 };
 
 /**

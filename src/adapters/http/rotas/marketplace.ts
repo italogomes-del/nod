@@ -6,6 +6,7 @@ import { formatoDeTokenGithub, garantirGithubSemConfiguracao, guardarComposioGit
 import { API_GITHUB } from "../../conectores-locais/github/backend-rest.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
+import { aoConectarApp } from "../../../use-cases/ao-conectar-app.ts";
 import { criarClienteComposio } from "../../integracoes/composio.ts";
 import { chavePrivadaValida, criarTokenDeInstalacao } from "../../integracoes/github-app.ts";
 import type { Rota } from "../roteador.ts";
@@ -67,7 +68,11 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       }
       if (!aceito) throw new ErroDeDominio("integracao_autenticacao");
       const salvo = await op.dentro(ctx.escopo, (d) => guardarTokenGithub(d, { token, cifrar: op.cifrar, decifrar: op.decifrar }));
-      const s = await op.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: salvo.id }));
+      const s = await op.dentro(ctx.escopo, async (d) => {
+        const r = await executar(d, sondarConector, { conectorId: salvo.id });
+        if (r.ok) await executar(d, aoConectarApp, { slug: SLUG_GITHUB });
+        return r;
+      });
       ctx.json(200, { conectado: s.ok, conectorId: salvo.id, conector: s.conector });
     } },
     /**
@@ -107,7 +112,11 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       if (app.slug === SLUG_GITHUB) {
         // ADR-048: o que já está pronto ganha. gh logado nesta máquina (ou o App da organização no
         // servidor) = conectado agora, sem login nem campo.
-        const r = await op.dentro(ctx.escopo, (d) => garantirGithubSemConfiguracao(d, { pelaPessoa: true }));
+        const r = await op.dentro(ctx.escopo, async (d) => {
+          const g = await garantirGithubSemConfiguracao(d, { pelaPessoa: true });
+          if (g.ok) await executar(d, aoConectarApp, { slug: SLUG_GITHUB });
+          return g;
+        });
         if (r.ok) { ctx.json(200, { conectado: true, conectorId: r.conector.id }); return; }
         if (r.motivo === "manual") { ctx.json(200, { conectado: false, frase: "Você já tem um conector com o slug github registrado à mão. O nod não o troca: remova ou renomeie esse conector para usar o GitHub do nod." }); return; }
         // Sem gh: o token já colado serve sem nova tela; a sonda escolhe o jeito (token antes do Composio na máquina).
@@ -116,7 +125,11 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
           return c && c.ownerId === ctx.escopo.pessoaId && c.comando === COMANDO_GITHUB_NATIVO && c.env[ENV_TOKEN_GITHUB] ? c.id : null;
         });
         if (comToken) {
-          const s = await op.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: comToken }));
+          const s = await op.dentro(ctx.escopo, async (d) => {
+            const r2 = await executar(d, sondarConector, { conectorId: comToken });
+            if (r2.ok) await executar(d, aoConectarApp, { slug: SLUG_GITHUB });
+            return r2;
+          });
           if (s.ok) { ctx.json(200, { conectado: true, conectorId: comToken, jeito: "token" }); return; }
         }
       }
@@ -157,7 +170,12 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const ativo = await c.conectado(sessao.contaId, `nod:${ctx.escopo.tenantId}:${ctx.escopo.pessoaId}`, app.slug);
       if (!ativo) { ctx.json(200, { conectado: false }); return; }
       await c.fixarConta(sessao.sessaoId, app.slug, sessao.contaId);
-      const r = await op.dentro(ctx.escopo, (d) => executar(d, sondarConector, { conectorId: sessao.conectorId }));
+      // definido em 2026-09-25: conectou, os cards "Conecte o X" abertos viram o de permitir na mesma transação.
+      const r = await op.dentro(ctx.escopo, async (d) => {
+        const s = await executar(d, sondarConector, { conectorId: sessao.conectorId });
+        if (s.ok) await executar(d, aoConectarApp, { slug: app.slug });
+        return s;
+      });
       ctx.json(200, { conectado: r.ok, conector: r.conector });
     } },
   ];

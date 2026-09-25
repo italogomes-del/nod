@@ -114,7 +114,7 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     expect((await deps.repos.propostas.buscar(pedido.data.proposta_id))?.estado).toBe("pendente");
   });
 
-  it("ADR-044: card de conexão de LEITURA com o app já conectado vira, no lugar, o card de concessão de um clique", async () => {
+  it("ADR-044: card de conexão com o app já conectado vira, no lugar, o card de concessão de um clique (leitura e, desde 2026-09-25, escrita)", async () => {
     const { deps, banco } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
     const ctx = { turnoId: "turno", agenteId: criado.agente.id, conversaId: criado.conversa.id };
@@ -132,8 +132,11 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     expect(data.proposta.payload).not.toHaveProperty("conectar");
     expect(data.decisao).toMatchObject({ id: data.proposta.id, tipo: "acesso", estado: "pendente" });
     expect(await deps.repos.concessoes.doAgente(criado.agente.id)).toEqual([]);
-    // Escrita não vira card automático: o agente pede as capacidades exatas depois da conexão.
-    await esperarErro(() => confirmarProposta(deps, { propostaId: escrita.data.proposta_id }), "estado_invalido");
+    // revisto em 2026-09-25: escrita também vira o card, com ler + escrita (apagar fica de fora), sem outro turno do agente.
+    expect(escrita.data.proposta_id).not.toBe(conectar.data.proposta_id);
+    const e = await executar(deps, confirmarProposta, { propostaId: escrita.data.proposta_id });
+    expect(e.data.proposta.payload).toMatchObject({ kind: "acesso", conector: "gmail", nivel: "escrita", capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS", "GMAIL_SEND_EMAIL"] });
+    expect(e.data.decisao).toMatchObject({ tipo: "acesso", estado: "pendente" });
   });
 });
 
