@@ -46,24 +46,16 @@ export const NUNCA_PERMANENTE: readonly RegExp[] = [
 ];
 
 /**
- * Verbo de LEITURA no começo da capacidade — `list_reviews`, `GITHUB_LIST_REVIEWS…`,
- * `GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED`: consultar não aprova nada e continua livre. Olha o
- * 1º e o 2º pedaço porque o Composio prefixa o app (`GITHUB_`).
- */
-const VERBO_DE_LEITURA = new Set(["list", "get", "check", "fetch", "search", "find", "read", "ver", "ler", "listar", "consultar", "buscar"]);
-
-/**
  * `nome` = `${slug}__${capacidade}` (catálogo do plano) ou só a capacidade (item de aprovação).
  * definido em 2026-09-24 (revisão da ADR-046): casa pelo NOME, para valer igual no GitHub nativo e no
- * mapeado pelo Composio (ADR-047), e nunca pega ferramenta de leitura — por `readOnlyHint` quando o
- * catálogo diz, e pelo verbo quando quem chama só tem o nome.
+ * mapeado pelo Composio (ADR-047). Leitura fica livre SÓ pelo `readOnlyHint === true` do catálogo
+ * sondado (`GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED` declara leitura); sem a declaração, o nome
+ * que casa é tratado como escrita — fail-closed, nunca inferido de verbo no nome (ADR-042).
  */
-export function nuncaPermanente(nome: string, readOnlyHint = false): boolean {
-  if (readOnlyHint) return false;
+export function nuncaPermanente(nome: string, readOnlyHint?: boolean): boolean {
+  if (readOnlyHint === true) return false;
   const i = nome.indexOf("__");
   const capacidade = i >= 0 ? nome.slice(i + 2) : nome;
-  const pedacos = capacidade.toLowerCase().split("_");
-  if (pedacos.slice(0, 2).some((p) => VERBO_DE_LEITURA.has(p))) return false;
   return NUNCA_PERMANENTE.some((r) => r.test(capacidade));
 }
 
