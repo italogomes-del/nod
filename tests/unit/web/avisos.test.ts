@@ -88,7 +88,10 @@ describe("contarAbertas", () => {
       [incidente],
     );
     expect(contarAbertas(sv)).toBe(3);
-    expect(renderChamada({ ...estadoInicial, suaVez: sv })).toContain("<b>3 pedidos</b> esperando por você");
+    // Desde o #62 a chamada do topo é o sino com contador; o número tem de ser o mesmo do Dock.
+    const sino = renderChamada({ ...estadoInicial, suaVez: sv });
+    expect(sino).toContain('aria-label="3 pedidos esperando por você"');
+    expect(sino).toContain('<span class="sino-cont" aria-hidden="true">3</span>');
     expect(contarAbertas(fila([item("v", { vencido: true })]))).toBe(0);
     expect(contarAbertas(null)).toBe(0);
   });
