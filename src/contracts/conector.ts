@@ -24,11 +24,13 @@ export type CapacidadeConector = {
   descricao: string;
   schema: JsonSchema;
   readOnlyHint: boolean;
+  /** definido em 2026-09-25 (revisão do PR #68): a anotação MCP `destructiveHint`, capturada na sonda; leva ao grupo apagar. */
+  destructiveHint?: boolean;
   /**
    * definido em 2026-09-25: só na resposta de GET /conectores — o grupo que a pessoa lê no card
    * (grupoDaCapacidade, src/domain/grupos-de-acesso.ts). Nunca gravado: o banco guarda o que a sonda viu.
    */
-  grupo?: "ler" | "criar" | "alterar" | "comentar" | "apagar";
+  grupo?: "ler" | "criar" | "alterar" | "comentar" | "outras" | "apagar";
 };
 
 /**

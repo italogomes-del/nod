@@ -3,7 +3,7 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
-import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type SituacaoApp } from "./app-acesso.ts";
+import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type NivelAtual, type SituacaoApp } from "./app-acesso.ts";
 
 /**
  * revisto em 2026-09-21 (ADR-041): app novo no painel não tem símbolo escrito à mão aqui, então o
@@ -96,14 +96,20 @@ function filtros(atual: Filtro, conectados: number, atencao: number): string {
 
 // ------------------------------------------------------------------------------------ gaveta
 
-function seletorNivel(agenteId: string, conectorId: string, atual: Nivel, nome: string): string {
+function seletorNivel(agenteId: string, conectorId: string, atual: NivelAtual, nome: string): string {
   const op = (n: Nivel) => `<button type="button" class="seg${n === atual ? " ativo" : ""}" data-act="nivel-bot" data-id="${esc(agenteId)}" data-conector="${esc(conectorId)}" data-nivel="${n}" aria-pressed="${n === atual}">${esc(ROTULO_NIVEL[n])}</button>`;
   return `<div class="segmentado" role="group" aria-label="${esc(`Acesso de ${nome}`)}">${op("nenhum")}${op("leitura")}${op("escrita")}</div>`;
 }
 
 function quemPodeUsar(estado: Estado, c: Conector, titulo: string): string {
   const bots = meusBots(estado);
-  const linhas = bots.map((a) => `<div class="quem-linha">${iconeAgente(a, "sm")}<div class="quem-nome"><b>${esc(a.nome)}</b><small>${esc(a.titulo || "Seu bot")}</small></div>${seletorNivel(a.id, c.id, nivelDoBot(estado, a.id, c), a.nome)}</div>`).join("");
+  const linhas = bots.map((a) => {
+    const nivel = nivelDoBot(estado, a.id, c);
+    // "Personalizado": ações dadas uma a uma (pela rotina, pelo card, na tela avançada). Nenhum botão aceso —
+    // escolher um nível mexe só em ler, criar, editar e comentar; apagar e o resto ficam como estão.
+    const sub = nivel === "personalizado" ? "Personalizado · ações escolhidas uma a uma" : a.titulo || "Seu bot";
+    return `<div class="quem-linha">${iconeAgente(a, "sm")}<div class="quem-nome"><b>${esc(a.nome)}</b><small>${esc(sub)}</small></div>${seletorNivel(a.id, c.id, nivel, a.nome)}</div>`;
+  }).join("");
   return `<section class="gaveta-secao"><h3>${esc(titulo)}</h3>${bots.length ? `<div class="quem-lista">${linhas}</div>` : '<p class="mudo">Você ainda não tem bots.</p>'}<p class="mudo">Quem ficar sem acesso pode pedir na conversa quando precisar; você decide ali, com um clique. Apagar fica sempre de fora de "Ler e alterar".</p></section>`;
 }
 
@@ -140,7 +146,9 @@ function gaveta(estado: Estado, app: AppComLogo, passo: "detalhes" | "quem-usa")
     corpo = `${status}${quemPodeUsar(estado, c, passo === "quem-usa" ? `Quem pode usar o ${app.nome}?` : "Quem usa")}${detalhesTecnicos(c)}`;
     rodape = passo === "quem-usa"
       ? botao("fechar-gaveta", "Pronto", { classe: "pri" })
-      : `${botao("conectar-app", "Entrar de novo", { id: app.slug })}${botao("desconectar-app", `Desconectar ${esc(app.nome)}`, { classe: "link perigo", id: c.id })}`;
+      // revisto em 2026-09-25 (revisão do PR #68): "Entrar de novo" só com o app em atenção — refazer o login
+      // desliga o conector até o novo terminar, e num app que funciona isso só tira o acesso dos bots.
+      : `${s === "atencao" ? botao("conectar-app", "Entrar de novo", { classe: "pri", id: app.slug }) : ""}${botao("desconectar-app", `Desconectar ${esc(app.nome)}`, { classe: "link perigo", id: c.id })}`;
   } else {
     const falha = login?.falhou ? blocoFalhou(login.falhou) : "";
     corpo = `${falha}<p class="gaveta-desc">${esc(app.descricao)}</p>${oQueLibera(estado, app.slug)}${comoFunciona(app.nome)}`;

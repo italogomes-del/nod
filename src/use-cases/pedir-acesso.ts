@@ -6,7 +6,8 @@ import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { SLUG_GITHUB } from "../contracts/github.ts";
-import { capacidadesDeLeitura, normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
+import { capacidadesDoNivel } from "../domain/grupos-de-acesso.ts";
+import { normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { evento } from "./autoria-evento.ts";
 import { garantirGithubSemConfiguracao } from "./conectar-github.ts";
@@ -77,7 +78,8 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     const r = await garantirGithubSemConfiguracao(deps, { pelaPessoa: false });
     if (r.ok) {
       conector = r.conector;
-      if (input.capacidades.length === 0) entrada = { ...input, capacidades: input.nivel === "leitura" ? capacidadesDeLeitura(r.conector.catalogo) : r.conector.catalogo.map((c) => c.nome) };
+      // revisto em 2026-09-25 (ADR-049): o mesmo nível de todo app — escrita sem o grupo apagar.
+      if (input.capacidades.length === 0) entrada = { ...input, capacidades: capacidadesDoNivel(r.conector.catalogo, input.nivel) };
     }
   }
   // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a escrita que a rotina

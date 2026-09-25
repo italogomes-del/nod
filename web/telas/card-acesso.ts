@@ -3,7 +3,7 @@ import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { botao, esc } from "../lib/render.ts";
-import { acoes, blocoEsperando, blocoFalhou, conectorDoApp, gruposDe, ICONE_OK, listaPodeENao, nomeDoApp, passos, podeENao, SETA_EXTERNA } from "./app-acesso.ts";
+import { acoes, blocoEsperando, blocoFalhou, checkboxesDosGrupos, conectorDoApp, gruposDe, ICONE_OK, listaPodeENao, nomeDoApp, passos, podeENao, SETA_EXTERNA } from "./app-acesso.ts";
 import { logoApp } from "./marketplace.ts";
 import { detalheAcesso, marcaGemeas, marcaRotinaParada, rotulosAcesso } from "./sua-vez.ts";
 
@@ -24,8 +24,9 @@ type ItemAberto = NonNullable<Estado["suaVez"]>["itens"][number];
 function subtitulo(p: Proposta, decisao: Decisao | null): string {
   if (p.payload.kind !== "acesso") return "";
   if (p.payload.para) {
-    const t = p.payload.para.trim();
-    return `Para ${t.charAt(0).toLowerCase()}${t.slice(1)}`;
+    // Texto do modelo (revisão do PR #68): entre aspas e atribuído ao bot, nunca como frase do sistema.
+    const t = p.payload.para.trim().replace(/^para\s+/i, "");
+    return `“Para ${t.charAt(0).toLowerCase()}${t.slice(1)}”`;
   }
   return p.payload.rotinaId && decisao ? decisao.frase : "";
 }
@@ -97,10 +98,11 @@ function cardPermitir(p: Proposta, decisao: Decisao, aberto: ItemAberto | undefi
   } else {
     // Mais de um grupo: a pessoa desmarca o que não quer dar. O input fica sob [data-decisao] para o
     // render preservar a marcação (main.ts), e Permitir manda só as capacidades dos grupos marcados.
-    const linhas = grupos.map((g) => `<label class="ac-grupo"><input type="checkbox" data-item="grupo-${esc(g.id)}" data-caps="${esc(g.capacidades.join(","))}" checked /><span><b>${esc(g.rotulo)}</b><small>${esc(acoes(g.capacidades.length))}</small></span></label>`).join("");
-    const temApagar = catalogo.some((x) => x.grupo === "apagar") && !grupos.some((g) => g.id === "apagar");
-    const fora = [...(temApagar ? ["Apagar fica de fora"] : []), ...c.naoPedido.map((n) => `Não inclui: ${n}`)];
-    oQue = `<div class="ac-grupos">${linhas}</div>${fora.length ? listaPodeENao({ pode: [], nao: fora }) : ""}`;
+
+    const pedidos = new Set(c.capacidades);
+    const deFora = catalogo.filter((x) => !pedidos.has(x.nome) && (x.grupo === "apagar" || x.grupo === "outras")).length;
+    const fora = [...(deFora > 0 ? [`Ficam de fora: ${acoes(deFora)} de apagar, desfazer e outras`] : []), ...c.naoPedido.map((n) => `Não inclui: ${n}`)];
+    oQue = `${checkboxesDosGrupos(catalogo, c.capacidades)}${fora.length ? listaPodeENao({ pode: [], nao: fora }) : ""}`;
   }
   const r = rotulosAcesso(p);
   const permitir = botao("permitir-acesso", r.permitir, { classe: "pri", id: decisao.id });

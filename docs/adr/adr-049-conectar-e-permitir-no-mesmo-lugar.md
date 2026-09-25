@@ -59,6 +59,34 @@ Duas correções vieram junto:
 
 Antes, um pedido de escrita virava o card de leitura.
 
+### Revisão do PR #68 (2026-09-25)
+
+A revisão adversarial achou que a regra por verbo, feita como lista do que é destrutivo, deixava passar
+destrutivos: nomes em camelCase (`deleteEvent`) e em português (`tarefa_excluir`), verbos como CLEAR,
+MERGE e CANCEL, e o `readOnlyHint` vencendo o "apagar". Com `pedir_acesso([], escrita)`, isso virava um
+card pré-marcado com esses destrutivos. Agora a regra **falha fechado**:
+- só entra num grupo de escrita o que o nome diz que cria, edita ou comenta;
+- o resto vai para "outras", que nenhum nível concede;
+- "apagar e desfazer" ganha de tudo, também do `readOnlyHint`;
+- o `destructiveHint` da sonda passou a ser capturado e leva para lá.
+
+Os níveis também passaram a respeitar o que foi dado à parte:
+- **Ler / Ler e alterar** só mexem em ler, criar, editar e comentar. O que foi dado à parte (apagar,
+  "outras", escrita declarada pela rotina) fica como estava.
+- **Nenhum** tira tudo.
+- **Personalizado:** um conjunto que não forma um nível aparece assim, sem botão aceso.
+- **Dono:** a rota de nível exige que o bot e o app sejam de quem chama.
+
+As outras correções:
+- **Rotina:** a criação da rotina depois do login vive na tentativa de login. Cancelar ou falhar a
+  descarta; antes ela sobrevivia e criava a rotina, concedendo o acesso dela, na próxima conexão do app.
+- **Sua vez:** também mostra os grupos para desmarcar.
+- **Verificar:** diz `falhou` quando a conta entrou e o app não respondeu, e a web para de perguntar.
+- **Troca de cards:** confere tudo antes de escrever e não engole erro no meio.
+- **"Entrar de novo":** só aparece com o app em atenção.
+- **Janela de login:** nasce sem `opener`.
+- **O `para`:** perde caracteres de controle e aparece entre aspas, como fala do bot.
+
 ## Alternativas descartadas
 
 - **O clique em Conectar já valer como permissão de leitura** (a variante de um clique do canvas).

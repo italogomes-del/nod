@@ -480,6 +480,7 @@ function render(): void {
 // Sessão, SSE e relógio.
 
 async function iniciarSessao(escopo: Escopo): Promise<void> {
+  conexoes.cancelarTodas();
   api = criarApi(escopo);
   // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
   avisador.reiniciar();
@@ -532,43 +533,42 @@ async function boot(): Promise<void> {
 
 // ---------------------------------------------------------------------------------------------
 // Conexão de apps (definido em 2026-09-25, jornadas de conexão): uma espera por app, e o que fazer quando
-// o login termina. Sem pedido específico (`aoConectar`), o padrão: no marketplace a gaveta abre em
+// o login termina. Sem um `depois` da própria tentativa, o padrão: no marketplace a gaveta abre em
 // "Quem pode usar"; no chat, o card já virou o de permitir no servidor e a conversa só relê.
-
-const aoConectar = new Map<string, () => Promise<void>>();
 
 const conexoes = criarConexoes({
   conectar: (slug) => api!.conectarApp(slug),
   verificar: (slug) => api!.verificarApp(slug),
   mudou: (slug, valor) => dispatch({ tipo: "conexao-app", slug, valor }),
-  conectado: async (slug) => {
+  conectado: (slug) => {
     const conversa = conversaAtual();
     dispatch({ tipo: "invalidar", quais: ["conectores", "sua-vez", "frota", ...(conversa ? [`conversa:${conversa.conversaId}` as Invalidacao] : [])] });
-    const proprio = aoConectar.get(slug);
-    aoConectar.delete(slug);
-    if (proprio) { await proprio(); return; }
     const t = estado.tela;
     if (t.tipo === "conectores" && !t.avancado) navegar({ ...t, gaveta: { slug, passo: "quem-usa" } });
   },
   abrirJanela: (nome) => {
-    try { return window.open("", nome, "popup,width=560,height=720"); } catch { return null; }
+    try {
+      const janela = window.open("", nome, "popup,width=560,height=720");
+      // Ainda about:blank, da nossa origem: cortar o opener impede a página do provedor de navegar o Nod.
+      if (janela) janela.opener = null;
+      return janela;
+    } catch { return null; }
   },
   esperar: (ms) => new Promise((r) => window.setTimeout(r, ms)),
   agora: () => Date.now(),
 });
 
-/** Chamado DENTRO do clique (a janela de login só abre sem bloqueio no gesto da pessoa). */
-function iniciarConexao(slug: string): void {
+/** Chamado DENTRO do clique (a janela de login só abre sem bloqueio no gesto da pessoa). `depois` morre com a tentativa. */
+function iniciarConexao(slug: string, depois: (() => Promise<void>) | null = null): void {
   if (!slug) return;
   // O GitHub não depende do Composio (ADR-048): o servidor tenta o gh desta máquina e o token antes.
   if (!estado.composioConfigurado && slug !== "github") {
-    aoConectar.delete(slug);
     navegar({ tipo: "conectores", avancado: true });
     dispatch({ tipo: "aviso-conexao", texto: "Para conectar apps, adicione a chave do Composio do time abaixo." });
     return;
   }
   dispatch({ tipo: "erro", erro: null });
-  void conexoes.iniciar(slug).catch((e: unknown) => { aoConectar.delete(slug); dispatch({ tipo: "erro", erro: erroDe(e) }); });
+  void conexoes.iniciar(slug, depois).catch((e: unknown) => dispatch({ tipo: "erro", erro: erroDe(e) }));
 }
 
 function propostaDoEstado(id: string): Proposta | null {
@@ -867,18 +867,18 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const slug = el.dataset.id ?? "";
     const propostaId = el.dataset.proposta ?? "";
     const ato = el.dataset.ato;
-    aoConectar.set(slug, async () => {
+    iniciarConexao(slug, async () => {
       const r = await api!.conectores();
       dispatch({ tipo: "hidratar-conectores", conectores: r.conectores, marketplace: r.marketplace, composioConfigurado: r.composioConfigurado });
-      const faltam = appsQueFaltam(propostaDoEstado(propostaId), estado);
-      if (faltam.length > 0) return;
+      // A proposta ainda tem de estar à vista e pendente: sumiu (decidida, recusada, de outra sessão), nada é confirmado.
+      const proposta = propostaDoEstado(propostaId);
+      if (!proposta || proposta.estado !== "pendente" || appsQueFaltam(proposta, estado).length > 0) return;
       await agir(async () => {
         if (ato === "decidir-proposta") await api!.decidir(propostaId, {});
         else await api!.confirmarProposta(propostaId);
         dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
       });
     });
-    iniciarConexao(slug);
   },
   "voltar-conexao": () => {
     const t = estado.tela;
@@ -1270,6 +1270,9 @@ document.addEventListener("focusout", (ev) => {
 document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
+  // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
+  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
+  if (ev.key === "Escape" && estado.dandoAcesso) { ev.preventDefault(); dispatch({ tipo: "dar-acesso", agenteId: null }); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
   // Esc com o campo respondendo: a próxima mensagem vira mensagem comum (o mesmo "Outro assunto").

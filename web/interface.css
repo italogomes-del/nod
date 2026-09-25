@@ -644,7 +644,8 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
 .app-card-abrir:focus-visible{outline:2px solid #3a4a6b;outline-offset:2px}
 .app-card:hover{border-color:#cfd3dd}
 .app-card>*:not(.app-card-abrir){position:relative;z-index:1;pointer-events:none}
-.app-card .app-card-actions{pointer-events:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:30px}
+.app-card .app-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:30px}
+.app-card .app-card-actions .bt,.app-card .app-card-actions a{pointer-events:auto}
 .app-card .app-card-actions .bt{border-radius:18px;padding:6px 14px;font-weight:600}
 .app-card .app-card-actions .bt.link{border:0;background:none;color:#2b5fb4;padding:0 4px}
 .app-card-heading .app-card-nome{flex:1;min-width:0}

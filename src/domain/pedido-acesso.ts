@@ -18,13 +18,23 @@ export function capacidadesDeLeitura(catalogo: Catalogo): string[] {
   return catalogo.filter((c) => c.readOnlyHint === true).map((c) => c.nome);
 }
 
+/** definido em 2026-09-25: o "para quê" do pedido, uma linha que o card mostra; vazio some. */
+export const PARA_MAX = 140;
+function paraDoPedido(pedido: Pick<ArgsPedirAcesso, "para">): { para?: string } {
+  // Texto do modelo: sem caracteres de controle nem de direção (U+202E e cia.), que mudariam o que o card mostra.
+  const t = (pedido.para ?? "").replace(/[\p{Cc}\p{Cf}]/gu, " ").replace(/\s+/g, " ").trim();
+  return t ? { para: t.length > PARA_MAX ? `${t.slice(0, PARA_MAX - 1).trimEnd()}…` : t } : {};
+}
+
 /**
  * Pedido de acesso com escopo nomeado (E6.2), puro desde 2026-09-24 (ADR-044; antes morava em
  * pedir-acesso.ts). Capacidade fora do catálogo sondado é recusada antes de chegar à conversa — o
  * agente nunca inventa escopo. App ausente ou desabilitado com capacidades [] vira pedido de CONEXÃO.
  * Em turno de rotina só se pede leitura, e [] quer dizer "as ferramentas de leitura deste app",
- * resolvidas aqui pelo catálogo. O nível segue o que é pedido de fato: 'leitura' com ferramenta de
- * escrita dentro seria rótulo mentiroso no card, então sobe para 'escrita' (e é recusado na rotina).
+ * resolvidas aqui pelo catálogo. Revisto em 2026-09-25 (ADR-049): na conversa, [] com o app
+ * conectado pede pelo nível (capacidadesDoNivel: leitura, ou escrita sem o grupo apagar). O nível segue
+ * o que é pedido de fato: 'leitura' com ferramenta de escrita dentro seria rótulo mentiroso no card,
+ * então sobe para 'escrita' (e é recusado na rotina).
  *
  * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): dois modos a mais.
  * - `declaracao`: os `acessos` de criar_rotina/atualizar_rotina. [] em leitura também vira as ferramentas
@@ -33,13 +43,6 @@ export function capacidadesDeLeitura(catalogo: Catalogo): string[] {
  * - `declaradas`, no turno de rotina: a escrita que a rotina DECLAROU para este app passa (a pessoa já a
  *   viu no card da rotina); escrita fora da declaração continua nao_permitido.
  */
-/** definido em 2026-09-25: o "para quê" do pedido, uma linha que o card mostra; vazio some. */
-export const PARA_MAX = 140;
-function paraDoPedido(pedido: Pick<ArgsPedirAcesso, "para">): { para?: string } {
-  const t = (pedido.para ?? "").replace(/\s+/g, " ").trim();
-  return t ? { para: t.length > PARA_MAX ? `${t.slice(0, PARA_MAX - 1).trimEnd()}…` : t } : {};
-}
-
 export function normalizarPedidoAcesso(entrada: {
   pedido: ArgsPedirAcesso;
   conector: Pick<Conector, "habilitado" | "catalogo"> | null;
@@ -126,5 +129,5 @@ export function fraseDoPedidoDeAcesso(entrada: {
     return `${quem}. Não inclui: ${fora}.`;
   }
   const outras = entrada.catalogo.filter((c) => !entrada.capacidades.includes(c.nome)).length;
-  return `${quem} (${acoes(entrada.capacidades.length)}).${outras > 0 ? ` Não inclui as outras ${acoes(outras)} do ${app}.` : ""}`;
+  return `${quem} (${acoes(entrada.capacidades.length)}).${outras === 1 ? ` Não inclui a outra ação do ${app}.` : outras > 1 ? ` Não inclui as outras ${acoes(outras)} do ${app}.` : ""}`;
 }

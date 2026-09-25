@@ -10,11 +10,15 @@ import { esc } from "../lib/render.ts";
  */
 
 export type Nivel = "nenhum" | "leitura" | "escrita";
+/** O nível que o bot TEM num app; "personalizado" = ações dadas uma a uma que não formam um nível. */
+export type NivelAtual = Nivel | "personalizado";
 export type IdGrupo = NonNullable<CapacidadeConector["grupo"]>;
 type Ctx = Pick<Estado, "conectores" | "marketplace" | "sessao">;
 
-export const ROTULO_GRUPO: Record<IdGrupo, string> = { ler: "Ler", criar: "Criar e enviar", alterar: "Editar", comentar: "Comentar", apagar: "Apagar" };
-const ORDEM: readonly IdGrupo[] = ["ler", "criar", "alterar", "comentar", "apagar"];
+// Espelho de ROTULOS_GRUPO e GRUPOS_DA_ESCRITA (src/domain/grupos-de-acesso.ts): o Record não compila se faltar um grupo.
+export const ROTULO_GRUPO: Record<IdGrupo, string> = { ler: "Ler", criar: "Criar e enviar", alterar: "Editar", comentar: "Comentar", outras: "Outras ações", apagar: "Apagar e desfazer" };
+const ORDEM: readonly IdGrupo[] = ["ler", "criar", "alterar", "comentar", "outras", "apagar"];
+const DA_ESCRITA: ReadonlySet<IdGrupo> = new Set<IdGrupo>(["ler", "criar", "alterar", "comentar"]);
 export const ROTULO_NIVEL: Record<Nivel, string> = { nenhum: "Nenhum", leitura: "Ler", escrita: "Ler e alterar" };
 
 export function nomeDoApp(ctx: Pick<Estado, "conectores" | "marketplace">, slug: string): string {
@@ -42,24 +46,32 @@ export function situacaoDoApp(estado: Ctx & Pick<Estado, "conectando">, slug: st
   return c.habilitado ? "conectado" : c.sondadoEm ? "atencao" : "nao_conectado";
 }
 
+/** Sem o grupo vindo do servidor, fecha: leitura só se a sonda disse; o resto não entra em nível nenhum. */
 function grupoDe(cap: Pick<CapacidadeConector, "readOnlyHint" | "grupo">): IdGrupo {
-  return cap.grupo ?? (cap.readOnlyHint ? "ler" : "alterar");
+  return cap.grupo ?? (cap.readOnlyHint ? "ler" : "outras");
 }
 
 /** Mesma regra de capacidadesDoNivel (src/domain/grupos-de-acesso.ts). */
 export function capacidadesDoNivel(catalogo: readonly CapacidadeConector[], nivel: Nivel): string[] {
   if (nivel === "nenhum") return [];
-  return catalogo.filter((c) => (nivel === "leitura" ? grupoDe(c) === "ler" : grupoDe(c) !== "apagar")).map((c) => c.nome);
+  return catalogo.filter((c) => (nivel === "leitura" ? grupoDe(c) === "ler" : DA_ESCRITA.has(grupoDe(c)))).map((c) => c.nome);
 }
 
-export function nivelDoBot(estado: Pick<Estado, "concessoes">, agenteId: string, conector: Conector): Nivel {
-  const concedidas = (estado.concessoes[agenteId] ?? []).filter((g) => g.conectorId === conector.id).map((g) => g.capacidade);
-  if (concedidas.length === 0) return "nenhum";
-  const leitura = new Set(conector.catalogo.filter((c) => c.readOnlyHint).map((c) => c.nome));
-  return concedidas.some((n) => !leitura.has(n)) ? "escrita" : "leitura";
+const mesmoConjunto = (a: ReadonlySet<string>, b: readonly string[]): boolean => a.size === b.length && b.every((x) => a.has(x));
+
+/**
+ * O nível que o bot tem, só se o conjunto concedido É um nível (revisto em 2026-09-25, revisão do PR #68):
+ * uma ação de escrita dada pela rotina não pinta "Ler e alterar" como ativo — clicar nele concederia o resto.
+ */
+export function nivelDoBot(estado: Pick<Estado, "concessoes">, agenteId: string, conector: Conector): NivelAtual {
+  const concedidas = new Set((estado.concessoes[agenteId] ?? []).filter((g) => g.conectorId === conector.id).map((g) => g.capacidade));
+  if (concedidas.size === 0) return "nenhum";
+  if (mesmoConjunto(concedidas, capacidadesDoNivel(conector.catalogo, "leitura"))) return "leitura";
+  if (mesmoConjunto(concedidas, capacidadesDoNivel(conector.catalogo, "escrita"))) return "escrita";
+  return "personalizado";
 }
 
-export function botsQueUsam(estado: Pick<Estado, "concessoes" | "frota" | "sessao">, conector: Conector): { agente: Agente; nivel: Nivel }[] {
+export function botsQueUsam(estado: Pick<Estado, "concessoes" | "frota" | "sessao">, conector: Conector): { agente: Agente; nivel: NivelAtual }[] {
   return meusBots(estado).map((agente) => ({ agente, nivel: nivelDoBot(estado, agente.id, conector) })).filter((b) => b.nivel !== "nenhum");
 }
 
@@ -73,7 +85,7 @@ export function gruposDe(catalogo: readonly CapacidadeConector[], nomes: readonl
   const porNome = new Map(catalogo.map((c) => [c.nome, c]));
   for (const n of nomes) {
     const cap = porNome.get(n);
-    const g = cap ? grupoDe(cap) : "alterar";
+    const g = cap ? grupoDe(cap) : "outras";
     por.set(g, [...(por.get(g) ?? []), n]);
   }
   return ORDEM.filter((g) => por.has(g)).map((g) => ({ id: g, rotulo: ROTULO_GRUPO[g], capacidades: por.get(g) ?? [] }));
@@ -92,7 +104,7 @@ export function podeENao(ctx: Pick<Estado, "conectores" | "marketplace">, slug: 
     const nao = curado?.length ? [`Não inclui: ${curado.join(", ")}`] : [`Não cria, altera nem apaga nada no ${nome}`];
     return { pode: [`Ver e ler o que está no ${nome}`], nao: [...nao, ...naoPedido.map((n) => `Não inclui: ${n}`)] };
   }
-  return { pode: [`Ler, criar, editar e comentar no ${nome}`], nao: ["Apagar fica de fora", ...naoPedido.map((n) => `Não inclui: ${n}`)] };
+  return { pode: [`Ler, criar, editar e comentar no ${nome}`], nao: ["Apagar, desfazer e outras ações ficam de fora", ...naoPedido.map((n) => `Não inclui: ${n}`)] };
 }
 
 const CHECK = '<svg class="ic-ok" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3 3 7-7"></path></svg>';
@@ -124,4 +136,15 @@ export function blocoEsperando(nome: string, url: string | null, curto = false):
 
 export function blocoFalhou(frase: string): string {
   return `<p class="conexao-falhou" role="status">${esc(frase)}</p>`;
+}
+
+/**
+ * Um checkbox por grupo do pedido (revisão do PR #68: no chat E em "Sua vez"). O input fica sob
+ * [data-decisao] para o render preservar a marcação (main.ts); "permitir-acesso" manda só os marcados.
+ * Um grupo só não tem o que desmarcar: devolve "".
+ */
+export function checkboxesDosGrupos(catalogo: readonly CapacidadeConector[], capacidades: readonly string[]): string {
+  const grupos = gruposDe(catalogo, capacidades);
+  if (grupos.length <= 1) return "";
+  return `<div class="ac-grupos">${grupos.map((g) => `<label class="ac-grupo"><input type="checkbox" data-item="grupo-${esc(g.id)}" data-caps="${esc(g.capacidades.join(","))}" checked /><span><b>${esc(g.rotulo)}</b><small>${esc(acoes(g.capacidades.length))}</small></span></label>`).join("")}</div>`;
 }

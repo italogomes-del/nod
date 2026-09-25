@@ -17,7 +17,7 @@ describe("decisões no chat", () => {
   it("mostra a autorização na conversa de origem com as mesmas ações da fila", () => {
     const html = renderTimeline(conversa, estado);
     expect(html).toContain("Preciso da sua decisão para continuar");
-    expect(html).toContain('data-act="decidir-proposta"');
+    expect(html).toContain('data-act="permitir-acesso"');
     expect(html).toContain('data-id="d"');
     // ADR-044: um clique concede E continua, e o botão diz isso.
     expect(html).toContain("Permitir e continuar");
@@ -245,7 +245,7 @@ describe("decisões no chat", () => {
       expect(html).toContain('data-caps="CLICKUP_GET_TASKS"');
       expect(html).toContain('data-caps="CLICKUP_CREATE_TASK"');
       expect(html).not.toContain('data-caps="CLICKUP_DELETE_TASK"');
-      expect(html).toContain("Apagar fica de fora");
+      expect(html).toContain("Ficam de fora: 1 ação de apagar, desfazer e outras");
       expect(html).toContain('data-act="permitir-acesso"');
     });
 

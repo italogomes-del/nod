@@ -57,7 +57,7 @@ function linha(a: AcessoPedido, ctx: Contexto, chave: string): LinhaPrecisa {
     fora = curado?.length ? `Não inclui: ${curado.join(", ")}.` : `Não inclui: nada que altere o ${nome}${deEscrita > 0 ? ` (${acoes(deEscrita)} de escrita ${deEscrita === 1 ? "fica" : "ficam"} de fora)` : ""}.`;
   } else {
     const outras = catalogo.filter((c) => !capacidades.includes(c.nome)).length;
-    fora = outras > 0 ? `Não inclui as outras ${acoes(outras)} do ${nome}.` : "";
+    fora = outras === 1 ? `Não inclui a outra ação do ${nome}.` : outras > 1 ? `Não inclui as outras ${acoes(outras)} do ${nome}.` : "";
   }
   const n = capacidades.length;
   const detalhe = n > 0

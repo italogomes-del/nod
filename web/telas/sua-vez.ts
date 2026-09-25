@@ -2,6 +2,7 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
+import { checkboxesDosGrupos } from "./app-acesso.ts";
 import { pedidosAbertos } from "../lib/avisos.ts";
 import { desdeDaParada, linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, contarFios, ehPergunta } from "../lib/perguntas.ts";
@@ -263,7 +264,12 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
       return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="o que mudou (opcional)" />${botao("retomar", "Retomar com turno novo", { classe: "pri", id: d.id })}${botao("dispensar", "Dispensar", { id: d.id, titulo: "Tirar da tela sem retomar" })}</div>`;
     case "acesso": {
       const r = rotulosAcesso(item.proposta);
-      return `<div class="acoes">${botao("decidir-proposta", r.permitir, { classe: "pri", id: d.id })}${botao("recusar-decisao", r.recusar, { id: d.id })}</div>`;
+      // revisto em 2026-09-25 (revisão do PR #68): os mesmos grupos do card do chat — sem eles, "Sua vez" (e o
+      // aviso no Mac) concedia o pedido inteiro num clique, sem como estreitar.
+      const p = item.proposta?.payload.kind === "acesso" ? item.proposta.payload : null;
+      const catalogo = p ? conectores.find((c) => c.slug === p.conector && c.habilitado)?.catalogo ?? [] : [];
+      const grupos = p ? checkboxesDosGrupos(catalogo, p.capacidades) : "";
+      return `${grupos}<div class="acoes">${botao("permitir-acesso", r.permitir, { classe: "pri", id: d.id })}${botao("recusar-decisao", r.recusar, { id: d.id })}</div>`;
     }
     // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a rotina que declara acessos
     // diz no botão que confirmar também libera; app por conectar vem primeiro (web/telas/rotina-precisa.ts).

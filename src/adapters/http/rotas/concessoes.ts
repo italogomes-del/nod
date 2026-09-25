@@ -1,5 +1,5 @@
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { capacidadesDoNivel, type NivelDeAcesso } from "../../../domain/grupos-de-acesso.ts";
+import { capacidadesDoNivel, doNivel, type NivelDeAcesso } from "../../../domain/grupos-de-acesso.ts";
 import { conceder, concederLote } from "../../../use-cases/conceder.ts";
 import { revogar, revogarLote } from "../../../use-cases/revogar.ts";
 import type { Rota } from "../roteador.ts";
@@ -50,14 +50,22 @@ export function rotasConcessoes(deps: DepsRotasConcessoes): Rota[] {
         if (!conectorId || (nivel !== "nenhum" && nivel !== "leitura" && nivel !== "escrita")) throw new ErroDeDominio("entrada_invalida", { cause: "conectorId e nivel" });
         const agenteId = ctx.params.id ?? "";
         const r = await deps.dentro(ctx.escopo, async (d) => {
+          // definido em 2026-09-25 (revisão do PR #68): o nível é da DONA do bot E do app. A leitura por RLS
+          // abre bots e conectores 'equipe'; sem isto qualquer pessoa do tenant ligaria o bot de outra a um
+          // app, ou o próprio bot às credenciais de um conector de colega. Os dois viram 404, em todo nível.
+          const agente = await d.repos.agentes.buscar(agenteId);
           const conector = await d.repos.conectores.buscar(conectorId);
-          if (!conector) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
+          if (!agente || agente.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado", { cause: "agente" });
+          if (!conector || conector.ownerId !== ctx.escopo.pessoaId) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
           if (nivel !== "nenhum" && !conector.habilitado) throw new ErroDeDominio("estado_invalido", { cause: "conecte o app antes de dar acesso" });
           await d.repos.concessoes.travar(agenteId, conector.id);
           const desejadas = new Set(capacidadesDoNivel(conector.catalogo, nivel as NivelDeAcesso));
           if (nivel !== "nenhum" && desejadas.size === 0) throw new ErroDeDominio("estado_invalido", { cause: "o app não tem ferramenta para esse nível" });
           const atuais = (await d.repos.concessoes.doAgente(agenteId)).filter((c) => c.conectorId === conector.id);
-          const sobram = atuais.filter((c) => !desejadas.has(c.capacidade)).map((c) => c.id);
+          // revisto em 2026-09-25 (revisão do PR #68): Ler / Ler e alterar só mexem no que é deles (ler, criar,
+          // editar, comentar). Apagar e "outras", dadas ação por ação ou pela rotina, ficam como estavam.
+          // "Nenhum" é sem acesso nenhum: tira tudo, as dadas uma a uma inclusive.
+          const sobram = atuais.filter((c) => !desejadas.has(c.capacidade) && (nivel === "nenhum" || doNivel(conector.catalogo, c.capacidade))).map((c) => c.id);
           const faltam = [...desejadas].filter((cap) => !atuais.some((c) => c.capacidade === cap));
           if (sobram.length > 0) await executar(d, revogarLote, { agenteId, concessaoIds: sobram });
           if (faltam.length > 0) await executar(d, concederLote, { agenteId, conectorId: conector.id, capacidades: faltam, autorTipo: "pessoa" });

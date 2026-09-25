@@ -64,6 +64,7 @@ export function paraCapacidade(t: FerramentaDescoberta): CapacidadeConector {
     schema: paraJsonSchema(t.inputSchema),
     // Ausente = NÃO é readOnly (default fechado): só a anotação explícita libera a ferramenta em turno não confiável (ADR-026).
     readOnlyHint: t.annotations?.readOnlyHint === true,
+    ...(t.annotations?.destructiveHint === true ? { destructiveHint: true } : {}),
   };
 }
 

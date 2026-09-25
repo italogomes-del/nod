@@ -4,7 +4,7 @@ import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
-import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type Nivel } from "./app-acesso.ts";
+import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type NivelAtual } from "./app-acesso.ts";
 import { logoApp } from "./marketplace.ts";
 
 /**
@@ -13,7 +13,7 @@ import { logoApp } from "./marketplace.ts";
  * conectar, com "Conectar" ali mesmo. Conectou, o app sobe para a lista de cima e a pessoa escolhe o nível.
  */
 function popoverDarAcesso(estado: Estado, agenteId: string, nomeBot: string): string {
-  const seg = (conectorId: string, atual: Nivel) => `<div class="segmentado sm" role="group" aria-label="${esc(`Acesso de ${nomeBot}`)}">${(["nenhum", "leitura", "escrita"] as const).map((n) => `<button type="button" class="seg${n === atual ? " ativo" : ""}" data-act="nivel-bot" data-id="${esc(agenteId)}" data-conector="${esc(conectorId)}" data-nivel="${n}" aria-pressed="${n === atual}">${esc(ROTULO_NIVEL[n])}</button>`).join("")}</div>`;
+  const seg = (conectorId: string, atual: NivelAtual) => `<div class="segmentado sm" role="group" aria-label="${esc(`Acesso de ${nomeBot}`)}">${(["nenhum", "leitura", "escrita"] as const).map((n) => `<button type="button" class="seg${n === atual ? " ativo" : ""}" data-act="nivel-bot" data-id="${esc(agenteId)}" data-conector="${esc(conectorId)}" data-nivel="${n}" aria-pressed="${n === atual}">${esc(ROTULO_NIVEL[n])}</button>`).join("")}</div>`;
   const conectados = estado.marketplace.flatMap((app) => {
     const c = conectorDoApp(estado, app.slug);
     return c?.habilitado ? [`<div class="da-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div class="da-nome"><b>${esc(app.nome)}</b>${seg(c.id, nivelDoBot(estado, agenteId, c))}</div></div>`] : [];

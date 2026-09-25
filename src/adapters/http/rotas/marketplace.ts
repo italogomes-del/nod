@@ -176,7 +176,9 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
         if (s.ok) await executar(d, aoConectarApp, { slug: app.slug });
         return s;
       });
-      ctx.json(200, { conectado: r.ok, conector: r.conector });
+      // definido em 2026-09-25 (revisão do PR #68): conta ativa e sonda falhou = `falhou`, para a web parar de
+      // perguntar — sem isso ela repetia fixarConta + sonda a cada 2,5 s por 10 min, com o spinner na tela.
+      ctx.json(200, { conectado: r.ok, ...(r.ok ? {} : { falhou: true }), conector: r.conector });
     } },
   ];
 }
