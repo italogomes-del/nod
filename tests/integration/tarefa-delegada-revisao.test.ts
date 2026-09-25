@@ -199,6 +199,31 @@ describeIntegracao("delegar_tarefa — revisão independente (ADR-046)", () => {
     });
   });
 
+  it("[2a] o handoff próprio só não contamina se a tarefa que ele criou nasceu confiável", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { taga, deps, repos, turnoTaga, delegar } = await cenario(trx);
+      // Primeira delegação sem plano: nasce nao_confiavel, e o handoff dela fica no histórico do Taga.
+      const primeira = await delegarTarefa(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, conversaId: taga.conversaId, agente: "Dev 1", tarefa: "x" });
+      expect((await repos.turnos.buscar(primeira.data.tarefa_id))?.entradaConfianca).toBe("nao_confiavel");
+      expect((await repos.turnos.buscar((await delegar()).data.tarefa_id))?.entradaConfianca).toBe("nao_confiavel");
+    });
+  });
+
+  it("merge/review liberados só pelo readOnlyHint do catálogo: CHECK_…_MERGED (leitura declarada) roda; LIST_REVIEWS sem a declaração é tratada como escrita", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { dev1, deps, repos, chamadas, delegar } = await cenario(trx);
+      const criado = await repos.conectores.criar({ nome: "GitHub (Composio)", slug: "github-composio", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
+      const conector = await repos.conectores.registrarSonda(criado?.id ?? "", { ok: true, catalogo: [cap("GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED", true), cap("GITHUB_LIST_REVIEWS_FOR_A_PULL_REQUEST", false)], agora: AGORA });
+      await concederLote(deps, { agenteId: dev1.agenteId, conectorId: conector?.id ?? "", capacidades: ["GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED", "GITHUB_LIST_REVIEWS_FOR_A_PULL_REQUEST"], autorTipo: "pessoa" });
+      const { data } = await delegar();
+      const plano = (await emitirPlanoTurno(deps, { turnoId: data.tarefa_id, machineId: randomUUID(), executor: "catcher" })).data;
+      const chamar = (nome: string) => chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome: `github-composio__${nome}`, argumentos: {}, plano });
+      expect((await chamar("GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED")).data).toMatchObject({ ok: true });
+      expect((await chamar("GITHUB_LIST_REVIEWS_FOR_A_PULL_REQUEST")).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED"]);
+    });
+  });
+
   it("[2a] resposta de outro bot (peer_ask, não confiável) no histórico contamina a delegação", async () => {
     await withRollback(MARLON, async (trx) => {
       const { taga, dev1, repos, delegar } = await cenario(trx);

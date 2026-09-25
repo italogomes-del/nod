@@ -59,7 +59,8 @@ reduzido (leitura + ferramentas nod, `pedir_acesso` incluído) e sem "Sempre per
   500 mensagens ou turnos contamina;
 - sessão nova: a janela de histórico do plano (50 mensagens) — mensagem não confiável, ou chamada de
   fora do turno que produziu uma das falas. O `handoff` que o próprio remetente escreveu numa
-  delegação anterior não conta: não traz nada de fora que a trilha daquele turno não acusasse.
+  delegação anterior só fica de fora se a tarefa que ele criou nasceu confiável (a checagem daquela
+  vez já provou que não havia nada de fora); tarefa contaminada, ou que não se acha mais, contamina.
 
 Consequência de UX: a tarefa contaminada não escreve direto nem depois que a pessoa concede acesso de
 escrita — as escritas saem do catálogo, e o alvo só produz efeito externo por cards de
@@ -146,9 +147,10 @@ mapeado pelo Composio (ADR-047):
 - qualquer nome com `approv` ou `aprovar`;
 - qualquer nome com `review` ou `revisar` (`pr_revisar`, `GITHUB_CREATE_/SUBMIT_/UPDATE_/DISMISS_A_REVIEW…`).
 
-Nunca pega leitura: ferramenta com `readOnlyHint` fica de fora, e capacidade cujo 1º ou 2º pedaço é um
-verbo de leitura (`list`, `get`, `check`…) também — `GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED`
-continua livre.
+Leitura fica livre só pela declaração do catálogo sondado (`readOnlyHint === true`):
+`GITHUB_CHECK_IF_A_PULL_REQUEST_HAS_BEEN_MERGED` continua chamável porque o catálogo a declara leitura.
+Sem a declaração, nome que casa é tratado como escrita (fail-closed); verbo no nome não conta (ADR-042:
+`readOnlyHint` nunca se infere do nome).
 
 Ela vale em quatro camadas:
 1. `chamarFerramenta` recusa a chamada DIRETA dessas ações em qualquer modo, mesmo com concessão de
