@@ -10,7 +10,7 @@ import type { JsonSchema } from "./json-schema.ts";
  * criar_rotina (o nascimento) veio junto em 2026-09-21, quando a main trouxe sem_novidade e o
  * arquivo de lá passou das 200 linhas de novo: TODO schema de rotina mora aqui agora.
  */
-const ROTINA_ID: JsonSchema = { type: "string", description: "Id da rotina, exatamente como veio do inventário ou de listar_rotinas.", minLength: 1 };
+const ROTINA_ID: JsonSchema = { type: "string", description: "Id da rotina, exatamente como veio do inventário, de listar_rotinas ou de ver_colegas.", minLength: 1 };
 
 /**
  * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): os apps que a rotina lê ou
@@ -60,14 +60,14 @@ export const FERRAMENTAS_ROTINA = {
   },
   pausar_rotina: {
     type: "object",
-    description: "Pausa uma rotina existente: ela para de executar até ser reativada. Use o id exato do inventário.",
+    description: "Pausa uma rotina existente: ela para de executar até ser reativada. Use o id exato do inventário; a rotina de um colega (id de ver_colegas) só quando a pessoa pedir.",
     properties: { rotina_id: ROTINA_ID },
     required: ["rotina_id"],
     additionalProperties: false,
   },
   reativar_rotina: {
     type: "object",
-    description: "Reativa uma rotina pausada. O próximo horário é recalculado a partir de agora; execuções perdidas na pausa não são repostas.",
+    description: "Reativa uma rotina pausada, sua ou de um colega quando a pessoa pedir. O próximo horário é recalculado a partir de agora; execuções perdidas na pausa não são repostas.",
     properties: { rotina_id: ROTINA_ID },
     required: ["rotina_id"],
     additionalProperties: false,

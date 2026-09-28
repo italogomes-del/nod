@@ -128,6 +128,7 @@ export function useCasesDeTeste(): UseCasesNod {
     semNovidade: naoImplementado("semNovidade (L7)"),
     perguntarABot: naoImplementado("perguntarABot (L7)"),
     delegarTarefa: naoImplementado("delegarTarefa (L7)"),
+    verColegas: naoImplementado("verColegas (L7)"),
   };
 }
 

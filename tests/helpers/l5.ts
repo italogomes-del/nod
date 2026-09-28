@@ -95,7 +95,7 @@ export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { token
 export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCasesNod {
   return {
     lembrar: async () => ({ data: { ok: true, id: "memoria-falsa" } }),
-    atualizarPerfil: async () => ({ data: { proposta_id: "proposta-perfil-falsa" } }),
+    atualizarPerfil: async () => ({ data: { proposta_id: "proposta-perfil-falsa", rotinas: [] } }),
     pedirAcesso,
     criarRotina: async () => ({ data: { proposta_id: "proposta-rotina-falsa", proxima_execucao: Date.now() + 1000, resumo: "rotina falsa" } }),
     listarRotinasDoAgente: async () => ({ data: { rotinas: [] } }),
@@ -110,6 +110,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     semNovidade: async () => ({ data: { ok: true } }),
     perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     delegarTarefa: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    verColegas: async () => ({ data: { colegas: [] } }),
     ...sobrescrita,
   };
 }

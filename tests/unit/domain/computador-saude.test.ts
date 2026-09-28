@@ -97,6 +97,8 @@ describe("plano de turno com o computador fora de uso (emenda da ADR-037)", () =
 
   it("sem o serviço de computador, ou em modo sem computador, a linha não aparece", () => {
     expect(montarPlano({ ...base, computador: false, computadorFora: { estado: "desligado" } }).promptSistema).not.toContain("Seu computador");
-    expect(montarPlano({ ...base, modo: "criacao", computadorFora: { estado: "desligado" } }).promptSistema).not.toContain("Seu computador");
+    expect(montarPlano({ ...base, modo: "peer", profundidade: 1, computadorFora: { estado: "desligado" } }).promptSistema).not.toContain("Seu computador");
+    // ADR-050: bot novo é bot completo — a criação tem computador, e o aviso de desligado aparece nela também.
+    expect(montarPlano({ ...base, modo: "criacao", computadorFora: { estado: "desligado" } }).promptSistema).toContain("Seu computador está desligado pela pessoa");
   });
 });

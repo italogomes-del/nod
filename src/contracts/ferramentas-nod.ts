@@ -1,25 +1,29 @@
 import type { ResultadoPedirAcesso } from "./acesso.ts";
 import type { MotivoPasse, MotivoSemNovidade } from "./motivos.ts";
 import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
+import { FERRAMENTAS_PERFIL, type ArgsAtualizarPerfil, type ArgsVerColegas, type ResultadoAtualizarPerfil, type ResultadoVerColegas } from "./ferramentas-perfil.ts";
 import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
 
 import type { JsonSchema } from "./json-schema.ts";
 export type { JsonSchema } from "./json-schema.ts";
 export type { ArgsPedirAPessoa } from "./pedido.ts";
+export type { ArgsAtualizarPerfil, ArgsVerColegas, AppDoColega, ColegaListado, ResultadoAtualizarPerfil, ResultadoVerColegas } from "./ferramentas-perfil.ts";
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As DEZESSEIS ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As DEZESSETE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
  * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; delegar_tarefa entra em 2026-09-24,
- * ADR-047). Lista FECHADA: cada nome tem um
+ * ADR-047; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em
+ * ferramentas-perfil.ts pelo mesmo gatilho). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
  * `${slug}__${tool}` e não mora aqui.
  */
 export const FERRAMENTAS_NOD = {
   ...FERRAMENTAS_ROTINA,
+  ...FERRAMENTAS_PERFIL,
   lembrar: {
     type: "object",
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
@@ -28,17 +32,6 @@ export const FERRAMENTAS_NOD = {
       texto: { type: "string", description: "O que lembrar, em uma frase.", minLength: 1 },
     },
     required: ["tipo", "texto"],
-    additionalProperties: false,
-  },
-  atualizar_perfil: {
-    type: "object",
-    description: "Propõe nome, título e/ou descrição para este agente. Nada muda antes da pessoa confirmar.",
-    properties: {
-      nome: { type: "string", description: "Nome curto do agente.", minLength: 1 },
-      titulo: { type: "string", description: "Título de uma linha.", minLength: 1 },
-      descricao: { type: "string", description: "O que o agente faz e como responde (regras duráveis).", minLength: 1 },
-    },
-    required: [],
     additionalProperties: false,
   },
   pedir_acesso: {
@@ -146,11 +139,10 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
 export const NOMES_FERRAMENTAS_NOD = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "pedir_aprovacao",
-  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa",
+  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa", "ver_colegas",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
-export type ArgsAtualizarPerfil = { nome?: string; titulo?: string; descricao?: string };
 export type ArgsPedirAcesso = { conector: string; capacidades: string[]; nivel: "leitura" | "escrita"; nao_pedido: string[]; para?: string };
 export type ItemPedidoAprovacao = {
   texto: string;
@@ -165,7 +157,6 @@ export type ArgsPerguntarABot = { agente: string; pergunta: string };
 export type ArgsDelegarTarefa = { agente: string; tarefa: string; contexto?: string };
 
 export type ResultadoLembrar = { ok: true; id: string };
-export type ResultadoProposta = { proposta_id: string };
 export type ResultadoPedirAprovacao =
   | { estado: "decidida"; itens: { idx: number; desfecho: string }[] }
   | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" };
@@ -177,7 +168,7 @@ export type ResultadoDelegarTarefa = { tarefa_id: string };
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
 export type ContratoFerramentaNod = {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
-  atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoProposta };
+  atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoAtualizarPerfil };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };
   criar_rotina: { args: ArgsCriarRotina; resultado: ResultadoCriarRotina };
   listar_rotinas: { args: ArgsListarRotinas; resultado: ResultadoListarRotinas };
@@ -192,4 +183,5 @@ export type ContratoFerramentaNod = {
   sem_novidade: { args: ArgsSemNovidade; resultado: ResultadoOk };
   perguntar_a_bot: { args: ArgsPerguntarABot; resultado: ResultadoPerguntarABot };
   delegar_tarefa: { args: ArgsDelegarTarefa; resultado: ResultadoDelegarTarefa };
+  ver_colegas: { args: ArgsVerColegas; resultado: ResultadoVerColegas };
 };

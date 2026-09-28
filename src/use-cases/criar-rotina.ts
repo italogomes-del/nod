@@ -4,7 +4,7 @@ import type { PayloadPropostaRotina, Proposta } from "../contracts/conversa.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
-import type { ArgsPedirAcesso } from "../contracts/ferramentas-nod.ts";
+import type { ArgsCriarRotina, ArgsPedirAcesso } from "../contracts/ferramentas-nod.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { normalizarAcessosDeclarados } from "../domain/rotina-acessos.ts";
@@ -50,33 +50,22 @@ export async function acessosDeclarados(deps: Deps, pedidos: readonly ArgsPedirA
 }
 
 /**
- * Ferramenta `criar_rotina` (origem AGENTE): NADA é agendado — nasce uma proposta kind 'rotina'
- * com o payload já normalizado (sobrevive a reinício sem reinterpretar, E7.1) e uma decisão tipo
- * 'rotina' em "Sua vez". definido em 2026-09-16: a decisão nasce com o MESMO id da proposta —
- * é a ligação entre as duas sem coluna nova no contrato; ativarRotina usa esse id nos dois lados.
- * Erro de domínio volta TIPADO no resultado ({erro}) para o modelo corrigir a chamada, em vez de
- * virar negação do proxy — inclusive o de `acessos` (app fora do registro e do marketplace, capacidade
- * fora do catálogo, escrita sem os nomes exatos, dois itens para o mesmo app).
+ * O payload da proposta 'rotina' a partir dos argumentos de criar_rotina, já normalizado e com os acessos
+ * validados. Lança o ErroDeDominio de cada regra; quem chama decide como devolver. Extraído em 2026-09-28
+ * (ADR-050): atualizar_perfil aceita as rotinas que vêm com o perfil e as valida pelo mesmo caminho.
  */
-export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) => {
-  let normalizada: RotinaNormalizada;
-  let acessos: AcessoPedido[] | undefined;
-  try {
-    normalizada = await normalizarComLimite(deps, input.agenteId, {
-      cron: input.cron,
-      fusoIana: input.fuso_iana,
-      instrucao: input.instrucao,
-      fonte: input.fonte,
-      entregavel: input.entregavel,
-      limitesAprovacao: input.limites_aprovacao,
-      politicaSemDado: input.politica_sem_dado,
-    });
-    acessos = await acessosDeclarados(deps, input.acessos);
-  } catch (e) {
-    if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
-    throw e;
-  }
-  const payload: PayloadPropostaRotina = {
+export async function prepararRotina(deps: Deps, agenteId: string, args: ArgsCriarRotina): Promise<PayloadPropostaRotina> {
+  const normalizada = await normalizarComLimite(deps, agenteId, {
+    cron: args.cron,
+    fusoIana: args.fuso_iana,
+    instrucao: args.instrucao,
+    fonte: args.fonte,
+    entregavel: args.entregavel,
+    limitesAprovacao: args.limites_aprovacao,
+    politicaSemDado: args.politica_sem_dado,
+  });
+  const acessos = await acessosDeclarados(deps, args.acessos);
+  return {
     kind: "rotina",
     cron: normalizada.cron,
     fusoIana: normalizada.fusoIana,
@@ -89,6 +78,25 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
     resumo: normalizada.resumo,
     ...(acessos !== undefined ? { acessos } : {}),
   };
+}
+
+/**
+ * Ferramenta `criar_rotina` (origem AGENTE): NADA é agendado — nasce uma proposta kind 'rotina'
+ * com o payload já normalizado (sobrevive a reinício sem reinterpretar, E7.1) e uma decisão tipo
+ * 'rotina' em "Sua vez". definido em 2026-09-16: a decisão nasce com o MESMO id da proposta —
+ * é a ligação entre as duas sem coluna nova no contrato; ativarRotina usa esse id nos dois lados.
+ * Erro de domínio volta TIPADO no resultado ({erro}) para o modelo corrigir a chamada, em vez de
+ * virar negação do proxy — inclusive o de `acessos` (app fora do registro e do marketplace, capacidade
+ * fora do catálogo, escrita sem os nomes exatos, dois itens para o mesmo app).
+ */
+export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) => {
+  let payload: PayloadPropostaRotina;
+  try {
+    payload = await prepararRotina(deps, input.agenteId, input);
+  } catch (e) {
+    if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
+    throw e;
+  }
   const proposta = await deps.repos.propostas.criar({ conversaId: input.conversaId, agenteId: input.agenteId, payload });
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: "proposta não criada" });
   const decisao = await deps.repos.decisoes.criar({
@@ -98,14 +106,14 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
     conversaId: input.conversaId,
     turnoId: input.turnoId,
     prazoDecisaoEm: deps.agora() + PRAZO_DECISAO_MS,
-    frase: `Rotina proposta: ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}`,
+    frase: `Rotina proposta: ${payload.resumo} · próxima execução ${carimbo(payload.proximaExecucao, payload.fusoIana)}`,
   });
   const autoria = autoriaAgente(input.agenteId, deps.escopo.pessoaId);
   const events: RuntimeEvent[] = [
-    evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: "rotina", proximaExecucao: normalizada.proximaExecucao }, { conversaId: input.conversaId, turnoId: input.turnoId }),
+    evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: "rotina", proximaExecucao: payload.proximaExecucao }, { conversaId: input.conversaId, turnoId: input.turnoId }),
   ];
   if (decisao) events.push(evento(deps, "decisao_criada", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: input.conversaId, turnoId: input.turnoId }));
-  return { data: { proposta_id: proposta.id, proxima_execucao: normalizada.proximaExecucao, resumo: normalizada.resumo }, events };
+  return { data: { proposta_id: proposta.id, proxima_execucao: payload.proximaExecucao, resumo: payload.resumo }, events };
 };
 
 export type SaidaCriarRotinaPelaPessoa = { rotina: Rotina; proposta: Proposta | null; decisao: Decisao | null };

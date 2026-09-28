@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { Rotina } from "../../../src/contracts/rotina.ts";
 import { atualizarPerfil } from "../../../src/use-cases/atualizar-perfil.ts";
+import { idDaProposta } from "../../helpers/perfil.ts";
 import { confirmarProposta } from "../../../src/use-cases/confirmar-proposta.ts";
 import { criarAgente, NOME_INICIAL } from "../../../src/use-cases/criar-agente.ts";
 import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
@@ -18,9 +19,9 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     const proposta = await executar(deps, atualizarPerfil, { ...ctx, nome: "Vera", titulo: "Revisora", descricao: "Revisa PRs e responde curto" });
     expect(proposta.events.map((e) => e.kind)).toEqual(["proposta_criada"]);
     expect(await deps.repos.agentes.buscar(criado.agente.id)).toMatchObject({ nome: NOME_INICIAL, confirmado: false });
-    expect((await deps.repos.propostas.buscar(proposta.data.proposta_id))?.estado).toBe("pendente");
+    expect((await deps.repos.propostas.buscar(idDaProposta(proposta.data)))?.estado).toBe("pendente");
 
-    const { data, events } = await executar(deps, confirmarProposta, { propostaId: proposta.data.proposta_id });
+    const { data, events } = await executar(deps, confirmarProposta, { propostaId: idDaProposta(proposta.data) });
     expect(data.proposta.estado).toBe("confirmada");
     expect(data.agente).toMatchObject({ nome: "Vera", titulo: "Revisora", descricao: "Revisa PRs e responde curto", confirmado: true });
     expect(events.map((e) => e.kind)).toEqual(["agente_atualizado", "mensagem_criada"]);
@@ -28,7 +29,7 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     expect(ultima?.texto).toContain("Confirmado por");
     expect(ultima?.texto).toContain("nome: Vera");
 
-    await esperarErro(() => confirmarProposta(deps, { propostaId: proposta.data.proposta_id }), "estado_invalido");
+    await esperarErro(() => confirmarProposta(deps, { propostaId: idDaProposta(proposta.data) }), "estado_invalido");
     await esperarErro(() => confirmarProposta(deps, { propostaId: randomUUID() }), "nao_encontrado");
   });
 
@@ -42,11 +43,11 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
     const proposta = await executar(deps, atualizarPerfil, { turnoId: "t", agenteId: criado.agente.id, conversaId: criado.conversa.id, nome: "Vera" });
-    const { data } = await executar(deps, recusarProposta, { propostaId: proposta.data.proposta_id });
+    const { data } = await executar(deps, recusarProposta, { propostaId: idDaProposta(proposta.data) });
     expect(data.proposta.estado).toBe("recusada");
     expect((await deps.repos.agentes.buscar(criado.agente.id))?.nome).toBe(NOME_INICIAL);
     expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Deixei isso de lado");
-    await esperarErro(() => recusarProposta(deps, { propostaId: proposta.data.proposta_id }), "estado_invalido");
+    await esperarErro(() => recusarProposta(deps, { propostaId: idDaProposta(proposta.data) }), "estado_invalido");
   });
 
   it("'rotina' confirma pelo services.rotinas.ativar (L7) na mesma tx e emite rotina_criada", async () => {

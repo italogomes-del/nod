@@ -14,6 +14,7 @@ import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
+import { idDaProposta } from "../helpers/perfil.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
@@ -143,11 +144,11 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       const p1 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Vera", titulo: "Revisora" })).data;
       const p2 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Outra" })).data;
 
-      const confirmada = await servidor.chamar(marlon, "POST", `propostas/${p1.proposta_id}/confirmar`);
+      const confirmada = await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`);
       expect(confirmada.status).toBe(200);
-      expect(((await confirmada.json()) as RespostaMutacao).ids).toEqual({ proposta: p1.proposta_id, agente: agente.id });
-      expect((await servidor.chamar(marlon, "POST", `propostas/${p1.proposta_id}/confirmar`)).status).toBe(409);
-      expect((await servidor.chamar(marlon, "POST", `propostas/${p2.proposta_id}/recusar`)).status).toBe(200);
+      expect(((await confirmada.json()) as RespostaMutacao).ids).toEqual({ proposta: idDaProposta(p1), agente: agente.id });
+      expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`)).status).toBe(409);
+      expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p2)}/recusar`)).status).toBe(200);
       expect((await servidor.chamar(marlon, "POST", `propostas/${randomUUID()}/recusar`)).status).toBe(404);
       expect(await deps.repos.agentes.buscar(agente.id)).toMatchObject({ nome: "Vera", titulo: "Revisora", confirmado: true });
 

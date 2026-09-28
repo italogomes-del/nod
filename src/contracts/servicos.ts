@@ -56,7 +56,11 @@ export interface ServicesNod<Trx> {
     /** O plano emitido para um turno vivo (GET /api/interno/plano); null sem token/plano. */
     buscar(turnoId: string): PlanoTurno | null;
   };
-  rotinas: { ativar(trx: Trx, propostaId: string): Promise<Rotina> };
+  /**
+   * `semMensagem` (definido em 2026-09-28, ADR-050): as rotinas que vêm com o perfil nascem pela
+   * confirmação dele, que escreve UMA linha com todas; sem isso a conversa ganhava uma por rotina.
+   */
+  rotinas: { ativar(trx: Trx, propostaId: string, opcoes?: { semMensagem?: boolean }): Promise<Rotina> };
   conectores: {
     /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. */
     chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean }): Promise<{ conteudo: string; isError: boolean }>;
@@ -115,6 +119,7 @@ export interface UseCasesNod<Deps> {
   semNovidade: CasoNod<Deps, "sem_novidade">;
   perguntarABot: CasoNod<Deps, "perguntar_a_bot">;
   delegarTarefa: CasoNod<Deps, "delegar_tarefa">;
+  verColegas: CasoNod<Deps, "ver_colegas">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -135,4 +140,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   sem_novidade: "semNovidade",
   perguntar_a_bot: "perguntarABot",
   delegar_tarefa: "delegarTarefa",
+  ver_colegas: "verColegas",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

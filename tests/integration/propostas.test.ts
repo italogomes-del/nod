@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import type { Rotina } from "../../src/contracts/rotina.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
+import { idDaProposta } from "../helpers/perfil.ts";
 import { confirmarProposta } from "../../src/use-cases/confirmar-proposta.ts";
 import { criarAgente, NOME_INICIAL } from "../../src/use-cases/criar-agente.ts";
 import { recusarProposta } from "../../src/use-cases/recusar-proposta.ts";
@@ -17,18 +18,18 @@ describeIntegracao("propostas no Postgres (E1.1): confirmar aplica; nada antes",
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
       const ctx = { turnoId: randomUUID(), agenteId: criado.agente.id, conversaId: criado.conversa.id };
       const { data: p } = await executar(deps, atualizarPerfil, { ...ctx, nome: "Vera", titulo: "Revisora", descricao: "Revisa PRs do nod e responde curto" });
-      expect(await deps.repos.propostas.buscar(p.proposta_id)).toMatchObject({ kind: "perfil", estado: "pendente", payload: { kind: "perfil", nome: "Vera" } });
+      expect(await deps.repos.propostas.buscar(idDaProposta(p))).toMatchObject({ kind: "perfil", estado: "pendente", payload: { kind: "perfil", nome: "Vera" } });
       expect(await deps.repos.agentes.buscar(criado.agente.id)).toMatchObject({ nome: NOME_INICIAL, confirmado: false });
 
       await vincularEscopo(trx, ANA);
-      expect(await depsSobreTrx(trx, ANA).repos.propostas.buscar(p.proposta_id)).toBeNull();
-      await esperarErro(() => confirmarProposta(depsSobreTrx(trx, ANA), { propostaId: p.proposta_id }), "nao_encontrado");
+      expect(await depsSobreTrx(trx, ANA).repos.propostas.buscar(idDaProposta(p))).toBeNull();
+      await esperarErro(() => confirmarProposta(depsSobreTrx(trx, ANA), { propostaId: idDaProposta(p) }), "nao_encontrado");
       await vincularEscopo(trx, MARLON);
 
-      const { data } = await executar(deps, confirmarProposta, { propostaId: p.proposta_id });
+      const { data } = await executar(deps, confirmarProposta, { propostaId: idDaProposta(p) });
       expect(data.agente).toMatchObject({ nome: "Vera", titulo: "Revisora", descricao: "Revisa PRs do nod e responde curto", confirmado: true });
       expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Confirmado por");
-      await esperarErro(() => confirmarProposta(deps, { propostaId: p.proposta_id }), "estado_invalido");
+      await esperarErro(() => confirmarProposta(deps, { propostaId: idDaProposta(p) }), "estado_invalido");
     });
   });
 
@@ -42,7 +43,7 @@ describeIntegracao("propostas no Postgres (E1.1): confirmar aplica; nada antes",
       const ctx = { turnoId: randomUUID(), agenteId: criado.agente.id, conversaId: criado.conversa.id };
 
       const recusada = (await executar(deps, atualizarPerfil, { ...ctx, nome: "Outro" })).data;
-      expect((await executar(deps, recusarProposta, { propostaId: recusada.proposta_id })).data.proposta.estado).toBe("recusada");
+      expect((await executar(deps, recusarProposta, { propostaId: idDaProposta(recusada) })).data.proposta.estado).toBe("recusada");
       expect((await deps.repos.agentes.buscar(criado.agente.id))?.nome).toBe("Vera");
       expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toBe("Deixei isso de lado. Nada foi agendado nem concedido.");
 

@@ -19,6 +19,7 @@ import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { conectorPublico } from "./registrar-conector.ts";
+import { ehColega } from "./ver-colegas.ts";
 
 export type EntradaEmitirPlano = {
   turnoId: string;
@@ -180,7 +181,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     anexos: await deps.repos.anexos.metas(turno.entradaAnexos),
     contextoConversa,
     pessoaNome: pessoa?.nome ?? "a pessoa",
-    colegas: visiveis.filter((a) => a.id !== agente.id && a.ownerId === agente.ownerId && a.confirmado && !a.oculto),
+    colegas: visiveis.filter((a) => ehColega(agente, a)),
     rotina,
     rotinasDoAgente,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
