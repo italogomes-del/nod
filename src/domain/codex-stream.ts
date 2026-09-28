@@ -1,12 +1,20 @@
 import type { EventoStream } from "../contracts/turno.ts";
 
-/** definido em 2026-09-18: normaliza eventos de codex exec --json; custo desconhecido permanece null. */
+/**
+ * definido em 2026-09-18: normaliza eventos de codex exec --json; custo desconhecido permanece null.
+ * definido em 2026-09-28: cada agent_message completa sai como `delta` (texto ao vivo) E `texto_bloco`
+ * (composição da fala). O `turn.completed` não traz texto, então sem os blocos a fala eram todas as
+ * mensagens coladas sem separador; com eles vale a mesma regra do Claude: a última mensagem é o final
+ * e as anteriores só entram se forem relatório (comporFala em stream-json.ts).
+ */
 export function interpretarCodex(linha: string): EventoStream[] {
   let v: Record<string, unknown>;
   try { const j: unknown = JSON.parse(linha); if (!j || typeof j !== "object" || Array.isArray(j)) return []; v = j as Record<string, unknown>; } catch { return []; }
   const item = v.item && typeof v.item === "object" ? v.item as Record<string, unknown> : {};
   if (v.type === "thread.started") return [{ tipo: "init", sessaoCli: "", ferramentas: [], modelo: "", versaoCli: "", apiKeySource: "desconhecido" }];
-  if (v.type === "item.completed" && item.type === "agent_message" && typeof item.text === "string") return [{ tipo: "delta", texto: item.text }];
+  if (v.type === "item.completed" && item.type === "agent_message" && typeof item.text === "string") {
+    return item.text.trim() === "" ? [{ tipo: "delta", texto: item.text }] : [{ tipo: "delta", texto: item.text }, { tipo: "texto_bloco", texto: item.text }];
+  }
   if (v.type === "item.started" && item.type === "mcp_tool_call") return [{ tipo: "tool_use", id: String(item.id ?? ""), nome: `mcp__${String(item.server ?? "nod")}__${String(item.tool ?? "")}`, input: item.arguments }];
   if (v.type === "item.completed" && item.type === "mcp_tool_call") return [{ tipo: "tool_result", toolUseId: String(item.id ?? ""), isError: item.status === "failed", texto: "" }];
   if (v.type !== "turn.completed" && v.type !== "turn.failed") return [];

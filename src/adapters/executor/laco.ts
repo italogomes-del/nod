@@ -4,7 +4,7 @@ import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../domain/stream-json.ts";
 import { log } from "../../obs/log.ts";
-import { INATIVIDADE_TURNO_MS, ISENCAO_FERRAMENTA_MS, RENOVACAO_MS, VERIFICACAO_INATIVIDADE_MS } from "../../shared/constantes.ts";
+import { INATIVIDADE_TURNO_MS, ISENCAO_FERRAMENTA_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS, VERIFICACAO_INATIVIDADE_MS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import type { Adapter, IdDriver, Registry } from "./spi.ts";
 
@@ -59,6 +59,21 @@ export function resultadoDeExcecao(erro: unknown, sinais: SinaisTurno, texto = "
   const base = { texto, sessaoCli: null, sinais, custoUsd: null, tokens: TOKENS_ZERADOS, ferramentasChamadas: [], negacoesPermissao: [] };
   if (ehErroDeDominio(erro) && erro.codigo === "executor_indisponivel") return { desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", ...base };
   return { desfecho: "falha", motivoFalha: "erro_execucao", ...base };
+}
+
+/**
+ * Corta o texto em `max` caracteres CONTANDO o marcador, que diz quanto ficou de fora. A rota da
+ * máquina recusa a Entrega inteira acima de TEXTO_ENTREGA_MAX_CHARS — e aí o turno nunca assentava.
+ */
+export function cortarTexto(texto: string, max = TEXTO_ENTREGA_MAX_CHARS): string {
+  if (texto.length <= max) return texto;
+  const marcador = (fora: number) => `\n[cortado pelo nod: ${fora} caracteres ficaram de fora]`;
+  // O marcador com o comprimento total tem pelo menos tantos dígitos quanto o real: cabe sempre.
+  let manter = Math.max(0, max - marcador(texto.length).length);
+  // Não parte um par substituto (emoji) ao meio.
+  const codigo = texto.charCodeAt(manter - 1);
+  if (manter > 0 && codigo >= 0xd800 && codigo <= 0xdbff) manter -= 1;
+  return texto.slice(0, manter) + marcador(texto.length - manter);
 }
 
 export function driverDoPlano(plano: PlanoTurno): IdDriver {
@@ -134,10 +149,12 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     const vigia = setInterval(vigiar, verificacaoInatividadeMs);
     vigia.unref?.();
 
-    const entregar = async (resultado: ResultadoTurno): Promise<void> => {
+    const entregar = async (bruto: ResultadoTurno): Promise<void> => {
       if (entregue) return;
       entregue = true;
       seqLocal += 1;
+      const resultado = bruto.texto.length > TEXTO_ENTREGA_MAX_CHARS ? { ...bruto, texto: cortarTexto(bruto.texto) } : bruto;
+      if (resultado !== bruto) log("aviso", "entrega_cortada", { turno_id: plano.turnoId, chars: bruto.texto.length, teto: TEXTO_ENTREGA_MAX_CHARS });
       const entrega: Entrega = {
         turnoId: plano.turnoId,
         machineId: o.machineId,

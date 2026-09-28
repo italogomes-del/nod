@@ -17,6 +17,7 @@ const CENARIOS = {
   "s4b-negado": "s4b-negado.jsonl",
   "s6-sigterm": "s6-sigterm.jsonl",
   "s2c-session-in-use": "s2c-session-in-use.jsonl",
+  "relatorio-lembrar": "relatorio-lembrar.jsonl",
 };
 
 const args = process.argv.slice(2);

@@ -25,7 +25,17 @@ else {
   emit({ type: "thread.started", thread_id: "sessao-codex" });
   if (prompt === "esperar") await new Promise((r) => setTimeout(r, 20_000));
   else if (prompt === "falhar") emit({ type: "turn.failed", error: { message: "segredo que não deve escapar" } });
-  else {
+  else if (prompt === "relatorio") {
+    // Relatório longo, depois lembrar, depois "Anotado." — o turn.completed do Codex não traz texto.
+    emit({ type: "item.completed", item: { type: "agent_message", text: "Vou consultar as tasks." } });
+    emit({ type: "item.started", item: { id: "t1", type: "mcp_tool_call", server: "nod", tool: "consultar", arguments: {} } });
+    emit({ type: "item.completed", item: { id: "t1", type: "mcp_tool_call", status: "completed" } });
+    emit({ type: "item.completed", item: { type: "agent_message", text: `Relatório das tasks: ${"NOD-101 aberto há 3 dias, sem revisão; ".repeat(10)}fim.` } });
+    emit({ type: "item.started", item: { id: "t2", type: "mcp_tool_call", server: "nod", tool: "lembrar", arguments: {} } });
+    emit({ type: "item.completed", item: { id: "t2", type: "mcp_tool_call", status: "completed" } });
+    emit({ type: "item.completed", item: { type: "agent_message", text: "Anotado." } });
+    emit({ type: "turn.completed", usage: { input_tokens: 30, output_tokens: 120, cached_input_tokens: 4 } });
+  } else {
     emit({ type: "item.started", item: { id: "t1", type: "mcp_tool_call", server: "nod", tool: "lembrar", arguments: {} } });
     emit({ type: "item.completed", item: { id: "t1", type: "mcp_tool_call", status: "completed" } });
     emit({ type: "item.completed", item: { type: "agent_message", text: "Resposta de teste." } });

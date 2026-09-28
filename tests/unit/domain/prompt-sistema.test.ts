@@ -31,6 +31,14 @@ describe("montarPromptSistema", () => {
     expect(p).toContain("- [preferencia] prefiro tópicos");
   });
 
+  it("definido em 2026-09-28: resposta ao colega é completa, e o relatório não vem antes de uma ferramenta", () => {
+    const peer = montarPromptSistema({ agente, memorias: [], ferramentas: [f("lembrar")], pessoaNome: "Marlon", modo: "peer" });
+    expect(peer).toContain("responda em texto, completo e verificável: tudo o que o colega precisa para responder à pessoa. Você não pode delegar nem encaminhar neste turno.");
+    expect(peer).not.toContain("curto e verificável");
+    expect(peer).toContain("O relatório completo vai só na resposta final, depois da última ferramenta. Não chame ferramenta depois do relatório; se precisar, reescreva o relatório inteiro no fim.");
+    expect(montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "conversa" })).not.toContain("Não chame ferramenta depois do relatório");
+  });
+
   it("modo criacao instrui a chamar atualizar_perfil; sem ferramentas diz 'nenhuma'", () => {
     const p = montarPromptSistema({ agente: { ...agente, nome: "Novo agente", titulo: "", descricao: "" }, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "criacao" });
     expect(p).toContain("atualizar_perfil");

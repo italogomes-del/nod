@@ -6,9 +6,13 @@ import type { Deps } from "./tipos.ts";
 /** definido em 2026-09-16: classe de procuração que autoriza bot-a-bot entre donos diferentes (ADR-025). */
 export const CLASSE_PERGUNTAR_A_BOT = "perguntar_a_bot";
 
-/** Moldura do SERVIDOR para a pergunta chegar ao alvo marcada como vinda de outro bot, não da pessoa. */
+/**
+ * Moldura do SERVIDOR para a pergunta chegar ao alvo marcada como vinda de outro bot, não da pessoa.
+ * definido em 2026-09-28: pede a mesma resposta completa do modo peer do prompt de sistema — "curto"
+ * aqui contradiria a instrução de lá.
+ */
 export function moldurarPergunta(remetenteNome: string, pergunta: string): string {
-  return `Pergunta de ${remetenteNome} (outro bot do nod, não supervisionado por pessoa neste turno): ${pergunta}\nResponda em texto, curto e verificável. Você não pode delegar nem encaminhar.`;
+  return `Pergunta de ${remetenteNome} (outro bot do nod, não supervisionado por pessoa neste turno): ${pergunta}\nResponda em texto, completo e verificável: tudo o que ${remetenteNome} precisa para responder à pessoa. Você não pode delegar nem encaminhar.`;
 }
 
 /**
