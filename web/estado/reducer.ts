@@ -8,6 +8,7 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
+import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada } from "../../src/contracts/turno.ts";
@@ -111,6 +112,11 @@ export type Estado = {
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
   /**
+   * Modo dev (definido em 2026-09-28, 0036): a preferência vem do servidor (o app desktop limpa o localStorage)
+   * e, ligada, cada conversa aberta traz o resumo do Raio-X de cada turno e o total do dia.
+   */
+  modoDev: { ligado: boolean; raioX: Record<string, RaioXConversa> };
+  /**
    * A chave crua recém-emitida: mostrada UMA vez e descartada ao sair da tela. Fica só na memória da
    * aba — nunca em storage — e o servidor não tem como mostrá-la de novo.
    */
@@ -154,6 +160,8 @@ export type Acao =
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-relatos"; relatos: Relato[] }
+  | { tipo: "modo-dev"; ligado: boolean }
+  | { tipo: "hidratar-raio-x"; conversaId: string; raioX: RaioXConversa }
   | { tipo: "chave-emitida"; emitida: ChaveEmitidaDto | null }
   | { tipo: "faixa"; faixa: FaixaParada | null }
   | { tipo: "composer"; conversaId: string; escolha: EscolhaComposer | null }
@@ -187,6 +195,7 @@ export const estadoInicial: Estado = {
   memorias: {},
   chaves: null,
   relatos: null,
+  modoDev: { ligado: false, raioX: {} },
   chaveEmitida: null,
   negacoes: [],
   faixaParada: null,
@@ -321,7 +330,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "sessao":
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
-      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null };
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
+        modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} } };
     case "navegar":
       return resolverInicio({
         ...estado,
@@ -410,6 +420,11 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, chaves: acao.chaves };
     case "hidratar-relatos":
       return { ...estado, relatos: acao.relatos };
+    // Desligado, os resumos saem da memória: religar busca de novo, com o que mudou nesse meio-tempo.
+    case "modo-dev":
+      return { ...estado, modoDev: { ligado: acao.ligado, raioX: acao.ligado ? estado.modoDev.raioX : {} } };
+    case "hidratar-raio-x":
+      return estado.modoDev.ligado ? { ...estado, modoDev: { ...estado.modoDev, raioX: { ...estado.modoDev.raioX, [acao.conversaId]: acao.raioX } } } : estado;
     case "chave-emitida":
       return acao.emitida ? invalidar({ ...estado, chaveEmitida: acao.emitida }, "chaves") : { ...estado, chaveEmitida: null };
     case "faixa":

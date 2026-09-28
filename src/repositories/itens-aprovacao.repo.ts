@@ -80,7 +80,7 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-053: este comando já foi aprovado nesta tarefa? Item 'terminal' aprovado (desfecho executado) com o MESMO
+     * ADR-055: este comando já foi aprovado nesta tarefa? Item 'terminal' aprovado (desfecho executado) com o MESMO
      * texto, numa decisão de um turno da cadeia — este e os que ele retoma. É o que deixa a retomada refazer o
      * comando que a pessoa aprovou depois de a espera no turno acabar, sem um segundo card.
      */

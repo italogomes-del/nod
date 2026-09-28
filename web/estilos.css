@@ -332,7 +332,7 @@ body.ocupado { cursor: progress; }
 .ap-oque { font-size: 14.5px; line-height: 1.45; }
 .ap-onde { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
 .ap-unico .ap-onde { margin-top: 2px; }
-/* definido em 2026-09-28 (ADR-053): o comando que vai rodar no Mac, inteiro e em fonte de código. */
+/* definido em 2026-09-28 (ADR-055): o comando que vai rodar no Mac, inteiro e em fonte de código. */
 .ap-comando { margin: 0; padding: 8px 10px; border-radius: 8px; background: #f5f5f3; border: 1px solid #e6e6e3; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
 .ap-item .justificativa { font-size: 12.5px; color: var(--amber); font-style: italic; margin: 5px 0 0; }
 .ap-detalhe { margin-top: 6px; }
@@ -441,3 +441,59 @@ body.ocupado { cursor: progress; }
   .relato-campo, .relato-anexo { animation: none; }
   .relato-opcao, .relato-alcance, .relato-campo textarea { transition: none; }
 }
+
+/* Modo dev (definido em 2026-09-28, 0036; canvas página modo-dev): faixa por resposta, selo no cabeçalho e a gaveta Raio-X. */
+.faixa-dev { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0; padding: 5px 6px 5px 10px;
+  border: 1px dashed var(--line); border-radius: 9px; background: var(--panel-soft); color: var(--ink-2);
+  font: 11.5px/1.4 var(--fm); width: fit-content; max-width: 100%; }
+.faixa-dev i { font-style: normal; color: var(--ink-3); }
+.faixa-dev b { color: var(--ink); font-weight: 600; }
+.faixa-dev-alerta { border-color: var(--amber-line); background: var(--amber-bg); }
+.dev-alerta { color: var(--amber); font-weight: 600; }
+.faixa-dev-bt { margin-left: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--blue); font: 600 11px var(--f); cursor: pointer; }
+.faixa-dev-bt:hover { background: var(--blue-soft); }
+.msg-linha .faixa-dev { margin-left: 0; }
+.selo-dev { padding: 3px 7px; border-radius: 6px; background: var(--dark); color: #fff; font: 700 10px/1 var(--fm); letter-spacing: .06em; }
+.dev-hoje { color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+
+.raio-x { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); margin: 24px 24px 24px auto; padding: 0;
+  border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: var(--ink); box-shadow: 0 24px 70px rgba(8, 10, 14, .16); }
+.raio-x[open] { display: flex; flex-direction: column; }
+.raio-x::backdrop { background: rgba(17, 19, 26, .22); }
+.raio-x > .mudo, .raio-x > .erro { padding: 24px; }
+.rx-cab { display: flex; justify-content: space-between; gap: 12px; padding: 18px 20px 10px; }
+.rx-cab h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.rx-cab p { margin: 3px 0 0; font-size: 12px; }
+.rx-abas { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.rx-abas button { padding: 8px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-3); font: 600 13px var(--f); cursor: pointer; }
+.rx-abas button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.rx-corpo { flex: 1; overflow: auto; padding: 14px 20px 18px; font-size: 13px; }
+.rx-rodape { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--line); }
+.rx-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.rx-cartoes > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.rx-cartoes small { font-size: 11px; color: var(--ink-3); }
+.rx-cartoes b { font: 600 18px var(--fm); }
+.rx-bloco { margin: 18px 0 0; }
+.rx-bloco h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.rx-bloco h3 small, .rx-item small, .raio-x summary small { color: var(--ink-3); font: 11.5px var(--fm); }
+.rx-barra { display: block; height: 6px; margin: 4px 0; border-radius: 3px; background: var(--panel-soft); overflow: hidden; }
+.rx-barra > span { display: block; height: 100%; background: var(--blue); }
+.rx-barra.rx-alerta > span { background: var(--amber); }
+.rx-partes { list-style: none; margin: 8px 0 0; padding: 0; }
+.rx-partes li { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.rx-partes li b { font: 600 12px var(--fm); text-align: right; }
+.rx-partes li small { grid-column: 1 / -1; font-size: 11px; }
+.rx-linha { list-style: none; margin: 0; padding: 0; }
+.rx-linha > li { padding: 7px 0; border-top: 1px solid var(--line); }
+.rx-linha time { display: inline-block; min-width: 68px; color: var(--ink-3); font: 11.5px var(--fm); }
+.rx-ctx { font: 600 12px var(--fm); }
+.rx-sub { opacity: .72; }
+.rx-compactacao { color: var(--amber); font-weight: 600; }
+.rx-fim { color: var(--red); font-weight: 600; }
+.rx-ferramentas { margin: 4px 0 0 68px; padding: 0; list-style: none; font: 11.5px var(--fm); color: var(--ink-2); }
+.rx-item, .raio-x summary { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.raio-x summary { cursor: pointer; }
+.raio-x pre { max-height: 320px; overflow: auto; margin: 4px 0 8px; padding: 10px; border-radius: 8px; background: var(--panel-soft);
+  font: 11.5px/1.5 var(--fm); white-space: pre-wrap; word-break: break-word; }
+.rx-aviso { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: var(--amber-bg); color: var(--amber); font-size: 12px; }

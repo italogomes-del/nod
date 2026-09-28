@@ -13,7 +13,7 @@ export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "Not
 /**
  * definido em 2026-09-28 (ADR-052): o kit do terminal — o que a pessoa faz no Claude Code, o bot faz no nod.
  * Cada chamada passa pelo hook PreToolUse do nod (trilha no servidor). Só no harness Claude Code, com o hook.
- * revisto em 2026-09-28 (ADR-053): sem sandbox — arquivos em qualquer lugar do Mac, Bash com rede e as
+ * revisto em 2026-09-28 (ADR-055): sem sandbox — arquivos em qualquer lugar do Mac, Bash com rede e as
  * credenciais da pessoa, e cada comando decidido pelo servidor (leitura roda, o resto pede aprovação).
  */
 export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch"] as const;
@@ -50,7 +50,7 @@ export function pastaDoBot(nome: string): string {
 export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string };
 
 /**
- * A decisão do hook do nod para UMA chamada nativa, pura. revisto em 2026-09-28 (ADR-053, "terminal de verdade,
+ * A decisão do hook do nod para UMA chamada nativa, pura. revisto em 2026-09-28 (ADR-055, "terminal de verdade,
  * como o inhouse"): a pessoa escolheu que o bot lê e grava em QUALQUER lugar do Mac, como ela no Claude Code —
  * as nativas de arquivo não são mais confinadas à pasta do bot (ADR-052). O Bash roda fora de sandbox, com rede e
  * as credenciais dela, e por isso cada comando passa pelo servidor. Fail-closed: ferramenta desconhecida e Bash
@@ -67,7 +67,7 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     case "NotebookEdit":
     case "Glob":
     case "Grep": {
-      // ADR-053: o Mac inteiro, menos onde moram as credenciais — lê-las é o primeiro passo para vazá-las.
+      // ADR-055: o Mac inteiro, menos onde moram as credenciais — lê-las é o primeiro passo para vazá-las.
       const caminhos = ["file_path", "notebook_path", "path", "pattern"].map((k) => p.entrada[k]).filter((v): v is string => typeof v === "string");
       return caminhos.some(tocaCredencial)
         ? { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false }

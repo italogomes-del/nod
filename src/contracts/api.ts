@@ -170,6 +170,11 @@ export const ROTAS = [
   /** Acréscimos da L6 (definido em 2026-09-16): estado do turno para a web/e2e e retomada direta por turno, sem decisão. */
   { metodo: "GET", caminho: "turnos/:id", lane: "L6" },
   { metodo: "POST", caminho: "turnos/:id/retomar", lane: "L6" },
+  /** Modo dev (definido em 2026-09-28, 0036): a preferência da pessoa e o Raio-X dos turnos. */
+  { metodo: "GET", caminho: "preferencias", lane: "L6" },
+  { metodo: "PUT", caminho: "preferencias", lane: "L6" },
+  { metodo: "GET", caminho: "turnos/:id/raio-x", lane: "L6" },
+  { metodo: "GET", caminho: "conversas/:id/raio-x", lane: "L6" },
   /** Chaves de máquina (E1.3, ADR-031): emitir (a chave crua sai uma vez), listar e revogar. */
   { metodo: "POST", caminho: "maquinas/chaves", lane: "L9" },
   { metodo: "GET", caminho: "maquinas/chaves", lane: "L9" },

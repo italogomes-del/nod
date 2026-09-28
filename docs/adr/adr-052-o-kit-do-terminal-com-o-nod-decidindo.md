@@ -1,6 +1,6 @@
 # ADR-052 — O kit do terminal, com o nod decidindo
 
-Status: aceito, revisto pela [ADR-053](adr-053-terminal-de-verdade-como-o-inhouse.md) (sem sandbox; arquivos no Mac inteiro; cada comando pelo servidor) · Data: 2026-09-28 · Revê ADR-036 (o Claude mantém `--tools ""`) · Estende ADR-039 · Emenda ADR-026
+Status: aceito, revisto pela [ADR-055](adr-055-terminal-de-verdade-como-o-inhouse.md) (sem sandbox; arquivos no Mac inteiro; cada comando pelo servidor) · Data: 2026-09-28 · Revê ADR-036 (o Claude mantém `--tools ""`) · Estende ADR-039 · Emenda ADR-026
 
 ## Contexto
 

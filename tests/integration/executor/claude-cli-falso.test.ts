@@ -173,6 +173,9 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(stdinJaTinhaChegado).toBe(false);
     expect(await readFile(stdin, "utf8")).toBe(plano.entrada.texto);
     expect(espiao.deltas.join("")).toContain("SONDA_OK");
+    // Modo dev (ADR-054): o driver entrega cada chamada do stream, com a ferramenta na chamada que a pediu.
+    expect(resultado.execucao?.chamadas.map((c) => [c.contexto, c.ferramentas.map((f) => f.nome)])).toEqual([[7351, ["mcp__nod__somar"]], [7724, []]]);
+    expect(resultado.execucao).toMatchObject({ janela: 200000, versaoCli: "2.1.272", custoSessaoUsd: 0.0207631 });
 
     const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
     expect(r.argv[0]).toBe("-p");
@@ -181,8 +184,9 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(r.argv).toContain("--include-partial-messages");
     expect(r.argv).toContain("--strict-mcp-config");
     expect(valor(r.argv, "--setting-sources")).toBe("project");
-    expect(valor(r.argv, "--tools")).toBe("");
-    expect(valor(r.argv, "--allowedTools")).toBe("mcp__nod__somar");
+    // ADR-054: sem nativas, só a busca de ferramentas — as definições do MCP entram quando o modelo as busca.
+    expect(valor(r.argv, "--tools")).toBe("ToolSearch");
+    expect(valor(r.argv, "--allowedTools")).toBe("mcp__nod__somar,ToolSearch");
     expect(valor(r.argv, "--permission-mode")).toBe("default");
     expect(r.argv).not.toContain("--max-turns");
     expect(valor(r.argv, "--append-system-prompt")).toBe("Você é a sonda do nod.");

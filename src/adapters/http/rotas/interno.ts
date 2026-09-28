@@ -163,7 +163,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       metodo: "POST",
       padrao: /^\/nativas$/,
       interno: true,
-      // revisto em 2026-09-28 (ADR-053): o Bash vem com o comando, e quem decide é autorizarComando — o que só lê
+      // revisto em 2026-09-28 (ADR-055): o Bash vem com o comando, e quem decide é autorizarComando — o que só lê
       // roda; o resto abre um card e a resposta diz ao hook qual decisão esperar. Trilha só do que roda.
       async handler(ctx) {
         const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown } | null;

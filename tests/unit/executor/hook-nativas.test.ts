@@ -7,7 +7,7 @@ import { planoDeTeste } from "../../helpers/l5.ts";
 
 const evento = (tool_name: string, tool_input: Record<string, unknown>) => ({ tool_name, tool_input, cwd: "/Users/m/nod/Ada" });
 
-describe("hook do nod (ADR-052, revisto pela ADR-053)", () => {
+describe("hook do nod (ADR-052, revisto pela ADR-055)", () => {
   const pedidos: Parameters<Confirmar>[0][] = [];
   const confirmar: Confirmar = async (p) => {
     pedidos.push(p);
@@ -53,7 +53,7 @@ function servidor(respostas: Record<string, (unknown | ((corpo: unknown) => unkn
   return { f, chamadas };
 }
 
-describe("a espera pela aprovação no próprio turno (ADR-053)", () => {
+describe("a espera pela aprovação no próprio turno (ADR-055)", () => {
   const cfg = { url: "http://nod/", token: "tok" };
   const AGUARDAR = "/api/interno/decisoes/d1/aguardar";
 
@@ -87,14 +87,14 @@ describe("a espera pela aprovação no próprio turno (ADR-053)", () => {
   });
 });
 
-describe("args do turno com o kit do terminal (ADR-052, revisto pela ADR-053)", () => {
+describe("args do turno com o kit do terminal (ADR-052, revisto pela ADR-055)", () => {
   const settings = settingsDoTerminal({ comandoHook: comandoDoHook({ nodePath: "/usr/bin/node", hookPath: "/app/Application Support/hook.mjs", config: "/tmp/t/hook.json" }) });
   const { args } = montarArgs({ plano: { ...planoDeTeste(), nativas: NATIVAS_DO_TERMINAL, pastaDoBot: "Ada" }, mcpJson: "/tmp/mcp.json", terminal: { settings, dirsExtras: ["/Users/m", "/Users/m/code/nod"] } });
 
   it("sem --restricted (ele tira Bash e WebFetch); --tools com a lista exata; o Mac da pessoa em --add-dir", () => {
     expect(args).not.toContain("--restricted");
     expect(args[args.indexOf("--setting-sources") + 1]).toBe("project");
-    expect(args[args.indexOf("--tools") + 1]!.split(",")).toEqual([...NATIVAS_DO_TERMINAL]);
+    expect(args[args.indexOf("--tools") + 1]!.split(",")).toEqual([...NATIVAS_DO_TERMINAL, "ToolSearch"]);
     expect(args[args.indexOf("--allowedTools") + 1]!.split(",")).toEqual(expect.arrayContaining(["Bash", "WebFetch", "Write"]));
     expect(args.filter((a, i) => args[i - 1] === "--add-dir")).toEqual(["/Users/m", "/Users/m/code/nod"]);
   });

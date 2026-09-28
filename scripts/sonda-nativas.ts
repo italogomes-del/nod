@@ -9,21 +9,21 @@ import { settingsDoTerminal } from "../src/adapters/executor/drivers/claude-cli.
 import { log } from "../src/obs/log.ts";
 
 /**
- * Sonda do kit do terminal (ADR-052, 4.0; revista pela ADR-053): mede no CLI REAL, em `-p` e com `--settings` por
+ * Sonda do kit do terminal (ADR-052, 4.0; revista pela ADR-055): mede no CLI REAL, em `-p` e com `--settings` por
  * turno, o que o nod precisa para ligar as nativas com ele decidindo. Cada ponto custa UM turno (haiku). Rode a
- * cada versão nova do CLI (flag-floors.ts) e registre o resultado na tabela da ADR-053.
+ * cada versão nova do CLI (flag-floors.ts) e registre o resultado na tabela da ADR-055.
  *
  *   node scripts/sonda-nativas.ts
  *
  *  1. hook PreToolUse em -p via --settings: roda para toda nativa? o deny barra?
  *  2. --restricted: o hook roda? quais nativas sobram no init?
- *  3. Bash sem sandbox (ADR-053): grava fora da pasta e acessa a rede quando o hook permite?
+ *  3. Bash sem sandbox (ADR-055): grava fora da pasta e acessa a rede quando o hook permite?
  *  4. hook que ESPERA (a aprovação da pessoa, até TETO_HOOK_S): o CLI aguarda e o comando roda depois?
  *  5. WebFetch e WebSearch com o login da pessoa: funcionam, e o hook é consultado?
  *
  * Medido em 2026-09-28 (CLI 2.1.283, ADR-052): 1 sim, deny barra (e o caminho chega resolvido: /private/var/…);
  * 2 o hook roda; sem --tools, o --restricted tira Bash e WebFetch do init, com --tools explícito eles ficam;
- * 5 sim, e o hook é consultado nas duas. Os pontos 3 e 4 estão na tabela da ADR-053.
+ * 5 sim, e o hook é consultado nas duas. Os pontos 3 e 4 estão na tabela da ADR-055.
  */
 try {
   process.loadEnvFile(".env");
@@ -48,7 +48,7 @@ mkdirSync(fora);
 const registro = join(raiz, "hook.log");
 const hook = join(raiz, "hook.mjs");
 // Hook mínimo: registra a chamada, nega Write fora da área (para medir que o deny barra) e, no comando que cita
-// "espera", segura 40 s antes de permitir — a aprovação da pessoa no hook do nod (ADR-053) faz o mesmo.
+// "espera", segura 40 s antes de permitir — a aprovação da pessoa no hook do nod (ADR-055) faz o mesmo.
 writeFileSync(hook, `import { appendFileSync, realpathSync } from "node:fs"; import { dirname, basename, join } from "node:path";
 const real = (c) => { try { return realpathSync(c); } catch { return join(real(dirname(c)), basename(c)); } };
 let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => {
@@ -97,6 +97,6 @@ await ponto("web", "Com WebFetch, leia https://example.com e diga o título.", "
 log("info", "sonda_nativas_fim", {
   hook_consultado: existsSync(registro) ? readFileSync(registro, "utf8").trim().split("\n").join(",") : "",
   dentro: ["a.txt", "c.txt", "d.txt"].map((f) => `${f}=${existsSync(join(area, f))}`).join(" "),
-  // ADR-053: b.txt fora (Write negado pelo hook) = false; e.txt e f.txt (Bash sem sandbox, f depois da espera) = true.
+  // ADR-055: b.txt fora (Write negado pelo hook) = false; e.txt e f.txt (Bash sem sandbox, f depois da espera) = true.
   fora: ["b.txt", "e.txt", "f.txt"].map((f) => `${f}=${existsSync(join(fora, f))}`).join(" "),
 });

@@ -8,7 +8,7 @@ import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS } from "../../share
  * quem decide — o mesmo papel do proxy para as ferramentas MCP (ADR-013), local e fail-closed. O driver grava
  * a configuração (0600) no diretório temporário do turno; o token nunca vai na linha de comando.
  *
- * revisto em 2026-09-28 (ADR-053, "terminal de verdade, como o inhouse"): sem sandbox. Arquivo em qualquer
+ * revisto em 2026-09-28 (ADR-055, "terminal de verdade, como o inhouse"): sem sandbox. Arquivo em qualquer
  * lugar do Mac passa; o Bash vai ao servidor COM o comando, e o servidor decide: o que só lê roda, o resto
  * vira card de aprovação na conversa — e o hook espera a resposta no próprio turno, em fatias, como o proxy
  * espera uma aprovação (0032). Sem confirmação do servidor, nada roda. Nunca escreve fora do JSON de saída

@@ -12,7 +12,7 @@ import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
- * ADR-053, "terminal de verdade, como o inhouse" (2026-09-28), no Postgres: o Bash do bot roda no Mac do Marlon
+ * ADR-055, "terminal de verdade, como o inhouse" (2026-09-28), no Postgres: o Bash do bot roda no Mac do Marlon
  * sem sandbox, e cada comando passa por autorizarComando. O que só lê roda; o que muda algo vira card; aprovado,
  * roda — inclusive na retomada, sem segundo card; "e o resto desta tarefa" libera os próximos da mesma tarefa.
  */
@@ -44,7 +44,7 @@ async function cenario(trx: Trx) {
   return { repos, deps, turno, plano, autorizar, retomada, agenteId, conversaId };
 }
 
-describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-053)", () => {
+describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)", () => {
   it("o que só lê roda sem card; o que muda algo abre UM card com o comando inteiro", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);

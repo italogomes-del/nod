@@ -159,7 +159,7 @@ export function detalheAcesso(proposta: Proposta | null | undefined): string {
  */
 function ondeAcontece(conectores: Estado["conectores"], slug: string): string {
   if (slug === "computador") return "no computador do bot";
-  // ADR-053: o comando roda no terminal do Mac da própria pessoa, com as credenciais dela.
+  // ADR-055: o comando roda no terminal do Mac da própria pessoa, com as credenciais dela.
   if (slug === "terminal") return "no terminal do seu Mac";
   return `no ${conectores.find((c) => c.slug === slug)?.nome ?? slug}`;
 }
@@ -244,13 +244,13 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
     // definido em 2026-09-24: no computador a frase é genérica ("Ação no computador do bot") e quatro
     // pedidos seguidos pareciam o mesmo; a ação concreta ("Abrir no navegador: …") sai do "Ver
     // detalhes". Só no computador: lá o texto é somente leitura, então o que aparece é o que será feito.
-    // ADR-053: o comando do terminal aparece inteiro, em fonte de código — é exatamente o que vai rodar no Mac.
+    // ADR-055: o comando do terminal aparece inteiro, em fonte de código — é exatamente o que vai rodar no Mac.
     const acao = unico.destino.conector === "terminal"
       ? `<pre class="ap-comando"><code>${esc(unico.textoFinal)}</code></pre>`
       : unico.destino.conector === "computador" && unico.textoFinal.trim() !== item.decisao.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
     // definido em 2026-09-28 (emenda da ADR-037): numa tarefa no computador cada passo pedia um clique (9 na
     // Ada). Este aprova o passo e libera os próximos DESTA tarefa; o servidor ignora em turno não confiável e
-    // em rotina com gate. ADR-053: o mesmo para os comandos no terminal do Mac.
+    // em rotina com gate. ADR-055: o mesmo para os comandos no terminal do Mac.
     const resto = unico.destino.conector === "computador" || unico.destino.conector === "terminal" ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: item.decisao.id }) : "";
     return `<div class="ap-unico">
       ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>

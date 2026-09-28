@@ -111,6 +111,9 @@ export type Assentamento = {
   custoUsd?: number | null;
   tokensEntrada?: number;
   tokensSaida?: number;
+  /** 0035: a sessão do CLI e o total que ele informou para ela — custoUsd é a diferença (custo-turno.ts). */
+  sessaoCli?: string | null;
+  custoSessaoUsd?: number | null;
 };
 
 /**
@@ -290,7 +293,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.liberado === true;
     },
 
-    /** ADR-053 (0034): "Pode fazer e o resto desta tarefa" num comando do terminal — a mesma regra do computador. */
+    /** ADR-055 (0034): "Pode fazer e o resto desta tarefa" num comando do terminal — a mesma regra do computador. */
     async liberarTerminal(raizId: string, agora: number): Promise<boolean> {
       const r = await conn`update turnos set terminal_liberado_em = coalesce(terminal_liberado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${raizId}`;
       return r.count === 1;
@@ -315,10 +318,23 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           custo_usd = coalesce(${a.custoUsd ?? null}, custo_usd),
           tokens_entrada = coalesce(${a.tokensEntrada ?? null}, tokens_entrada),
           tokens_saida = coalesce(${a.tokensSaida ?? null}, tokens_saida),
+          sessao_cli = coalesce(${a.sessaoCli ?? null}, sessao_cli),
+          custo_sessao_usd = coalesce(${a.custoSessaoUsd ?? null}, custo_sessao_usd),
           lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'despachando')
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
+    },
+
+    /**
+     * 0035: o total que a sessão do CLI tinha no turno anterior DELA (o maior já registrado, que é o último: o total
+     * só cresce dentro de uma sessão). null = nenhum turno desta sessão registrou total ainda.
+     */
+    async totalAnteriorDaSessao(sessaoCli: string, turnoId: string): Promise<number | null> {
+      const [l] = await conn<{ total: string | null }[]>`
+        select max(custo_sessao_usd) as total from turnos
+        where tenant_id = ${escopo.tenantId} and sessao_cli = ${sessaoCli} and id <> ${turnoId} and custo_sessao_usd is not null`;
+      return l?.total === null || l?.total === undefined ? null : Number(l.total);
     },
 
     /** Transição terminal e idempotente (ADR-010/021): só o que está vivo vira 'interrompido'. */

@@ -3,7 +3,7 @@ import { decidirNativa, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL, nativasDoTurno,
 
 const decidir = (ferramenta: string, entrada: Record<string, unknown>) => decidirNativa({ ferramenta, entrada });
 
-describe("kit do terminal (ADR-052, revisto pela ADR-053)", () => {
+describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
   it("conversa e criação confiáveis com o harness Claude recebem o kit; sem ele, só arquivo e só com pasta", () => {
     expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: false, terminal: true })).toEqual(NATIVAS_DO_TERMINAL);
     expect(nativasDoTurno({ modo: "criacao", confianca: "confiavel", pastasAutorizadas: false, terminal: true })).toEqual(NATIVAS_DO_TERMINAL);
@@ -20,7 +20,7 @@ describe("kit do terminal (ADR-052, revisto pela ADR-053)", () => {
     expect(pastaDoBot("..")).toBe("bot");
   });
 
-  it("ADR-053: arquivo em qualquer lugar do Mac, como a pessoa no Claude Code", () => {
+  it("ADR-055: arquivo em qualquer lugar do Mac, como a pessoa no Claude Code", () => {
     for (const [f, entrada] of [
       ["Write", { file_path: "/Users/marlon/nod/Ada/checklist.html" }],
       ["Edit", { file_path: "/Users/marlon/Inhouse/leapy/src/app.ts" }],
@@ -30,7 +30,7 @@ describe("kit do terminal (ADR-052, revisto pela ADR-053)", () => {
     ] as const) expect(decidir(f, entrada), f).toMatchObject({ permitir: true, contamina: false });
   });
 
-  it("ADR-053: menos onde moram as credenciais — as ferramentas de arquivo não abrem chaves nem tokens", () => {
+  it("ADR-055: menos onde moram as credenciais — as ferramentas de arquivo não abrem chaves nem tokens", () => {
     for (const [f, entrada] of [
       ["Read", { file_path: "/Users/marlon/.ssh/id_ed25519" }],
       ["Read", { file_path: "/Users/marlon/.aws/credentials" }],

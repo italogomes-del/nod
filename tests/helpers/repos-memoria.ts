@@ -1,5 +1,6 @@
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
+import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
@@ -67,8 +68,13 @@ export type BancoMemoria = {
   /** 0032: quem continuou cada decisão e as raízes com o computador liberado para a tarefa. */
   continuacoes: Map<string, "turno" | "retomada">;
   computadorLiberado: Set<string>;
-  /** 0034 (ADR-053): raízes com o terminal liberado para a tarefa. */
+  /** 0034 (ADR-055): raízes com o terminal liberado para a tarefa. */
   terminalLiberado: Set<string>;
+  /** 0035: a sessão do CLI e o total informado, por turno. */
+  custoSessao: Map<string, { sessaoCli: string; total: number }>;
+  /** 0036: o Raio-X de cada turno e as preferências de cada pessoa (chave tenant:pessoa). */
+  raioX: Map<string, { composicao: ComposicaoRaioX | null; execucao: ExecucaoRaioX | null }>;
+  preferencias: Map<string, Preferencias>;
   /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
   contaminados: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
@@ -116,6 +122,9 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     continuacoes: new Map(),
     computadorLiberado: new Set(),
     terminalLiberado: new Set(),
+    custoSessao: new Map(),
+    raioX: new Map(),
+    preferencias: new Map(),
     contaminados: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
@@ -736,8 +745,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           producedOutput: t.sinais.producedOutput || !!a.sinais?.producedOutput,
         };
         if (a.custoUsd !== undefined && a.custoUsd !== null) t.custoUsd = a.custoUsd;
+        if (a.sessaoCli && a.custoSessaoUsd !== undefined && a.custoSessaoUsd !== null) b.custoSessao.set(id, { sessaoCli: a.sessaoCli, total: a.custoSessaoUsd });
         t.leaseAte = null;
         return t;
+      },
+      async totalAnteriorDaSessao(sessaoCli, turnoId) {
+        const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
+        return totais.length === 0 ? null : Math.max(...totais);
       },
       async interromper(id, motivo) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
@@ -1651,6 +1665,37 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           && (!filtro.capacidade || p.capacidade === filtro.capacidade));
         for (const p of alvos) { p.inativoEm = quando; p.inativoMotivo = motivo; }
         return alvos.length;
+      },
+    },
+    raioX: {
+      async gravarComposicao(turnoId, composicao) {
+        b.raioX.set(turnoId, { execucao: null, ...b.raioX.get(turnoId), composicao });
+      },
+      async gravarExecucao(turnoId, execucao) {
+        b.raioX.set(turnoId, { composicao: null, ...b.raioX.get(turnoId), execucao });
+      },
+      async doTurno(turnoId) {
+        const t = doTenant(b.turnos).find((x) => x.id === turnoId);
+        if (!t) return null;
+        const r = b.raioX.get(t.id);
+        return { turnoId: t.id, agenteId: t.agenteId, estado: t.estado, custoUsd: t.custoUsd, criadoEm: t.criadoEm, composicao: r?.composicao ?? null, execucao: r?.execucao ?? null };
+      },
+      async daConversa(conversaId, limite) {
+        return doTenant(b.turnos).filter((t) => t.conversaId === conversaId).sort((x, y) => y.criadoEm - x.criadoEm).slice(0, limite)
+          .map((t) => ({ turnoId: t.id, agenteId: t.agenteId, estado: t.estado, custoUsd: t.custoUsd, criadoEm: t.criadoEm, composicao: null, execucao: b.raioX.get(t.id)?.execucao ?? null }));
+      },
+      async totalDesde(conversaId, desde) {
+        const com = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.criadoEm >= desde && t.custoUsd !== null);
+        return { custoUsd: com.reduce((s, t) => s + (t.custoUsd ?? 0), 0), turnos: com.length };
+      },
+    },
+    preferencias: {
+      async buscar() {
+        return b.preferencias.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? { modoDev: false };
+      },
+      async gravar(p) {
+        b.preferencias.set(`${escopo.tenantId}:${escopo.pessoaId}`, { modoDev: p.modoDev });
+        return { modoDev: p.modoDev };
       },
     },
   } satisfies Repos;

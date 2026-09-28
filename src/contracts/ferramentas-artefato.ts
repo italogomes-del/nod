@@ -12,7 +12,7 @@ export const FERRAMENTAS_ARTEFATO = {
   publicar_artefato: {
     type: "object",
     description:
-      "Publica na conversa um artefato: uma página HTML que a pessoa vê e usa ali mesmo (checklist, tabela, relatório). HTML autocontido: CSS e JS inline, sem nada de fora (sem rede, sem CDN, imagem só data:). Estado interativo: leia window.nod.estado e salve com window.nod.salvar(dados), um JSON de até 64 KB, com chaves estáveis entre versões. Sem artefato_id cria a versão 1; com o artefato_id de um artefato seu publica a próxima versão do mesmo.",
+      "Publica na conversa um artefato: uma página HTML que a pessoa vê e usa ali mesmo (checklist, painel, relatório com gráfico); tabela simples vai no texto, em markdown. HTML autocontido: CSS e JS inline, sem nada de fora (sem rede, sem CDN, imagem só data:). Estado interativo: leia window.nod.estado e salve com window.nod.salvar(dados), um JSON de até 64 KB, com chaves estáveis entre versões. Sem artefato_id cria a versão 1; com o artefato_id de um artefato seu publica a próxima versão do mesmo.",
     properties: {
       titulo: { type: "string", description: "Título curto do card.", minLength: 1, maxLength: 120 },
       html: { type: "string", description: "O documento HTML inteiro, autocontido.", minLength: 1, maxLength: 500_000 },

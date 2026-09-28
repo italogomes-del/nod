@@ -31,6 +31,12 @@ describe("montarPromptSistema", () => {
     expect(p).toContain("- [preferencia] prefiro tópicos");
   });
 
+  it("definido em 2026-09-28 (ADR-053): diz o que a conversa mostra e pede o link no próprio nome", () => {
+    const p = montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "conversa" });
+    expect(p).toContain("tabelas em markdown (cabeçalho e linha |---|)");
+    expect(p).toContain("ponha o link no próprio nome");
+  });
+
   it("definido em 2026-09-28: resposta ao colega é completa, e o relatório não vem antes de uma ferramenta", () => {
     const peer = montarPromptSistema({ agente, memorias: [], ferramentas: [f("lembrar")], pessoaNome: "Marlon", modo: "peer" });
     expect(peer).toContain("responda em texto, completo e verificável: tudo o que o colega precisa para responder à pessoa. Você não pode delegar nem encaminhar neste turno.");
@@ -161,6 +167,12 @@ describe("montarPromptSistema", () => {
       const outro: FerramentaPlano = { ...f("slack__SLACK_LIST"), origem: "conector", conectorId: "c-slack" };
       const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), doConector("GMAIL_LIST_LABELS"), doConector("GMAIL_FETCH_EMAILS"), outro], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
       expect(conexoes(p)[0]?.concedidas_a_voce).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"]);
+    });
+
+    it("2026-09-28 (modo dev): o resto do app vai só pelo nome — sem descrição nem catálogo repetido", () => {
+      const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), doConector("GMAIL_FETCH_EMAILS")], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
+      expect(conexoes(p)[0]).toEqual({ slug: "gmail", habilitado: true, concedidas_a_voce: ["GMAIL_FETCH_EMAILS"], outras_do_app: ["GMAIL_LIST_LABELS"] });
+      expect(p).not.toContain("rótulos");
     });
   });
 });

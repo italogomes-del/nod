@@ -9,7 +9,7 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * ação do card E libera as próximas da MESMA tarefa — o turno raiz e as retomadas dele —, nunca de outra.
  * Não libera nada em turno não confiável (ADR-026) nem vence o gate de rotina (a checagem da ação faz isso:
  * fundo/computadores.ts e autorizar-comando.ts); a liberação fica escrita na conversa.
- * revisto em 2026-09-28 (ADR-053): o mesmo clique num comando do terminal do Mac libera os comandos seguintes
+ * revisto em 2026-09-28 (ADR-055): o mesmo clique num comando do terminal do Mac libera os comandos seguintes
  * da tarefa. Cada destino tem a sua marca: liberar o terminal não libera o computador, nem o contrário.
  */
 export const liberarNaTarefa: CasoDeUso<{ decisao: Decisao }, { liberado: boolean }> = async (deps, { decisao }) => {
@@ -48,7 +48,7 @@ export async function computadorLiberadoNaTarefa(deps: Pick<Deps, "repos">, turn
   return raiz ? deps.repos.turnos.computadorLiberado(raiz.id) : false;
 }
 
-/** ADR-053: os comandos deste turno no terminal do Mac já foram liberados para a tarefa inteira? */
+/** ADR-055: os comandos deste turno no terminal do Mac já foram liberados para a tarefa inteira? */
 export async function terminalLiberadoNaTarefa(deps: Pick<Deps, "repos">, turnoId: string): Promise<boolean> {
   const raiz = await deps.repos.turnos.raizDaCadeia(turnoId);
   return raiz ? deps.repos.turnos.terminalLiberado(raiz.id) : false;

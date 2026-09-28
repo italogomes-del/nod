@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { FLAG_FLOORS } from "../../../src/adapters/executor/flag-floors.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
+import { NATIVAS_DE_ARQUIVO } from "../../../src/domain/nativas.ts";
 
 function planoDeTeste(parcial: Partial<PlanoTurno["entrada"]> = {}): PlanoTurno {
   return {
@@ -40,7 +41,7 @@ const valor = (args: string[], flag: string) => {
 };
 
 describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)", () => {
-  it("contém as flags obrigatórias, --tools vazio e --allowedTools EXATO com o catálogo do plano", () => {
+  it("contém as flags obrigatórias, --tools só com a busca e --allowedTools EXATO com o catálogo do plano", () => {
     const { args } = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/x/mcp.json" });
     expect(args[0]).toBe("-p");
     expect(valor(args, "--output-format")).toBe("stream-json");
@@ -49,8 +50,9 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(args).toContain("--strict-mcp-config");
     expect(valor(args, "--setting-sources")).toBe("project");
     expect(valor(args, "--mcp-config")).toBe("/tmp/x/mcp.json");
-    expect(valor(args, "--tools")).toBe("");
-    expect(valor(args, "--allowedTools")).toBe("mcp__nod__lembrar,mcp__nod__ex__somar");
+    // 2026-09-28 (modo dev): a ToolSearch vai sempre — sem ela toda definição de MCP entra em toda chamada.
+    expect(valor(args, "--tools")).toBe("ToolSearch");
+    expect(valor(args, "--allowedTools")).toBe("mcp__nod__lembrar,mcp__nod__ex__somar,ToolSearch");
     expect(valor(args, "--permission-mode")).toBe("default");
     expect(valor(args, "--model")).toBe("claude-haiku-4-5-20251001");
     // definido em 2026-09-18: sem teto de passos — quem limita o turno é o watchdog de atividade.
@@ -128,7 +130,7 @@ describe("pastas autorizadas no harness", () => {
   it("sem projeto autorizado mantém o comportamento atual: nativas desligadas", () => {
     const { args } = montarArgs({ plano: planoDeTeste(), mcpJson: "/tmp/mcp.json" });
     expect(args).toContain("--tools");
-    expect(args[args.indexOf("--tools") + 1]).toBe("");
+    expect(args[args.indexOf("--tools") + 1]).toBe("ToolSearch");
     expect(args).not.toContain("--restricted");
     expect(args).not.toContain("--add-dir");
     expect(args.join(" ")).not.toMatch(/\bRead\b/);
@@ -141,8 +143,8 @@ describe("pastas autorizadas no harness", () => {
     expect(args).toContain("--restricted");
     // --restricted substitui a leitura de configuração do repo aberto.
     expect(args).not.toContain("--setting-sources");
-    // --tools "" apagaria as nativas que acabamos de liberar.
-    expect(args).not.toContain("--tools");
+    // --tools lista exatamente as nativas liberadas, mais a busca de ferramentas.
+    expect(args[args.indexOf("--tools") + 1]!.split(",")).toEqual([...NATIVAS_DE_ARQUIVO, "ToolSearch"]);
     const permitidas = args[args.indexOf("--allowedTools") + 1]!.split(",");
     expect(permitidas).toContain("Read");
     expect(permitidas).toContain("Edit");
@@ -160,7 +162,7 @@ describe("pastas autorizadas no harness", () => {
     expect(antigo[antigo.indexOf("--allowedTools") + 1]!.split(",")).toContain("Write");
     // Sem pastas, nem o campo liga nativa nenhuma.
     const semPasta = montarArgs({ plano: { ...planoDeTeste(), nativas: ["Read"] }, mcpJson: "/tmp/mcp.json" }).args;
-    expect(semPasta[semPasta.indexOf("--tools") + 1]).toBe("");
+    expect(semPasta[semPasta.indexOf("--tools") + 1]).toBe("ToolSearch");
     expect(semPasta[semPasta.indexOf("--allowedTools") + 1]!.split(",")).not.toContain("Read");
   });
 

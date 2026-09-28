@@ -1,4 +1,4 @@
-# ADR-053 — Terminal de verdade no Mac, como o inhouse
+# ADR-055 — Terminal de verdade no Mac, como o inhouse
 
 Status: aceito · Data: 2026-09-28 · Revê ADR-052 (decisões 2, 3 e 4: pasta, confinamento e sandbox) · Estende ADR-037 (0032, "o resto desta tarefa") e ADR-042
 

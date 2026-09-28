@@ -9,7 +9,7 @@ import type { CasoDeUso } from "./tipos.ts";
 
 /**
  * O mesmo filtro que a web aplica ao botão (via `nuncaPermanente` do DTO): sensível, computador e ADR-047 ficam de
- * fora. O terminal também (ADR-053): a regra de conector vale para a ferramenta inteira, e "todo comando" seria
+ * fora. O terminal também (ADR-055): a regra de conector vale para a ferramenta inteira, e "todo comando" seria
  * tirar a aprovação do Mac; para não repetir o card, existe "Pode fazer e o resto desta tarefa".
  */
 export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino">): boolean {

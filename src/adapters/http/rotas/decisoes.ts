@@ -43,7 +43,7 @@ function sempre(corpo: unknown): boolean {
   return typeof corpo === "object" && corpo !== null && (corpo as { sempre?: unknown }).sempre === true;
 }
 
-/** "Pode fazer e o resto desta tarefa" (2026-09-28): libera o computador ou o terminal (ADR-053) para a cadeia do turno raiz. */
+/** "Pode fazer e o resto desta tarefa" (2026-09-28): libera o computador ou o terminal (ADR-055) para a cadeia do turno raiz. */
 function restoDaTarefa(corpo: unknown): boolean {
   return typeof corpo === "object" && corpo !== null && (corpo as { restoDaTarefa?: unknown }).restoDaTarefa === true;
 }

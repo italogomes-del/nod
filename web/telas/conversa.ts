@@ -19,6 +19,7 @@ import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoe
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
+import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -94,7 +95,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "resultado_aprovacao") return `<div class="msg-resultado">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
   if (p?.kind === "parada") return `<div class="msg-parada">■ ${paragrafos(m.texto)}</div>`;
-  if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Tarefa não concluída por" : p.delegada ? "Resultado de" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto)}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
+  if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Tarefa não concluída por" : p.delegada ? "Resultado de" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
 }
@@ -148,7 +149,7 @@ function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
 export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
-  if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}</div>`;
+  if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}${faixaDaMensagem(m, estado)}</div>`;
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
   // Autoria composta (ADR-023) aparece inteira: o pedido delegado é "Taga · por você" (ADR-047).
@@ -168,7 +169,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
   const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto)}${metaTags}</div>`}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -332,7 +333,7 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
     return `<details class="collaboration" data-disclosure="${esc(k)}"><summary>${grupo.length} ${grupo.length === 1 ? "mensagem" : "mensagens"} com <span class="avatar-stack">${avatares}</span><span>${esc(nome)}</span><span class="chevron">⌄</span></summary><div class="collaboration-panel">${participantes.map((id) => {
       const a = agenteDe(estado, id);
       const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
-      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Tarefa · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluída" : x.payload?.kind === "peer_ask" && x.payload.delegada ? "Resultado" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto)}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
+      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Tarefa · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluída" : x.payload?.kind === "peer_ask" && x.payload.delegada ? "Resultado" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto, { chave: `colab:${x.id}` })}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
     }).join("")}</div></details>`;
   });
   // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de
@@ -424,6 +425,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
   return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
+      ${renderSeloModoDev(estado, a?.conversaId, nome)}
       ${vivo ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" }) : ""}
       <button type="button" class="bt toggle-detalhes" data-act="alternar-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot">${PAINEL}</button>
     </div>`;

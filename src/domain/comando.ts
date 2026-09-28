@@ -1,5 +1,5 @@
 /**
- * Um comando do terminal do Mac da pessoa só LÊ, ou muda algo? (definido em 2026-09-28, ADR-053, "terminal de
+ * Um comando do terminal do Mac da pessoa só LÊ, ou muda algo? (definido em 2026-09-28, ADR-055, "terminal de
  * verdade, como o inhouse"). O que só lê roda direto; o resto pede aprovação num card. A classificação é
  * CONSERVADORA: na dúvida, "altera" — o custo de errar para esse lado é um clique, e o do outro é um comando
  * rodando no Mac com as credenciais da pessoa sem ela ver.
@@ -27,7 +27,7 @@ const SIMPLES = new Set([
 ]);
 
 /**
- * Onde moram as credenciais da pessoa no Mac (definido em 2026-09-28, ADR-053). Ler é "só ler", mas ler ISTO e
+ * Onde moram as credenciais da pessoa no Mac (definido em 2026-09-28, ADR-055). Ler é "só ler", mas ler ISTO e
  * depois mandar para fora (WebFetch, um comentário) é o caminho de um texto malicioso num PR: por isso nunca é
  * leitura livre. Casa no texto do comando e no caminho das ferramentas de arquivo.
  */

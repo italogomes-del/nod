@@ -1,7 +1,7 @@
 -- 0034 o terminal de verdade no Mac da pessoa: cada comando que altera algo pede aprovação. Convenção
 -- `-- ROLLBACK:`. Só aditiva.
 --
--- definido em 2026-09-28 (ADR-053, "terminal de verdade, como o inhouse"): o Bash do bot roda sem sandbox, com
+-- definido em 2026-09-28 (ADR-055, "terminal de verdade, como o inhouse"): o Bash do bot roda sem sandbox, com
 -- a rede e as credenciais da pessoa. O que só lê roda direto; o resto vira item de aprovação com destino
 -- 'terminal', e o motivo do card é o destino (como o computador do bot).
 --

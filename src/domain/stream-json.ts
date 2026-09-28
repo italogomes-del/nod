@@ -27,6 +27,11 @@ function tokensDe(usage: Obj | null): TokensTurno {
   };
 }
 
+function janelaDe(modelUsage: Obj | null): number | null {
+  const janelas = Object.values(modelUsage ?? {}).map((u) => num(obj(u)?.["contextWindow"])).filter((j): j is number => j !== null);
+  return janelas.length ? Math.max(...janelas) : null;
+}
+
 function textoDoConteudo(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -64,6 +69,16 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       apiKeySource: str(o["apiKeySource"], "desconhecido"),
     };
   }
+  if (type === "system" && subtype === "compact_boundary") {
+    // O stream usa snake_case; o transcript em disco, camelCase (medido nos .jsonl de 28/09). Aceita os dois.
+    const meta = obj(o["compact_metadata"]) ?? obj(o["compactMetadata"]);
+    return {
+      tipo: "compactacao",
+      antes: num(meta?.["pre_tokens"]) ?? num(meta?.["preTokens"]),
+      depois: num(meta?.["post_tokens"]) ?? num(meta?.["postTokens"]),
+      gatilho: str(meta?.["trigger"], "desconhecido"),
+    };
+  }
   if (type === "rate_limit_event") {
     const info = obj(o["rate_limit_info"]);
     const janelas = obj(info?.["unifiedWindows"]);
@@ -79,6 +94,20 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
     if (ev?.["type"] === "content_block_delta") {
       const delta = obj(ev["delta"]);
       if (delta?.["type"] === "text_delta") return { tipo: "delta", texto: str(delta["text"]) };
+    }
+    // O message_delta fecha a chamada com o usage completo dela (o do message_start ainda não tem a saída).
+    if (ev?.["type"] === "message_delta" && obj(ev["usage"])) {
+      const usage = obj(ev["usage"]);
+      const t = tokensDe(usage);
+      return {
+        tipo: "chamada",
+        entrada: t.entrada,
+        cacheLido: t.cacheLeitura,
+        cacheNovo: t.cacheCriacao,
+        saida: t.saida,
+        pensamento: num(obj(usage?.["output_tokens_details"])?.["thinking_tokens"]) ?? 0,
+        subagente: typeof o["parent_tool_use_id"] === "string",
+      };
     }
     return { tipo: "ignorado", razao: "tipo_desconhecido", tipoBruto: `${type} ev=${str(ev?.["type"], "?")}` };
   }
@@ -124,6 +153,7 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       custoUsd: num(o["total_cost_usd"]),
       tokens: tokensDe(obj(o["usage"])),
       numTurnos: num(o["num_turns"]) ?? 0,
+      janela: janelaDe(obj(o["modelUsage"])),
       negacoesPermissao: denials.map((d) => str(obj(d)?.["tool_name"])).filter((n) => n !== ""),
     };
   }

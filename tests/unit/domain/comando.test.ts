@@ -3,7 +3,7 @@ import { classificarComando } from "../../../src/domain/comando.ts";
 
 const tipo = (c: string) => classificarComando(c).tipo;
 
-describe("classificarComando (ADR-053): o que só lê roda direto, o resto pede", () => {
+describe("classificarComando (ADR-055): o que só lê roda direto, o resto pede", () => {
   it("revisar um PR é leitura do começo ao fim", () => {
     for (const c of [
       "gh pr list -R leapy-edtech/leapy",

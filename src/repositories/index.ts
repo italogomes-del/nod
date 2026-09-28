@@ -32,6 +32,7 @@ import { salasRepo } from "./salas.repo.ts";
 import type { Repos } from "./tipos.ts";
 import { trilhaRepo } from "./trilha.repo.ts";
 import { turnosRepo } from "./turnos.repo.ts";
+import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 
 /** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Leapy §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
@@ -68,6 +69,8 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     paradas: paradasRepo(conn, escopo),
     catcher: catcherRepo(conn, escopo),
     maquinaTokens: maquinaTokensRepo(conn, escopo),
+    raioX: raioXRepo(conn, escopo),
+    preferencias: preferenciasRepo(conn, escopo),
   };
 }
 

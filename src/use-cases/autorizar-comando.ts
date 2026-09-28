@@ -8,14 +8,14 @@ import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-/** O destino do item de aprovação de um comando: não é conector, é o terminal do Mac da pessoa (ADR-053). */
+/** O destino do item de aprovação de um comando: não é conector, é o terminal do Mac da pessoa (ADR-055). */
 export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as const;
 
 /** Por que o comando rodou sem card — vai à trilha e aos testes, nunca ao modelo como permissão. */
 export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprovado" | "liberado_na_tarefa" } | { aguardar: string };
 
 /**
- * Cada comando do terminal do Mac da pessoa (definido em 2026-09-28, ADR-053, "terminal de verdade, como o
+ * Cada comando do terminal do Mac da pessoa (definido em 2026-09-28, ADR-055, "terminal de verdade, como o
  * inhouse"). O hook do nod manda o comando ANTES de ele rodar; aqui se decide, nesta ordem:
  *
  *  1. só lê (classificarComando) e o turno não trouxe conteúdo da web → roda;
