@@ -102,6 +102,12 @@ export type EventoStream =
   /** `sessaoCli` é null só no catcher (0005): ele não abre sessão real, e o classificador não pode promover um marcador a --resume. */
   | { tipo: "init"; sessaoCli: string | null; ferramentas: string[]; modelo: string; versaoCli: string; apiKeySource: string }
   | { tipo: "delta"; texto: string }
+  /**
+   * Bloco de texto COMPLETO de uma mensagem do assistente (definido em 2026-09-28). Só compõe a fala no
+   * fim do turno (classificarResultado); o texto ao vivo continua saindo dos `delta`, e ninguém publica
+   * este evento — republicá-lo duplicaria o texto no cartão de atividade.
+   */
+  | { tipo: "texto_bloco"; texto: string }
   | { tipo: "tool_use"; id: string; nome: string; input: unknown }
   | { tipo: "tool_result"; toolUseId: string; isError: boolean; texto: string }
   | {

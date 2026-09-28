@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { EventoStream } from "../../../src/contracts/turno.ts";
-import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS } from "../../../src/domain/stream-json.ts";
+import { interpretarCodex } from "../../../src/domain/codex-stream.ts";
+import { classificarResultado, comporFala, interpretarLinhaStreamJson, NARRACAO_MAX_CHARS, reduzirSinais, SINAIS_ZERADOS } from "../../../src/domain/stream-json.ts";
 
 const FIXTURES = new URL("../../fixtures/stream-json/", import.meta.url);
 function eventosDe(nome: string): EventoStream[] {
@@ -125,5 +126,103 @@ describe("classificarResultado (ADR-009: estado de protocolo, nunca string de er
     const res = (subtype: string): EventoStream => ({ tipo: "result", sucesso: false, subtype, sessaoCli: "s", texto: "", custoUsd: 0.01, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [], erroCru: null });
     expect(classificarResultado({ eventos: [init, res("error_max_turns")], exitCode: 0, signal: null, stderr: "" })).toMatchObject({ desfecho: "falha", motivoFalha: "erro_max_turns" });
     expect(classificarResultado({ eventos: [init, res("error_during_execution")], exitCode: 1, signal: null, stderr: "" })).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao" });
+  });
+});
+
+/**
+ * definido em 2026-09-28: o `result` do CLI traz só a última mensagem. Relatório escrito antes de uma
+ * ferramenta (lembrar → "Anotado.") sumia da fala da pessoa e da resposta ao colega.
+ */
+describe("fala inteira: relatório antes da última ferramenta + texto final", () => {
+  const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
+  const ok = (texto: string): EventoStream => ({ tipo: "result", sucesso: true, subtype: "success", sessaoCli: "s", texto, custoUsd: 0.01, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 2, negacoesPermissao: [], erroCru: null });
+  const ferramenta = (id: string): EventoStream[] => [
+    { tipo: "tool_use", id, nome: "mcp__nod__lembrar", input: {} },
+    { tipo: "tool_result", toolUseId: id, isError: false, texto: "ok" },
+  ];
+  /** Deltas e depois o bloco completo, como o CLI emite. */
+  const bloco = (texto: string): EventoStream[] => [{ tipo: "delta", texto }, { tipo: "texto_bloco", texto }];
+  const relatorio = `Relatório das tasks: ${"NOD-101 aberto há 3 dias, sem revisão; ".repeat(10)}fim.`;
+  const texto = (eventos: EventoStream[]) => classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "" }).texto;
+
+  it("o parser devolve texto_bloco para o bloco de texto completo e continua devolvendo tool_use", () => {
+    const evs = eventosDe("relatorio-lembrar.jsonl");
+    const blocos = evs.filter((e) => e.tipo === "texto_bloco");
+    expect(blocos).toHaveLength(2);
+    expect(blocos[0]).toMatchObject({ texto: expect.stringMatching(/^Relatório das tasks da semana:/) });
+    expect(blocos[1]).toEqual({ tipo: "texto_bloco", texto: "Anotado." });
+    expect(evs.find((e) => e.tipo === "tool_use")).toMatchObject({ nome: "mcp__nod__lembrar", input: { texto: "Marlon quer o relatório de tasks às segundas" } });
+    // bloco só de thinking continua ignorado (s3)
+    expect(eventosDe("s3-mcp-ok.jsonl").filter((e) => e.tipo === "texto_bloco")).toHaveLength(1);
+  });
+
+  it("fixture real de formato: relatório > 280 → lembrar → 'Anotado.' vira relatório + linha em branco + 'Anotado.'", () => {
+    const r = classificarResultado({ eventos: eventosDe("relatorio-lembrar.jsonl"), exitCode: 0, signal: null, stderr: "" });
+    expect(r.desfecho).toBe("sucesso");
+    expect(r.ferramentasChamadas).toEqual(["mcp__nod__lembrar"]);
+    expect(r.texto.startsWith("Relatório das tasks da semana:\n\n- NOD-101")).toBe(true);
+    expect(r.texto.endsWith("destravar a revisão do NOD-101 hoje.\n\nAnotado.")).toBe(true);
+  });
+
+  it("narração curta (≤ 280) antes das ferramentas fica só no cartão de atividade", () => {
+    const narracao = "Buscando tasks no Linear…";
+    expect(texto([init, ...bloco(narracao), ...ferramenta("u1"), ...bloco("Achei 3 tasks."), ok("Achei 3 tasks.")])).toBe("Achei 3 tasks.");
+    // o limite é estrito: exatamente NARRACAO_MAX_CHARS ainda é narração
+    const noLimite = "a".repeat(NARRACAO_MAX_CHARS);
+    expect(texto([init, ...bloco(noLimite), ...ferramenta("u1"), ok("Pronto.")])).toBe("Pronto.");
+    expect(texto([init, ...bloco(`${noLimite}b`), ...ferramenta("u1"), ok("Pronto.")])).toBe(`${noLimite}b\n\nPronto.`);
+  });
+
+  it("vários passos: só o relatório entra, na ordem, e o texto final fecha a fala", () => {
+    const evs = [init, ...bloco("Buscando tasks…"), ...ferramenta("u1"), ...bloco(relatorio), ...ferramenta("u2"), ...bloco("Salvando na memória."), ...ferramenta("u3"), ...bloco("Anotado."), ok("Anotado.")];
+    expect(texto(evs)).toBe(`${relatorio}\n\nAnotado.`);
+  });
+
+  it("sem duplicar: o final que repete o relatório (mesmo com espaços diferentes) sai uma vez só", () => {
+    const final = `Pronto, aqui vai de novo:\n\n${relatorio.replaceAll("; ", ";\n")}`;
+    expect(texto([init, ...bloco(relatorio), ...ferramenta("u1"), ...bloco(final), ok(final)])).toBe(final);
+    // o mesmo relatório escrito duas vezes antes das ferramentas também entra uma vez
+    expect(texto([init, ...bloco(relatorio), ...ferramenta("u1"), ...bloco(relatorio), ...ferramenta("u2"), ok("Anotado.")])).toBe(`${relatorio}\n\nAnotado.`);
+  });
+
+  it("sem ferramenta, ou com o relatório depois da última ferramenta, a fala é o result intacto (s3)", () => {
+    expect(texto([init, ...bloco(relatorio), ok(relatorio)])).toBe(relatorio);
+    expect(texto([init, ...bloco("Buscando…"), ...ferramenta("u1"), ...bloco(relatorio), ok(relatorio)])).toBe(relatorio);
+  });
+
+  it("result sem texto: o final são os blocos depois da última ferramenta; sem eles, todos os blocos separados", () => {
+    expect(texto([init, ...bloco(relatorio), ...ferramenta("u1"), ...bloco("Anotado."), ok("")])).toBe(`${relatorio}\n\nAnotado.`);
+    expect(texto([init, ...bloco("Buscando…"), ...ferramenta("u1"), ...bloco("Achei."), ...ferramenta("u2"), ok("")])).toBe("Buscando…\n\nAchei.");
+    // sem blocos (catcher), os deltas colados, como antes
+    expect(texto([init, { tipo: "delta", texto: "oi " }, { tipo: "delta", texto: "tudo bem" }, ok("")])).toBe("oi tudo bem");
+  });
+
+  it("turno interrompido (sem result): todos os blocos separados + o trecho que não fechou bloco", () => {
+    const evs: EventoStream[] = [init, ...bloco("Buscando tasks…"), ...ferramenta("u1"), ...bloco(relatorio), ...ferramenta("u2"), { tipo: "delta", texto: "Agora vou " }, { tipo: "delta", texto: "salvar" }];
+    const r = classificarResultado({ eventos: evs, exitCode: 143, signal: null, stderr: "", interrompidoPeloDriver: true });
+    expect(r.desfecho).toBe("interrompido");
+    expect(r.texto).toBe(`Buscando tasks…\n\n${relatorio}\n\nAgora vou salvar`);
+    // sem blocos, os deltas colados continuam sendo o texto (s6)
+    const s6 = classificarResultado({ eventos: eventosDe("s6-sigterm.jsonl"), exitCode: 143, signal: null, stderr: "" });
+    const deltas = eventosDe("s6-sigterm.jsonl").map((e) => (e.tipo === "delta" ? e.texto : "")).join("");
+    expect(s6.texto).toBe(deltas);
+  });
+
+  it("Codex: cada agent_message vira delta (ao vivo) e texto_bloco; a última é o final e as anteriores só se forem relatório", () => {
+    const linha = (v: unknown) => interpretarCodex(JSON.stringify(v));
+    const msg = (text: string) => linha({ type: "item.completed", item: { type: "agent_message", text } });
+    const tool = (id: string) => [...linha({ type: "item.started", item: { id, type: "mcp_tool_call", server: "nod", tool: "lembrar", arguments: {} } }), ...linha({ type: "item.completed", item: { id, type: "mcp_tool_call", status: "completed" } })];
+    expect(msg("Olá.")).toEqual([{ tipo: "delta", texto: "Olá." }, { tipo: "texto_bloco", texto: "Olá." }]);
+    const fim = linha({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
+    const evs = [...linha({ type: "thread.started" }), ...msg("Vou consultar."), ...tool("t1"), ...msg(relatorio), ...tool("t2"), ...msg("Anotado."), ...fim];
+    const r = classificarResultado({ eventos: evs, exitCode: 0, signal: null, stderr: "" });
+    expect(r.desfecho).toBe("sucesso");
+    expect(r.texto).toBe(`${relatorio}\n\nAnotado.`);
+  });
+
+  it("comporFala sem relatório devolve o final intacto, inclusive vazio", () => {
+    expect(comporFala([], "  pronto  ")).toBe("  pronto  ");
+    expect(comporFala(["curto"], "")).toBe("");
+    expect(comporFala([relatorio], "")).toBe(relatorio);
   });
 });

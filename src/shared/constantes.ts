@@ -66,6 +66,15 @@ export const SALA_MAX = 6;
 /** Frames guardados por pessoa para replay. definido em 2026-09-16: cobre ~1 min de deltas de um turno; buffer podado → resumed:false (ADR-016). */
 export const BUFFER_SSE_FRAMES = 500;
 
+/**
+ * Teto de caracteres da fala e do texto do resultado numa Entrega. A rota da máquina
+ * (ponte-validacao.ts) recusa acima disso, e o laço (laco.ts) corta antes de entregar, com marcador
+ * visível. definido em 2026-09-28: o valor que a rota já aplicava; o corte existe porque a fala agora
+ * junta o relatório escrito antes da última ferramenta, e uma recusa derrubava a entrega inteira e
+ * deixava o turno sem assentar.
+ */
+export const TEXTO_ENTREGA_MAX_CHARS = 100_000;
+
 /** definido em 2026-09-16: 15 s — teto de UMA requisição do servidor a um conector (initialize ou tools/call). */
 export const CHAMADA_CONECTOR_MS = 15_000;
 
