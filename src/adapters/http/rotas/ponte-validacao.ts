@@ -3,6 +3,7 @@ import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../cont
 import type { Entrega, TrechoVivo } from "../../../contracts/ponte.ts";
 import type { SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
 
 export function exigir(condicao: unknown): asserts condicao {
@@ -12,7 +13,7 @@ export function objeto(v: unknown): Record<string, unknown> {
   exigir(v && typeof v === "object" && !Array.isArray(v));
   return v as Record<string, unknown>;
 }
-export function texto(v: unknown, max = 100_000): v is string { return typeof v === "string" && v.length <= max; }
+export function texto(v: unknown, max = TEXTO_ENTREGA_MAX_CHARS): v is string { return typeof v === "string" && v.length <= max; }
 /**
  * Trechos do turno vivo. São efêmeros: um item fora do formato é descartado sozinho e uma lista acima
  * dos tetos vira vazia, sem nunca derrubar a renovação (que é o lease do turno).

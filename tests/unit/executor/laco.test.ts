@@ -1,5 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { driverDoPlano, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
+import { entrega as validarEntrega } from "../../../src/adapters/http/rotas/ponte-validacao.ts";
+import { cortarTexto, driverDoPlano, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
+import { TEXTO_ENTREGA_MAX_CHARS } from "../../../src/shared/constantes.ts";
 import type { Adapter, Driver, Instance, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno } from "../../../src/contracts/turno.ts";
@@ -203,6 +206,51 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     expect(Date.now() - inicio).toBeLessThan(2_000);
     expect(vezes).toBe(1);
     expect(laco.turnoAtual()).toBeNull();
+  });
+
+  it("fala acima do teto da rota chega cortada com marcador, e a Entrega passa na validação HTTP", async () => {
+    const grande = `${"relatório ".repeat(TEXTO_ENTREGA_MAX_CHARS / 10)}${"x".repeat(5_000)}`;
+    const falante: Driver = {
+      meta: { id: "catcher", locality: "ambos" },
+      async create(): Promise<Instance> {
+        return {
+          sondar: async () => ({ estado: "pronto", versao: "x", em: 0 }),
+          adapter: (): Adapter => ({
+            async rodarTurno(sinks) {
+              await sinks.sinal("attempted");
+              return { desfecho: "sucesso", texto: grande, sessaoCli: null, sinais: { ...SINAIS_ZERADOS, attempted: true, producedOutput: true }, custoUsd: 0.1, tokens: { entrada: 1, saida: 1, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+            },
+            interromper: async () => {},
+          }),
+          dispose: async () => {},
+        };
+      },
+    };
+    const turnoId = randomUUID();
+    const ponte = ponteFalsa([planoDeTeste(turnoId, "relatório enorme")]);
+    const laco = iniciarLaco({ ponte, registry: await registryCom(falante), pessoaId: "p", machineId: "m1", relogio: Date.now, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    const [e] = ponte.entregas;
+    if (e?.fala.tipo !== "texto") throw new Error("fala sem texto");
+    expect(e.fala.texto.length).toBeLessThanOrEqual(TEXTO_ENTREGA_MAX_CHARS);
+    expect(e.resultado.texto).toBe(e.fala.texto);
+    const fora = Number(/\n\[cortado pelo nod: (\d+) caracteres ficaram de fora\]$/.exec(e.fala.texto)?.[1]);
+    expect(e.fala.texto.startsWith(grande.slice(0, TEXTO_ENTREGA_MAX_CHARS - 100))).toBe(true);
+    expect(e.fala.texto.indexOf("\n[cortado pelo nod:") + fora).toBe(grande.length);
+    // antes do corte a rota da máquina recusava a Entrega inteira e o turno ficava sem assentar
+    expect(() => validarEntrega(JSON.parse(JSON.stringify(e)), "m1")).not.toThrow();
+    expect(() => validarEntrega(JSON.parse(JSON.stringify({ ...e, fala: { tipo: "texto", texto: grande } })), "m1")).toThrow();
+  });
+
+  it("cortarTexto: abaixo do teto não mexe; acima, cabe no teto com o marcador e não parte emoji ao meio", () => {
+    expect(cortarTexto("curto", 10)).toBe("curto");
+    expect(cortarTexto("a".repeat(10), 10)).toBe("a".repeat(10));
+    const emojis = "😀".repeat(100);
+    const cortado = cortarTexto(emojis, 60);
+    expect(cortado.length).toBeLessThanOrEqual(60);
+    expect(cortado).toBe(`${"😀".repeat(4)}\n[cortado pelo nod: 192 caracteres ficaram de fora]`);
+    expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(cortado)).toBe(false);
   });
 
   it("resultadoDeExcecao distingue executor_indisponivel (interrompido) de qualquer outra exceção (falha erro_execucao)", () => {

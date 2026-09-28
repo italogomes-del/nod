@@ -273,6 +273,20 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(resultado.negacoesPermissao).toEqual(["mcp__nod__somar"]);
   });
 
+  it("relatório → lembrar → 'Anotado.': a fala leva o relatório e o final; o texto ao vivo sai só dos deltas, uma vez", async () => {
+    const { instance } = await instanciar("relatorio-lembrar");
+    const espiao = sinksEspiao();
+    const resultado = await instance.adapter(planoDeTeste(dir)).rodarTurno(espiao.sinks);
+    expect(resultado.desfecho).toBe("sucesso");
+    expect(resultado.ferramentasChamadas).toEqual(["mcp__nod__lembrar"]);
+    expect(resultado.texto.startsWith("Relatório das tasks da semana:")).toBe(true);
+    expect(resultado.texto.endsWith("NOD-101 hoje.\n\nAnotado.")).toBe(true);
+    // 3 deltas do relatório + 1 de "Anotado.": o bloco completo não vira delta de novo
+    expect(espiao.deltas).toHaveLength(4);
+    expect(espiao.deltas.join("")).toBe(`${resultado.texto.replace("\n\nAnotado.", "")}Anotado.`);
+    expect(espiao.eventos.filter((e) => e.tipo === "texto_bloco")).toHaveLength(2);
+  });
+
   it("binário que não existe → ErroDeDominio executor_indisponivel (motor_ausente) antes de qualquer spawn", async () => {
     const instance = await criarClaudeCliDriver(lig).create({ ...cfgBase, bin: "/nao/existe/claude" });
     const espiao = sinksEspiao();

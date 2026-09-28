@@ -13,3 +13,7 @@ Origem: scratchpad/sondas da sessão de 2026-09-16 (mapa-cli.json descreve cada 
   (init, status, rate_limit, message_start, 2 content_block_start, 2 thinking_tokens, 31 deltas,
   1 assistant, 1 content_block_stop), com o `session_id` do s6, e termina na última linha real do s6
   — sem `result`, como o SIGTERM deixou.
+- `relatorio-lembrar.jsonl` — SINTÉTICO (2026-09-28), no formato das linhas reais do s3 (uma linha
+  `assistant` por bloco, deltas antes do bloco completo): o modelo escreve um relatório de mais de 280
+  caracteres, chama `mcp__nod__lembrar`, recebe o tool_result e fecha com "Anotado.". O `result` traz só
+  "Anotado." — é o caso em que a fala perdia o relatório (comporFala em src/domain/stream-json.ts).

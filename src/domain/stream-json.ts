@@ -89,6 +89,11 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
         const b = obj(bloco);
         if (b?.["type"] === "tool_use") return { tipo: "tool_use", id: str(b["id"]), nome: str(b["name"]), input: b["input"] };
       }
+      // O CLI emite UMA linha `assistant` por bloco de conteúdo (thinking, text, tool_use — ver
+      // s3-mcp-ok.jsonl), então uma linha com texto e ferramenta juntos não foi observada; se vier, a
+      // ferramenta ganha, como antes deste evento existir.
+      const texto = textoDoConteudo(content);
+      if (texto.trim() !== "") return { tipo: "texto_bloco", texto };
     }
     return { tipo: "ignorado", razao: "tipo_desconhecido", tipoBruto: "assistant" };
   }
@@ -131,6 +136,7 @@ export function reduzirSinais(sinais: SinaisTurno, ev: EventoStream): SinaisTurn
     case "init":
       return { ...sinais, attempted: true, promptSubmitted: true };
     case "delta":
+    case "texto_bloco":
     case "tool_use":
     case "tool_result":
     case "result":
@@ -141,6 +147,37 @@ export function reduzirSinais(sinais: SinaisTurno, ev: EventoStream): SinaisTurn
 }
 
 export const SINAIS_ZERADOS: SinaisTurno = { attempted: false, rejected: false, promptSubmitted: false, producedOutput: false };
+
+/**
+ * Bloco de texto escrito ANTES da última ferramenta só entra na fala se passar disto.
+ * definido em 2026-09-28: a linha "Progresso" do prompt pede UMA frase curta por etapa entre
+ * ferramentas ("Categorizando lote de 11 e-mails"), então narração cabe folgada em 280 caracteres e
+ * fica só no cartão de atividade. Texto maior que isso antes de uma ferramenta é relatório: o modelo
+ * escreveu a resposta, chamou `lembrar` e fechou com "Anotado." — e o `result` do CLI traz só a
+ * última mensagem, então a pessoa (e o colega que perguntou) recebia só "Anotado.".
+ */
+export const NARRACAO_MAX_CHARS = 280;
+
+const normalizar = (s: string) => s.replace(/\s+/g, " ").trim();
+const juntarBlocos = (partes: readonly string[]) => partes.map((p) => p.trim()).filter((p) => p !== "").join("\n\n");
+
+/**
+ * Fala = relatórios escritos antes da última ferramenta (> NARRACAO_MAX_CHARS, ainda não contidos no
+ * texto final) + texto final, separados por linha em branco. Sem relatório a acrescentar, o texto final
+ * sai intacto.
+ */
+export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string): string {
+  const alvo = normalizar(final);
+  const relatorios: string[] = [];
+  for (const bloco of antesDaUltimaFerramenta) {
+    const t = bloco.trim();
+    if (t.length <= NARRACAO_MAX_CHARS) continue;
+    const n = normalizar(t);
+    if (alvo.includes(n) || relatorios.some((r) => normalizar(r).includes(n))) continue;
+    relatorios.push(t);
+  }
+  return relatorios.length === 0 ? final : juntarBlocos([...relatorios, final]);
+}
 
 /**
  * Classifica pelo ESTADO DE PROTOCOLO (ADR-009), nunca pela string de erro — `stderr` entra na
@@ -155,6 +192,13 @@ export const SINAIS_ZERADOS: SinaisTurno = { attempted: false, rejected: false, 
  *  - sem init, exitCode ≠ 0 → sessao_rejeitada: TODA recusa pré-init cai aqui (s2c foi a única
  *    observada). CLI não autenticado é motivo do INVENTÁRIO (sonda → nao_autenticado) e barra o
  *    turno antes do spawn (montarPlano → executor_indisponivel); este classificador não o infere.
+ *
+ * O texto (definido em 2026-09-28) é o que vira a fala do bot e a resposta ao colega:
+ *  - com result: comporFala(blocos antes da última ferramenta, final). O final é `result.texto`; vazio
+ *    (Codex, que nunca o preenche, ou erro sem texto), são os blocos depois da última ferramenta; sem
+ *    eles, todos os blocos; sem blocos, os deltas colados, como antes;
+ *  - sem result (interrompido): tudo o que foi escrito — os blocos separados por linha em branco mais o
+ *    trecho em streaming que não chegou a fechar um bloco; sem blocos, os deltas colados, como antes.
  */
 export function classificarResultado(entrada: {
   eventos: readonly EventoStream[];
@@ -170,21 +214,37 @@ export function classificarResultado(entrada: {
   let result: Extract<EventoStream, { tipo: "result" }> | null = null;
   const ferramentasChamadas: string[] = [];
   let textoStream = "";
-  for (const ev of entrada.eventos) {
+  // Deltas desde o último bloco completo: o trecho que um SIGTERM deixa sem o `assistant` que o fecharia.
+  let textoAberto = "";
+  const blocos: { texto: string; posicao: number }[] = [];
+  let ultimaFerramenta = -1;
+  for (const [posicao, ev] of entrada.eventos.entries()) {
     sinais = reduzirSinais(sinais, ev);
     if (ev.tipo === "init") init = ev;
     else if (ev.tipo === "result") result = ev;
-    else if (ev.tipo === "tool_use") ferramentasChamadas.push(ev.nome);
-    else if (ev.tipo === "delta") textoStream += ev.texto;
+    else if (ev.tipo === "tool_use") {
+      ferramentasChamadas.push(ev.nome);
+      ultimaFerramenta = posicao;
+    } else if (ev.tipo === "delta") {
+      textoStream += ev.texto;
+      textoAberto += ev.texto;
+    } else if (ev.tipo === "texto_bloco") {
+      blocos.push({ texto: ev.texto, posicao });
+      textoAberto = "";
+    }
   }
   const lancou = entrada.exitCode !== null || entrada.signal !== null || entrada.eventos.length > 0;
   sinais = { ...sinais, attempted: sinais.attempted || lancou };
   const sessaoCli = result?.sessaoCli ?? init?.sessaoCli ?? null;
   const tokensZerados: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 };
 
+  const todos = blocos.map((b) => b.texto);
   if (result) {
+    const depois = blocos.filter((b) => b.posicao > ultimaFerramenta).map((b) => b.texto);
+    const final = result.texto || juntarBlocos(depois) || juntarBlocos(todos) || textoStream;
+    const antes = blocos.filter((b) => b.posicao < ultimaFerramenta).map((b) => b.texto);
     const base = {
-      texto: result.texto || textoStream,
+      texto: comporFala(antes, final),
       sessaoCli,
       sinais,
       custoUsd: result.custoUsd,
@@ -196,7 +256,8 @@ export function classificarResultado(entrada: {
     return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base };
   }
 
-  const base = { texto: textoStream, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };
+  const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : textoStream;
+  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };

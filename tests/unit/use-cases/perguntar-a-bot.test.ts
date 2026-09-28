@@ -38,6 +38,7 @@ describe("perguntarABot (1 salto) e entregarRespostaPeer", () => {
     expect(tarefa).toMatchObject({ agenteId: tuca.id, conversaId: tuca.conversaId, origem: "peer", profundidade: 1, entradaConfianca: "nao_confiavel", estado: "pendente" });
     expect(tarefa?.entradaTexto).toContain("Pergunta de Vera (outro bot do nod");
     expect(tarefa?.entradaTexto).toContain("qual o status do PR 42?");
+    expect(tarefa?.entradaTexto).toContain("Responda em texto, completo e verificável: tudo o que Vera precisa para responder à pessoa.");
     const pergunta = d.banco.mensagens.find((m) => m.conversaId === tuca.conversaId);
     expect(pergunta).toMatchObject({ turnoId: r.data.tarefa_id, kind: "texto", confianca: "nao_confiavel", autoria: { autor_tipo: "agente", autor_id: vera.id } });
     expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada", "turno_criado"]);

@@ -32,6 +32,15 @@ it("normaliza texto, ferramentas, sinais e tokens; isola configuração e apaga 
   expect(registro.modo).toBe(0o600); expect(registro.proxy).toContain(plano.tokenDeTurno);
   expect(await readdir(cfg.cwdBase)).toEqual([]);
 });
+it("relatório antes da última ferramenta entra na fala; narração curta não; ao vivo segue só por delta", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const deltas: string[] = []; const blocos: string[] = [];
+  const resultado = await instance.adapter(planoHarness({ texto: "relatorio" })).rodarTurno({ sinal: async () => {}, delta: (d) => deltas.push(d), evento: (e) => { if (e.tipo === "texto_bloco") blocos.push(e.texto); } });
+  const relatorio = `Relatório das tasks: ${"NOD-101 aberto há 3 dias, sem revisão; ".repeat(10)}fim.`;
+  expect(resultado).toMatchObject({ desfecho: "sucesso", texto: `${relatorio}\n\nAnotado.`, ferramentasChamadas: ["mcp__nod__consultar", "mcp__nod__lembrar"] });
+  expect(deltas).toEqual(["Vou consultar as tasks.", relatorio, "Anotado."]);
+  expect(blocos).toEqual(deltas);
+});
 it("conta desconectada fecha o gate antes de enviar o prompt", async () => {
   cfg.env.TESTE_NOD_SEM_LOGIN = "1";
   const instance = await criarCodexCliDriver(lig).create(cfg);
