@@ -14,7 +14,9 @@ export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "Not
  * turno de uma conversa com pasta autorizada ganhava Write/Edit nativos — inclusive a continuação com a
  * resposta de um colega (não confiável) e a retomada de rotina com gate. As nativas não passam pelo proxy:
  * não há moldura nem catálogo reduzido que as segure (ADR-026), então o único gate possível é não ligá-las.
+ * revisto em 2026-09-28 (ADR-050, "bot novo é bot completo"): a criação também — é a mesma conversa própria,
+ * aberta pela pessoa; antes ela nem tinha pasta, e bot novo com workspace_* sem Write/Edit ficaria pela metade.
  */
 export function nativasDoTurno(t: { modo: ModoTurno; confianca: Confianca; pastasAutorizadas: boolean }): readonly string[] {
-  return t.pastasAutorizadas && t.modo === "conversa" && t.confianca === "confiavel" ? NATIVAS_DE_ARQUIVO : [];
+  return t.pastasAutorizadas && (t.modo === "conversa" || t.modo === "criacao") && t.confianca === "confiavel" ? NATIVAS_DE_ARQUIVO : [];
 }

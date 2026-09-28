@@ -34,7 +34,9 @@ O desenho que valeu está na página "Bot novo" do canvas "Nod — tela do agent
 
 ## Decisão
 
-1. **A criação tem o kit da conversa mais `atualizar_perfil`.** Isso inclui o computador e as pastas.
+1. **A criação tem o kit da conversa mais `atualizar_perfil`.** Isso inclui o computador e as pastas,
+   com as ferramentas nativas de arquivo nas mesmas condições da conversa (`nativasDoTurno`, emenda da
+   ADR-039 do mesmo dia: entrada confiável e pasta autorizada).
    Perfil vazio deixa de ser trava de capacidade e vira uma linha no prompt: o primeiro pedido é trabalho
    para fazer agora, e quando a missão fica clara o bot propõe o perfil no mesmo turno.
    `modoDoTurno` continua devolvendo `criacao` (o prompt e o `atualizar_perfil` dependem disso).
