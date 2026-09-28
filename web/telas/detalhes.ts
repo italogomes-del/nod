@@ -2,6 +2,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
+import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
 import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type NivelAtual } from "./app-acesso.ts";
@@ -152,6 +153,7 @@ export function renderDetalhes(estado: Estado): string {
     <section class="detalhes-secao"><h3>Ambiente</h3>
       ${dona ? botao("abrir-computador", `Computador do bot${a.computadorForaDoAr ? ' <span class="tag tag-vermelha">fora do ar</span>' : ""}`, { classe: "atalho", id: a.id, titulo: "O computador próprio do bot (ADR-037), não o seu Mac" }) : ""}
       ${dona ? botao("abrir-workspace", "Pasta de trabalho", { classe: "atalho", id: a.id }) : ""}
+      ${dona && a.harness !== "codex-cli" ? `<p class="mudo">Pasta no seu Mac: <code>${esc(caminhoDaPastaDoBot(a.nome))}</code></p>` : ""}
       ${dona ? botao("inteligencia", `✦ ${nomeInteligencia(a, estado.executor?.harnesses)}`, { classe: "atalho", id: a.id, titulo: "Inteligência do agente: modelo e harness" }) : ""}
       <p class="mudo">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p>
     </section>`;

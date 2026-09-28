@@ -268,6 +268,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTurno(l) : null;
     },
 
+    /** ADR-052 (0033): o turno trouxe conteúdo da web pelas nativas. A primeira marca fica. */
+    async contaminar(id: string, agora: number): Promise<boolean> {
+      const r = await conn`update turnos set contaminado_em = coalesce(contaminado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return r.count === 1;
+    },
+
+    async contaminado(id: string): Promise<boolean> {
+      const [l] = await conn<{ sim: boolean }[]>`select contaminado_em is not null as sim from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.sim === true;
+    },
+
     /** "Pode fazer e o resto desta tarefa" (0032): marca a RAIZ; vale para ela e as retomadas dela. */
     async liberarComputador(raizId: string, agora: number): Promise<boolean> {
       const r = await conn`update turnos set computador_liberado_em = coalesce(computador_liberado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${raizId}`;

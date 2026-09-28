@@ -59,6 +59,8 @@ export type ServidorNod = {
 };
 
 export const CAMINHO_PROXY = fileURLToPath(new URL("../mcp-proxy/proxy.ts", import.meta.url));
+/** ADR-052: o hook PreToolUse do nod, rodado pelo mesmo Node do proxy. */
+export const CAMINHO_HOOK = fileURLToPath(new URL("../executor/hook-nativas.ts", import.meta.url));
 
 /** machine-id estável em NOD_HOME/machine-id (EMENDA 11: NOD_HOME guarda SÓ isto). */
 export async function machineIdEstavel(env: EnvApp): Promise<string> {
@@ -116,7 +118,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
   //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
-  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY })];
+  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY })];
   const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" || env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production"));
   const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });

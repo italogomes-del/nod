@@ -34,7 +34,7 @@ async function pedidoDaPessoa(deps: Deps, turnoId: string, remetenteId: string):
 }
 
 /** Chamada que trouxe conteúdo de fora: conector, computador ou pasta (ADR-026). */
-const deFora = (l: LinhaTrilha): boolean => l.kind === "tool_call" && (l.conectorId !== null || /^(computador|workspace)_/.test(l.ferramenta));
+const deFora = (l: LinhaTrilha): boolean => l.kind === "tool_call" && (l.conectorId !== null || /^(computador|workspace)_|^nativa__/.test(l.ferramenta));
 
 /** definido em 2026-09-24: teto da leitura da conversa inteira; bateu no teto = não dá para provar, contamina. */
 const TETO_CONVERSA = 500;
@@ -56,7 +56,8 @@ const TETO_CONVERSA = 500;
  */
 async function remetenteViuConteudoDeFora(deps: Deps, turno: Turno, plano: PlanoTurno | undefined): Promise<boolean> {
   if (!plano || plano.turnoId !== turno.id) return true;
-  if (plano.workspaceId || plano.workspacePastas) return true;
+  // ADR-052: nativa lê arquivo e web sem passar pelo proxy — plano com nativas conta como conteúdo de fora.
+  if (plano.workspaceId || plano.workspacePastas || plano.nativas?.length) return true;
   if ((await deps.repos.trilha.doTurno(turno.id)).some(deFora)) return true;
   const retomada = plano.entrada.sessaoCli !== null;
   const mensagens = await deps.repos.mensagens.listarDaConversa(turno.conversaId, retomada ? TETO_CONVERSA : MENSAGENS_DO_PLANO);

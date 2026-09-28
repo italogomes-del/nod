@@ -13,6 +13,7 @@ extraMetadata:
 asar: true
 asarUnpack:
   - dist/desktop/proxy.mjs
+  - dist/desktop/hook-nativas.mjs
 npmRebuild: false
 artifactName: nod-${version}-${os}-${arch}.${ext}
 mac:

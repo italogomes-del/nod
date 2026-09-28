@@ -1,6 +1,6 @@
 import { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Inventario } from "../../../contracts/inventario.ts";
@@ -16,7 +16,7 @@ import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
-import { NATIVAS_DE_ARQUIVO } from "../../../domain/nativas.ts";
+import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
 import { MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
 
 /**
@@ -31,6 +31,11 @@ export type LigacaoClaudeCli = {
   urlNod: string;
   /** Caminho absoluto do proxy MCP (L5). */
   proxyPath: string;
+  /**
+   * ADR-052: caminho do hook PreToolUse do nod (hook-nativas.ts). Sem ele, o kit do terminal não liga — o turno
+   * fica só com as nativas de arquivo das pastas autorizadas, como antes (fail-closed).
+   */
+  hookPath?: string;
   nodePath?: string;
   electronComoNode?: boolean;
   /** definido em 2026-09-16: a sonda usa o modelo mais barato (EMENDA 35). */
@@ -85,17 +90,47 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
 ];
 
 
+/** O que o modelo lê quando o plano pediu o kit do terminal e esta máquina não o tem (app sem o hook). */
+export const AVISO_SEM_TERMINAL = "Nesta máquina o kit do terminal não está disponível neste turno: não há Bash, WebFetch nem WebSearch, e as nativas de arquivo só valem nas pastas de projeto autorizadas.";
+
+/** ADR-052: o turno com o kit do terminal — `settings` (hook + sandbox) e as pastas além do cwd. */
+export type TurnoTerminal = { settings: string; dirsExtras: readonly string[] };
+
+/** Aspas de shell para o comando do hook (o CLI o roda num shell): caminhos com espaço, como "Application Support". */
+const aspas = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+
+/**
+ * ADR-052: o `--settings` do turno com o kit do terminal. O hook PreToolUse do nod decide CADA nativa (medido em
+ * 2026-09-28: roda em -p via --settings, e o deny barra a chamada); o sandbox do Bash grava só nas pastas do bot e
+ * não acessa a rede (medido: "operation not permitted" fora da pasta, "deny network-outbound"), sem escape.
+ */
+export function settingsDoTerminal(p: { comandoHook: string; permitidas: readonly string[] }): string {
+  return JSON.stringify({
+    // Só as nativas, no formato da documentação ("Edit|Write"). As ferramentas MCP do nod passam pelo proxy; o hook
+    // as deixa passar também quando o CLI o consulta para elas (medido ao vivo em 2026-09-28: com "*", o hook
+    // negava mcp__nod__publicar_artefato como "fora do kit").
+    hooks: { PreToolUse: [{ matcher: NATIVAS_DO_TERMINAL.join("|"), hooks: [{ type: "command", command: p.comandoHook, timeout: 30 }] }] },
+    sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: [...p.permitidas] }, network: { allowedDomains: [] } },
+  });
+}
+
+/** O comando que o CLI roda para o hook: o mesmo Node do proxy, o script do hook e a config 0600 do turno. */
+export function comandoDoHook(p: { nodePath: string; hookPath: string; config: string; electronComoNode?: boolean }): string {
+  return `${p.electronComoNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)} ${aspas(p.config)}`;
+}
+
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean }): { args: string[]; sessaoCli: string } {
-  const { plano } = entrada;
-  const pastas = plano.workspacePastas ?? null;
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal }): { args: string[]; sessaoCli: string } {
+  const { plano, terminal } = entrada;
+  const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
   // do plano (nativasDoTurno, 2026-09-28); plano de servidor antigo sem o campo cai na regra anterior.
-  const nativas = pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO) : [];
+  // ADR-052: no kit do terminal elas são exatamente as do plano, sob o hook e o sandbox do nod.
+  const nativas = terminal ? (plano.nativas ?? []) : pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO).filter((n) => (NATIVAS_DE_ARQUIVO as readonly string[]).includes(n)) : [];
   const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas].join(",");
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
   // Todos os projetos aprovados entram: o bot transita entre eles sem reautorizar (decisão de 2026-09-18).
-  const extras = (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
+  const extras = terminal ? terminal.dirsExtras : (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
   const args = [
     "-p",
     // ADR-046: com anexo, a entrada é uma linha stream-json com blocos de imagem/PDF em vez de texto puro.
@@ -110,12 +145,15 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     ...(entrada.compactar ? ["--autocompact", String(JANELA_AUTOCOMPACT_TOKENS)] : []),
     // --restricted substitui --setting-sources project: ignora CLAUDE.md, skills e hooks do repo
     // aberto, que o nod não escreveu, e confina as ferramentas de arquivo às pastas permitidas.
+    // ADR-052: o kit do terminal NÃO usa --restricted (ele tira Bash e WebFetch, medido em 2026-09-28); o cwd é a
+    // pasta do bot, que o nod controla, e quem confina é o hook do nod + o sandbox do Bash (--settings).
     ...(pastas ? ["--restricted"] : ["--setting-sources", "project"]),
     ...extras.flatMap((p) => ["--add-dir", p]),
     "--strict-mcp-config",
     "--mcp-config",
     entrada.mcpJson,
-    ...(pastas ? [] : ["--tools", ""]),
+    // Só --tools restringe o que existe no turno (--allowedTools só aprova): no terminal, a lista exata.
+    ...(terminal ? ["--tools", nativas.join(","), "--settings", terminal.settings] : pastas ? [] : ["--tools", ""]),
     "--allowedTools",
     permitidas,
     "--permission-mode",
@@ -212,7 +250,19 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const pastas = confinavel ? plano.workspacePastas ?? null : null;
               await mkdir(cfg.cwdBase, { recursive: true });
               const tmpdir = await mkdtemp(join(cfg.cwdBase, "turno-"));
-              const diretorio = pastas?.ativa ?? tmpdir;
+              // ADR-052: o kit do terminal só liga com o hook do nod e a pasta do bot; senão, as nativas de arquivo de antes.
+              const pedeTerminal = (plano.nativas ?? []).some((n) => !(NATIVAS_DE_ARQUIVO as readonly string[]).includes(n));
+              const pastaBot = pedeTerminal && lig.hookPath && confinavel && plano.pastaDoBot ? join(home, "nod", plano.pastaDoBot) : null;
+              let terminal: TurnoTerminal | undefined;
+              if (pastaBot && lig.hookPath) {
+                await mkdir(pastaBot, { recursive: true });
+                const permitidas = [pastaBot, ...(plano.workspacePastas?.aprovadas ?? [])];
+                const config = join(tmpdir, "hook-nativas.json");
+                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, permitidas }), { mode: 0o600 });
+                const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
+                terminal = { settings: settingsDoTerminal({ comandoHook, permitidas }), dirsExtras: permitidas.filter((p) => p !== pastaBot) };
+              }
+              const diretorio = pastaBot ?? pastas?.ativa ?? tmpdir;
               const eventos: EventoStream[] = [];
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
@@ -225,7 +275,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const entradaStdin = streamJson
                   ? mensagemClaude(plano.entrada.texto, anexos)
                   : [plano.entrada.texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
-                const { args } = montarArgs({ plano: pastas ? plano : { ...plano, workspacePastas: null }, mcpJson, compactar, streamJson });
+                // Sem o kit (sem hook nesta máquina), o prompt não pode prometer Bash e web: a linha que corrige vai junto.
+                const semKit = pedeTerminal && !terminal ? { promptSistema: `${plano.promptSistema}\n${AVISO_SEM_TERMINAL}` } : {};
+                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs);
 
                 const pendentes: Promise<void>[] = [];
