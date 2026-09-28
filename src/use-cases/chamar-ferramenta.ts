@@ -212,7 +212,10 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const tool = ferramenta.nome.startsWith(`${conector.slug}__`) ? ferramenta.nome.slice(conector.slug.length + 2) : ferramenta.nome;
   const concessoes = await deps.repos.concessoes.doAgente(input.agenteId);
   if (!concessoes.some((c) => c.conectorId === conectorId && c.capacidade === tool)) return negar("capacidade_desligada", "ferramenta_negada", conectorId);
-  if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && !ferramenta.readOnlyHint) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  // definido em 2026-09-28 (ADR-052, 0033): o turno que trouxe conteúdo da web pelas nativas vira, dali em
+  // diante, turno com gate — escrita em conector só por item aprovado, como o catálogo reduzido faria.
+  const soPorAprovacao = plano.politicaExecucao.efeitoExternoSoPorAprovacao || (await deps.repos.turnos.contaminado(input.turnoId));
+  if (soPorAprovacao && !ferramenta.readOnlyHint) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
   // definido em 2026-09-24 (revisão da ADR-047): aprovar PR e merge NUNCA rodam por chamada direta, em
   // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
   // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".

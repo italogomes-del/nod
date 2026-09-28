@@ -63,6 +63,11 @@ export type PlanoTurno = {
    * (plano de servidor antigo) = o driver cai na regra anterior (nativas de arquivo quando há pasta).
    */
   nativas?: readonly string[];
+  /**
+   * definido em 2026-09-28 (ADR-052): o nome da pasta do bot no Mac da pessoa, `~/nod/<pastaDoBot>`. Presente
+   * só quando o turno tem o kit do terminal; o driver a cria e a usa como diretório do turno.
+   */
+  pastaDoBot?: string;
   superficie: "maquina_da_pessoa";
   decididoPor: `regra:${string}`;
   autoria: Autoria;

@@ -16,7 +16,7 @@ import { conectorTocaAprendiz } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
-import { nativasDoTurno } from "./nativas.ts";
+import { nativasDoTurno, pastaDoBot } from "./nativas.ts";
 import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
@@ -135,6 +135,8 @@ export type EntradaPlano = {
   delegacao?: { pessoaNome: string; remetenteNome: string } | null;
   /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
   pastasAutorizadas?: boolean;
+  /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
+  terminal?: boolean;
   agora: number;
 };
 
@@ -196,7 +198,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   };
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
-  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true });
+  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true });
+  const pasta = nativas.includes("Bash") ? pastaDoBot(entrada.agente.nome) : undefined;
   return {
     tenantId: entrada.turno.tenantId,
     turnoId: entrada.turno.id,
@@ -211,7 +214,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null }),
+    ...(pasta ? { pastaDoBot: pasta } : {}),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}) },
     politicaExecucao: {
       prazoMs,

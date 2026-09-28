@@ -92,7 +92,10 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     conectorIdPorIdx.push(conector.id);
   }
 
-  const { automatico, porItem } = decidirLote(propostas.map((p) => ({ plano: input.plano ?? null, destino: p.destino, origemSensivel: p.origemSensivel })));
+  // ADR-052 (0033): turno que trouxe a web pelas nativas não usa "Sempre permitir" — a mesma regra do não confiável.
+  const contaminado = input.plano ? await deps.repos.turnos.contaminado(input.turnoId) : false;
+  const plano = input.plano && contaminado ? { ...input.plano, confiancaEntrada: "nao_confiavel" as const } : input.plano ?? null;
+  const { automatico, porItem } = decidirLote(propostas.map((p) => ({ plano, destino: p.destino, origemSensivel: p.origemSensivel })));
 
   const decisao = await deps.repos.decisoes.criar({
     tipo: "aprovacao",

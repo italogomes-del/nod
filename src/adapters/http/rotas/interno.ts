@@ -3,6 +3,7 @@ import type { Workspaces } from "../../fundo/workspaces.ts";
 import type { ClasseNegacao } from "../../../contracts/negacao.ts";
 import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
 import type { Relogio } from "../../../shared/types.ts";
@@ -152,6 +153,29 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           }
           await dormir(intervalo + Math.floor(Math.random() * 250));
         }
+      },
+    },
+    {
+      // ADR-052: o hook do nod confirma cada chamada NATIVA antes de ela rodar. A nativa tem de estar no plano do
+      // turno; a trilha registra sempre (delegar_tarefa lê a trilha para saber o que entrou de fora); a web marca
+      // o turno (0033). Quem decide se contamina é o SERVIDOR, pela ferramenta — nunca o que o hook manda.
+      metodo: "POST",
+      padrao: /^\/nativas$/,
+      interno: true,
+      async handler(ctx) {
+        const c = (await ctx.corpo()) as { ferramenta?: unknown } | null;
+        const ferramenta = typeof c?.ferramenta === "string" ? c.ferramenta : "";
+        const turnoId = ctx.params.turnoId ?? "";
+        const plano = deps.tokens.planoDe(turnoId);
+        if (!plano || !(plano.nativas ?? []).includes(ferramenta)) {
+          ctx.json(403, { codigo: "nao_permitido", mensagem: "ferramenta nativa fora do plano deste turno" });
+          return;
+        }
+        await deps.dentro(ctx.escopo, async (d) => {
+          await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA });
+          if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());
+        });
+        ctx.json(200, { ok: true });
       },
     },
     {

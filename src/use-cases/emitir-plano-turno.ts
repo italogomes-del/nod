@@ -192,6 +192,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       return slug ? [`${slug}__${p.capacidade}`] : [];
     }),
     pastasAutorizadas: pastas !== null,
+    // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
+    terminal: executor === "local" && (escolha ? escolha.harness === "claude-cli" : true),
     agora,
   });
 

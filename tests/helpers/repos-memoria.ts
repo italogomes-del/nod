@@ -67,6 +67,8 @@ export type BancoMemoria = {
   /** 0032: quem continuou cada decisão e as raízes com o computador liberado para a tarefa. */
   continuacoes: Map<string, "turno" | "retomada">;
   computadorLiberado: Set<string>;
+  /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
+  contaminados: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
   composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
@@ -111,6 +113,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     composioChaves: new Map(),
     continuacoes: new Map(),
     computadorLiberado: new Set(),
+    contaminados: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
     concessoes: [],
@@ -623,6 +626,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async computadorLiberado(raizId: string) {
         return b.computadorLiberado.has(raizId);
+      },
+      async contaminar(id: string) {
+        if (!doTenant(b.turnos).some((t) => t.id === id && t.ownerId === escopo.pessoaId)) return false;
+        b.contaminados.add(id);
+        return true;
+      },
+      async contaminado(id: string) {
+        return b.contaminados.has(id);
       },
       async enfileirar(t) {
         const turno: Turno = {
