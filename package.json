@@ -8,6 +8,9 @@
     "node": "24.19.0"
   },
   "scripts": {
+    "site:dev": "vite --config site/vite.config.ts",
+    "site:build": "tsc -p site/tsconfig.json && vite build --config site/vite.config.ts",
+    "site:preview": "vite preview --config site/vite.config.ts",
     "dev": "node scripts/dev.mjs",
     "dev:setup": "npm run docker:up && npm run db:migrate && npm run db:migrate:test && npm run db:seed",
     "start": "node src/adapters/http/server.ts",
