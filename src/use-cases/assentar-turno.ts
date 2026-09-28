@@ -1,4 +1,5 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
@@ -13,7 +14,8 @@ import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-export type EntradaAssentarTurno = Entrega & { executor?: Executor };
+/** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -128,7 +130,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // pode virar a sessão da conversa do alvo com a pessoa.
   const sessaoDaConversa = turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
-  if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor);
+  if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
   await deps.repos.gastos.registrar({
     turnoId: turno.id,
     executor,

@@ -45,3 +45,15 @@ it("retomada ligada a uma rotina não troca a sessão da conversa; retomada da c
   await rodarAteOFim(await retomar(daConversa?.id ?? ""), "sessao-nova-da-conversa");
   expect((await deps.repos.conversas.buscar(conversaId))?.sessaoCli).toBe("sessao-nova-da-conversa");
 });
+
+/** 0030: a sessão devolvida pelo turno é do harness do plano puxado; sem isso o próximo turno não a retoma. */
+it("assentar grava o harness e o instante junto com a sessão da conversa", async () => {
+  const { deps } = depsEmMemoria();
+  const { data: bot } = await criarAgente(deps, { dono: "pessoa", nome: "Ada" });
+  const conversaId = bot.conversa.id;
+  const turno = await deps.repos.turnos.enfileirar({ conversaId, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
+  const machineId = randomUUID();
+  expect((await deps.repos.turnos.reivindicar({ machineId, agora: deps.agora() }))?.id).toBe(turno?.id);
+  await executar(deps, assentarTurno, { turnoId: turno?.id ?? "", machineId, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: { ...RESULTADO, sessaoCli: "sessao-do-claude" }, executor: "local", harness: "claude-cli" });
+  expect(await deps.repos.conversas.buscar(conversaId)).toMatchObject({ sessaoCli: "sessao-do-claude", sessaoExecutor: "local", sessaoHarness: "claude-cli", sessaoEm: expect.any(Number) });
+});

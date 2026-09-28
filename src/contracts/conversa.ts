@@ -2,6 +2,7 @@ import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Visibilidade } from "./agente.ts";
 import type { Executor } from "./evento.ts";
+import type { IdHarness } from "./harness.ts";
 
 export type TipoConversa = "propria" | "sala";
 
@@ -21,6 +22,10 @@ export type Conversa = {
    * Opcional no tipo para não obrigar cada literal de teste a declará-lo; ausente ⇒ desconhecido ⇒ não reaproveita.
    */
   sessaoExecutor?: Executor | null;
+  /** Harness que criou `sessaoCli` (0030): com harness escolhido, só ele retoma a sessão. */
+  sessaoHarness?: IdHarness | null;
+  /** Quando a sessão avançou pela última vez (0030): o que a conversa ganhou depois não está nela. */
+  sessaoEm?: EpochMs | null;
   criadoEm: EpochMs;
 };
 

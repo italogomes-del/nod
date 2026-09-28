@@ -41,6 +41,8 @@ export type EntradaEmitirPlano = {
  */
 export const MENSAGENS_DO_PLANO = 50;
 export const HISTORICO_NO_PLANO = 20;
+/** definido em 2026-09-28 (0030): o que chegou depois da sessão vai quase inteiro — o checklist da rotina das 8h tem ~3k. */
+const TEXTO_DESDE_A_SESSAO = 8000;
 
 /** Motor cujo inventário decide a localidade (ADR-019/022). */
 export const MOTOR_CLI = "claude-cli";
@@ -111,9 +113,21 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-17: rotina e trabalho de colega usam sessão nova com missão e catálogo atuais; o histórico explícito preserva contexto.
   // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina também — o --resume da conversa a levaria de volta ao modo conversa.
   // definido em 2026-09-24 (ADR-047): a tarefa delegada também — a sessão da conversa é do alvo com a pessoa.
-  const sessaoCli = !escolha && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
-  const historico = !sessaoCli ? mensagens.slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot", texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
-  const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico });
+  // definido em 2026-09-28 (0030): com harness escolhido, a sessão só vale para o harness que a criou. Antes
+  // `!escolha` desligava o --resume de todo turno real desde os harnesses (18/09), e cada mensagem abria uma
+  // sessão com 20 falas de 1.000 caracteres. Só o Claude Code retoma sessão hoje (o Codex devolve null).
+  const sessaoDoHarness = escolha ? escolha.harness === "claude-cli" && conversa?.sessaoHarness === escolha.harness : true;
+  const sessaoCli = sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const autorDe = (m: (typeof mensagens)[number]) => (m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot");
+  const historico = !sessaoCli ? mensagens.slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
+  // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
+  const vistaAte = sessaoCli ? conversa?.sessaoEm ?? null : null;
+  const desdeSuaUltimaVez = vistaAte === null ? [] : mensagens
+    .filter((m) => m.criadoEm > vistaAte && m.criadoEm < turno.criadoEm && m.id !== turno.mensagemOrigemId)
+    .slice(-HISTORICO_NO_PLANO)
+    .map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, TEXTO_DESDE_A_SESSAO), confianca: m.confianca }));
+  const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico, ...(desdeSuaUltimaVez.length ? { desdeSuaUltimaVez } : {}) });
   // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
   // ligada a uma rotina herda o gate DELA (ADR-044); retomada sem rotina não tem gate.
   const rotina: { exigeAprovacao: boolean } | null = ligacao ? { exigeAprovacao: ligacao.rotina.exigeAprovacao } : turno.origem === "rotina" ? { exigeAprovacao: true } : null;
