@@ -3,7 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import type { Negacao } from "../../contracts/negacao.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { LONGPOLL_APROVACAO_MS, ORCAMENTO_RESULTADO_CHARS } from "../../shared/constantes.ts";
+import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, ORCAMENTO_RESULTADO_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import { ferramentaDoPlano, ferramentasMcp, validadeDoPlano } from "./catalogo.ts";
 import { criarClienteNod, ehFalhaTransporte, type ClienteNod } from "../executor/cliente-nod.ts";
@@ -38,6 +38,8 @@ export type OpcoesProxy = {
   /** ADR-048: ambiente desta máquina para o gh (default process.env) e quem executa (injetável no teste). */
   ambiente?: Readonly<Record<string, string | undefined>>;
   executarNaMaquina?: typeof executarGithubNaMaquina;
+  /** Fatias de espera por uma aprovação no mesmo turno (default ESPERA_APROVACAO_NO_TURNO_MS / LONGPOLL_APROVACAO_MS). */
+  fatiasAprovacao?: number;
 };
 
 export type Proxy = {
@@ -121,6 +123,17 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
     return texto(guardado.naoConfiavel ? envolverNaoConfiavel(conteudo, guardado.origem, guardado.computador) : conteudo);
   }
 
+  /** A decisão e, por item, o que a ação aprovada no computador devolveu: cortado e moldurado como não confiável. */
+  function decididaComResultados(itens: readonly { idx: number; desfecho: unknown; resultado?: string }[], orcamento: number): ConteudoMcp {
+    const partes = [JSON.stringify({ estado: "decidida", itens: itens.map(({ resultado: _resultado, ...i }) => i) })];
+    for (const i of itens) {
+      if (!i.resultado) continue;
+      const conteudo = neutralizarDelimitadores(cortarGuardando(i.resultado, orcamento, { origem: "computador", naoConfiavel: true, computador: true }));
+      partes.push(envolverNaoConfiavel(`Resultado do item ${i.idx + 1}:\n${conteudo}`, "computador", true));
+    }
+    return texto(partes.join("\n\n"));
+  }
+
   async function toolsCall(id: IdJsonRpc, params: unknown): Promise<string> {
     const p = (typeof params === "object" && params !== null ? params : {}) as { name?: unknown; arguments?: unknown };
     const nome = typeof p.name === "string" ? p.name : "";
@@ -149,9 +162,15 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
     }
     servidorForaDesde = null;
     if ("aguardar" in r) {
-      const a = await cliente.aguardar(r.aguardar, longpoll);
-      if (!ehFalhaTransporte(a) && a.estado === "decidida") {
-        return resposta(id, texto(JSON.stringify({ estado: "decidida", itens: a.itens })));
+      // definido em 2026-09-28 (0032): espera no PRÓPRIO turno, em fatias, até ESPERA_APROVACAO_NO_TURNO_MS. A
+      // pessoa aprova e o bot segue com o resultado na mão; antes a espera era uma fatia de 20 s e cada ação
+      // no computador virava um turno novo. Passado o prazo (ou o servidor fora), o turno encerra e a
+      // decisão vira UMA retomada no servidor.
+      const fatias = opcoes.fatiasAprovacao ?? Math.ceil(ESPERA_APROVACAO_NO_TURNO_MS / LONGPOLL_APROVACAO_MS);
+      for (let i = 0; i < fatias; i++) {
+        const a = await cliente.aguardar(r.aguardar, longpoll);
+        if (ehFalhaTransporte(a)) break;
+        if (a.estado === "decidida") return resposta(id, decididaComResultados(a.itens, orcamento));
       }
       return resposta(id, texto(JSON.stringify({ estado: "pendente", decisao_id: r.aguardar, instrucao: INSTRUCAO_PENDENTE })));
     }

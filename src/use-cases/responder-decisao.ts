@@ -7,6 +7,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { historicoDoFio, mensagensDoFio, rodadaNoFio } from "../domain/fio-da-pergunta.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -76,38 +77,29 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
   const autoria: ReturnType<typeof autoriaPessoa> = { ...autoriaPessoa(deps.escopo, input.executor ?? "catcher"), autor_id: input.respondidaPor.id };
   const original = d.turnoId ? await deps.repos.turnos.buscar(d.turnoId) : null;
   let turno: Turno | null = null;
+  let turnoNovo = false;
   if (original) {
     await deps.repos.paradas.encerrarAbertas({ conversaId: d.conversaId, agora });
     // definido em 2026-09-24 (ADR-044): a retomada de uma rotina roda como rotina, em sessão nova
     // (emitir-plano-turno.ts), então precisa da entrada ORIGINAL da rotina para saber o que fazer.
     const daRotina = await rotinaDoTurno(deps.repos, original.id);
-    turno = await deps.repos.turnos.enfileirar({
-      conversaId: d.conversaId,
-      agenteId: d.agenteId,
-      origem: "retomada",
+    ({ turno, nova: turnoNovo } = await enfileirarRetomada(deps, {
+      original,
       prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
-      profundidade: original.profundidade,
       entradaTexto: [
         `Resposta de ${input.respondidaPor.nome} ao seu pedido (${d.tipo}: "${d.frase}"): ${input.texto}`,
         "Continue a partir daqui; nada foi reenviado.",
         ...(await historicoDaResposta(deps, d)),
         ...(daRotina ? ["Entrada original da rotina:", daRotina.turnoDisparado.entradaTexto] : []),
       ].join("\n"),
-      // definido em 2026-09-24 (ADR-044): a confiança é a do turno que PAROU, nunca "confiavel" fixo. A
-      // rotina que leu e-mail nasce nao_confiavel; responder por ela não limpa o que já está no contexto.
-      entradaConfianca: original.entradaConfianca,
-      modelo: original.modelo,
-      harness: original.harness,
-      retomaTurnoId: original.id,
-      sobProcuracaoDe: original.sobProcuracaoDe ?? null,
       reenvios: original.reenvios + 1,
       executor: input.executor ?? "catcher",
-    });
+    }));
   }
   const payload: PayloadMensagem = { kind: "resposta_a_pedido", decisaoId: d.id, agenteId: d.agenteId, perguntaEm: Date.parse(d.criadoEm), retomada: original !== null, ...(turno ? { turnoRetomadaId: turno.id } : {}) };
   const mensagem = await deps.repos.mensagens.criar({ conversaId: d.conversaId, turnoId: d.turnoId, autoria, kind: "texto", texto: input.texto, payload, confianca: "confiavel" });
   if (!mensagem) throw new ErroDeDominio("nao_permitido");
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: d.conversaId, turnoId: d.turnoId, dados: { mensagem_id: mensagem.id, kind: "texto", decisao_id: d.id, destravou: true } })];
-  if (original && turno) events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: d.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: d.id } }));
+  if (original && turno && turnoNovo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: d.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: d.id } }));
   return { data: { mensagem, turno }, events };
 };

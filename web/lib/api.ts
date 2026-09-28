@@ -157,7 +157,7 @@ export function criarApi(escopo: Escopo) {
     // fora de foco, que não carimba vista_em (ADR-007, refinamento da mesma data).
     suaVez: (ver = true) => get<SuaVezDto>(ver ? "sua-vez" : "sua-vez?ver=0"),
     dispensarIncidente: (id: string) => post<RespostaMutacao>(`incidentes/${id}/dispensar`),
-    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
+    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),
     reabrir: (id: string) => post<RespostaMutacao>(`decisoes/${id}/reabrir`),

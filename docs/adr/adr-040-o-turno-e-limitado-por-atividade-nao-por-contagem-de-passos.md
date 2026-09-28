@@ -82,3 +82,16 @@ incomodar na prática, é esse o caminho seguinte — não voltar o contador.
 
 Se um laço produtivo caro acontecer de fato em produção (não em hipótese), a resposta é o detector
 de repetição acima, não restaurar `--max-turns`: o contador já demonstrou cortar trabalho legítimo.
+
+## Emenda de 2026-09-28 — a aprovação continua no mesmo turno
+
+**Contexto.** "O turno acaba e a retomada é um turno novo" valia para toda aprovação que não fosse decidida dentro de uma fatia de 20 s. Numa tarefa no computador do bot, a Ada fez 10 turnos em 3 minutos, e cada retomada reescreveu o resumo. Pior: a aprovação dada dentro da fatia continuava o turno **e** criava uma retomada, em cascata.
+
+**Decisão.**
+- **O proxy espera a decisão no próprio turno**, com a ferramenta aberta, em fatias de `LONGPOLL_APROVACAO_MS` até `ESPERA_APROVACAO_NO_TURNO_MS` (420 s). Isso fica abaixo da isenção de ferramenta aberta do vigia (480 s). Aprovada nesse tempo, o mesmo turno segue com o resultado; passado o prazo, ou com o servidor fora, volta o "pendente" e o turno encerra.
+- **Uma decisão, uma continuação** (0032, `decisoes.continuada_em` e `continuada_por`):
+  - quem entrega a decisão ao turno que espera a reivindica como `turno`;
+  - a fase 2 só cria retomada se o turno já não está rodando, sob a trava da linha do turno;
+  - o assentamento do turno cria a retomada da aprovação decidida que ele não chegou a receber.
+- **Retomadas se juntam:** toda retomada nasce por `enfileirarRetomada`. Se já há uma retomada do mesmo turno na fila, a entrada nova se junta a ela. Vale para acesso, perfil, pasta, resposta a pedido e "Retomar".
+- **Limitação conhecida:** a queda da máquina (`interromperPorMaquina`) não passa pela rede de segurança. Ela já abre o card "Retomar" para a pessoa.

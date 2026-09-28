@@ -134,6 +134,29 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /**
+     * definido em 2026-09-28 (0032): quem continua esta decisão — o turno que a esperava ('turno') ou uma
+     * retomada ('retomada'). O primeiro a reivindicar ganha: "minha" = acabou de ganhar; senão, quem já tinha.
+     */
+    async reivindicarContinuacao(id: string, por: "turno" | "retomada", agora: number): Promise<"minha" | "turno" | "retomada" | null> {
+      const [l] = await conn<{ continuada_por: string }[]>`
+        update decisoes set continuada_em = ${data(agora)}, continuada_por = ${por}
+        where tenant_id = ${escopo.tenantId} and id = ${id} and continuada_em is null
+        returning continuada_por`;
+      if (l) return "minha";
+      const [atual] = await conn<{ continuada_por: string | null }[]>`select continuada_por from decisoes where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return atual?.continuada_por === "turno" || atual?.continuada_por === "retomada" ? atual.continuada_por : null;
+    },
+
+    /** Aprovações deste turno já decididas que ninguém continuou (0032): o assentamento do turno as retoma. */
+    async aContinuarDoTurno(turnoId: string): Promise<Decisao[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from decisoes
+        where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} and tipo = 'aprovacao' and estado = 'decidida' and continuada_em is null
+        order by decidida_em`;
+      return linhas.map(paraDecisao);
+    },
+
     /** Só decide o que está aberto; a segunda chamada devolve null (idempotência na rota). */
     async decidir(id: string, p: { por: string; agora: number }): Promise<Decisao | null> {
       const desfecho: DesfechoDecisao = { tipo: "decidida", por: p.por, em: iso(p.agora) };

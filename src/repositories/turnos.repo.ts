@@ -228,6 +228,57 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /**
+     * definido em 2026-09-28 (0032): serializa quem cria retomada de um MESMO turno — decisões decididas em
+     * sequência e o assentamento dele. Sem a trava, duas aprovações seguidas viravam duas retomadas.
+     */
+    async travarRetomadas(retomaTurnoId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`retomada:${retomaTurnoId}`}))`;
+    },
+
+    /** A retomada deste turno que ainda não foi reivindicada: a próxima continuação se junta a ela. */
+    async retomadaNaFila(retomaTurnoId: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and retoma_turno_id = ${retomaTurnoId} and origem = 'retomada' and estado = 'pendente'
+        order by criado_em desc limit 1`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
+    async juntarEntrada(id: string, texto: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set entrada_texto = entrada_texto || ${`\n\n${texto}`}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /** O turno que começou a tarefa: sobe pela cadeia de retoma_turno_id (teto de saltos contra ciclo). */
+    async raizDaCadeia(id: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        with recursive cadeia(id, retoma_turno_id, saltos) as (
+          select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${id}
+          union all
+          select t.id, t.retoma_turno_id, c.saltos + 1 from turnos t join cadeia c on t.tenant_id = ${escopo.tenantId} and t.id = c.retoma_turno_id
+          where c.saltos < 50
+        )
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and id = (select id from cadeia order by saltos desc limit 1)`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /** "Pode fazer e o resto desta tarefa" (0032): marca a RAIZ; vale para ela e as retomadas dela. */
+    async liberarComputador(raizId: string, agora: number): Promise<boolean> {
+      const r = await conn`update turnos set computador_liberado_em = coalesce(computador_liberado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${raizId}`;
+      return r.count === 1;
+    },
+
+    async computadorLiberado(raizId: string): Promise<boolean> {
+      const [l] = await conn<{ liberado: boolean }[]>`select computador_liberado_em is not null as liberado from turnos where tenant_id = ${escopo.tenantId} and id = ${raizId}`;
+      return l?.liberado === true;
+    },
+
     /** Assenta o resultado: só sai de 'despachando' (ou 'pendente' para interrupção antes de rodar). */
     async assentar(id: string, a: Assentamento): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`

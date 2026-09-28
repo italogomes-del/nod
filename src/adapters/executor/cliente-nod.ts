@@ -34,7 +34,8 @@ export type RespostaFerramenta =
   | { executarLocal: { capacidade: string; argumentos: Record<string, unknown> } };
 
 export type RespostaAguardar =
-  | { estado: "decidida"; itens: { idx: number; desfecho: DesfechoItem | null }[] }
+  /** `resultado` (0032): o que a ação aprovada no computador devolveu — conteúdo NÃO confiável. */
+  | { estado: "decidida"; itens: { idx: number; desfecho: DesfechoItem | null; resultado?: string }[] }
   | { estado: "pendente" };
 
 export type FalhaTransporte = { transporte: "servidor_fora" | "timeout" | "falha_tecnica"; status: number | null };

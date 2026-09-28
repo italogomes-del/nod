@@ -161,6 +161,9 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     expect(Date.now() - inicio).toBeLessThan(2_000);
 
     await repos.decisoes.decidir(pedido.aguardar, { por: PESSOA_MARLON, agora: agora() });
+    // definido em 2026-09-28: decidida só com o efeito assentado — a fase 1 fecha antes de executar.
+    expect(((await (await interno("GET", `decisoes/${pedido.aguardar}/aguardar`)).json()) as { estado: string }).estado).toBe("pendente");
+    for (const item of await repos.itensAprovacao.listar(pedido.aguardar)) await repos.itensAprovacao.registrarDesfecho(item.id, "executado");
     const decidida = (await (await interno("GET", `decisoes/${pedido.aguardar}/aguardar`)).json()) as { estado: string; itens: { idx: number }[] };
     expect(decidida.estado).toBe("decidida");
     expect(decidida.itens.map((i) => i.idx)).toEqual([0]);

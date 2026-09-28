@@ -1,6 +1,7 @@
 import type { Proposta } from "../contracts/conversa.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
@@ -36,12 +37,9 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
   const original = await deps.repos.turnos.buscar(turnoId);
   if (!original || original.agenteId !== proposta.agenteId || original.conversaId !== proposta.conversaId) throw new ErroDeDominio("estado_invalido");
   if (await deps.repos.agentes.execucaoBloqueada(original.id)) return { data: { turnoId: null }, events };
-  const turno = await deps.repos.turnos.enfileirar({
-    conversaId: original.conversaId,
-    agenteId: original.agenteId,
-    origem: "retomada",
+  const { turno, nova } = await enfileirarRetomada(deps, {
+    original,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
-    profundidade: original.profundidade,
     entradaTexto: [
       `A pessoa autorizou a pasta ${pasta} nesta conversa.`,
       "Retome a tarefa que motivou o pedido, usando o contexto da conversa e a entrada original abaixo.",
@@ -49,15 +47,10 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
       "Entrada do turno original:",
       original.entradaTexto,
     ].join("\n"),
-    entradaConfianca: original.entradaConfianca,
-    harness: original.harness,
-    modelo: original.modelo,
-    retomaTurnoId: original.id,
-    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   return {
     data: { turnoId: turno?.id ?? null },
-    events: turno ? [...events, evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, proposta_id: proposta.id } })] : events,
+    events: nova && turno ? [...events, evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, proposta_id: proposta.id } })] : events,
   };
 };
