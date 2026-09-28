@@ -6,9 +6,11 @@ import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { nomeDoApp } from "../domain/pedido-acesso.ts";
 import { mesmosAcessos } from "../domain/rotina-acessos.ts";
 import { resumoCron, validarAtualizacaoRotina } from "../domain/rotina-texto.ts";
-import { assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
+import type { PlanoTurno } from "../contracts/plano-turno.ts";
+import { agenteVisivel, assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
 import { acessosDeclarados } from "./criar-rotina.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
+import { ehColega } from "./ver-colegas.ts";
 import type { Deps } from "./tipos.ts";
 
 /**
@@ -41,14 +43,17 @@ export const listarRotinasDoAgente: CasoNod<Deps, "listar_rotinas"> = async (dep
 /**
  * Tronco de pausar_rotina/reativar_rotina. Erro de domínio volta TIPADO em {erro} para o modelo
  * corrigir a chamada (mesmo contrato de criar_rotina), em vez de virar negação do proxy.
- * A rotina tem que ser DESTE agente: o id vem do modelo, e sem esse filtro um agente mexeria na
- * rotina de outro dentro do mesmo tenant (rotinas.buscar é tenant-wide, por RLS de leitura).
+ * A rotina tem que ser DESTE agente, ou de um colega quando a pessoa pediu (rotinaAlternavel): o id vem
+ * do modelo, e sem esse filtro um agente mexeria na rotina de qualquer outro dentro do mesmo tenant
+ * (rotinas.buscar é tenant-wide, por RLS de leitura).
  */
-async function alternar(deps: Deps, input: { agenteId: string; rotinaId: string }, estado: EstadoRotina) {
+async function alternar(deps: Deps, input: { agenteId: string; rotinaId: string; plano?: PlanoTurno }, estado: EstadoRotina) {
   try {
-    const atual = await rotinaDoAgente(deps, input.agenteId, input.rotinaId);
+    const { rotina: atual, quem } = await rotinaAlternavel(deps, input);
     const jaEstava = atual.estado === estado;
-    const { data } = await pausarRotina(deps, { rotinaId: input.rotinaId, estado, autoria: autoriaAgente(input.agenteId, deps.escopo.pessoaId) });
+    // Na conversa do colega fica dito quem pausou e a pedido de quem: a pessoa abre a Nina e entende.
+    const texto = quem && estado === "pausada" ? `${quem} pausou esta rotina a seu pedido: nada será disparado até você reativar.` : undefined;
+    const { data } = await pausarRotina(deps, { rotinaId: input.rotinaId, estado, autoria: autoriaAgente(input.agenteId, deps.escopo.pessoaId), ...(texto ? { texto } : {}) });
     return { data: { rotina_id: data.rotina.id, estado: data.rotina.estado, ja_estava: jaEstava, proxima_execucao: data.rotina.estado === "ativa" ? data.rotina.proximaExecucao : null } };
   } catch (e) {
     if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
@@ -57,10 +62,31 @@ async function alternar(deps: Deps, input: { agenteId: string; rotinaId: string 
 }
 
 export const pausarRotinaPeloAgente: CasoNod<Deps, "pausar_rotina"> = (deps, input) =>
-  alternar(deps, { agenteId: input.agenteId, rotinaId: input.rotina_id }, "pausada");
+  alternar(deps, { agenteId: input.agenteId, rotinaId: input.rotina_id, plano: input.plano }, "pausada");
 
 export const reativarRotinaPeloAgente: CasoNod<Deps, "reativar_rotina"> = (deps, input) =>
-  alternar(deps, { agenteId: input.agenteId, rotinaId: input.rotina_id }, "ativa");
+  alternar(deps, { agenteId: input.agenteId, rotinaId: input.rotina_id, plano: input.plano }, "ativa");
+
+/**
+ * definido em 2026-09-28 (ADR-050): a Tarsila assume o que a Nina, a Ada e a Taga faziam e pergunta se
+ * pausa as rotinas delas, para nada chegar em dobro. Pausar e reativar são reversíveis em um clique e a
+ * pessoa está no turno; por isso a rotina de um COLEGA (mesmo dono, confirmado, visível — o filtro de
+ * ver_colegas) também vale, mas só com entrada confiável: turno aberto por mensagem da pessoa. Pergunta de
+ * outro bot, conteúdo de conector ou rotina acordada sozinha nunca mexem na rotina de outro agente.
+ * `quem` = nome de quem pausou quando a rotina é de colega; null quando é a própria.
+ */
+async function rotinaAlternavel(deps: Deps, input: { agenteId: string; rotinaId: string; plano?: PlanoTurno }): Promise<{ rotina: Rotina; quem: string | null }> {
+  assertUuid(input.agenteId, "agenteId");
+  assertUuid(input.rotinaId, "rotina_id");
+  const r = await deps.repos.rotinas.buscar(input.rotinaId);
+  if (!r || r.excluidoEm !== null) throw new ErroDeDominio("nao_encontrado", { cause: "rotina excluída ou inexistente" });
+  if (r.agenteId === input.agenteId) return { rotina: r, quem: null };
+  if (input.plano?.confiancaEntrada !== "confiavel") throw new ErroDeDominio("nao_encontrado", { cause: "rotina de outro agente fora de pedido da pessoa" });
+  const eu = await agenteVisivel(deps.repos, input.agenteId);
+  const dono = await deps.repos.agentes.buscar(r.agenteId);
+  if (!dono || !ehColega(eu, dono)) throw new ErroDeDominio("nao_encontrado", { cause: "rotina de quem não é colega" });
+  return { rotina: r, quem: eu.nome };
+}
 
 /** A rotina tem que existir, ser DESTE agente e não estar excluída. Mesmo filtro de `alternar`. */
 async function rotinaDoAgente(deps: Deps, agenteId: string, rotinaId: string): Promise<Rotina> {

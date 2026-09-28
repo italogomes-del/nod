@@ -61,8 +61,13 @@ describe("montarPlano", () => {
     expect(p.decididoPor).toBe("regra:reducao_por_confianca");
   });
 
-  it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega, pedir acesso e silêncio; sala tem passar/encaminhar", () => {
-    expect(nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"))).toEqual(["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"]);
+  it("modos: criacao é o kit da conversa mais atualizar_perfil; rotina permite consulta a colega, pedir acesso e silêncio; sala tem passar/encaminhar", () => {
+    // ADR-050: bot novo é bot completo — perfil vazio não tira ferramenta nenhuma da conversa.
+    const criacao = nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"));
+    expect(criacao.filter((n) => n !== "atualizar_perfil").sort()).toEqual(nomes(montarPlano(base)).filter((n) => !n.includes("__")).sort());
+    expect(criacao).toContain("atualizar_perfil");
+    for (const n of ["ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"]) expect(criacao).toContain(n);
+    expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
     expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
     const sala = nomes(montarPlano({ ...base, modo: "sala" }));
@@ -141,8 +146,11 @@ describe("catálogo de workspace conforme haja projeto autorizado", () => {
     expect(montarPlano({ ...base, workspace: false, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
   });
   it("fora da conversa própria não oferece nenhuma", () => {
-    for (const modo of ["sala", "criacao"] as const) {
+    for (const modo of ["sala", "rotina"] as const) {
       expect(montarPlano({ ...base, modo, workspace: true, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
     }
+  });
+  it("a criação é conversa própria: bot novo também trabalha na pasta (ADR-050)", () => {
+    expect(montarPlano({ ...base, modo: "criacao", workspace: true, workspaceVinculado: true }).catalogo.ferramentas.some((f) => f.nome === "workspace_terminal")).toBe(true);
   });
 });

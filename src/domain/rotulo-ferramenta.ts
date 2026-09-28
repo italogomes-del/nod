@@ -20,6 +20,7 @@ const NOD: Record<string, string> = {
   sem_novidade: "Viu que não há novidade",
   perguntar_a_bot: "Perguntou a outro bot",
   delegar_tarefa: "Pediu uma tarefa a outro bot",
+  ver_colegas: "Viu o que os colegas fazem",
 };
 
 /** Prefixos de capacidade que só leem; o resto de um conector conta como alteração. */

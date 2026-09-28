@@ -17,6 +17,7 @@ import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
 import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
+import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -161,8 +162,11 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
-function renderProposta(p: Proposta, estado: Estado): string {
+function renderProposta(p: Proposta, estado: Estado, propostas: readonly Proposta[]): string {
   const a = agenteDe(estado, p.agenteId);
+  // definido em 2026-09-28 (ADR-050): o perfil que traz rotinas é um card só, com as rotinas dentro.
+  const cardPerfil = renderCardPerfil(p, propostas, estado, a);
+  if (cardPerfil !== null) return cardPerfil;
   // definido em 2026-09-25 (jornadas de conexão): conectar e permitir no mesmo card (card-acesso.ts).
   const cardAcesso = renderCardAcesso(p, itemAbertoDoCard(p, estado), estado);
   if (cardAcesso !== null) return cardAcesso;
@@ -380,13 +384,15 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
   // definido em 2026-09-24: a proposta de um pedido dobrado no "×N" não vira card próprio — sem a
   // decisão aberta ela cairia no card de revisão; o card do grupo (o mais antigo) decide por todas.
   const gemeas = idsGemeas(estado);
-  const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id));
+  // As rotinas que vêm com um perfil (ADR-050) aparecem dentro do card dele, não soltas.
+  const noPerfil = idsNoPerfil(c.propostas);
+  const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id) && !noPerfil.has(p.id));
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
   return `<div class="timeline">
     ${sep}
     ${renderMensagensAgrupadas(c.mensagens, estado, sala)}
     ${acolhimento}
-    ${propostas.map((p) => renderProposta(p, estado)).join("")}
+    ${propostas.map((p) => renderProposta(p, estado, c.propostas)).join("")}
     ${renderDecisoesDaConversa(estado, c.conversa.id, new Set(propostas.map((p) => p.id)))}
     ${vivos.map((t) => renderTurnoVivo(t, c, estado)).join("")}
     ${renderFaixaParada(estado.faixaParada)}

@@ -10,6 +10,14 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
   if (!existente) throw new ErroDeDominio("nao_encontrado");
   const proposta = await deps.repos.propostas.decidir(input.propostaId, "recusada");
   if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${existente.estado}` });
+  // definido em 2026-09-28 (ADR-050): as rotinas que vieram com o perfil saem de lado junto com ele —
+  // o card era um só, e elas não têm decisão própria em "Sua vez" para alguém recusar depois.
+  if (proposta.payload.kind === "perfil") {
+    for (const id of proposta.payload.rotinas ?? []) {
+      const rp = await deps.repos.propostas.buscar(id);
+      if (rp?.estado === "pendente") await deps.repos.propostas.decidir(id, "recusada");
+    }
+  }
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
   const mensagem = await deps.repos.mensagens.criar({

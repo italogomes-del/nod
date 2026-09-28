@@ -38,6 +38,25 @@ describe("montarPromptSistema", () => {
     expect(p).not.toContain("O que você faz");
   });
 
+  it("ADR-050: a criação manda fazer o primeiro pedido agora e propor o perfil com as rotinas, não esperar o perfil", () => {
+    const p = montarPromptSistema({ agente: { ...agente, nome: "Tarsila", titulo: "", descricao: "" }, memorias: [], ferramentas: [f("atualizar_perfil"), f("ver_colegas")], pessoaNome: "Marlon", modo: "criacao" });
+    expect(p).toContain("o primeiro pedido é trabalho para fazer agora");
+    expect(p).toContain("nunca é motivo para dizer que não consegue");
+    expect(p).toContain("pondo em rotinas as tarefas recorrentes");
+    expect(p).not.toContain("Faça uma pergunta curta por vez e ofereça exemplos concretos. Assim que");
+  });
+
+  it("ADR-050: com ver_colegas o diretório aparece e a linha diz que o que o colega faz é dado do nod", () => {
+    const entrada = { agente, memorias: [], pessoaNome: "Marlon", modo: "conversa" as const, colegas: [{ id: "nina", nome: "Nina", titulo: "E-mail", descricao: "Resume o Gmail" }] };
+    const so = montarPromptSistema({ ...entrada, ferramentas: [f("ver_colegas")] });
+    expect(so).toContain('"nome":"Nina"');
+    expect(so).toContain("chame ver_colegas");
+    expect(so).toContain("Nunca peça à pessoa para copiar o que um colega faz");
+    expect(so).toContain("só pausa ou reativa quando a pessoa pedir");
+    // Sem perguntar/delegar, a linha do trabalho assíncrono não entra: ver_colegas responde na hora.
+    expect(so).not.toContain("a resposta chegará em um novo turno");
+  });
+
   it("expõe o inventário de rotinas com id, só para quem pode agir sobre rotina existente", () => {
     const rotinas = [{ id: "r-relatorio", resumo: "dias úteis às 08:00 (America/Sao_Paulo)", instrucao: "Resumir os PRs abertos", estado: "ativa" as const }];
     const entrada = { agente, memorias: [], pessoaNome: "Marlon", modo: "conversa" as const, rotinas };

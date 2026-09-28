@@ -27,7 +27,12 @@ export type Conversa = {
 export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
-export type PayloadPropostaPerfil = { kind: "perfil"; nome?: string; titulo?: string; descricao?: string };
+/**
+ * definido em 2026-09-28 (ADR-050): `rotinas` são as propostas 'rotina' que vêm com o perfil (o card é um
+ * só e confirmar cria todas); `turnoId` é o turno que propôs, retomado quando a pessoa confirma. Propostas
+ * gravadas antes não têm nenhum dos dois.
+ */
+export type PayloadPropostaPerfil = { kind: "perfil"; nome?: string; titulo?: string; descricao?: string; turnoId?: string; rotinas?: string[] };
 export type PayloadPropostaRotina = {
   kind: "rotina";
   cron: string;
