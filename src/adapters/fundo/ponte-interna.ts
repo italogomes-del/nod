@@ -1,4 +1,5 @@
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
+import type { IdHarness } from "../../contracts/harness.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
@@ -51,6 +52,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const escopos = new Map<string, Escopo>();
   /** Executor do PLANO de cada turno puxado: a entrega assenta com ele, não com o executor vigente (que pode ter sido trocado no meio). */
   const executores = new Map<string, Executor>();
+  /** Harness do plano puxado (0030): a sessão que o turno devolver é deste harness. */
+  const harnesses = new Map<string, IdHarness>();
   const tenantsPorPessoa = new Map<string, string>();
 
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
@@ -88,6 +91,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (r.data.plano) {
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
+            if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
           }
           return r.data.plano;
         });
@@ -131,7 +135,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await assentarTurno(d, { ...e, executor });
+          const r = await assentarTurno(d, { ...e, executor, harness: harnesses.get(e.turnoId) ?? null });
           // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
           // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
           // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).
@@ -171,6 +175,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       } finally {
         escopos.delete(e.turnoId);
         executores.delete(e.turnoId);
+        harnesses.delete(e.turnoId);
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
       }

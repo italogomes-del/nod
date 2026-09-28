@@ -1,8 +1,9 @@
 import type { Visibilidade } from "../contracts/agente.ts";
 import type { Conversa, TipoConversa } from "../contracts/conversa.ts";
 import type { Executor } from "../contracts/evento.ts";
+import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
-import { ms } from "./conversao.ts";
+import { ms, msOuNull } from "./conversao.ts";
 
 interface Linha {
   tenant_id: string;
@@ -14,10 +15,12 @@ interface Linha {
   sala_id: string | null;
   sessao_cli: string | null;
   sessao_executor: string | null;
+  sessao_harness: string | null;
+  sessao_em: Date | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, tipo, agente_id, sala_id, sessao_cli, sessao_executor, criado_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, tipo, agente_id, sala_id, sessao_cli, sessao_executor, sessao_harness, sessao_em, criado_em";
 
 const paraConversa = (l: Linha): Conversa => ({
   tenantId: l.tenant_id,
@@ -29,6 +32,8 @@ const paraConversa = (l: Linha): Conversa => ({
   salaId: l.sala_id,
   sessaoCli: l.sessao_cli,
   sessaoExecutor: l.sessao_executor === "local" || l.sessao_executor === "catcher" ? l.sessao_executor : null,
+  sessaoHarness: HARNESSES.find((h) => h.id === l.sessao_harness)?.id ?? null,
+  sessaoEm: msOuNull(l.sessao_em),
   criadoEm: ms(l.criado_em),
 });
 
@@ -72,9 +77,13 @@ export function conversasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraConversa);
     },
 
-    /** Grava sessão E executor juntos (0005): sessão sem dono não vale --resume. */
-    async atualizarSessaoCli(id: string, sessaoCli: string | null, sessaoExecutor: Executor | null = null): Promise<boolean> {
-      const r = await conn`update conversas set sessao_cli = ${sessaoCli}, sessao_executor = ${sessaoCli ? sessaoExecutor : null} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    /**
+     * Grava sessão, executor e harness juntos (0005, 0030): sessão sem dono não vale --resume. `sessao_em`
+     * marca até onde a sessão viu a conversa; o que chegar depois entra no plano como "desde a sua última vez".
+     */
+    async atualizarSessaoCli(id: string, sessaoCli: string | null, sessaoExecutor: Executor | null = null, sessaoHarness: IdHarness | null = null): Promise<boolean> {
+      const r = await conn`update conversas set sessao_cli = ${sessaoCli}, sessao_executor = ${sessaoCli ? sessaoExecutor : null},
+        sessao_harness = ${sessaoCli ? sessaoHarness : null}, sessao_em = ${sessaoCli ? conn`clock_timestamp()` : null} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
     },
   };

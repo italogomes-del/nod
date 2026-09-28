@@ -382,10 +382,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar() {
         return doTenant(b.conversas).sort((x, y) => x.criadoEm - y.criadoEm);
       },
-      async atualizarSessaoCli(id, sessaoCli) {
+      async atualizarSessaoCli(id, sessaoCli, sessaoExecutor = null, sessaoHarness = null) {
         const c = doTenant(b.conversas).find((x) => x.id === id);
         if (!c) return false;
         c.sessaoCli = sessaoCli;
+        c.sessaoExecutor = sessaoCli ? sessaoExecutor : null;
+        c.sessaoHarness = sessaoCli ? sessaoHarness : null;
+        c.sessaoEm = sessaoCli ? agora() : null;
         return true;
       },
     },
