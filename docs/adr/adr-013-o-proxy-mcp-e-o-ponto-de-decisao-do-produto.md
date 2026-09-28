@@ -22,3 +22,17 @@ Hoje o proxy chama o servidor por `tools/call` em loopback (mesmo processo, `Pon
 ## Gatilho de reversão
 
 Reabrir (mover a autoridade para o servidor) se aparecer um incidente em que o AGENTE — não o dono da máquina — contornou o proxy local, ou se um segundo executor remoto precisar de decisão sem plano puxado. Trocar o binário do proxy pelo dono da máquina NÃO é gatilho: a trilha nunca foi probatória contra o dono.
+
+## Emenda de 2026-09-28 — corte que não perde dado
+
+**Contexto.** O corte fixo de 8.000 caracteres ("cabe num turno haiku", 16/09) fazia o bot trabalhar com um pedaço da resposta. O corte caía no meio de um item, e a marca dizia "orçamento do turno", que o bot repetia à pessoa como um limite de turno. Casos: o ClickUp da Ada, o Gmail da Tarsila e 70 de 104 arquivos de um PR do Dev 1. Nenhum bot roda em haiku hoje. O Claude Code do terminal passa 25.000 tokens inline e, acima disso, salva a resposta num arquivo que o modelo lê por partes.
+
+**Decisão.**
+- **Orçamento de 75.000 caracteres por resposta** (`ORCAMENTO_RESULTADO_CHARS`), equivalente ao inline do terminal.
+- **O proxy continua o único ponto de corte**, e o corte passou a entender JSON:
+  - compacta sem perda (tira espaçamento e campos vazios);
+  - corta por **itens inteiros** da maior lista, mantendo as chaves irmãs e citando a paginação da fonte;
+  - só no último caso corta por caracteres.
+- **`ler_mais {ref}`, ferramenta de origem `proxy`:** o proxy guarda o resto durante o turno e o entrega em partes, com a mesma moldura. Ela não vai ao servidor: o resto já passou pela decisão do servidor na chamada original. É leitura pura, então fica também no catálogo reduzido.
+- **O servidor GitHub nativo e o `gh` da máquina deixam de cortar antes.** O corte duplo perdia a marca.
+- **Contra o desvio para arquivo, que o bot não lê** (`--tools ""`): o filho recebe `MAX_MCP_OUTPUT_TOKENS` com o dobro do orçamento, e o `tools/list` anota `_meta.anthropic/maxResultSizeChars`. Medido com o CLI real em `scripts/sonda-saida-mcp.ts`.

@@ -26,8 +26,26 @@ export const PROBE_MS = 8_000;
 export const LONGPOLL_APROVACAO_MS = 20_000;
 /** Conteúdo não confiável menor que isto não é embrulhado. definido em 2026-09-16: copiado do limiar _UNTRUSTED_WRAP_MIN_CHARS do openmausbot (ADR-026). */
 export const UNTRUSTED_WRAP_MIN_CHARS = 32;
-/** Corte do resultado de ferramenta antes de entrar no contexto. definido em 2026-09-16: ~2k tokens, cabe num turno haiku sem estourar o cache (ADR-013). */
-export const ORCAMENTO_RESULTADO_CHARS = 8_000;
+/**
+ * Corte do resultado de ferramenta antes de entrar no contexto (ADR-013). definido em 2026-09-16 como 8.000
+ * (~2k tokens, "cabe num turno haiku"); redefinido em 2026-09-28 para o que o Claude Code do terminal passa
+ * inline: 25.000 tokens por resposta MCP (MAX_MCP_OUTPUT_TOKENS padrão), ~75.000 caracteres de JSON. Nenhum
+ * bot roda em haiku hoje, e 8.000 cortava o ClickUp da Ada, o Gmail da Tarsila e 70 de 104 arquivos de um PR.
+ * Acima disso nada se perde: o proxy guarda o resto e o modelo lê com `ler_mais`.
+ */
+export const ORCAMENTO_RESULTADO_CHARS = 75_000;
+/**
+ * definido em 2026-09-28: acima do seu próprio teto o Claude Code desvia a resposta MCP para um arquivo e
+ * entrega só o caminho — que o bot do nod não abre (--tools "", sem Read). Todo token tem pelo menos um
+ * caractere na prática, mas emoji e escrita não latina gastam mais de um token por caractere: o dobro do
+ * orçamento garante que a resposta cortada pelo proxy nunca chega a esse teto.
+ * medido em 2026-09-28 (CLI 2.1.283, scripts/sonda-saida-mcp.ts): com as duas proteções, 75.000 caracteres
+ * de hex chegaram inline (tool_result de 75.016); sem elas, 120.000 viraram um aviso de 1.476 caracteres
+ * apontando para ~/.claude/projects/…/tool-results, e o modelo tentou um `grep` que não tinha.
+ */
+export const MAX_MCP_OUTPUT_TOKENS_FILHO = ORCAMENTO_RESULTADO_CHARS * 2;
+/** Anotação por ferramenta no tools/list (`_meta.anthropic/maxResultSizeChars`): texto até isto fica inline. */
+export const MAX_RESULTADO_INLINE_CHARS = ORCAMENTO_RESULTADO_CHARS + 5_000;
 /** Abandono do outbox exige AMBAS. definido em 2026-09-16: 5 tentativas cobre um despachante a cada 250ms com falha transitória (Leapy §7). */
 export const OUTBOX_TETO_TENTATIVAS = 5;
 /** definido em 2026-09-16: 30 min — só o teto esvaziaria a fila numa queda curta do consumidor (Leapy §7). */

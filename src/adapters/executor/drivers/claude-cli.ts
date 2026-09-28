@@ -17,6 +17,7 @@ import { iniciarProcesso, executarColetando, type Processo } from "../processo.t
 import { lerFlagsDoHelp, lerVersao, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
 import { NATIVAS_DE_ARQUIVO } from "../../../domain/nativas.ts";
+import { MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
 
 /**
  * Driver claude-cli (ADR-012: implementação ÚNICA e real; ADR-014 invertido: o CLI é o da pessoa).
@@ -135,6 +136,8 @@ export function montarEnvDoFilho(env: Record<string, string>, home: string, praz
     // definido em 2026-09-16: uma ferramenta (aprovação em long-poll) pode esperar tanto quanto o turno, nunca menos de 60 s;
     // o teto real do CLI é o que scripts/sonda-mcp-timeout.ts mede.
     MCP_TOOL_TIMEOUT: String(Math.max(60_000, Math.floor(prazoMs))),
+    // definido em 2026-09-28: acima deste teto o CLI desviaria a resposta para um arquivo que o bot não lê.
+    MAX_MCP_OUTPUT_TOKENS: String(MAX_MCP_OUTPUT_TOKENS_FILHO),
   };
 }
 

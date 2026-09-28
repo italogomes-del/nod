@@ -69,8 +69,8 @@ describe("conector github na máquina pelo gh (ADR-048)", PROCESSO, () => {
     expect(env.HOME).toBe(casa);
   });
 
-  it("o diff grande volta cortado ao orçamento, com a marca de corte", async () => {
-    const r = await executar("pr_diff", { repositorio: "leapy/nod", numero: 7 });
+  it("com orçamento, o diff grande volta cortado e com a marca (quem chama sem proxy, como o modo local)", async () => {
+    const r = await executarGithubNaMaquina({ capacidade: "pr_diff", argumentos: { repositorio: "leapy/nod", numero: 7 }, ambiente: ambiente(), bin: gh, orcamentoChars: 8_000 });
     expect(r.isError).toBe(false);
     expect(r.conteudo.length).toBeLessThan(8_400);
     expect(r.conteudo).toContain("+linha 0 do diff");
