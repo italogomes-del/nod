@@ -56,6 +56,12 @@ export type PlanoTurno = {
    * e o driver mantém o diretório temporário vazio com as ferramentas nativas desligadas.
    */
   workspacePastas?: { ativa: string; aprovadas: string[] } | null;
+  /**
+   * definido em 2026-09-28: ferramentas nativas do harness liberadas neste turno (`nativasDoTurno`). O prompt
+   * e o driver leem daqui — antes o prompt sempre dizia "Não há Read…" mesmo com elas ligadas. Ausente
+   * (plano de servidor antigo) = o driver cai na regra anterior (nativas de arquivo quando há pasta).
+   */
+  nativas?: readonly string[];
   superficie: "maquina_da_pessoa";
   decididoPor: `regra:${string}`;
   autoria: Autoria;
