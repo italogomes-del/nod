@@ -27,6 +27,8 @@ export type ItemAExecutar = {
   dono?: { tenantId: string; pessoaId: string };
   /** ADR-048: a decisão veio de turno de rotina; só então o GitHub App da organização pode atender. */
   rotina?: boolean;
+  /** ADR-053: comando no terminal do Mac — aprovar LIBERA; quem roda é o hook do turno, no Mac da pessoa. */
+  terminal?: boolean;
 };
 
 export type SaidaMarcarEDecidir = { decisao: Decisao; itens: ItemAprovacao[]; aExecutar: ItemAExecutar[] };
@@ -59,7 +61,8 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   for (const marca of input.itens ?? []) {
     const existente = await deps.repos.itensAprovacao.buscar(marca.id);
     if (!existente || existente.decisaoId !== decisao.id) throw new ErroDeDominio("entrada_invalida", { cause: `item ${marca.id} não pertence à decisão` });
-    if (existente.destino.conector === "computador" && marca.textoFinal !== undefined && marca.textoFinal !== existente.textoOriginal) throw new ErroDeDominio("entrada_invalida");
+    // Computador e terminal (ADR-053): aprova-se exatamente o que o bot vai fazer — o texto não se edita no card.
+    if ((existente.destino.conector === "computador" || existente.destino.conector === "terminal") && marca.textoFinal !== undefined && marca.textoFinal !== existente.textoOriginal) throw new ErroDeDominio("entrada_invalida");
     const marcado = await deps.repos.itensAprovacao.marcar(marca.id, { selecionado: marca.selecionado, textoFinal: marca.textoFinal, agora });
     if (!marcado) throw new ErroDeDominio("nao_permitido", { cause: "item de outra pessoa" });
   }
@@ -74,6 +77,12 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
       if (decisao.ownerId !== deps.escopo.pessoaId || !decisao.turnoId || typeof item.destino.argumentos.acaoId !== "string") throw new ErroDeDominio("nao_permitido");
       if (!item.selecionado) await deps.repos.computadores.concluir(item.destino.argumentos.acaoId, "recusada");
       aExecutar.push({ item, conectorId: null, computador: { tenantId: decisao.tenantId, pessoaId: decisao.ownerId, agenteId: decisao.agenteId, turnoId: decisao.turnoId, acaoId: item.destino.argumentos.acaoId } });
+      continue;
+    }
+    // ADR-053: o comando roda no Mac da DONA, pelo hook do turno dela — só ela aprova.
+    if (item.destino.conector === "terminal") {
+      if (decisao.ownerId !== deps.escopo.pessoaId || !decisao.turnoId) throw new ErroDeDominio("nao_permitido");
+      aExecutar.push({ item, conectorId: null, terminal: true });
       continue;
     }
     const conector = item.selecionado ? await deps.repos.conectores.buscarPorSlug(item.destino.conector) : null;
@@ -108,9 +117,14 @@ export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unk
  */
 export async function executarItens(services: Pick<Services, "conectores" | "computadores" | "github">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
   const desfechos: DesfechoExecutado[] = [];
-  for (const { item, conectorId, computador, dono, rotina } of aExecutar) {
+  for (const { item, conectorId, computador, dono, rotina, terminal } of aExecutar) {
     if (!item.selecionado) {
       desfechos.push({ itemId: item.id, desfecho: item.origemSensivel ? "sensivel_nao_aprovado" : "retirado_pela_pessoa" });
+      continue;
+    }
+    // ADR-053: nada roda no servidor. "executado" é o que o hook lê para soltar o comando (autorizar-comando.ts).
+    if (terminal) {
+      desfechos.push({ itemId: item.id, desfecho: "executado" });
       continue;
     }
     if (item.destino.execucao === "maquina") {
@@ -146,12 +160,15 @@ export async function executarItens(services: Pick<Services, "conectores" | "com
 export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovacao[], texto: string): string {
   const linhas = itens.map((i) => `- item ${i.idx + 1} (${i.destino.conector}.${i.destino.ferramenta}): ${i.desfecho ?? "sem desfecho"} — ${i.textoFinal}`);
   const noComputador = itens.some((i) => i.destino.conector === "computador" && i.desfecho === "executado");
+  // ADR-053: o comando aprovado depois de a espera no turno acabar ainda não rodou — o turno anterior foi negado.
+  const noTerminal = itens.some((i) => i.destino.conector === "terminal" && i.desfecho === "executado");
   return [
     // definido em 2026-09-28: não é "turno interrompido" — o turno que pediu concluiu; esta é a continuação dele.
     "Continuando a tarefa: a pessoa decidiu a aprovação que você pediu; nada foi reenviado.",
     `Resultado da aprovação "${decisao.frase}" (${texto}):`,
     ...linhas,
     ...(noComputador ? ["O resultado da ação no computador não veio junto: observe a tela ou os arquivos antes de seguir."] : []),
+    ...(noTerminal ? ["O comando aprovado ainda NÃO rodou: rode exatamente o mesmo comando agora — ele passa sem novo pedido."] : []),
     "Continue a partir daqui; nada foi reenviado.",
   ].join("\n");
 }

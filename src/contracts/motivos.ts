@@ -62,6 +62,8 @@ export const MOTIVOS_APROVACAO_MANUAL = [
   "gate_de_rotina",
   "fora_do_catalogo",
   "sem_plano",
+  // ADR-053 (0034): comando que altera algo no terminal do Mac da pessoa.
+  "destino_terminal",
 ] as const;
 export type MotivoAprovacaoManual = (typeof MOTIVOS_APROVACAO_MANUAL)[number];
 

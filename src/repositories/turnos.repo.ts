@@ -290,6 +290,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.liberado === true;
     },
 
+    /** ADR-053 (0034): "Pode fazer e o resto desta tarefa" num comando do terminal — a mesma regra do computador. */
+    async liberarTerminal(raizId: string, agora: number): Promise<boolean> {
+      const r = await conn`update turnos set terminal_liberado_em = coalesce(terminal_liberado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${raizId}`;
+      return r.count === 1;
+    },
+
+    async terminalLiberado(raizId: string): Promise<boolean> {
+      const [l] = await conn<{ liberado: boolean }[]>`select terminal_liberado_em is not null as liberado from turnos where tenant_id = ${escopo.tenantId} and id = ${raizId}`;
+      return l?.liberado === true;
+    },
+
     /** Assenta o resultado: só sai de 'despachando' (ou 'pendente' para interrupção antes de rodar). */
     async assentar(id: string, a: Assentamento): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`

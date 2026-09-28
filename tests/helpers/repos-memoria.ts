@@ -67,6 +67,8 @@ export type BancoMemoria = {
   /** 0032: quem continuou cada decisão e as raízes com o computador liberado para a tarefa. */
   continuacoes: Map<string, "turno" | "retomada">;
   computadorLiberado: Set<string>;
+  /** 0034 (ADR-053): raízes com o terminal liberado para a tarefa. */
+  terminalLiberado: Set<string>;
   /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
   contaminados: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
@@ -113,6 +115,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     composioChaves: new Map(),
     continuacoes: new Map(),
     computadorLiberado: new Set(),
+    terminalLiberado: new Set(),
     contaminados: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
@@ -627,6 +630,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async computadorLiberado(raizId: string) {
         return b.computadorLiberado.has(raizId);
       },
+      async liberarTerminal(raizId: string) {
+        if (!doTenant(b.turnos).some((t) => t.id === raizId && t.ownerId === escopo.pessoaId)) return false;
+        b.terminalLiberado.add(raizId);
+        return true;
+      },
+      async terminalLiberado(raizId: string) {
+        return b.terminalLiberado.has(raizId);
+      },
       async contaminar(id: string) {
         if (!doTenant(b.turnos).some((t) => t.id === id && t.ownerId === escopo.pessoaId)) return false;
         b.contaminados.add(id);
@@ -950,6 +961,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async listar(decisaoId) {
         return doTenant(b.itens).filter((i) => i.decisaoId === decisaoId).sort((x, y) => x.idx - y.idx);
+      },
+      async comandoAprovadoNaCadeia(turnoId, comando) {
+        const cadeia = new Set<string>();
+        let atual = doTenant(b.turnos).find((t) => t.id === turnoId) ?? null;
+        for (let saltos = 0; atual && saltos < 50; saltos++) {
+          cadeia.add(atual.id);
+          atual = atual.retomaTurnoId ? doTenant(b.turnos).find((t) => t.id === atual?.retomaTurnoId) ?? null : null;
+        }
+        const decisoes = new Set(doTenant(b.decisoes).filter((d) => d.turnoId !== null && cadeia.has(d.turnoId)).map((d) => d.id));
+        return doTenant(b.itens).some((i) => decisoes.has(i.decisaoId) && i.destino.conector === "terminal" && i.destino.argumentos.comando === comando && i.selecionado && i.desfecho === "executado");
       },
       async pendentesNaMaquina() {
         return doTenant(b.itens).flatMap((item) => {

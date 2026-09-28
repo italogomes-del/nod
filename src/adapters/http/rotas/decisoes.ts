@@ -8,7 +8,7 @@ import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-ca
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
-import { liberarComputadorNaTarefa } from "../../../use-cases/liberar-computador-na-tarefa.ts";
+import { liberarNaTarefa } from "../../../use-cases/liberar-na-tarefa.ts";
 import { permitirSempre } from "../../../use-cases/permitir-sempre.ts";
 import { recusarProposta } from "../../../use-cases/recusar-proposta.ts";
 import { autoriaDaPessoa } from "../../../use-cases/registrar-negacao.ts";
@@ -43,7 +43,7 @@ function sempre(corpo: unknown): boolean {
   return typeof corpo === "object" && corpo !== null && (corpo as { sempre?: unknown }).sempre === true;
 }
 
-/** "Pode fazer e o resto desta tarefa" (2026-09-28): libera o computador para a cadeia do turno raiz. */
+/** "Pode fazer e o resto desta tarefa" (2026-09-28): libera o computador ou o terminal (ADR-053) para a cadeia do turno raiz. */
 function restoDaTarefa(corpo: unknown): boolean {
   return typeof corpo === "object" && corpo !== null && (corpo as { restoDaTarefa?: unknown }).restoDaTarefa === true;
 }
@@ -101,7 +101,7 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             if (r.turnoRetomadaId) ids.turnoRetomada = r.turnoRetomadaId;
           } else {
             // Liberar ANTES de executar: a próxima ação da tarefa pode chegar enquanto esta ainda roda.
-            if (restoDaTarefa(corpo)) await comoDona(ctx.escopo, atual, (deps) => executar(deps, liberarComputadorNaTarefa, { decisao: fase1.decisao }));
+            if (restoDaTarefa(corpo)) await comoDona(ctx.escopo, atual, (deps) => executar(deps, liberarNaTarefa, { decisao: fase1.decisao }));
             // A chamada ao conector roda FORA de qualquer transação (não segura conexão do banco).
             const desfechos: DesfechoExecutado[] = await executarItens(d.services, fase1.aExecutar);
             const fase2 = await comoDona(ctx.escopo, atual, (deps) => executar(deps, assentarAprovacao, { decisaoId, desfechos }));

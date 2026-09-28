@@ -7,6 +7,7 @@ import { NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
 import type { Relogio } from "../../../shared/types.ts";
+import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
 import { chamarFerramenta, REGRA_CHAMADA, registrarExecucaoLocal, VERSAO_REGRA_CHAMADA } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import type { Rota } from "../roteador.ts";
@@ -162,8 +163,10 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       metodo: "POST",
       padrao: /^\/nativas$/,
       interno: true,
+      // revisto em 2026-09-28 (ADR-053): o Bash vem com o comando, e quem decide é autorizarComando — o que só lê
+      // roda; o resto abre um card e a resposta diz ao hook qual decisão esperar. Trilha só do que roda.
       async handler(ctx) {
-        const c = (await ctx.corpo()) as { ferramenta?: unknown } | null;
+        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown } | null;
         const ferramenta = typeof c?.ferramenta === "string" ? c.ferramenta : "";
         const turnoId = ctx.params.turnoId ?? "";
         const plano = deps.tokens.planoDe(turnoId);
@@ -171,11 +174,17 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           ctx.json(403, { codigo: "nao_permitido", mensagem: "ferramenta nativa fora do plano deste turno" });
           return;
         }
-        await deps.dentro(ctx.escopo, async (d) => {
+        if (ferramenta === "Bash" && typeof c?.comando !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "Bash sem comando" });
+        const aguardar = await deps.dentro(ctx.escopo, async (d) => {
+          if (ferramenta === "Bash") {
+            const r = await executar(d, autorizarComando, { plano, comando: String(c?.comando) });
+            if ("aguardar" in r) return r.aguardar;
+          }
           await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA });
           if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());
+          return null;
         });
-        ctx.json(200, { ok: true });
+        ctx.json(200, aguardar ? { aguardar } : { ok: true });
       },
     },
     {

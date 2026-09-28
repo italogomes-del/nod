@@ -79,6 +79,28 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraItem);
     },
 
+    /**
+     * ADR-053: este comando já foi aprovado nesta tarefa? Item 'terminal' aprovado (desfecho executado) com o MESMO
+     * texto, numa decisão de um turno da cadeia — este e os que ele retoma. É o que deixa a retomada refazer o
+     * comando que a pessoa aprovou depois de a espera no turno acabar, sem um segundo card.
+     */
+    async comandoAprovadoNaCadeia(turnoId: string, comando: string): Promise<boolean> {
+      const [l] = await conn<{ sim: boolean }[]>`
+        with recursive cadeia(id, retoma_turno_id, saltos) as (
+          select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${turnoId}
+          union all
+          select t.id, t.retoma_turno_id, c.saltos + 1 from turnos t join cadeia c on t.tenant_id = ${escopo.tenantId} and t.id = c.retoma_turno_id
+          where c.saltos < 50
+        )
+        select exists (
+          select 1 from itens_aprovacao i join decisoes d on d.tenant_id = i.tenant_id and d.id = i.decisao_id
+          where i.tenant_id = ${escopo.tenantId} and d.turno_id in (select id from cadeia)
+            and i.destino->>'conector' = 'terminal' and i.destino->'argumentos'->>'comando' = ${comando}
+            and i.selecionado and i.desfecho = 'executado'
+        ) as sim`;
+      return l?.sim === true;
+    },
+
     async buscar(id: string): Promise<ItemAprovacao | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from itens_aprovacao where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? paraItem(l) : null;

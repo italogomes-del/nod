@@ -7,7 +7,7 @@ import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComput
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
-import { computadorLiberadoNaTarefa } from "../../use-cases/liberar-computador-na-tarefa.ts";
+import { computadorLiberadoNaTarefa } from "../../use-cases/liberar-na-tarefa.ts";
 import type { Escopo } from "../../shared/types.ts";
 import { autoriaAgente, evento } from "../../use-cases/autoria-evento.ts";
 import { errosDoSchema, type ResultadoChamada } from "../../use-cases/chamar-ferramenta.ts";
