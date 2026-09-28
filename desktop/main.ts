@@ -13,6 +13,7 @@ import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop } from "../src/contracts/desktop.ts";
 import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } from "./avisos-mac.ts";
+import { abreNoNavegador } from "./links-externos.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 
 type Config = { url: string; chave: string };
@@ -146,7 +147,8 @@ async function ler(): Promise<Config | null> {
 }
 function proteger(w: BrowserWindow, origem?: string) {
   w.webContents.setWindowOpenHandler(({ url }) => {
-    if (origem && url.startsWith(`${origem}/`)) void shell.openExternal(url);
+    // ADR-053: o link do bot (target=_blank) também sai para o navegador padrão; a janela nunca abre no app.
+    if (origem && (url.startsWith(`${origem}/`) || abreNoNavegador(url))) void shell.openExternal(url);
     return { action: "deny" };
   });
   w.webContents.on("will-navigate", (e, url) => {
