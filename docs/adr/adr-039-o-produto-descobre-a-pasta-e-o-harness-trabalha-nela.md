@@ -83,3 +83,12 @@ Se o confinamento do harness deixar de ser verificável — uma versão que remo
 `--restricted`, ou uma medição que mostre vazamento para fora das pastas permitidas —
 voltar as nativas para desligadas e reativar as ferramentas `workspace_*` de arquivo,
 que continuam existindo no proxy.
+
+## Emenda de 2026-09-28 — nativas só em turno de conversa confiável
+
+**Contexto.** Uma revisão do caminho das ferramentas nativas achou uma brecha. Com pasta autorizada, `montarArgs` ligava Write, Edit e as demais nativas de arquivo em **qualquer** turno da conversa: inclusive a continuação que traz a resposta de um colega (entrada não confiável) e a retomada de uma rotina com gate de aprovação. As nativas não passam pelo proxy, então nem a moldura nem o catálogo reduzido do ADR-026 as seguravam. Além disso, o prompt sempre dizia "Não há Read, Edit, Write…", mesmo quando o driver as ligava.
+
+**Decisão.**
+- `nativasDoTurno` (`src/domain/nativas.ts`) decide as nativas no domínio. Só um turno de modo `conversa`, com entrada `confiavel` e pasta autorizada, as recebe. Rotina, peer, delegação, sala, criação e turno não confiável ficam sem nenhuma.
+- O plano carrega `nativas`. O prompt lista exatamente essas, e o driver as usa no `--allowedTools`. Sem nativas, o plano sai sem `workspacePastas`, com cwd temporário e `--tools ""`. Isso protege também um app desktop antigo, que decide pelas pastas.
+- O vínculo com o projeto (`workspaceId`) e as ferramentas `workspace_*` do proxy continuam valendo em qualquer turno: elas passam pela moldura e pela trilha.

@@ -16,6 +16,7 @@ import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
+import { NATIVAS_DE_ARQUIVO } from "../../../domain/nativas.ts";
 
 /**
  * Driver claude-cli (ADR-012: implementação ÚNICA e real; ADR-014 invertido: o CLI é o da pessoa).
@@ -82,20 +83,15 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
   "--resume",
 ];
 
-/**
- * Ferramentas nativas de arquivo liberadas quando há projeto autorizado. Bash fica fora: --restricted
- * remove as ferramentas que rodam comando, e comando continua indo ao container isolado do nod.
- * Medido em 2026-09-18: com --restricted, ler fora das pastas permitidas é NEGADO pelo CLI (aparece
- * em permission_denials), por caminho relativo e absoluto, e o CLAUDE.md do projeto é ignorado.
- */
-export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"] as const;
 
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
 export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean }): { args: string[]; sessaoCli: string } {
   const { plano } = entrada;
   const pastas = plano.workspacePastas ?? null;
-  // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio.
-  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...(pastas ? NATIVAS_DE_ARQUIVO : [])].join(",");
+  // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
+  // do plano (nativasDoTurno, 2026-09-28); plano de servidor antigo sem o campo cai na regra anterior.
+  const nativas = pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO) : [];
+  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas].join(",");
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
   // Todos os projetos aprovados entram: o bot transita entre eles sem reautorizar (decisão de 2026-09-18).
   const extras = (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
