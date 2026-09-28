@@ -24,7 +24,7 @@ const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map(
 describe("tarefa delegada (ADR-047): o plano carrega o pedido da pessoa", () => {
   it("profundidade 1 NÃO vira peer: pedir_acesso e os caminhos de aprovação entram, e as escritas concedidas também", () => {
     const p = montarPlano({ ...base, computador: true });
-    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"]);
+    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "ler_mais"]);
     expect(nomes(p)).toContain("github__pr_ver");
     expect(nomes(p)).toContain("github__pr_comentar");
     expect(p.profundidade).toBe(1);
@@ -58,7 +58,8 @@ describe("tarefa delegada (ADR-047): o plano carrega o pedido da pessoa", () => 
 
   it("peer continua peer: só lembrar, e o prompt manda trabalho com acesso vir como tarefa delegada sem citar ferramenta", () => {
     const p = montarPlano({ ...base, turno: { ...turno, origem: "peer", sobProcuracaoDe: null }, modo: "peer", confianca: "nao_confiavel" });
-    expect(nomes(p)).toEqual(["lembrar", "github__pr_ver"]);
+    // ler_mais (2026-09-28) acompanha toda ferramenta de fora: só lê o resto do que o proxy já cortou.
+    expect(nomes(p)).toEqual(["lembrar", "github__pr_ver", "ler_mais"]);
     expect(p.promptSistema).toContain("precisa vir como tarefa delegada pela pessoa");
   });
 });

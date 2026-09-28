@@ -62,9 +62,12 @@ describe("montarPlano", () => {
   });
 
   it("modos: criacao propõe perfil/rotina/acesso; rotina permite consulta a colega, pedir acesso e silêncio; sala tem passar/encaminhar", () => {
-    expect(nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"))).toEqual(["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"]);
+    expect(nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"]);
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
+    // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
+    expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
+    expect(nomes(montarPlano({ ...base, modo: "rotina", conectores: [], concessoes: [] }))).not.toContain("ler_mais");
     const sala = nomes(montarPlano({ ...base, modo: "sala" }));
     expect(sala).toContain("passar");
     expect(sala).toContain("encaminhar");

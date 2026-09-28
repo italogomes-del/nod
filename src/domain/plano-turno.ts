@@ -19,6 +19,7 @@ import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { nativasDoTurno } from "./nativas.ts";
 import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
+import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
 import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
@@ -161,6 +162,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     ferramentas = catalogoReduzido(ferramentas);
     decididoPor = REGRA_REDUCAO_POR_CONFIANCA;
   }
+  // definido em 2026-09-28: quem pode receber resposta grande (conector, computador, pasta) recebe também
+  // `ler_mais`, atendida pelo proxy. Leitura pura: fica até no catálogo reduzido do turno não confiável.
+  if (ferramentas.some((f) => f.origem !== "nod")) ferramentas = [...ferramentas, FERRAMENTA_LER_MAIS];
   const conectoresUsados = new Set(ferramentas.map((f) => f.conectorId));
   const servidoresUsados = servidores.filter((s) => conectoresUsados.has(s.conectorId));
 

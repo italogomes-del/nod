@@ -2,7 +2,6 @@ import type { Readable, Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { CAPACIDADES_GITHUB } from "../../../contracts/github.ts";
 import { ArgumentoGithubInvalido, ehCapacidadeGithub, validarArgsGithub } from "../../../domain/github.ts";
-import { ORCAMENTO_RESULTADO_CHARS } from "../../../shared/constantes.ts";
 import { PROTOCOLO_MCP } from "../../mcp-proxy/cliente-mcp.ts";
 import { cortar } from "../../mcp-proxy/corte.ts";
 import { CODIGO, erro, interpretar, resposta } from "../../mcp-proxy/jsonrpc.ts";
@@ -24,7 +23,12 @@ import { ErroGithub, mensagemErroGithub } from "./erros.ts";
  */
 export type ServidorGithub = { tratarLinha(linha: string): Promise<string | null>; ligar(entrada: Readable, saida: Writable): Promise<void> };
 
-export function criarServidorGithub(backend: BackendGithub | null, orcamentoChars = ORCAMENTO_RESULTADO_CHARS): ServidorGithub {
+/**
+ * definido em 2026-09-28: sem corte por padrão. O processo é compartilhado entre turnos e não conhece o
+ * orçamento do plano; cortar aqui fazia o proxy recortar o que já estava cortado e perder a marca. O proxy
+ * é o único ponto de corte (ADR-013), com o resto guardado para `ler_mais`.
+ */
+export function criarServidorGithub(backend: BackendGithub | null, orcamentoChars = Number.POSITIVE_INFINITY): ServidorGithub {
   let fila: Promise<unknown> = Promise.resolve();
   const disponiveis = new Set(backend?.disponiveis ?? []);
 

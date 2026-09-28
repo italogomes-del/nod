@@ -9,7 +9,7 @@ import { ferramentaDoPlano, ferramentasMcp, validadeDoPlano } from "./catalogo.t
 import { criarClienteNod, ehFalhaTransporte, type ClienteNod } from "../executor/cliente-nod.ts";
 import { PROTOCOLO_MCP } from "./cliente-mcp.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
-import { cortar } from "./corte.ts";
+import { continuarResposta, cortarResposta, type Resto } from "./corte.ts";
 import { CODIGO, erro, interpretar, resposta, type IdJsonRpc } from "./jsonrpc.ts";
 import { criarLineSplitter } from "./line-splitter.ts";
 import { envolverNaoConfiavel, neutralizarDelimitadores } from "./moldura.ts";
@@ -49,6 +49,8 @@ export type Proxy = {
 };
 
 const INSTRUCAO_PENDENTE = "encerre o turno; a decisão retoma depois" as const;
+/** Restos guardados por turno para `ler_mais`; o mais antigo sai quando passa disto. */
+const MAX_RESTOS = 20;
 
 function texto(t: string): ConteudoMcp {
   return { content: [{ type: "text", text: t }] };
@@ -62,6 +64,23 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
   let semPlanoDesde: number | null = null;
   let servidorForaDesde: number | null = null;
   let fila: Promise<unknown> = Promise.resolve();
+  // definido em 2026-09-28: o resto das respostas cortadas neste turno, por ref, para `ler_mais` — o
+  // equivalente do arquivo em que o terminal salva resposta grande. Vive com o processo (um por turno).
+  const restos = new Map<string, { resto: Resto; origem: string; naoConfiavel: boolean; computador: boolean }>();
+  let proximoRef = 1;
+
+  /** Corta ao orçamento e, se sobrou, guarda o resto com a origem e a confiança do conteúdo. */
+  function cortarGuardando(conteudo: string, orcamento: number, guardar: { origem: string; naoConfiavel: boolean; computador: boolean }): string {
+    const ref = `r${proximoRef}`;
+    const corte = cortarResposta(conteudo, orcamento, ref);
+    if (corte.resto) {
+      proximoRef += 1;
+      restos.set(ref, { resto: corte.resto, ...guardar });
+      // Teto de memória por turno: o resto mais antigo sai primeiro.
+      if (restos.size > MAX_RESTOS) restos.delete(restos.keys().next().value ?? "");
+    }
+    return corte.texto;
+  }
 
   async function buscarPlano(): Promise<void> {
     const r = await cliente.plano();
@@ -83,6 +102,25 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
     return erro(id, CODIGO.negacaoNod, `nenhum trabalho começa: ${motivo}`, n);
   }
 
+  /**
+   * `ler_mais` (2026-09-28): atendida AQUI, sem ida ao servidor — o resto é do que este proxy já cortou e
+   * já passou pela decisão do servidor na chamada original. Mesma moldura, mesmo corte.
+   */
+  function lerMais(argumentos: Record<string, unknown>, orcamento: number): ConteudoMcp {
+    const ref = typeof argumentos.ref === "string" ? argumentos.ref : "";
+    const guardado = restos.get(ref);
+    if (!guardado) {
+      diag("ler_mais_sem_resto", { ref });
+      return { ...texto(`Não há resto guardado com ref="${ref}". O resto só existe no turno em que a resposta foi cortada; refaça a chamada original.`), isError: true };
+    }
+    const parte = continuarResposta(guardado.resto, orcamento, ref);
+    if (parte.resto) restos.set(ref, { ...guardado, resto: parte.resto });
+    else restos.delete(ref);
+    diag("ler_mais", { ref, fim: parte.resto === null });
+    const conteudo = neutralizarDelimitadores(parte.texto);
+    return texto(guardado.naoConfiavel ? envolverNaoConfiavel(conteudo, guardado.origem, guardado.computador) : conteudo);
+  }
+
   async function toolsCall(id: IdJsonRpc, params: unknown): Promise<string> {
     const p = (typeof params === "object" && params !== null ? params : {}) as { name?: unknown; arguments?: unknown };
     const nome = typeof p.name === "string" ? p.name : "";
@@ -100,6 +138,8 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
       await cliente.negacao(n).catch(() => undefined);
       return resposta(id, conteudoNegado(n, agora()));
     }
+    const orcamento = v.plano.politicaExecucao.orcamentoResultadoChars || ORCAMENTO_RESULTADO_CHARS;
+    if (ferramenta.origem === "proxy") return resposta(id, lerMais(argumentos, orcamento));
     const r = await cliente.ferramenta(nome, argumentos);
     if (ehFalhaTransporte(r)) {
       servidorForaDesde ??= agora();
@@ -124,23 +164,22 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
         await cliente.negacao(n).catch(() => undefined);
         return resposta(id, conteudoNegado(n, agora()));
       }
-      const local = await (opcoes.executarNaMaquina ?? executarGithubNaMaquina)({ capacidade, argumentos: r.executarLocal.argumentos, ambiente: opcoes.ambiente ?? process.env, orcamentoChars: v.plano.politicaExecucao.orcamentoResultadoChars || ORCAMENTO_RESULTADO_CHARS });
+      // O corte é daqui (com resto para ler_mais), não da máquina: ela devolve tudo.
+      const local = await (opcoes.executarNaMaquina ?? executarGithubNaMaquina)({ capacidade, argumentos: r.executarLocal.argumentos, ambiente: opcoes.ambiente ?? process.env, orcamentoChars: Number.POSITIVE_INFINITY });
       diag("execucao_local", { nome, codigo: local.codigo });
       await cliente.execucaoLocal?.(nome, local.codigo).catch(() => undefined);
       const origem = v.plano.catalogo.servidores.find((s) => s.conectorId === ferramenta.conectorId)?.nome ?? nome;
-      const texto = envolverNaoConfiavel(neutralizarDelimitadores(local.conteudo), origem, false);
+      const texto = envolverNaoConfiavel(neutralizarDelimitadores(cortarGuardando(local.conteudo, orcamento, { origem, naoConfiavel: true, computador: false })), origem, false);
       return resposta(id, { content: [{ type: "text", text: texto }], ...(local.isError ? { isError: true } : {}) });
     }
     if (!r.ok) {
       diag("negacao_servidor", { nome, motivo: r.negacao.motivo, terminal: r.negacao.terminal });
       return resposta(id, conteudoNegado(r.negacao, agora()));
     }
-    let conteudo = cortar(r.conteudo, v.plano.politicaExecucao.orcamentoResultadoChars || ORCAMENTO_RESULTADO_CHARS).texto;
-    conteudo = neutralizarDelimitadores(conteudo);
-    if (r.confianca === "nao_confiavel") {
-      const origem = ferramenta.origem === "conector" ? (v.plano.catalogo.servidores.find((s) => s.conectorId === ferramenta.conectorId)?.nome ?? nome) : nome;
-      conteudo = envolverNaoConfiavel(conteudo, origem, ferramenta.origem === "computador");
-    }
+    const naoConfiavel = r.confianca === "nao_confiavel";
+    const origem = ferramenta.origem === "conector" ? (v.plano.catalogo.servidores.find((s) => s.conectorId === ferramenta.conectorId)?.nome ?? nome) : nome;
+    let conteudo = neutralizarDelimitadores(cortarGuardando(r.conteudo, orcamento, { origem, naoConfiavel, computador: ferramenta.origem === "computador" }));
+    if (naoConfiavel) conteudo = envolverNaoConfiavel(conteudo, origem, ferramenta.origem === "computador");
     return resposta(id, { content: [{ type: "text", text: conteudo }, ...(r.imagem ? [{ type: "image", ...r.imagem }] : []), ...(r.audio ? [{ type: "audio", ...r.audio }] : [])], ...(r.isError ? { isError: true } : {}) });
   }
 
