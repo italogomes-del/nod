@@ -31,6 +31,12 @@ describe("montarPromptSistema", () => {
     expect(p).toContain("- [preferencia] prefiro tópicos");
   });
 
+  it("definido em 2026-09-28 (ADR-053): diz o que a conversa mostra e pede o link no próprio nome", () => {
+    const p = montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "conversa" });
+    expect(p).toContain("tabelas em markdown (cabeçalho e linha |---|)");
+    expect(p).toContain("ponha o link no próprio nome");
+  });
+
   it("definido em 2026-09-28: resposta ao colega é completa, e o relatório não vem antes de uma ferramenta", () => {
     const peer = montarPromptSistema({ agente, memorias: [], ferramentas: [f("lembrar")], pessoaNome: "Marlon", modo: "peer" });
     expect(peer).toContain("responda em texto, completo e verificável: tudo o que o colega precisa para responder à pessoa. Você não pode delegar nem encaminhar neste turno.");

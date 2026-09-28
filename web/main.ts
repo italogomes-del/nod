@@ -29,6 +29,7 @@ import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
+import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
@@ -843,6 +844,18 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // ADR-051: o artefato numa janela grande (o mesmo documento, o mesmo estado) e o .html para guardar.
   "artefato-tela-cheia": (el) => agir(() => artefatos.telaCheia(el.dataset.mensagem ?? "")),
   "artefato-baixar": (el) => agir(() => artefatos.baixar(el.dataset.mensagem ?? "")),
+  // ADR-053: a tabela do bot vai para a área de transferência com as colunas separadas, pronta para a planilha.
+  "copiar-tabela": async (el) => {
+    const rotulo = el.querySelector("span");
+    if (!rotulo) return;
+    try {
+      await navigator.clipboard.writeText(el.dataset.tsv ?? "");
+      rotulo.textContent = "Copiada";
+    } catch {
+      rotulo.textContent = "Não copiou";
+    }
+    setTimeout(() => { rotulo.textContent = "Copiar"; }, 1500);
+  },
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
@@ -1216,6 +1229,8 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
       dispatch({ tipo: "invalidar", quais: [`concessoes:${agenteId}`, "frota"] });
     }),
 };
+
+instalarDicaDeLink(document);
 
 document.addEventListener("click", (ev) => {
   const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-act]");

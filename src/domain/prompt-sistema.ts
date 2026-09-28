@@ -91,6 +91,8 @@ export function montarPromptSistema(entrada: {
   const linhas: string[] = [];
   linhas.push(`Você é ${entrada.agente.nome}${entrada.agente.titulo ? `, ${entrada.agente.titulo}` : ""}, um agente do nod a serviço de ${entrada.pessoaNome}.`);
   linhas.push("Responda sempre em português do Brasil.");
+  // definido em 2026-09-28 (ADR-053): a conversa mostra link e tabela; a URL solta ainda funciona, mas o nome lê melhor.
+  linhas.push("Formatação: a conversa mostra **negrito**, *itálico*, `código`, blocos de código, tabelas em markdown (cabeçalho e linha |---|) e links http(s). Ao citar uma mensagem, tarefa, PR ou página, ponha o link no próprio nome, como [PR #481](https://…), em vez de colar a URL solta.");
   if (entrada.agente.descricao.trim() !== "") linhas.push(`O que você faz: ${entrada.agente.descricao.trim()}`);
   linhas.push(entrada.modo === "delegacao" ? instrucaoDelegacao(entrada.delegacao) : INSTRUCAO_MODO[entrada.modo]);
   // definido em 2026-09-24 (emenda da ADR-037): sem as ferramentas, o agente ainda precisa saber POR
@@ -144,7 +146,7 @@ export function montarPromptSistema(entrada: {
   }
   // definido em 2026-09-28 (ADR-051): pedida uma checklist "num artefato", a Ada escreveu HTML no computador
   // do bot — 18 turnos, US$ 5,94, e o arquivo nunca abriu para a pessoa. O artefato do nod aparece na conversa.
-  if (entrada.ferramentas.some((f) => f.nome === "publicar_artefato")) linhas.push("Artefatos: para entregar algo visual ou de marcar (checklist, tabela, relatório), chame publicar_artefato com HTML autocontido (CSS e JS inline, nada de fora: sem rede, CDN ou fonte externa; links não abrem); ele aparece na conversa e a pessoa usa ali mesmo. Estado interativo: leia window.nod.estado ao carregar e grave com window.nod.salvar(dados), com chaves estáveis. Para atualizar, publique uma nova versão com o artefato_id (está no resultado e no histórico); antes, chame ler_artefato para ver o que a pessoa já marcou. Não use o computador do bot para isso.");
+  if (entrada.ferramentas.some((f) => f.nome === "publicar_artefato")) linhas.push("Artefatos: para entregar algo visual ou de marcar (checklist, painel, relatório com gráfico), chame publicar_artefato com HTML autocontido (CSS e JS inline, nada de fora: sem rede, CDN ou fonte externa; links não abrem); ele aparece na conversa e a pessoa usa ali mesmo. Estado interativo: leia window.nod.estado ao carregar e grave com window.nod.salvar(dados), com chaves estáveis. Para atualizar, publique uma nova versão com o artefato_id (está no resultado e no histórico); antes, chame ler_artefato para ver o que a pessoa já marcou. Não use o computador do bot para isso. Tabela simples vai no próprio texto, em markdown, sem artefato.");
   const nomes = [...entrada.ferramentas].map((f) => f.nomeMcp).sort();
   // definido em 2026-09-28: a linha diz as nativas que o turno TEM. Antes ela sempre negava Read/Edit/Write,
   // inclusive no turno com pasta autorizada em que o driver as liga — o modelo acreditava no prompt.
