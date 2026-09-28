@@ -60,7 +60,7 @@ describe("args do turno com o kit do terminal (ADR-052)", () => {
   it("sem --restricted (ele tira Bash e WebFetch); --tools com a lista exata; pastas extras em --add-dir", () => {
     expect(args).not.toContain("--restricted");
     expect(args[args.indexOf("--setting-sources") + 1]).toBe("project");
-    expect(args[args.indexOf("--tools") + 1]!.split(",")).toEqual([...NATIVAS_DO_TERMINAL]);
+    expect(args[args.indexOf("--tools") + 1]!.split(",")).toEqual([...NATIVAS_DO_TERMINAL, "ToolSearch"]);
     expect(args[args.indexOf("--allowedTools") + 1]!.split(",")).toEqual(expect.arrayContaining(["Bash", "WebFetch", "Write"]));
     expect(args.filter((a, i) => args[i - 1] === "--add-dir")).toEqual(["/Users/m/code/nod"]);
   });

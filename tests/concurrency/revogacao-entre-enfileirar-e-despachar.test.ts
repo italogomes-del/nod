@@ -32,6 +32,7 @@ afterEach(async () => {
   await escopado(async (trx) => {
     await trx`set local lock_timeout = '2s'`;
     await trx`delete from concessoes where id in ${trx(criados.concessoes)}`;
+    await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
     await trx`delete from mensagens where id in ${trx(criados.mensagens)}`;

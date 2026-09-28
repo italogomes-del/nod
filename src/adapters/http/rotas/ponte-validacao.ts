@@ -1,6 +1,16 @@
 import type { Inventario } from "../../../contracts/inventario.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, TrechoVivo } from "../../../contracts/ponte.ts";
+import {
+  TETO_CHAMADAS_RAIO_X,
+  TETO_COMPACTACOES_RAIO_X,
+  TETO_FERRAMENTAS_POR_CHAMADA,
+  TETO_FERRAMENTAS_RAIO_X,
+  type ChamadaRaioX,
+  type CompactacaoRaioX,
+  type ExecucaoRaioX,
+  type FerramentaNaChamada,
+} from "../../../contracts/raio-x.ts";
 import type { SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
@@ -43,6 +53,48 @@ export function inventario(v: unknown, agora: number): Inventario {
   exigir(i.estado === "ausente" || i.estado === "nao_autenticado");
   return { estado: i.estado, motivo: i.estado === "ausente" ? "Harness não encontrado neste computador" : "Entre na conta do harness neste computador", em: agora };
 }
+const inteiro = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
+const inteiroOuNull = (v: unknown): v is number | null => v === null || inteiro(v);
+
+/**
+ * Raio-X da execução (modo dev, 0036). É telemetria: fora do formato ou acima dos tetos vira `undefined` e a
+ * entrega segue — um turno nunca é recusado pelo Raio-X. Só os campos do contrato atravessam, reconstruídos aqui.
+ */
+export function execucao(v: unknown): ExecucaoRaioX | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const x = v as Record<string, unknown>;
+  if (!Array.isArray(x.chamadas) || x.chamadas.length > TETO_CHAMADAS_RAIO_X || !Array.isArray(x.compactacoes) || x.compactacoes.length > TETO_COMPACTACOES_RAIO_X) return undefined;
+  const chamadas: ChamadaRaioX[] = [];
+  for (const bruta of x.chamadas as unknown[]) {
+    if (!bruta || typeof bruta !== "object") return undefined;
+    const c = bruta as Record<string, unknown>;
+    const numeros = [c.em, c.contexto, c.entrada, c.cacheLido, c.cacheNovo, c.saida, c.pensamento];
+    if (!numeros.every(inteiro) || typeof c.subagente !== "boolean" || !Array.isArray(c.ferramentas) || c.ferramentas.length > TETO_FERRAMENTAS_POR_CHAMADA) return undefined;
+    const ferramentas: FerramentaNaChamada[] = [];
+    for (const fb of c.ferramentas as unknown[]) {
+      const f = (fb && typeof fb === "object" ? fb : {}) as Record<string, unknown>;
+      if (!texto(f.nome, 200) || !inteiroOuNull(f.resultadoChars) || typeof f.erro !== "boolean") return undefined;
+      ferramentas.push({ nome: f.nome, resultadoChars: f.resultadoChars, erro: f.erro });
+    }
+    chamadas.push({ em: c.em as number, contexto: c.contexto as number, entrada: c.entrada as number, cacheLido: c.cacheLido as number, cacheNovo: c.cacheNovo as number, saida: c.saida as number, pensamento: c.pensamento as number, subagente: c.subagente, ferramentas });
+  }
+  if (chamadas.reduce((n, c) => n + c.ferramentas.length, 0) > TETO_FERRAMENTAS_RAIO_X) return undefined;
+  const compactacoes: CompactacaoRaioX[] = [];
+  for (const bruta of x.compactacoes as unknown[]) {
+    const c = (bruta && typeof bruta === "object" ? bruta : {}) as Record<string, unknown>;
+    if (!inteiro(c.em) || !inteiroOuNull(c.antes) || !inteiroOuNull(c.depois) || !texto(c.gatilho, 40)) return undefined;
+    compactacoes.push({ em: c.em, antes: c.antes, depois: c.depois, gatilho: c.gatilho });
+  }
+  const custo = x.custoSessaoUsd;
+  if (!inteiro(x.chamadasOmitidas) || !inteiroOuNull(x.janela) || !inteiro(x.ferramentasNoInit) || !inteiro(x.duracaoMs) || typeof x.buscaDeFerramentas !== "boolean") return undefined;
+  if (!(x.modelo === null || texto(x.modelo, 100)) || !(x.versaoCli === null || texto(x.versaoCli, 100))) return undefined;
+  if (!(custo === null || (typeof custo === "number" && Number.isFinite(custo) && custo >= 0))) return undefined;
+  return {
+    chamadas, chamadasOmitidas: x.chamadasOmitidas, compactacoes, janela: x.janela, modelo: x.modelo, versaoCli: x.versaoCli,
+    custoSessaoUsd: custo, ferramentasNoInit: x.ferramentasNoInit, buscaDeFerramentas: x.buscaDeFerramentas, duracaoMs: x.duracaoMs,
+  };
+}
+
 export function entrega(v: unknown, machineId: string): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
@@ -55,11 +107,13 @@ export function entrega(v: unknown, machineId: string): Entrega {
   exigir(r.motivoFalha === undefined || MOTIVOS_FALHA.some((m) => m === r.motivoFalha));
   exigir(r.motivoInterrupcao === undefined || MOTIVOS_INTERRUPCAO.some((m) => m === r.motivoInterrupcao));
   const validados = sinais(r.sinais);
+  const raioX = execucao(r.execucao);
   // definido em 2026-09-17: erroCru remoto não entra no log; só os campos do contrato validado atravessam HTTP.
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
     ferramentasChamadas: r.ferramentasChamadas as string[], negacoesPermissao: r.negacoesPermissao as string[],
     motivoFalha: r.motivoFalha as Entrega["resultado"]["motivoFalha"], motivoInterrupcao: r.motivoInterrupcao as Entrega["resultado"]["motivoInterrupcao"],
+    ...(raioX ? { execucao: raioX } : {}),
   } };
 }

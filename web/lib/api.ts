@@ -6,6 +6,7 @@ import type { Agente, FormaAgente, CorAgente } from "../../src/contracts/agente.
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
+import type { Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
@@ -115,6 +116,11 @@ export function criarApi(escopo: Escopo) {
     turno: (id: string) => get<{ turno: Turno }>(`turnos/${id}`),
     cancelarTurno: (id: string) => post<RespostaMutacao>(`turnos/${id}/cancelar`),
     relatar: (entrada: EntradaRelato) => post<RespostaMutacao>("relatos", entrada),
+    // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
+    preferencias: () => get<Preferencias>("preferencias"),
+    gravarPreferencias: (p: Preferencias) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
+    raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),
     relatos: () => get<{ relatos: Relato[] }>("relatos"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),

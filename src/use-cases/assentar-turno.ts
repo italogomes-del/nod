@@ -4,6 +4,7 @@ import type { Mensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
@@ -132,15 +133,21 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const sessaoDaConversa = turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
   if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
+  // 0035: o `total_cost_usd` do CLI é o total da SESSÃO; numa sessão retomada ele traz o custo dos turnos
+  // anteriores. O turno custa a diferença — em gastos, no turno e nos eventos.
+  const anterior = resultado.sessaoCli ? await deps.repos.turnos.totalAnteriorDaSessao(resultado.sessaoCli, turno.id) : null;
+  const custoUsd = custoDoTurno(resultado.custoUsd, anterior);
   await deps.repos.gastos.registrar({
     turnoId: turno.id,
     executor,
     tokensEntrada: resultado.tokens.entrada,
     tokensSaida: resultado.tokens.saida,
-    custoUsd: resultado.custoUsd,
+    custoUsd,
     modelo: turno.modelo,
     em: agora,
   });
+  // Modo dev (0036): cada chamada e as compactações. Também na entrega tardia, que é a que mais pede explicação.
+  if (resultado.execucao) await deps.repos.raioX.gravarExecucao(turno.id, resultado.execucao);
 
   for (const nome of resultado.negacoesPermissao) {
     const negacao = { classe: "ferramenta_negada" as const, nome, motivo: "fora_do_catalogo" as const, desde: agora, terminal: false };
@@ -166,9 +173,11 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     motivoInterrupcao: desfecho.motivoInterrupcao,
     motivoFalha: desfecho.motivoFalha,
     sinais: resultado.sinais,
-    custoUsd: resultado.custoUsd,
+    custoUsd,
     tokensEntrada: resultado.tokens.entrada,
     tokensSaida: resultado.tokens.saida,
+    sessaoCli: resultado.sessaoCli,
+    custoSessaoUsd: resultado.custoUsd,
   });
   if (!assentado) throw new ErroDeDominio("estado_invalido", { cause: "turno mudou de estado durante a entrega" });
 
@@ -189,9 +198,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       confianca: "confiavel",
     });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
-    events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, custo_usd: resultado.custoUsd } }));
+    events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, custo_usd: custoUsd } }));
   } else {
-    events.push(evento(deps.escopo, { kind: "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: "concluido", custo_usd: resultado.custoUsd, ferramentas: resultado.ferramentasChamadas.length } }));
+    events.push(evento(deps.escopo, { kind: "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: "concluido", custo_usd: custoUsd, ferramentas: resultado.ferramentasChamadas.length } }));
   }
 
   // definido em 2026-09-28 (0032): aprovação já decidida que este turno não chegou a receber (a espera acabou

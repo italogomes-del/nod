@@ -7,6 +7,7 @@ import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { montarExecucao } from "../../../domain/raio-x.ts";
 import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
@@ -119,6 +120,15 @@ export function comandoDoHook(p: { nodePath: string; hookPath: string; config: s
   return `${p.electronComoNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)} ${aspas(p.config)}`;
 }
 
+/**
+ * A busca de ferramentas do Claude Code (definido em 2026-09-28): com ela no `--tools`, as ferramentas de MCP entram
+ * só pelo nome e a definição é carregada quando o modelo precisa. Sem ela, todas as definições vão em toda chamada.
+ * Medido com scripts/sonda-busca-ferramentas.ts (CLI 2.1.284, sonnet, 60 ferramentas de ~900 caracteres): a
+ * primeira chamada caiu de 24.189 para 4.561 tokens. Não é nativa do plano: não lê nem grava nada, só carrega
+ * definições que o plano já liberou — o proxy continua decidindo cada chamada (ADR-013).
+ */
+export const FERRAMENTA_DE_BUSCA = "ToolSearch";
+
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
 export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal }): { args: string[]; sessaoCli: string } {
   const { plano, terminal } = entrada;
@@ -127,7 +137,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
   // do plano (nativasDoTurno, 2026-09-28); plano de servidor antigo sem o campo cai na regra anterior.
   // ADR-052: no kit do terminal elas são exatamente as do plano, sob o hook e o sandbox do nod.
   const nativas = terminal ? (plano.nativas ?? []) : pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO).filter((n) => (NATIVAS_DE_ARQUIVO as readonly string[]).includes(n)) : [];
-  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas].join(",");
+  const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas, FERRAMENTA_DE_BUSCA].join(",");
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
   // Todos os projetos aprovados entram: o bot transita entre eles sem reautorizar (decisão de 2026-09-18).
   const extras = terminal ? terminal.dirsExtras : (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
@@ -153,7 +163,10 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     "--mcp-config",
     entrada.mcpJson,
     // Só --tools restringe o que existe no turno (--allowedTools só aprova): no terminal, a lista exata.
-    ...(terminal ? ["--tools", nativas.join(","), "--settings", terminal.settings] : pastas ? [] : ["--tools", ""]),
+    // definido em 2026-09-28 (modo dev): a ToolSearch vai sempre na lista — sem ela o CLI carrega TODAS as definições
+    // de MCP em toda chamada (scripts/sonda-busca-ferramentas.ts: 24.189 → 4.561 tokens na primeira chamada).
+    "--tools", [...nativas, FERRAMENTA_DE_BUSCA].join(","),
+    ...(terminal ? ["--settings", terminal.settings] : []),
     "--allowedTools",
     permitidas,
     "--permission-mode",
@@ -264,6 +277,13 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               }
               const diretorio = pastaBot ?? pastas?.ativa ?? tmpdir;
               const eventos: EventoStream[] = [];
+              // Modo dev (0036): quando cada evento chegou, para o Raio-X pôr as chamadas e compactações no tempo.
+              const inicio = Date.now();
+              const momentos: number[] = [];
+              const comExecucao = (r: ResultadoTurno): ResultadoTurno => {
+                const execucao = montarExecucao(eventos, momentos, Date.now() - inicio);
+                return execucao ? { ...r, execucao } : r;
+              };
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
                 // Fail-closed: sem --autocompact no help da versão instalada, o turno roda sem ela.
@@ -291,6 +311,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     const ev = interpretarLinhaStreamJson(linha);
                     if (ev.tipo === "ignorado") return;
                     eventos.push(ev);
+                    momentos.push(Date.now() - inicio);
                     sinks.evento(ev);
                     if (ev.tipo === "delta") sinks.delta(ev.texto);
                     const depois = reduzirSinais(sinais, ev);
@@ -312,9 +333,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const fim = await proc.fim;
                 await Promise.all(pendentes);
                 if (fim.erroSpawn) {
-                  return classificarResultado({ eventos, exitCode: null, signal: null, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() });
+                  return comExecucao(classificarResultado({ eventos, exitCode: null, signal: null, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
                 }
-                return classificarResultado({ eventos, exitCode: fim.exitCode, signal: fim.signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() });
+                return comExecucao(classificarResultado({ eventos, exitCode: fim.exitCode, signal: fim.signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
               } finally {
                 processo = null;
                 await rm(tmpdir, { recursive: true, force: true });
