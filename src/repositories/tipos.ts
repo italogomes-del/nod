@@ -3,6 +3,7 @@ import type { computadoresRepo } from "./computadores.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import type { agentesRepo } from "./agentes.repo.ts";
 import type { anexosRepo } from "./anexos.repo.ts";
+import type { artefatosRepo } from "./artefatos.repo.ts";
 import type { catcherRepo } from "./catcher.repo.ts";
 import type { concessoesRepo } from "./concessoes.repo.ts";
 import type { permissoesPermanentesRepo } from "./permissoes-permanentes.repo.ts";
@@ -53,6 +54,7 @@ export interface Repos {
   conversas: ReturnType<typeof conversasRepo>;
   mensagens: ReturnType<typeof mensagensRepo>;
   anexos: ReturnType<typeof anexosRepo>;
+  artefatos: ReturnType<typeof artefatosRepo>;
   propostas: ReturnType<typeof propostasRepo>;
   relatos: ReturnType<typeof relatosRepo>;
   turnos: ReturnType<typeof turnosRepo>;

@@ -761,3 +761,30 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
   .cp-rodape .bt { min-height: 44px; }
   .cp-rodape .bt.link.cp-agora-nao { margin-left: 0; }
 }
+
+/* Artefato do nod (ADR-051, definido em 2026-09-28): um card discreto, alinhado às falas do bot; quem
+   aparece é o conteúdo que ele publicou. O iframe não tem borda — a moldura é o card. */
+.artefato { margin: 4px 0 22px 52px; max-width: 760px; border: 1px solid #e3e6ee; border-radius: 14px; background: #fff; overflow: hidden; }
+.artefato-cab { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 14px; border-bottom: 1px solid #eff0f4; font-size: 13px; }
+.artefato-marca { color: var(--ink-3); font-size: 13px; }
+.artefato-titulo { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artefato-meta { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; }
+.artefato-status { color: var(--red); font-size: 11.5px; }
+.artefato-status:empty { display: none; }
+.artefato-acoes { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.artefato-acoes .bt.link { font-size: 12px; padding: 2px 0; }
+.artefato-acoes .bt.link:hover, .artefato-acoes .bt.link:focus-visible { text-decoration: underline; }
+.artefato-quadro { display: block; width: 100%; height: 320px; border: 0; background: #fff; }
+.artefato-carregando, .artefato-bloqueado { margin: 0; padding: 14px; color: var(--ink-3); font-size: 12.5px; }
+.artefato-anterior > summary { cursor: pointer; padding: 9px 14px; font-size: 12px; color: var(--ink-3); }
+.artefato-anterior > summary:hover { color: var(--ink-2); }
+.artefato-anterior[open] > summary { border-bottom: 1px solid #eff0f4; }
+.artefato-dialogo { width: min(1100px, 96vw); height: 90vh; max-width: none; max-height: none; padding: 0; border: 1px solid var(--line); border-radius: 16px; background: #fff; overflow: hidden; }
+.artefato-dialogo[open] { display: flex; flex-direction: column; }
+.artefato-dialogo::backdrop { background: rgba(17, 19, 26, .28); backdrop-filter: blur(2px); }
+.artefato-dialogo-corpo { flex: 1; min-height: 0; }
+.artefato-quadro.tela-cheia { height: 100%; }
+@media (max-width: 760px) {
+  .artefato { margin-left: 0; }
+  .artefato-acoes { gap: 8px; }
+}

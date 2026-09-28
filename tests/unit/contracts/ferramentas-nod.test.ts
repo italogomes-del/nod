@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FERRAMENTAS_NOD, NOMES_FERRAMENTAS_NOD, type JsonSchema, type NomeFerramentaNod } from "../../../src/contracts/ferramentas-nod.ts";
+import { HTML_MAX_ARTEFATO, TITULO_MAX_ARTEFATO } from "../../../src/contracts/artefato.ts";
 import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
 
 const ESPERADAS = [
@@ -7,10 +8,11 @@ const ESPERADAS = [
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina",
   "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa",
   "ver_colegas",
+  "publicar_artefato", "ler_artefato",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as DEZESSETE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-24 traz delegar_tarefa; 2026-09-28 traz ver_colegas)", () => {
+  it("lista fechada com as DEZENOVE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-24 traz delegar_tarefa; 2026-09-28 traz ver_colegas e o artefato, ADR-051)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });
@@ -47,6 +49,13 @@ describe("FERRAMENTAS_NOD", () => {
   it("atualizar_perfil aceita as rotinas que vêm com o perfil, no MESMO schema de criar_rotina (ADR-050)", () => {
     expect(FERRAMENTAS_NOD.atualizar_perfil.properties.rotinas.items).toBe(FERRAMENTAS_NOD.criar_rotina);
     expect(FERRAMENTAS_NOD.atualizar_perfil.required).toEqual([]);
+  });
+
+  it("ADR-051: os tetos dos schemas do artefato são os de artefato.ts (o schema precisa de literal; a regra mora no contrato)", () => {
+    expect(FERRAMENTAS_NOD.publicar_artefato.properties.titulo.maxLength).toBe(TITULO_MAX_ARTEFATO);
+    expect(FERRAMENTAS_NOD.publicar_artefato.properties.html.maxLength).toBe(HTML_MAX_ARTEFATO);
+    expect(FERRAMENTAS_NOD.publicar_artefato.required).toEqual(["titulo", "html"]);
+    expect(FERRAMENTAS_NOD.ler_artefato.required).toEqual(["artefato_id"]);
   });
 
   it("cada ferramenta tem um caso de uso nomeado em UseCasesNod (EMENDA 5)", () => {

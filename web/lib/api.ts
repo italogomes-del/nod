@@ -1,4 +1,5 @@
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
+import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente } from "../../src/contracts/agente.ts";
@@ -167,6 +168,13 @@ export function criarApi(escopo: Escopo) {
     chaves: () => get<{ chaves: ChaveMaquinaDto[] }>("maquinas/chaves"),
     emitirChave: (nome: string) => post<ChaveEmitidaDto>("maquinas/chaves", { nome }),
     revogarChave: (id: string) => del<{ ok: true }>(`maquinas/chaves/${id}`),
+    // ADR-051 (definido em 2026-09-28): o card do artefato busca o HTML da SUA versão e o estado da pessoa.
+    versaoArtefato: (id: string, versao: number) => get<ArtefatoDto>(`artefatos/${encodeURIComponent(id)}/versoes/${versao}`),
+    salvarEstadoArtefato: (id: string, dados: unknown) => pedir<{ ok: true }>("PUT", `${base}/artefatos/${encodeURIComponent(id)}/estado`, { dados }),
+    /** Ao fechar a página: keepalive deixa o PUT terminar depois de a aba sair (o que falhar aqui se perde, sem aviso). */
+    salvarEstadoArtefatoAoSair: (id: string, dados: unknown) => {
+      void fetch(`${base}/artefatos/${encodeURIComponent(id)}/estado`, { method: "PUT", keepalive: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ dados }) }).catch(() => undefined);
+    },
   };
 }
 

@@ -2,6 +2,7 @@ import type { ResultadoPedirAcesso } from "./acesso.ts";
 import type { MotivoPasse, MotivoSemNovidade } from "./motivos.ts";
 import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
 import { FERRAMENTAS_PERFIL, type ArgsAtualizarPerfil, type ArgsVerColegas, type ResultadoAtualizarPerfil, type ResultadoVerColegas } from "./ferramentas-perfil.ts";
+import { FERRAMENTAS_ARTEFATO, type ContratoFerramentasArtefato } from "./ferramentas-artefato.ts";
 import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
 
@@ -12,11 +13,12 @@ export type { ArgsAtualizarPerfil, ArgsVerColegas, AppDoColega, ColegaListado, R
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As DEZESSETE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As DEZENOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
  * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; delegar_tarefa entra em 2026-09-24,
  * ADR-047; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em
- * ferramentas-perfil.ts pelo mesmo gatilho). Lista FECHADA: cada nome tem um
+ * ferramentas-perfil.ts pelo mesmo gatilho; publicar_artefato/ler_artefato também em 2026-09-28, ADR-051,
+ * em ferramentas-artefato.ts). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
  * `${slug}__${tool}` e não mora aqui.
@@ -24,6 +26,7 @@ export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsLista
 export const FERRAMENTAS_NOD = {
   ...FERRAMENTAS_ROTINA,
   ...FERRAMENTAS_PERFIL,
+  ...FERRAMENTAS_ARTEFATO,
   lembrar: {
     type: "object",
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
@@ -139,7 +142,7 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
 export const NOMES_FERRAMENTAS_NOD = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "pedir_aprovacao",
-  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa", "ver_colegas",
+  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa", "ver_colegas", "publicar_artefato", "ler_artefato",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -166,7 +169,7 @@ export type ResultadoPerguntarABot = { tarefa_id: string };
 export type ResultadoDelegarTarefa = { tarefa_id: string };
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
-export type ContratoFerramentaNod = {
+export type ContratoFerramentaNod = ContratoFerramentasArtefato & {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoAtualizarPerfil };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };

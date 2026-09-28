@@ -16,7 +16,9 @@ export type KindMensagem =
   | "resultado_aprovacao"
   | "negacao"
   | "parada"
-  | "peer_ask";
+  | "peer_ask"
+  /** definido em 2026-09-28 (ADR-051, 0031): o card do artefato; o HTML vem por GET artefatos/:id. */
+  | "artefato";
 
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
@@ -61,7 +63,9 @@ export type PayloadMensagem =
    * para o agente. O card da proposta some ao permitir; esta linha fica na conversa ("leapy aberta
    * para o Dev 1 · Trocar"). `onde` é a pasta-mãe relativa à pasta pessoal, quando a busca a deu.
    */
-  | { kind: "pasta_aberta"; propostaId: string; agenteId: string; pasta: string; nome: string; onde?: string };
+  | { kind: "pasta_aberta"; propostaId: string; agenteId: string; pasta: string; nome: string; onde?: string }
+  /** definido em 2026-09-28 (ADR-051): só ids — o HTML (até 500 000 caracteres) não viaja com a conversa. */
+  | { kind: "artefato"; artefatoId: string; versao: number; titulo: string };
 
 export type Mensagem = {
   tenantId: TenantId;

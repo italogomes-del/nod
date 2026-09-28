@@ -85,6 +85,8 @@ export function useCasesFalsos(): UseCasesNod {
     perguntarABot,
     delegarTarefa,
     verColegas,
+    publicarArtefato: naoImplementado("useCases.publicarArtefato"),
+    lerArtefato: naoImplementado("useCases.lerArtefato"),
   };
 }
 

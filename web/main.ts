@@ -16,7 +16,7 @@ import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
-import { esquecerRegiao, regiao } from "./lib/regioes.ts";
+import { esquecerRegiao, regiao, regiaoMudaria } from "./lib/regioes.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
@@ -28,6 +28,7 @@ import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
 import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
+import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
 import { renderMemoria } from "./telas/memoria.ts";
 import { renderPerfil } from "./telas/perfil.ts";
@@ -90,6 +91,15 @@ const avisador = criarAvisador({
   ligado: () => canalAvisos.ligado(),
   pessoaId: () => estado.sessao?.pessoaId ?? null,
   mostrar: (aviso) => canalAvisos.mostrar(aviso),
+});
+/**
+ * Artefatos do nod (ADR-051, definido em 2026-09-28): o card vem na timeline; o iframe sandbox, o estado
+ * e a gravação moram aqui, fora do render por regiões.
+ */
+const artefatos = criarArtefatosVivos({
+  carregar: (id, versao) => (api ? api.versaoArtefato(id, versao) : Promise.reject(new ErroApi(401, "nao_permitido", "sem sessão"))),
+  salvar: (id, dados) => (api ? api.salvarEstadoArtefato(id, dados) : Promise.reject(new ErroApi(401, "nao_permitido", "sem sessão"))),
+  salvarAoSair: (id, dados) => api?.salvarEstadoArtefatoAoSair(id, dados),
 });
 /** A última leitura de "Sua vez" foi com a janela atrás (`?ver=0`): ao voltar, relê para carimbar vista_em. */
 let suaVezSemVer = false;
@@ -370,6 +380,9 @@ function renderPrincipal(): void {
     valor: el.value, marcado: el.checked, inicial: el.defaultValue, marcadoInicial: el.defaultChecked,
     foco: document.activeElement === el, inicio: el.selectionStart, fim: el.selectionEnd,
   }));
+  // ADR-051: o iframe do artefato sai antes de a timeline ser regravada e volta sem recarregar (moveBefore),
+  // no hidratar() logo abaixo — depois de os <details> reabrirem; sem moveBefore, ele é recriado do cache.
+  if (regiaoMudaria("timeline", corpo)) artefatos.estacionar();
   regiao("timeline", corpo);
   for (const resposta of respostas) {
     const el = document.querySelector<HTMLInputElement>(`[data-decisao="${CSS.escape(resposta.decisao)}"] input[${resposta.atributo}="${CSS.escape(resposta.chave)}"]`);
@@ -397,6 +410,7 @@ function renderPrincipal(): void {
   filtrarBots((document.getElementById("busca-destinatario") as HTMLInputElement | null)?.value ?? "", ".contact-picker");
   filtrarApps((document.getElementById("busca-marketplace") as HTMLInputElement | null)?.value ?? "");
   for (const el of document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
+  artefatos.hidratar(timeline ?? document);
   if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
   if (composer?.chave !== composerDe) {
@@ -826,6 +840,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     // o turno e a mensagem já ligam o relato ao que aconteceu.
     if (id && api) abrirReportarBug(api, id, __NOD_VERSAO__, null);
   },
+  // ADR-051: o artefato numa janela grande (o mesmo documento, o mesmo estado) e o .html para guardar.
+  "artefato-tela-cheia": (el) => agir(() => artefatos.telaCheia(el.dataset.mensagem ?? "")),
+  "artefato-baixar": (el) => agir(() => artefatos.baixar(el.dataset.mensagem ?? "")),
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
