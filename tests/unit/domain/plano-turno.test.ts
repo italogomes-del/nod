@@ -69,7 +69,8 @@ describe("montarPlano", () => {
     for (const n of ["ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+    // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
     expect(nomes(montarPlano({ ...base, modo: "rotina", conectores: [], concessoes: [] }))).not.toContain("ler_mais");
@@ -79,6 +80,28 @@ describe("montarPlano", () => {
     expect(sala).toContain("pedir_a_pessoa");
     // sem_novidade é só de rotina: em sala/conversa alguém está esperando resposta.
     expect(sala).not.toContain("sem_novidade");
+  });
+
+  it("ADR-051: artefato em conversa, criação e rotina; fora de sala, peer e delegação; ler_artefato só lê", () => {
+    // A criação tem o kit da conversa desde a ADR-050 (bot novo é bot completo), artefato incluído.
+    for (const modo of ["conversa", "criacao", "rotina"] as const) {
+      expect(nomes(montarPlano({ ...base, modo }))).toEqual(expect.arrayContaining(["publicar_artefato", "ler_artefato"]));
+    }
+    for (const modo of ["sala", "delegacao"] as const) {
+      expect(nomes(montarPlano({ ...base, modo })), modo).not.toContain("publicar_artefato");
+    }
+    expect(nomes(montarPlano({ ...base, modo: "peer", profundidade: 1 }))).not.toContain("publicar_artefato");
+    const plano = montarPlano({ ...base, modo: "conversa" });
+    const ler = plano.catalogo.ferramentas.find((f) => f.nome === "ler_artefato");
+    const publicar = plano.catalogo.ferramentas.find((f) => f.nome === "publicar_artefato");
+    expect(ler).toMatchObject({ origem: "nod", readOnlyHint: true });
+    expect(publicar).toMatchObject({ origem: "nod", readOnlyHint: false });
+    // Turno não confiável: nod fica no catálogo reduzido (confianca.ts) — publicar não sai do nod.
+    const reduzido = montarPlano({ ...base, modo: "conversa", confianca: "nao_confiavel" });
+    expect(nomes(reduzido)).toEqual(expect.arrayContaining(["publicar_artefato", "ler_artefato"]));
+    expect(plano.promptSistema).toContain("publicar_artefato");
+    expect(plano.promptSistema).toContain("window.nod.salvar");
+    expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
   });
 
   it("agente acordado por rotina pode consultar colega sem transferir escrita nem permitir outro salto", () => {

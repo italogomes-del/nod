@@ -14,6 +14,14 @@ export function regiao(id: string, html: string): void {
   el.innerHTML = html;
 }
 
+/**
+ * A região seria regravada com este HTML? definido em 2026-09-28 (ADR-051): quem guarda nó VIVO dentro
+ * dela (o iframe do artefato) só o tira antes quando o innerHTML vai mesmo ser trocado.
+ */
+export function regiaoMudaria(id: string, html: string): boolean {
+  return ultimoHtml.get(id) !== html;
+}
+
 /** Zera o cache de uma região (quando o nó foi trocado por fora). */
 export function esquecerRegiao(id: string): void {
   ultimoHtml.delete(id);

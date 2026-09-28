@@ -154,6 +154,10 @@ function proteger(w: BrowserWindow, origem?: string) {
     if (origem && url.startsWith(`${origem}/api/sessao/google`)) { e.preventDefault(); void shell.openExternal(url); }
   });
   w.webContents.on("will-redirect", (e, url) => { if (!origem || new URL(url).origin !== origem) e.preventDefault(); });
+  // definido em 2026-09-28 (ADR-051): o iframe do artefato (sandbox, CSP sem rede) ainda pode navegar A SI
+  // MESMO — link, location, meta refresh —, a única saída que a CSP não fecha. No app, subframe nenhum sai
+  // do documento que a página lhe deu (no navegador, a web fecha o iframe no segundo `load`).
+  w.webContents.on("will-frame-navigate", (e) => { if (!e.isMainFrame && !/^about:(srcdoc|blank)$/.test(e.url)) e.preventDefault(); });
   w.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   w.webContents.session.setPermissionCheckHandler(() => false);
 }

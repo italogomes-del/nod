@@ -111,7 +111,16 @@ const DESPACHO: Despacho = {
   perguntar_a_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.perguntar_a_bot](deps, { ...ctx, ...args }),
   delegar_tarefa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.delegar_tarefa](deps, { ...ctx, ...args }),
   ver_colegas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_colegas](deps, { ...ctx, ...args }),
+  publicar_artefato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.publicar_artefato](deps, { ...ctx, ...args }),
+  ler_artefato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ler_artefato](deps, { ...ctx, ...args }),
 };
+
+/**
+ * Ferramentas nod cujo resultado é conteúdo que o modelo NÃO escreveu agora e que chega marcado como não
+ * confiável (ADR-026): definido em 2026-09-28 (ADR-051), ler_artefato — o estado foi gravado pela página,
+ * que é código do bot rodando no navegador, e o HTML pode ter vindo de um turno que leu conteúdo de fora.
+ */
+const NOD_DE_CONTEUDO_NAO_CONFIAVEL: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato"]);
 
 function ehNomeNod(nome: string): nome is NomeFerramentaNod {
   return Object.prototype.hasOwnProperty.call(FERRAMENTAS_NOD, nome);
@@ -136,7 +145,7 @@ async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerra
   if (nome === "pedir_aprovacao" && typeof data === "object" && data !== null && (data as { estado?: unknown }).estado === "pendente") {
     return { resultado: { aguardar: String((data as { decisao_id: string }).decisao_id) }, events: saida.events ?? [] };
   }
-  return { resultado: { ok: true, conteudo: JSON.stringify(data), confianca: "confiavel" }, events: saida.events ?? [] };
+  return { resultado: { ok: true, conteudo: JSON.stringify(data), confianca: NOD_DE_CONTEUDO_NAO_CONFIAVEL.has(nome) ? "nao_confiavel" : "confiavel" }, events: saida.events ?? [] };
 }
 
 // ---------------------------------------------------------------------------------------------

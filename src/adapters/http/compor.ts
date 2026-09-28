@@ -53,6 +53,7 @@ import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
 import { perguntarABot } from "../../use-cases/perguntar-a-bot.ts";
 import { delegarTarefa } from "../../use-cases/delegar-tarefa.ts";
 import { verColegas } from "../../use-cases/ver-colegas.ts";
+import { lerArtefato, publicarArtefato } from "../../use-cases/artefatos.ts";
 import { servicoSala } from "../../use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
@@ -67,6 +68,7 @@ import { segredoEfetivo } from "./sessao.ts";
 import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
+import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
 import { rotasMarketplace } from "./rotas/marketplace.ts";
@@ -205,7 +207,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot, delegarTarefa, verColegas };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot, delegarTarefa, verColegas, publicarArtefato, lerArtefato };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -563,6 +565,7 @@ export function comporApp(o: OpcoesCompor): App {
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
     ...criarRotasConversas(depsRotas),
+    ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),

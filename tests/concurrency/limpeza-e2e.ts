@@ -26,6 +26,10 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from decisao_eventos_varridos where owner_id = ${p}`;
     await trx`delete from decisoes where owner_id = ${p}`;
     await trx`delete from concessoes where owner_id = ${p}`;
+    // ADR-051 (0031): a versão aponta para a mensagem e o artefato para agente/conversa — saem antes deles.
+    await trx`delete from artefato_estados where owner_id = ${p}`;
+    await trx`delete from artefato_versoes where owner_id = ${p}`;
+    await trx`delete from artefatos where owner_id = ${p}`;
     await trx`delete from anexos where owner_id = ${p}`;
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from propostas where owner_id = ${p}`;

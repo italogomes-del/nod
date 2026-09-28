@@ -25,7 +25,8 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
     const turnos = conversa ? await deps.repos.turnos.listarDaConversa(conversa.id, TURNOS_CONTADOS) : [];
     const execucoes = turnos.filter((t) => t.estado === "concluido").length;
     const ultima = conversa ? await deps.repos.mensagens.ultimaDaConversa(conversa.id) : null;
-    const previa = ultima ? previaDaMensagem(ultima.texto) : null;
+    // definido em 2026-09-28 (ADR-051): o texto do artefato leva o id para o modelo; a prévia mostra só o título.
+    const previa = ultima ? previaDaMensagem(ultima.payload?.kind === "artefato" ? `▣ ${ultima.payload.titulo}` : ultima.texto) : null;
     linhas.push({
       ...agente,
       conversaId: conversa?.id ?? "",

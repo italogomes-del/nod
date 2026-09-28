@@ -7,6 +7,7 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
 import { criarInterruptor, type InterruptorNod } from "../../src/services/interruptor.ts";
 import type { Escopo, Relogio, Tx } from "../../src/shared/types.ts";
+import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
 import { lembrar } from "../../src/use-cases/lembrar.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
@@ -129,6 +130,8 @@ export function useCasesDeTeste(): UseCasesNod {
     perguntarABot: naoImplementado("perguntarABot (L7)"),
     delegarTarefa: naoImplementado("delegarTarefa (L7)"),
     verColegas: naoImplementado("verColegas (L7)"),
+    publicarArtefato,
+    lerArtefato,
   };
 }
 

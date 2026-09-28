@@ -20,7 +20,7 @@ export const ENUMS_DE_ESTADO = {
   politica_resposta: ["so_mencoes", "lead", "todos"],
   tipo_decisao: ["aprovacao", "acesso", "retomar_turno", "gate_rotina", "perfil", "rotina", "pergunta", "falta_de_dado", "permissao", "rotina_atualizacao", "rotina_exclusao"],
   estado_decisao: ["pendente", "decidida", "vencida", "reaberta"],
-  kind_mensagem: ["texto", "sistema", "handoff", "passe", "consentimento", "rotina_execucao", "resultado_aprovacao", "negacao", "parada", "peer_ask"],
+  kind_mensagem: ["texto", "sistema", "handoff", "passe", "consentimento", "rotina_execucao", "resultado_aprovacao", "negacao", "parada", "peer_ask", "artefato"],
   memoria_tipo: ["preferencia", "fato", "resumo"],
   transporte_conector: ["stdio", "http"],
   declaracao_sensibilidade: ["toca", "nao-toca", "nao-declarou"],

@@ -174,4 +174,8 @@ export const ROTAS = [
   { metodo: "POST", caminho: "maquinas/chaves", lane: "L9" },
   { metodo: "GET", caminho: "maquinas/chaves", lane: "L9" },
   { metodo: "DELETE", caminho: "maquinas/chaves/:id", lane: "L9" },
+  /** Artefato do nod (ADR-051, definido em 2026-09-28): o card busca HTML e estado; a pessoa salva o que marcou. */
+  { metodo: "GET", caminho: "artefatos/:id", lane: "L6" },
+  { metodo: "GET", caminho: "artefatos/:id/versoes/:versao", lane: "L6" },
+  { metodo: "PUT", caminho: "artefatos/:id/estado", lane: "L6" },
 ] as const satisfies readonly EntradaRota[];

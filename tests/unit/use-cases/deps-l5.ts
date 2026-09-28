@@ -2,6 +2,7 @@ import type { Conector } from "../../../src/contracts/conector.ts";
 import type { ResultadoSonda } from "../../../src/contracts/servicos.ts";
 import { criarTokenTurno } from "../../../src/services/token-turno.ts";
 import type { Escopo, Transacao, Tx } from "../../../src/shared/types.ts";
+import { lerArtefato, publicarArtefato } from "../../../src/use-cases/artefatos.ts";
 import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
@@ -74,6 +75,8 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     delegarTarefa: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     verColegas: async () => ({ data: { colegas: [] } }),
+    publicarArtefato,
+    lerArtefato,
     ...opcoes.useCases,
   };
   const tx: Transacao = (fn) => fn({} as Tx);

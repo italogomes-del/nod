@@ -1,5 +1,6 @@
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
+import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { PermissaoPermanente } from "../../src/contracts/permissao-permanente.ts";
@@ -46,6 +47,10 @@ export type BancoMemoria = {
   conversas: Conversa[];
   mensagens: Mensagem[];
   anexos: { tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number }[];
+  /** ADR-051 (0031): artefato, versões e o estado por pessoa (UNIQUE tenant+artefato+owner reproduzido). */
+  artefatos: (Artefato & { tenantId: string; ownerId: string })[];
+  artefatoVersoes: (VersaoArtefato & { tenantId: string; ownerId: string })[];
+  artefatoEstados: (EstadoArtefato & { tenantId: string; ownerId: string; json: string })[];
   propostas: Proposta[];
   turnos: Turno[];
   entregas: Set<string>;
@@ -88,6 +93,9 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     conversas: [],
     mensagens: [],
     anexos: [],
+    artefatos: [],
+    artefatoVersoes: [],
+    artefatoEstados: [],
     propostas: [],
     turnos: [],
     entregas: new Set(),
@@ -129,6 +137,7 @@ export function reposMemoria(escopo?: Escopo): Repos {
 
 const agora = () => Date.now();
 const iso = (n: number) => new Date(n).toISOString();
+const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
@@ -434,6 +443,57 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           const l = doTenant(b.anexos).find((x) => x.id === id);
           return l ? [{ id: l.id, nome: l.nome, mime: l.mime, tamanho: l.bytes.byteLength }] : [];
         });
+      },
+    },
+
+    artefatos: {
+      async criar(a) {
+        const t = agora();
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: a.agenteId, conversaId: a.conversaId, titulo: a.titulo, versaoAtual: 1, criadoEm: t, atualizadoEm: t };
+        b.artefatos.push(l);
+        return semDono(l);
+      },
+      async buscar(id) {
+        // Sem RLS aqui (o isolamento por pessoa se prova na integração), mas o artefato é privado da dona.
+        const l = doTenant(b.artefatos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        return l ? semDono(l) : null;
+      },
+      async proximaVersao(id, titulo) {
+        const l = doTenant(b.artefatos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!l) return null;
+        l.versaoAtual += 1;
+        l.titulo = titulo;
+        l.atualizadoEm = agora();
+        return semDono(l);
+      },
+      async gravarVersao(v) {
+        if (doTenant(b.artefatoVersoes).some((x) => x.artefatoId === v.artefatoId && x.versao === v.versao)) throw new Error("artefato_versoes_unica");
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, artefatoId: v.artefatoId, versao: v.versao, html: v.html, mensagemId: v.mensagemId, criadoEm: agora() };
+        b.artefatoVersoes.push(l);
+        return { artefatoId: l.artefatoId, versao: l.versao, html: l.html, mensagemId: l.mensagemId, criadoEm: l.criadoEm };
+      },
+      async versao(artefatoId, versao) {
+        const l = doTenant(b.artefatoVersoes).find((x) => x.artefatoId === artefatoId && x.versao === versao && x.ownerId === escopo.pessoaId);
+        return l ? { artefatoId: l.artefatoId, versao: l.versao, html: l.html, mensagemId: l.mensagemId, criadoEm: l.criadoEm } : null;
+      },
+      async estado(artefatoId) {
+        const l = doTenant(b.artefatoEstados).find((x) => x.artefatoId === artefatoId && x.ownerId === escopo.pessoaId);
+        return l ? { artefatoId: l.artefatoId, dados: l.dados, atualizadoEm: l.atualizadoEm } : null;
+      },
+      async salvarEstado(artefatoId, json) {
+        // O banco mede o texto normalizado do jsonb; aqui, o texto recebido (a validação veio antes).
+        if (Buffer.byteLength(json, "utf8") > ESTADO_MAX_BYTES_ARTEFATO) return null;
+        const dados: unknown = JSON.parse(json);
+        const existente = doTenant(b.artefatoEstados).find((x) => x.artefatoId === artefatoId && x.ownerId === escopo.pessoaId);
+        if (existente) {
+          existente.dados = dados;
+          existente.json = json;
+          existente.atualizadoEm = agora();
+          return { artefatoId, dados, atualizadoEm: existente.atualizadoEm };
+        }
+        const l = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, artefatoId, dados, json, atualizadoEm: agora() };
+        b.artefatoEstados.push(l);
+        return { artefatoId, dados, atualizadoEm: l.atualizadoEm };
       },
     },
 

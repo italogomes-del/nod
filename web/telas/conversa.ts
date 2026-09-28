@@ -18,6 +18,7 @@ import { renderCardAcesso } from "./card-acesso.ts";
 import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
+import { renderCardArtefato } from "./card-artefato.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -29,6 +30,13 @@ export function nomesDe(estado: Estado): Record<string, string> {
 
 function agenteDe(estado: Estado, id: string): FrotaDto["agentes"][number] | undefined {
   return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
+}
+
+/** A maior versão do artefato entre as mensagens carregadas da conversa: as anteriores ficam recolhidas. */
+function versaoMaisRecente(estado: Estado, conversaId: string, artefatoId: string, piso: number): number {
+  let n = piso;
+  for (const m of estado.conversas[conversaId]?.mensagens ?? []) if (m.payload?.kind === "artefato" && m.payload.artefatoId === artefatoId && m.payload.versao > n) n = m.payload.versao;
+  return n;
 }
 
 /** Badge de executor (plano): 'catcher' ou 'rodou em <máquina>' — dado tipado da autoria, nunca texto. */
@@ -66,6 +74,8 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     return `<div class="msg-computador-fora" role="status"><div class="mcf-titulo"><b>Computador do bot fora do ar</b><span class="mudo">desde ${esc(dataHora(p.desde))}</span></div><p>${paragrafos(m.texto)}</p>${acoes}</div>`;
   }
   if (p?.kind === "pasta_aberta") return renderPastaAberta(p, estado, agenteDe(estado, p.agenteId));
+  // definido em 2026-09-28 (ADR-051): o card do artefato; o iframe entra depois do render (telas/artefatos-vivos.ts).
+  if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   if (m.kind === "sistema") return `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).

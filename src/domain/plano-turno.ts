@@ -52,12 +52,17 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * meio de outro bot. Tem pedir_acesso (inclusive escrita: quem pediu foi a pessoa) e os caminhos de
  * aprovação; não tem salto (profundidade 1), nem rotina, nem delegar de novo. delegar_tarefa só entra
  * onde há mensagem da pessoa para carregar: conversa e sala.
+ *
+ * publicar_artefato/ler_artefato (definido em 2026-09-28, ADR-051) entram onde o bot fala com UMA pessoa
+ * na conversa dele: conversa e rotina — e a retomada, que cai num dos dois (modoDoTurno). Fora da sala
+ * (o estado é por pessoa e a sala tem várias; a RLS do artefato não tem perna de sala), da criação, do
+ * peer (quem lê é outro bot) e da delegação (o resultado volta ao remetente, não à pessoa).
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "passar", "encaminhar"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"],
   peer: ["lembrar"],
   delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"],
 };
@@ -68,7 +73,10 @@ export const PLANO_VALIDADE_MS = 3_600_000;
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
 
 function ferramentaNod(nome: NomeFerramentaNod): FerramentaPlano {
-  return { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] };
+  const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] };
+  // definido em 2026-09-28 (ADR-051): ler_artefato só lê, e o resultado dela tem orçamento próprio no
+  // proxy — o do turno (8 000) cortaria o HTML que a ferramenta promete devolver.
+  return nome === "ler_artefato" ? { ...base, readOnlyHint: true } : base;
 }
 
 /** conector habilitado ∩ concessão do agente por capacidade → `${slug}__${tool}` (E6). */
