@@ -23,20 +23,25 @@ import type { ComputadorFora } from "./prompt-sistema.ts";
 import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
 /**
- * Ferramentas nod por modo (definido em 2026-09-16): criação propõe perfil/rotina/acesso; conversa
- * e sala têm o kit completo; rotina permite consulta a colega (definido em 2026-09-17) e encerrar em
- * silêncio por sem_novidade (definido em 2026-09-21 — só faz sentido onde ninguém está esperando
- * resposta, por isso não entra em conversa nem em sala); peer é texto-só, sem
- * salto (E12.4). pedir_a_pessoa (EMENDA 16) entra onde há pessoa para destravar: conversa, sala e
- * rotina — não em criação (o modelo pergunta em texto) nem em peer (o remetente é outro bot).
+ * Ferramentas nod por modo (definido em 2026-09-16): conversa e sala têm o kit completo; rotina
+ * permite consulta a colega (definido em 2026-09-17) e encerrar em silêncio por sem_novidade
+ * (definido em 2026-09-21 — só faz sentido onde ninguém está esperando resposta, por isso não entra
+ * em conversa nem em sala); peer é texto-só, sem salto (E12.4). pedir_a_pessoa (EMENDA 16) entra
+ * onde há pessoa para destravar: criação, conversa, sala e rotina — não em peer (o remetente é outro bot).
+ *
+ * Criação (revisto em 2026-09-28, ADR-050, "bot novo é bot completo"): é o kit da conversa MAIS
+ * atualizar_perfil. Antes eram só quatro ferramentas, e a Tarsila, pedida para assumir o que três
+ * colegas faziam, respondeu "não consigo" cinco vezes — não via os colegas, não perguntava, não
+ * delegava. Perfil vazio não é trava de capacidade: é uma linha no prompt (prompt-sistema.ts).
+ * ver_colegas (ADR-050) entra onde a pessoa está: criação, conversa e sala.
  *
  * pedir_acesso entra na rotina desde 2026-09-24 (ADR-044): ele só PROPÕE — quem decide é a pessoa,
  * num botão —, e sem ele a rotina sem acesso pedia por pedir_a_pessoa em texto a cada execução. No
  * turno de rotina o domínio só aceita leitura (pedido-acesso.ts).
  *
  * Ciclo de vida de rotina (listar/pausar/reativar, definido em 2026-09-21) só em conversa e sala,
- * onde a pessoa está presente para pedir e conferir. FORA de propósito em:
- * criação (o agente ainda não tem rotina: o inventário seria vazio), peer (quem fala é outro bot,
+ * onde a pessoa está presente para pedir e conferir — e, desde a ADR-050, na criação, pelo mesmo motivo.
+ * FORA de propósito em: peer (quem fala é outro bot,
  * e mexer em rotina por pedido de bot burlaria o corte de segundo salto do ADR-035) e rotina — este
  * é o caso perigoso: um turno acordado por agendamento que pudesse se pausar sozinho viraria uma
  * rotina que se desliga por conta própria, e o modo rotina já é explicitamente "a própria execução",
@@ -48,9 +53,9 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * onde há mensagem da pessoa para carregar: conversa e sala.
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "pedir_acesso", "criar_rotina", "lembrar"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "passar", "encaminhar"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "passar", "encaminhar"],
   rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade"],
   peer: ["lembrar"],
   delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"],
@@ -143,14 +148,15 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n !== "delegar_tarefa" || podeDelegar).map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
-  const temComputador = entrada.computador === true && modo !== "peer" && modo !== "criacao" && modo !== "delegacao";
+  // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.
+  const temComputador = entrada.computador === true && modo !== "peer" && modo !== "delegacao";
   const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
   /**
    * definido em 2026-09-18: sem projeto autorizado o agente só enxerga consultar e propor. Ver um
    * martelo que ainda não pode usar era o que o levava a tentar, falhar e virar tutorial de menu.
    */
   const SEM_PROJETO = ["workspace_consultar", "workspace_propor_pasta"];
-  const workspace: FerramentaPlano[] = entrada.workspace && modo === "conversa"
+  const workspace: FerramentaPlano[] = entrada.workspace && (modo === "conversa" || modo === "criacao")
     ? Object.entries(FERRAMENTAS_WORKSPACE)
       .filter(([nome]) => entrada.workspaceVinculado || SEM_PROJETO.includes(nome))
       .map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta"].includes(nome), tocaAprendiz: true, schema }))

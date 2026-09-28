@@ -58,3 +58,4 @@ Cada arquivo é um ADR: uma decisão, o que mudou, e por quê.
 | [ADR-047](adr-047-tarefa-delegada-carrega-o-pedido-da-pessoa.md) | Tarefa delegada carrega o pedido da pessoa; aprovar PR e merge nunca são permanentes | emenda ADR-025, ADR-026, ADR-042 |
 | [ADR-048](adr-048-github-um-conector-varios-jeitos-de-conectar.md) | GitHub: um conector, vários jeitos de conectar; o gh roda no Mac de quem o logou | emenda ADR-013, ADR-015, ADR-021, ADR-041, ADR-042, ADR-044 |
 | [ADR-049](adr-049-conectar-e-permitir-no-mesmo-lugar.md) | Conectar e permitir no mesmo lugar: login percebido sozinho, card que vira permissão, nível por bot no marketplace, técnico em "Avançado" | emenda ADR-013, ADR-033, ADR-041, ADR-044 |
+| [ADR-050](adr-050-bot-novo-e-bot-completo.md) | Bot novo é bot completo: criação com o kit da conversa, `ver_colegas`, perfil com as rotinas num card só, retomada ao confirmar, pausar rotina de colega a pedido | emenda ADR-033, ADR-043, ADR-044 |

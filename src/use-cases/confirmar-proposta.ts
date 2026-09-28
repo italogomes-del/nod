@@ -11,6 +11,8 @@ import type { ConectorGuardado } from "../contracts/conector.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
+import { carimbo } from "./apoio-l7.ts";
+import { retomarAposPerfil } from "./retomar-apos-perfil.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type SaidaConfirmarProposta = { proposta: Proposta; agente: Agente | null; rotina: Rotina | null; decisao: Decisao | null };
@@ -85,6 +87,20 @@ async function conexaoDaRotinaViraPedido(deps: Deps, existente: Proposta, p: Pay
 }
 
 /**
+ * As propostas 'rotina' que vieram com o perfil (ADR-050): só as ainda pendentes e de fato 'rotina' —
+ * uma já recusada ou removida simplesmente não nasce, em vez de derrubar a confirmação do perfil.
+ */
+async function ativarRotinasDoPerfil(deps: Deps, ids: readonly string[]): Promise<Rotina[]> {
+  const ativadas: Rotina[] = [];
+  for (const id of ids) {
+    const rp = await deps.repos.propostas.buscar(id);
+    if (!rp || rp.estado !== "pendente" || rp.payload.kind !== "rotina") continue;
+    ativadas.push(await deps.tx((trx) => deps.services.rotinas.ativar(trx, id, { semMensagem: true })));
+  }
+  return ativadas;
+}
+
+/**
  * Nada vale antes daqui (E1.1). 'perfil': aplica nome/título/descrição e marca confirmado; 'rotina':
  * services.rotinas.ativar (L7) na MESMA tx; 'acesso': desde 2026-09-24 (ADR-044) o pedido já nasce
  * com a decisão de mesmo id (pedir-acesso.ts) e confirmar só a devolve — o ramo que cria a decisão
@@ -116,8 +132,15 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     const p = proposta.payload;
     agente = await deps.repos.agentes.atualizarPerfil(proposta.agenteId, { nome: p.nome, titulo: p.titulo, descricao: p.descricao, confirmado: true });
     if (!agente) throw new ErroDeDominio("nao_permitido");
-    resumo = [p.nome ? `nome: ${p.nome}` : null, p.titulo ? `título: ${p.titulo}` : null, p.descricao ? `descrição: ${p.descricao}` : null].filter((x) => x !== null).join("; ");
+    // definido em 2026-09-28 (ADR-050): as rotinas que vieram com o perfil nascem no mesmo clique, com os
+    // acessos declarados (ativarRotina), e a linha de sistema é uma só para o card inteiro.
+    const ativadas = await ativarRotinasDoPerfil(deps, p.rotinas ?? []);
+    for (const r of ativadas) events.push(evento(deps.escopo, { kind: "rotina_criada", autoria, agora, conversaId: proposta.conversaId, dados: { rotina_id: r.id, proposta_id: r.id, proxima_execucao: r.proximaExecucao } }));
+    const primeira = [...ativadas].sort((a, b) => a.proximaExecucao - b.proximaExecucao)[0];
+    const comRotinas = primeira ? `${ativadas.length === 1 ? "1 rotina" : `${ativadas.length} rotinas`}, a próxima em ${carimbo(primeira.proximaExecucao, primeira.fusoIana)}` : null;
+    resumo = [p.nome ? `nome: ${p.nome}` : null, p.titulo ? `título: ${p.titulo}` : null, p.descricao ? `descrição: ${p.descricao}` : null, comRotinas].filter((x) => x !== null).join("; ");
     events.push(evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: proposta.conversaId, dados: { agente_id: agente.id, acao: "perfil_confirmado", nome: agente.nome, proposta_id: proposta.id } }));
+    events.push(...(await retomarAposPerfil(deps, proposta, ativadas.length)));
   } else if (proposta.payload.kind === "rotina") {
     // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): ativar concede os acessos
     // declarados dos apps conectados na MESMA transação (conceder-acessos-da-rotina.ts).

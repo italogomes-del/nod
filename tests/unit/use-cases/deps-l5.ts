@@ -58,7 +58,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
   };
   const useCases: UseCasesNod = {
     lembrar: async () => ({ data: { ok: true, id: "memoria-falsa" } }),
-    atualizarPerfil: async () => ({ data: { proposta_id: "proposta-perfil-falsa" } }),
+    atualizarPerfil: async () => ({ data: { proposta_id: "proposta-perfil-falsa", rotinas: [] } }),
     pedirAcesso,
     criarRotina: async () => ({ data: { proposta_id: "proposta-rotina-falsa", proxima_execucao: agora() + 1000, resumo: "rotina falsa" } }),
     listarRotinasDoAgente: async () => ({ data: { rotinas: [] } }),
@@ -73,6 +73,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     semNovidade: async () => ({ data: { ok: true } }),
     perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     delegarTarefa: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    verColegas: async () => ({ data: { colegas: [] } }),
     ...opcoes.useCases,
   };
   const tx: Transacao = (fn) => fn({} as Tx);

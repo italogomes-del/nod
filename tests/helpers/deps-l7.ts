@@ -11,6 +11,7 @@ import { semNovidade } from "../../src/use-cases/sem-novidade.ts";
 import { passar } from "../../src/use-cases/passar.ts";
 import { perguntarABot } from "../../src/use-cases/perguntar-a-bot.ts";
 import { delegarTarefa } from "../../src/use-cases/delegar-tarefa.ts";
+import { verColegas } from "../../src/use-cases/ver-colegas.ts";
 import { servicoSala } from "../../src/use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
@@ -83,6 +84,7 @@ export function useCasesFalsos(): UseCasesNod {
     semNovidade,
     perguntarABot,
     delegarTarefa,
+    verColegas,
   };
 }
 

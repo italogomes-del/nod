@@ -6,10 +6,11 @@ const ESPERADAS = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina",
   "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa",
+  "ver_colegas",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as DEZESSEIS ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-24 traz delegar_tarefa)", () => {
+  it("lista fechada com as DEZESSETE ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-24 traz delegar_tarefa; 2026-09-28 traz ver_colegas)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });
@@ -41,6 +42,11 @@ describe("FERRAMENTAS_NOD", () => {
     expect(FERRAMENTAS_NOD.pedir_a_pessoa.required).toContain("tipo");
     expect(FERRAMENTAS_NOD.pedir_a_pessoa.properties.tipo.enum).toEqual(["pergunta", "falta_de_dado", "permissao"]);
     expect(FERRAMENTAS_NOD.pedir_aprovacao.properties.itens.items.properties.destino.required).toEqual(["conector", "ferramenta", "argumentos"]);
+  });
+
+  it("atualizar_perfil aceita as rotinas que vêm com o perfil, no MESMO schema de criar_rotina (ADR-050)", () => {
+    expect(FERRAMENTAS_NOD.atualizar_perfil.properties.rotinas.items).toBe(FERRAMENTAS_NOD.criar_rotina);
+    expect(FERRAMENTAS_NOD.atualizar_perfil.required).toEqual([]);
   });
 
   it("cada ferramenta tem um caso de uso nomeado em UseCasesNod (EMENDA 5)", () => {
