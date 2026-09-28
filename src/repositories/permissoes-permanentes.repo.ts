@@ -121,8 +121,8 @@ export function permissoesPermanentesRepo(conn: Conn, escopo: Escopo) {
     /**
      * Reconciliação (ADR-042 claim 7): o mundo mudou e a regra para de valer. Sem isto a permissão
      * dorme e acorda — revogar o acesso e reconceder meses depois traria a regra de volta viva, que
-     * é escalada silenciosa. Não reativa nada: o precedente do ADR-034 e de duplicar-agente.ts:35 é
-     * que estado permissivo não volta sozinho.
+     * é escalada silenciosa. Não reativa nada: o precedente do ADR-034 é que estado permissivo não volta
+     * sozinho (duplicar leva só as ATIVAS, por clique da dona e com consentimento novo).
      */
     async desativarPor(
       filtro: { agenteId?: string; conectorId?: string; capacidade?: string },

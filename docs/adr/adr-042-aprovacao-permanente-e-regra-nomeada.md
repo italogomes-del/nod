@@ -48,7 +48,9 @@ tem que morar no servidor.
    capacidade sair do catálogo na sonda seguinte ou o agente ser excluído deixa a regra
    INATIVA com motivo tipado. Inativa não é apagada, e não volta sozinha quando a condição se
    desfaz — mesmo princípio do ADR-034 (*"Restaurar não devolve concessões nem reativa
-   rotinas"*) e de `duplicar-agente.ts:35`, que força `exigeAprovacao: true` na cópia.
+   rotinas"*). Duplicar (emenda de 2026-09-28 do ADR-034) respeita isso: a dona leva as
+   regras ATIVAS para a cópia por clique explícito, com consentimento novo na conversa dela.
+   Inativa não vai, e bot de outra pessoa não passa regra nenhuma.
 
 ## Por que a claim 6 é a mais importante
 

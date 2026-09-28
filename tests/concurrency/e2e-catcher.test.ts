@@ -191,7 +191,7 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect(registros.registros.find((r) => r.turnoId === t2.id && r.tipo === "plano_recebido")?.dados).toMatchObject({ sessaoCli: null, executor: "catcher" });
   });
 
-  it("memória: lembrar (origem agente) aparece em GET memoria com a mensagem 'anotei'; a pessoa edita, acrescenta e apaga; Pin/Hide/Duplicate (cópia sem memória nem histórico)", { timeout: JORNADA_MS }, async () => {
+  it("memória: lembrar (origem agente) aparece em GET memoria com a mensagem 'anotei'; a pessoa edita, acrescenta e apaga; Pin/Hide/Duplicate (cópia com memória, sem histórico)", { timeout: JORNADA_MS }, async () => {
     const t = await rodar(vera.conversaId, 'Lembre que prefiro resumos em tópicos. [[tool: lembrar {"tipo":"preferencia","texto":"prefere resumos em tópicos"}]] [[texto: Anotado.]]');
     expect(t.estado).toBe("concluido");
     const lista = await json<{ memorias: Memoria[] }>("GET", `agentes/${vera.agenteId}/memoria`);
@@ -212,8 +212,11 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     criados.agentes.push(copia.agente.id);
     criados.conversas.push(copia.conversa.id);
     expect(copia.agente).toMatchObject({ nome: "Vera (cópia)", duplicadoDe: vera.agenteId });
-    expect((await json<{ memorias: Memoria[] }>("GET", `agentes/${copia.agente.id}/memoria`)).memorias).toEqual([]);
-    expect((await conversa(copia.conversa.id)).mensagens).toEqual([]);
+    // Emenda de 2026-09-28 da ADR-034: a dona leva a memória; o histórico nunca vem (só consentimentos e avisos de sistema da própria cópia).
+    expect((await json<{ memorias: Memoria[] }>("GET", `agentes/${copia.agente.id}/memoria`)).memorias.map((x) => [x.tipo, x.origem, x.texto])).toEqual([["preferencia", "agente", "prefere tópicos curtos"]]);
+    const daCopia = (await conversa(copia.conversa.id)).mensagens;
+    expect(daCopia.filter((x) => x.kind !== "consentimento" && x.kind !== "sistema")).toEqual([]);
+    expect(daCopia.some((x) => x.texto.includes("prefiro resumos em tópicos"))).toBe(false);
   });
 
   it("rotina por texto: criar_rotina vira proposta + decisão 'rotina' (zero rotinas); decidir ativa com fuso nomeado; o scheduler dispara e a execução é registrada; fuso offset → 400; pausar", { timeout: JORNADA_MS }, async () => {
