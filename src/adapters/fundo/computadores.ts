@@ -7,6 +7,7 @@ import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComput
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
+import { computadorLiberadoNaTarefa } from "../../use-cases/liberar-computador-na-tarefa.ts";
 import type { Escopo } from "../../shared/types.ts";
 import { autoriaAgente, evento } from "../../use-cases/autoria-evento.ts";
 import { errosDoSchema, type ResultadoChamada } from "../../use-cases/chamar-ferramenta.ts";
@@ -251,7 +252,10 @@ export function criarComputadores(o: Opcoes) {
         let acao: AcaoComputador;
         try { acao = validarAcaoComputador({ ...args, ...(nome !== "computador_interagir" ? { tipo: nome.slice(11) } : {}), ...(nome === "computador_arquivos" ? { caminho: args.caminho ?? "." } : {}) }); }
         catch { return negar("args_invalidos"); }
-        if (alteraComputador(acao) && (c.politica === "supervisionado" || plano.politicaExecucao.efeitoExternoSoPorAprovacao)) {
+        // definido em 2026-09-28 (emenda da ADR-037): "Pode fazer e o resto desta tarefa" dispensa o card nas próximas
+        // ações da MESMA tarefa. Nunca vence o gate de rotina, nunca vale em turno não confiável (ADR-026).
+        const liberadaNaTarefa = !plano.politicaExecucao.efeitoExternoSoPorAprovacao && plano.confiancaEntrada === "confiavel" && alteraComputador(acao) && await computadorLiberadoNaTarefa(d, plano.turnoId);
+        if (alteraComputador(acao) && !liberadaNaTarefa && (c.politica === "supervisionado" || plano.politicaExecucao.efeitoExternoSoPorAprovacao)) {
           const registro = await d.repos.computadores.registrar({ computadorId: c.id, turnoId: plano.turnoId, autor: "bot", tipo: acao.tipo, estado: "pendente", argumentosCifrados: o.cifrar(JSON.stringify(acao)) });
           const pedido = await pedirAprovacaoComputador(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, resumo: "Ação no computador do bot", itens: [{ texto: resumoAcaoComputador(acao), destino: { conector: "computador", ferramenta: "executar", argumentos: { acaoId: registro.id } } }] });
           if (pedido.events?.length) await d.repos.events.gravarComOutbox(pedido.events);
@@ -271,17 +275,33 @@ export function criarComputadores(o: Opcoes) {
       }
     },
     async executarAprovado(p: Escopo & { agenteId: string; turnoId: string; acaoId: string }): Promise<void> {
-      const r = await o.dentro(p, async (d) => {
+      const { r, tipo } = await o.dentro(p, async (d) => {
         const c = await obter(d, p.agenteId);
         if (!c.habilitado || c.controle !== "bot" || !await turnoPermitido(d, p.turnoId, p.agenteId, true)) throw new ErroDeDominio("nao_permitido");
         if (c.indisponivelDesde !== null) throw new ErroDeDominio("estado_invalido", { cause: "computador fora do ar" });
         const a = await d.repos.computadores.buscarAcao(p.acaoId);
         if (!a || a.computadorId !== c.id || a.turnoId !== p.turnoId || a.estado !== "pendente" || !a.argumentosCifrados) throw new ErroDeDominio("estado_invalido");
         const acao = validarAcaoComputador(JSON.parse(o.decifrar(a.argumentosCifrados)));
-        return reservar(d, c, acao, "bot", p.turnoId, a.id);
+        return { r: await reservar(d, c, acao, "bot", p.turnoId, a.id), tipo: acao.tipo };
       });
-      const resultado = await executar(p, r);
+      // definido em 2026-09-28 (0032): o resultado volta ao turno que esperava a aprovação — antes era jogado
+      // fora, e a saída do terminal aprovado nunca chegava ao bot (11 casos de "a saída não voltou").
+      // Cifrado como os argumentos (ADR-037) e apagado quando entregue (resultadoDaAcao).
+      const guardar = (conteudo: unknown) => o.dentro(p, (d) => d.repos.computadores.gravarResultado(p.acaoId, o.cifrar(JSON.stringify(conteudo))));
+      let resultado: Awaited<ReturnType<typeof executar>>;
+      try {
+        resultado = await executar(p, r);
+      } catch (e) {
+        await guardar(erroDaFerramenta(`computador_${tipo}`, e));
+        throw e;
+      }
+      await guardar({ ...resultado, audio: undefined, ...(resultado.tela ? { tela: { ...resultado.tela, imagem: undefined } } : {}) });
       if (resultado.codigoSaida !== undefined && resultado.codigoSaida !== 0) throw new ErroDeDominio("estado_invalido");
+    },
+    /** 0032: o resultado da ação aprovada, uma vez, para o turno que a esperava; null se não há. */
+    async resultadoDaAcao(escopo: Escopo, acaoId: string): Promise<string | null> {
+      const cifrado = await o.dentro(escopo, (d) => d.repos.computadores.tirarResultado(acaoId));
+      return cifrado ? o.decifrar(cifrado) : null;
     },
   };
 }

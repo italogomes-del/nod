@@ -12,6 +12,7 @@ import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
+import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
@@ -193,5 +194,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(evento(deps.escopo, { kind: "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: "concluido", custo_usd: resultado.custoUsd, ferramentas: resultado.ferramentasChamadas.length } }));
   }
 
+  // definido em 2026-09-28 (0032): aprovação já decidida que este turno não chegou a receber (a espera acabou
+  // um instante antes do clique) vira UMA retomada — nunca duas, e nunca nenhuma.
+  events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };
 };

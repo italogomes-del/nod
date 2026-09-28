@@ -1,13 +1,14 @@
-import { MODELO_AGENTE_PADRAO } from "../contracts/modelos.ts";
 import { randomUUID } from "node:crypto";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem } from "../contracts/motivos.ts";
+import type { Turno } from "../contracts/turno.ts";
 import { redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
+import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
@@ -141,6 +142,44 @@ export async function executarItens(services: Pick<Services, "conectores" | "com
   return desfechos;
 }
 
+/** A entrada da retomada que continua uma aprovação: o desfecho por item, em texto fixo do servidor. */
+export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovacao[], texto: string): string {
+  const linhas = itens.map((i) => `- item ${i.idx + 1} (${i.destino.conector}.${i.destino.ferramenta}): ${i.desfecho ?? "sem desfecho"} — ${i.textoFinal}`);
+  const noComputador = itens.some((i) => i.destino.conector === "computador" && i.desfecho === "executado");
+  return [
+    // definido em 2026-09-28: não é "turno interrompido" — o turno que pediu concluiu; esta é a continuação dele.
+    "Continuando a tarefa: a pessoa decidiu a aprovação que você pediu; nada foi reenviado.",
+    `Resultado da aprovação "${decisao.frase}" (${texto}):`,
+    ...linhas,
+    ...(noComputador ? ["O resultado da ação no computador não veio junto: observe a tela ou os arquivos antes de seguir."] : []),
+    "Continue a partir daqui; nada foi reenviado.",
+  ].join("\n");
+}
+
+function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
+  return { tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId, dados: { origem: "retomada", retoma_turno_id: decisao.turnoId, decisao_id: decisao.id } };
+}
+
+/**
+ * Rede de segurança (definido em 2026-09-28, 0032): o turno TERMINOU sem receber uma aprovação que já foi
+ * decidida — a espera do proxy acabou um instante antes do clique, ou o turno caiu. Chamado pelo
+ * assentamento do turno, sob a mesma trava da fase 2. Item ainda executando fica para a fase 2.
+ */
+export async function continuarAprovacoesDoTurno(deps: Deps, turno: Turno): Promise<RuntimeEvent[]> {
+  const agora = deps.agora();
+  const events: RuntimeEvent[] = [];
+  for (const decisao of await deps.repos.decisoes.aContinuarDoTurno(turno.id)) {
+    const itens = await deps.repos.itensAprovacao.listar(decisao.id);
+    if (itens.some((i) => i.selecionado && i.desfecho === null)) continue;
+    if ((await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) !== "minha") continue;
+    const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
+    const texto = redigirDesfechoAprovacao({ itens, aprovadorNome: pessoa?.nome ?? "A pessoa", agora });
+    const r = await enfileirarRetomada(deps, { original: turno, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+    if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoriaDaPessoa(deps.escopo), agora));
+  }
+  return events;
+}
+
 export type EntradaAssentarAprovacao = { decisaoId: string; desfechos: readonly DesfechoExecutado[] };
 export type SaidaAssentarAprovacao = { mensagemId: string | null; turnoRetomadaId: string | null; itens: ItemAprovacao[] };
 
@@ -187,37 +226,16 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
   const events: RuntimeEvent[] = [];
   let turnoRetomadaId: string | null = null;
   if (decisao.turnoId) {
-    const original = await deps.repos.turnos.buscar(decisao.turnoId);
-    const linhas = itens.map((i) => `- item ${i.idx + 1} (${i.destino.conector}.${i.destino.ferramenta}): ${i.desfecho ?? "sem desfecho"} — ${i.textoFinal}`);
-    const entradaTexto = [`${redigir("retomada", agora, { motivo: "aprovação decidida" })}`, `Resultado da aprovação "${decisao.frase}" (${texto}):`, ...linhas, "Continue a partir daqui; nada foi reenviado."].join("\n");
-    const turno = await deps.repos.turnos.enfileirar({
-      conversaId: decisao.conversaId,
-      agenteId: decisao.agenteId,
-      origem: "retomada",
-      prazoEm: agora + PRAZO_DECISAO_MS,
-      // definido em 2026-09-24 (revisão da ADR-047): profundidade e confiança do turno que pediu. Com 0 e
-      // "confiavel" fixos, a retomada de uma tarefa delegada saía do salto e lavava a marca.
-      profundidade: original?.profundidade ?? 0,
-      entradaTexto,
-      entradaConfianca: original?.entradaConfianca ?? "confiavel",
-      modelo: original?.modelo ?? MODELO_AGENTE_PADRAO,
-      harness: original?.harness,
-      retomaTurnoId: decisao.turnoId,
-      sobProcuracaoDe: original?.sobProcuracaoDe ?? null,
-    });
-    turnoRetomadaId = turno?.id ?? null;
-    if (turno) {
-      events.push({
-        tenantId: deps.escopo.tenantId,
-        id: randomUUID(),
-        createdAt: agora,
-        kind: "turno_criado",
-        autoria,
-        pessoaDestinoId: deps.escopo.pessoaId,
-        conversaId: decisao.conversaId,
-        turnoId: turno.id,
-        dados: { origem: "retomada", retoma_turno_id: decisao.turnoId, decisao_id: decisao.id },
-      });
+    // definido em 2026-09-28 (0032): uma decisão, UMA continuação. A trava do turno serializa esta fase com o
+    // assentamento dele. Turno vivo = ele mesmo recebe a decisão (espera do proxy) ou, se terminar sem ela,
+    // o assentamento a continua (continuarAprovacoesDoTurno). Antes esta fase SEMPRE criava retomada, e a
+    // aprovação dada durante a espera virava duas continuações — dez turnos da Ada em três minutos.
+    const original = await deps.repos.turnos.buscarTravado(decisao.turnoId);
+    const vivo = original?.estado === "despachando";
+    if (original && !vivo && (await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) === "minha") {
+      const r = await enfileirarRetomada(deps, { original, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+      turnoRetomadaId = r.turno?.id ?? null;
+      if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoria, agora));
     }
   }
   if (mensagem) {
@@ -267,21 +285,13 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
   if (!decisao.turnoId) return { data: { turnoRetomadaId: null }, events: gemeas.events };
   const original = await deps.repos.turnos.buscar(decisao.turnoId);
   if (!original) throw new ErroDeDominio("nao_encontrado", { cause: "turno interrompido" });
-  const turno = await deps.repos.turnos.enfileirar({
-    conversaId: decisao.conversaId,
-    agenteId: decisao.agenteId,
-    origem: "retomada",
+  const { turno, nova } = await enfileirarRetomada(deps, {
+    original,
     prazoEm: agora + PRAZO_DECISAO_MS,
-    profundidade: original.profundidade,
     entradaTexto: redigir("retomada", agora, { motivo: original.motivoInterrupcao ?? "interrupção" }),
-    entradaConfianca: original.entradaConfianca,
-    modelo: original.modelo,
-    harness: original.harness,
-    retomaTurnoId: original.id,
-    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
-  const events: RuntimeEvent[] = turno
+  const events: RuntimeEvent[] = turno && nova
     ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria: autoriaDaPessoa(deps.escopo), pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: decisao.id } }]
     : [];
   return { data: { turnoRetomadaId: turno?.id ?? null }, events: [...gemeas.events, ...events] };

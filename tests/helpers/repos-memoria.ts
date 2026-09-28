@@ -59,6 +59,9 @@ export type BancoMemoria = {
   membros: (MembroSala & { criadoEm: number })[];
   conectores: ConectorGuardado[];
   composioChaves: Map<string, string>;
+  /** 0032: quem continuou cada decisão e as raízes com o computador liberado para a tarefa. */
+  continuacoes: Map<string, "turno" | "retomada">;
+  computadorLiberado: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
   composioSessoes: Map<string, import("../../src/repositories/composio.repo.ts").SessaoComposio>;
   concessoes: Concessao[];
@@ -98,6 +101,8 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     membros: [],
     conectores: [],
     composioChaves: new Map(),
+    continuacoes: new Map(),
+    computadorLiberado: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
     concessoes: [],
@@ -137,6 +142,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       obter: async () => null, travar: async () => null, configurar: async () => undefined,
       ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [],
       buscarAcao: async () => null, concluir: async () => undefined,
+      gravarResultado: async () => undefined, tirarResultado: async () => null,
       registrar: async () => { throw new Error("use o banco para testar computadores"); },
       registrarFalha: async () => null, registrarSucesso: async () => false,
       // Sem computador em memória, nenhum está fora do ar (a frota em memória segue igual).
@@ -533,6 +539,31 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscarTravado(id: string) {
         return doTenant(b.turnos).find((t) => t.id === id) ?? null;
       },
+      async travarRetomadas() {
+        // Em memória tudo roda em série: não há o que travar.
+      },
+      async retomadaNaFila(retomaTurnoId: string) {
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente").sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
+      },
+      async juntarEntrada(id: string, texto: string) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
+        if (!t) return null;
+        t.entradaTexto = `${t.entradaTexto}\n\n${texto}`;
+        return t;
+      },
+      async raizDaCadeia(id: string) {
+        let atual = doTenant(b.turnos).find((t) => t.id === id) ?? null;
+        for (let saltos = 0; atual?.retomaTurnoId && saltos < 50; saltos++) atual = doTenant(b.turnos).find((t) => t.id === atual?.retomaTurnoId) ?? atual;
+        return atual;
+      },
+      async liberarComputador(raizId: string) {
+        if (!doTenant(b.turnos).some((t) => t.id === raizId && t.ownerId === escopo.pessoaId)) return false;
+        b.computadorLiberado.add(raizId);
+        return true;
+      },
+      async computadorLiberado(raizId: string) {
+        return b.computadorLiberado.has(raizId);
+      },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,
@@ -752,6 +783,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (!d) return false;
         d.vistaEm ??= iso(em);
         return true;
+      },
+      async reivindicarContinuacao(id, por) {
+        if (!doTenant(b.decisoes).some((x) => x.id === id)) return null;
+        if (!b.continuacoes.has(id)) {
+          b.continuacoes.set(id, por);
+          return "minha";
+        }
+        return b.continuacoes.get(id) ?? null;
+      },
+      async aContinuarDoTurno(turnoId) {
+        return doTenant(b.decisoes).filter((d) => d.turnoId === turnoId && d.tipo === "aprovacao" && d.estado === "decidida" && !b.continuacoes.has(d.id)).sort((x, y) => (x.decididaEm ?? 0) - (y.decididaEm ?? 0));
       },
       async decidir(id, p) {
         const d = doTenant(b.decisoes).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "reaberta"));

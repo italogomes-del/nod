@@ -123,8 +123,13 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             if (decisao.estado === "decidida" || decisao.estado === "vencida") {
               const itens = await d.repos.itensAprovacao.listar(decisaoId);
               // ADR-048: item aprovado que roda no Mac ainda sem desfecho = a execução não acabou.
-              if (decisao.estado === "decidida" && itens.some((i) => i.selecionado && i.desfecho === null && i.destino.execucao === "maquina")) return { estado: "pendente" as const };
-              return { estado: "decidida" as const, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho })) };
+              // definido em 2026-09-28: vale para TODO item aprovado — a fase 1 fecha a decisão antes de
+              // executar, e o computador voltava "decidida" com desfecho nulo enquanto ainda rodava.
+              if (decisao.estado === "decidida" && itens.some((i) => i.selecionado && i.desfecho === null)) return { estado: "pendente" as const };
+              // 0032: este turno é quem continua a decisão. Se uma retomada já ficou com ela, o turno encerra
+              // (a retomada continua) — nunca os dois.
+              if (decisao.estado === "decidida" && (await d.repos.decisoes.reivindicarContinuacao(decisaoId, "turno", deps.agora())) === "retomada") return { estado: "pendente" as const };
+              return { estado: "decidida" as const, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho, acaoId: i.destino.conector === "computador" && typeof i.destino.argumentos?.acaoId === "string" ? i.destino.argumentos.acaoId : null })) };
             }
             return { estado: "pendente" as const };
           });
@@ -133,7 +138,12 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             return;
           }
           if (olhada.estado === "decidida") {
-            ctx.json(200, olhada);
+            // 0032: o resultado da ação aprovada no computador volta junto (cifrado até aqui, entregue uma vez).
+            const itens = await Promise.all(olhada.itens.map(async ({ acaoId, ...i }) => {
+              const resultado = acaoId && deps.computadores ? await deps.computadores.resultadoDaAcao(ctx.escopo, acaoId) : null;
+              return resultado ? { ...i, resultado } : i;
+            }));
+            ctx.json(200, { estado: "decidida", itens });
             return;
           }
           if (deps.agora() - inicio + intervalo > teto) {

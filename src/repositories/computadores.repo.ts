@@ -50,6 +50,17 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
       return l ? { ...acao(l), argumentosCifrados: l.argumentos_cifrados } : null;
     },
+    /** 0032: o resultado da ação aprovada, cifrado como os argumentos (ADR-037), até o turno recebê-lo. */
+    async gravarResultado(id: string, cifrado: string): Promise<void> {
+      await conn`update computador_acoes set resultado_cifrado = ${cifrado} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    },
+    /** Entrega uma vez: devolve o resultado cifrado e o apaga na mesma transação. */
+    async tirarResultado(id: string): Promise<string | null> {
+      const [l] = await conn<{ resultado_cifrado: string | null }[]>`select resultado_cifrado from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
+      if (!l?.resultado_cifrado) return null;
+      await conn`update computador_acoes set resultado_cifrado = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return l.resultado_cifrado;
+    },
     /** `motivo` só na ação que falhou (CHECK computador_acao_motivo_so_na_falha, 0022). */
     async concluir(id: string, estado: RegistroComputador["estado"], motivo: MotivoFalhaComputador | null = null): Promise<void> {
       await conn`update computador_acoes set estado = ${estado}, motivo = ${estado === "falhou" ? motivo : null}, argumentos_cifrados = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;

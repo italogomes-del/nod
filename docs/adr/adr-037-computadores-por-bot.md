@@ -126,3 +126,16 @@ plano) e web `computador`; conformidade `motivos-enum`.
 
 **Não implementado.** Reconstruir a imagem (`npm run computador:build`) e recriar o container da Nina
 com os volumes preservados é passo de operação, fora do código.
+
+## Emenda de 2026-09-28 — o resultado volta e "e o resto desta tarefa"
+
+**Contexto.** Nos dados de 16/09 a 28/09, 68% das aprovações foram "Ação no computador do bot". Em 11 casos a saída da ação aprovada nunca chegou ao bot: `executarAprovado` descartava o resultado. E cada passo pedia um clique (9 na tarefa da Ada).
+
+**Decisão.**
+- **O resultado da ação aprovada volta ao turno que espera.** Ele fica em `computador_acoes.resultado_cifrado`, cifrado como os argumentos, e é apagado ao ser entregue. Chega no `aguardar`, cortado e moldurado como não confiável pelo proxy, mesmo quando a ação falha. A decisão só volta "decidida" com todo item aprovado já com desfecho.
+- **"Pode fazer e o resto desta tarefa":** aprova o passo do card e marca `turnos.computador_liberado_em` na **raiz** da cadeia de retomadas. As próximas ações que alteram o computador, na mesma tarefa, rodam sem card. A liberação:
+  - nunca vale em turno não confiável (ADR-026);
+  - nunca vence o gate de rotina (`efeitoExternoSoPorAprovacao`);
+  - não passa para outra tarefa;
+  - fica escrita na conversa.
+- "Sempre permitir" continua bloqueado para o computador. A aprovação de cada ação continua vinculada à ação cifrada quando há card.

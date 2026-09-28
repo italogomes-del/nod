@@ -24,6 +24,12 @@ export const ISENCAO_FERRAMENTA_MS = 480_000;
 export const PROBE_MS = 8_000;
 /** Fatia do long-poll de aprovação. definido em 2026-09-16: abaixo do teto do pull da ponte (20s no servidor, ADR-021); o teto real do tools/call do CLI é medido por scripts/sonda-mcp-timeout.ts (L4). */
 export const LONGPOLL_APROVACAO_MS = 20_000;
+/**
+ * definido em 2026-09-28 (0032): quanto o turno espera, com a ferramenta aberta, a pessoa decidir uma aprovação
+ * (fatias de LONGPOLL_APROVACAO_MS). Aprovou nesse tempo, o MESMO turno segue — sem retomada e sem resumo
+ * repetido. Abaixo da isenção do vigia (ISENCAO_FERRAMENTA_MS, 480 s), que derrubaria o turno "mudo".
+ */
+export const ESPERA_APROVACAO_NO_TURNO_MS = 420_000;
 /** Conteúdo não confiável menor que isto não é embrulhado. definido em 2026-09-16: copiado do limiar _UNTRUSTED_WRAP_MIN_CHARS do openmausbot (ADR-026). */
 export const UNTRUSTED_WRAP_MIN_CHARS = 32;
 /**

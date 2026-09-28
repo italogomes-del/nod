@@ -6,6 +6,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
+import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type EntradaRetomarTurno = ({ decisaoId: string; turnoId?: undefined } | { turnoId: string; decisaoId?: undefined }) & {
@@ -56,20 +57,11 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     confianca: "confiavel",
   });
 
-  const turno = await deps.repos.turnos.enfileirar({
-    conversaId: conversa.id,
-    agenteId: original.agenteId,
-    origem: "retomada",
+  // retomar não lava a marca (revisão da ADR-047): enfileirarRetomada copia a confiança do turno original.
+  const { turno, nova } = await enfileirarRetomada(deps, {
+    original,
     prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
-    profundidade: original.profundidade,
     entradaTexto: texto,
-    // definido em 2026-09-24 (revisão da ADR-047): retomar não lava a marca — a tarefa delegada que nasceu
-    // não confiável volta não confiável (era "confiavel" fixo, pendência da ADR-044).
-    entradaConfianca: original.entradaConfianca,
-    modelo: original.modelo,
-    harness: original.harness,
-    retomaTurnoId: original.id,
-    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
     executor: input.executor ?? "catcher",
   });
@@ -77,7 +69,7 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
 
   const events = [
     evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto", destravou: true } }),
-    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, reenvios: turno.reenvios } }),
+    ...(nova ? [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, reenvios: turno.reenvios } })] : []),
   ];
   if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
   if (decisao) {

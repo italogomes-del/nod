@@ -241,12 +241,16 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
     // pedidos seguidos pareciam o mesmo; a ação concreta ("Abrir no navegador: …") sai do "Ver
     // detalhes". Só no computador: lá o texto é somente leitura, então o que aparece é o que será feito.
     const acao = unico.destino.conector === "computador" && unico.textoFinal.trim() !== item.decisao.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
+    // definido em 2026-09-28 (emenda da ADR-037): numa tarefa no computador cada passo pedia um clique (9 na
+    // Ada). Este aprova o passo e libera os próximos DESTA tarefa; o servidor ignora em turno não confiável e
+    // em rotina com gate.
+    const resto = unico.destino.conector === "computador" ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: item.decisao.id }) : "";
     return `<div class="ap-unico">
       ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
       ${aberta ? detalheTecnico(unico) : ""}
       ${tagDesfecho(unico, aberta)}
     </div>
-    ${aberta ? `<div class="acoes">${botao("decidir-aprovacao", "Pode fazer", { classe: "pri", id: item.decisao.id })}${botao("decidir-aprovacao-nenhum", "Agora não", { id: item.decisao.id })}${botaoSempre(item, conectores)}</div>` : ""}`;
+    ${aberta ? `<div class="acoes">${botao("decidir-aprovacao", "Pode fazer", { classe: "pri", id: item.decisao.id })}${resto}${botao("decidir-aprovacao-nenhum", "Agora não", { id: item.decisao.id })}${botaoSempre(item, conectores)}</div>` : ""}`;
   }
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }

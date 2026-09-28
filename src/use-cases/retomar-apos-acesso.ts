@@ -2,6 +2,7 @@ import type { Proposta } from "../contracts/conversa.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta }, { turnoId: string | null }> = async (deps, { decisao, proposta }) => {
@@ -13,12 +14,9 @@ export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta
   if (!original || original.agenteId !== decisao.agenteId || original.conversaId !== decisao.conversaId) throw new ErroDeDominio("estado_invalido");
   if (await deps.repos.agentes.execucaoBloqueada(original.id)) return { data: { turnoId: null } };
   const agora = deps.agora();
-  const turno = await deps.repos.turnos.enfileirar({
-    conversaId: original.conversaId,
-    agenteId: original.agenteId,
-    origem: "retomada",
+  const { turno, nova } = await enfileirarRetomada(deps, {
+    original,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
-    profundidade: original.profundidade,
     entradaTexto: [
       `A pessoa concedeu acesso a ${p.conector}: ${p.capacidades.join(", ")}.`,
       "Retome a tarefa que motivou esse pedido de acesso, usando o contexto da conversa e a entrada original abaixo.",
@@ -26,16 +24,10 @@ export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta
       "Entrada do turno original:",
       original.entradaTexto,
     ].join("\n"),
-    entradaConfianca: original.entradaConfianca,
-    harness: original.harness,
-    modelo: original.modelo,
-    retomaTurnoId: original.id,
-    // ADR-047: a retomada de uma tarefa delegada continua sob o pedido da mesma pessoa.
-    sobProcuracaoDe: original.sobProcuracaoDe ?? null,
     reenvios: original.reenvios + 1,
   });
   return {
     data: { turnoId: turno?.id ?? null },
-    events: turno ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo), agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: decisao.id } })] : [],
+    events: nova && turno ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo), agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: decisao.id } })] : [],
   };
 };
