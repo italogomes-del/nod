@@ -7,12 +7,13 @@ import { describe, expect, it } from "vitest";
  * ADR-044: conceder é ato da PESSOA. Chamam conceder/concederLote só o botão da decisão de acesso
  * (decidir-acesso.ts) e a concessão manual por capacidade da tela Conectores (rota de pessoa);
  * conceder-acessos-da-rotina.ts concede o que a rotina declarou quando a pessoa a confirma (emenda de
- * 2026-09-24, "rotina nasce com o acesso"). Prova PROGRAMÁTICA no estilo de fronteiras.test.ts:
+ * 2026-09-24, "rotina nasce com o acesso"); duplicar-agente.ts leva as concessões do bot da própria dona
+ * quando ela clica em Duplicar (emenda de 2026-09-28 da ADR-034). Prova PROGRAMÁTICA no estilo de fronteiras.test.ts:
  * a regra do eslint.config.mjs está de pé (negativo e positivo) E o código de hoje a respeita —
  * um eslint-disable numa linha passaria pela primeira prova, não pela segunda.
  */
 const eslint = new ESLint({ cwd: process.cwd() });
-const PODEM = ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts"];
+const PODEM = ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts", "src/use-cases/duplicar-agente.ts"];
 
 async function restricoes(codigo: string, caminho: string): Promise<string[]> {
   const [r] = await eslint.lintText(codigo, { filePath: caminho });
@@ -34,10 +35,11 @@ describe("conceder só pela pessoa (ADR-044)", () => {
     expect(await restricoes(`import { concederLote } from "../../use-cases/conceder.ts";\nexport const y = concederLote;\n`, "src/adapters/fundo/y.ts")).toHaveLength(1);
   });
 
-  it("decidir-acesso.ts, a rota da pessoa e conceder-acessos-da-rotina.ts podem; outro export de conceder.ts continua livre", async () => {
+  it("decidir-acesso.ts, a rota da pessoa, conceder-acessos-da-rotina.ts e duplicar-agente.ts podem; outro export de conceder.ts continua livre", async () => {
     expect(await restricoes(`import { concederLote } from "./conceder.ts";\nexport const x = concederLote;\n`, "src/use-cases/decidir-acesso.ts")).toEqual([]);
     expect(await restricoes(`import { conceder } from "../../../use-cases/conceder.ts";\nexport const x = conceder;\n`, "src/adapters/http/rotas/concessoes.ts")).toEqual([]);
     expect(await restricoes(`import { concederLote } from "./conceder.ts";\nexport const x = concederLote;\n`, "src/use-cases/conceder-acessos-da-rotina.ts")).toEqual([]);
+    expect(await restricoes(`import { concederLote } from "./conceder.ts";\nexport const x = concederLote;\n`, "src/use-cases/duplicar-agente.ts")).toEqual([]);
     expect(await restricoes(`import { quandoUtc } from "./conceder.ts";\nexport const x = quandoUtc;\n`, "src/use-cases/revogar.ts")).toEqual([]);
   });
 

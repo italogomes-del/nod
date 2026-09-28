@@ -36,7 +36,7 @@ export function renderPerfil(estado: Estado, agenteId: string): string {
         <button class="bt pri" type="submit" data-act="salvar-perfil">Salvar</button>
         ${botao("fixar", a.fixado ? "Desafixar" : "Fixar", { id: a.id })}
         ${botao("ocultar", a.oculto ? "Mostrar" : "Ocultar", { id: a.id })}
-        ${botao("duplicar", "Duplicar", { id: a.id, titulo: "copia o perfil; nunca memória nem histórico" })}
+        ${botao("duplicar", "Duplicar", { id: a.id, titulo: a.ownerId === estado.sessao?.pessoaId ? "copia o bot com memória, acessos e rotinas; nunca o histórico" : "copia o perfil; memória, acessos e histórico ficam com a dona" })}
         ${botao("ir-memoria", "Memória", { id: a.id })}
         ${botao("abrir-conversa", "Conversa", { dados: { conversa: a.conversaId, agente: a.id } })}
       </div>

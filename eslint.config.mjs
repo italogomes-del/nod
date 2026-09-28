@@ -92,12 +92,14 @@ export default tseslint.config(
   // definido em 2026-09-24 (ADR-044): conceder é ato da PESSOA. Chamam conceder/concederLote só o botão
   // da decisão de acesso (decidir-acesso.ts) e a concessão manual por capacidade da tela Conectores
   // (rota de pessoa); conceder-acessos-da-rotina.ts concede o que a rotina declarou quando a pessoa a
-  // confirma (emenda de 2026-09-24, "rotina nasce com o acesso").
+  // confirma (emenda de 2026-09-24, "rotina nasce com o acesso"); duplicar-agente.ts leva à cópia as
+  // concessões do bot da PRÓPRIA dona quando ela clica em Duplicar — só a rota de pessoa o chama, nenhuma
+  // ferramenta (emenda de 2026-09-28 da ADR-034).
   // Regra do núcleo (no-restricted-imports), não a do typescript-eslint: a mesma regra num segundo
   // bloco SUBSTITUIRIA as fronteiras de camada acima para estes arquivos.
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts", "src/**/conceder-acessos-da-rotina.ts"],
+    ignores: ["src/use-cases/conceder.ts", "src/use-cases/decidir-acesso.ts", "src/adapters/http/rotas/concessoes.ts", "src/**/conceder-acessos-da-rotina.ts", "src/use-cases/duplicar-agente.ts"],
     rules: {
       "no-restricted-imports": [
         "error",

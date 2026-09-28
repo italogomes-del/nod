@@ -6,8 +6,8 @@ import { enviarMensagem } from "../../../src/use-cases/enviar-mensagem.ts";
 import { registrarMemoria } from "../../../src/use-cases/lembrar.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
-describe("duplicarAgente (Grok Bot: Duplicate copia perfil, nunca memória nem histórico)", () => {
-  it("cópia leva nome ' (cópia)', título, descrição, dono e modelo; avatar preservado; sem memórias nem mensagens", async () => {
+describe("duplicarAgente (Grok Bot: Duplicate; a dona leva o bot inteiro, nunca o histórico)", () => {
+  it("cópia leva nome ' (cópia)', título, descrição, dono, modelo, avatar e memória; sem mensagens", async () => {
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "empresa", nome: "Vera" });
     await executar(deps, editarPerfil, { agenteId: criado.agente.id, titulo: "Revisora", descricao: "Revisa PRs" });
@@ -20,7 +20,7 @@ describe("duplicarAgente (Grok Bot: Duplicate copia perfil, nunca memória nem h
     expect(data.agente.cor).toBe(criado.agente.cor);
     expect(data.conversa).toMatchObject({ tipo: "propria", agenteId: data.agente.id });
     expect(data.conversa.id).not.toBe(criado.conversa.id);
-    expect(await deps.repos.memorias.listarDoAgente(data.agente.id)).toEqual([]);
+    expect(await deps.repos.memorias.listarDoAgente(data.agente.id)).toMatchObject([{ tipo: "preferencia", texto: "resumos em tópicos", origem: "pessoa" }]);
     expect(await deps.repos.mensagens.listarDaConversa(data.conversa.id)).toEqual([]);
     expect(await deps.repos.memorias.listarDoAgente(criado.agente.id)).toHaveLength(1);
     expect(events.map((e) => e.kind)).toEqual(["agente_atualizado"]);

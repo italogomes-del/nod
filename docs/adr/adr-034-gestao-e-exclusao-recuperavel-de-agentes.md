@@ -48,3 +48,32 @@ A interface informa isso ao confirmar exclusão. Restaurar não revalida tokens/
 `tests/integration/gestao-agentes.test.ts` cobre o ciclo, cópia, isolamento de dono e geração entre
 pessoas. `tests/concurrency/gestao-agentes-http.test.ts` verifica os endpoints reais. O roteiro visual
 está em [UAT da gestão](../uat-gestao-agentes.md).
+
+## Emenda de 2026-09-28 — duplicar de verdade
+
+**Contexto.** O Marlon duplicou o Dev 1 esperando o mesmo bot, e a cópia veio sem as 7 concessões do
+GitHub. Pela regra acima, também viria sem memória e com as rotinas pausadas. Para quem duplica o
+PRÓPRIO bot, "reaproveitar a configuração" deixava de fora justamente o que faz o bot funcionar.
+
+**Decisão.**
+
+- **A dona duplicando o próprio bot leva o bot inteiro:** perfil e avatar (como antes), memória,
+  concessões, regras "Sempre permitir" ativas (ADR-042) e rotinas no **mesmo estado**. Uma rotina
+  ativa continua ativa, com a aprovação como estava. A conversa da cópia registra "Rotina ativa: …",
+  como na confirmação.
+- **Todo acesso nasce com consentimento novo, na conversa da cópia.** Concessões passam por
+  `concederLote` (a mesma mensagem e os mesmos eventos de um "Dar acesso"). Regras ganham uma mensagem
+  `permissao-permanente` e mantêm o item de origem. O clique em Duplicar é o consentimento, e fica
+  citável na conversa da cópia (ADR-013). Capacidade fora do catálogo e regra que hoje não poderia
+  nascer (`nuncaPermanente`, ADR-047) não são propagadas. `duplicar-agente.ts` entra na lista de quem
+  pode chamar `concederLote` (`eslint.config.mjs`, ADR-044) porque só a rota de pessoa o chama.
+- **Bot de equipe duplicado por outra pessoa não muda:** vem só o perfil, rotinas pausadas e com
+  aprovação, sem memória nem permissões. Quem não deu o acesso não o herda.
+- Continuam fora: histórico, sessão do CLI, fixação, seção, leitura e o computador do bot (a cópia
+  ganha o próprio vínculo, ADR-037). A pasta de trabalho é vínculo local da conversa e também não vem.
+
+**Custo aceito.** Rotina ativa duplicada roda nos dois bots. A caixa de confirmação avisa isso antes
+do clique.
+
+**Gatilho de reversão.** Se aparecer efeito externo duplicado por rotina copiada ativa (dois envios da
+mesma coisa), volta a regra de copiar as rotinas pausadas, mantendo a cópia de memória e acessos.

@@ -616,7 +616,11 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
     pedirGestao("Mover para", `<p>Escolha uma seção ou escreva um novo nome. Deixe vazio para tirar da seção.</p><label>Seção<input name="secao" value="${esc(a.secao ?? "")}" maxlength="60" list="secoes-bots" placeholder="Sem seção" /></label><datalist id="secoes-bots">${secoes.map((n) => `<option value="${esc(n!)}"></option>`).join("")}</datalist>`, "Mover", async (d) => mudarGestao(() => api!.organizarAgente(a.id, { secao: String(d.get("secao")) }))); return;
   }
   if (acao === "duplicar") {
-    pedirGestao(`Duplicar ${a.nome}?`, "<p>A cópia mantém perfil e avatar. Rotinas começam pausadas. Histórico, memória e acessos não são copiados.</p>", "Duplicar", async () => {
+    // definido em 2026-09-28 (emenda da ADR-034): a dona leva o bot inteiro; bot de equipe de outra pessoa, só o perfil.
+    const texto = a.ownerId === estado.sessao?.pessoaId
+      ? "<p>A cópia leva perfil, avatar, memória, acessos e rotinas. Rotinas ativas também rodam na cópia. Só o histórico da conversa não vem.</p>"
+      : "<p>A cópia mantém perfil e avatar. Rotinas começam pausadas. Como o bot não é seu, memória e acessos ficam com a dona; o histórico também não vem.</p>";
+    pedirGestao(`Duplicar ${a.nome}?`, texto, "Duplicar", async () => {
       const r = await api!.duplicar(a.id);
       await mudarGestao(async () => r);
       navegar({ tipo: "conversa", agenteId: r.agente.id, conversaId: r.conversa.id });
