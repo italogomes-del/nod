@@ -151,6 +151,19 @@ describe("pastas autorizadas no harness", () => {
     expect(permitidas).not.toContain("Bash");
   });
 
+  it("as nativas vêm do plano (nativasDoTurno); plano antigo sem o campo cai na regra anterior", () => {
+    const soLeitura = montarArgs({ plano: { ...comPastas("/w/nod", ["/w/nod"]), nativas: ["Read", "Glob"] }, mcpJson: "/tmp/mcp.json" }).args;
+    const permitidas = soLeitura[soLeitura.indexOf("--allowedTools") + 1]!.split(",");
+    expect(permitidas).toContain("Read");
+    expect(permitidas).not.toContain("Write");
+    const antigo = montarArgs({ plano: comPastas("/w/nod", ["/w/nod"]), mcpJson: "/tmp/mcp.json" }).args;
+    expect(antigo[antigo.indexOf("--allowedTools") + 1]!.split(",")).toContain("Write");
+    // Sem pastas, nem o campo liga nativa nenhuma.
+    const semPasta = montarArgs({ plano: { ...planoDeTeste(), nativas: ["Read"] }, mcpJson: "/tmp/mcp.json" }).args;
+    expect(semPasta[semPasta.indexOf("--tools") + 1]).toBe("");
+    expect(semPasta[semPasta.indexOf("--allowedTools") + 1]!.split(",")).not.toContain("Read");
+  });
+
   it("todos os projetos aprovados entram em --add-dir, sem repetir o ativo", () => {
     const { args } = montarArgs({ plano: comPastas("/w/nod", ["/w/nod", "/w/site", "/w/api"]), mcpJson: "/tmp/mcp.json" });
     const dirs = args.filter((a, i) => args[i - 1] === "--add-dir");

@@ -16,6 +16,7 @@ import { conectorTocaAprendiz } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
+import { nativasDoTurno } from "./nativas.ts";
 import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
@@ -123,6 +124,8 @@ export type EntradaPlano = {
   semprePermitir?: readonly string[];
   /** Turno de delegação (ADR-047): quem pediu e por meio de quem, para a linha do prompt. */
   delegacao?: { pessoaNome: string; remetenteNome: string } | null;
+  /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
+  pastasAutorizadas?: boolean;
   agora: number;
 };
 
@@ -181,6 +184,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   };
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
+  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true });
   return {
     tenantId: entrada.turno.tenantId,
     turnoId: entrada.turno.id,
@@ -194,7 +198,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     confiancaEntrada: entrada.confianca,
     profundidade: entrada.profundidade,
     catalogo: { ferramentas, servidores: servidoresUsados },
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null }),
+    nativas,
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null }),
     entrada: { texto: entrada.turno.entradaTexto, sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}) },
     politicaExecucao: {
       prazoMs,
