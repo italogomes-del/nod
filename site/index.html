@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#faf9f6" />
+    <meta name="description" content="Bots que conversam entre si, cada um com sua escolha de IA e seu próprio computador. Conheça o nod: conversas, memória e ajuda para tirar suas ideias do papel." />
+    <meta property="og:title" content="nod — Uma boa conversa. Um trabalho a menos." />
+    <meta property="og:description" content="Escolha a IA de cada bot, veja seus bots colaborarem e conheça os computadores próprios do nod. Um projeto em construção." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>nod — Uma boa conversa. Um trabalho a menos.</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/main.ts"></script>
+  </head>
+  <body>
+    <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6" /></symbol>
+      <symbol id="diagonal" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12" /></symbol>
+      <symbol id="play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7Z" /></symbol>
+      <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      <symbol id="file" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16h14V8Zm0 0v5h5M9 12h6m-6 4h4" /></symbol>
+      <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></symbol>
+      <symbol id="close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6" /></symbol>
+      <symbol id="monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></symbol>
+      <symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" /></symbol>
+      <symbol id="folder" viewBox="0 0 24 24"><path d="M3 7V4h6l3 3h9v13H3Z" /></symbol>
+    </svg>
+    <a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+    <header class="site-header wrap">
+      <a class="wordmark" href="#" aria-label="nod, início">nod<span class="wordmark-dot">.</span></a>
+      <nav aria-label="Navegação principal">
+        <a href="#como-funciona">Como funciona</a>
+        <a href="#sua-ia">Sua escolha de IA</a>
+        <a href="#possibilidades">Possibilidades</a>
+        <a href="#projeto">O projeto</a>
+      </nav>
+      <a class="header-cta" href="#lista-interesse">Entrar na lista <svg class="icon" aria-hidden="true"><use href="#diagonal" /></svg></a>
+    </header>
+
+    <main id="conteudo">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <a class="preview-badge" href="#projeto"><span class="status-dot"></span> Um novo jeito de tocar o dia <span class="badge-label">Em construção</span><span aria-hidden="true">↗</span></a>
+        <h1 id="hero-title">Uma boa conversa.<br /><span>Um trabalho a menos.</span></h1>
+        <p class="hero-description">Seus bots, com a IA que você escolher.<br />Eles conversam entre si e cada um pode ter seu próprio computador para fazer acontecer.</p>
+        <div class="hero-actions">
+          <a class="button button-dark" href="#lista-interesse">Quero acompanhar <svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></a>
+          <a class="quiet-link" href="#demonstracao"><svg class="icon play-icon" aria-hidden="true"><use href="#play" /></svg> Explore a demonstração</a>
+        </div>
+        <div class="hero-friend friend-blue" aria-hidden="true"><span class="friend-note">ideia boa?<br />deixa comigo.</span><img src="/mascots/vera.svg" alt="" width="120" height="120" /><span class="friend-spark">✳</span></div>
+        <div class="hero-friend friend-orange" aria-hidden="true"><span class="friend-note">a gente<br />desenrola.</span><img src="/mascots/lume.svg" alt="" width="105" height="105" /></div>
+        <a class="provider-strip" href="#sua-ia" aria-label="Entenda as opções de IA: Claude, ChatGPT via Codex e Cursor em preparação">
+          <span class="provider-wordmark provider-claude"><img class="provider-logo" src="/providers/claude.svg" alt="" width="30" height="30" /><span>Claude<small>via Claude Code</small></span></span>
+          <span class="provider-wordmark provider-chatgpt"><img class="provider-logo" src="/providers/chatgpt.svg" alt="" width="30" height="30" /><span>ChatGPT<small>via Codex</small></span></span>
+          <span class="provider-wordmark provider-cursor"><img class="provider-logo" src="/providers/cursor.svg" alt="" width="30" height="30" /><span>Cursor<small>em preparação</small></span></span>
+          <svg class="icon" aria-hidden="true"><use href="#diagonal" /></svg>
+        </a>
+        <div class="hero-footnote"><span class="tiny-line"></span> Uma IA para cada bot. Seu contexto continua no nod.</div>
+        <div class="feature-shortcuts"><a href="#bots-em-equipe">Bots que colaboram <span aria-hidden="true">↗</span></a><span aria-hidden="true">·</span><a href="#computadores">Um computador por bot <span aria-hidden="true">↗</span></a></div>
+      </section>
+
+      <section id="demonstracao" class="demo-section wrap" aria-label="Conheça os bots em uma demonstração interativa">
+        <div class="demo-caption"><span><span class="status-dot"></span> UM POUQUINHO DO NOD</span><span>Exemplos ilustrativos · escolha um bot <span aria-hidden="true">↓</span></span></div>
+        <div class="product-window">
+          <aside class="demo-sidebar" aria-label="Bots da demonstração">
+            <div class="sidebar-heading"><span>Meus bots</span><span class="sidebar-count">4</span></div>
+            <div class="bot-list" role="group" aria-label="Escolher exemplo de conversa">
+              <button class="bot-option is-selected" type="button" data-bot="vera" aria-pressed="true"><img src="/mascots/vera.svg" alt="" width="44" height="44" /><span><strong>Vera</strong><small>Escrita & conteúdo</small></span><span class="bot-indicator"></span></button>
+              <button class="bot-option" type="button" data-bot="lume" aria-pressed="false"><img src="/mascots/lume.svg" alt="" width="44" height="44" /><span><strong>Lume</strong><small>Ideias & pesquisa</small></span><span class="bot-indicator"></span></button>
+              <button class="bot-option" type="button" data-bot="nico" aria-pressed="false"><img src="/mascots/nico.svg" alt="" width="44" height="44" /><span><strong>Nico</strong><small>Código & projetos</small></span><span class="bot-indicator"></span></button>
+              <button class="bot-option" type="button" data-bot="bia" aria-pressed="false"><img src="/mascots/bia.svg" alt="" width="44" height="44" /><span><strong>Bia</strong><small>Rotinas & organização</small></span><span class="bot-indicator"></span></button>
+            </div>
+            <div class="sidebar-note"><span class="note-star" aria-hidden="true">✳</span><p>Um nome, uma função.<br />Um bot do seu jeito.</p></div>
+            <div class="sidebar-user"><span class="user-avatar">V</span><span>Seu espaço<small>Feito para você</small></span></div>
+          </aside>
+          <div class="demo-conversation">
+            <header class="conversation-header">
+              <img id="chat-avatar" src="/mascots/vera.svg" alt="" width="42" height="42" />
+              <div><h2 id="chat-name">Vera</h2><p id="chat-specialty">Um olhar cuidadoso para suas palavras.</p></div>
+              <span class="demo-label">DEMONSTRAÇÃO</span>
+            </header>
+            <div class="conversation-body" id="conversation" aria-live="polite" aria-atomic="true">
+              <div class="chat-day">Uma ideia, uma conversa</div>
+              <div class="message message-user"><span class="message-author">Você</span><p>Vera, transforma essa ideia em um post? Quero apresentar o nod de um jeito simples, sem parecer uma propaganda.</p></div>
+              <div class="message message-bot"><span class="message-author">Vera</span><p>Claro. Vou partir do que ele faz no dia a dia e manter o tom direto que você gosta.</p></div>
+              <div class="work-step"><svg class="icon" aria-hidden="true"><use href="#check" /></svg> Organizei a ideia e preparei um primeiro rascunho.</div>
+              <button class="delivery" id="delivery" type="button" aria-label="Abrir rascunho: Um primeiro oi do nod"><span class="delivery-icon"><svg class="icon" aria-hidden="true"><use href="#file" /></svg></span><span><strong>Um primeiro oi do nod</strong><small>Rascunho de post · pronto para você revisar</small></span><svg class="icon" aria-hidden="true"><use href="#diagonal" /></svg></button>
+              <p class="chat-end">“Se quiser, também posso deixar mais curto.”</p>
+            </div>
+            <div class="demo-composer"><span>Seu próximo pedido começa aqui.</span><button id="replay" class="replay-button" type="button"><svg class="icon play-icon" aria-hidden="true"><use href="#play" /></svg><span>Reproduzir exemplo</span></button></div>
+          </div>
+        </div>
+        <div class="demo-bottom"><span>Uma prévia da experiência. Nenhuma IA está sendo executada aqui.</span><span class="demo-pagination" aria-hidden="true"><i class="active"></i><i></i><i></i><i></i></span></div>
+      </section>
+
+      <section id="sua-ia" class="intelligence-section wrap" aria-labelledby="intelligence-title">
+        <div class="intelligence-intro">
+          <div class="section-heading">
+            <span class="eyebrow">01 / LIBERDADE PARA ESCOLHER</span>
+            <h2 id="intelligence-title">Seu bot.<br />Sua escolha de IA.</h2>
+            <p>Um bot para escrever com Claude. Outro com sua conta do ChatGPT, pelo Codex. Você escolhe a inteligência de cada um.</p>
+            <p class="intelligence-promise">O perfil, as conversas e a memória ficam no nod, mesmo quando você troca a IA.</p>
+          </div>
+          <div class="model-demo" aria-label="Exemplo ilustrativo de escolha da IA de um bot">
+            <div class="model-demo-caption"><span>O MESMO BOT. OUTRA POSSIBILIDADE.</span><span>Exemplo</span></div>
+            <div class="model-bot"><img src="/mascots/vera.svg" alt="" width="76" height="76" /><div><strong>Vera</strong><span>Seu bot de escrita & conteúdo</span></div><span class="model-bot-tag">do seu jeito</span></div>
+            <fieldset class="model-options">
+              <legend>Qual IA vai ajudar a Vera?</legend>
+              <label class="model-option"><input type="radio" name="demo-model" value="claude" checked /><img class="provider-logo" src="/providers/claude.svg" alt="" width="28" height="28" /><span><strong>Claude</strong><small>pela sua conta do Claude Code</small></span><span class="model-radio" aria-hidden="true"></span></label>
+              <label class="model-option"><input type="radio" name="demo-model" value="chatgpt" /><img class="provider-logo" src="/providers/chatgpt.svg" alt="" width="28" height="28" /><span><strong>ChatGPT</strong><small>pela sua conta do Codex</small></span><span class="model-radio" aria-hidden="true"></span></label>
+              <div class="model-option model-option-future"><img class="provider-logo" src="/providers/cursor.svg" alt="" width="28" height="28" /><span><strong>Cursor</strong><small>Mais uma opção para seus bots</small></span><span class="future-label">Em preparação</span></div>
+            </fieldset>
+            <p class="model-selection" id="model-selection" role="status" aria-live="polite">Neste exemplo, a Vera usa Claude. O perfil e a memória continuam os mesmos.</p>
+            <div class="model-keeps"><svg class="icon" aria-hidden="true"><use href="#check" /></svg> O seu bot continua sendo seu.</div>
+          </div>
+        </div>
+        <div class="access-heading"><h3>E como essa IA chega até o seu bot?</h3><p>Estamos construindo três caminhos. Você escolhe o que faz sentido para você.</p></div>
+        <div class="access-options">
+          <article class="access-option access-current">
+            <div class="access-top"><span class="access-number">01</span><span class="access-status"><span class="status-dot"></span> Integrado no projeto</span></div>
+            <h4>Com a assinatura<br /> que você já usa.</h4>
+            <p>Conecte sua conta do Claude ou do ChatGPT no computador. O nod usa essa conexão para dar inteligência aos seus bots.</p>
+            <div class="access-bottom"><strong>Sua conta → seus bots</strong><span>Via Claude Code ou Codex. Modelos e limites dependem do seu plano.</span></div>
+          </article>
+          <article class="access-option">
+            <div class="access-top"><span class="access-number">02</span><span class="access-status status-planned">Planejado</span></div>
+            <h4>Com sua<br /> própria API.</h4>
+            <p>Conecte o serviço de IA diretamente, usando uma chave de acesso. Você escolhe o provedor e paga o consumo na sua conta com ele.</p>
+            <div class="access-bottom"><strong>Sua chave → seus bots</strong><span>Um caminho para quem prefere usar e gerenciar sua própria API.</span></div>
+          </article>
+          <article class="access-option">
+            <div class="access-top"><span class="access-number">03</span><span class="access-status status-planned">Planejado</span></div>
+            <h4>Direto<br /> pelo nod.</h4>
+            <p>Escolha entre os modelos que o nod vai oferecer. A conexão com os provedores fica por nossa conta, sem precisar configurar sua própria chave.</p>
+            <div class="access-bottom"><strong>Você escolhe → o nod conecta</strong><span>Modelos de diferentes provedores, acessados pelo próprio nod.</span></div>
+          </article>
+        </div>
+        <p class="intelligence-note">Hoje, Claude Code e Codex estão integrados à versão em desenvolvimento. Cursor, API própria e modelos pelo nod fazem parte dos próximos passos.</p>
+      </section>
+
+      <section id="como-funciona" class="how-section wrap" aria-labelledby="how-title">
+        <div class="section-heading"><span class="eyebrow">02 / SIMPLES COMO UMA CONVERSA</span><h2 id="how-title">Você explica.<br />Seu bot continua.</h2><p>Sem precisar começar do zero a cada pedido.<br />Dê uma função, compartilhe o contexto e encontre<br class="desktop-break" /> seu jeito de trabalhar junto.</p></div>
+        <div class="how-steps">
+          <article><span class="step-number">01</span><div><h3>Um bot com uma missão.</h3><p>Para escrever, organizar ideias ou cuidar de uma rotina. Você escolhe o nome e conta como ele pode ajudar.</p></div></article>
+          <article><span class="step-number">02</span><div><h3>Conte do seu jeito.</h3><p>Converse, compartilhe referências e ajuste o caminho. Seu bot pode guardar as preferências que você pedir.</p></div></article>
+          <article><span class="step-number">03</span><div><h3>O trabalho volta para você.</h3><p>Acompanhe na conversa, revise a entrega e diga o que vem depois. Você escolhe os acessos dos seus bots.</p></div></article>
+        </div>
+      </section>
+
+      <section id="possibilidades" class="possibilities wrap" aria-labelledby="possibilities-title">
+        <div class="possibilities-heading"><div><span class="eyebrow">03 / CADA UM COM SEU TALENTO</span><h2 id="possibilities-title">O que você quer<br />tirar da frente?</h2></div><p>Pequenas ajudas.<br />Novas possibilidades para o seu dia.</p></div>
+        <div class="use-cases">
+          <article class="use-case case-blue"><div class="case-illustration"><span class="paper-note note-one">aquela ideia<br />que ficou solta...</span><img src="/mascots/vera.svg" alt="Vera, bot azul de escrita" width="140" height="140" loading="lazy" /><span class="paper-note note-two">virou um<br /><b>bom começo.</b></span></div><span class="case-role">VERA / ESCRITA & CONTEÚDO</span><h3>Da ideia ao<br />primeiro rascunho.</h3><p>Textos, mensagens e propostas. Um ponto de partida para você dar seu toque.</p><button class="case-link" type="button" data-example="vera">Ver a Vera em ação <svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></button></article>
+          <article class="use-case case-orange"><div class="case-illustration"><span class="idea-ray ray-one" aria-hidden="true"></span><span class="idea-ray ray-two" aria-hidden="true"></span><span class="idea-ray ray-three" aria-hidden="true"></span><img src="/mascots/lume.svg" alt="Lume, bot laranja de ideias" width="145" height="145" loading="lazy" /><span class="idea-tag">e se a gente...?</span></div><span class="case-role">LUME / IDEIAS & PESQUISA</span><h3>Outro olhar<br />para a sua ideia.</h3><p>Organize referências, explore caminhos e encontre uma boa próxima pergunta.</p><button class="case-link" type="button" data-example="lume">Pensar junto com Lume <svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></button></article>
+          <article class="use-case case-lilac"><div class="case-illustration"><div class="mini-calendar" aria-hidden="true"><span>SEGUNDA</span><b>09:00</b><i>combinado.</i></div><img src="/mascots/bia.svg" alt="Bia, bot lilás de organização" width="130" height="130" loading="lazy" /></div><span class="case-role">BIA / ROTINAS & ORGANIZAÇÃO</span><h3>Combinou uma vez.<br />Virou rotina.</h3><p>Peça uma tarefa recorrente, confirme o horário e receba o resultado na conversa.</p><button class="case-link" type="button" data-example="bia">Combinar com a Bia <svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></button></article>
+        </div>
+      </section>
+
+      <section id="bots-em-equipe" class="collaboration-section capability-section wrap" aria-labelledby="collaboration-title">
+        <div class="section-heading">
+          <span class="eyebrow">04 / UMA IDEIA PUXA A OUTRA</span>
+          <h2 id="collaboration-title">Eles também<br />conversam entre si.</h2>
+          <p>Um tem a ideia. Outro encontra as palavras. Seus bots podem consultar uns aos outros e, quando você pedir, passar uma tarefa para um colega.</p>
+          <p>Você faz o pedido e acompanha a troca. A resposta volta para a conversa, com a contribuição de cada um.</p>
+          <div class="collaboration-signature"><img src="/mascots/vera.svg" alt="" width="44" height="44" /><span aria-hidden="true">+</span><img src="/mascots/lume.svg" alt="" width="44" height="44" /><span>Talentos diferentes.<br />Um trabalho em comum.</span></div>
+        </div>
+        <div class="collaboration-demo" aria-label="Exemplo ilustrativo de conversa entre dois bots">
+          <div class="capability-caption"><span>UM PEDIDO. DOIS TALENTOS.</span><span>Exemplo</span></div>
+          <div class="collaboration-request"><span>Você → Vera</span><p>Peça ao Lume uma ideia para o post de boas-vindas. Depois, escreva a abertura.</p></div>
+          <ol class="bot-exchange">
+            <li><img src="/mascots/vera.svg" alt="" width="42" height="42" /><div><span>Vera <span aria-hidden="true">→</span> Lume</span><p>Qual seria um jeito simples de apresentar o nod?</p></div></li>
+            <li><img src="/mascots/lume.svg" alt="" width="42" height="42" /><div><span>Lume <span aria-hidden="true">→</span> Vera</span><p>Comece por aquela ideia que vive ficando para depois. Mostre como um bot ajuda a dar o primeiro passo.</p></div></li>
+            <li><img src="/mascots/vera.svg" alt="" width="42" height="42" /><div><span>Vera <span aria-hidden="true">→</span> Você</span><p>Usei a ideia do Lume e preparei uma abertura. Quer ver?</p></div></li>
+          </ol>
+          <button id="collaboration-result" class="collaboration-result" type="button"><svg class="icon" aria-hidden="true"><use href="#file" /></svg><span>Ver o texto que criaram juntos</span><svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></button>
+        </div>
+      </section>
+
+      <section id="computadores" class="computer-section capability-section wrap" aria-labelledby="computer-title">
+        <div class="computer-illustration" id="computer-scene" data-computer-stage="complete">
+          <div class="computer-task"><span class="user-avatar">V</span><p>Nico, abra o briefing do meu site e salve os próximos passos.</p></div>
+          <div class="computer-monitor">
+            <div class="desktop-surface">
+              <div class="desktop-menubar"><span><img src="/mascots/nico.svg" alt="" width="20" height="20" /><strong>Computador do Nico</strong></span><span class="desktop-system" aria-hidden="true">◔ &nbsp; ▰ &nbsp; 09:41</span></div>
+              <div class="desktop-wallpaper" aria-hidden="true"><i></i><i></i><span>um espaço<br />para fazer.</span></div>
+              <div class="desktop-shortcut" aria-hidden="true"><svg class="icon"><use href="#folder" /></svg><span>Meu projeto</span></div>
+              <div class="desktop-window">
+                <div class="desktop-window-top"><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span><span id="desktop-window-title">Navegador</span><svg class="icon" aria-hidden="true"><use href="#monitor" /></svg></div>
+                <div id="computer-browser">
+                  <div class="browser-tab-strip" aria-hidden="true"><span><svg class="icon"><use href="#globe" /></svg><span id="browser-tab-title">Briefing do projeto</span><b>×</b></span><b>+</b></div>
+                  <div class="browser-toolbar" aria-hidden="true"><span class="browser-navigation">← &nbsp; → &nbsp; ↻</span><div class="browser-url"><svg class="icon"><use href="#globe" /></svg><span id="browser-url-text">projeto.example/briefing</span></div><span>⋮</span></div>
+                  <div class="browser-canvas">
+                    <div class="browser-new-tab"><svg class="icon" aria-hidden="true"><use href="#globe" /></svg><strong>Por onde começamos?</strong><span>Pesquise ou digite um endereço</span></div>
+                    <div class="browser-document"><div class="briefing-brand">começo<span>.</span><small>BRIEFING DO PROJETO</small></div><span class="briefing-kicker">DO PAPEL PARA O MUNDO</span><h3>Um site para<br />um bom começo.</h3><p>Uma primeira versão, simples e com a nossa cara.</p><div class="briefing-cover" aria-hidden="true"><i></i><i></i><i></i></div><div class="briefing-notes"><h4>O que precisa entrar</h4><div><span>01</span> Apresentar a ideia com clareza</div><div><span>02</span> Mostrar um exemplo na prática</div><div><span>03</span> Convidar as pessoas a acompanhar</div></div></div>
+                    <div class="browser-loading" aria-hidden="true"></div>
+                  </div>
+                </div>
+                <div id="computer-files" hidden>
+                  <div class="files-toolbar"><span>← &nbsp; →</span><span><svg class="icon" aria-hidden="true"><use href="#folder" /></svg>Meu projeto</span><span>☷</span></div>
+                  <div class="files-workspace"><aside aria-hidden="true"><span>Favoritos</span><b>⌂ Início</b><b class="active">▱ Meu projeto</b><b>↓ Downloads</b></aside><div class="files-list"><span class="files-list-heading">NOME <span>TIPO</span></span><div class="desktop-file"><svg class="icon" aria-hidden="true"><use href="#file" /></svg><span>briefing.md<small>O ponto de partida</small></span><small>MD</small></div><div class="desktop-file saved-file"><svg class="icon" aria-hidden="true"><use href="#file" /></svg><span>proximos-passos.md<small>Três passos para começar</small></span><svg class="icon saved-check" aria-hidden="true"><use href="#check" /></svg></div><div class="file-preview"><span>PRÓXIMOS PASSOS</span><p>1. Escrever a apresentação</p><p>2. Escolher um exemplo</p><p>3. Preparar o convite</p></div></div></div>
+                </div>
+              </div>
+              <div class="desktop-dock" role="group" aria-label="Aplicativos do computador ilustrativo"><button type="button" data-computer-view="browser" aria-label="Abrir navegador do Nico" aria-pressed="true" aria-controls="computer-browser"><svg class="icon" aria-hidden="true"><use href="#globe" /></svg><span>Navegador</span></button><button type="button" data-computer-view="files" aria-label="Abrir arquivos do Nico" aria-pressed="false" aria-controls="computer-files"><svg class="icon" aria-hidden="true"><use href="#folder" /></svg><span>Arquivos</span></button><span class="dock-terminal" aria-hidden="true">›_</span><span class="dock-divider" aria-hidden="true"></span><img src="/mascots/nico.svg" alt="" width="32" height="32" /></div>
+              <div class="agent-pointer" aria-hidden="true"><svg viewBox="0 0 28 32"><path d="M3 2v24l6-6 5 10 5-3-5-9h10Z" /></svg><span>Nico</span><i></i></div>
+              <div class="desktop-toast"><svg class="icon" aria-hidden="true"><use href="#check" /></svg><span>Resumo salvo<small>proximos-passos.md</small></span></div>
+              <span class="desktop-takeover-label">Você está no controle</span>
+            </div>
+          </div>
+          <div class="computer-story-status"><img src="/mascots/nico.svg" alt="" width="28" height="28" /><p id="computer-action">Abri o briefing e salvei os próximos passos.</p><span>EXEMPLO</span></div>
+          <div class="scene-playback"><div class="scene-progress" aria-hidden="true"></div><button class="scene-control" id="computer-play" type="button"><span class="scene-control-label">Reproduzir</span></button></div>
+          <div class="computer-control"><span id="computer-controller"><span class="status-dot"></span> Nico no controle</span><button id="computer-takeover" type="button" aria-pressed="false" aria-describedby="computer-status">Assumir controle <svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></button></div>
+          <p class="computer-status" id="computer-status" role="status" aria-live="polite">Você pode explorar os aplicativos e assumir o controle nesta demonstração.</p>
+          <p class="capability-note">Cena ilustrativa. Nenhuma navegação ou tarefa real é executada.</p>
+        </div>
+        <div class="section-heading">
+          <span class="eyebrow">05 / UM LUGAR PARA FAZER ACONTECER</span>
+          <h2 id="computer-title">Um computador<br />para cada bot.</h2>
+          <p>Seu bot pode ter um espaço próprio, com navegador, arquivos e terminal. Um lugar para abrir páginas, usar aplicativos e trabalhar no que você pediu.</p>
+          <ul class="computer-benefits"><li><svg class="icon" aria-hidden="true"><use href="#monitor" /></svg><div><strong>Você pode acompanhar.</strong><span>Veja a tela e o que seu bot está fazendo.</span></div></li><li><svg class="icon" aria-hidden="true"><use href="#arrow" /></svg><div><strong>Assuma quando precisar.</strong><span>Entre em uma conta ou ajuste algo. Depois, devolva o controle ao bot.</span></div></li><li><svg class="icon" aria-hidden="true"><use href="#folder" /></svg><div><strong>Cada um no seu espaço.</strong><span>Os arquivos e as sessões de cada bot ficam no computador dele.</span></div></li></ul>
+          <p class="computer-availability">Disponível quando os computadores estão configurados no ambiente do nod.</p>
+        </div>
+      </section>
+
+      <section class="memory-section wrap" aria-labelledby="memory-title">
+        <div class="memory-illustration" aria-label="Exemplo de preferência guardada"><div class="memory-bubble">Ah, e lembra: eu prefiro<br />textos curtos, sem jargão.</div><div class="memory-response"><img src="/mascots/nico.svg" alt="" width="58" height="58" /><div><span><svg class="icon" aria-hidden="true"><use href="#check" /></svg> Preferência guardada</span><p>Direto ao ponto. Pode deixar.</p></div></div><span class="memory-annotation">menos repetir. mais continuar.</span></div>
+        <div class="section-heading"><span class="eyebrow">06 / COM O TEMPO, MAIS SEU</span><h2 id="memory-title">Uma conversa<br />puxa a outra.</h2><p>Seu jeito de escrever. O contexto de um projeto.<br class="desktop-break" /> Aquela preferência que faz diferença. A memória<br class="desktop-break" /> ajuda seus bots a continuar de onde vocês pararam.</p></div>
+      </section>
+
+      <section id="projeto" class="project-section" aria-labelledby="project-title">
+        <div class="wrap project-inner">
+          <div id="lista-interesse">
+            <span class="eyebrow"><span class="status-dot"></span> UM PROJETO EM CONSTRUÇÃO</span>
+            <h2 id="project-title">Ainda é o começo.<br /><span>Vem acompanhar.</span></h2>
+            <p>Estamos construindo, usando e aprendendo a cada conversa.<br class="desktop-break" /> Entre na lista para receber novidades e saber quando<br class="desktop-break" /> você puder experimentar o nod.</p>
+            <div>
+              <form class="interest-form" id="interest-form" aria-label="Lista de interesse do nod">
+                <label for="interest-email">Seu e-mail</label>
+                <div class="interest-fields">
+                  <input id="interest-email" type="email" name="email" autocomplete="email" placeholder="voce@exemplo.com" required maxlength="254" aria-describedby="interest-status" disabled />
+                  <button class="button button-light" id="interest-submit" type="submit" disabled>Quero acompanhar <svg class="icon" aria-hidden="true"><use href="#diagonal" /></svg></button>
+                </div>
+                <p id="interest-status" class="interest-note" role="status" aria-live="polite">Inscrições em breve. Estamos preparando a lista de interesse.</p>
+              </form>
+            </div>
+            <span class="project-note">Primeira prévia · acesso público ainda não disponível</span>
+          </div>
+          <div class="project-friends" aria-hidden="true"><div class="friend-orbit orbit-one"></div><div class="friend-orbit orbit-two"></div><img class="project-vera" src="/mascots/vera.svg" alt="" width="165" height="165" loading="lazy" /><img class="project-lume" src="/mascots/lume.svg" alt="" width="120" height="120" loading="lazy" /><img class="project-bia" src="/mascots/bia.svg" alt="" width="110" height="110" loading="lazy" /><span class="orbit-plus">+</span><span class="orbit-hello">oi, mundo.</span></div>
+        </div>
+      </section>
+
+      <section class="faq-section wrap" aria-labelledby="faq-title"><div><span class="eyebrow">ANTES DE IR</span><h2 id="faq-title">Talvez você<br />esteja pensando...</h2></div><div class="faq-list"><details><summary>O que é o nod?<span aria-hidden="true">+</span></summary><p>Um lugar para criar bots de IA com funções próprias e trabalhar com eles por conversa. Cada bot pode ter um perfil, guardar contexto, conversar com outros bots e usar seu próprio computador. Você escolhe a IA de cada um e pode definir rotinas.</p></details><details><summary>Posso usar a assinatura de IA que já tenho?<span aria-hidden="true">+</span></summary><p>Essa é uma das propostas do nod. A versão em desenvolvimento já se conecta ao Claude Code e ao Codex no seu computador. O Codex permite usar sua conta do ChatGPT; os modelos disponíveis e os limites dependem da conta conectada. Cada bot pode usar uma opção diferente. <a class="faq-source" href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener">Entenda o acesso ao Codex pelo ChatGPT ↗</a></p></details><details><summary>O que são os modelos pelo nod?<span aria-hidden="true">+</span></summary><p>É um caminho planejado para acessar modelos de outros provedores direto pelo nod. Você escolherá uma opção, e o nod cuidará da conexão. Não significa que estamos treinando uma IA própria. Modelos disponíveis e preços ainda serão definidos.</p></details><details><summary>Já posso usar?<span aria-hidden="true">+</span></summary><p>O nod está em desenvolvimento e ainda não tem acesso público aberto. Esta página apresenta a ideia e uma demonstração com conversas ilustrativas.</p></details><details><summary>Como funciona o computador de um bot?<span aria-hidden="true">+</span></summary><p>É um ambiente separado, com navegador, arquivos e terminal. Você pode acompanhar a tela, assumir o controle para entrar em uma conta e devolver ao bot quando terminar. Os arquivos e as sessões ficam naquele ambiente. O recurso depende de os computadores estarem configurados no nod.</p></details><details><summary>Os bots trabalham com o computador desligado?<span aria-hidden="true">+</span></summary><p>A execução depende do ambiente configurado. Na configuração local, o computador e o nod precisam estar ligados, inclusive para executar rotinas. Esta prévia não promete execução contínua na nuvem.</p></details><details><summary>Vai ser open source? E quanto vai custar?<span aria-hidden="true">+</span></summary><p>Estamos explorando esses caminhos. Abrir o código e oferecer infraestrutura gerenciada é uma possibilidade, mas ainda não há decisão sobre licença, planos ou preços.</p></details></div></section>
+    </main>
+
+    <footer class="site-footer wrap"><a class="wordmark" href="#" aria-label="nod, voltar ao início">nod<span class="wordmark-dot">.</span></a><p>Uma boa companhia para as suas ideias.</p><button type="button" id="about-preview">Sobre esta prévia <span aria-hidden="true">↗</span></button></footer>
+
+    <dialog id="preview-dialog" aria-labelledby="dialog-title"><div class="dialog-top"><span class="eyebrow" id="dialog-label">EXEMPLO ILUSTRATIVO</span><button class="dialog-close" type="button" aria-label="Fechar"><svg class="icon" aria-hidden="true"><use href="#close" /></svg></button></div><h2 id="dialog-title">Um primeiro oi do nod</h2><div id="dialog-body"></div><button class="button button-dark dialog-dismiss" type="button">Voltar à página <svg class="icon" aria-hidden="true"><use href="#arrow" /></svg></button></dialog>
+    <noscript><p class="noscript-note">Você está vendo uma prévia estática. Ative o JavaScript para trocar os exemplos de conversa.</p></noscript>
+  </body>
+</html>
