@@ -2,6 +2,7 @@ import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Confianca } from "./mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoSemNovidade } from "./motivos.ts";
+import type { ExecucaoRaioX } from "./raio-x.ts";
 
 /**
  * Os quatro sinais write-ahead (ADR-009) — definição ÚNICA, usada pelo turno, pelo SPI e pela ponte.
@@ -92,6 +93,8 @@ export type ResultadoTurno = {
   negacoesPermissao: string[];
   /** Motivo cru da falha, só para diagnóstico em log (0005: antes o `erro_execucao` chegava sem causa). */
   erroCru?: string | null;
+  /** Modo dev (0036): cada chamada à API e as compactações do turno. Ausente no Codex e no catcher. */
+  execucao?: ExecucaoRaioX;
 };
 
 /**
@@ -110,6 +113,13 @@ export type EventoStream =
   | { tipo: "texto_bloco"; texto: string }
   | { tipo: "tool_use"; id: string; nome: string; input: unknown }
   | { tipo: "tool_result"; toolUseId: string; isError: boolean; texto: string }
+  /**
+   * Fim de uma chamada à API (`stream_event` message_delta, definido em 2026-09-28 para o modo dev): o usage
+   * DAQUELA chamada. O `usage` do `result` soma o turno inteiro e não mostra o contexto de cada chamada.
+   */
+  | { tipo: "chamada"; entrada: number; cacheLido: number; cacheNovo: number; saida: number; pensamento: number; subagente: boolean }
+  /** `system/compact_boundary`: o Claude Code resumiu o histórico no meio do turno. Tokens antes/depois quando vierem. */
+  | { tipo: "compactacao"; antes: number | null; depois: number | null; gatilho: string }
   | {
       tipo: "result";
       sucesso: boolean;
@@ -119,6 +129,8 @@ export type EventoStream =
       custoUsd: number | null;
       tokens: TokensTurno;
       numTurnos: number;
+      /** Maior `modelUsage[*].contextWindow` (modo dev): o teto contra o qual o contexto de cada chamada é medido. Ausente no Codex e no catcher. */
+      janela?: number | null;
       negacoesPermissao: string[];
       /** Texto cru do CLI quando `sucesso` é false (subtype/result/error): vai ao log, nunca à pessoa (ADR-002). */
       erroCru: string | null;

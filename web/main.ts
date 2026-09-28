@@ -3,6 +3,7 @@ import { abrirComputador } from "./telas/computador.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
+import { abrirRaioX } from "./telas/raio-x.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
@@ -164,11 +165,42 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
-  if (q.startsWith("conversa:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
+  if (q.startsWith("conversa:")) {
+    // Modo dev (0036): a faixa de cada resposta acompanha a conversa — o turno que acabou de assentar já tem Raio-X.
+    void carregarRaioX(q.slice(9));
+    return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
+  }
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), concessoes: (await api.concessoes(q.slice(11))).concessoes };
   if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
   return null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Modo dev (definido em 2026-09-28, 0036). A preferência mora no servidor: o app desktop limpa o localStorage.
+
+/** A meia-noite de hoje no relógio da pessoa: o "Hoje com o bot" do cabeçalho. */
+function meiaNoite(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+async function carregarRaioX(conversaId: string): Promise<void> {
+  if (!api || !estado.modoDev.ligado) return;
+  try {
+    dispatch({ tipo: "hidratar-raio-x", conversaId, raioX: await api.raioXDaConversa(conversaId, meiaNoite()) });
+  } catch {
+    // Telemetria: sem o Raio-X, a conversa segue igual e a faixa só não aparece.
+  }
+}
+
+async function alternarModoDev(): Promise<void> {
+  if (!api) return;
+  const p = await api.gravarPreferencias({ modoDev: !estado.modoDev.ligado });
+  dispatch({ tipo: "modo-dev", ligado: p.modoDev });
+  const c = conversaDaTela(estado);
+  if (p.modoDev && c) await carregarRaioX(c.conversa.id);
 }
 
 async function reidratar(): Promise<void> {
@@ -511,6 +543,11 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   canalAvisos.contador(0);
   ambienteBanco = await api.ambiente();
   dispatch({ tipo: "sessao", escopo });
+  void api.preferencias().then((p) => {
+    dispatch({ tipo: "modo-dev", ligado: p.modoDev });
+    const c = conversaDaTela(estado);
+    if (p.modoDev && c) void carregarRaioX(c.conversa.id);
+  }, () => undefined);
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
     aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "executor", "salas", "rotinas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
@@ -833,6 +870,12 @@ function filtrarBots(texto: string, raiz = "#sidebar"): void {
 }
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
+  "abrir-raio-x": (el) => {
+    const t = estado.tela;
+    const nome = t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala";
+    if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome);
+  },
+  "alternar-modo-dev": () => agir(alternarModoDev),
   "relatar-mensagem": (el) => {
     const id = el.dataset.id;
     // definido em 2026-09-21: o correlation_id NÃO vai junto. `estado.erro` é o slot do último erro
@@ -1331,6 +1374,7 @@ document.addEventListener("focusout", (ev) => {
 
 document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
+  if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }

@@ -1,0 +1,129 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import type { ExecucaoRaioX } from "../../src/contracts/raio-x.ts";
+import type { ResultadoTurno } from "../../src/contracts/turno.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
+import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
+import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
+import { gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../src/use-cases/raio-x.ts";
+import { ANA, depsSobreTrx, esperarErro, executar, MARLON } from "../helpers/deps-l6.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+const PRONTO = { estado: "pronto" as const, versao: "teste", em: 0 };
+const SINAIS = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true };
+const resultado = (custoSessao: number, sessaoCli: string, extra: Partial<ResultadoTurno> = {}): ResultadoTurno => ({
+  desfecho: "sucesso",
+  texto: "feito",
+  sessaoCli,
+  sinais: SINAIS,
+  custoUsd: custoSessao,
+  tokens: { entrada: 120, saida: 30, cacheLeitura: 0, cacheCriacao: 0 },
+  ferramentasChamadas: [],
+  negacoesPermissao: [],
+  ...extra,
+});
+const EXECUCAO: ExecucaoRaioX = {
+  chamadas: [
+    { em: 1000, contexto: 160_500, entrada: 10, cacheLido: 150_000, cacheNovo: 10_490, saida: 300, pensamento: 120, subagente: false, ferramentas: [{ nome: "mcp__nod__clickup__GET_TASKS", resultadoChars: 73_900, erro: false }] },
+    { em: 30_000, contexto: 181_800, entrada: 8, cacheLido: 181_000, cacheNovo: 792, saida: 200, pensamento: 0, subagente: false, ferramentas: [] },
+  ],
+  chamadasOmitidas: 0,
+  compactacoes: [{ em: 29_000, antes: 179_900, depois: 22_700, gatilho: "auto" }],
+  janela: 200_000,
+  modelo: "claude-sonnet-5",
+  versaoCli: "2.1.284",
+  custoSessaoUsd: 9.68,
+  ferramentasNoInit: 40,
+  buscaDeFerramentas: true,
+  duracaoMs: 31_000,
+};
+
+/**
+ * O dublê de `planos.emitir` das deps da L6 monta o plano pelo domínio; aqui o turno despachado é emitido de novo
+ * pelo caso de uso real, como o servidor faz no PUXAR, para a composição ser gravada.
+ */
+async function despacharEmitindo(deps: ReturnType<typeof depsSobreTrx>, machineId: string): Promise<string> {
+  const turnoId = (await executar(deps, despacharTurno, { machineId, inventario: PRONTO })).data.plano?.turnoId ?? "";
+  await executar(deps, emitirPlanoTurno, { turnoId, machineId, executor: "catcher" });
+  return turnoId;
+}
+
+describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", () => {
+  it("0035: numa sessão retomada, cada turno custa a diferença para o total que o anterior registrou", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      const sessao = randomUUID();
+      const maquina = randomUUID();
+      const custos: (number | null)[] = [];
+      for (const [i, total] of [8.35, 8.8, 9.68].entries()) {
+        await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: `pedido ${i}`, inventario: PRONTO });
+        const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+        const a = (await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: i + 1, fala: { tipo: "texto", texto: "feito" }, resultado: resultado(total, sessao) })).data;
+        custos.push(a.turno?.custoUsd ?? null);
+        expect((await deps.repos.gastos.doTurno(turnoId)).map((g) => g.custoUsd)).toEqual([a.turno?.custoUsd]);
+      }
+      expect(custos).toEqual([8.35, 0.45, 0.88]);
+      // O total do dia soma o custo de cada turno, e não os totais da sessão (que dariam 26,83).
+      const dia = (await executar(deps, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data;
+      expect(dia.desde).toEqual({ custoUsd: 9.68, turnos: 3 });
+    });
+  });
+
+  it("0036: a emissão grava a composição (texto só com modo dev), a entrega grava a execução, e a conversa resume", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      const maquina = randomUUID();
+
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "sem modo dev", inventario: PRONTO });
+      const t1 = await despacharEmitindo(deps, maquina);
+      const semTexto = (await executar(deps, raioXDoTurno, { turnoId: t1 })).data;
+      expect(semTexto.composicao).toMatchObject({ comTexto: false, entrada: { chars: "sem modo dev".length, anexos: 0 }, sessaoRetomada: false });
+      expect(semTexto.composicao?.prompt.length).toBeGreaterThan(0);
+      expect(semTexto.composicao?.prompt.every((p) => p.texto === undefined)).toBe(true);
+      expect(semTexto.execucao).toBeNull();
+      await executar(deps, assentarTurno, { turnoId: t1, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(0.5, randomUUID()) });
+
+      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false });
+      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true });
+      await esperarErro(() => gravarPreferencias(deps, { modoDev: "sim" }), "entrada_invalida");
+
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "com modo dev", inventario: PRONTO });
+      const t2 = await despacharEmitindo(deps, maquina);
+      await executar(deps, assentarTurno, { turnoId: t2, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(1.02, randomUUID(), { execucao: EXECUCAO }) });
+
+      const r = (await executar(deps, raioXDoTurno, { turnoId: t2 })).data;
+      expect(r).toMatchObject({ turnoId: t2, estado: "concluido", custoUsd: 1.02, execucao: EXECUCAO, composicao: { comTexto: true, entrada: { texto: "com modo dev" } } });
+      expect(r.composicao?.prompt.find((p) => p.secao === "identidade")?.texto).toContain("um agente do nod");
+      expect(JSON.stringify(r.composicao)).not.toContain(`tok-${t2}`);
+
+      const conversa = (await executar(deps, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data;
+      expect(conversa.turnos.map((t) => t.turnoId)).toEqual([t2, t1]);
+      expect(conversa.turnos[0]).toEqual({ turnoId: t2, custoUsd: 1.02, chamadas: 2, compactacoes: 1, picoContexto: 181_800, janela: 200_000, cachePct: 97, modelo: "claude-sonnet-5" });
+      expect(conversa.turnos[1]).toMatchObject({ turnoId: t1, custoUsd: 0.5, chamadas: 0, picoContexto: null });
+    });
+  });
+
+  it("0036: o Raio-X e a preferência são privados da pessoa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, gravarPreferencias, { modoDev: true });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "privado", inventario: PRONTO });
+      const turnoId = await despacharEmitindo(deps, randomUUID());
+      expect((await executar(deps, raioXDoTurno, { turnoId })).data.composicao?.comTexto).toBe(true);
+
+      await vincularEscopo(trx, ANA);
+      const daAna = depsSobreTrx(trx, ANA);
+      await esperarErro(() => raioXDoTurno(daAna, { turnoId }), "nao_encontrado");
+      expect(await trx`select 1 from turno_raio_x where turno_id = ${turnoId}`).toHaveLength(0);
+      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false });
+      expect((await executar(daAna, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data).toEqual({ turnos: [], desde: { custoUsd: 0, turnos: 0 } });
+    });
+  });
+});

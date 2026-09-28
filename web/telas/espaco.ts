@@ -4,6 +4,7 @@ import { botao, esc } from "../lib/render.ts";
 import { renderInventario } from "./frota.ts";
 import { renderChaves } from "./chaves.ts";
 import { renderNegacoes } from "./negacao.ts";
+import { renderPreferenciaModoDev } from "./modo-dev.ts";
 
 /**
  * "Seu espaço" (definido em 2026-09-18): o que é da CONTA, não de um bot. Nasceu ao derrubar o rail —
@@ -28,6 +29,8 @@ export function renderEspaco(estado: Estado, ambiente: { regime: string; porta?:
     </section>
 
     ${renderAvisos(avisos)}
+
+    ${renderPreferenciaModoDev(estado)}
 
     <section class="espaco-secao">
       <h2>Computadores</h2>

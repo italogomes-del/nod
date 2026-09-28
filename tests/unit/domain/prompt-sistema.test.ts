@@ -168,5 +168,11 @@ describe("montarPromptSistema", () => {
       const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), doConector("GMAIL_LIST_LABELS"), doConector("GMAIL_FETCH_EMAILS"), outro], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
       expect(conexoes(p)[0]?.concedidas_a_voce).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"]);
     });
+
+    it("2026-09-28 (modo dev): o resto do app vai só pelo nome — sem descrição nem catálogo repetido", () => {
+      const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), doConector("GMAIL_FETCH_EMAILS")], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
+      expect(conexoes(p)[0]).toEqual({ slug: "gmail", habilitado: true, concedidas_a_voce: ["GMAIL_FETCH_EMAILS"], outras_do_app: ["GMAIL_LIST_LABELS"] });
+      expect(p).not.toContain("rótulos");
+    });
   });
 });

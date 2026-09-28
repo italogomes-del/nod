@@ -12,6 +12,7 @@ import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
+import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
@@ -210,6 +211,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
   const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
+  // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
+  const { modoDev } = await deps.repos.preferencias.buscar();
+  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev }));
 
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,

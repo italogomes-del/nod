@@ -19,7 +19,7 @@ it("Claude e Codex recebem todas as capacidades de programação do mesmo plano"
   const permitidas = claude[claude.indexOf("--allowedTools") + 1]!.split(",");
   const config = configMcpCodex(plano, { urlNod: "http://127.0.0.1:8888", proxyPath: "/tmp/proxy.mjs" });
   const codex = argsCodex(plano, config);
-  expect(permitidas).toEqual(plano.catalogo.ferramentas.map(f => f.nomeMcp));
+  expect(permitidas).toEqual([...plano.catalogo.ferramentas.map(f => f.nomeMcp), "ToolSearch"]);
   for (const nome of [...Object.keys(FERRAMENTAS_COMPUTADOR), ...Object.keys(FERRAMENTAS_WORKSPACE)]) {
     expect(permitidas).toContain(`mcp__nod__${nome}`);
     expect(config).toContain(JSON.stringify(nome));
@@ -31,7 +31,8 @@ it("trocar o harness não acrescenta ferramentas ausentes no plano", () => {
   const plano = planoHarness();
   plano.catalogo.ferramentas = [];
   const claude = montarArgs({ plano, mcpJson: "/tmp/mcp.json" }).args;
-  expect(claude[claude.indexOf("--allowedTools") + 1]).toBe("");
+  // Só a busca de ferramentas, que não traz nada que o plano não tenha liberado.
+  expect(claude[claude.indexOf("--allowedTools") + 1]).toBe("ToolSearch");
   const config = configMcpCodex(plano, { urlNod: "http://127.0.0.1:8888", proxyPath: "/tmp/proxy.mjs" });
   expect(config).toContain("enabled_tools = []");
 });
