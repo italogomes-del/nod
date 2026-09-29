@@ -561,8 +561,7 @@ body { background: #fcfdff; }
 .chave:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .acesso-cab { display: flex; align-items: center; gap: 10px; }
 .acesso-cab > div { flex: 1; min-width: 0; }
-.acesso-marca { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: #273044;
-  color: #fff; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.acesso-cab .app-logo { width: 26px; height: 26px; min-width: 26px; border-radius: 7px; font-size: 13px; }
 .acesso-frase { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); }
 .acesso-rodape { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .acesso-rodape details { flex: 1; min-width: 0; }
@@ -570,6 +569,9 @@ body { background: #fcfdff; }
 .acesso-acoes { list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); }
 .acesso-acoes li { padding: 3px 0 3px 14px; position: relative; font-size: 11.5px; color: var(--ink-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acesso-grupo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.acesso-grupo small { margin: 0; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
+.acesso-grupo + .acesso-acoes { margin-top: 2px; padding-top: 0; border-top: 0; }
 .acesso-acoes li::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: var(--line-2); }
 .acesso-rodape summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
 .acesso-rodape summary:focus:not(:focus-visible) { outline: none; }

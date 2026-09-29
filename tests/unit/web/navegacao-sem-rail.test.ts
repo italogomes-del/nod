@@ -123,11 +123,10 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     expect(html).toContain("1 ação permitida");
   });
 
-  it("ADR-044: agrupa por app e nível — 'Gmail · só leitura · N ações' — com os nomes técnicos só no <details>", () => {
+  it("ADR-044: só leitura vira 'Gmail · só leitura · N ações', com os nomes técnicos só no <details>", () => {
     const catalogo = [
       { nome: "GMAIL_FETCH_EMAILS", readOnlyHint: true },
       { nome: "GMAIL_LIST_LABELS", readOnlyHint: true },
-      { nome: "GMAIL_SEND_EMAIL", readOnlyHint: false },
     ];
     const estado: Estado = {
       ...base,
@@ -135,19 +134,76 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       concessoes: { a1: [
         { id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_FETCH_EMAILS" } as never,
         { id: "g2", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_LIST_LABELS" } as never,
-        { id: "g3", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_SEND_EMAIL" } as never,
       ] },
     };
     const html = renderDetalhes(estado);
-    expect(html.match(/class="acesso"/g)).toHaveLength(2);
+    expect(html.match(/class="acesso"/g)).toHaveLength(1);
     expect(html).toContain("<small>só leitura</small>");
     expect(html).toContain("2 ações permitidas");
     expect(html).toContain("Não envia nem altera nada.");
-    expect(html).toContain("1 ação permitida");
     expect(html).toContain('data-ids="g1,g2"');
-    expect(html).toContain('data-ids="g3"');
+    expect(html).not.toContain("Deixar só leitura");
     expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
     expect(html).not.toContain('data-act="revogar"');
+  });
+
+  // definido em 2026-09-29 (emenda da ADR-044): um card por app e nível repetia Gmail/Slack/ClickUp.
+  it("UM card por app: leitura e escrita juntas, com o logo do Marketplace e 'Deixar só leitura'", () => {
+    const catalogo = [
+      { nome: "GMAIL_FETCH_EMAILS", readOnlyHint: true },
+      { nome: "GMAIL_LIST_LABELS", readOnlyHint: true },
+      { nome: "GMAIL_SEND_EMAIL", readOnlyHint: false },
+    ];
+    const conector = { nome: "Gmail", slug: "gmail", catalogo, transporte: "http", env: {}, args: [], declaracao: "nao-toca", sondadoEm: null };
+    const estado: Estado = {
+      ...dona,
+      marketplace: [{ slug: "gmail", nome: "Gmail", logo: "https://logos.composio.dev/gmail.svg" } as never],
+      // Dois registros do mesmo app (o antigo, fora do ar, e o habilitado) continuam sendo uma ferramenta.
+      conectores: [
+        { ...conector, id: "k1", habilitado: true, ultimaFalha: null } as never,
+        { ...conector, id: "k0", habilitado: false, ultimaFalha: { motivo: "conector_indisponivel", em: 1 } } as never,
+      ],
+      concessoes: { a1: [
+        { id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_FETCH_EMAILS" } as never,
+        { id: "g3", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_SEND_EMAIL" } as never,
+        { id: "g2", agenteId: "a1", conectorId: "k0", capacidade: "GMAIL_LIST_LABELS" } as never,
+      ] },
+    };
+    const html = renderDetalhes(estado);
+    expect(html.match(/class="acesso"/g)).toHaveLength(1);
+    expect(html).toContain('src="/api/t/t/marketplace/gmail/logo"');
+    expect(html).not.toContain("acesso-marca");
+    expect(html).toContain("<small>pode ler e alterar</small>");
+    expect(html).toContain("Pode consultar e fazer alterações em seu nome.");
+    expect(html).toContain("3 ações permitidas");
+    expect(html).toContain("indisponível");
+    // Revogar tira tudo; "Deixar só leitura" tira só a de escrita.
+    expect(html).toContain('data-ids="g1,g2,g3"');
+    expect(html).toMatch(/data-act="revogar-acessos"[^>]*data-ids="g3"[^>]*>Deixar só leitura</);
+    expect(html.indexOf("Consulta · 2")).toBeLessThan(html.indexOf("Altera · 1"));
+    expect(html.indexOf("Altera · 1")).toBeLessThan(html.indexOf("Send email"));
+  });
+
+  it("só escrita: 'pode alterar', sem seções nem 'Deixar só leitura'", () => {
+    const estado: Estado = {
+      ...base,
+      conectores: [{ id: "k1", nome: "Slack", slug: "slack", catalogo: [{ nome: "SLACK_SEND_MESSAGE", readOnlyHint: false }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
+      concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "SLACK_SEND_MESSAGE" } as never] },
+    };
+    const html = renderDetalhes(estado);
+    expect(html).toContain("<small>pode alterar</small>");
+    expect(html).toContain("Pode fazer alterações em seu nome.");
+    expect(html).not.toContain("Deixar só leitura");
+    expect(html).not.toContain("acesso-grupo");
+  });
+
+  it("o nome legível tira o prefixo pelo slug quando o nome do app tem espaço", () => {
+    const estado: Estado = {
+      ...base,
+      conectores: [{ id: "k1", nome: "Google Calendar", slug: "googlecalendar", catalogo: [{ nome: "GOOGLECALENDAR_EVENTS_LIST", readOnlyHint: true }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
+      concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "GOOGLECALENDAR_EVENTS_LIST" } as never] },
+    };
+    expect(renderDetalhes(estado)).toContain(">Events list</li>");
   });
 
   it("cada ação vira uma linha legível; a descrição do catálogo fica só no title (definido em 2026-09-24)", () => {

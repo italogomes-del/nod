@@ -313,3 +313,13 @@ concurrency 24/75 (1 pulado).
 **Não implementado.** O card de acesso do pré-voo que já estava aberto para o app quando a mudança de
 rotina concedeu não fecha sozinho: vale o clique (idempotente) ou o vencimento. A lista de rotinas e o
 painel do bot ainda não mostram os acessos declarados.
+
+## Emenda de 2026-09-29 — um card por app no painel do bot
+
+O painel agrupava por app **e** nível: quem concedeu leitura e depois escrita via Gmail, Slack e ClickUp
+em dois cards cada (medido em 2026-09-29 no painel da Clarice: 11 cards para 7 apps). Agora é UM card
+por app, com o logo do Marketplace (`logoApp`, ADR-057) no lugar da inicial. O nível vira a linha de
+baixo do nome ("só leitura", "pode alterar", "pode ler e alterar"); a lista aberta separa "Consulta" de
+"Altera" quando há as duas; "Revogar" tira tudo do app com um `revogarLote` e "Deixar só leitura" tira
+só as de escrita — o que o card de escrita separado permitia antes. A chave é o slug, não o conector:
+dois registros do mesmo app continuam uma ferramenta. A classificação segue o `readOnlyHint` da sonda.
