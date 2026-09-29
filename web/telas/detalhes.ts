@@ -59,37 +59,53 @@ export function renderDetalhes(estado: Estado): string {
 
   /**
    * definido em 2026-09-24 (ADR-044): um clique concede as ferramentas de leitura de um app inteiro, e
-   * 28 linhas de nome técnico escondiam o que importa. Uma linha por app e nível ("Gmail · só leitura ·
-   * 28 ações"), os nomes no <details> e revogar tira o grupo de uma vez, com um registro só. O nível é
-   * o readOnlyHint da sonda; o que o catálogo não descreve conta como escrita — o painel não promete
-   * "só leitura" sem a sonda dizer.
+   * 28 linhas de nome técnico escondiam o que importa. Os nomes ficam no <details> e revogar tira o grupo
+   * de uma vez, com um registro só. O nível é o readOnlyHint da sonda; o que o catálogo não descreve conta
+   * como escrita — o painel não promete "só leitura" sem a sonda dizer.
+   * definido em 2026-09-29 (emenda da ADR-044): UM card por app. Um card por app e nível repetia Gmail,
+   * Slack e ClickUp em dois cards cada; agora o nível é a linha de baixo do nome, a lista aberta separa o
+   * que só consulta do que altera, e "Deixar só leitura" revoga só as de escrita.
    */
-  const grupos = new Map<string, { nome: string; leitura: boolean; indisponivel: boolean; itens: typeof concessoes }>();
+  type Grupo = { slug: string; nome: string; indisponivel: boolean; leitura: typeof concessoes; escrita: typeof concessoes };
+  const grupos = new Map<string, Grupo>();
   const descricaoDe = new Map<string, string>();
   for (const g of concessoes) {
     const c = estado.conectores.find((x) => x.id === g.conectorId);
     const cap = c?.catalogo.find((x) => x.nome === g.capacidade);
-    const leitura = cap?.readOnlyHint === true;
     if (cap?.descricao) descricaoDe.set(g.id, cap.descricao);
-    const chave = `${g.conectorId}:${leitura ? "leitura" : "escrita"}`;
-    const grupo = grupos.get(chave) ?? { nome: c?.nome ?? "conector", leitura, indisponivel: Boolean(c?.ultimaFalha), itens: [] };
-    grupo.itens.push(g);
+    // Pelo slug: dois registros do mesmo app (um antigo e o habilitado) continuam sendo UMA ferramenta.
+    const chave = c?.slug ?? g.conectorId;
+    const grupo = grupos.get(chave) ?? { slug: c?.slug ?? "", nome: c?.nome ?? "conector", indisponivel: false, leitura: [], escrita: [] };
+    grupo.indisponivel ||= Boolean(c?.ultimaFalha);
+    (cap?.readOnlyHint === true ? grupo.leitura : grupo.escrita).push(g);
     grupos.set(chave, grupo);
   }
+  const ids = (itens: typeof concessoes) => itens.map((i) => i.id).join(",");
   // definido em 2026-09-24 (revisão da interface): o card diz em palavras o que o nível permite, e a
   // lista aberta mostra a descrição do catálogo — o nome técnico fica pequeno ao lado, para quem procura.
   const acessos = [...grupos.entries()]
     .map(([chave, g]) => {
+      const todos = [...g.leitura, ...g.escrita];
       const indisponivel = g.indisponivel ? '<span class="tag tag-ambar" title="o conector está fora do ar">indisponível</span>' : "";
-      const acoes = `${g.itens.length} ${g.itens.length === 1 ? "ação permitida" : "ações permitidas"}`;
-      const frase = g.leitura ? "Pode consultar. Não envia nem altera nada." : "Pode fazer alterações em seu nome.";
+      const acoes = `${todos.length} ${todos.length === 1 ? "ação permitida" : "ações permitidas"}`;
+      const [nivel, frase] = !g.escrita.length
+        ? ["só leitura", "Pode consultar. Não envia nem altera nada."]
+        : g.leitura.length
+          ? ["pode ler e alterar", "Pode consultar e fazer alterações em seu nome."]
+          : ["pode alterar", "Pode fazer alterações em seu nome."];
       // definido em 2026-09-24: a descrição do catálogo tem parágrafos de instrução para o modelo — ilegível
-      // aqui. Cada ação vira UMA linha com o nome legível; a descrição inteira fica no title.
-      const itens = g.itens
-        .map((i) => `<li title="${esc(descricaoDe.get(i.id) ?? i.capacidade)}">${esc(nomeLegivel(i.capacidade, g.nome))}</li>`)
-        .join("");
-      const nomes = `<details data-disclosure="acessos-${esc(a.id)}-${esc(chave)}"><summary>${acoes}</summary><ul class="acesso-acoes">${itens}</ul></details>`;
-      return `<li class="acesso"><div class="acesso-cab"><span class="acesso-marca" aria-hidden="true">${esc(g.nome.slice(0, 1).toUpperCase())}</span><div><b>${esc(g.nome)}</b><small>${g.leitura ? "só leitura" : "pode alterar"}</small></div>${indisponivel}</div><p class="acesso-frase">${frase}</p><div class="acesso-rodape">${nomes}${botao("revogar-acessos", "Revogar", { classe: "link sm perigo", dados: { agente: a.id, ids: g.itens.map((i) => i.id).join(",") }, titulo: g.itens.length === 1 ? "revoga a ação deste grupo" : `revoga as ${g.itens.length} ações deste grupo` })}</div></li>`;
+      // aqui. Cada ação vira UMA linha com o nome legível; a descrição inteira fica no title. O prefixo sai
+      // pelo slug ("GOOGLECALENDAR_…" não começa com o nome "Google Calendar").
+      const linhas = (itens: typeof concessoes) => itens.map((i) => `<li title="${esc(descricaoDe.get(i.id) ?? i.capacidade)}">${esc(nomeLegivel(i.capacidade, g.slug || g.nome))}</li>`).join("");
+      const lista = (rotulo: string, itens: typeof concessoes, extra = "") => (itens.length ? `<div class="acesso-grupo"><small>${esc(rotulo)} · ${itens.length}</small>${extra}</div><ul class="acesso-acoes">${linhas(itens)}</ul>` : "");
+      const soLeitura =
+        g.leitura.length && g.escrita.length
+          ? botao("revogar-acessos", "Deixar só leitura", { classe: "link sm perigo", dados: { agente: a.id, ids: ids(g.escrita) }, titulo: `${g.escrita.length === 1 ? "revoga a ação que altera" : `revoga as ${g.escrita.length} ações que alteram`}; as de leitura continuam` })
+          : "";
+      const secoes = g.leitura.length && g.escrita.length ? `${lista("Consulta", g.leitura)}${lista("Altera", g.escrita, soLeitura)}` : `<ul class="acesso-acoes">${linhas(todos)}</ul>`;
+      const nomes = `<details data-disclosure="acessos-${esc(a.id)}-${esc(chave)}"><summary>${acoes}</summary>${secoes}</details>`;
+      const revogar = botao("revogar-acessos", "Revogar", { classe: "link sm perigo", dados: { agente: a.id, ids: ids(todos) }, titulo: todos.length === 1 ? `revoga a ação do ${g.nome}` : `revoga as ${todos.length} ações do ${g.nome}` });
+      return `<li class="acesso"><div class="acesso-cab">${logoApp(estado, g.slug, g.nome)}<div><b>${esc(g.nome)}</b><small>${nivel}</small></div>${indisponivel}</div><p class="acesso-frase">${frase}</p><div class="acesso-rodape">${nomes}${revogar}</div></li>`;
     })
     .join("");
 
