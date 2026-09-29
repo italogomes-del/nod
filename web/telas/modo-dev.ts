@@ -14,8 +14,9 @@ export const ALERTA_JANELA = 0.85;
 
 const numero = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
 
-/** 158_000 → "158 mil"; 197_500 → "197,5 mil"; 850 → "850". */
+/** 158_000 → "158 mil"; 197_500 → "197,5 mil"; 850 → "850"; 1_000_000 → "1 mi" (a janela do opus; "1.000 mil" não se lê). */
 export function mil(n: number): string {
+  if (n >= 999_950) return `${numero.format(Math.round(n / 100_000) / 10)} mi`;
   return n >= 1000 ? `${numero.format(Math.round(n / 100) / 10)} mil` : numero.format(n);
 }
 
@@ -45,14 +46,17 @@ export function faixaDaMensagem(m: Mensagem, estado: Estado): string {
 
 export function renderFaixaDev(r: ResumoRaioX): string {
   const alerta = r.picoContexto !== null && r.janela !== null && r.picoContexto >= r.janela * ALERTA_JANELA;
+  // definido em 2026-09-28 (canvas modo-dev, D1): "pico" quando houve compactação — o contexto subiu e desceu no turno.
+  const rotulo = r.compactacoes ? "pico" : "contexto";
+  const barra = r.picoContexto !== null && r.janela ? `<span class="faixa-dev-barra" aria-hidden="true"><span style="width:${Math.min(100, (r.picoContexto / r.janela) * 100).toFixed(1)}%"></span></span>` : "";
   const partes = [
     `<b>${esc(usd(r.custoUsd))}</b>`,
-    r.chamadas ? `${r.chamadas} ${r.chamadas === 1 ? "chamada" : "chamadas"}${r.compactacoes ? ` + ${r.compactacoes} ${r.compactacoes === 1 ? "compactação" : "compactações"}` : ""}` : "",
-    r.picoContexto !== null ? `<span class="${alerta ? "dev-alerta" : ""}">contexto ${esc(mil(r.picoContexto))}${r.janela ? ` / ${esc(mil(r.janela))}` : ""}</span>` : "",
-    r.cachePct !== null ? `${r.cachePct}% do cache` : "",
-    esc(modeloCurto(r.modelo)),
+    r.chamadas ? `<span>${r.chamadas} ${r.chamadas === 1 ? "chamada" : "chamadas"}${r.compactacoes ? ` + ${r.compactacoes} ${r.compactacoes === 1 ? "compactação" : "compactações"}` : ""}</span>` : "",
+    r.picoContexto !== null ? `<span class="faixa-dev-ctx${alerta ? " dev-alerta" : ""}">${rotulo}${barra}<span>${esc(mil(r.picoContexto))}${r.janela ? ` / ${esc(mil(r.janela))}` : ""}</span></span>` : "",
+    r.cachePct !== null ? `<span>${r.cachePct}% do cache</span>` : "",
+    r.modelo ? `<span>${esc(modeloCurto(r.modelo))}</span>` : "",
   ].filter(Boolean);
-  return `<div class="faixa-dev${alerta ? " faixa-dev-alerta" : ""}">${partes.join('<i aria-hidden="true">·</i>')}<button type="button" class="faixa-dev-bt" data-act="abrir-raio-x" data-id="${esc(r.turnoId)}">Raio-X</button></div>`;
+  return `<div class="faixa-dev${alerta ? " faixa-dev-alerta" : ""}">${partes.join("")}<button type="button" class="faixa-dev-bt" data-act="abrir-raio-x" data-id="${esc(r.turnoId)}">Raio-X</button></div>`;
 }
 
 /** No cabeçalho da conversa: o selo e o total de hoje com o bot. */

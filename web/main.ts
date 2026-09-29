@@ -873,7 +873,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "abrir-raio-x": (el) => {
     const t = estado.tela;
     const nome = t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala";
-    if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome);
+    if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome, el);
   },
   "alternar-modo-dev": () => agir(alternarModoDev),
   "relatar-mensagem": (el) => {
