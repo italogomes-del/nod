@@ -27,6 +27,8 @@ function comConversa(mensagens: Mensagem[]): Estado {
 describe("modo dev na web", () => {
   it("números como no canvas: mil com uma casa, dólar com duas (três abaixo de um centavo)", () => {
     expect([mil(158_000), mil(197_500), mil(850)]).toEqual(["158 mil", "197,5 mil", "850"]);
+    // A janela do opus: "1.000 mil" não se lê.
+    expect([mil(1_000_000), mil(1_250_000), mil(999_900)]).toEqual(["1 mi", "1,3 mi", "999,9 mil"]);
     expect([usd(1.02), usd(0.004), usd(null)]).toEqual(["US$ 1,02", "US$ 0,004", "US$ —"]);
   });
 
@@ -35,9 +37,10 @@ describe("modo dev na web", () => {
     expect(html).toContain("US$ 1,02");
     expect(html).toContain("5 chamadas + 3 compactações");
     expect(html).toContain("faixa-dev-alerta");
-    expect(html).toContain("contexto 197,5 mil / 200 mil");
+    // Houve compactação: o rótulo é "pico", com a mini-barra antes do número (canvas D1).
+    expect(html).toMatch(/pico<span class="faixa-dev-barra"[^>]*><span style="width:98\.8%"><\/span><\/span><span>197,5 mil \/ 200 mil<\/span>/);
     expect(html).toContain("98% do cache");
-    expect(html).toContain(">sonnet<");
+    expect(html).toContain("<span>sonnet</span>");
     expect(html).toContain('data-act="abrir-raio-x" data-id="t1"');
   });
 
