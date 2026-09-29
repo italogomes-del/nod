@@ -29,8 +29,8 @@ export function ehColega(eu: Pick<Agente, "id" | "ownerId">, a: Pick<Agente, "id
 
 /**
  * Ferramenta `ver_colegas` (definido em 2026-09-28, ADR-050): o que os outros bots da pessoa fazem, lido
- * do nod — perfil, rotinas e apps concedidos. Não pergunta nada a outro modelo (perguntar_a_bot é para
- * opinião), então o resultado sai na hora e é confiável: é a configuração que a própria pessoa confirmou.
+ * do nod — perfil, rotinas e apps concedidos. Não pergunta nada a outro modelo (pedir_a_bot é para isso,
+ * ADR-058), então o resultado sai na hora e é confiável: é a configuração que a própria pessoa confirmou.
  * `agente` aceita o id do diretório ou o nome único; fora dos colegas = nao_encontrado, nome repetido =
  * entrada_invalida, ambos tipados em {erro} para o modelo corrigir a chamada.
  */

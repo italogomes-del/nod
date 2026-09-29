@@ -133,7 +133,7 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraAgente(l) : null;
     },
 
-    /** Resolve por nome entre os agentes visíveis (para encaminhar/perguntar_a_bot por nome). */
+    /** Resolve por nome entre os agentes visíveis (para encaminhar/pedir_a_bot por nome). */
     async buscarPorNome(nome: string): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from agentes where tenant_id = ${escopo.tenantId} and excluido_em is null and lower(nome) = lower(${nome}) order by criado_em limit 1`;

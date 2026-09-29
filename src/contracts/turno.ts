@@ -19,10 +19,14 @@ export type SinaisTurno = {
 /** Quatro estados (ADR-010 revisado); 'interrompido' exige motivo (CHECK na 0002). */
 export type EstadoTurno = "pendente" | "despachando" | "concluido" | "interrompido";
 
-/** 'delegacao' (definido em 2026-09-24, ADR-047): tarefa que a pessoa pediu a outro bot por meio do remetente. */
+/**
+ * 'delegacao' (definido em 2026-09-24, ADR-047; revisto em 2026-09-29, ADR-058): o turno de quem cumpre um
+ * pedido de colega (pedir_a_bot), com os acessos dele. 'peer' é legado: o turno de quem respondia a
+ * perguntar_a_bot, que saiu na ADR-058; nenhum turno novo nasce com ele.
+ */
 export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer" | "delegacao";
 
-/** Profundidade estrutural de peer: 0 = normal; 1 = respondendo a perguntar_a_bot ou cumprindo delegar_tarefa, sem porta lateral (E12.4). */
+/** Profundidade estrutural (E12.4): 0 = normal; 1 = cumprindo um pedido de colega, ou a continuação de quem pediu — sem novo salto. */
 export type Profundidade = 0 | 1;
 
 export type Turno = {

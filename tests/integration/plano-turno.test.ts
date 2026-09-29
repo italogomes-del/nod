@@ -57,7 +57,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       expect(nomes).toContain("exemplo__listar_contatos");
       expect(nomes).not.toContain("exemplo__enviar_email");
       expect(nomes.some((n) => n.startsWith("desligado__"))).toBe(false);
-      expect(nomes).toContain("perguntar_a_bot");
+      expect(nomes).toContain("pedir_a_bot");
       expect(nomes).toContain("pedir_aprovacao");
       expect(r.data.catalogo.servidores).toEqual([{ conectorId: conector?.id, nome: "exemplo", trust: "untrusted", transporte: "stdio" }]);
       expect(r.data).toMatchObject({ turnoId: turno?.id, agenteId, conversaId, machineId: maquina, executor: "catcher", superficie: "maquina_da_pessoa", localidade: "local" });
@@ -95,7 +95,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
     });
   });
 
-  it("profundidade 1 vira modo peer: sem perguntar_a_bot nem encaminhar (E12.4); rotina sem gate identificável liga efeitoExternoSoPorAprovacao (fail-closed)", async () => {
+  it("turno peer legado: sem pedir_a_bot nem encaminhar (E12.4, ADR-058); rotina sem gate identificável liga efeitoExternoSoPorAprovacao (fail-closed)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const agora = () => Date.now();
@@ -103,7 +103,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const peer = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "peer", prazoEm: agora() + 600_000, profundidade: 1, entradaTexto: "pergunta", entradaConfianca: "nao_confiavel", modelo: "m" });
       const planoPeer = (await emitirPlanoTurno(deps, { turnoId: peer?.id ?? "", machineId: "m" })).data;
       const nomesPeer = planoPeer.catalogo.ferramentas.map((f) => f.nome);
-      expect(nomesPeer).not.toContain("perguntar_a_bot");
+      expect(nomesPeer).not.toContain("pedir_a_bot");
       expect(nomesPeer).not.toContain("encaminhar");
       expect(nomesPeer).toContain("lembrar");
       expect(planoPeer.profundidade).toBe(1);
@@ -113,7 +113,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const planoRotina = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
       expect(planoRotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
       // ADR-044: pedir_acesso entra na rotina (só propõe; a pessoa decide num botão). ADR-051: publicar/ler artefato também.
-      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
 
       // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004): sem janela o gate fica ligado.
       const r = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", exigeAprovacao: false, proximaExecucao: agora() + 1000 });
@@ -134,7 +134,9 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
     expect(modoDoTurno({ origem: "conversa", profundidade: 0 }, { tipo: "propria" }, { confirmado: false })).toBe("criacao");
     expect(modoDoTurno({ origem: "conversa", profundidade: 0 }, { tipo: "propria" }, { confirmado: true })).toBe("conversa");
     expect(modoDoTurno({ origem: "sala", profundidade: 0 }, { tipo: "sala" }, { confirmado: true })).toBe("sala");
-    expect(modoDoTurno({ origem: "conversa", profundidade: 1 }, null, { confirmado: true })).toBe("peer");
+    // ADR-058: profundidade 1 só corta o salto; o modo vem da origem (peer é o turno legado de perguntar_a_bot).
+    expect(modoDoTurno({ origem: "conversa", profundidade: 1 }, null, { confirmado: true })).toBe("conversa");
+    expect(modoDoTurno({ origem: "peer", profundidade: 1 }, null, { confirmado: true })).toBe("peer");
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const agora = () => Date.now();

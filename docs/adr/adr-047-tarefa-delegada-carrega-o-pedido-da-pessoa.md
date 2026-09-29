@@ -3,6 +3,12 @@
 Status: aceito · Data: 2026-09-24 · Emenda ADR-025 e ADR-026. ADR-042 ganha uma lista de ações que
 nunca são permanentes.
 
+> **Substituída em parte pela [ADR-058](adr-058-um-pedido-entre-bots-com-os-acessos-de-quem-recebe.md)
+> (2026-09-29).** `perguntar_a_bot` e `delegar_tarefa` viraram uma ferramenta só, `pedir_a_bot`. Quem recebe
+> usa os acessos dele venha o pedido de conversa, sala ou rotina. Saem a exigência da mensagem da pessoa e a
+> checagem de conteúdo de fora; a trava da rotina de quem pediu é herdada. Continuam valendo daqui: um salto,
+> `NUNCA_PERMANENTE`, entrega única por raiz, avisos de falha e a neutralização dos blocos da entrada.
+
 ## Contexto
 
 Marlon pediu ao Taga: "pede ao Dev 1 para me ajudar a revisar o PR #466". O Dev 1 recusou, e a recusa

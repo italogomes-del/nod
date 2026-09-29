@@ -73,7 +73,7 @@ describeIntegracao("produto v1: formulários e colaboração com servidor comple
     const b = await criar("Revisora");
     const sala = await srv.json<RespostaMutacao>("POST", "salas", { nome: "Lançamento", agenteIds: [a.agente.id, b.agente.id] });
     const pergunta = `[[texto: O principal risco é falta de clareza.]]`;
-    await srv.json("POST", `salas/${sala.ids.salaId}/mensagens`, { texto: `@Autora [[tool: perguntar_a_bot ${JSON.stringify({ agente: b.agente.id, pergunta })}]] [[texto: Pedi uma revisão.]]` });
+    await srv.json("POST", `salas/${sala.ids.salaId}/mensagens`, { texto: `@Autora [[tool: pedir_a_bot ${JSON.stringify({ agente: b.agente.id, pedido: pergunta })}]] [[texto: Pedi uma revisão.]]` });
     const retorno = await srv.esperar(async () => {
       const c = await srv.json<ConversaDto>("GET", `conversas/${sala.ids.conversaId}/mensagens`);
       return c.mensagens.some((m) => m.kind === "peer_ask") ? c : null;

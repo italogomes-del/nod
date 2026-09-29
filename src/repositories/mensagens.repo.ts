@@ -122,6 +122,18 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraMensagem);
     },
 
+    /**
+     * O `peer_pedido` que abriu uma tarefa de colega (definido em 2026-09-29, ADR-058): a ligação tipada até
+     * quem pediu. Direto pelo turno, sem a janela de MENSAGENS_DO_PLANO — a trava herdada não pode depender dela.
+     */
+    async pedidoDaTarefa(turnoId: string): Promise<Mensagem | null> {
+      const [l] = await conn<LinhaMensagem[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} and payload->>'kind' = 'peer_pedido'
+        order by criado_em, id limit 1`;
+      return l ? paraMensagem(l) : null;
+    },
+
     async ultimaDaConversa(conversaId: string): Promise<Mensagem | null> {
       const [l] = await conn<LinhaMensagem[]>`
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} order by criado_em desc, id desc limit 1`;

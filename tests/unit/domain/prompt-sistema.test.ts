@@ -11,7 +11,7 @@ const mem = (id: string, texto: string, criadoEm: number): Memoria => ({ tenantI
 describe("montarPromptSistema", () => {
   it("expõe os colegas como dados e explica a continuação assíncrona apenas quando pode consultar", () => {
     const entrada = { agente, memorias: [], pessoaNome: "Marlon", modo: "conversa" as const, colegas: [{ id: "tuca", nome: "Tuca", titulo: "Atendimento", descricao: "Conhece os clientes" }] };
-    const prompt = montarPromptSistema({ ...entrada, ferramentas: [f("perguntar_a_bot")] });
+    const prompt = montarPromptSistema({ ...entrada, ferramentas: [f("pedir_a_bot")] });
     expect(prompt).toContain('"nome":"Tuca"');
     expect(prompt).toContain("Conhece os clientes");
     expect(prompt).toContain("Nunca invente a resposta do colega");

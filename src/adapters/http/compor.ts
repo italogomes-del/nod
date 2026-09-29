@@ -50,8 +50,7 @@ import { semNovidade } from "../../use-cases/sem-novidade.ts";
 import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
-import { perguntarABot } from "../../use-cases/perguntar-a-bot.ts";
-import { delegarTarefa } from "../../use-cases/delegar-tarefa.ts";
+import { pedirABot } from "../../use-cases/pedir-a-bot.ts";
 import { verColegas } from "../../use-cases/ver-colegas.ts";
 import { lerArtefato, publicarArtefato } from "../../use-cases/artefatos.ts";
 import { servicoSala } from "../../use-cases/servico-sala.ts";
@@ -105,7 +104,7 @@ import { criarRotasNaoLidos } from "./rotas/nao-lidos.ts";
  * Fatias de Services: planos ← L5 (emitirPlanoTurno), rotinas ← L7 (servicoRotinas), conectores ← L5
  * (conectores-vivos), interruptor ← L6, catcher ← L3/L4 (catcherRepo), tokenTurno ← L5, sala ← L7
  * (servicoSala), barramento ← L8. UseCasesNod: lembrar/atualizarPerfil ← L6; criarRotina/passar/
- * encaminhar/perguntarABot/delegarTarefa ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5 (EMENDA 5).
+ * encaminhar/pedirABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5 (EMENDA 5).
  *
  * O registry chega DEPOIS (ligarRegistry): o driver catcher precisa da URL do servidor, que só existe
  * depois do listen — em produção a porta é fixa, no teste é 0 (EMENDA 34).
@@ -211,7 +210,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, perguntarABot, delegarTarefa, verColegas, publicarArtefato, lerArtefato };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());

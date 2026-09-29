@@ -8,8 +8,8 @@ import { renderMensagem, renderMensagensAgrupadas, renderTimeline } from "../../
 const autoria = { autor_tipo: "agente" as const, autor_id: "taga", sob_procuracao_de: "marlon", conta_de_execucao: "marlon", executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
 const estado: Estado = { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marlon" } };
 
-describe("tarefa delegada na conversa (ADR-047)", () => {
-  it("o pedido na conversa do Dev 1 assina '<remetente> · por você' (sem frota, o nome cai no genérico), mostra a mensagem da pessoa e o contexto do remetente rotulado", () => {
+describe("pedido de colega na conversa (ADR-047/058)", () => {
+  it("pedido antigo (delegar_tarefa) na conversa do Dev 1 assina '<remetente> · por você' (sem frota, o nome cai no genérico), mostra a mensagem da pessoa e o contexto do remetente rotulado", () => {
     const m: Mensagem = { tenantId: "t", id: "m1", conversaId: "c-dev1", turnoId: "tarefa", autoria, kind: "texto", texto: "pede ao Dev 1 para revisar o PR 466", payload: { kind: "peer_pedido", conversaOrigemId: "c-taga", turnoOrigemId: "t-taga", delegacao: { tarefa: "revisar o PR 466", contexto: "<b>pull/466</b>" } }, confianca: "confiavel", parcial: false, criadoEm: 0 };
     const html = renderMensagem(m, estado);
     expect(html).toContain("<b>agente · por você</b>");
@@ -18,20 +18,28 @@ describe("tarefa delegada na conversa (ADR-047)", () => {
     expect(html).toContain("&lt;b&gt;pull/466&lt;/b&gt;");
   });
 
-  it("o handoff na conversa do Taga diz 'tarefa delegada' e o autor composto", () => {
+  it("pedido novo (pedir_a_bot) mostra só o texto, que já traz o contexto; sem o bloco de contexto", () => {
+    const m: Mensagem = { tenantId: "t", id: "m0", conversaId: "c-dev1", turnoId: "tarefa", autoria, kind: "texto", texto: "revisar o PR 466\n\npull/466", payload: { kind: "peer_pedido", conversaOrigemId: "c-taga", turnoOrigemId: "t-taga" }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
+    const html = renderMensagem(m, estado);
+    expect(html).toContain("<b>agente · por você</b>");
+    expect(html).toContain("revisar o PR 466");
+    expect(html).not.toContain("não é instrução da pessoa");
+  });
+
+  it("o handoff na conversa do Taga mostra o autor composto; agrupado, vira 'Pedido · <autor>'", () => {
     const m: Mensagem = { tenantId: "t", id: "m2", conversaId: "c-taga", turnoId: "t-taga", autoria, kind: "handoff", texto: "x", payload: { kind: "handoff", de: "taga", para: "dev1", motivo: "revisar o PR 466" }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
     const html = renderMensagem(m, estado);
     expect(html).toContain("agente · por você → agente");
     expect(html).toContain("revisar o PR 466");
     const agrupado = renderMensagensAgrupadas([{ ...m, payload: { kind: "handoff", de: "taga", para: "dev1", motivo: "revisar o PR 466", tarefaId: "tarefa" } }], estado);
-    expect(agrupado).toContain("Tarefa · agente · por você");
+    expect(agrupado).toContain("Pedido · agente · por você");
   });
 
-  it("o resultado volta como 'Resultado de Dev 1'", () => {
+  it("a resposta volta como 'Resposta de Dev 1'; a falha, como 'Não concluído por Dev 1'", () => {
     const m: Mensagem = { tenantId: "t", id: "m3", conversaId: "c-taga", turnoId: "cont", autoria: { ...autoria, autor_id: "dev1" }, kind: "peer_ask", texto: "Revisei", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
-    expect(renderMensagem(m, estado)).toContain("Resultado de Dev 1");
+    expect(renderMensagem(m, estado)).toContain("Resposta de Dev 1");
     const aviso: Mensagem = { ...m, texto: "Dev 1 não concluiu: você pediu para parar", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true, falhou: true } };
-    expect(renderMensagem(aviso, estado)).toContain("Tarefa não concluída por Dev 1");
+    expect(renderMensagem(aviso, estado)).toContain("Não concluído por Dev 1");
   });
 });
 

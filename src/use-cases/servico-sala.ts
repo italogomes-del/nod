@@ -3,7 +3,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import type { Tx } from "../shared/types.ts";
 import { encaminhar } from "./encaminhar.ts";
 import { passar } from "./passar.ts";
-import { perguntarABot } from "./perguntar-a-bot.ts";
+import { pedirABot } from "./pedir-a-bot.ts";
 import type { Deps, Services } from "./tipos.ts";
 
 /**
@@ -31,9 +31,9 @@ export function servicoSala(depsSobre: (trx: Tx) => Deps, aoGravar?: (trx: Tx, e
       if (aoGravar && r.events?.length) await aoGravar(trx, r.events);
       return r.data;
     },
-    async perguntar(trx, p) {
+    async pedir(trx, p) {
       const deps = depsSobre(trx);
-      const r = await perguntarABot(deps, { ...(await contexto(deps, p.turnoId)), agente: p.agente, pergunta: p.pergunta });
+      const r = await pedirABot(deps, { ...(await contexto(deps, p.turnoId)), agente: p.agente, pedido: p.pedido, ...(p.contexto ? { contexto: p.contexto } : {}) });
       if (aoGravar && r.events?.length) await aoGravar(trx, r.events);
       return { tarefaId: r.data.tarefa_id };
     },

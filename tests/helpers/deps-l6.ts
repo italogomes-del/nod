@@ -99,7 +99,7 @@ export function servicosDeTeste(reposDe: (trx: Tx) => Repos, escopo: Escopo, opc
         await reposDe(trx).catcher.registrar({ turnoId, tipo, dados });
       },
     },
-    sala: { encaminhar: naoImplementado("sala.encaminhar (L7)"), passar: naoImplementado("sala.passar (L7)"), perguntar: naoImplementado("sala.perguntar (L7)") },
+    sala: { encaminhar: naoImplementado("sala.encaminhar (L7)"), passar: naoImplementado("sala.passar (L7)"), pedir: naoImplementado("sala.pedir (L7)") },
     barramento: {
       publicar(pessoaId, tipo, dados) {
         const frame: FrameSse = { streamId: "teste", seq: ++seq, pessoaId, tipo, dados };
@@ -127,8 +127,7 @@ export function useCasesDeTeste(): UseCasesNod {
     passar: naoImplementado("passar (L7)"),
     encaminhar: naoImplementado("encaminhar (L7)"),
     semNovidade: naoImplementado("semNovidade (L7)"),
-    perguntarABot: naoImplementado("perguntarABot (L7)"),
-    delegarTarefa: naoImplementado("delegarTarefa (L7)"),
+    pedirABot: naoImplementado("pedirABot (L7)"),
     verColegas: naoImplementado("verColegas (L7)"),
     publicarArtefato,
     lerArtefato,

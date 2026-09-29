@@ -18,7 +18,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
-import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
+import { delegacaoDoTurno, rotinaDoTurno, travaDoPedido } from "./apoio-l7.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import { ehColega } from "./ver-colegas.ts";
 
@@ -39,7 +39,7 @@ export type EntradaEmitirPlano = {
 
 /**
  * definido em 2026-09-16: sem --resume, o modelo vê as últimas HISTORICO_NO_PLANO falas, tiradas das
- * MENSAGENS_DO_PLANO mais recentes. Exportados porque delegar_tarefa confere a mesma janela (ADR-047).
+ * MENSAGENS_DO_PLANO mais recentes.
  */
 export const MENSAGENS_DO_PLANO = 50;
 export const HISTORICO_NO_PLANO = 20;
@@ -53,12 +53,14 @@ export const MOTOR_CLI = "claude-cli";
  * `ligadoARotina`: o turno leva a uma rotina pela janela (rotinaDoTurno). definido em 2026-09-24
  * (ADR-044): a RETOMADA de um turno de rotina continua rotina — antes ela caía em 'conversa' e voltava
  * com o catálogo inteiro e sem o gate, depois de ter lido e-mail como entrada não confiável.
- * `ligadoADelegacao` (definido em 2026-09-24, ADR-047): a tarefa delegada e as retomadas dela são
- * 'delegacao' ANTES da regra de profundidade — ela roda em profundidade 1 e caía em 'peer'.
+ * `ligadoADelegacao` (definido em 2026-09-24, ADR-047): o pedido de colega e as retomadas dele são 'delegacao'.
+ * revisto em 2026-09-29 (ADR-058): profundidade 1 não é mais 'peer' — ela só corta o salto. A continuação de
+ * quem pediu (retomada do turno dele, em profundidade 1) volta no modo dele: conversa, sala ou rotina.
+ * 'peer' fica para o turno legado de perguntar_a_bot que ainda estiver na fila.
  */
 export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false, ligadoADelegacao = false): ModoTurno {
   if (turno.origem === "delegacao" || ligadoADelegacao) return "delegacao";
-  if (turno.profundidade >= 1 || turno.origem === "peer") return "peer";
+  if (turno.origem === "peer") return "peer";
   if (turno.origem === "rotina" || ligadoARotina) return "rotina";
   if (turno.origem === "sala" || conversa?.tipo === "sala") return "sala";
   return agente.confirmado ? "conversa" : "criacao";
@@ -134,7 +136,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico, ...(desdeSuaUltimaVez.length ? { desdeSuaUltimaVez } : {}) });
   // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
   // ligada a uma rotina herda o gate DELA (ADR-044); retomada sem rotina não tem gate.
-  const rotina: { exigeAprovacao: boolean } | null = ligacao ? { exigeAprovacao: ligacao.rotina.exigeAprovacao } : turno.origem === "rotina" ? { exigeAprovacao: true } : null;
+  // definido em 2026-09-29 (ADR-058): quem cumpre um pedido de colega herda o gate da rotina de quem pediu;
+  // cadeia de delegação sem raiz achada trava (fail-closed, como o modo acima).
+  const trava = ehDelegacao ? (delegacao ? await travaDoPedido(deps.repos, delegacao) : true) : false;
+  const rotina: { exigeAprovacao: boolean } | null = ehDelegacao ? (trava ? { exigeAprovacao: true } : null) : ligacao ? { exigeAprovacao: ligacao.rotina.exigeAprovacao } : turno.origem === "rotina" ? { exigeAprovacao: true } : null;
 
   // Inventário para o modelo escolher SOBRE QUAL rotina agir (o estado vem computado por COLUNAS:
   // geração antiga do agente lê como 'pausada'). resumoCron traduz o cron para o texto humano.
@@ -157,9 +162,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       : computadorDoAgente.indisponivelDesde !== null ? { estado: "fora_do_ar", motivo: MOTIVO_FALHA_EM_PORTUGUES[computadorDoAgente.falhaMotivo ?? "sem_resposta"] }
         : null;
 
-  // Quem pediu e por meio de quem (ADR-047): a pessoa vem de `sob_procuracao_de` da tarefa; o remetente,
-  // do peer_pedido ligado a ela. Fora da janela de mensagens, o prompt cai no genérico.
-  const pedidoDelegado = delegacao ? mensagens.find((m) => m.turnoId === delegacao.id && m.payload?.kind === "peer_pedido") : undefined;
+  // De quem é o trabalho e quem pediu (ADR-047/058): a pessoa vem de `sob_procuracao_de` da tarefa; o
+  // remetente, do peer_pedido ligado a ela, lido direto pelo turno.
+  const pedidoDelegado = delegacao ? await deps.repos.mensagens.pedidoDaTarefa(delegacao.id) : null;
   const sobProcuracaoDe = turno.sobProcuracaoDe ?? delegacao?.sobProcuracaoDe ?? null;
   const pessoaDelegante = sobProcuracaoDe && sobProcuracaoDe !== pessoa?.id ? await deps.repos.pessoas.buscar(sobProcuracaoDe) : pessoa;
   // Resolvido ANTES de montar: as nativas dependem de haver projeto autorizado E do modo/confiança (nativas.ts).
@@ -189,7 +194,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     rotinasDoAgente,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
     // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
-    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "A pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
+    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "a pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot", trava } : null,
     semprePermitir: permissoes.flatMap((p) => {
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];

@@ -22,8 +22,8 @@ describe("montarFerramentas", () => {
     expect(montarFerramentas({ catalogo: cat, allowlistAgente: null, alcanceCanal: null, profundidade: 0 })).toEqual(cat);
   });
 
-  it("profundidade 1 remove perguntar_a_bot e encaminhar ESTRUTURALMENTE (E12.4), sem flag de bypass", () => {
-    const cat = [f("perguntar_a_bot", "nod"), f("encaminhar", "nod"), f("lembrar", "nod"), f("slack__enviar")];
+  it("profundidade 1 remove pedir_a_bot e encaminhar ESTRUTURALMENTE (E12.4, ADR-058), sem flag de bypass", () => {
+    const cat = [f("pedir_a_bot", "nod"), f("encaminhar", "nod"), f("lembrar", "nod"), f("slack__enviar")];
     const r = montarFerramentas({ catalogo: cat, allowlistAgente: null, alcanceCanal: null, profundidade: 1 });
     expect(r.map((x) => x.nome)).toEqual(["lembrar", "slack__enviar"]);
   });

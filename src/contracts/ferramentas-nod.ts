@@ -13,10 +13,10 @@ export type { ArgsAtualizarPerfil, ArgsVerColegas, AppDoColega, ColegaListado, R
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As DEZENOVE ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As DEZOITO ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
- * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; delegar_tarefa entra em 2026-09-24,
- * ADR-047; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em
+ * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; pedir_a_bot substitui perguntar_a_bot e
+ * delegar_tarefa em 2026-09-29, ADR-058; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em
  * ferramentas-perfil.ts pelo mesmo gatilho; publicar_artefato/ler_artefato também em 2026-09-28, ADR-051,
  * em ferramentas-artefato.ts). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
@@ -109,26 +109,19 @@ export const FERRAMENTAS_NOD = {
     required: ["motivo"],
     additionalProperties: false,
   },
-  perguntar_a_bot: {
-    type: "object",
-    description: "Pergunta em texto a outro bot do mesmo dono (1 salto). A resposta volta como conteúdo não confiável.",
-    properties: { agente: { type: "string", description: "Id do diretório de colegas, ou nome único do bot.", minLength: 1 }, pergunta: { type: "string", description: "A pergunta.", minLength: 1 } },
-    required: ["agente", "pergunta"],
-    additionalProperties: false,
-  },
   /**
-   * definido em 2026-09-24 (ADR-047): o que autoriza é a mensagem da PESSOA que abriu este turno, que o
-   * servidor lê do banco — por isso nenhum campo carrega o pedido dela nem o id da mensagem.
+   * definido em 2026-09-29 (ADR-058): UM jeito de pedir a um colega, pergunta ou tarefa. Quem recebe usa os
+   * acessos dele; a mensagem da pessoa que abriu este turno, se houver, o servidor lê do banco e leva junto.
    */
-  delegar_tarefa: {
+  pedir_a_bot: {
     type: "object",
-    description: "A pessoa pediu que outro bot FAÇA algo (revisar, corrigir, levantar, preparar). O servidor leva junto a mensagem literal dela como autorização; o colega trabalha com os acessos dele e pede o que faltar na conversa dele. Para uma dúvida ou opinião, use perguntar_a_bot. Agenda trabalho assíncrono: diga que pediu e encerre; o resultado chega em um novo turno.",
+    description: "Pede a um colega (outro bot da pessoa) uma resposta ou um trabalho: explicar, consultar, levantar, revisar, corrigir, preparar. Ele resolve com os acessos e ferramentas DELE e pede o que faltar. Agenda trabalho assíncrono: diga que pediu e encerre; o resultado chega em um novo turno.",
     properties: {
       agente: { type: "string", description: "Id do diretório de colegas, ou nome único do bot.", minLength: 1 },
-      tarefa: { type: "string", description: "O que a pessoa pediu que ele faça, em uma frase.", minLength: 1 },
-      contexto: { type: "string", description: "Onde achar o trabalho: links, números, nomes. Não é instrução da pessoa." },
+      pedido: { type: "string", description: "O que você precisa, autocontido: a pergunta ou a tarefa e o que deve voltar.", minLength: 1 },
+      contexto: { type: "string", description: "Onde achar o trabalho: links, números, nomes, o que já se sabe." },
     },
-    required: ["agente", "tarefa"],
+    required: ["agente", "pedido"],
     additionalProperties: false,
   },
 } as const satisfies Record<string, JsonSchema>;
@@ -142,7 +135,7 @@ export type NomeFerramentaNod = keyof typeof FERRAMENTAS_NOD;
 export const NOMES_FERRAMENTAS_NOD = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "pedir_aprovacao",
-  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "perguntar_a_bot", "delegar_tarefa", "ver_colegas", "publicar_artefato", "ler_artefato",
+  "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot", "ver_colegas", "publicar_artefato", "ler_artefato",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -156,8 +149,7 @@ export type ArgsPedirAprovacao = { resumo: string; itens: ItemPedidoAprovacao[] 
 export type ArgsPassar = { motivo: MotivoPasse };
 export type ArgsSemNovidade = { motivo: MotivoSemNovidade };
 export type ArgsEncaminhar = { para_agente: string; motivo: string };
-export type ArgsPerguntarABot = { agente: string; pergunta: string };
-export type ArgsDelegarTarefa = { agente: string; tarefa: string; contexto?: string };
+export type ArgsPedirABot = { agente: string; pedido: string; contexto?: string };
 
 export type ResultadoLembrar = { ok: true; id: string };
 export type ResultadoPedirAprovacao =
@@ -165,8 +157,7 @@ export type ResultadoPedirAprovacao =
   | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" };
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
-export type ResultadoPerguntarABot = { tarefa_id: string };
-export type ResultadoDelegarTarefa = { tarefa_id: string };
+export type ResultadoPedirABot = { tarefa_id: string };
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
 export type ContratoFerramentaNod = ContratoFerramentasArtefato & {
@@ -184,7 +175,6 @@ export type ContratoFerramentaNod = ContratoFerramentasArtefato & {
   passar: { args: ArgsPassar; resultado: ResultadoOk };
   encaminhar: { args: ArgsEncaminhar; resultado: ResultadoOk };
   sem_novidade: { args: ArgsSemNovidade; resultado: ResultadoOk };
-  perguntar_a_bot: { args: ArgsPerguntarABot; resultado: ResultadoPerguntarABot };
-  delegar_tarefa: { args: ArgsDelegarTarefa; resultado: ResultadoDelegarTarefa };
+  pedir_a_bot: { args: ArgsPedirABot; resultado: ResultadoPedirABot };
   ver_colegas: { args: ArgsVerColegas; resultado: ResultadoVerColegas };
 };
