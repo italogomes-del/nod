@@ -79,3 +79,34 @@ Rode a sonda a cada versão nova do CLI e registre o resultado aqui.
 - **Regra permanente por comando.**
 - **Leitura de conteúdo de fora pelo Bash** (`gh pr diff`, `curl` aprovado) ainda não contamina o turno; só WebFetch e WebSearch contaminam.
 - **Codex** continua só com o proxy.
+
+## Emenda de 2026-09-28: as skills do terminal
+
+O Marlon pediu ao Dev 1 "quero usar a skill de /review nesse PR". O Dev 1 respondeu: "Não tenho ferramenta de
+skills nem de slash commands neste ambiente". A resposta era verdade.
+
+Medido no CLI 2.1.284, lendo só o `init` (sem chamar o modelo):
+- **As skills já vinham carregadas, mas não podiam ser chamadas.** Como o nod rodava, o `init` listava 18 skills,
+  só as embutidas. Com o `--add-dir` da pasta da pessoa, que esta ADR já passa, vinham 305 skills (o `review` entre
+  elas) e os 4 plugins dela. O `--strict-mcp-config` continuou barrando os servidores MCP dos plugins. Faltava só a
+  ferramenta `Skill` no `--tools`.
+- **O hook continua decidindo tudo.** Uma sonda de US$ 0,065 com haiku mostrou que o hook do nod recebe `Skill`
+  (com o nome da skill) e depois o `Bash` que ela manda rodar. Com subagente, o hook recebe `Agent` e depois o
+  `Bash` de dentro do subagente, com o `agent_id` dele. O `init` lista o subagente como `Task`; o `--tools` aceita e
+  o hook recebe `Agent`.
+
+**Decisão.**
+- **Kit:** `Skill` e `Agent` entram no kit do terminal (`NATIVAS_DE_SKILL`), só onde o kit já existe: conversa e
+  criação confiáveis no Claude Code.
+- **Hook:** deixa os dois passarem. O que a skill ou o subagente usar volta ao hook chamada por chamada, e o Bash
+  continua indo ao servidor.
+- **Prompt:** diz que "/nome" é pedido de skill. `AskUserQuestion` não existe em `-p`; quando a skill pedir uma
+  pergunta à pessoa, ela vai por `pedir_a_pessoa`.
+
+**Fora da emenda:**
+- `AskUserQuestion` e os comandos só de terminal (`/doctor`, `/color`, `/reload-plugins`);
+- as settings do usuário além do que o `--add-dir` já traz. `--setting-sources user` traria `env`, `permissions` e
+  `autoMode` do `settings.json` para dentro do turno.
+
+**Gatilho:** um `nativa__Bash` na trilha, de dentro de um subagente, sem decisão correspondente. Nesse caso o
+`Agent` sai do kit.

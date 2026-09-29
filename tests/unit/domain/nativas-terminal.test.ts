@@ -13,6 +13,16 @@ describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
     expect(nativasDoTurno({ modo: "rotina", confianca: "confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
   });
 
+  it("emenda da ADR-055: as skills da pessoa e os subagentes estão no kit, e o hook os deixa passar", () => {
+    expect(NATIVAS_DO_TERMINAL).toEqual(expect.arrayContaining(["Skill", "Agent"]));
+    expect(decidir("Skill", { skill: "review", args: "420" })).toEqual({ permitir: true, motivo: "skill da pessoa: cada ferramenta que ela usar passa pelo nod", contamina: false });
+    expect(decidir("Agent", { subagent_type: "general-purpose", prompt: "revise" })).toMatchObject({ permitir: true, contamina: false });
+    // O nome antigo do subagente (o `init` ainda o lista) não entra por engano: o hook recebe "Agent".
+    expect(decidir("Task", {})).toMatchObject({ permitir: false });
+    // Fora do terminal (só arquivo, com pasta), nada de skill.
+    expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: true })).not.toContain("Skill");
+  });
+
   it("a pasta do bot é o nome dele, sem o que o sistema de arquivos recusa", () => {
     expect(pastaDoBot("Ada")).toBe("Ada");
     expect(pastaDoBot("Dev 1 (cópia)")).toBe("Dev 1 (cópia)");

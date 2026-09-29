@@ -96,6 +96,8 @@ describe("partesDoPrompt: o prompt de sistema em seções", () => {
       f("perguntar_a_bot"), f("delegar_tarefa"), f("ver_colegas"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("publicar_artefato"),
       f("computador_bash", "computador"), f("pasta_ler", "workspace"), f("gmail__GMAIL_FETCH_EMAILS", "conector"),
     ],
+    nativas: modo === "conversa" || modo === "criacao" ? ["Read", "Bash", "Skill", "Agent"] : [],
+    pastaDoBot: "Clarice",
     pessoaNome: "Marlon",
     modo,
     colegas: [{ id: "a2", nome: "Dev 1", titulo: "dev", descricao: "revisa PR" }],

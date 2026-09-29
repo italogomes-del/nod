@@ -11,12 +11,22 @@ import type { ModoTurno } from "../contracts/plano-turno.ts";
 export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"] as const;
 
 /**
+ * definido em 2026-09-28 (emenda da ADR-055, "as skills do terminal"): as skills da pessoa e os subagentes. Sem a
+ * ferramenta Skill, o Dev 1 respondeu "não tenho ferramenta de skills" a um pedido de /review — as 305 skills dela
+ * e os plugins já vinham carregados pelo --add-dir da pasta dela, e nenhuma podia ser chamada. Medido no CLI
+ * 2.1.284: o hook do nod recebe a Skill e o Agent, e DEPOIS cada ferramenta que a skill ou o subagente usa (o Bash
+ * do subagente chega com o agent_id dele) — a decisão do servidor continua em toda chamada. O `init` lista o
+ * subagente como "Task"; o --tools aceita e o hook recebe "Agent".
+ */
+export const NATIVAS_DE_SKILL = ["Skill", "Agent"] as const;
+
+/**
  * definido em 2026-09-28 (ADR-052): o kit do terminal — o que a pessoa faz no Claude Code, o bot faz no nod.
  * Cada chamada passa pelo hook PreToolUse do nod (trilha no servidor). Só no harness Claude Code, com o hook.
  * revisto em 2026-09-28 (ADR-055): sem sandbox — arquivos em qualquer lugar do Mac, Bash com rede e as
  * credenciais da pessoa, e cada comando decidido pelo servidor (leitura roda, o resto pede aprovação).
  */
-export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch"] as const;
+export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL] as const;
 
 /** As nativas que trazem conteúdo de FORA para o turno: a chamada marca o turno como contaminado (0033). */
 export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch"];
@@ -82,6 +92,12 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     case "WebFetch":
     case "WebSearch":
       return { permitir: true, motivo: "conteúdo da web: o turno passa a tratar escrita externa como não confiável", contamina: true };
+    // Emenda da ADR-055: a skill é instrução dos arquivos da própria pessoa, e o subagente é o mesmo modelo com as
+    // mesmas ferramentas; o que cada um USA passa por aqui de novo, chamada por chamada.
+    case "Skill":
+      return { permitir: true, motivo: "skill da pessoa: cada ferramenta que ela usar passa pelo nod", contamina: false };
+    case "Agent":
+      return { permitir: true, motivo: "subagente: cada ferramenta dele passa pelo nod", contamina: false };
     default:
       return { permitir: false, motivo: `ferramenta fora do kit do nod: ${p.ferramenta}`, contamina: false };
   }
