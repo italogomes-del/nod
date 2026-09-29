@@ -19,8 +19,8 @@ diz outra coisa (páginas "Managed Auth" e "Authentication" das sessions):
 - **189 toolkits exigem OAuth próprio.** Sem auth config no painel, a sessão devolve erro pedindo um.
 - **O total é 312.**
 
-A premissa valia para os 189, não para os 123. Os números são da documentação, não de uma medição nossa: a
-sonda com a chave do tenant não rodou nesta sessão (ver "Não medido").
+A premissa valia para os 189, não para os 123. Os números acima são da documentação. O que a grade mostra
+com a chave do tenant está em "Medido".
 
 ## Decisão
 
@@ -83,16 +83,24 @@ sonda com a chave do tenant não rodou nesta sessão (ver "Não medido").
 - **Nenhum app de "Mais apps" conectado em 30 dias** (conectores cujo slug não está em `APPS_MARKETPLACE`
   nem no painel). A seção é ruído, e passa a abrir fechada.
 
-## Não medido
+## Medido
 
-- A sonda que confirmaria os números e o formato real de `meta.categories` (`{ id, name }` ou texto) com
-  a chave do tenant não rodou nesta sessão: o modo automático bloqueou a leitura da chave. O código lê as
-  duas formas e descarta o resto. O script está descrito no PR.
-- Os hosts de `meta.logo` do catálogo público. O que estiver fora de `logos.composio.dev`,
-  `assets.composio.dev` e `cdn.composio.dev` vira a inicial do nome, como no ADR-041.
+Medido em 2026-09-29, com o servidor desta mudança na 5274 e a chave do tenant Leapy, por
+`GET /api/t/<tenant>/conectores` (login stub):
+
+- **104 apps na grade:** 12 no dia a dia e 92 em "Mais apps". O Notion, o Linear e o Google Sheets
+  voltaram ao dia a dia. Os 92 já descontam os filtros dos itens 1 a 3.
+- **Todos os 104 com logo, de `logos.composio.dev/api/<slug>`.** O proxy devolveu o do Airtable como
+  `image/svg+xml`, 1262 B.
+- **Resposta sem cache: 0,77 s. Com cache: 0,06 s.** O gatilho de 2 s está longe.
+- **Categorias dos 92:** Vendas e marketing 15, Comunicação 13, Produtividade 10, Projetos 9,
+  Desenvolvimento 9, Finanças 9, Conhecimento 7, Design e mídia 6, Dados 5, E-commerce 2, Pessoas 1,
+  Atendimento 1. Só 5 caíram em "Integrações".
+
+Não medido: conectar de fato um app de "Mais apps". Esse é o primeiro gatilho de reversão.
 
 ## Fora deste ADR
 
-- O `github_mcp` do painel tem `_` no slug e continua aparecendo pela curadoria. Pela regex da rota, o clique em "Conectar" não
-  casa com a rota `[a-z0-9-]+` e dá 404, como já acontecia antes. Corrigir isso é mexer no slug do
-  conector, e fica para uma decisão própria.
+- O `github_mcp` do painel tem `_` no slug e continua aparecendo pela curadoria. Pela regex da rota
+  `[a-z0-9-]+`, o clique em "Conectar" não casa e dá 404, como já acontecia antes. Corrigir isso é mexer
+  no slug do conector, e fica para uma decisão própria.
