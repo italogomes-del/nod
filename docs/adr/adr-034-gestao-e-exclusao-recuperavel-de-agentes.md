@@ -77,3 +77,31 @@ do clique.
 
 **Gatilho de reversão.** Se aparecer efeito externo duplicado por rotina copiada ativa (dois envios da
 mesma coisa), volta a regra de copiar as rotinas pausadas, mantendo a cópia de memória e acessos.
+
+## Emenda de 2026-09-29 — não lido é o "lido até" da conversa
+
+A marcação manual (`agentes.nao_lido`, 0011) era o único não lido: nada marcava quando o bot respondia,
+a rotina entregava ou alguém escrevia numa sala. Para saber, era preciso abrir bot por bot, e sala não
+tinha sinal nenhum (canvas "Nod — tela do agente", página "Não lidos").
+
+- **0039 `leituras`:** uma linha por pessoa e conversa com o `lido_ate`, o `criado_em` da última mensagem
+  vista, lido do próprio banco. `ms()` trunca os microssegundos e deixaria a última mensagem contando
+  como nova. Não lida é a mensagem de texto ou artefato de quem não é a pessoa, criada depois dele. Aviso
+  do sistema, execução de rotina e a troca interna entre bots não contam.
+- **Na migração:** cada conversa ganha a linha de quem a lê, lida até ali. O bot que a pessoa tinha
+  marcado continua com a última fala como nova. `agentes.nao_lido` fica sem uso, porque outras cópias
+  do Nod na main usam o mesmo banco. Sai numa migração depois desta.
+- **"Marcar como não lido"** (menu do bot e `PATCH organizacao`) põe o `lido_ate` logo antes da última
+  fala. Abrir a conversa com a janela na frente, ou "Marcar como lido", leva até a última mensagem.
+- **Na web:** o ponto cinza do mascote passa a vir desses dados. A prévia nova fica em tinta escura e a
+  sala ganha o ponto à direita. Com algo não lido, o ícone entre a busca e o + abre a tela Não lidos, a
+  conversa mais recente em cima. A linha "Novas" marca onde a pessoa parou quando ela abre a conversa
+  ou volta para a janela; a fala que chega enquanto ela olha é lida sem linha.
+
+**Validação.** `tests/integration/nao-lidos.test.ts` (6 casos: contagem, microssegundos, três últimas,
+marcar não lido, oculto, sala e marcar tudo, isolamento entre pessoas) e `tests/unit/web/nao-lidos.test.ts`
+(9 casos), verdes num banco efêmero com a 0039.
+
+**Gatilho de reversão.** Se a leitura de `nao-lidos` passar de 100 ms no p95 com o histórico real,
+porque a contagem varre as mensagens de cada conversa, a contagem vira um contador mantido na
+escrita da mensagem.

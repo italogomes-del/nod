@@ -345,7 +345,11 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
     if (k) grupos.set(k, [...(grupos.get(k) ?? []), m]);
   }
   const mostrados = new Set<string>();
-  const pedacos = mensagens.map((m) => {
+  // definido em 2026-09-29 (0039, canvas "Não lidos"): a linha "Novas" entra acima da primeira não lida de quando a
+  // pessoa abriu a conversa, e fica até ela sair.
+  const novas = mensagens[0] ? estado.novasDesde[mensagens[0].conversaId] : undefined;
+  const pedacos = mensagens.map((m) => (novas?.mensagemId === m.id ? linhaNovas(novas.em) : "") + pedaco(m));
+  function pedaco(m: Mensagem): string {
     const k = grupoDe(m);
     if (!k) return renderMensagem(m, estado, sala);
     if (mostrados.has(k)) return "";
@@ -359,12 +363,16 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
       const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
       return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Tarefa · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluída" : x.payload?.kind === "peer_ask" && x.payload.delegada ? "Resultado" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto, { chave: `colab:${x.id}` })}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
     }).join("")}</div></details>`;
-  });
+  }
   // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de
   // recolher os avisos — o <details> do fio não é linha de sistema.
   const linhas: LinhaDaConversa[] = mensagens.map((m, i) => ({ id: m.id, sistema: linhaDeSistema(m), html: pedacos[i] ?? "" }));
   const conversaId = mensagens[0]?.conversaId;
   return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas);
+}
+
+function linhaNovas(em: number): string {
+  return `<div class="linha-novas" role="separator" aria-label="Mensagens novas"><span>Novas · desde ${esc(hora(em))}</span></div>`;
 }
 
 /** definido em 2026-09-24: a partir de quantas linhas de sistema SEGUIDAS a conversa as recolhe. */

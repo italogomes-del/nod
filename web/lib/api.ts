@@ -8,6 +8,7 @@ import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
+import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
@@ -101,6 +102,11 @@ export function criarApi(escopo: Escopo) {
     frota: () => get<FrotaDto>("frota"),
     gestaoAgentes: () => get<FrotaDto>("gestao-agentes"),
     organizarAgente: (id: string, campos: { secao?: string; naoLido?: boolean }) => patch<{ agente: Agente }>(`agentes/${id}/organizacao`, campos),
+    /** Não lidos (definido em 2026-09-29, 0039). */
+    naoLidos: () => get<NaoLidosDto>("nao-lidos"),
+    marcarLida: (conversaId: string) => post<RespostaMutacao>(`conversas/${conversaId}/lida`),
+    marcarNaoLida: (conversaId: string) => post<RespostaMutacao>(`conversas/${conversaId}/nao-lida`),
+    marcarTudoLido: () => post<RespostaMutacao>("nao-lidos/marcar-tudo"),
     excluirAgente: (id: string) => del<{ agente: Agente }>(`agentes/${id}`),
     restaurarAgente: (id: string) => post<{ agente: Agente }>(`agentes/${id}/restaurar`),
     inventario: (forcar = false) => get<Inventario>(`inventario${forcar ? "?forcar=1" : ""}`),

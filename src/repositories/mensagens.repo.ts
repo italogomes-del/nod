@@ -3,7 +3,7 @@ import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../cont
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms } from "./conversao.ts";
 
-interface Linha {
+export interface LinhaMensagem {
   tenant_id: string;
   id: string;
   conversa_id: string;
@@ -26,10 +26,10 @@ interface Linha {
   criado_em: Date;
 }
 
-const COLUNAS =
+export const COLUNAS_MENSAGEM =
   "tenant_id, id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, criado_em";
 
-function paraMensagem(l: Linha): Mensagem {
+export function paraMensagem(l: LinhaMensagem): Mensagem {
   return {
     tenantId: l.tenant_id,
     id: l.id,
@@ -74,26 +74,26 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
   return {
     async criar(m: NovaMensagem): Promise<Mensagem | null> {
       const a = m.autoria;
-      const [l] = await conn<Linha[]>`
+      const [l] = await conn<LinhaMensagem[]>`
         insert into mensagens (tenant_id, id, owner_id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao,
           executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial)
         values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.conversaId}, ${m.turnoId ?? null}, ${a.autor_tipo}, ${a.autor_id},
           ${a.sob_procuracao_de}, ${a.conta_de_execucao}, ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por},
           ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false})
-        returning ${conn.unsafe(COLUNAS)}`;
+        returning ${conn.unsafe(COLUNAS_MENSAGEM)}`;
       return l ? paraMensagem(l) : null;
     },
 
     async buscar(id: string): Promise<Mensagem | null> {
-      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from mensagens where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      const [l] = await conn<LinhaMensagem[]>`select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? paraMensagem(l) : null;
     },
 
     /** Em ordem de criação; `limite` corta pelas mais recentes (a resposta volta crescente). */
     async listarDaConversa(conversaId: string, limite = 200): Promise<Mensagem[]> {
-      const linhas = await conn<Linha[]>`
+      const linhas = await conn<LinhaMensagem[]>`
         select * from (
-          select ${conn.unsafe(COLUNAS)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
+          select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
           order by criado_em desc, id desc limit ${limite}
         ) recentes order by criado_em, id`;
       return linhas.map(paraMensagem);
@@ -110,9 +110,9 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
      * O `limite` é teto de segurança: conversa movimentada não vira dump.
      */
     async janelaAte(conversaId: string, ancoraId: string, desde: number, limite = 100): Promise<Mensagem[]> {
-      const linhas = await conn<Linha[]>`
+      const linhas = await conn<LinhaMensagem[]>`
         select * from (
-          select ${conn.unsafe(COLUNAS)} from mensagens
+          select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
           where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
             and criado_em >= ${data(desde)}
             and (id = ${ancoraId} or criado_em <= (
@@ -123,8 +123,8 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
     },
 
     async ultimaDaConversa(conversaId: string): Promise<Mensagem | null> {
-      const [l] = await conn<Linha[]>`
-        select ${conn.unsafe(COLUNAS)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} order by criado_em desc, id desc limit 1`;
+      const [l] = await conn<LinhaMensagem[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} order by criado_em desc, id desc limit 1`;
       return l ? paraMensagem(l) : null;
     },
 

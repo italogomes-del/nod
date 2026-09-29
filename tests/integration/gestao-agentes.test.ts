@@ -15,6 +15,7 @@ import type { CapacidadeConector } from "../../src/contracts/conector.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { concederLote } from "../../src/use-cases/conceder.ts";
 import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
+import { autoriaDoAgente } from "../../src/use-cases/registrar-negacao.ts";
 
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome, schema: { type: "object" }, readOnlyHint });
 
@@ -30,13 +31,16 @@ describeIntegracao("gestão de agentes: ciclo de vida e organização", () => {
     await withRollback(MARLON, async (tx) => {
       const d = depsSobreTrx(tx, MARLON);
       const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "UAT gestão" });
+      // 0039: "não lido" é o "lido até" da conversa, então precisa de uma fala do bot para marcar.
+      await d.repos.mensagens.criar({ conversaId: b.conversa.id, autoria: autoriaDoAgente(MARLON, b.agente.id), kind: "texto", texto: "Pronto.", confianca: "confiavel" });
       await gerirAgente(d, { agenteId: b.agente.id, acao: "organizar", secao: "  Design  ", naoLido: true });
       await fixarAgente(d, { agenteId: b.agente.id, fixado: true });
       await ocultarAgente(d, { agenteId: b.agente.id, oculto: true });
       expect((await listarFrota(d, {})).data.agentes.some((a) => a.id === b.agente.id)).toBe(false);
       expect((await listarFrota(d, { gerenciar: true })).data.agentes.find((a) => a.id === b.agente.id)).toMatchObject({ secao: "Design", naoLido: true, fixado: true, oculto: true });
       await gerirAgente(d, { agenteId: b.agente.id, acao: "organizar", secao: "", naoLido: false });
-      expect(await d.repos.agentes.buscar(b.agente.id)).toMatchObject({ secao: "", naoLido: false });
+      expect(await d.repos.agentes.buscar(b.agente.id)).toMatchObject({ secao: "" });
+      expect((await listarFrota(d, { gerenciar: true })).data.agentes.find((a) => a.id === b.agente.id)?.naoLido).toBe(false);
       await esperarErro(() => gerirAgente(d, { agenteId: b.agente.id, acao: "organizar", secao: "a".repeat(61) }), "entrada_invalida");
     });
   });

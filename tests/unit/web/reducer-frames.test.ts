@@ -33,12 +33,12 @@ function comConversa(): Estado {
  * A tabela POR_FRAME é total: um tipo novo no contrato não compila sem entrar aqui.
  */
 describe("aplicarFrame por TipoFrame", () => {
-  it("mensagem.nova invalida a conversa do frame (e só ela); sem conversaId não invalida nada", () => {
+  it("mensagem.nova invalida a conversa do frame e os não lidos (0039); sem conversaId não invalida nada", () => {
     const e = aplicarFrame(estadoInicial, frame("mensagem.nova", { conversaId: CONVERSA, kind: "mensagem_criada" }), AGORA);
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`]);
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "nao-lidos"]);
     expect(aplicarFrame(estadoInicial, frame("mensagem.nova", { kind: "mensagem_criada" }), AGORA).invalidacoes).toEqual([]);
     // sem duplicata quando o mesmo frame chega duas vezes
-    expect(aplicarFrame(e, frame("mensagem.nova", { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual([`conversa:${CONVERSA}`]);
+    expect(aplicarFrame(e, frame("mensagem.nova", { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual([`conversa:${CONVERSA}`, "nao-lidos"]);
   });
 
   it("turno.iniciado: kind turno_criado = 'na fila', turno_despachado = 'rodando' (pendência L8 §5), guardando executor e máquina", () => {
@@ -120,9 +120,9 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("inventario.mudou invalida inventário, frota e o interruptor de executor; agente.mudou invalida frota (+ memória quando a ação é memoria_criada, + concessões quando é concessao_criada)", () => {
     expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor"]);
-    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota", "gestao"]);
-    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", `conversa:${CONVERSA}`, "memoria:a1"]);
-    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", kind: "concessao_criada" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "concessoes:a1"]);
+    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos"]);
+    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", `conversa:${CONVERSA}`, "memoria:a1"]);
+    expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", kind: "concessao_criada" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", "concessoes:a1"]);
   });
 
   it("parada.faixa vira FaixaParada renderizável (nadaRodando escrito, nunca em branco)", () => {
@@ -133,7 +133,7 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("resumed:false reidrata TUDO (replay parcial nunca é aplicado, ADR-016); resumed:true não faz nada", () => {
     const e = aplicarFrame(comConversa(), frame("resumed", { resumed: false }), AGORA);
-    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "rotinas", "conectores", "inventario", "executor", "salas", `conversa:${CONVERSA}`]);
+    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", `conversa:${CONVERSA}`]);
     expect(aplicarFrame(comConversa(), frame("resumed", { resumed: true }), AGORA).invalidacoes).toEqual([]);
   });
 });

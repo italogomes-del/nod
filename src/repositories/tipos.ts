@@ -33,6 +33,7 @@ import type { trilhaRepo } from "./trilha.repo.ts";
 import type { turnosRepo } from "./turnos.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
+import type { leiturasRepo } from "./leituras.repo.ts";
 
 /**
  * Regras de repositório (Leapy §1, ADR-018 refinado): factory `xRepo(conn: Conn, escopo: Escopo)`
@@ -80,4 +81,5 @@ export interface Repos {
   raioX: ReturnType<typeof raioXRepo>;
   preferencias: ReturnType<typeof preferenciasRepo>;
   comandos: ReturnType<typeof comandosRepo>;
+  leituras: ReturnType<typeof leiturasRepo>;
 }
