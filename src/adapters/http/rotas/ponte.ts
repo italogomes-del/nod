@@ -3,6 +3,7 @@ import type { IdHarness } from "../../../contracts/harness.ts";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
+import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
@@ -38,6 +39,8 @@ export function criarPonteHttpServidor(d: {
   agora(): number;
   delta(plano: PlanoTurno, texto: string): void;
   ferramenta(plano: PlanoTurno, nome: string): void;
+  /** A lista de tarefas do bot, inteira, quando muda (definido em 2026-09-28). */
+  tarefas(plano: PlanoTurno, tarefas: TarefaDoBot[]): void;
   longpollMs?: number;
   /** ADR-048: itens aprovados que esperam o gh do Mac desta pessoa, e o desfecho que o Mac relata. */
   itensLocais?(escopo: Escopo): Promise<ItemLocal[]>;
@@ -122,6 +125,7 @@ export function criarPonteHttpServidor(d: {
       if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(plano, b.delta);
       if (r.ativo) for (const t of trechos(b.trechos)) {
         if ("ferramenta" in t) d.ferramenta(plano, t.ferramenta);
+        else if ("tarefas" in t) d.tarefas(plano, t.tarefas);
         else if (t.texto) d.delta(plano, t.texto);
       }
       ctx.json(200, r);

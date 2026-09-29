@@ -3,7 +3,7 @@ import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
 import type { MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
-import type { ResultadoTurno, SinaisTurno } from "./turno.ts";
+import type { ResultadoTurno, SinaisTurno, TarefaDoBot } from "./turno.ts";
 
 /** A máquina se anuncia (ADR-021 conectar). */
 export type AnuncioMaquina = {
@@ -42,7 +42,7 @@ export type PedidoRenovar = {
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
  * de ferramenta (nunca input/resultado). O servidor republica como turno.delta / turno.atividade.
  */
-export type TrechoVivo = { texto: string } | { ferramenta: string };
+export type TrechoVivo = { texto: string } | { ferramenta: string } | { tarefas: TarefaDoBot[] };
 
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois

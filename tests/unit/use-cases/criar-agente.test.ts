@@ -62,6 +62,15 @@ describe("criarAgente (E1.1/E1.2/E1.3, EMENDA 17)", () => {
     expect(r.data.agente).toMatchObject({ nome: "Vera", titulo: "Revisora", dono: "pessoa" });
   });
 
+  it("0037: o esforço muda sem recomeçar a sessão; \"\" volta ao padrão do modelo; valor fora da lista é recusado", async () => {
+    const { deps } = depsEmMemoria();
+    const { data } = await executar(deps, criarAgente, { dono: "pessoa" });
+    expect((await executar(deps, editarPerfil, { agenteId: data.agente.id, esforco: "high" })).data.agente.esforco).toBe("high");
+    expect((await executar(deps, editarPerfil, { agenteId: data.agente.id, nome: "Vera" })).data.agente.esforco).toBe("high");
+    expect((await executar(deps, editarPerfil, { agenteId: data.agente.id, esforco: "" })).data.agente.esforco).toBeNull();
+    await esperarErro(() => editarPerfil(deps, { agenteId: data.agente.id, esforco: "turbo" }), "entrada_invalida");
+  });
+
   it("fixar alterna; ocultar tira da frota sem apagar", async () => {
     const { deps } = depsEmMemoria();
     const { data } = await executar(deps, criarAgente, { dono: "pessoa" });

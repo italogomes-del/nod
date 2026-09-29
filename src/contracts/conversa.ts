@@ -26,6 +26,8 @@ export type Conversa = {
   sessaoHarness?: IdHarness | null;
   /** Quando a sessão avançou pela última vez (0030): o que a conversa ganhou depois não está nela. */
   sessaoEm?: EpochMs | null;
+  /** /nova-sessao (0038): o histórico que vai no prompt só leva o que veio depois deste instante. */
+  recomecoEm?: EpochMs | null;
   criadoEm: EpochMs;
 };
 

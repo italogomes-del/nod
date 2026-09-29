@@ -175,6 +175,9 @@ export const ROTAS = [
   { metodo: "PUT", caminho: "preferencias", lane: "L6" },
   { metodo: "GET", caminho: "turnos/:id/raio-x", lane: "L6" },
   { metodo: "GET", caminho: "conversas/:id/raio-x", lane: "L6" },
+  /** O "/" do chat (definido em 2026-09-28, 0038): o catálogo do Mac e a nova sessão, que é do nod. */
+  { metodo: "GET", caminho: "comandos", lane: "L6" },
+  { metodo: "POST", caminho: "conversas/:id/nova-sessao", lane: "L6" },
   /** Chaves de máquina (E1.3, ADR-031): emitir (a chave crua sai uma vez), listar e revogar. */
   { metodo: "POST", caminho: "maquinas/chaves", lane: "L9" },
   { metodo: "GET", caminho: "maquinas/chaves", lane: "L9" },

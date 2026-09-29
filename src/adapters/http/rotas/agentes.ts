@@ -56,6 +56,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
           descricao: textoOpcional(corpo.descricao),
           modelo: textoOpcional(corpo.modelo),
           harness: corpo.harness as PreferenciaHarness | undefined,
+          esforco: corpo.esforco === null ? null : textoOpcional(corpo.esforco),
           forma: corpo.forma as FormaAgente | undefined,
           cor: corpo.cor as CorAgente | undefined,
           dono: corpo.dono,

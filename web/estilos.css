@@ -584,3 +584,41 @@ details[open] > summary .rx-seta { transform: translateY(-4px) rotate(45deg); }
 }
 @media (prefers-reduced-motion: reduce) { .rx-seta { transition: none; } .raio-x[open] { animation: none; } }
 @media (hover: none) { .rx-fechar { width: 44px; height: 44px; border-radius: 22px; } }
+
+/* A lista de tarefas do bot no cartão de atividade (definido em 2026-09-28): a checklist que o terminal mostra. */
+.atividade-tarefas { margin: 4px 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.atividade-tarefas-cab { margin: 0 0 4px; color: var(--ink-3); font-size: 11.5px; font-weight: 600; }
+.atividade-tarefas ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--ink-2); }
+.atividade-tarefas li { display: flex; gap: 8px; align-items: baseline; }
+.tarefa-marca { width: 14px; flex-shrink: 0; text-align: center; }
+.tarefa-feita { color: var(--ink-3); }
+.tarefa-feita .tarefa-marca { color: var(--ok); }
+.tarefa-andamento { color: var(--ink); font-weight: 500; }
+.tarefa-andamento .tarefa-marca { color: var(--blue); }
+
+/* O "/" do campo (definido em 2026-09-28; canvas "Comandos /"): a lista acima do campo, a dica e o chip na mensagem. */
+.composer { position: relative; }
+.barra-lista { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; width: min(660px, 100%); max-height: 420px; overflow: auto;
+  display: flex; flex-direction: column; gap: 1px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(17, 19, 26, .14); }
+.barra-cab, .barra-grupo { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px 4px; font-size: 11.5px; color: var(--ink-3); }
+/* Na rolagem, o que é o total e o que são as teclas continuam à vista. */
+.barra-cab { position: sticky; top: -6px; z-index: 1; background: var(--panel); }
+.barra-grupo { font-weight: 600; border-top: 1px solid var(--line); margin-top: 4px; }
+.barra-grupo span + span { font-weight: 400; }
+.barra-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border: 0; border-radius: 10px; background: none;
+  text-align: left; font: inherit; cursor: pointer; }
+.barra-item[aria-selected="true"], .barra-item:hover { background: var(--blue-soft); }
+.barra-nome { flex-shrink: 0; width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px var(--fm); color: var(--ink); }
+.barra-nome b { color: var(--blue); font-weight: 600; }
+.barra-desc { flex-grow: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
+.barra-etiqueta { flex-shrink: 0; padding: 2px 7px; border-radius: 6px; background: var(--panel-soft); color: var(--ink-2); font-size: 11px; }
+.barra-aviso { margin: 4px 2px; padding: 9px 12px; border-radius: 10px; background: var(--amber-bg); color: var(--amber); font-size: 12.5px; }
+.barra-vazio { padding: 10px 12px; font-size: 12.5px; color: var(--ink-3); }
+.barra-rodape { position: sticky; bottom: -6px; display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 12px 6px; margin-top: 4px; border-top: 1px solid var(--line); background: var(--panel); font-size: 11.5px; color: var(--ink-3); }
+.barra-rodape b { font: 500 11.5px var(--fm); color: var(--ink-2); }
+.barra-dica-nomes { margin-left: auto; }
+.barra-dica { margin: 0 0 8px; padding: 9px 14px; border: 1px solid #e1e8f5; border-radius: 12px; background: #f7f9fd; font-size: 12.5px; color: var(--ink-2); }
+.barra-dica b { font: 600 12.5px var(--fm); color: var(--ink); }
+.barra-dica span { color: var(--ink-3); }
+.chip-comando { display: inline-block; margin-right: 6px; padding: 2px 9px; border-radius: 10px; background: #e8f0fd; color: #1f4a8f; font: 500 12.5px var(--fm); }

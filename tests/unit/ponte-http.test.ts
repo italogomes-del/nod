@@ -56,4 +56,10 @@ describe("desktop: fronteiras HTTP", () => {
     expect(trechos([{ texto: "a".repeat(9_000) }, { texto: "b".repeat(9_000) }])).toEqual([]);
     expect(trechos("texto")).toEqual([]);
   });
+  it("servidor: a lista de tarefas do bot passa validada; fora do formato ou acima de 50, o trecho some", () => {
+    const tarefas = [{ id: "1", titulo: "Ler o diff", estado: "feita" }, { id: "2", titulo: "Checar SQL", estado: "andamento" }];
+    expect(trechos([{ tarefas }])).toEqual([{ tarefas }]);
+    expect(trechos([{ tarefas: [{ id: "1", titulo: "x", estado: "concluida" }] }, { texto: "ok" }])).toEqual([{ texto: "ok" }]);
+    expect(trechos([{ tarefas: Array.from({ length: 51 }, (_, i) => ({ id: String(i), titulo: "t", estado: "pendente" })) }])).toEqual([]);
+  });
 });

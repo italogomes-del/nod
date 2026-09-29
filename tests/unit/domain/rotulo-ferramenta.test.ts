@@ -18,7 +18,10 @@ describe("rotuloFerramenta", () => {
     expect(rotuloFerramenta("mcp__nod__workspace_ler_texto")).toBe("Usou a pasta de trabalho");
   });
   it("fora do proxy nod: nome nativo ou servidor MCP do Codex", () => {
-    expect(rotuloFerramenta("Bash")).toBe("Usou Bash");
+    expect(rotuloFerramenta("Bash")).toBe("Rodou um comando");
+    expect(rotuloFerramenta("TaskUpdate")).toBe("Organizou as tarefas");
+    expect(rotuloFerramenta("Skill")).toBe("Usou uma skill");
+    expect(rotuloFerramenta("Ferramenta_nova")).toBe("Usou Ferramenta_nova");
     expect(rotuloFerramenta("mcp__outro__fazer")).toBe("Usou Outro");
     expect(rotuloFerramenta("")).toBe("Usou uma ferramenta");
   });

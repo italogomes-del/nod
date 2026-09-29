@@ -8,6 +8,8 @@ import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { montarExecucao } from "../../../domain/raio-x.ts";
+import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
+import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
@@ -137,7 +139,7 @@ export function comandoDoHook(p: { nodePath: string; hookPath: string; config: s
 export const FERRAMENTA_DE_BUSCA = "ToolSearch";
 
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal }): { args: string[]; sessaoCli: string } {
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean }): { args: string[]; sessaoCli: string } {
   const { plano, terminal } = entrada;
   const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
@@ -160,6 +162,8 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     plano.entrada.modelo,
     // Sem teto de passos, a tarefa longa precisa de janela: compactar em vez de bater no limite.
     ...(entrada.compactar ? ["--autocompact", String(JANELA_AUTOCOMPACT_TOKENS)] : []),
+    // definido em 2026-09-28 (0037): o esforço do bot, só quando o help da versão instalada traz a flag.
+    ...(entrada.esforco && plano.entrada.esforco ? ["--effort", plano.entrada.esforco] : []),
     // --restricted substitui --setting-sources project: ignora CLAUDE.md, skills e hooks do repo
     // aberto, que o nod não escreveu, e confina as ferramentas de arquivo às pastas permitidas.
     // ADR-052: o kit do terminal NÃO usa --restricted (ele tira Bash e WebFetch, medido em 2026-09-28); o cwd é a
@@ -185,8 +189,16 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
   return { args, sessaoCli };
 }
 
+/**
+ * definido em 2026-09-28: o CLAUDE.md das pastas além do cwd (a da pessoa e os projetos autorizados). Medido no CLI
+ * 2.1.284 com /context: o CLAUDE.md de um repositório que é só --add-dir NÃO carrega; com esta variável, carrega. No
+ * terminal a pessoa abre o Claude Code DENTRO do repositório e ele lê as regras do projeto; o bot trabalha da pasta
+ * dele (~/nod/<bot>) e ficava sem elas. Só no kit do terminal: o --restricted do modo de pastas as ignora de propósito.
+ */
+export const CLAUDE_MD_DAS_PASTAS = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD";
+
 /** Env do filho: cfg.env (já sem a denylist) + PATH aumentado + HOME + teto do tools/call. */
-export function montarEnvDoFilho(env: Record<string, string>, home: string, prazoMs: number): Record<string, string> {
+export function montarEnvDoFilho(env: Record<string, string>, home: string, prazoMs: number, opcoes: { claudeMdDasPastas?: boolean } = {}): Record<string, string> {
   return {
     ...env,
     PATH: caminhoAumentado(env.PATH, home),
@@ -196,6 +208,7 @@ export function montarEnvDoFilho(env: Record<string, string>, home: string, praz
     MCP_TOOL_TIMEOUT: String(Math.max(60_000, Math.floor(prazoMs))),
     // definido em 2026-09-28: acima deste teto o CLI desviaria a resposta para um arquivo que o bot não lê.
     MAX_MCP_OUTPUT_TOKENS: String(MAX_MCP_OUTPUT_TOKENS_FILHO),
+    ...(opcoes.claudeMdDasPastas ? { [CLAUDE_MD_DAS_PASTAS]: "1" } : {}),
   };
 }
 
@@ -210,6 +223,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
       const envBase = { ...cfg.env, PATH: path, HOME: home };
       let binario: string | null = null;
       let versao: string | null = null;
+      // O "/" do chat (0038): o último catálogo entregue por este app; o próximo só vai se mudar.
+      let catalogoEntregue: string | null = null;
       let flagsNoHelp: string[] | null = null;
 
       /** `--version` + `--help` sem gastar turno; a sonda completa também preenche. */
@@ -288,9 +303,20 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               // Modo dev (0036): quando cada evento chegou, para o Raio-X pôr as chamadas e compactações no tempo.
               const inicio = Date.now();
               const momentos: number[] = [];
-              const comExecucao = (r: ResultadoTurno): ResultadoTurno => {
+              const finalizar = async (r: ResultadoTurno): Promise<ResultadoTurno> => {
                 const execucao = montarExecucao(eventos, momentos, Date.now() - inicio);
-                return execucao ? { ...r, execucao } : r;
+                const init = eventos.find((e): e is Extract<EventoStream, { tipo: "init" }> => e.tipo === "init");
+                let comandos: CatalogoDeComandos | undefined;
+                if (init && (init.skills?.length || init.comandos?.length)) {
+                  const pastasDeProjeto = (terminal?.dirsExtras ?? pastas?.aprovadas ?? []).filter((p) => p !== home);
+                  const catalogo = await lerCatalogoDoMac(init, { home, pastasDeProjeto }).catch(() => null);
+                  const chave = catalogo ? JSON.stringify(catalogo) : null;
+                  if (catalogo && chave !== catalogoEntregue) {
+                    comandos = catalogo;
+                    catalogoEntregue = chave;
+                  }
+                }
+                return { ...r, ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}) };
               };
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
@@ -305,8 +331,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   : [plano.entrada.texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
                 // Sem o kit (sem hook nesta máquina), o prompt não pode prometer Bash e web: a linha que corrige vai junto.
                 const semKit = pedeTerminal && !terminal ? { promptSistema: `${plano.promptSistema}\n${AVISO_SEM_TERMINAL}` } : {};
-                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal });
-                const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs);
+                const esforco = (flagsNoHelp ?? []).includes("--effort");
+                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco });
+                const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];
                 const proc = iniciarProcesso({
@@ -341,9 +368,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const fim = await proc.fim;
                 await Promise.all(pendentes);
                 if (fim.erroSpawn) {
-                  return comExecucao(classificarResultado({ eventos, exitCode: null, signal: null, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
+                  return finalizar(classificarResultado({ eventos, exitCode: null, signal: null, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
                 }
-                return comExecucao(classificarResultado({ eventos, exitCode: fim.exitCode, signal: fim.signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
+                return finalizar(classificarResultado({ eventos, exitCode: fim.exitCode, signal: fim.signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
               } finally {
                 processo = null;
                 await rm(tmpdir, { recursive: true, force: true });

@@ -19,6 +19,11 @@ describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
     expect(decidir("Agent", { subagent_type: "general-purpose", prompt: "revise" })).toMatchObject({ permitir: true, contamina: false });
     // O nome antigo do subagente (o `init` ainda o lista) não entra por engano: o hook recebe "Agent".
     expect(decidir("Task", {})).toMatchObject({ permitir: false });
+    // A lista de tarefas do bot só organiza o trabalho da sessão.
+    for (const f of ["TaskCreate", "TaskGet", "TaskList", "TaskUpdate"]) {
+      expect(NATIVAS_DO_TERMINAL).toContain(f);
+      expect(decidir(f, {})).toMatchObject({ permitir: true, contamina: false });
+    }
     // Fora do terminal (só arquivo, com pasta), nada de skill.
     expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: true })).not.toContain("Skill");
   });

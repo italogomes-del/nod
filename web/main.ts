@@ -38,6 +38,9 @@ import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
+import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
+import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
+import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 
@@ -207,6 +210,7 @@ async function reidratar(): Promise<void> {
   if (!api || reidratando) return;
   const pendentes = [...new Set([...estado.invalidacoes, ...invalidacoesDaTela(estado)])];
   if (pendentes.length === 0) return;
+  const telaAntes = estado.tela;
   reidratando = true;
   try {
     // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
@@ -226,7 +230,11 @@ async function reidratar(): Promise<void> {
   } finally {
     reidratando = false;
   }
-  if (estado.invalidacoes.some((q) => relevante(q))) void reidratar();
+  // definido em 2026-09-28: a tela que mudou DURANTE a busca (clicar num bot com a primeira carga em andamento) também
+  // pede o que lhe falta; antes a conversa esperava o próximo tique (15 s). Só quando a tela mudou: há falta que não se
+  // resolve buscando (sem nenhuma sala, "salas" continua faltando) e voltaria a buscar sem parar.
+  const telaMudou = estado.tela !== telaAntes && invalidacoesDaTela(estado).some((q) => relevante(q));
+  if (telaMudou || estado.invalidacoes.some((q) => relevante(q))) void reidratar();
 }
 
 function relevante(q: Invalidacao): boolean {
@@ -387,7 +395,7 @@ function renderPrincipal(): void {
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness) }) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -734,6 +742,113 @@ function emModoResposta(conversaId: string): boolean {
   return modoDoComposer(estado, conversaId).tipo === "resposta";
 }
 
+// ---- o "/" do campo (definido em 2026-09-28; canvas "Comandos /") --------------------------------------------------
+// O catálogo vem do servidor (o que o Mac mandou no último turno) e é relido quando a lista abre, no máximo por minuto.
+let comandosDto: ComandosDto | null = null;
+let comandosLidosEm = 0;
+let itensDaBarra: ItemDaBarra[] = [];
+let selecionadoNaBarra = 0;
+
+async function carregarComandos(): Promise<void> {
+  if (!api || Date.now() - comandosLidosEm < 60_000) return;
+  comandosLidosEm = Date.now();
+  try {
+    comandosDto = await api.comandos();
+  } catch {
+    // Sem a lista, o campo continua mandando texto: "/nome" ainda roda a skill no Mac.
+  }
+}
+
+function nomeDoBotDaTela(): string {
+  const t = estado.tela;
+  return t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "o bot" : "o bot";
+}
+
+/** Abre, filtra ou fecha a lista pelo que está no campo; sem lista, a dica diz o que o comando escrito faz. */
+function atualizarBarra(ta: HTMLTextAreaElement): void {
+  const lista = document.getElementById("barra-lista");
+  const dica = document.getElementById("barra-dica");
+  if (!lista || !dica) return;
+  const filtro = nomeDigitado(ta.value, ta.selectionStart);
+  if (filtro !== null) {
+    const recentes = recentesDaConversa(conversaDaTela(estado)?.mensagens ?? []);
+    const l = listaDaBarra(comandosDto, filtro, recentes);
+    itensDaBarra = l.itens;
+    selecionadoNaBarra = Math.min(selecionadoNaBarra, Math.max(0, l.itens.length - 1));
+    lista.innerHTML = renderListaBarra(l, { filtro, selecionado: selecionadoNaBarra, bot: nomeDoBotDaTela(), doMacEm: comandosDto?.doMacEm ?? null });
+    lista.hidden = false;
+    dica.hidden = true;
+    // A primeira abertura busca a lista; quando ela chega, redesenha com o que estiver no campo.
+    if (Date.now() - comandosLidosEm >= 60_000) void carregarComandos().then(() => { if (!lista.hidden) atualizarBarra(ta); });
+    return;
+  }
+  fecharListaBarra();
+  const c = comandoNoTexto(comandosDto, ta.value);
+  dica.innerHTML = c ? renderDicaBarra(c, nomeDoBotDaTela()) : "";
+  dica.hidden = !c;
+}
+
+function fecharListaBarra(): void {
+  const lista = document.getElementById("barra-lista");
+  if (lista) lista.hidden = true;
+  itensDaBarra = [];
+  selecionadoNaBarra = 0;
+}
+
+/** Troca o nome digitado pelo escolhido, deixa o cursor depois dele e mostra a dica. */
+function escolherNaBarra(ta: HTMLTextAreaElement, item: ItemDaBarra): void {
+  const depois = ta.value.slice(ta.selectionStart).replace(/^\S*/, "");
+  const inicio = `/${item.nome} `;
+  ta.value = inicio + depois.trimStart();
+  ta.selectionStart = ta.selectionEnd = inicio.length;
+  fecharListaBarra();
+  atualizarBarra(ta);
+  ta.focus();
+}
+
+/** Com a lista aberta, as setas andam, Enter e Tab escolhem, Esc fecha. Devolve true quando tratou a tecla. */
+function teclaNaBarra(ev: KeyboardEvent, ta: HTMLTextAreaElement): boolean {
+  const lista = document.getElementById("barra-lista");
+  if (!lista || lista.hidden) return false;
+  if (ev.key === "Escape") { fecharListaBarra(); return true; }
+  if (itensDaBarra.length === 0) return false;
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    selecionadoNaBarra = (selecionadoNaBarra + (ev.key === "ArrowDown" ? 1 : itensDaBarra.length - 1)) % itensDaBarra.length;
+    atualizarBarra(ta);
+    lista.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+  if ((ev.key === "Enter" && !ev.shiftKey) || ev.key === "Tab") {
+    const item = itensDaBarra[selecionadoNaBarra];
+    if (item) escolherNaBarra(ta, item);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Os comandos que o nod resolve sem turno: /nova-sessao zera a sessão do bot (o /clear do CLI não esquece — medido)
+ * e /modelo abre a escolha de modelo e esforço. Os outros seguem como mensagem: o servidor põe o nome do CLI.
+ */
+async function comandoDoNod(texto: string, alvo: { conversaId: string; salaId?: string | null }): Promise<boolean> {
+  const c = comandoNoTexto(comandosDto, texto);
+  if (!c || !("conversa" in c) || alvo.salaId || !api) return false;
+  const t = estado.tela;
+  if (c.conversa.acao === "nod") {
+    const a = api;
+    await agir(async () => {
+      await a.novaSessao(alvo.conversaId);
+      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
+    });
+    return true;
+  }
+  if (c.conversa.acao === "tela" && t.tipo === "conversa") {
+    abrirInteligencia(t.agenteId);
+    return true;
+  }
+  return false;
+}
+
 async function enviarComposer(): Promise<void> {
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
   const alvo = conversaAtual();
@@ -746,6 +861,12 @@ async function enviarComposer(): Promise<void> {
   if (!texto && ids.length === 0) return;
   // definido em 2026-09-24 (emenda da ADR-045): com pergunta aberta, a mensagem RESPONDE por
   // POST decisoes/:id/responder (a retomada nasce lá), salvo "Outro assunto".
+  if (ids.length === 0 && (await comandoDoNod(texto, alvo))) {
+    ta.value = "";
+    ta.style.height = "auto";
+    atualizarBarra(ta);
+    return;
+  }
   const destino = destinoDoEnvio(modoDoComposer(estado, alvo.conversaId));
   const a = api;
   await agir(async () => {
@@ -756,6 +877,7 @@ async function enviarComposer(): Promise<void> {
     }
     ta.value = "";
     ta.style.height = "auto";
+    atualizarBarra(ta);
     if (r.enviado === "mensagem") limparAnexos(alvo.conversaId);
     // A escolha do campo vale até este envio: a próxima mensagem volta ao padrão.
     dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: null });
@@ -863,6 +985,13 @@ function filtrarApps(texto: string): void {
   for (const el of cards) el.hidden = !el.dataset.appBusca?.includes(texto.trim().toLowerCase());
   const vazio = document.getElementById("marketplace-vazio");
   if (vazio) vazio.hidden = cards.some((el) => !el.hidden);
+}
+
+/** A escolha de modelo e esforço de um bot da pessoa (o menu da gestão e o /modelo do campo). */
+function abrirInteligencia(agenteId: string | undefined): void {
+  const a = botGerido(agenteId);
+  if (!a || a.ownerId !== estado.sessao?.pessoaId) return;
+  pedirGestao(`Inteligência de ${a.nome}`, renderInteligencia(a, estado.executor?.harnesses, true), "Salvar escolha", async (d) => mudarGestao(() => api!.editarPerfil(a.id, escolhaInteligencia(d))));
 }
 
 function filtrarBots(texto: string, raiz = "#sidebar"): void {
@@ -1043,11 +1172,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "menu-agente": (el) => menuDoBot(el),
-  "inteligencia": (el) => {
-    const a = botGerido(el.dataset.id);
-    if (!a || a.ownerId !== estado.sessao?.pessoaId) return;
-    pedirGestao(`Inteligência de ${a.nome}`, renderInteligencia(a, estado.executor?.harnesses, true), "Salvar escolha", async (d) => mudarGestao(() => api!.editarPerfil(a.id, escolhaInteligencia(d))));
-  },
+  "inteligencia": (el) => abrirInteligencia(el.dataset.id),
   "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
   "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
@@ -1381,6 +1506,7 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && estado.dandoAcesso) { ev.preventDefault(); dispatch({ tipo: "dar-acesso", agenteId: null }); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
+  if (teclaNaBarra(ev, ta)) { ev.preventDefault(); return; }
   // Esc com o campo respondendo: a próxima mensagem vira mensagem comum (o mesmo "Outro assunto").
   if (ev.key === "Escape") {
     const alvo = conversaAtual();
@@ -1415,6 +1541,7 @@ document.addEventListener("input", (ev) => {
   if (ta.id !== "composer-texto") return;
   ta.style.height = "auto";
   ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
+  atualizarBarra(ta);
   const caixa = document.getElementById("autocomplete");
   if (!caixa) return;
   const sugestoes = JSON.parse(ta.dataset.sugestoes ?? "[]") as string[];
@@ -1425,6 +1552,14 @@ document.addEventListener("input", (ev) => {
 });
 
 document.addEventListener("mousedown", (ev) => {
+  const item = (ev.target as HTMLElement).closest<HTMLElement>(".barra-item");
+  const campo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (item && campo) {
+    ev.preventDefault();
+    const escolhido = itensDaBarra[Number(item.dataset.indice)];
+    if (escolhido) escolherNaBarra(campo, escolhido);
+    return;
+  }
   const sug = (ev.target as HTMLElement).closest<HTMLElement>(".sug");
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
   if (!sug || !ta) return;

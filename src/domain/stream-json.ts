@@ -27,6 +27,10 @@ function tokensDe(usage: Obj | null): TokensTurno {
   };
 }
 
+function nomes(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((t): t is string => typeof t === "string") : [];
+}
+
 function janelaDe(modelUsage: Obj | null): number | null {
   const janelas = Object.values(modelUsage ?? {}).map((u) => num(obj(u)?.["contextWindow"])).filter((j): j is number => j !== null);
   return janelas.length ? Math.max(...janelas) : null;
@@ -67,6 +71,13 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       modelo: str(o["model"]),
       versaoCli: str(o["claude_code_version"]),
       apiKeySource: str(o["apiKeySource"], "desconhecido"),
+      skills: nomes(o["skills"]),
+      comandos: nomes(o["slash_commands"]),
+      comandosSoDoTerminal: nomes(o["terminal_slash_commands"]),
+      plugins: (Array.isArray(o["plugins"]) ? o["plugins"] : []).flatMap((p) => {
+        const x = obj(p);
+        return x && typeof x["name"] === "string" && typeof x["path"] === "string" ? [{ nome: x["name"], caminho: x["path"] }] : [];
+      }),
     };
   }
   if (type === "system" && subtype === "compact_boundary") {

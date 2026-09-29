@@ -12,6 +12,10 @@ export type DonoAgente = "pessoa" | "empresa";
 
 export type Visibilidade = "privado" | "equipe";
 
+/** Níveis do `--effort` do Claude Code, na ordem (medido no `--help` da 2.1.284). */
+export const ESFORCOS_AGENTE = ["low", "medium", "high", "xhigh", "max"] as const;
+export type EsforcoAgente = (typeof ESFORCOS_AGENTE)[number];
+
 /**
  * Agente (bot). Nasce 'Novo agente' (EMENDA 17) e o modelo propõe o perfil por `atualizar_perfil`.
  * Sem `cwd` (EMENDA 11, ADR-014 literal): o driver cria um mkdtemp por turno e apaga no finally.
@@ -36,6 +40,8 @@ export type Agente = {
   confirmado: boolean;
   modelo: string;
   harness?: PreferenciaHarness;
+  /** O `--effort` do Claude Code (0037). Ausente ou null = o padrão do modelo. */
+  esforco?: EsforcoAgente | null;
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;
   secao?: string;
