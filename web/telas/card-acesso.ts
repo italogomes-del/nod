@@ -45,8 +45,7 @@ function cabecalho(p: Proposta, estado: Estado, verbo: string, marcas = "", deci
   const nome = nomeDoApp(estado, slug);
   const bot = nomeDoBot(estado, p) ?? "O bot";
   const sub = subtitulo(p, decisao);
-  const temLogo = Boolean(estado.marketplace.find((m) => m.slug === slug)?.logo);
-  return `<div class="ac-cab">${logoApp(slug, nome, temLogo)}<div class="ac-titulo"><b>${esc(bot)} quer ${esc(verbo)} seu ${esc(nome)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>${marcas}</div>`;
+  return `<div class="ac-cab">${logoApp(estado, slug, nome)}<div class="ac-titulo"><b>${esc(bot)} quer ${esc(verbo)} seu ${esc(nome)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>${marcas}</div>`;
 }
 
 function rodape(botoes: string, nota = ""): string {

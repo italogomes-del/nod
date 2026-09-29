@@ -104,3 +104,42 @@ Não medido: conectar de fato um app de "Mais apps". Esse é o primeiro gatilho 
 - O `github_mcp` do painel tem `_` no slug e continua aparecendo pela curadoria. Pela regex da rota
   `[a-z0-9-]+`, o clique em "Conectar" não casa e dá 404, como já acontecia antes. Corrigir isso é mexer
   no slug do conector, e fica para uma decisão própria.
+
+## Logos oficiais (2026-09-29)
+
+**Nenhum logo do provedor chegava à tela.** A web pedia `/api/marketplace/:slug/logo`, sem o tenant, e a
+rota só existe escopada (`/api/t/:tenant/marketplace/:slug/logo`, ADR-005). Toda busca dava 404 e o
+`onerror` tirava a imagem. Por isso a grade mostrava símbolos desenhados à mão (✣, ⌘, "31"…) e iniciais,
+inclusive antes deste ADR. A correção: `logoApp` recebe o estado e monta a URL com o tenant da sessão, como
+`conversa.ts` já faz nos anexos. Os símbolos saíram. Sem logo, o cartão mostra só a inicial do nome.
+
+**Comparação dos 104.** Medido em 2026-09-29. Cada logo que o Composio serve foi posto ao lado do ícone
+que a própria marca publica no próprio site (`link rel=icon`/`apple-touch-icon`). Para os produtos do
+Google, a comparação foi com o CDN de marca que o `workspace.google.com` usa. Cerca de 90 bateram. Em 10, o
+logo do Composio é antigo ou de outra marca, e a web usa o arquivo da própria marca, guardado em
+`web/public/logos/`. Nenhum arquivo foi desenhado ou editado: o único ajuste foi trocar as variáveis CSS
+dos SVGs da Atlassian pela cor padrão que o próprio SVG declara.
+
+| App | O Composio servia | Arquivo oficial (fonte) |
+|---|---|---|
+| Google Sheets | versão anterior de 2026 | `gstatic.com/images/branding/productlogos/sheets_2026q3/v1/web/192px.svg` |
+| Jira | o "A" da Atlassian | `@atlaskit/logo` 23.3.1, pacote oficial da Atlassian, `artifacts/logo-components/jira/icon.js` |
+| Confluence | o "A" da Atlassian | idem, `confluence/icon.js` |
+| Bitbucket | balde azul, anterior à marca de 2025 | idem, `bitbucket/icon.js` (o mesmo desenho do `bitbucket.org/favicon.ico`) |
+| Linear | círculo lilás antigo | `linear.app/static/favicon.svg` |
+| Basecamp | montanha verde antiga | `basecamp.com/assets/images/general/favicon.svg` |
+| Harvest | barras laranja antigas | `getharvest.com/hubfs/Harvest_2026.svg` |
+| FreshBooks | variante preta | `freshbooks.com/_next/static/media/freshbooks-icon.c24773ec.svg` |
+| Dynamics 365 | o logo da Microsoft | `learn.microsoft.com/en-us/media/logos/logo_dynamics.svg` |
+| Prisma | triângulo antigo | `prisma.io/icon.svg`, o mesmo símbolo do logo do cabeçalho do site (`/logo/full-color.svg`) |
+
+Ficaram com o do Composio:
+
+- **Zoom.** O ícone atual ("zm") só existe oficialmente em 32 px. O kit de imprensa tem só o logo por
+  extenso, 1426×321, largo demais para o cartão. O do Composio é o ícone oficial da versão anterior.
+- **Google Photos, Ads e BigQuery.** Não há versão 2026 no CDN do Google.
+- **Excel e Outlook.** O site da Microsoft serve o favicon da empresa, e o do Composio é o do produto.
+
+**Gatilho de revisão:** uma marca trocar o ícone e o arquivo guardado ficar para trás do que ela mesma
+publica. A lista de slugs com arquivo próprio mora em `LOGOS_OFICIAIS` (`web/telas/marketplace.ts`), e
+`tests/unit/web/logo-app.test.ts` confere que cada um existe em `web/public/logos/`.

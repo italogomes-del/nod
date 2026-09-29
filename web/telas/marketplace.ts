@@ -6,18 +6,29 @@ import { haQuanto } from "../lib/relogio.ts";
 import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type NivelAtual, type SituacaoApp } from "./app-acesso.ts";
 
 /**
- * revisto em 2026-09-21 (ADR-041): app novo no painel não tem símbolo escrito à mão aqui, então o
- * logo vem do provedor PELO SERVIDOR (/api/marketplace/:slug/logo). A inicial continua desenhada
- * por baixo: é ela que aparece enquanto a imagem carrega e se a busca falhar (onerror some com a
- * <img> e descobre o span).
+ * definido em 2026-09-29 (ADR-057, "Logos oficiais"): onde o logo que o Composio serve é antigo ou de
+ * outra marca, a web usa o arquivo da própria marca, guardado em web/public/logos/. As fontes estão no ADR.
  */
-export function logoApp(slug: string, nome: string, temLogo = false): string {
-  const simbolos: Record<string, string> = { slack: "✣", github: "⌘", gmail: "M", notion: "N", linear: "◩", googlesheets: "▤", googlecalendar: "31", clickup: "⌃" };
-  const inicial = esc(simbolos[slug] ?? nome.slice(0, 1).toUpperCase());
-  const img = temLogo
-    ? `<img src="/api/marketplace/${encodeURIComponent(slug)}/logo" alt="" loading="lazy" onerror="this.remove()" />`
-    : "";
-  return `<span class="app-logo app-${esc(slug)}" aria-hidden="true">${inicial}${img}</span>`;
+const LOGOS_OFICIAIS: ReadonlySet<string> = new Set(["basecamp", "bitbucket", "confluence", "dynamics365", "freshbooks", "googlesheets", "harvest", "jira", "linear", "prisma"]);
+
+/**
+ * revisto em 2026-09-21 (ADR-041): app novo no painel não tem símbolo escrito à mão aqui, então o
+ * logo vem do provedor PELO SERVIDOR. A inicial continua desenhada por baixo: é ela que aparece
+ * enquanto a imagem carrega e se a busca falhar (onerror some com a <img> e descobre o span).
+ *
+ * revisto em 2026-09-29: a URL não levava o tenant (/api/marketplace/:slug/logo) e toda busca dava 404 —
+ * nenhum logo do provedor chegou à tela, só os símbolos. A rota é escopada (/api/t/:tenant/…, ADR-005),
+ * como os anexos em conversa.ts. Os símbolos desenhados à mão (✣, ⌘, 31…) saíram: sem logo, a inicial.
+ */
+export function logoApp(ctx: Pick<Estado, "marketplace"> & Partial<Pick<Estado, "sessao">>, slug: string, nome: string): string {
+  const tenant = ctx.sessao?.tenantId;
+  const src = LOGOS_OFICIAIS.has(slug)
+    ? `/logos/${slug}.svg`
+    : tenant && ctx.marketplace.some((a) => a.slug === slug && a.logo)
+      ? `/api/t/${encodeURIComponent(tenant)}/marketplace/${encodeURIComponent(slug)}/logo`
+      : null;
+  const img = src ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.remove()" />` : "";
+  return `<span class="app-logo app-${esc(slug)}" aria-hidden="true">${esc(nome.slice(0, 1).toUpperCase())}${img}</span>`;
 }
 
 /**
@@ -67,7 +78,7 @@ function acaoDoCartao(estado: Estado, app: AppComLogo, s: SituacaoApp): string {
 function cartao(estado: Estado, app: AppComLogo, s: SituacaoApp, selecionado: boolean): string {
   return `<article class="app-card sit-${s}${selecionado ? " selected" : ""}" data-app-busca="${esc(`${app.nome} ${app.categoria} ${app.descricao}`.toLowerCase())}" id="app-${esc(app.slug)}">
     <button type="button" class="app-card-abrir" data-act="abrir-app" data-id="${esc(app.slug)}" aria-label="${esc(`Ver ${app.nome}`)}"></button>
-    <div class="app-card-heading">${logoApp(app.slug, app.nome, !!app.logo)}<span class="app-card-nome"><h3>${esc(app.nome)}</h3><small>${esc(app.categoria)}</small></span>${pilula(s)}</div>
+    <div class="app-card-heading">${logoApp(estado, app.slug, app.nome)}<span class="app-card-nome"><h3>${esc(app.nome)}</h3><small>${esc(app.categoria)}</small></span>${pilula(s)}</div>
     <p>${esc(app.descricao)}</p>
     <div class="app-card-actions">${acaoDoCartao(estado, app, s)}</div>
   </article>`;
@@ -84,7 +95,7 @@ function faixaAtencao(estado: Estado, apps: readonly AppComLogo[]): string {
     const c = conectorDoApp(estado, app.slug);
     const bots = c ? botsQueUsam(estado, c).map((b) => b.agente.nome) : [];
     const quem = bots.length === 0 ? "Nenhum bot depende dele agora." : `${bots.length === 1 ? bots[0] : `${bots.slice(0, -1).join(", ")} e ${bots.at(-1)}`} ${bots.length === 1 ? "não consegue" : "não conseguem"} usar o ${app.nome}${c?.ultimaFalha ? ` desde ${haQuanto(estado.agora - c.ultimaFalha.em)}` : ""}.`;
-    return `<div class="atencao-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div><b>O ${esc(app.nome)} ${esc(motivoDaFalha(c))}</b><small>${esc(quem)} Entrar de novo costuma resolver.</small></div>${botao("conectar-app", "Entrar de novo", { classe: "pri sm", id: app.slug })}</div>`;
+    return `<div class="atencao-linha">${logoApp(estado, app.slug, app.nome)}<div><b>O ${esc(app.nome)} ${esc(motivoDaFalha(c))}</b><small>${esc(quem)} Entrar de novo costuma resolver.</small></div>${botao("conectar-app", "Entrar de novo", { classe: "pri sm", id: app.slug })}</div>`;
   });
   return linhas.length ? `<section class="mkt-atencao" aria-label="Precisam de atenção">${linhas.join("")}</section>` : "";
 }
@@ -156,7 +167,7 @@ function gaveta(estado: Estado, app: AppComLogo, passo: "detalhes" | "quem-usa")
   }
   return `<div class="gaveta-fundo" data-act="fechar-gaveta"></div>
   <aside class="gaveta" role="dialog" aria-modal="true" aria-label="${esc(app.nome)}">
-    <div class="gaveta-cab">${logoApp(app.slug, app.nome, !!app.logo)}<div><h2>${esc(app.nome)}</h2><small>${esc(app.categoria)}</small></div>${botao("fechar-gaveta", "×", { classe: "gaveta-fechar", aria: "Fechar" })}</div>
+    <div class="gaveta-cab">${logoApp(estado, app.slug, app.nome)}<div><h2>${esc(app.nome)}</h2><small>${esc(app.categoria)}</small></div>${botao("fechar-gaveta", "×", { classe: "gaveta-fechar", aria: "Fechar" })}</div>
     <div class="gaveta-corpo">${corpo}</div>
     <div class="gaveta-rodape">${rodape}</div>
   </aside>`;

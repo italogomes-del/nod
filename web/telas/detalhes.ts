@@ -17,12 +17,12 @@ function popoverDarAcesso(estado: Estado, agenteId: string, nomeBot: string): st
   const seg = (conectorId: string, atual: NivelAtual) => `<div class="segmentado sm" role="group" aria-label="${esc(`Acesso de ${nomeBot}`)}">${(["nenhum", "leitura", "escrita"] as const).map((n) => `<button type="button" class="seg${n === atual ? " ativo" : ""}" data-act="nivel-bot" data-id="${esc(agenteId)}" data-conector="${esc(conectorId)}" data-nivel="${n}" aria-pressed="${n === atual}">${esc(ROTULO_NIVEL[n])}</button>`).join("")}</div>`;
   const conectados = estado.marketplace.flatMap((app) => {
     const c = conectorDoApp(estado, app.slug);
-    return c?.habilitado ? [`<div class="da-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div class="da-nome"><b>${esc(app.nome)}</b>${seg(c.id, nivelDoBot(estado, agenteId, c))}</div></div>`] : [];
+    return c?.habilitado ? [`<div class="da-linha">${logoApp(estado, app.slug, app.nome)}<div class="da-nome"><b>${esc(app.nome)}</b>${seg(c.id, nivelDoBot(estado, agenteId, c))}</div></div>`] : [];
   });
   const faltam = estado.marketplace.filter((app) => situacaoDoApp(estado, app.slug) !== "conectado").slice(0, 6).map((app) => {
     const login = estado.conectando[app.slug];
     const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
-    return `<div class="da-linha">${logoApp(app.slug, app.nome, !!app.logo)}<div class="da-nome"><b>${esc(app.nome)}</b></div>${acao}</div>`;
+    return `<div class="da-linha">${logoApp(estado, app.slug, app.nome)}<div class="da-nome"><b>${esc(app.nome)}</b></div>${acao}</div>`;
   });
   return `<div class="dar-acesso" role="dialog" aria-label="${esc(`Dar a ${nomeBot} acesso a um app`)}">
     <div class="da-cab"><b>Dar a ${esc(nomeBot)} acesso a…</b>${botao("dar-acesso", "×", { classe: "link", id: agenteId, aria: "Fechar" })}</div>

@@ -15,7 +15,7 @@ import { blocoEsperando, SETA_EXTERNA } from "./app-acesso.ts";
  * nomeDoApp e fraseDoPedidoDeAcesso (src/domain/pedido-acesso.ts) com o que o estado já tem.
  */
 
-type Contexto = Pick<Estado, "conectores" | "marketplace"> & Partial<Pick<Estado, "conectando">>;
+type Contexto = Pick<Estado, "conectores" | "marketplace"> & Partial<Pick<Estado, "conectando" | "sessao">>;
 
 /** Os acessos que a proposta declara: nascimento ('rotina') ou mudança que traz a lista nova. */
 export function acessosDaProposta(p: Proposta | null | undefined): readonly AcessoPedido[] {
@@ -63,8 +63,7 @@ function linha(a: AcessoPedido, ctx: Contexto, chave: string): LinhaPrecisa {
   const detalhe = n > 0
     ? `<details class="ap-detalhe" data-disclosure="rotina-precisa-${esc(chave)}-${esc(a.conector)}"><summary>${n === 1 ? "Ver a ação" : `Ver as ${n} ações`}</summary><ul class="acesso-acoes">${capacidades.map((c) => `<li><code>${esc(a.conector)}.${esc(c)}</code></li>`).join("")}</ul></details>`
     : "";
-  const temLogo = Boolean(ctx.marketplace.find((m) => m.slug === a.conector)?.logo);
-  const html = `<div class="rotina-precisa" data-app="${esc(a.conector)}">${logoApp(a.conector, nome, temLogo)}<div class="rp-corpo"><b class="rp-rotulo">Precisa</b><div class="rp-oque">${esc(verbo)} seu ${esc(nome)}</div>${fora ? `<small class="rp-fora">${esc(fora)}</small>` : ""}${detalhe}</div></div>`;
+  const html = `<div class="rotina-precisa" data-app="${esc(a.conector)}">${logoApp(ctx, a.conector, nome)}<div class="rp-corpo"><b class="rp-rotulo">Precisa</b><div class="rp-oque">${esc(verbo)} seu ${esc(nome)}</div>${fora ? `<small class="rp-fora">${esc(fora)}</small>` : ""}${detalhe}</div></div>`;
   return { slug: a.conector, nome, conectado, escrita: temEscrita, html };
 }
 
