@@ -3,6 +3,7 @@ import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
+import type { TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
@@ -146,6 +147,14 @@ function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
   return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
 }
 
+/** "/review 420" na mensagem da pessoa: o comando vira chip e o resto segue como texto (canvas "Comandos /", C4). */
+export function comChipDeComando(texto: string): string {
+  const m = /^\/([\w.:-]+)(\s[\s\S]*)?$/.exec(texto.trim());
+  if (!m) return paragrafos(texto);
+  const resto = (m[2] ?? "").trim();
+  return `<span class="chip-comando">/${esc(m[1]!)}</span>${resto ? ` ${paragrafos(resto)}` : ""}`;
+}
+
 export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
@@ -169,7 +178,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
   const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? paragrafos(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -278,10 +287,25 @@ function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, 
   return `<article class="message bot atividade" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
     <div class="atividade-cab"><span class="atividade-pulso" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
     <p class="atividade-agora">${esc(linhaAtual(a))}</p>
+    ${renderTarefasDoBot(a.tarefas)}
     <details data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-seta" aria-hidden="true">›</span><span>${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}</span><span class="atividade-ver">Ver etapas</span><span class="atividade-recolher">Recolher</span></summary>
       <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
     </details>
   </section></div></article>`;
+}
+
+/** A lista de tarefas do bot (definido em 2026-09-28): a checklist que o terminal mostra, dentro do cartão. */
+const MARCA_TAREFA: Record<TarefaDoBot["estado"], { simbolo: string; rotulo: string }> = {
+  feita: { simbolo: "✓", rotulo: "feita" },
+  andamento: { simbolo: "●", rotulo: "em andamento" },
+  pendente: { simbolo: "○", rotulo: "a fazer" },
+};
+
+export function renderTarefasDoBot(tarefas: readonly TarefaDoBot[]): string {
+  if (tarefas.length === 0) return "";
+  const feitas = tarefas.filter((t) => t.estado === "feita").length;
+  const itens = tarefas.map((t) => `<li class="tarefa-${t.estado}"><span class="tarefa-marca" aria-hidden="true">${MARCA_TAREFA[t.estado].simbolo}</span><span>${esc(t.titulo)}</span><span class="sr-only">(${MARCA_TAREFA[t.estado].rotulo})</span></li>`).join("");
+  return `<section class="atividade-tarefas" aria-label="Tarefas: ${feitas} de ${tarefas.length} feitas"><div class="atividade-tarefas-cab">Tarefas · ${feitas} de ${tarefas.length}</div><ol>${itens}</ol></section>`;
 }
 
 function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
@@ -442,7 +466,7 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * quando há pergunta aberta (web/telas/pergunta.ts), e `data-padrao` / `data-titulo` guardam a dica e
  * a dica do clipe de sempre, para o main voltar a elas quando o campo sai do modo resposta.
  */
-export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita } = {}): string {
+export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
   const aceita = opcoes.anexos;
   const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
@@ -451,8 +475,10 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
     ? `<div class="anexos-fila" id="composer-anexos" hidden></div><button type="button" class="clipe" data-act="anexar" aria-label="Anexar arquivo"${tituloClipe ? ` title="${esc(tituloClipe)}" data-titulo="${esc(tituloClipe)}"` : ""}>${CLIPE}</button><input type="file" id="composer-arquivos" multiple accept="${accept}" hidden data-aceita="${aceita}" />`
     : "";
   const resumo = aceita ? `<span class="anexos-resumo" id="composer-resumo"></span>` : "";
-  const dica = aceita ? " · arraste ou cole imagens e PDFs" : sugestoes.length ? " · @ menciona um bot" : "";
+  const dica = [opcoes.comandos ? " · / para comandos" : "", aceita ? " · arraste ou cole imagens e PDFs" : sugestoes.length ? " · @ menciona um bot" : ""].join("");
+  // O "/" (definido em 2026-09-28): a lista abre acima do campo; a dica diz o que o comando escrito faz.
+  const barra = opcoes.comandos ? '<div class="barra-lista" id="barra-lista" role="listbox" aria-label="Comandos" hidden></div><div class="barra-dica" id="barra-dica" hidden></div>' : "";
   const nota = `Enter envia · Shift+Enter quebra linha${dica}`;
-  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div><div class="box${aceita ? " com-anexos" : ""}">${lista}${anexar}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}">${lista}${anexar}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao="${esc(nota)}">${esc(nota)}</p></div>`;
 }

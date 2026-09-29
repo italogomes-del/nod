@@ -11,9 +11,9 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
-import type { FaixaParada } from "../../src/contracts/turno.ts";
+import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { Escopo } from "../../src/shared/types.ts";
-import { comFerramenta, comTexto, type AtividadeTurno } from "../lib/atividade.ts";
+import { comFerramenta, comTarefas, comTexto, type AtividadeTurno } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
 
@@ -207,6 +207,18 @@ export const estadoInicial: Estado = {
   ocupado: false,
 };
 
+/** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
+const ESTADOS_TAREFA: Record<EstadoDaTarefa, true> = { pendente: true, andamento: true, feita: true };
+function tarefasDoFrame(v: unknown): TarefaDoBot[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((t): TarefaDoBot[] => {
+    const o = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
+    return typeof o.id === "string" && typeof o.titulo === "string" && typeof o.estado === "string" && o.estado in ESTADOS_TAREFA
+      ? [{ id: o.id, titulo: o.titulo, estado: o.estado as EstadoDaTarefa }]
+      : [];
+  }).slice(0, 50);
+}
+
 function texto(v: unknown): string | null {
   return typeof v === "string" && v !== "" ? v : null;
 }
@@ -272,6 +284,13 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
     return { ...e, turnosVivos, conversas: { ...e.conversas, [c.conversa.id]: { ...c, atividades: { ...c.atividades, [turnoId]: comFerramenta(c.atividades[turnoId], rotulo) } } } };
+  },
+  "turno.tarefas": (e, f) => {
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    const c = conversaId ? e.conversas[conversaId] : undefined;
+    if (!turnoId || !c) return e;
+    return { ...e, conversas: { ...e.conversas, [c.conversa.id]: { ...c, atividades: { ...c.atividades, [turnoId]: comTarefas(c.atividades[turnoId], tarefasDoFrame(f.dados.tarefas)) } } } };
   },
   "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
   "turno.interrompido": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),

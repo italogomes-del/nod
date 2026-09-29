@@ -1,5 +1,5 @@
 import type { PreferenciaHarness } from "../contracts/harness.ts";
-import type { Agente, CorAgente, DonoAgente, FormaAgente, Visibilidade } from "../contracts/agente.ts";
+import type { Agente, CorAgente, DonoAgente, EsforcoAgente, FormaAgente, Visibilidade } from "../contracts/agente.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
 
@@ -19,6 +19,7 @@ interface Linha {
   confirmado: boolean;
   modelo: string;
   harness?: PreferenciaHarness;
+  esforco: EsforcoAgente | null;
   duplicado_de: string | null;
   secao: string;
   nao_lido: boolean;
@@ -26,7 +27,7 @@ interface Linha {
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, duplicado_de, criado_em, secao, nao_lido, excluido_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, duplicado_de, criado_em, secao, nao_lido, excluido_em";
 
 function paraAgente(l: Linha): Agente {
   return {
@@ -45,6 +46,7 @@ function paraAgente(l: Linha): Agente {
     confirmado: l.confirmado,
     modelo: l.modelo,
     harness: l.harness ?? "auto",
+    esforco: l.esforco ?? null,
     duplicadoDe: l.duplicado_de,
     secao: l.secao,
     naoLido: l.nao_lido,
@@ -69,7 +71,7 @@ export type NovoAgente = {
   confirmado?: boolean;
 };
 
-export type PerfilAgente = Partial<Pick<Agente, "nome" | "titulo" | "descricao" | "confirmado" | "modelo" | "harness" | "forma" | "cor">>;
+export type PerfilAgente = Partial<Pick<Agente, "nome" | "titulo" | "descricao" | "confirmado" | "modelo" | "harness" | "forma" | "cor" | "esforco">>;
 
 /** dono é imutável (trigger nod_agente_dono_imutavel): não existe método que o altere. */
 export function agentesRepo(conn: Conn, escopo: Escopo) {
@@ -159,7 +161,8 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
           forma = coalesce(${perfil.forma ?? null}, forma),
           cor = coalesce(${perfil.cor ?? null}, cor),
           modelo = coalesce(${perfil.modelo ?? null}, modelo),
-          harness = coalesce(${perfil.harness ?? null}, harness)
+          harness = coalesce(${perfil.harness ?? null}, harness),
+          esforco = case when ${perfil.esforco !== undefined} then ${perfil.esforco ?? null} else esforco end
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;

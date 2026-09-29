@@ -1,3 +1,5 @@
+import type { TarefaDoBot } from "../../src/contracts/turno.ts";
+
 /**
  * Turno vivo como cartão de atividade (definido em 2026-09-24): o balão é o que o agente DIZ, o cartão
  * é o que ele está FAZENDO. O texto em streaming vai para `atual`; cada ferramenta (turno.atividade)
@@ -14,11 +16,17 @@ export type AtividadeTurno = {
   totalEtapas: number;
   ferramentas: number;
   ultimaFerramenta: string | null;
+  /** A lista de tarefas do bot (turno.tarefas), inteira, a mais nova que chegou. */
+  tarefas: TarefaDoBot[];
 };
 
 export const ETAPAS_GUARDADAS = 200;
 
-export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null };
+export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [] };
+
+export function comTarefas(a: AtividadeTurno | undefined, tarefas: TarefaDoBot[]): AtividadeTurno {
+  return { ...(a ?? ATIVIDADE_VAZIA), tarefas };
+}
 
 export function comTexto(a: AtividadeTurno | undefined, trecho: string): AtividadeTurno {
   const base = a ?? ATIVIDADE_VAZIA;
@@ -44,7 +52,7 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string): At
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo };
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas };
 }
 
 /** Primeira frase da narração, numa linha, sem marcação: é o que cabe numa linha do cartão. */

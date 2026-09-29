@@ -17,10 +17,11 @@ interface Linha {
   sessao_executor: string | null;
   sessao_harness: string | null;
   sessao_em: Date | null;
+  recomeco_em: Date | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, tipo, agente_id, sala_id, sessao_cli, sessao_executor, sessao_harness, sessao_em, criado_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, tipo, agente_id, sala_id, sessao_cli, sessao_executor, sessao_harness, sessao_em, recomeco_em, criado_em";
 
 const paraConversa = (l: Linha): Conversa => ({
   tenantId: l.tenant_id,
@@ -34,6 +35,7 @@ const paraConversa = (l: Linha): Conversa => ({
   sessaoExecutor: l.sessao_executor === "local" || l.sessao_executor === "catcher" ? l.sessao_executor : null,
   sessaoHarness: HARNESSES.find((h) => h.id === l.sessao_harness)?.id ?? null,
   sessaoEm: msOuNull(l.sessao_em),
+  recomecoEm: msOuNull(l.recomeco_em),
   criadoEm: ms(l.criado_em),
 });
 
@@ -81,6 +83,13 @@ export function conversasRepo(conn: Conn, escopo: Escopo) {
      * Grava sessão, executor e harness juntos (0005, 0030): sessão sem dono não vale --resume. `sessao_em`
      * marca até onde a sessão viu a conversa; o que chegar depois entra no plano como "desde a sua última vez".
      */
+    /** /nova-sessao (0038): sem sessão para retomar, e o histórico do prompt recomeça agora. */
+    async recomecar(id: string): Promise<boolean> {
+      const r = await conn`update conversas set sessao_cli = null, sessao_executor = null, sessao_harness = null, sessao_em = null,
+        recomeco_em = clock_timestamp() where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return r.count > 0;
+    },
+
     async atualizarSessaoCli(id: string, sessaoCli: string | null, sessaoExecutor: Executor | null = null, sessaoHarness: IdHarness | null = null): Promise<boolean> {
       const r = await conn`update conversas set sessao_cli = ${sessaoCli}, sessao_executor = ${sessaoCli ? sessaoExecutor : null},
         sessao_harness = ${sessaoCli ? sessaoHarness : null}, sessao_em = ${sessaoCli ? conn`clock_timestamp()` : null} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;

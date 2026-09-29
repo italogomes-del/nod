@@ -1,5 +1,6 @@
 import type { AnuncioMaquina, PonteInterna, TrechoVivo } from "../../contracts/ponte.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
+import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
 
 export class FalhaPonte extends Error {
@@ -103,6 +104,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       aparar(turnoId);
     },
     ferramenta(turnoId: string, nome: string) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []), { ferramenta: nome }]); aparar(turnoId); },
+    /** A lista inteira substitui a que ainda não saiu: só a mais nova importa. */
+    tarefas(turnoId: string, lista: TarefaDoBot[]) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("tarefas" in t)), { tarefas: lista }]); aparar(turnoId); },
     cancelar() { for (const c of ativos) c.abort(); },
   };
 }

@@ -40,6 +40,8 @@ export const FLAG_FLOORS = {
    * real é o `--help` lido no turno.
    */
   "--autocompact": { piso: "2.1.276", ocultaNoHelp: false },
+  /** definido em 2026-09-28 (0037): o esforço do bot. Condicional como --autocompact; piso na versão sondada aqui. */
+  "--effort": { piso: "2.1.284", ocultaNoHelp: false },
 } as const satisfies Record<string, { piso: string; ocultaNoHelp: boolean }>;
 
 export type FlagComPiso = keyof typeof FLAG_FLOORS;

@@ -1,6 +1,7 @@
 import type { Inventario } from "../../../contracts/inventario.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, TrechoVivo } from "../../../contracts/ponte.ts";
+import { TETO_COMANDOS, TETO_DESCRICAO_COMANDO, TETO_SO_DO_TERMINAL, type CatalogoDeComandos, type ComandoDoMac } from "../../../contracts/comandos.ts";
 import {
   TETO_CHAMADAS_RAIO_X,
   TETO_COMPACTACOES_RAIO_X,
@@ -11,7 +12,8 @@ import {
   type ExecucaoRaioX,
   type FerramentaNaChamada,
 } from "../../../contracts/raio-x.ts";
-import type { SinaisTurno } from "../../../contracts/turno.ts";
+import { ESTADOS_DA_TAREFA, type SinaisTurno, type TarefaDoBot } from "../../../contracts/turno.ts";
+import { TETO_TAREFAS, TETO_TITULO_TAREFA } from "../../../domain/tarefas-do-bot.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
@@ -38,8 +40,20 @@ export function trechos(v: unknown): TrechoVivo[] {
     if (Object.keys(o).length !== 1) continue;
     if (texto(o.texto, 16_000)) { total += o.texto.length; saida.push({ texto: o.texto }); }
     else if (texto(o.ferramenta, 200) && /^[A-Za-z0-9_.-]+$/.test(o.ferramenta)) saida.push({ ferramenta: o.ferramenta });
+    else if (Array.isArray(o.tarefas)) { const t = tarefasDoTrecho(o.tarefas); if (t) saida.push({ tarefas: t }); }
   }
   return total > 16_000 ? [] : saida;
+}
+/** A lista de tarefas do bot num trecho vivo: fora do formato ou acima dos tetos, o trecho some sozinho. */
+function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {
+  if (v.length > TETO_TAREFAS) return null;
+  const saida: TarefaDoBot[] = [];
+  for (const bruta of v) {
+    const t = (bruta && typeof bruta === "object" ? bruta : {}) as Record<string, unknown>;
+    if (!texto(t.id, 40) || !texto(t.titulo, TETO_TITULO_TAREFA) || !ESTADOS_DA_TAREFA.some((e) => e === t.estado)) return null;
+    saida.push({ id: t.id, titulo: t.titulo, estado: t.estado as TarefaDoBot["estado"] });
+  }
+  return saida;
 }
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
 export function sinais(v: unknown): SinaisTurno {
@@ -95,6 +109,22 @@ export function execucao(v: unknown): ExecucaoRaioX | undefined {
   };
 }
 
+/** O catálogo do "/" (0038). Como o Raio-X, é extra: fora do formato vira undefined e a entrega segue. */
+export function comandos(v: unknown): CatalogoDeComandos | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const c = v as Record<string, unknown>;
+  if (!Array.isArray(c.comandos) || c.comandos.length > TETO_COMANDOS || !Array.isArray(c.soDoTerminal) || c.soDoTerminal.length > TETO_SO_DO_TERMINAL) return undefined;
+  const nome = (x: unknown): x is string => texto(x, 160) && /^[\w.:-]+$/.test(x);
+  const lista: ComandoDoMac[] = [];
+  for (const bruto of c.comandos as unknown[]) {
+    const k = (bruto && typeof bruto === "object" ? bruto : {}) as Record<string, unknown>;
+    if (!nome(k.nome) || !texto(k.descricao, TETO_DESCRICAO_COMANDO) || !texto(k.origem, 60) || !(k.argumento === undefined || texto(k.argumento, 120))) return undefined;
+    lista.push({ nome: k.nome, descricao: k.descricao, origem: k.origem, ...(k.argumento !== undefined ? { argumento: k.argumento as string } : {}) });
+  }
+  if (!(c.soDoTerminal as unknown[]).every(nome) || !(c.versaoCli === null || texto(c.versaoCli, 60))) return undefined;
+  return { comandos: lista, soDoTerminal: c.soDoTerminal as string[], versaoCli: c.versaoCli as string | null };
+}
+
 export function entrega(v: unknown, machineId: string): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
@@ -108,6 +138,7 @@ export function entrega(v: unknown, machineId: string): Entrega {
   exigir(r.motivoInterrupcao === undefined || MOTIVOS_INTERRUPCAO.some((m) => m === r.motivoInterrupcao));
   const validados = sinais(r.sinais);
   const raioX = execucao(r.execucao);
+  const catalogo = comandos(r.comandos);
   // definido em 2026-09-17: erroCru remoto não entra no log; só os campos do contrato validado atravessam HTTP.
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
@@ -115,5 +146,6 @@ export function entrega(v: unknown, machineId: string): Entrega {
     ferramentasChamadas: r.ferramentasChamadas as string[], negacoesPermissao: r.negacoesPermissao as string[],
     motivoFalha: r.motivoFalha as Entrega["resultado"]["motivoFalha"], motivoInterrupcao: r.motivoInterrupcao as Entrega["resultado"]["motivoInterrupcao"],
     ...(raioX ? { execucao: raioX } : {}),
+    ...(catalogo ? { comandos: catalogo } : {}),
   } };
 }

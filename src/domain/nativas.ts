@@ -1,4 +1,5 @@
 import { tocaCredencial } from "./comando.ts";
+import { FERRAMENTAS_DE_TAREFA } from "./tarefas-do-bot.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
 
@@ -26,7 +27,7 @@ export const NATIVAS_DE_SKILL = ["Skill", "Agent"] as const;
  * revisto em 2026-09-28 (ADR-055): sem sandbox — arquivos em qualquer lugar do Mac, Bash com rede e as
  * credenciais da pessoa, e cada comando decidido pelo servidor (leitura roda, o resto pede aprovação).
  */
-export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL] as const;
+export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL, ...FERRAMENTAS_DE_TAREFA] as const;
 
 /** As nativas que trazem conteúdo de FORA para o turno: a chamada marca o turno como contaminado (0033). */
 export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch"];
@@ -98,6 +99,12 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
       return { permitir: true, motivo: "skill da pessoa: cada ferramenta que ela usar passa pelo nod", contamina: false };
     case "Agent":
       return { permitir: true, motivo: "subagente: cada ferramenta dele passa pelo nod", contamina: false };
+    // A lista de tarefas do bot só organiza o trabalho dentro da sessão: não lê nem muda nada fora dela.
+    case "TaskCreate":
+    case "TaskGet":
+    case "TaskList":
+    case "TaskUpdate":
+      return { permitir: true, motivo: "lista de tarefas do bot", contamina: false };
     default:
       return { permitir: false, motivo: `ferramenta fora do kit do nod: ${p.ferramenta}`, contamina: false };
   }

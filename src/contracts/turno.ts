@@ -2,6 +2,7 @@ import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Confianca } from "./mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoSemNovidade } from "./motivos.ts";
+import type { CatalogoDeComandos } from "./comandos.ts";
 import type { ExecucaoRaioX } from "./raio-x.ts";
 
 /**
@@ -95,7 +96,14 @@ export type ResultadoTurno = {
   erroCru?: string | null;
   /** Modo dev (0036): cada chamada à API e as compactações do turno. Ausente no Codex e no catcher. */
   execucao?: ExecucaoRaioX;
+  /** O "/" do chat (0038): o catálogo do Mac, só quando mudou desde a última entrega deste app. */
+  comandos?: CatalogoDeComandos;
 };
+
+/** Lista de tarefas do bot (TaskCreate/TaskUpdate do Claude Code), no cartão de atividade (domain/tarefas-do-bot.ts). */
+export const ESTADOS_DA_TAREFA = ["pendente", "andamento", "feita"] as const;
+export type EstadoDaTarefa = (typeof ESTADOS_DA_TAREFA)[number];
+export type TarefaDoBot = { id: string; titulo: string; estado: EstadoDaTarefa };
 
 /**
  * Evento já interpretado de uma linha do `--output-format stream-json` (mapa-cli 2026-09-16).
@@ -103,7 +111,19 @@ export type ResultadoTurno = {
  */
 export type EventoStream =
   /** `sessaoCli` é null só no catcher (0005): ele não abre sessão real, e o classificador não pode promover um marcador a --resume. */
-  | { tipo: "init"; sessaoCli: string | null; ferramentas: string[]; modelo: string; versaoCli: string; apiKeySource: string }
+  | {
+      tipo: "init";
+      sessaoCli: string | null;
+      ferramentas: string[];
+      modelo: string;
+      versaoCli: string;
+      apiKeySource: string;
+      /** O "/" do chat (definido em 2026-09-28): o que o CLI carregou. Ausentes no Codex e no catcher. */
+      skills?: string[];
+      comandos?: string[];
+      comandosSoDoTerminal?: string[];
+      plugins?: { nome: string; caminho: string }[];
+    }
   | { tipo: "delta"; texto: string }
   /**
    * Bloco de texto COMPLETO de uma mensagem do assistente (definido em 2026-09-28). Só compõe a fala no

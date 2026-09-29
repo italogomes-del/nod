@@ -1,6 +1,7 @@
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
+import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
@@ -75,6 +76,8 @@ export type BancoMemoria = {
   /** 0036: o Raio-X de cada turno e as preferências de cada pessoa (chave tenant:pessoa). */
   raioX: Map<string, { composicao: ComposicaoRaioX | null; execucao: ExecucaoRaioX | null }>;
   preferencias: Map<string, Preferencias>;
+  /** 0038: o catálogo do "/" de cada pessoa (chave tenant:pessoa). */
+  comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
   /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
   contaminados: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
@@ -125,6 +128,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     custoSessao: new Map(),
     raioX: new Map(),
     preferencias: new Map(),
+    comandos: new Map(),
     contaminados: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
@@ -340,6 +344,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           modelo: perfil.modelo ?? a.modelo,
           forma: perfil.forma ?? a.forma,
           cor: perfil.cor ?? a.cor,
+          // 0037: null volta ao padrão do modelo; ausente não mexe (o coalesce não serve aqui).
+          esforco: perfil.esforco === undefined ? a.esforco ?? null : perfil.esforco,
         });
         return a;
       },
@@ -411,6 +417,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async listar() {
         return doTenant(b.conversas).sort((x, y) => x.criadoEm - y.criadoEm);
+      },
+      async recomecar(id) {
+        const c = doTenant(b.conversas).find((x) => x.id === id);
+        if (!c) return false;
+        Object.assign(c, { sessaoCli: null, sessaoExecutor: null, sessaoHarness: null, sessaoEm: null, recomecoEm: agora() });
+        return true;
       },
       async atualizarSessaoCli(id, sessaoCli, sessaoExecutor = null, sessaoHarness = null) {
         const c = doTenant(b.conversas).find((x) => x.id === id);
@@ -1696,6 +1708,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async gravar(p) {
         b.preferencias.set(`${escopo.tenantId}:${escopo.pessoaId}`, { modoDev: p.modoDev });
         return { modoDev: p.modoDev };
+      },
+    },
+    comandos: {
+      async gravar(catalogo) {
+        b.comandos.set(`${escopo.tenantId}:${escopo.pessoaId}`, { catalogo, em: agora() });
+      },
+      async buscar() {
+        return b.comandos.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? null;
       },
     },
   } satisfies Repos;

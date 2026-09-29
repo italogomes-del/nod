@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { CLAUDE_MD_DAS_PASTAS, FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { FLAG_FLOORS } from "../../../src/adapters/executor/flag-floors.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { NATIVAS_DE_ARQUIVO } from "../../../src/domain/nativas.ts";
@@ -85,6 +85,14 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(sessaoCli).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
+  it("0037: o esforço do bot vira --effort só quando o help da versão instalada traz a flag", () => {
+    const plano = { ...planoDeTeste(), entrada: { ...planoDeTeste().entrada, esforco: "high" as const } };
+    expect(valor(montarArgs({ plano, mcpJson: "m", esforco: true }).args, "--effort")).toBe("high");
+    expect(montarArgs({ plano, mcpJson: "m", esforco: false }).args).not.toContain("--effort");
+    expect(montarArgs({ plano: planoDeTeste(), mcpJson: "m", esforco: true }).args).not.toContain("--effort");
+    expect(Object.keys(FLAG_FLOORS)).toContain("--effort");
+  });
+
   it("toda flag usada nos args tem piso na tabela de floors (ADR-014)", () => {
     const { args } = montarArgs({ plano: planoDeTeste(), mcpJson: "m" });
     const flagsUsadas = args.filter((a) => a.startsWith("--"));
@@ -99,6 +107,11 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(env.MCP_TOOL_TIMEOUT).toBe("60000");
     expect(montarEnvDoFilho({}, "/h", 120_000).MCP_TOOL_TIMEOUT).toBe("120000");
     expect(env.LANG).toBe("pt_BR");
+    expect(env[CLAUDE_MD_DAS_PASTAS]).toBeUndefined();
+  });
+
+  it("no kit do terminal, o CLAUDE.md dos projetos autorizados entra (a variável medida em 28/09)", () => {
+    expect(montarEnvDoFilho({}, "/h", 60_000, { claudeMdDasPastas: true })[CLAUDE_MD_DAS_PASTAS]).toBe("1");
   });
 });
 

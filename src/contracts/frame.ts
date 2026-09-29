@@ -4,6 +4,8 @@ export type TipoFrame =
   | "turno.delta"
   /** Ferramenta chamada no turno vivo: só {nome, rotulo}, nunca input/resultado. Separa as etapas do cartão de atividade. */
   | "turno.atividade"
+  /** A lista de tarefas do bot no turno vivo (TaskCreate/TaskUpdate): {tarefas: TarefaDoBot[]}, a lista inteira. */
+  | "turno.tarefas"
   | "turno.encerrado"
   | "turno.interrompido"
   | "decisao.nova"

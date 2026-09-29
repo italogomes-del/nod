@@ -4,6 +4,7 @@ import type { Mensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
@@ -90,6 +91,11 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, machineId: entrega.machineId });
   const events: RuntimeEvent[] = [];
 
+  // Comando da conversa (0038): /uso e /contexto voltam do Claude Code em inglês; a pessoa lê em português. O
+  // /compactar não tem resposta para a pessoa: medido ao vivo em 28/09, o CLI devolveu como resultado a saída do
+  // /contexto anterior (o último texto que sobra na sessão compactada). Vale só a linha com os números, abaixo.
+  const comandoDoTurno = comandoDaConversa(turno.entradaTexto)?.comando.nome;
+  const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto) : "";
   let mensagem: Mensagem | null = null;
   if (entrega.fala.tipo === "passe") {
     const agente = await deps.repos.agentes.buscar(turno.agenteId);
@@ -103,25 +109,31 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       confianca: turno.entradaConfianca,
       parcial: interrompido,
     });
-  } else if (entrega.fala.texto.trim() !== "" && turno.origem === "sala" && !tardia) {
+  } else if (falaTexto.trim() !== "" && turno.origem === "sala" && !tardia) {
     // definido em 2026-09-16 (pendência L7 §4): a fala de um bot numa sala entra por postarNaSala para os
     // responders (menção) e o orçamento do canal rodarem na MESMA tx — nunca por mensagens.criar direto.
     const conversa = await deps.repos.conversas.buscar(turno.conversaId);
     if (!conversa?.salaId) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala sem sala" });
-    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: entrega.fala.texto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
+    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
-  } else if (entrega.fala.texto.trim() !== "" && !silencioso && !rotinaCaida) {
+  } else if (falaTexto.trim() !== "" && !silencioso && !rotinaCaida) {
     mensagem = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,
       autoria,
       kind: "texto",
-      texto: entrega.fala.texto,
+      texto: falaTexto,
       payload: null,
       confianca: turno.entradaConfianca,
       parcial: interrompido,
     });
+  }
+  // /compactar não tem fala: a conversa ganha a linha com quanto o histórico ocupava e quanto sobrou.
+  const compactacao = resultado.execucao?.compactacoes.at(-1);
+  if (!mensagem && !tardia && comandoDoTurno === "compactar" && resultado.desfecho === "sucesso") {
+    const agente = await deps.repos.agentes.buscar(turno.agenteId);
+    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: textoDaCompactacao(agente?.nome ?? "O bot", compactacao?.antes ?? null, compactacao?.depois ?? null), confianca: "confiavel" });
   }
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
 
@@ -148,6 +160,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   });
   // Modo dev (0036): cada chamada e as compactações. Também na entrega tardia, que é a que mais pede explicação.
   if (resultado.execucao) await deps.repos.raioX.gravarExecucao(turno.id, resultado.execucao);
+  // O "/" do chat (0038): o catálogo do Mac, quando o app mandou um novo.
+  if (resultado.comandos) await deps.repos.comandos.gravar(resultado.comandos);
 
   for (const nome of resultado.negacoesPermissao) {
     const negacao = { classe: "ferramenta_negada" as const, nome, motivo: "fora_do_catalogo" as const, desde: agora, terminal: false };

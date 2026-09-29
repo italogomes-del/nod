@@ -73,7 +73,17 @@ describe("aplicarFrame por TipoFrame", () => {
       totalEtapas: 1,
       ferramentas: 2,
       ultimaFerramenta: "Alterou Gmail",
+      tarefas: [],
     });
+  });
+
+  it("turno.tarefas guarda a lista inteira no turno vivo, sem perder a ferramenta seguinte; item fora do formato fica de fora", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
+    const tarefas = [{ id: "1", titulo: "Ler o diff", estado: "feita" }, { id: "2", titulo: "Checar SQL", estado: "andamento" }];
+    e = aplicarFrame(e, frame("turno.tarefas", { conversaId: CONVERSA, turnoId: TURNO, tarefas: [...tarefas, { id: 3, titulo: "x", estado: "?" }] }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Bash", rotulo: "Rodou um comando" }), AGORA);
+    expect(e.conversas[CONVERSA]?.atividades[TURNO]?.tarefas).toEqual(tarefas);
+    expect(e.conversas[CONVERSA]?.atividades[TURNO]?.ferramentas).toBe(1);
   });
 
   it("turno.interrompido limpa o vivo e invalida conversa, frota e sua-vez (pode ter nascido 'retomar?')", () => {

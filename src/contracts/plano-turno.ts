@@ -1,4 +1,5 @@
 import type { AnexoMeta } from "./anexo.ts";
+import type { EsforcoAgente } from "./agente.ts";
 import type { IdHarness } from "./harness.ts";
 import type { Autoria, Executor } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
@@ -79,7 +80,7 @@ export type PlanoTurno = {
    * `anexos` (ADR-046): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
-  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[] };
+  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente };
   politicaExecucao: {
     prazoMs: number;
     orcamentoResultadoChars: number;

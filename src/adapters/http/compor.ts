@@ -58,6 +58,7 @@ import { servicoSala } from "../../use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { iniciarLaco } from "../executor/laco.ts";
+import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
@@ -93,6 +94,7 @@ import { criarRotasSuaVez } from "./rotas/sua-vez.ts";
 import { rotasTrilha } from "./rotas/trilha.ts";
 import { criarRotasTurnos } from "./rotas/turnos.ts";
 import { criarRotasRaioX } from "./rotas/raio-x.ts";
+import { criarRotasComandos } from "./rotas/comandos.ts";
 
 /**
  * Composição do app (L9): UMA função monta Services concreto, UseCasesNod completo, a ponte
@@ -390,6 +392,7 @@ export function comporApp(o: OpcoesCompor): App {
     agora: relogio,
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
     ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
+    tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
     itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
@@ -571,6 +574,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasPropostas(depsRotas),
     ...criarRotasTurnos(depsRotas),
     ...criarRotasRaioX(depsRotas),
+    ...criarRotasComandos(depsRotas),
     ...rotasConcessoes({ dentro }),
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
@@ -600,7 +604,7 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas", dados: Record<string, unknown>): void {
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
 
@@ -612,6 +616,12 @@ export function comporApp(o: OpcoesCompor): App {
     });
   }
 
+  // A lista de tarefas do bot (definido em 2026-09-28): o mesmo acompanhante do app do Mac, publicado direto.
+  const planosVivos = new Map<string, PlanoTurno>();
+  const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => {
+    const plano = planosVivos.get(turnoId);
+    if (plano) publicarDoPlano(plano, "turno.tarefas", { tarefas });
+  });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
   const iniciar: IniciarLaco = (p) =>
     iniciarPoolDeLacos((ponte) => iniciarLaco({
@@ -621,9 +631,10 @@ export function comporApp(o: OpcoesCompor): App {
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
         else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });
+        tarefasVivas.evento(plano.turnoId, ev);
       },
-      aoIniciarTurno: (plano, adapter) => interruptor.registrar(plano.turnoId, () => adapter.interromper()),
-      aoTerminarTurno: (plano) => interruptor.esquecer(plano.turnoId),
+      aoIniciarTurno: (plano, adapter) => { interruptor.registrar(plano.turnoId, () => adapter.interromper()); planosVivos.set(plano.turnoId, plano); },
+      aoTerminarTurno: (plano) => { interruptor.esquecer(plano.turnoId); tarefasVivas.esquecer(plano.turnoId); planosVivos.delete(plano.turnoId); },
     }), p.ponte);
 
   return {

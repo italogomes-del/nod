@@ -23,6 +23,29 @@ const NOD: Record<string, string> = {
   ver_colegas: "Viu o que os colegas fazem",
 };
 
+/**
+ * As nativas do Claude Code no kit do terminal (definido em 2026-09-28): "Usou TaskCreate" e "Usou Bash" não diziam
+ * nada a quem lê o cartão. A lista de tarefas aparece inteira no cartão; aqui basta dizer que o bot a organizou.
+ */
+const NATIVAS: Record<string, string> = {
+  Read: "Leu um arquivo",
+  Edit: "Editou um arquivo",
+  Write: "Escreveu um arquivo",
+  NotebookEdit: "Editou um notebook",
+  Glob: "Procurou arquivos",
+  Grep: "Procurou nos arquivos",
+  Bash: "Rodou um comando",
+  WebFetch: "Abriu uma página",
+  WebSearch: "Pesquisou na web",
+  Skill: "Usou uma skill",
+  Agent: "Chamou um subagente",
+  ToolSearch: "Buscou ferramentas",
+  TaskCreate: "Organizou as tarefas",
+  TaskUpdate: "Organizou as tarefas",
+  TaskList: "Organizou as tarefas",
+  TaskGet: "Organizou as tarefas",
+};
+
 /** Prefixos de capacidade que só leem; o resto de um conector conta como alteração. */
 const LEITURA = /^(search|list|get|read|find|fetch|query|who|consultar|listar|ler|buscar)/i;
 
@@ -33,7 +56,7 @@ function titulo(slug: string): string {
 
 export function rotuloFerramenta(nomeCli: string): string {
   const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(nomeCli);
-  if (!m) return nomeCli ? `Usou ${nomeCli}` : "Usou uma ferramenta";
+  if (!m) return NATIVAS[nomeCli] ?? (nomeCli ? `Usou ${nomeCli}` : "Usou uma ferramenta");
   const nome = m[2]!;
   const nod = NOD[nome];
   if (nod) return nod;
