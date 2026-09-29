@@ -43,6 +43,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from rotinas where owner_id = ${p}`;
     await trx`delete from sala_membros where owner_id = ${p}`;
     await trx`delete from salas where owner_id = ${p}`;
+    // 0039: o "lido até" aponta para a conversa — sai antes dela.
+    await trx`delete from leituras where owner_id = ${p}`;
     if (ids.conversas.length) await trx`delete from conversas where id in ${trx(ids.conversas)}`;
     await trx`delete from conversas where owner_id = ${p}`;
     if (ids.agentes.length) await trx`delete from agentes where id in ${trx(ids.agentes)}`;

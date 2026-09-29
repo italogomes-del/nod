@@ -178,6 +178,11 @@ export const ROTAS = [
   /** O "/" do chat (definido em 2026-09-28, 0038): o catálogo do Mac e a nova sessão, que é do nod. */
   { metodo: "GET", caminho: "comandos", lane: "L6" },
   { metodo: "POST", caminho: "conversas/:id/nova-sessao", lane: "L6" },
+  /** Não lidos (definido em 2026-09-29, 0039): o que chegou depois do "lido até" de cada conversa, e marcar. */
+  { metodo: "GET", caminho: "nao-lidos", lane: "L6" },
+  { metodo: "POST", caminho: "nao-lidos/marcar-tudo", lane: "L6" },
+  { metodo: "POST", caminho: "conversas/:id/lida", lane: "L6" },
+  { metodo: "POST", caminho: "conversas/:id/nao-lida", lane: "L6" },
   /** Chaves de máquina (E1.3, ADR-031): emitir (a chave crua sai uma vez), listar e revogar. */
   { metodo: "POST", caminho: "maquinas/chaves", lane: "L9" },
   { metodo: "GET", caminho: "maquinas/chaves", lane: "L9" },

@@ -13,9 +13,15 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
   const agora = deps.agora();
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(atual.id);
   const pendentes = input.acao === "excluir" ? (await deps.repos.turnos.pendentesDaPessoa()).filter((t) => t.agenteId === atual.id) : [];
+  // definido em 2026-09-29 (0039): "não lido" é o "lido até" da conversa, não mais a coluna agentes.nao_lido.
+  if (input.acao === "organizar" && input.naoLido !== undefined && conversa) {
+    if (input.naoLido) await deps.repos.leituras.marcarNaoLida(conversa.id);
+    else await deps.repos.leituras.marcarLida(conversa.id);
+  }
   const agente = input.acao === "excluir" ? await deps.repos.agentes.excluir(atual.id, agora)
     : input.acao === "restaurar" ? await deps.repos.agentes.restaurar(atual.id)
-    : await deps.repos.agentes.organizar(atual.id, { secao: input.secao?.trim(), naoLido: input.naoLido });
+    : input.secao !== undefined ? await deps.repos.agentes.organizar(atual.id, { secao: input.secao.trim() })
+    : atual;
   if (!agente) throw new ErroDeDominio("estado_invalido");
   return { data: { agente }, events: [...pendentes.map((t) => evento(deps.escopo, { kind: "turno_interrompido", autoria: autoriaPessoa(deps.escopo), agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa" } })), evento(deps.escopo, { kind: "agente_atualizado", conversaId: conversa?.id ?? null, autoria: autoriaPessoa(deps.escopo), agora, dados: { agente_id: agente.id, acao: input.acao } })] };
 };

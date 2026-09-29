@@ -18,6 +18,8 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
   const agentes = await deps.repos.agentes.listar(input.gerenciar ? { incluirOcultos: true, incluirExcluidos: true } : {});
   // definido em 2026-09-24 (emenda da ADR-037): uma consulta para a frota inteira, não uma por agente.
   const foraDoAr = await deps.repos.computadores.foraDoAr();
+  // definido em 2026-09-29 (0039): "não lido" sai do "lido até" da conversa, não da coluna agentes.nao_lido.
+  const comNovas = new Set((await deps.repos.leituras.resumo()).map((r) => r.conversaId));
   const linhas: FrotaDto["agentes"] = [];
   for (const agente of agentes) {
     const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
@@ -29,6 +31,7 @@ export const listarFrota: CasoDeUso<{ agora?: number; gerenciar?: boolean }, Fro
     const previa = ultima ? previaDaMensagem(ultima.payload?.kind === "artefato" ? `▣ ${ultima.payload.titulo}` : ultima.texto) : null;
     linhas.push({
       ...agente,
+      naoLido: conversa ? comNovas.has(conversa.id) : false,
       conversaId: conversa?.id ?? "",
       descricaoEstado: descricaoEstado(agente, { concessoes: concessoes.length, execucoes }),
       computadorForaDoAr: foraDoAr.get(agente.id) ?? null,

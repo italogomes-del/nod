@@ -90,9 +90,8 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<{ geracao_execucao: number }[]>`select geracao_execucao from agentes where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? Number(l.geracao_execucao) : null;
     },
-    async organizar(id: string, campos: { secao?: string; naoLido?: boolean }): Promise<Agente | null> {
-      const [l] = await conn<Linha[]>`update agentes set secao = coalesce(${campos.secao ?? null}, secao),
-        nao_lido = coalesce(${campos.naoLido ?? null}, nao_lido)
+    async organizar(id: string, campos: { secao: string }): Promise<Agente | null> {
+      const [l] = await conn<Linha[]>`update agentes set secao = ${campos.secao}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;

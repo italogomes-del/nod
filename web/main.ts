@@ -38,6 +38,7 @@ import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
+import { BANDEJA, naoLidaDe, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
 import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
@@ -116,6 +117,42 @@ function naFrente(): boolean {
   return document.visibilityState === "visible" && document.hasFocus();
 }
 
+/**
+ * Não lidos (definido em 2026-09-29, 0039): a conversa na tela, com a janela na frente, é lida. A linha "Novas"
+ * só entra quando a pessoa acabou de abrir a conversa, voltou para a janela ou abriu o Nod (`linhaEm`); a fala que
+ * chega enquanto ela olha é lida sem linha.
+ */
+let linhaEm: string | null = null;
+let primeiraLeitura = true;
+/** A conversa que a pessoa marcou como não lida com ela aberta: continua não lida até ela sair. */
+let deixarNaoLida: string | null = null;
+const lendo = new Set<string>();
+
+function lerConversaDaTela(): void {
+  const t = estado.tela;
+  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || !naFrente()) return;
+  const conversaId = t.conversaId;
+  const comLinha = linhaEm === conversaId || primeiraLeitura;
+  linhaEm = null;
+  primeiraLeitura = false;
+  const nova = naoLidaDe(estado, conversaId);
+  if (!nova || deixarNaoLida === conversaId || lendo.has(conversaId)) return;
+  if (comLinha && !estado.novasDesde[conversaId]) dispatch({ tipo: "novas-desde", conversaId, mensagemId: nova.primeiraId, em: nova.desde });
+  lendo.add(conversaId);
+  void api
+    .marcarLida(conversaId)
+    .then(() => dispatch({ tipo: "invalidar", quais: ["nao-lidos"] }), () => undefined)
+    .finally(() => lendo.delete(conversaId));
+}
+
+/** O ponto de não lido: a conversa aberta, com a pessoa olhando, nunca pisca como nova enquanto a leitura vai ao servidor. */
+function temNovas(conversaId: string): boolean {
+  if (!naoLidaDe(estado, conversaId)) return false;
+  const t = estado.tela;
+  const aberta = (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId;
+  return !(aberta && naFrente() && deixarNaoLida !== conversaId);
+}
+
 function dispatch(acao: Acao): void {
   estado = reduzir(estado, acao);
   render();
@@ -166,6 +203,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "rotinas") return { tipo: "hidratar-rotinas", rotinas: (await api.rotinas()).rotinas };
   if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
+  if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   if (q.startsWith("conversa:")) {
@@ -212,6 +250,7 @@ async function reidratar(): Promise<void> {
   if (pendentes.length === 0) return;
   const telaAntes = estado.tela;
   reidratando = true;
+  let lerDepois = false;
   try {
     // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
     const relevantes = pendentes.filter((q) => relevante(q));
@@ -222,6 +261,7 @@ async function reidratar(): Promise<void> {
         const acao = await buscar(q);
         if (acao) estado = reduzir(estado, acao);
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
+        if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
       } catch (e) {
         if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
       }
@@ -230,6 +270,7 @@ async function reidratar(): Promise<void> {
   } finally {
     reidratando = false;
   }
+  if (lerDepois) lerConversaDaTela();
   // definido em 2026-09-28: a tela que mudou DURANTE a busca (clicar num bot com a primeira carga em andamento) também
   // pede o que lhe falta; antes a conversa esperava o próximo tique (15 s). Só quando a tela mudou: há falta que não se
   // resolve buscando (sem nenhuma sala, "salas" continua faltando) e voltaria a buscar sem parar.
@@ -239,7 +280,7 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
-  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas") return true;
+  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos") return true;
   if (q === "gestao") return t.tipo === "gestao" || t.tipo === "perfil";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil" || t.tipo === "conversa" || t.tipo === "sala";
@@ -276,13 +317,14 @@ function renderSidebar(): string {
     // diz quando o bot trabalha. Selos ⚑, estrela de fixado e pontos soltos saíram.
     const perguntando = perguntas.get(a.id) ?? 0;
     // definido em 2026-09-24 (emenda da ADR-044): "rotina parada" (âmbar) quando uma rotina dele espera acesso.
-    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : a.naoLido ? "nao-lido" : "";
+    const nova = temNovas(a.conversaId);
+    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : nova ? "nao-lido" : "";
     const rotuloAviso = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const estadoVisual = aviso && mascote === "disponivel" ? "aguardando" : mascote;
     // definido em 2026-09-24 (sidebar no estilo do Grok): o título vira um chip ao lado do nome e a linha de
     // baixo é a última mensagem; os estados que pedem ação (fora do ar, pergunta, rotina parada) ganham dela.
-    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
     const chip = a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "";
     return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
   };
@@ -292,7 +334,7 @@ function renderSidebar(): string {
   // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
   const bloco = (a: (typeof agentes)[number]) => {
     const perguntando = perguntas.get(a.id) ?? 0;
-    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : a.naoLido ? "nao-lido" : "";
+    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : temNovas(a.conversaId) ? "nao-lido" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
     return `<div class="fixado" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
@@ -305,7 +347,8 @@ function renderSidebar(): string {
   const salas = estado.salas
     .map(
       (s) =>
-        `<button class="row"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"><span class="g">#</span><span class="txt"><b>${esc(s.sala.nome)}</b></span><span class="meta"></span></button>`,
+        // definido em 2026-09-29 (0039): a sala não tem mascote, então o ponto de não lido fica à direita.
+        `<button class="row"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"${temNovas(s.sala.conversaId) ? ` aria-label="Abrir a sala ${esc(s.sala.nome)} (mensagem nova)"` : ""}><span class="g">#</span><span class="txt"><b>${esc(s.sala.nome)}</b></span><span class="meta">${temNovas(s.sala.conversaId) ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</span></button>`,
     )
     .join("");
 
@@ -328,8 +371,13 @@ function renderSidebar(): string {
   // definido em 2026-09-24 (sidebar no estilo do Grok): sem marca e sem título — o topo tem só busca,
   // sino e +. A busca é um ícone; o campo aparece ao clicar, com ⌘K, ou enquanto tem texto.
   const buscando = buscaAberta || termoBusca() !== "";
+  // definido em 2026-09-29 (0039, canvas "Não lidos"): o ícone só existe com algo não lido (ou com a tela aberta).
+  const comNovas = (estado.naoLidos?.conversas ?? []).some((c) => temNovas(c.conversaId));
+  const naoLidos = comNovas || t.tipo === "nao-lidos"
+    ? `<button class="icone-topo nao-lidos-bt" data-act="navegar" data-tela="nao-lidos" aria-current="${t.tipo === "nao-lidos" ? "page" : "false"}" aria-label="${esc(rotuloNaoLidos(estado))}" title="Não lidos">${BANDEJA}${comNovas ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</button>`
+    : "";
   return `<div class="search-wrap">
-      <div class="sh"><button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <div class="sh"><button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
@@ -364,6 +412,9 @@ function renderPrincipal(): void {
       break;
     case "sua-vez":
       corpo = renderSuaVez(estado);
+      break;
+    case "nao-lidos":
+      corpo = renderNaoLidos(estado);
       break;
     case "rotinas":
       corpo = renderRotinas(estado);
@@ -558,14 +609,14 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   }, () => undefined);
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
-    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "inventario", "executor", "salas", "rotinas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
+    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") dispatch({ tipo: "frame", frame: ev.frame, agora: Date.now() });
     else if (ev.tipo === "conexao") dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
   });
   live.connect();
-  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "salas", "executor", "rotinas"] });
+  dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "salas", "executor", "rotinas"] });
 }
 
 async function boot(): Promise<void> {
@@ -654,7 +705,10 @@ function propostaDoEstado(id: string): Proposta | null {
 function navegar(tela: Tela): void {
   // O menu "Avisos no Mac" muda a preferência sem passar pela página: "Seu espaço" relê ao abrir.
   if (tela.tipo === "espaco") void canalAvisos.reler();
+  linhaEm = tela.tipo === "conversa" || tela.tipo === "sala" ? tela.conversaId : null;
+  deixarNaoLida = null;
   dispatch({ tipo: "navegar", tela });
+  lerConversaDaTela();
   if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
 
@@ -699,7 +753,15 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
       await mudarGestao(() => api!.ocultar(a.id, true)); navegar({ tipo: "gestao" });
     }); return;
   }
-  executar(() => acao === "fixar" ? api!.fixar(a.id, !a.fixado) : acao === "nao-lido" ? api!.organizarAgente(a.id, { naoLido: !a.naoLido }) : acao === "restaurar" ? api!.restaurarAgente(a.id) : api!.ocultar(a.id, false));
+  if (acao === "nao-lido") {
+    // definido em 2026-09-29 (0039): o menu vale pelo "lido até". Marcar a conversa aberta como não lida não pode ser
+    // desfeito pela leitura automática: ela fica não lida até a pessoa sair dela.
+    const nova = a.naoLido === true;
+    if (!nova) deixarNaoLida = a.conversaId;
+    void agir(async () => { await (nova ? api!.marcarLida(a.conversaId) : api!.marcarNaoLida(a.conversaId)); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); });
+    return;
+  }
+  executar(() => acao === "fixar" ? api!.fixar(a.id, !a.fixado) : acao === "restaurar" ? api!.restaurarAgente(a.id) : api!.ocultar(a.id, false));
 }
 
 /**
@@ -717,7 +779,9 @@ function abrirAlvoDoAviso(alvo: AlvoAviso): void {
 }
 
 function botGerido(id: string | undefined): BotGerido | undefined {
-  return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
+  const a = [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
+  // "Marcar como lido / não lido" no menu segue os não lidos, que chegam a cada mensagem (a frota não).
+  return a && estado.naoLidos ? { ...a, naoLido: temNovas(a.conversaId) } : a;
 }
 
 function menuDoBot(el: HTMLElement): void {
@@ -1033,7 +1097,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "sua-vez" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
+    if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
   },
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
   // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha
@@ -1167,11 +1231,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`, ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),
-  "abrir-conversa": (el) => {
-    const a = estado.frota?.agentes.find((a) => a.id === el.dataset.agente);
-    if (a?.naoLido && a.ownerId === estado.sessao?.pessoaId) void agir(async () => { await mudarGestao(() => api!.organizarAgente(a.id, { naoLido: false })); });
-    navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" });
-  },
+  "abrir-conversa": (el) => navegar({ tipo: "conversa", conversaId: el.dataset.conversa ?? "", agenteId: el.dataset.agente ?? "" }),
+  "marcar-lida": (el) => agir(async () => { await api!.marcarLida(el.dataset.conversa ?? ""); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
+  "marcar-tudo-lido": () => agir(async () => { await api!.marcarTudoLido(); dispatch({ tipo: "invalidar", quais: ["nao-lidos", "frota"] }); }),
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "menu-agente": (el) => menuDoBot(el),
   "inteligencia": (el) => abrirInteligencia(el.dataset.id),
@@ -1581,6 +1643,10 @@ function aoVoltarParaFrente(): void {
   if (!naFrente()) return;
   void canalAvisos.reler();
   if (suaVezSemVer && estado.sessao) dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
+  // O que chegou com a janela atrás fica com a linha "Novas" quando a pessoa volta (definido em 2026-09-29).
+  const t = estado.tela;
+  if (t.tipo === "conversa" || t.tipo === "sala") linhaEm = t.conversaId;
+  lerConversaDaTela();
 }
 window.addEventListener("focus", aoVoltarParaFrente);
 document.addEventListener("visibilitychange", aoVoltarParaFrente);

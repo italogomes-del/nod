@@ -78,6 +78,8 @@ export type BancoMemoria = {
   preferencias: Map<string, Preferencias>;
   /** 0038: o catálogo do "/" de cada pessoa (chave tenant:pessoa). */
   comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
+  /** 0039: o "lido até" de cada pessoa em cada conversa (chave tenant:pessoa:conversa). */
+  leituras: Map<string, number>;
   /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
   contaminados: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
@@ -129,6 +131,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     raioX: new Map(),
     preferencias: new Map(),
     comandos: new Map(),
+    leituras: new Map(),
     contaminados: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
@@ -1718,6 +1721,46 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return b.comandos.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? null;
       },
     },
+    leituras: (() => {
+      const chave = (conversaId: string) => `${escopo.tenantId}:${escopo.pessoaId}:${conversaId}`;
+      const nova = (m: Mensagem) => (m.kind === "texto" || m.kind === "artefato") && !(m.autoria.autor_tipo === "pessoa" && m.autoria.autor_id === escopo.pessoaId);
+      const naoLidas = (conversaId: string) => {
+        const ate = b.leituras.get(chave(conversaId)) ?? -Infinity;
+        return doTenant(b.mensagens).filter((m) => m.conversaId === conversaId && m.criadoEm > ate && nova(m)).sort((x, y) => x.criadoEm - y.criadoEm);
+      };
+      return {
+        async resumo() {
+          return doTenant(b.conversas)
+            .filter((c) => c.tipo === "sala" || c.ownerId === escopo.pessoaId)
+            .flatMap((c) => {
+              const ms = naoLidas(c.id);
+              return ms.length ? [{ conversaId: c.id, tipo: c.tipo, agenteId: c.agenteId, salaId: c.salaId, total: ms.length, desde: ms[0]!.criadoEm, ultimaEm: ms[ms.length - 1]!.criadoEm }] : [];
+            })
+            .sort((x, y) => y.ultimaEm - x.ultimaEm);
+        },
+        async mensagens(conversaIds: readonly string[], por = 3) {
+          const saida = new Map<string, { primeira: Mensagem; ultimas: Mensagem[]; daRotina: boolean }>();
+          for (const id of conversaIds) {
+            const ms = naoLidas(id);
+            if (!ms.length) continue;
+            const turnos = new Set(ms.map((m) => m.turnoId));
+            saida.set(id, { primeira: ms[0]!, ultimas: ms.slice(-por), daRotina: doTenant(b.turnos).some((t) => turnos.has(t.id) && t.origem === "rotina") });
+          }
+          return saida;
+        },
+        async marcarLida(conversaId: string) {
+          const ultima = Math.max(...doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).map((m) => m.criadoEm), -Infinity);
+          const ate = Number.isFinite(ultima) ? ultima : agora();
+          b.leituras.set(chave(conversaId), Math.max(b.leituras.get(chave(conversaId)) ?? -Infinity, ate));
+        },
+        async marcarNaoLida(conversaId: string) {
+          const ultima = Math.max(...doTenant(b.mensagens).filter((m) => m.conversaId === conversaId && nova(m)).map((m) => m.criadoEm), -Infinity);
+          if (!Number.isFinite(ultima)) return false;
+          b.leituras.set(chave(conversaId), ultima - 0.001);
+          return true;
+        },
+      };
+    })(),
   } satisfies Repos;
 
   return repos;

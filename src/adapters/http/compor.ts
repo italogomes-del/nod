@@ -95,6 +95,7 @@ import { rotasTrilha } from "./rotas/trilha.ts";
 import { criarRotasTurnos } from "./rotas/turnos.ts";
 import { criarRotasRaioX } from "./rotas/raio-x.ts";
 import { criarRotasComandos } from "./rotas/comandos.ts";
+import { criarRotasNaoLidos } from "./rotas/nao-lidos.ts";
 
 /**
  * Composição do app (L9): UMA função monta Services concreto, UseCasesNod completo, a ponte
@@ -575,6 +576,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasTurnos(depsRotas),
     ...criarRotasRaioX(depsRotas),
     ...criarRotasComandos(depsRotas),
+    ...criarRotasNaoLidos(depsRotas),
     ...rotasConcessoes({ dentro }),
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),

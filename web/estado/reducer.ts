@@ -6,6 +6,7 @@ import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
+import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
@@ -42,6 +43,8 @@ export type Tela =
    */
   | { tipo: "conectores"; app?: string; gaveta?: { slug: string; passo: "detalhes" | "quem-usa" }; avancado?: true; filtro?: "todos" | "conectados" | "atencao"; voltar?: { tipo: "conversa"; conversaId: string; agenteId: string } | { tipo: "sala"; salaId: string; conversaId: string } }
   | { tipo: "sua-vez" }
+  /** Não lidos (definido em 2026-09-29, 0039): tudo o que chegou, a conversa mais recente em cima. */
+  | { tipo: "nao-lidos" }
   | { tipo: "nova-sala" }
   | { tipo: "chaves" }
   | { tipo: "relatos" }
@@ -68,7 +71,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "gestao" | "frota" | "sua-vez" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -84,6 +87,13 @@ export type Estado = {
   cancelando: Record<string, number>;
   salas: { sala: Sala; membros: MembroSala[] }[];
   suaVez: SuaVezDto | null;
+  /** Não lidos (0039): o que chegou depois do "lido até" de cada conversa; null = ainda não carregou. */
+  naoLidos: NaoLidosDto | null;
+  /**
+   * Onde a linha "Novas" entra em cada conversa: a primeira não lida quando a pessoa abriu a conversa (ou voltou
+   * para a janela com ela aberta). Fica até ela sair da conversa; o servidor já conta tudo como lido.
+   */
+  novasDesde: Record<string, { mensagemId: string; em: number }>;
   rotinas: RotinaDto[];
   execucoes: Record<string, ExecucaoRotina[]>;
   /** Rotinas com o histórico aberto no painel. Separado de `execucoes`: um evento recarrega a lista, mas não a reabre. */
@@ -150,6 +160,8 @@ export type Acao =
   | { tipo: "hidratar-executor"; executor: EstadoExecutor }
   | { tipo: "hidratar-conversa"; conversa: ConversaDto; agora: number }
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
+  | { tipo: "hidratar-nao-lidos"; naoLidos: NaoLidosDto }
+  | { tipo: "novas-desde"; conversaId: string; mensagemId: string; em: number }
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
   | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
   | { tipo: "alternar-historico"; rotinaId: string }
@@ -181,6 +193,8 @@ export const estadoInicial: Estado = {
   cancelando: {},
   salas: [],
   suaVez: null,
+  naoLidos: null,
+  novasDesde: {},
   rotinas: [],
   execucoes: {},
   historicoAberto: {},
@@ -253,7 +267,8 @@ const conv = (f: FrameSse): Invalidacao | null => {
 };
 
 const POR_FRAME: Record<TipoFrame, Handler> = {
-  "mensagem.nova": (e, f) => invalidar(e, conv(f)),
+  // definido em 2026-09-29 (0039): a mensagem nova também relê os não lidos (o ponto da barra e o ícone do topo).
+  "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos") : e),
   "turno.iniciado": (e, f, agora) => {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
@@ -322,7 +337,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
     const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
-    return invalidar(e, "frota", "gestao", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
+    return invalidar(e, "frota", "gestao", "nao-lidos", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
   },
   "parada.faixa": (e, f) => {
     const faixa: FaixaParada = {
@@ -336,7 +351,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // O relato é registro, não estado vivo da conversa: nada na timeline muda, então nada se invalida.
   // A tela de relatos recarrega quando é aberta (definido em 2026-09-21).
   "relato.criado": (e) => e,
-  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
+  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
 export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Estado {
@@ -350,7 +365,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
       return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
-        modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} } };
+        modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
+        naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {} };
     case "navegar":
       return resolverInicio({
         ...estado,
@@ -360,6 +376,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
         // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
         chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
+        // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
+        novasDesde: {},
       });
     case "cancelando-turno":
       return { ...estado, cancelando: { ...estado.cancelando, [acao.turnoId]: acao.agora } };
@@ -435,6 +453,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
     case "hidratar-salas":
       return { ...estado, salas: acao.salas };
+    case "hidratar-nao-lidos":
+      return { ...estado, naoLidos: acao.naoLidos };
+    case "novas-desde":
+      return { ...estado, novasDesde: { ...estado.novasDesde, [acao.conversaId]: { mensagemId: acao.mensagemId, em: acao.em } } };
     case "hidratar-chaves":
       return { ...estado, chaves: acao.chaves };
     case "hidratar-relatos":
@@ -512,6 +534,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // A fila alimenta o badge ⚑ da sidebar e a faixa de chamada em QUALQUER tela: sem o rail, ela é o
   // único aviso de que há decisão parada.
   if (!estado.suaVez) faltas.push("sua-vez");
+  // O ícone de Não lidos e o ponto de cada linha da barra valem em qualquer tela, como a fila.
+  if (!estado.naoLidos) faltas.push("nao-lidos");
   if ((t.tipo === "chaves" || t.tipo === "espaco") && !estado.chaves) faltas.push("chaves");
   // O frame relato.criado não invalida nada (é registro), então a tela busca quando ainda não tem.
   if (t.tipo === "relatos" && !estado.relatos) faltas.push("relatos");
