@@ -86,7 +86,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const turnoId = ctx.params.turnoId ?? "";
         const plano = deps.tokens.planoDe(turnoId);
         // definido em 2026-09-24 (revisão da ADR-047): computador e pasta também deixam a chamada na trilha —
-        // o que eles devolvem é conteúdo de fora, e delegar_tarefa lê a trilha do turno para saber disso.
+        // o que eles devolvem é conteúdo de fora, e a trilha é o registro do que o turno tocou (E8.4).
         if (plano && ((ctx.params.nome?.startsWith("workspace_") && deps.workspaces) || (ctx.params.nome?.startsWith("computador_") && deps.computadores))) {
           await deps.dentro(ctx.escopo, (d) => d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(ctx.params.nome ?? ""), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA }));
         }
@@ -158,7 +158,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
     },
     {
       // ADR-052: o hook do nod confirma cada chamada NATIVA antes de ela rodar. A nativa tem de estar no plano do
-      // turno; a trilha registra sempre (delegar_tarefa lê a trilha para saber o que entrou de fora); a web marca
+      // turno; a trilha registra sempre (é o registro do que entrou de fora); a web marca
       // o turno (0033). Quem decide se contamina é o SERVIDOR, pela ferramenta — nunca o que o hook manda.
       metodo: "POST",
       padrao: /^\/nativas$/,

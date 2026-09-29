@@ -53,7 +53,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     sala: {
       encaminhar: async () => ({ ok: true }),
       passar: async () => ({ ok: true }),
-      perguntar: async () => ({ tarefaId: "tarefa-falsa" }),
+      pedir: async () => ({ tarefaId: "tarefa-falsa" }),
     },
     barramento: { publicar: (pessoaId, tipo, dados) => ({ streamId: "s", seq: 1, pessoaId, tipo, dados }) },
   };
@@ -72,8 +72,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     passar: async () => ({ data: { ok: true } }),
     encaminhar: async () => ({ data: { ok: true } }),
     semNovidade: async () => ({ data: { ok: true } }),
-    perguntarABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
-    delegarTarefa: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    pedirABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
     verColegas: async () => ({ data: { colegas: [] } }),
     publicarArtefato,
     lerArtefato,

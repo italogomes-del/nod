@@ -408,73 +408,68 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect((await chamar("POST", `salas/${salaId}/parar`)).status).toBe(200);
   });
 
-  it("bot-a-bot: perguntar_a_bot cria a tarefa peer (profundidade 1) na conversa do alvo; a resposta volta como peer_ask não confiável e o remetente continua SEM perguntar_a_bot no catálogo", { timeout: JORNADA_MS }, async () => {
+  it("bot-a-bot (ADR-058): pedir_a_bot abre no alvo um turno 'delegacao' confiável; a resposta volta como peer_ask e o remetente continua no modo dele, sem novo salto", { timeout: JORNADA_MS }, async () => {
     const desde = frames.length;
-    const t = await rodar(vera.conversaId, 'Pergunte ao Tuca o status do PR 42. [[tool: perguntar_a_bot {"agente":"Tuca","pergunta":"qual o status do PR 42? [[texto: PR 42 aprovado ontem]]"}]] [[texto: Perguntei ao Tuca.]]');
+    const t = await rodar(vera.conversaId, 'Pergunte ao Tuca o status do PR 42. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"qual o status do PR 42? [[texto: PR 42 aprovado ontem]]"}]] [[texto: Perguntei ao Tuca.]]');
     expect(t.estado).toBe("concluido");
-    const peer = await esperarOu(tuca.conversaId, () =>
+    const resposta = await esperarOu(tuca.conversaId, () =>
       srv.esperar(async () => {
         const dto = await conversa(vera.conversaId);
         return dto.mensagens.find((m) => m.kind === "peer_ask") ?? null;
       }, { nome: "peer_ask", timeoutMs: 15_000 }),
     );
-    expect(peer).toMatchObject({ confianca: "nao_confiavel", texto: "PR 42 aprovado ontem" });
-    expect(peer.payload).toMatchObject({ kind: "peer_ask", agenteId: tuca.agenteId, nome: "Tuca", naoSupervisionado: true });
-    const tarefa = await turno(peer.payload?.kind === "peer_ask" ? peer.payload.tarefaId : "");
-    expect(tarefa).toMatchObject({ origem: "peer", profundidade: 1, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
+    expect(resposta).toMatchObject({ texto: "PR 42 aprovado ontem" });
+    expect(resposta.payload).toMatchObject({ kind: "peer_ask", agenteId: tuca.agenteId, nome: "Tuca", delegada: true });
+    const tarefa = await turno(resposta.payload?.kind === "peer_ask" ? resposta.payload.tarefaId : "");
+    expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: srv.pessoa.pessoaId, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
+    const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+    const doAlvo = dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === tarefa.id)?.dados.ferramentas as string[];
+    expect(doAlvo).toContain("mcp__nod__pedir_acesso");
+    expect(doAlvo).not.toContain("mcp__nod__pedir_a_bot");
     const continuacao = await srv.esperar(async () => {
-      const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
-      return dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === peer.turnoId) ?? null;
+      const d = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
+      return d.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === resposta.turnoId) ?? null;
     }, { nome: "plano da continuação", timeoutMs: 15_000 });
     const ferramentas = continuacao.dados.ferramentas as string[];
-    expect(ferramentas).toContain("mcp__nod__lembrar");
-    expect(ferramentas).not.toContain("mcp__nod__perguntar_a_bot");
+    // A continuação é a retomada do turno da Vera: o kit da conversa, menos o salto.
+    expect(ferramentas).toEqual(expect.arrayContaining(["mcp__nod__lembrar", "mcp__nod__pedir_aprovacao"]));
+    expect(ferramentas).not.toContain("mcp__nod__pedir_a_bot");
+    expect(await turno(resposta.turnoId ?? "")).toMatchObject({ origem: "retomada", profundidade: 1 });
     expect(frames.slice(desde).filter((f) => f.tipo === "turno.iniciado").length).toBeGreaterThanOrEqual(2);
+    await esperarTurno(resposta.turnoId ?? "");
   });
 
-  it("tarefa delegada (ADR-047): delegar_tarefa leva a mensagem da pessoa; o alvo roda em 'delegacao' com pedir_acesso e sem delegar de novo; o resultado volta ao remetente como 'Resultado'", { timeout: JORNADA_MS }, async () => {
-    // Remetente novo: a conversa da Vera já tem a resposta não confiável do bot-a-bot no histórico, e isso
-    // contaminaria a delegação (revisão da ADR-047) — aqui a jornada é a do pedido limpo.
+  it("pedido com a mensagem da pessoa (ADR-058): ela vai junto ao alvo, literal; o resultado volta; a falha no alvo avisa o remetente uma vez", { timeout: JORNADA_MS }, async () => {
     const criadoTaga = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Taga", descricao: "Coordena o time." });
     criados.agentes.push(criadoTaga.agente.id);
     criados.conversas.push(criadoTaga.conversa.id);
     const taga = { agenteId: criadoTaga.agente.id, conversaId: criadoTaga.conversa.id };
-    const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/leapy/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
+    const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/leapy/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
     const t = await rodar(taga.conversaId, pedido);
     expect(t.estado).toBe("concluido");
     const resultado = await esperarOu(tuca.conversaId, () =>
       srv.esperar(async () => {
         const dto = await conversa(taga.conversaId);
         return dto.mensagens.find((m) => m.kind === "peer_ask" && m.payload?.kind === "peer_ask" && m.payload.delegada === true) ?? null;
-      }, { nome: "resultado da tarefa delegada", timeoutMs: 15_000 }),
+      }, { nome: "resultado do pedido", timeoutMs: 15_000 }),
     );
-    expect(resultado).toMatchObject({ confianca: "nao_confiavel", texto: "PR 466 revisado: dois comentários" });
+    expect(resultado).toMatchObject({ texto: "PR 466 revisado: dois comentários" });
     expect(resultado.autoria.sob_procuracao_de).toBe(srv.pessoa.pessoaId);
     const tarefa = await turno(resultado.payload?.kind === "peer_ask" ? resultado.payload.tarefaId : "");
     expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: srv.pessoa.pessoaId, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
-    // Na conversa do Tuca, o pedido é a mensagem LITERAL da pessoa, assinada "Taga · por <pessoa>".
+    expect(tarefa.entradaTexto).toContain(`<pedido_da_pessoa>\n${pedido}\n</pedido_da_pessoa>`);
+    // Na conversa do Tuca, o pedido é a fala do Taga, assinada "Taga · por <pessoa>".
     const naConversaDoAlvo = (await conversa(tuca.conversaId)).mensagens.find((m) => m.turnoId === tarefa.id && m.payload?.kind === "peer_pedido");
-    expect(naConversaDoAlvo).toMatchObject({ texto: pedido, confianca: "confiavel" });
     expect(naConversaDoAlvo?.autoria).toMatchObject({ autor_id: taga.agenteId, sob_procuracao_de: srv.pessoa.pessoaId });
-    const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
-    const doAlvo = dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === tarefa.id)?.dados.ferramentas as string[];
-    expect(doAlvo).toContain("mcp__nod__pedir_acesso");
-    expect(doAlvo).not.toContain("mcp__nod__delegar_tarefa");
-    expect(doAlvo).not.toContain("mcp__nod__perguntar_a_bot");
-    const continuacao = await srv.esperar(async () => {
-      const d = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
-      return d.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === resultado.turnoId) ?? null;
-    }, { nome: "plano da continuação do remetente", timeoutMs: 15_000 });
-    expect(continuacao.dados.ferramentas as string[]).not.toContain("mcp__nod__delegar_tarefa");
     await esperarTurno(resultado.turnoId ?? "");
 
-    // Revisão da ADR-047: a tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
-    await rodar(taga.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: delegar_tarefa {"agente":"Tuca","tarefa":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
+    // A tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.
+    await rodar(taga.conversaId, 'Pede ao Tuca para revisar o PR 467. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"revisar o PR 467 [[falha: error_during_execution]]"}]] [[texto: Pedi ao Tuca.]]');
     const aviso = await esperarOu(tuca.conversaId, () =>
       srv.esperar(async () => {
         const dto = await conversa(taga.conversaId);
         return dto.mensagens.find((m) => m.payload?.kind === "peer_ask" && m.payload.falhou === true) ?? null;
-      }, { nome: "aviso de tarefa não concluída", timeoutMs: 15_000 }),
+      }, { nome: "aviso de pedido não concluído", timeoutMs: 15_000 }),
     );
     expect(aviso.texto).toMatch(/^Tuca não concluiu: /);
     await esperarTurno(aviso.turnoId ?? "");

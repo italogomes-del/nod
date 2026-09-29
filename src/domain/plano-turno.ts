@@ -26,7 +26,7 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
 
 /**
  * Ferramentas nod por modo (definido em 2026-09-16): conversa e sala têm o kit completo; rotina
- * permite consulta a colega (definido em 2026-09-17) e encerrar em silêncio por sem_novidade
+ * pede a colega (definido em 2026-09-17; pedir_a_bot desde 2026-09-29, ADR-058) e encerra em silêncio por sem_novidade
  * (definido em 2026-09-21 — só faz sentido onde ninguém está esperando resposta, por isso não entra
  * em conversa nem em sala); peer é texto-só, sem salto (E12.4). pedir_a_pessoa (EMENDA 16) entra
  * onde há pessoa para destravar: criação, conversa, sala e rotina — não em peer (o remetente é outro bot).
@@ -49,10 +49,10 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * rotina que se desliga por conta própria, e o modo rotina já é explicitamente "a própria execução",
  * não a hora de reconfigurar. Quem reconfigura é a pessoa, na conversa.
  *
- * delegacao (definido em 2026-09-24, ADR-047): o turno de quem cumpre uma tarefa que a pessoa pediu por
- * meio de outro bot. Tem pedir_acesso (inclusive escrita: quem pediu foi a pessoa) e os caminhos de
- * aprovação; não tem salto (profundidade 1), nem rotina, nem delegar de novo. delegar_tarefa só entra
- * onde há mensagem da pessoa para carregar: conversa e sala.
+ * delegacao (definido em 2026-09-24, ADR-047; revisto em 2026-09-29, ADR-058): o turno de quem cumpre um
+ * pedido de colega (pedir_a_bot), com os acessos dele. Tem pedir_acesso (inclusive escrita) e os caminhos
+ * de aprovação; não tem salto (profundidade 1), nem rotina. pedir_a_bot entra em todo modo em que um bot
+ * trabalha para a pessoa: criação, conversa, sala e rotina. peer é legado (perguntar_a_bot saiu na ADR-058).
  *
  * publicar_artefato/ler_artefato (definido em 2026-09-28, ADR-051) entram onde o bot fala com UMA pessoa
  * na conversa dele: conversa e rotina — e a retomada, que cai num dos dois (modoDoTurno). Fora da sala
@@ -60,10 +60,10 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * peer (quem lê é outro bot) e da delegação (o resultado volta ao remetente, não à pessoa).
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa", "passar", "encaminhar"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"],
   peer: ["lembrar"],
   delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"],
 };
@@ -132,8 +132,11 @@ export type EntradaPlano = {
   rotinasDoAgente?: readonly RotinaNoPrompt[];
   /** Nomes `${slug}__${tool}` das regras ATIVAS da pessoa para este agente (ADR-042). */
   semprePermitir?: readonly string[];
-  /** Turno de delegação (ADR-047): quem pediu e por meio de quem, para a linha do prompt. */
-  delegacao?: { pessoaNome: string; remetenteNome: string } | null;
+  /**
+   * Turno de quem cumpre um pedido de colega (ADR-047/058): de quem é o trabalho, quem pediu e se a trava da
+   * rotina de onde o pedido nasceu vale aqui (`trava`, que também chega por `rotina`), para a linha do prompt.
+   */
+  delegacao?: { pessoaNome: string; remetenteNome: string; trava?: boolean } | null;
   /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
   pastasAutorizadas?: boolean;
   /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
@@ -151,13 +154,11 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaAprendiz, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
 
-  // definido em 2026-09-24 (ADR-047): a delegação também roda em profundidade 1 (não repassa), mas não é
-  // peer — a autoridade é o pedido da pessoa, e virar peer apagava isso (catálogo só `lembrar`).
-  const modo: ModoTurno = entrada.profundidade >= 1 && entrada.modo !== "delegacao" ? "peer" : entrada.modo;
-  // definido em 2026-09-24 (revisão da ADR-047): delegar_tarefa só aparece quando o turno PODE delegar
-  // (as mesmas condições de delegar-tarefa.ts) — numa retomada ela estaria no catálogo e sempre negaria.
-  const podeDelegar = (entrada.turno.origem === "conversa" || entrada.turno.origem === "sala") && entrada.profundidade === 0 && entrada.confianca === "confiavel" && Boolean(entrada.turno.mensagemOrigemId);
-  const nod = FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n !== "delegar_tarefa" || podeDelegar).map(ferramentaNod);
+  // revisto em 2026-09-29 (ADR-058): profundidade 1 não é mais "peer". Ela corta o salto (montarFerramentas
+  // tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é 'delegacao', e a
+  // continuação de quem pediu é a retomada do turno dele (conversa, sala ou rotina, com a trava da rotina).
+  const modo: ModoTurno = entrada.modo;
+  const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.

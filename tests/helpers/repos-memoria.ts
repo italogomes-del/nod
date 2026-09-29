@@ -563,6 +563,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas[todas.length - 1] ?? null;
       },
+      async pedidoDaTarefa(turnoId) {
+        return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
+      },
       async marcarParcial(id, parcial) {
         const m = doTenant(b.mensagens).find((x) => x.id === id);
         if (!m) return false;

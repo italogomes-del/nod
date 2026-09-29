@@ -125,8 +125,8 @@ export async function agenteVisivel(repos: Repos, agenteId: string): Promise<Age
 }
 
 /**
- * Alvo de perguntar_a_bot e delegar_tarefa (extraído em 2026-09-24, ADR-047, para as duas não
- * divergirem): id do diretório ou nome único entre os agentes visíveis, preferindo os do mesmo dono.
+ * Alvo de pedir_a_bot (ADR-058; extraído em 2026-09-24, ADR-047, quando eram duas ferramentas): id do
+ * diretório ou nome único entre os agentes visíveis, preferindo os do mesmo dono.
  * Nome repetido = entrada_invalida (o modelo usa o id); a si mesmo = entrada_invalida.
  */
 export async function resolverAlvo(repos: Repos, remetente: Agente, agente: string): Promise<Agente> {
@@ -143,15 +143,16 @@ export async function resolverAlvo(repos: Repos, remetente: Agente, agente: stri
 }
 
 /**
- * Mesmo dono passa; dono diferente só com procuração prévia da CLASSE pedida (autorizarDelegacao,
+ * Mesmo dono passa; dono diferente só com procuração prévia de uma das CLASSES aceitas (autorizarDelegacao,
  * fail-closed → nao_permitido, ADR-025). definido em 2026-09-16: gastoHoje = 0 — sem rota de
  * procuração nesta rodada, o teto diário não é contado (registrado como pendência).
  */
-export async function autorizarAlvo(repos: Repos, remetente: Agente, alvo: Agente, classe: string): Promise<void> {
+export async function autorizarAlvo(repos: Repos, remetente: Agente, alvo: Agente, classes: readonly string[]): Promise<void> {
   if (alvo.ownerId === remetente.ownerId) return;
   const procuracoes = await repos.procuracoes.listarDoBeneficiario(remetente.id);
-  const r = autorizarDelegacao(procuracoes, { agenteConcedenteId: alvo.id, agenteBeneficiarioId: remetente.id, classe, gastoHoje: 0 });
-  if (!r.autorizado) throw new ErroDeDominio("nao_permitido", { cause: r.motivo });
+  const resultados = classes.map((classe) => autorizarDelegacao(procuracoes, { agenteConcedenteId: alvo.id, agenteBeneficiarioId: remetente.id, classe, gastoHoje: 0 }));
+  const recusa = resultados.find((r) => !r.autorizado);
+  if (!resultados.some((r) => r.autorizado)) throw new ErroDeDominio("nao_permitido", { cause: recusa && !recusa.autorizado ? recusa.motivo : "sem_procuracao" });
 }
 
 /**
@@ -165,6 +166,22 @@ export async function delegacaoDoTurno(repos: Repos, turno: Turno): Promise<Turn
     atual = await repos.turnos.buscar(atual.retomaTurnoId);
   }
   return atual?.origem === "delegacao" ? atual : null;
+}
+
+/**
+ * A trava que quem cumpre um pedido de colega herda (definido em 2026-09-29, ADR-058): o turno de quem pediu,
+ * achado pelo `peer_pedido` da tarefa, era de rotina com exige_aprovacao, ou uma retomada ligada a ela? Então
+ * o efeito externo de quem recebe também só sai por item aprovado. Sem achar o pedido ou quem pediu, trava
+ * (fail-closed); turno de rotina sem janela também trava (E7.3).
+ */
+export async function travaDoPedido(repos: Repos, tarefa: Turno): Promise<boolean> {
+  const pedido = await repos.mensagens.pedidoDaTarefa(tarefa.id);
+  if (!pedido || pedido.payload?.kind !== "peer_pedido") return true;
+  const remetente = await repos.turnos.buscar(pedido.payload.turnoOrigemId);
+  if (!remetente) return true;
+  const ligacao = await rotinaDoTurno(repos, remetente.id);
+  if (ligacao) return ligacao.rotina.exigeAprovacao;
+  return remetente.origem === "rotina";
 }
 
 /**

@@ -18,8 +18,7 @@ const NOD: Record<string, string> = {
   passar: "Passou a vez",
   encaminhar: "Encaminhou a outro bot",
   sem_novidade: "Viu que não há novidade",
-  perguntar_a_bot: "Perguntou a outro bot",
-  delegar_tarefa: "Pediu uma tarefa a outro bot",
+  pedir_a_bot: "Pediu ajuda a outro bot",
   ver_colegas: "Viu o que os colegas fazem",
 };
 

@@ -84,7 +84,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
     const para = agenteDe(estado, p.para)?.nome ?? "agente";
     const alvo = agenteDe(estado, p.para);
-    return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? (m.autoria.sob_procuracao_de ? "tarefa delegada" : "pedido de colaboração") : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
+    return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? "pedido a colega" : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
   }
   if (p?.kind === "passe") return `<div class="msg-passe">⏭ ${paragrafos(m.texto)} <span class="tag tag-cinza">${esc(p.motivo.replaceAll("_", " "))}</span></div>`;
   if (p?.kind === "consentimento") {
@@ -96,7 +96,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "resultado_aprovacao") return `<div class="msg-resultado">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
   if (p?.kind === "parada") return `<div class="msg-parada">■ ${paragrafos(m.texto)}</div>`;
-  if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Tarefa não concluída por" : p.delegada ? "Resultado de" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
+  if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
 }
@@ -161,7 +161,8 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}${faixaDaMensagem(m, estado)}</div>`;
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
-  // Autoria composta (ADR-023) aparece inteira: o pedido delegado é "Taga · por você" (ADR-047).
+  // Autoria composta (ADR-023) aparece inteira: o pedido de colega é "Taga · por você" (ADR-047/058). O bloco de
+  // contexto só existe em pedido antigo (delegar_tarefa); o de pedir_a_bot já traz o contexto no próprio texto.
   const autor = ehPessoa ? "Você" : m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agente?.nome ?? assinatura(m.autoria, nomesDe(estado));
   const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time></div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
@@ -361,7 +362,7 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
     return `<details class="collaboration" data-disclosure="${esc(k)}"><summary>${grupo.length} ${grupo.length === 1 ? "mensagem" : "mensagens"} com <span class="avatar-stack">${avatares}</span><span>${esc(nome)}</span><span class="chevron">⌄</span></summary><div class="collaboration-panel">${participantes.map((id) => {
       const a = agenteDe(estado, id);
       const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
-      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Tarefa · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluída" : x.payload?.kind === "peer_ask" && x.payload.delegada ? "Resultado" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto, { chave: `colab:${x.id}` })}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
+      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Pedido · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluído" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto, { chave: `colab:${x.id}` })}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
     }).join("")}</div></details>`;
   }
   // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de

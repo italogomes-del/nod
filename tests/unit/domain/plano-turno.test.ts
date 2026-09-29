@@ -44,12 +44,13 @@ describe("montarPlano", () => {
     expect(off.catalogo.servidores).toEqual([]);
   });
 
-  it("profundidade 1 vira modo peer: sem perguntar_a_bot nem encaminhar (E12.4)", () => {
+  it("profundidade 1 corta o salto — sem pedir_a_bot nem encaminhar (E12.4) — e mantém o modo (ADR-058)", () => {
     const p = montarPlano({ ...base, modo: "sala", profundidade: 1 });
-    expect(nomes(p)).not.toContain("perguntar_a_bot");
+    expect(nomes(p)).not.toContain("pedir_a_bot");
     expect(nomes(p)).not.toContain("encaminhar");
+    expect(nomes(p)).toContain("passar");
     expect(p.profundidade).toBe(1);
-    expect(p.promptSistema).toContain("outro bot");
+    expect(p.promptSistema).toContain("Modo de sala");
   });
 
   it("entrada nao_confiavel: só readOnly de conector; nod fica; decididoPor nomeia a regra", () => {
@@ -66,10 +67,10 @@ describe("montarPlano", () => {
     const criacao = nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"));
     expect(criacao.filter((n) => n !== "atualizar_perfil").sort()).toEqual(nomes(montarPlano(base)).filter((n) => !n.includes("__")).sort());
     expect(criacao).toContain("atualizar_perfil");
-    for (const n of ["ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pedir_a_pessoa"]) expect(criacao).toContain(n);
+    for (const n of ["ver_colegas", "pedir_a_bot", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "perguntar_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
     // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
@@ -104,15 +105,17 @@ describe("montarPlano", () => {
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
   });
 
-  it("agente acordado por rotina pode consultar colega sem transferir escrita nem permitir outro salto", () => {
+  it("agente acordado por rotina pode pedir a colega; quem recebe (delegacao) tem o catálogo dele e não repassa (ADR-058)", () => {
     const rotina = montarPlano({ ...base, modo: "rotina", turno: { ...turno, origem: "rotina" }, confianca: "nao_confiavel", rotina: { exigeAprovacao: true } });
-    expect(nomes(rotina)).toContain("perguntar_a_bot");
+    expect(nomes(rotina)).toContain("pedir_a_bot");
     expect(nomes(rotina)).toContain("exemplo__listar_contatos");
     expect(nomes(rotina)).not.toContain("exemplo__enviar_email");
     expect(rotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    const colega = montarPlano({ ...base, modo: "peer", profundidade: 1, confianca: "nao_confiavel" });
-    expect(nomes(colega)).not.toContain("perguntar_a_bot");
-    expect(nomes(colega)).not.toContain("exemplo__enviar_email");
+    const colega = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 1 }, profundidade: 1, confianca: "confiavel", rotina: { exigeAprovacao: true } });
+    expect(nomes(colega)).not.toContain("pedir_a_bot");
+    expect(nomes(colega)).toEqual(expect.arrayContaining(["exemplo__listar_contatos", "exemplo__enviar_email"]));
+    // A trava herdada da rotina de quem pediu segura a escrita no proxy, não no catálogo.
+    expect(colega.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
   });
 
   it("EMENDA 15: origem rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; conversa não", () => {

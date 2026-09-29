@@ -75,7 +75,8 @@ export interface ServicesNod<Trx> {
   sala: {
     encaminhar(trx: Trx, p: { turnoId: string; paraAgente: string; motivo: string }): Promise<{ ok: true }>;
     passar(trx: Trx, p: { turnoId: string; motivo: MotivoPasse }): Promise<{ ok: true }>;
-    perguntar(trx: Trx, p: { turnoId: string; agente: string; pergunta: string }): Promise<{ tarefaId: string }>;
+    /** pedir_a_bot (ADR-058) para quem só tem o turnoId. */
+    pedir(trx: Trx, p: { turnoId: string; agente: string; pedido: string; contexto?: string }): Promise<{ tarefaId: string }>;
   };
   barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse };
 }
@@ -95,7 +96,7 @@ export type SaidaCasoDeUso<O> = { data: O; events?: RuntimeEvent[] };
  * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema,
  * aplica gate de parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps`
  * pelo mesmo motivo de ServicesNod. lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/
- * perguntarABot/delegarTarefa ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
+ * pedirABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
  */
 export type CasoNod<Deps, N extends NomeFerramentaNod> = (
   deps: Deps,
@@ -117,8 +118,7 @@ export interface UseCasesNod<Deps> {
   passar: CasoNod<Deps, "passar">;
   encaminhar: CasoNod<Deps, "encaminhar">;
   semNovidade: CasoNod<Deps, "sem_novidade">;
-  perguntarABot: CasoNod<Deps, "perguntar_a_bot">;
-  delegarTarefa: CasoNod<Deps, "delegar_tarefa">;
+  pedirABot: CasoNod<Deps, "pedir_a_bot">;
   verColegas: CasoNod<Deps, "ver_colegas">;
   publicarArtefato: CasoNod<Deps, "publicar_artefato">;
   lerArtefato: CasoNod<Deps, "ler_artefato">;
@@ -140,8 +140,7 @@ export const USE_CASE_POR_FERRAMENTA = {
   passar: "passar",
   encaminhar: "encaminhar",
   sem_novidade: "semNovidade",
-  perguntar_a_bot: "perguntarABot",
-  delegar_tarefa: "delegarTarefa",
+  pedir_a_bot: "pedirABot",
   ver_colegas: "verColegas",
   publicar_artefato: "publicarArtefato",
   ler_artefato: "lerArtefato",

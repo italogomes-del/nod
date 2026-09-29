@@ -93,7 +93,7 @@ describe("partesDoPrompt: o prompt de sistema em seções", () => {
     agente: { nome: "Clarice", titulo: "assistente", descricao: "Cuida da agenda." },
     memorias: [{ tenantId: "t", id: "m1", agenteId: "a", tipo: "preferencia", texto: "prefere tópicos", origem: "pessoa", criadoEm: 1 }],
     ferramentas: [
-      f("perguntar_a_bot"), f("delegar_tarefa"), f("ver_colegas"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("publicar_artefato"),
+      f("pedir_a_bot"), f("ver_colegas"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("publicar_artefato"),
       f("computador_bash", "computador"), f("pasta_ler", "workspace"), f("gmail__GMAIL_FETCH_EMAILS", "conector"),
     ],
     nativas: modo === "conversa" || modo === "criacao" ? ["Read", "Bash", "Skill", "Agent"] : [],

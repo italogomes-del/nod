@@ -72,7 +72,7 @@ describeIntegracao("bot novo é bot completo (ADR-050)", () => {
       const tarsila = await c.repos.agentes.buscar(c.tarsila.agenteId);
       expect(tarsila?.confirmado).toBe(false);
       expect(modoDoTurno(c.turno, { tipo: "propria" }, { confirmado: false })).toBe("criacao");
-      for (const n of ["ver_colegas", "perguntar_a_bot", "delegar_tarefa", "pausar_rotina", "atualizar_perfil"]) expect(FERRAMENTAS_NOD_POR_MODO.criacao).toContain(n);
+      for (const n of ["ver_colegas", "pedir_a_bot", "pausar_rotina", "atualizar_perfil"]) expect(FERRAMENTAS_NOD_POR_MODO.criacao).toContain(n);
     });
   });
 
