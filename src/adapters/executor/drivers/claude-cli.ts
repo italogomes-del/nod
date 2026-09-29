@@ -18,7 +18,7 @@ import { iniciarProcesso, executarColetando, type Processo } from "../processo.t
 import { lerFlagsDoHelp, lerVersao, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
 import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
-import { MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
+import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
 
 /**
  * Driver claude-cli (ADR-012: implementação ÚNICA e real; ADR-014 invertido: o CLI é o da pessoa).
@@ -94,24 +94,31 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
 /** O que o modelo lê quando o plano pediu o kit do terminal e esta máquina não o tem (app sem o hook). */
 export const AVISO_SEM_TERMINAL = "Nesta máquina o kit do terminal não está disponível neste turno: não há Bash, WebFetch nem WebSearch, e as nativas de arquivo só valem nas pastas de projeto autorizadas.";
 
-/** ADR-052: o turno com o kit do terminal — `settings` (hook + sandbox) e as pastas além do cwd. */
+/** ADR-052: o turno com o kit do terminal — `settings` (o hook do nod) e as pastas além do cwd (ADR-055: a pasta da pessoa). */
 export type TurnoTerminal = { settings: string; dirsExtras: readonly string[] };
 
 /** Aspas de shell para o comando do hook (o CLI o roda num shell): caminhos com espaço, como "Application Support". */
 const aspas = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 
 /**
- * ADR-052: o `--settings` do turno com o kit do terminal. O hook PreToolUse do nod decide CADA nativa (medido em
- * 2026-09-28: roda em -p via --settings, e o deny barra a chamada); o sandbox do Bash grava só nas pastas do bot e
- * não acessa a rede (medido: "operation not permitted" fora da pasta, "deny network-outbound"), sem escape.
+ * Teto do hook em segundos: a espera de uma aprovação no próprio turno (0032) mais folga para a confirmação final.
+ * Abaixo dele o CLI mataria o hook no meio da espera e o comando aprovado não rodaria.
  */
-export function settingsDoTerminal(p: { comandoHook: string; permitidas: readonly string[] }): string {
+export const TETO_HOOK_S = Math.ceil(ESPERA_APROVACAO_NO_TURNO_MS / 1000) + 30;
+
+/**
+ * ADR-052: o `--settings` do turno com o kit do terminal. O hook PreToolUse do nod decide CADA nativa (medido em
+ * 2026-09-28: roda em -p via --settings, e o deny barra a chamada).
+ * revisto em 2026-09-28 (ADR-055, "terminal de verdade, como o inhouse"): SEM sandbox. O Bash roda no Mac da
+ * pessoa com rede, o gh e o git logados dela; quem segura é o hook, que manda cada comando ao servidor — o que só
+ * lê roda, o resto espera a aprovação dela num card.
+ */
+export function settingsDoTerminal(p: { comandoHook: string }): string {
   return JSON.stringify({
     // Só as nativas, no formato da documentação ("Edit|Write"). As ferramentas MCP do nod passam pelo proxy; o hook
     // as deixa passar também quando o CLI o consulta para elas (medido ao vivo em 2026-09-28: com "*", o hook
     // negava mcp__nod__publicar_artefato como "fora do kit").
-    hooks: { PreToolUse: [{ matcher: NATIVAS_DO_TERMINAL.join("|"), hooks: [{ type: "command", command: p.comandoHook, timeout: 30 }] }] },
-    sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: [...p.permitidas] }, network: { allowedDomains: [] } },
+    hooks: { PreToolUse: [{ matcher: NATIVAS_DO_TERMINAL.join("|"), hooks: [{ type: "command", command: p.comandoHook, timeout: TETO_HOOK_S }] }] },
   });
 }
 
@@ -135,7 +142,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
   const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
   // do plano (nativasDoTurno, 2026-09-28); plano de servidor antigo sem o campo cai na regra anterior.
-  // ADR-052: no kit do terminal elas são exatamente as do plano, sob o hook e o sandbox do nod.
+  // ADR-052: no kit do terminal elas são exatamente as do plano, sob o hook do nod (ADR-055: sem sandbox).
   const nativas = terminal ? (plano.nativas ?? []) : pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO).filter((n) => (NATIVAS_DE_ARQUIVO as readonly string[]).includes(n)) : [];
   const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas, FERRAMENTA_DE_BUSCA].join(",");
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
@@ -156,7 +163,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     // --restricted substitui --setting-sources project: ignora CLAUDE.md, skills e hooks do repo
     // aberto, que o nod não escreveu, e confina as ferramentas de arquivo às pastas permitidas.
     // ADR-052: o kit do terminal NÃO usa --restricted (ele tira Bash e WebFetch, medido em 2026-09-28); o cwd é a
-    // pasta do bot, que o nod controla, e quem confina é o hook do nod + o sandbox do Bash (--settings).
+    // pasta do bot, que o nod controla, e quem decide cada chamada é o hook do nod (--settings; ADR-055: sem sandbox).
     ...(pastas ? ["--restricted"] : ["--setting-sources", "project"]),
     ...extras.flatMap((p) => ["--add-dir", p]),
     "--strict-mcp-config",
@@ -269,11 +276,12 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               let terminal: TurnoTerminal | undefined;
               if (pastaBot && lig.hookPath) {
                 await mkdir(pastaBot, { recursive: true });
-                const permitidas = [pastaBot, ...(plano.workspacePastas?.aprovadas ?? [])];
                 const config = join(tmpdir, "hook-nativas.json");
-                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, permitidas }), { mode: 0o600 });
+                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno }), { mode: 0o600 });
                 const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
-                terminal = { settings: settingsDoTerminal({ comandoHook, permitidas }), dirsExtras: permitidas.filter((p) => p !== pastaBot) };
+                // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
+                const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);
+                terminal = { settings: settingsDoTerminal({ comandoHook }), dirsExtras };
               }
               const diretorio = pastaBot ?? pastas?.ativa ?? tmpdir;
               const eventos: EventoStream[] = [];

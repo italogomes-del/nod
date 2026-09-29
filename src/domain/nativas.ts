@@ -1,3 +1,4 @@
+import { tocaCredencial } from "./comando.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
 
@@ -10,11 +11,22 @@ import type { ModoTurno } from "../contracts/plano-turno.ts";
 export const NATIVAS_DE_ARQUIVO = ["Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"] as const;
 
 /**
- * definido em 2026-09-28 (ADR-052): o kit do terminal — o que a pessoa faz no Claude Code, o bot faz no nod.
- * Cada chamada passa pelo hook PreToolUse do nod (caminho confinado à pasta do bot e às pastas autorizadas,
- * trilha no servidor) e o Bash roda no sandbox nativo, sem rede. Só no harness Claude Code, com o hook.
+ * definido em 2026-09-28 (emenda da ADR-055, "as skills do terminal"): as skills da pessoa e os subagentes. Sem a
+ * ferramenta Skill, o Dev 1 respondeu "não tenho ferramenta de skills" a um pedido de /review — as 305 skills dela
+ * e os plugins já vinham carregados pelo --add-dir da pasta dela, e nenhuma podia ser chamada. Medido no CLI
+ * 2.1.284: o hook do nod recebe a Skill e o Agent, e DEPOIS cada ferramenta que a skill ou o subagente usa (o Bash
+ * do subagente chega com o agent_id dele) — a decisão do servidor continua em toda chamada. O `init` lista o
+ * subagente como "Task"; o --tools aceita e o hook recebe "Agent".
  */
-export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch"] as const;
+export const NATIVAS_DE_SKILL = ["Skill", "Agent"] as const;
+
+/**
+ * definido em 2026-09-28 (ADR-052): o kit do terminal — o que a pessoa faz no Claude Code, o bot faz no nod.
+ * Cada chamada passa pelo hook PreToolUse do nod (trilha no servidor). Só no harness Claude Code, com o hook.
+ * revisto em 2026-09-28 (ADR-055): sem sandbox — arquivos em qualquer lugar do Mac, Bash com rede e as
+ * credenciais da pessoa, e cada comando decidido pelo servidor (leitura roda, o resto pede aprovação).
+ */
+export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL] as const;
 
 /** As nativas que trazem conteúdo de FORA para o turno: a chamada marca o turno como contaminado (0033). */
 export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch"];
@@ -41,28 +53,20 @@ export function pastaDoBot(nome: string): string {
   return limpo === "" ? "bot" : limpo;
 }
 
-export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean };
+/**
+ * `comando` = o Bash: quem decide é o SERVIDOR (autorizar-comando.ts), com o comando na mão — só lê roda direto,
+ * o resto vira card. O hook nunca decide um comando sozinho.
+ */
+export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string };
 
 /**
- * A decisão do hook do nod para UMA chamada nativa (ADR-052), pura: `resolver` devolve o caminho real
- * (realpath do que existe; do ancestral que existe + o resto, senão) e `permitidas` já vem resolvida. Medido
- * em 2026-09-28: o CLI entrega /private/var/… onde o turno passou /var/… — comparar sem resolver nega o que é
- * da pasta do bot. Fail-closed: ferramenta desconhecida, caminho fora ou Bash sem sandbox → nega.
+ * A decisão do hook do nod para UMA chamada nativa, pura. revisto em 2026-09-28 (ADR-055, "terminal de verdade,
+ * como o inhouse"): a pessoa escolheu que o bot lê e grava em QUALQUER lugar do Mac, como ela no Claude Code —
+ * as nativas de arquivo não são mais confinadas à pasta do bot (ADR-052). O Bash roda fora de sandbox, com rede e
+ * as credenciais dela, e por isso cada comando passa pelo servidor. Fail-closed: ferramenta desconhecida e Bash
+ * sem comando → nega.
  */
-export function decidirNativa(p: { ferramenta: string; entrada: Record<string, unknown>; permitidas: readonly string[]; cwd: string; resolver: (caminho: string) => string; separador?: string }): DecisaoNativa {
-  const sep = p.separador ?? "/";
-  const dentro = (caminho: string) => {
-    const real = p.resolver(caminho.startsWith(sep) ? caminho : `${p.cwd}${sep}${caminho}`);
-    return p.permitidas.some((raiz) => real === raiz || real.startsWith(raiz.endsWith(sep) ? raiz : `${raiz}${sep}`));
-  };
-  const caminhoDe = (chave: string, padrao?: string): string | null => {
-    const v = p.entrada[chave];
-    return typeof v === "string" && v !== "" ? v : padrao ?? null;
-  };
-  const porCaminho = (caminho: string | null): DecisaoNativa =>
-    caminho !== null && dentro(caminho)
-      ? { permitir: true, motivo: "dentro das pastas do bot", contamina: false }
-      : { permitir: false, motivo: "fora da pasta do bot e das pastas autorizadas nesta conversa", contamina: false };
+export function decidirNativa(p: { ferramenta: string; entrada: Record<string, unknown> }): DecisaoNativa {
   // Ferramenta MCP do nod não é nativa: quem decide é o proxy (ADR-013), que também grava a trilha. Medido ao
   // vivo em 2026-09-28: com o matcher "*", o CLI consultava o hook para MCP e ele negava publicar_artefato.
   if (p.ferramenta.startsWith("mcp__")) return { permitir: true, motivo: "ferramenta do nod: quem decide é o proxy", contamina: false };
@@ -70,19 +74,30 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     case "Read":
     case "Write":
     case "Edit":
-      return porCaminho(caminhoDe("file_path"));
     case "NotebookEdit":
-      return porCaminho(caminhoDe("notebook_path"));
     case "Glob":
-    case "Grep":
-      return porCaminho(caminhoDe("path", p.cwd));
-    case "Bash":
-      return p.entrada.dangerouslyDisableSandbox === true
-        ? { permitir: false, motivo: "comando fora da área protegida não roda no nod", contamina: false }
-        : { permitir: true, motivo: "no sandbox: grava só nas pastas do bot, sem rede", contamina: false };
+    case "Grep": {
+      // ADR-055: o Mac inteiro, menos onde moram as credenciais — lê-las é o primeiro passo para vazá-las.
+      const caminhos = ["file_path", "notebook_path", "path", "pattern"].map((k) => p.entrada[k]).filter((v): v is string => typeof v === "string");
+      return caminhos.some(tocaCredencial)
+        ? { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false }
+        : { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false };
+    }
+    case "Bash": {
+      const comando = typeof p.entrada.command === "string" ? p.entrada.command : "";
+      return comando.trim() === ""
+        ? { permitir: false, motivo: "comando vazio", contamina: false }
+        : { permitir: true, motivo: "o servidor do nod decide o comando", contamina: false, comando };
+    }
     case "WebFetch":
     case "WebSearch":
       return { permitir: true, motivo: "conteúdo da web: o turno passa a tratar escrita externa como não confiável", contamina: true };
+    // Emenda da ADR-055: a skill é instrução dos arquivos da própria pessoa, e o subagente é o mesmo modelo com as
+    // mesmas ferramentas; o que cada um USA passa por aqui de novo, chamada por chamada.
+    case "Skill":
+      return { permitir: true, motivo: "skill da pessoa: cada ferramenta que ela usar passa pelo nod", contamina: false };
+    case "Agent":
+      return { permitir: true, motivo: "subagente: cada ferramenta dele passa pelo nod", contamina: false };
     default:
       return { permitir: false, motivo: `ferramenta fora do kit do nod: ${p.ferramenta}`, contamina: false };
   }

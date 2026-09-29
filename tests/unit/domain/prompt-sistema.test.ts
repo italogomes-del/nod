@@ -31,6 +31,14 @@ describe("montarPromptSistema", () => {
     expect(p).toContain("- [preferencia] prefiro tópicos");
   });
 
+  it("emenda da ADR-055: com a Skill no turno, /nome é pedido de skill e a pergunta da skill vai por pedir_a_pessoa", () => {
+    const comSkill = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_a_pessoa")], nativas: ["Read", "Bash", "Skill", "Agent"], pastaDoBot: "Vera", pessoaNome: "Marlon", modo: "conversa" });
+    expect(comSkill).toContain("Skills: as skills de Marlon no Claude Code");
+    expect(comSkill).toContain('"/nome" na mensagem é um pedido para rodar a skill nome');
+    expect(comSkill).toContain("pergunte com pedir_a_pessoa");
+    expect(montarPromptSistema({ agente, memorias: [], ferramentas: [], nativas: ["Read", "Edit"], pessoaNome: "Marlon", modo: "conversa" })).not.toContain("Skills:");
+  });
+
   it("definido em 2026-09-28 (ADR-053): diz o que a conversa mostra e pede o link no próprio nome", () => {
     const p = montarPromptSistema({ agente, memorias: [], ferramentas: [], pessoaNome: "Marlon", modo: "conversa" });
     expect(p).toContain("tabelas em markdown (cabeçalho e linha |---|)");

@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { Confianca } from "../../src/contracts/mensagem.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { decidir } from "../../src/use-cases/decidir.ts";
-import { computadorLiberadoNaTarefa, liberarComputadorNaTarefa } from "../../src/use-cases/liberar-computador-na-tarefa.ts";
+import { computadorLiberadoNaTarefa, liberarNaTarefa } from "../../src/use-cases/liberar-na-tarefa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
@@ -93,7 +93,7 @@ describeIntegracao("aprovação no mesmo turno: uma decisão, uma continuação 
         await c.repos.itensAprovacao.criarLote(d?.id ?? "", [{ idx: 0, texto: "Abrir no navegador: file:///checklist.html", destino: { conector: "computador", ferramenta: "executar", argumentos: { acaoId: randomUUID() } }, origemSensivel: false }]);
         return (await c.repos.decisoes.decidir(d?.id ?? "", { por: PESSOA_MARLON, agora: Date.now() }))!;
       };
-      const r = await liberarComputadorNaTarefa(c.deps, { decisao: await computador() });
+      const r = await liberarNaTarefa(c.deps, { decisao: await computador() });
       expect(r.data.liberado).toBe(true);
       const retomada = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "retomada", retomaTurnoId: c.turnoId, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
       expect(await computadorLiberadoNaTarefa(c.deps, retomada?.id ?? "")).toBe(true);
@@ -109,7 +109,7 @@ describeIntegracao("aprovação no mesmo turno: uma decisão, uma continuação 
       const d = await c.repos.decisoes.criar({ tipo: "aprovacao", agenteId: c.agenteId, conversaId: c.conversaId, turnoId: c.turnoId, prazoDecisaoEm: Date.now() + 86_400_000, frase: "Ação no computador do bot" });
       await c.repos.itensAprovacao.criarLote(d?.id ?? "", [{ idx: 0, texto: "Rodar no terminal: ls", destino: { conector: "computador", ferramenta: "executar", argumentos: { acaoId: randomUUID() } }, origemSensivel: false }]);
       const decidida = await c.repos.decisoes.decidir(d?.id ?? "", { por: PESSOA_MARLON, agora: Date.now() });
-      expect((await liberarComputadorNaTarefa(c.deps, { decisao: decidida! })).data.liberado).toBe(false);
+      expect((await liberarNaTarefa(c.deps, { decisao: decidida! })).data.liberado).toBe(false);
       expect(await computadorLiberadoNaTarefa(c.deps, c.turnoId)).toBe(false);
     });
   });

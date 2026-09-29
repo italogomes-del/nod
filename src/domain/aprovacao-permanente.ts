@@ -102,6 +102,8 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   if (entrada.origemSensivel) return { automatico: false, motivo: "origem_sensivel" };
   if (plano.politicaExecucao.efeitoExternoSoPorAprovacao) return { automatico: false, motivo: "gate_de_rotina" };
   if (entrada.destino.conector === "computador") return { automatico: false, motivo: "destino_computador" };
+  // ADR-055: comando no terminal do Mac se decide por autorizar-comando.ts, nunca por regra de conector.
+  if (entrada.destino.conector === "terminal") return { automatico: false, motivo: "destino_terminal" };
 
   const nome = `${entrada.destino.conector}__${entrada.destino.ferramenta}`;
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === nome);

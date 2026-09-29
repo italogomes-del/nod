@@ -159,6 +159,8 @@ export function detalheAcesso(proposta: Proposta | null | undefined): string {
  */
 function ondeAcontece(conectores: Estado["conectores"], slug: string): string {
   if (slug === "computador") return "no computador do bot";
+  // ADR-055: o comando roda no terminal do Mac da própria pessoa, com as credenciais dela.
+  if (slug === "terminal") return "no terminal do seu Mac";
   return `no ${conectores.find((c) => c.slug === slug)?.nome ?? slug}`;
 }
 
@@ -168,7 +170,7 @@ function detalheTecnico(i: Item["itensAprovacao"][number]): string {
   return `<details class="ap-detalhe"><summary>Ver detalhes</summary>
     <dl><dt>ferramenta</dt><dd>${esc(i.destino.conector)}.${esc(i.destino.ferramenta)}</dd>
     ${args.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === "string" ? v : JSON.stringify(v))}</dd>`).join("")}</dl>
-    <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" aria-label="Editar o texto antes de enviar" ${i.destino.conector === "computador" ? 'readonly title="Ação vinculada à tela observada; para mudar, recuse e peça uma nova ação."' : ""} />
+    <input class="texto-final" data-item-texto="${esc(i.id)}" value="${esc(i.textoFinal)}" aria-label="Editar o texto antes de enviar" ${i.destino.conector === "computador" ? 'readonly title="Ação vinculada à tela observada; para mudar, recuse e peça uma nova ação."' : i.destino.conector === "terminal" ? 'readonly title="Aprova-se exatamente este comando; para mudar, recuse e diga ao bot o que quer."' : ""} />
   </details>`;
 }
 
@@ -183,11 +185,13 @@ function detalheTecnico(i: Item["itensAprovacao"][number]): string {
  */
 function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
   const nunca = new Set(item.nuncaPermanente ?? []);
-  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && !nunca.has(i.id));
+  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nunca.has(i.id));
   const nomes = [...new Set(elegiveis.map((i) => `${i.destino.conector}.${i.destino.ferramenta}`))];
   if (nomes.length === 0) {
     const motivo = item.itensAprovacao.some((i) => i.destino.conector === "computador")
       ? "Ação no computador é aprovada uma a uma: ela está presa à tela que o bot observou."
+      : item.itensAprovacao.some((i) => i.destino.conector === "terminal")
+        ? "Comando no seu Mac é aprovado um a um. Para não repetir nesta tarefa, use \"Pode fazer e o resto desta tarefa\"."
       : item.itensAprovacao.some((i) => nunca.has(i.id))
         ? "Aprovar ou fazer merge de PR sempre passa por você — não dá para permitir de uma vez."
         : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
@@ -240,11 +244,14 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
     // definido em 2026-09-24: no computador a frase é genérica ("Ação no computador do bot") e quatro
     // pedidos seguidos pareciam o mesmo; a ação concreta ("Abrir no navegador: …") sai do "Ver
     // detalhes". Só no computador: lá o texto é somente leitura, então o que aparece é o que será feito.
-    const acao = unico.destino.conector === "computador" && unico.textoFinal.trim() !== item.decisao.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
+    // ADR-055: o comando do terminal aparece inteiro, em fonte de código — é exatamente o que vai rodar no Mac.
+    const acao = unico.destino.conector === "terminal"
+      ? `<pre class="ap-comando"><code>${esc(unico.textoFinal)}</code></pre>`
+      : unico.destino.conector === "computador" && unico.textoFinal.trim() !== item.decisao.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
     // definido em 2026-09-28 (emenda da ADR-037): numa tarefa no computador cada passo pedia um clique (9 na
     // Ada). Este aprova o passo e libera os próximos DESTA tarefa; o servidor ignora em turno não confiável e
-    // em rotina com gate.
-    const resto = unico.destino.conector === "computador" ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: item.decisao.id }) : "";
+    // em rotina com gate. ADR-055: o mesmo para os comandos no terminal do Mac.
+    const resto = unico.destino.conector === "computador" || unico.destino.conector === "terminal" ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: item.decisao.id }) : "";
     return `<div class="ap-unico">
       ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
       ${aberta ? detalheTecnico(unico) : ""}

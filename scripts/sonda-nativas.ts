@@ -9,21 +9,21 @@ import { settingsDoTerminal } from "../src/adapters/executor/drivers/claude-cli.
 import { log } from "../src/obs/log.ts";
 
 /**
- * Sonda do kit do terminal (ADR-052, 4.0): mede no CLI REAL, em `-p` e com `--settings` por turno, o que o nod
- * precisa para ligar as nativas com ele decidindo. Cada ponto custa UM turno (haiku). Rode a cada versão nova
- * do CLI (flag-floors.ts) e registre o resultado na tabela da ADR-052.
+ * Sonda do kit do terminal (ADR-052, 4.0; revista pela ADR-055): mede no CLI REAL, em `-p` e com `--settings` por
+ * turno, o que o nod precisa para ligar as nativas com ele decidindo. Cada ponto custa UM turno (haiku). Rode a
+ * cada versão nova do CLI (flag-floors.ts) e registre o resultado na tabela da ADR-055.
  *
  *   node scripts/sonda-nativas.ts
  *
  *  1. hook PreToolUse em -p via --settings: roda para toda nativa? o deny barra?
  *  2. --restricted: o hook roda? quais nativas sobram no init?
- *  3. sandbox do Bash: escrita fora da pasta e rede são negadas?
- *  4. WebFetch e WebSearch com o login da pessoa: funcionam, e o hook é consultado?
+ *  3. Bash sem sandbox (ADR-055): grava fora da pasta e acessa a rede quando o hook permite?
+ *  4. hook que ESPERA (a aprovação da pessoa, até TETO_HOOK_S): o CLI aguarda e o comando roda depois?
+ *  5. WebFetch e WebSearch com o login da pessoa: funcionam, e o hook é consultado?
  *
- * Medido em 2026-09-28 (CLI 2.1.283): 1 sim, deny barra (e o caminho chega resolvido: /private/var/…);
+ * Medido em 2026-09-28 (CLI 2.1.283, ADR-052): 1 sim, deny barra (e o caminho chega resolvido: /private/var/…);
  * 2 o hook roda; sem --tools, o --restricted tira Bash e WebFetch do init, com --tools explícito eles ficam;
- * 3 sim ("operation not permitted", "deny network-outbound"); 4 sim, e o hook é consultado nas duas.
- * Hook consultado em 7 de 7 chamadas; nada foi escrito fora da área.
+ * 5 sim, e o hook é consultado nas duas. Os pontos 3 e 4 estão na tabela da ADR-055.
  */
 try {
   process.loadEnvFile(".env");
@@ -47,15 +47,17 @@ mkdirSync(area);
 mkdirSync(fora);
 const registro = join(raiz, "hook.log");
 const hook = join(raiz, "hook.mjs");
-// Hook mínimo: registra a chamada e nega Write fora da área (o do nod decide igual, por caminho real).
+// Hook mínimo: registra a chamada, nega Write fora da área (para medir que o deny barra) e, no comando que cita
+// "espera", segura 40 s antes de permitir — a aprovação da pessoa no hook do nod (ADR-055) faz o mesmo.
 writeFileSync(hook, `import { appendFileSync, realpathSync } from "node:fs"; import { dirname, basename, join } from "node:path";
 const real = (c) => { try { return realpathSync(c); } catch { return join(real(dirname(c)), basename(c)); } };
 let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => {
   const e = JSON.parse(s); appendFileSync(${JSON.stringify(registro)}, e.tool_name + "\\n");
   const negar = e.tool_name === "Write" && !real(e.tool_input.file_path ?? "").startsWith(${JSON.stringify(`${area}/`)});
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: negar ? "deny" : "allow", permissionDecisionReason: "sonda" } }));
+  const responder = () => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: negar ? "deny" : "allow", permissionDecisionReason: "sonda" } }));
+  if (e.tool_name === "Bash" && String(e.tool_input.command ?? "").includes("espera")) setTimeout(responder, 40_000); else responder();
 });`);
-const settings = settingsDoTerminal({ comandoHook: `'${process.execPath}' '${hook}'`, permitidas: [area] });
+const settings = settingsDoTerminal({ comandoHook: `'${process.execPath}' '${hook}'` });
 
 async function ponto(nome: string, prompt: string, ferramentas: string, restrito = false): Promise<void> {
   let init: string[] = [];
@@ -89,10 +91,12 @@ async function ponto(nome: string, prompt: string, ferramentas: string, restrito
 
 await ponto("hook_write", `Com Write, crie ${join(area, "a.txt")} e depois ${join(fora, "b.txt")}. Diga o que aconteceu.`, "Write");
 await ponto("restricted", `Com Write, crie ${join(area, "c.txt")}.`, "Write,Bash,WebFetch", true);
-await ponto("sandbox_bash", `Com Bash, um por vez: echo x > ${join(area, "d.txt")}; echo x > ${join(fora, "e.txt")}; curl -sS -m 5 https://example.com`, "Bash");
+await ponto("bash_de_verdade", `Com Bash, um por vez: echo x > ${join(area, "d.txt")}; echo x > ${join(fora, "e.txt")}; curl -sS -m 5 -o /dev/null -w '%{http_code}' https://example.com. Diga o código HTTP.`, "Bash");
+await ponto("hook_espera", `Com Bash, rode exatamente: echo espera > ${join(fora, "f.txt")}`, "Bash");
 await ponto("web", "Com WebFetch, leia https://example.com e diga o título.", "WebFetch,WebSearch");
 log("info", "sonda_nativas_fim", {
   hook_consultado: existsSync(registro) ? readFileSync(registro, "utf8").trim().split("\n").join(",") : "",
   dentro: ["a.txt", "c.txt", "d.txt"].map((f) => `${f}=${existsSync(join(area, f))}`).join(" "),
-  fora: ["b.txt", "e.txt"].map((f) => `${f}=${existsSync(join(fora, f))}`).join(" "),
+  // ADR-055: b.txt fora (Write negado pelo hook) = false; e.txt e f.txt (Bash sem sandbox, f depois da espera) = true.
+  fora: ["b.txt", "e.txt", "f.txt"].map((f) => `${f}=${existsSync(join(fora, f))}`).join(" "),
 });
