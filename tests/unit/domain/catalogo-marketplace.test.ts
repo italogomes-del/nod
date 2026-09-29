@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogoDoPiso, mesclarCatalogo } from "../../../src/domain/catalogo-marketplace.ts";
+import { catalogoDoPiso, categoriaEmPortugues, mesclarCatalogo, type AppGerenciado } from "../../../src/domain/catalogo-marketplace.ts";
 import { CATEGORIA_PADRAO, DESCRICAO_PADRAO } from "../../../src/contracts/marketplace.ts";
 
 describe("catálogo do marketplace (ADR-041)", () => {
@@ -50,5 +50,62 @@ describe("catálogo do marketplace (ADR-041)", () => {
     expect(piso.length).toBeGreaterThanOrEqual(12);
     expect(piso.every((a) => a.logo === null)).toBe(true);
     expect(piso.map((a) => a.slug)).toContain("supabase");
+  });
+
+});
+
+describe("catálogo público com login gerenciado (ADR-057)", () => {
+  const gerenciado = (slug: string, nome: string, extra: Partial<AppGerenciado> = {}): AppGerenciado => ({ slug, nome, logo: null, descricao: "", categorias: [], ...extra });
+
+  it("app curado que o Composio conecta sem auth config volta para o dia a dia, com o nome em português", () => {
+    const apps = mesclarCatalogo([{ slug: "slack", nome: "Slack", logo: null }], [gerenciado("notion", "Notion"), gerenciado("googlesheets", "Google Sheets")]);
+    expect(apps.map((a) => a.slug)).toEqual(["slack", "github", "notion", "googlesheets"]);
+    expect(apps.every((a) => !a.doCatalogo)).toBe(true);
+    expect(apps.find((a) => a.slug === "notion")?.categoria).toBe("Conhecimento");
+  });
+
+  it("o resto entra depois de tudo, em ordem alfabética, marcado doCatalogo, com a descrição do provedor", () => {
+    const apps = mesclarCatalogo(
+      [{ slug: "slack", nome: "Slack", logo: null }],
+      [
+        gerenciado("zendesk", "Zendesk", { descricao: "Customer service software.", categorias: ["Customer Support"] }),
+        gerenciado("hubspot", "HubSpot", { descricao: "CRM platform.", categorias: ["CRM"], logo: "https://logos.composio.dev/hubspot.png" }),
+      ],
+    );
+    expect(apps.map((a) => a.slug)).toEqual(["slack", "github", "hubspot", "zendesk"]);
+    expect(apps.find((a) => a.slug === "hubspot")).toEqual({
+      slug: "hubspot", nome: "HubSpot", descricao: "CRM platform.", categoria: "Vendas e marketing",
+      logo: "https://logos.composio.dev/hubspot.png", doCatalogo: true,
+    });
+  });
+
+  it("app do painel sem curadoria ganha descrição, categoria e logo do catálogo público, e não duplica", () => {
+    const apps = mesclarCatalogo([{ slug: "airtable", nome: "Airtable", logo: null }], [gerenciado("airtable", "Airtable", { descricao: "Spreadsheet-database hybrid.", categorias: ["Productivity"], logo: "https://logos.composio.dev/airtable.png" })]);
+    expect(apps.filter((a) => a.slug === "airtable")).toEqual([{
+      slug: "airtable", nome: "Airtable", descricao: "Spreadsheet-database hybrid.", categoria: "Produtividade", logo: "https://logos.composio.dev/airtable.png",
+    }]);
+  });
+
+  it("toolkit cujo slug não cabe num conector fica fora: botão que não conecta não entra na grade", () => {
+    const apps = mesclarCatalogo([], [gerenciado("google_maps", "Google Maps"), gerenciado("-x", "X"), gerenciado("asana", "Asana")]);
+    expect(apps.map((a) => a.slug)).toEqual(["github", "asana"]);
+  });
+
+  it("a descrição longa do provedor é cortada na palavra, com reticências", () => {
+    const longa = `${"palavra ".repeat(40)}fim`;
+    const app = mesclarCatalogo([], [gerenciado("asana", "Asana", { descricao: longa })]).find((a) => a.slug === "asana");
+    expect(app!.descricao.length).toBeLessThanOrEqual(161);
+    expect(app!.descricao.endsWith("palavra…")).toBe(true);
+  });
+
+  it("a categoria vira português pela primeira palavra que casa; o que não casa cai no padrão", () => {
+    expect(categoriaEmPortugues(["Productivity & Project Management"])).toBe("Projetos");
+    expect(categoriaEmPortugues(["Collaboration & Communication"])).toBe("Comunicação");
+    expect(categoriaEmPortugues(["Developer Tools & DevOps"])).toBe("Desenvolvimento");
+    expect(categoriaEmPortugues(["AI & Machine Learning"])).toBe("IA");
+    expect(categoriaEmPortugues(["HR & Recruiting"])).toBe("Pessoas");
+    expect(categoriaEmPortugues(["Gaming", "Finance & Accounting"])).toBe("Finanças");
+    expect(categoriaEmPortugues(["Gaming"])).toBe(CATEGORIA_PADRAO);
+    expect(categoriaEmPortugues([])).toBe(CATEGORIA_PADRAO);
   });
 });

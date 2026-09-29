@@ -1,12 +1,9 @@
 import type { ServerResponse } from "node:http";
-import type { AppComLogo } from "../../../contracts/marketplace.ts";
-import { catalogoDoPiso, mesclarCatalogo } from "../../../domain/catalogo-marketplace.ts";
-import { criarClienteComposio } from "../../integracoes/composio.ts";
+import { criarCatalogoComposio } from "../../integracoes/catalogo-composio.ts";
 import { atualizarCredenciaisConector } from "../../../use-cases/atualizar-credenciais-conector.ts";
 import type { SensibilidadeDeclarada, TransporteConector } from "../../../contracts/conector.ts";
 import { grupoDaCapacidade } from "../../../domain/grupos-de-acesso.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { log } from "../../../obs/log.ts";
 import { habilitarConector } from "../../../use-cases/habilitar-conector.ts";
 import { conectorPublico, registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
@@ -21,14 +18,6 @@ export type DepsRotasConectores = {
   decifrar: (texto: string) => string;
   fetchImpl?: typeof fetch;
 };
-
-/**
- * definido em 2026-09-21 (ADR-041): o catálogo vem do provedor a cada abertura da tela, e uma
- * janela curta evita repetir a chamada em cada F5 sem esconder por muito tempo o app que a pessoa
- * acabou de criar no painel. Cache por TENANT: a chave é do tenant, o catálogo também.
- */
-const JANELA_CATALOGO_MS = 60_000;
-const catalogoPorTenant = new Map<string, { em: number; apps: AppComLogo[] }>();
 
 /**
  * O logo é buscado PELO SERVIDOR (ADR-041 §6): um <img> apontando para o CDN faria o browser de
@@ -68,32 +57,8 @@ type CorpoConector = {
  * habilitar, desabilitar. A web recebe `Conector` (env só com chaves → true); nada cifrado sai.
  */
 export function rotasConectores(deps: DepsRotasConectores): Rota[] {
-  /**
-   * O catálogo do provedor, com a curadoria por cima. Falhar aqui NÃO derruba a tela: sem chave,
-   * com a chamada fora do ar ou com resposta em forma inesperada, a grade cai no piso curado —
-   * o que a pessoa perde é o app novo, não o Marketplace.
-   */
-  async function catalogo(tenantId: string, cifrada: string | null): Promise<AppComLogo[]> {
-    if (!cifrada) return catalogoDoPiso();
-    const agora = Date.now();
-    const posto = catalogoPorTenant.get(tenantId);
-    if (posto && agora - posto.em < JANELA_CATALOGO_MS) return posto.apps;
-    try {
-      const doProvedor = await criarClienteComposio(deps.decifrar(cifrada), deps.fetchImpl).catalogo();
-      const apps = doProvedor.length ? mesclarCatalogo(doProvedor) : catalogoDoPiso();
-      catalogoPorTenant.set(tenantId, { em: agora, apps });
-      return apps;
-    } catch (e) {
-      // definido em 2026-09-21: cair no piso em silêncio esconde justamente o que este caminho
-      // existe para corrigir — a grade fica plausível e o app novo continua ausente, sem rastro.
-      log("aviso", "marketplace_catalogo_do_piso", {
-        tenant_id: tenantId,
-        codigo: e instanceof ErroDeDominio ? e.codigo : "desconhecido",
-        usou_cache: !!posto,
-      });
-      return posto?.apps ?? catalogoDoPiso();
-    }
-  }
+  // O cache mora em src/adapters/integracoes/catalogo-composio.ts: a rota de conectar lê o mesmo (ADR-057).
+  const catalogo = criarCatalogoComposio(deps);
   return [
     {
       metodo: "GET",

@@ -43,4 +43,11 @@ export const CATEGORIA_PADRAO = "Integrações";
 export const DESCRICAO_PADRAO = "Conecte para dar a este app as ferramentas que seus bots podem usar.";
 
 /** Um app do marketplace já mesclado com o catálogo do provedor (src/domain/catalogo-marketplace.ts). */
-export type AppComLogo = AppMarketplace & { logo: string | null };
+export type AppComLogo = AppMarketplace & {
+  logo: string | null;
+  /**
+   * definido em 2026-09-29 (ADR-057): veio do catálogo público do Composio, com login gerenciado por
+   * ele, sem curadoria e sem auth config no painel. A tela o mostra em "Mais apps", não no dia a dia.
+   */
+  doCatalogo?: true;
+};

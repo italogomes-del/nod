@@ -8,6 +8,7 @@ import { registrarConector } from "../../../use-cases/registrar-conector.ts";
 import { sondarConector } from "../../../use-cases/sondar-conector.ts";
 import { aoConectarApp } from "../../../use-cases/ao-conectar-app.ts";
 import { criarClienteComposio } from "../../integracoes/composio.ts";
+import { criarCatalogoComposio } from "../../integracoes/catalogo-composio.ts";
 import { chavePrivadaValida, criarTokenDeInstalacao } from "../../integracoes/github-app.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
@@ -31,6 +32,7 @@ export type OpcoesRotasMarketplace = {
 
 export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
   const cliente = (chave: string) => criarClienteComposio(chave, op.fetchImpl);
+  const catalogo = criarCatalogoComposio({ decifrar: op.decifrar, fetchImpl: op.fetchImpl });
   /**
    * revisto em 2026-09-21 (ADR-041): a curadoria deixou de ser a lista do que EXISTE, então
    * recusar por ausência nela barraria justamente o app recém-criado no painel. Quem valida é o
@@ -137,6 +139,9 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       if (!cifrada && app.slug === SLUG_GITHUB) { ctx.json(200, { conectado: false, frase: fraseSemJeito(false) }); return; }
       if (!cifrada) throw new ErroDeDominio("integracao_nao_configurada");
       const chave = op.decifrar(cifrada);
+      // definido em 2026-09-29 (ADR-057): app do catálogo público não tem curadoria; o conector nasce com
+      // o nome que a grade mostrou, não com o slug. O catálogo acabou de ser lido pela tela: sai do cache.
+      const nome = APPS_MARKETPLACE.some((a) => a.slug === app.slug) ? app.nome : (await catalogo(ctx.escopo.tenantId, cifrada)).find((a) => a.slug === app.slug)?.nome ?? app.nome;
       const c = cliente(chave);
       const userId = `nod:${ctx.escopo.tenantId}:${ctx.escopo.pessoaId}`;
       const sessao = await c.criarSessao(userId, app.slug);
@@ -155,7 +160,7 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
         const env = { "x-api-key": chave };
         const conector = existente
           ? await d.repos.conectores.atualizarEndpoint(existente.id, sessao.url, op.cifrar(JSON.stringify(env)), Object.keys(env))
-          : await executar(d, registrarConector, { nome: app.nome, slug: app.slug, transporte: "http", url: sessao.url, env, declaracao: "toca", cifrar: op.cifrar });
+          : await executar(d, registrarConector, { nome, slug: app.slug, transporte: "http", url: sessao.url, env, declaracao: "toca", cifrar: op.cifrar });
         if (!conector) throw new ErroDeDominio("estado_invalido");
         await d.repos.composio.salvarSessao({ toolkit: app.slug, sessaoId: sessao.id, contaId: link.contaId, conectorId: conector.id });
         return conector.id;

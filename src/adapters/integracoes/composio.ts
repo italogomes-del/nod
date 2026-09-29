@@ -1,6 +1,7 @@
 import { COMPOSIO_POR_CAPACIDADE_GITHUB } from "../../contracts/github.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import type { ArgsGithub } from "../../domain/github.ts";
+import type { AppGerenciado } from "../../domain/catalogo-marketplace.ts";
 
 export type ChamadaComposio = { slug: string; argumentos: Record<string, unknown> };
 
@@ -43,6 +44,21 @@ function urlDoProvedor(valor: string, hosts: string[]): URL {
 
 const BASE = "https://backend.composio.dev/api/v3.1";
 
+const HOSTS_LOGO = ["logos.composio.dev", "assets.composio.dev", "cdn.composio.dev"];
+
+/** O logo só passa com host da allowlist: o servidor é quem busca a imagem (ADR-041 §6). */
+function logoDoProvedor(bruto: unknown): string | null {
+  if (typeof bruto !== "string") return null;
+  try { return urlDoProvedor(bruto, HOSTS_LOGO).href; } catch { return null; }
+}
+
+/**
+ * definido em 2026-09-29 (ADR-057): o `GET /toolkits` devolve até 1000 por página, e o catálogo
+ * público tinha 312 toolkits na documentação do provedor. Cinco páginas são folga, não expectativa: o
+ * teto existe para um `next_cursor` que nunca acaba não virar laço.
+ */
+const PAGINAS_TOOLKITS = 5;
+
 /** definido em 2026-09-17: URLs e erros do provedor nunca transportam a chave para a web ou para o modelo. */
 export function criarClienteComposio(chave: string, f: typeof fetch = fetch) {
   async function pedir(path: string, body?: unknown): Promise<Record<string, unknown>> {
@@ -78,14 +94,46 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch) {
         if (!slug || !/^[a-z0-9_-]{1,64}$/.test(slug)) continue;
         if (o.status === "DISABLED" || o.deleted === true) continue;
         const meta = (tk && typeof tk === "object" ? tk : {}) as Record<string, unknown>;
-        const logoBruto = meta.logo ?? (meta.meta as Record<string, unknown> | undefined)?.logo ?? o.logo;
-        let logo: string | null = null;
-        if (typeof logoBruto === "string") {
-          try { logo = urlDoProvedor(logoBruto, ["logos.composio.dev", "assets.composio.dev", "cdn.composio.dev"]).href; } catch { logo = null; }
-        }
+        const logo = logoDoProvedor(meta.logo ?? (meta.meta as Record<string, unknown> | undefined)?.logo ?? o.logo);
         const nome = typeof meta.name === "string" ? meta.name : slug;
         if (!porSlug.has(slug)) porSlug.set(slug, { slug, nome, logo });
         else if (logo && !porSlug.get(slug)!.logo) porSlug.get(slug)!.logo = logo;
+      }
+      return [...porSlug.values()];
+    },
+    /**
+     * ADR-057: o catálogo público, só o que o Composio conecta sem auth config no painel — o toolkit
+     * com login gerenciado por ele (`composio_managed_auth_schemes` não vazio). Ficam de fora o que
+     * não tem login a fazer (`no_auth`: conectar aqui termina numa conta conectada, que ele não tem),
+     * o toolkit local e o customizado do projeto (esse, com auth config, já vem do `catalogo()`).
+     */
+    async gerenciados(): Promise<AppGerenciado[]> {
+      const porSlug = new Map<string, AppGerenciado>();
+      let cursor: string | null = null;
+      for (let pagina = 0; pagina < PAGINAS_TOOLKITS; pagina++) {
+        const r = await pedir(`/toolkits?limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+        if (!Array.isArray(r.items)) throw new ErroDeDominio("conector_indisponivel");
+        for (const it of r.items as unknown[]) {
+          if (!it || typeof it !== "object") continue;
+          const o = it as Record<string, unknown>;
+          const slug = typeof o.slug === "string" ? o.slug.toLowerCase() : null;
+          if (!slug || !/^[a-z0-9_-]{1,64}$/.test(slug) || porSlug.has(slug)) continue;
+          const gerenciado = Array.isArray(o.composio_managed_auth_schemes) && o.composio_managed_auth_schemes.length > 0;
+          if (!gerenciado || o.no_auth === true || o.is_local_toolkit === true || o.type === "custom") continue;
+          const meta = (o.meta && typeof o.meta === "object" ? o.meta : {}) as Record<string, unknown>;
+          const categorias = (Array.isArray(meta.categories) ? meta.categories as unknown[] : [])
+            .map((c) => typeof c === "string" ? c : c && typeof c === "object" ? (c as Record<string, unknown>).name : null)
+            .filter((c): c is string => typeof c === "string" && c.length > 0);
+          porSlug.set(slug, {
+            slug,
+            nome: typeof o.name === "string" && o.name.trim() ? o.name.trim() : slug,
+            logo: logoDoProvedor(meta.logo),
+            descricao: typeof meta.description === "string" ? meta.description : "",
+            categorias,
+          });
+        }
+        cursor = typeof r.next_cursor === "string" && r.next_cursor ? r.next_cursor : null;
+        if (!cursor) break;
       }
       return [...porSlug.values()];
     },

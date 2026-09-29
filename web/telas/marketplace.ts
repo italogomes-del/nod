@@ -171,6 +171,13 @@ export function renderMarketplace(estado: Estado): string {
   const conectados = situacoes.filter((x) => x.s === "conectado").length;
   const atencao = situacoes.filter((x) => x.s === "atencao");
   const visiveis = situacoes.filter((x) => filtro === "todos" || (filtro === "conectados" ? x.s === "conectado" : x.s === "atencao"));
+  // definido em 2026-09-29 (ADR-057): o catálogo público vem depois do dia a dia, numa seção própria; o app
+  // dele que a pessoa conectou sobe para a grade de cima. Enquanto conecta, fica onde foi clicado: o cartão
+  // que espera o login (web/lib/conexao.ts) não pode sumir da vista no meio da espera.
+  const doCatalogo = (x: { app: AppComLogo; s: SituacaoApp }) => x.app.doCatalogo === true && (x.s === "nao_conectado" || x.s === "conectando");
+  const principais = visiveis.filter((x) => !doCatalogo(x));
+  const mais = visiveis.filter(doCatalogo);
+  const selecionado = (slug: string) => tela?.gaveta?.slug === slug || tela?.app === slug;
   const retorno = tela?.voltar ? botao("voltar-conexao", "← Voltar para a conversa", { classe: "link" }) : "";
   const semComposio = estado.composioConfigurado ? "" : `<p class="mkt-aviso">Para conectar a maioria dos apps, o Composio do time precisa estar configurado. ${botao("abrir-avancado", "Configurar", { classe: "link" })}</p>`;
   const aviso = estado.avisoConexao ? `<p class="connection-notice" role="status">${esc(estado.avisoConexao)}</p>` : "";
@@ -182,7 +189,11 @@ export function renderMarketplace(estado: Estado): string {
     ${aviso}${semComposio}
     ${filtros(filtro, conectados, atencao.length)}
     ${filtro === "todos" ? faixaAtencao(estado, atencao.map((x) => x.app)) : ""}
-    <div class="apps-grid">${visiveis.map((x) => cartao(estado, x.app, x.s, tela?.gaveta?.slug === x.app.slug || tela?.app === x.app.slug)).join("")}</div>
+    <div class="apps-grid">${principais.map((x) => cartao(estado, x.app, x.s, selecionado(x.app.slug))).join("")}</div>
+    ${mais.length ? `<section class="mkt-mais" data-secao-apps aria-labelledby="mkt-mais-titulo">
+      <div class="mkt-mais-topo"><h2 id="mkt-mais-titulo">Mais apps <span class="mudo">· ${mais.length}</span></h2><p>O Composio cuida do login destes apps: é só conectar.</p></div>
+      <div class="apps-grid">${mais.map((x) => cartao(estado, x.app, x.s, selecionado(x.app.slug))).join("")}</div>
+    </section>` : ""}
     <p id="marketplace-vazio" class="mudo" hidden>Nenhum app encontrado.</p>
     <p class="mkt-rodape mudo">Não achou o app? ${botao("abrir-avancado", "Conectar um servidor MCP próprio", { classe: "link" })} · ${botao("abrir-avancado", "Configurações avançadas", { classe: "link" })}</p>
   </div>
