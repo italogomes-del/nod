@@ -983,6 +983,8 @@ function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; tex
 function filtrarApps(texto: string): void {
   const cards = [...document.querySelectorAll<HTMLElement>("[data-app-busca]")];
   for (const el of cards) el.hidden = !el.dataset.appBusca?.includes(texto.trim().toLowerCase());
+  // ADR-057: a seção "Mais apps" some inteira quando a busca não deixa nenhum cartão dela.
+  for (const secao of document.querySelectorAll<HTMLElement>("[data-secao-apps]")) secao.hidden = !secao.querySelector("[data-app-busca]:not([hidden])");
   const vazio = document.getElementById("marketplace-vazio");
   if (vazio) vazio.hidden = cards.some((el) => !el.hidden);
 }

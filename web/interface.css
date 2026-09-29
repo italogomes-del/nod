@@ -718,6 +718,8 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
 .mkt-uso{display:flex;align-items:center;gap:8px;font-size:12px;color:#6e6e73}
 .mkt-rostos{display:flex;padding-left:5px}.mkt-rostos>*{margin-left:-5px}
 .mkt-rodape{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.mkt-mais{display:flex;flex-direction:column;gap:14px;margin-top:14px;padding-top:22px;border-top:1px solid #ececef}
+.mkt-mais-topo h2{margin:0;font-size:19px;letter-spacing:-.3px}.mkt-mais-topo h2 .mudo{font-weight:500}.mkt-mais-topo p{margin:4px 0 0;color:#6e6e73;font-size:13.5px}
 .gaveta-fundo{position:fixed;inset:0;background:rgba(20,20,30,.18);z-index:40}
 .gaveta{position:fixed;right:0;top:0;bottom:0;width:min(480px,100vw);background:#fff;box-shadow:-12px 0 40px rgba(20,20,40,.14);display:flex;flex-direction:column;z-index:41}
 .gaveta-cab{display:flex;align-items:center;gap:14px;padding:24px 28px 18px;border-bottom:1px solid #efefec}

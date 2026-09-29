@@ -69,3 +69,11 @@ Enquanto o produto roda só para uma pessoa, o formulário de chave **continua v
 em vez de aparecer só quando o tenant não tem chave: a troca frequente durante o desenvolvimento
 vale mais que a tela limpa. Quando o time entrar de verdade, esconder para quem já tem chave no
 tenant é uma linha em `web/telas/marketplace.ts`.
+
+## Revisto em 2026-09-29 ([ADR-057](adr-057-marketplace-com-o-catalogo-publico-do-composio.md))
+
+O item 3 ficou mais largo. A grade agora é o `GET /auth_configs` **mais** o catálogo público com login
+gerenciado pelo Composio (`composio_managed_auth_schemes` no `GET /toolkits`), este numa seção "Mais
+apps". A premissa do contexto ("Notion, Linear e Google Sheets … nunca conectariam") vale só para os
+toolkits sem login gerenciado. Segundo a documentação do provedor, esses três têm login gerenciado. O
+gatilho "mais de ~40 itens" foi atendido com seção e busca, sem paginação.
