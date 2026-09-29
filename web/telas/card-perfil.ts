@@ -63,8 +63,7 @@ export function renderCardPerfil(p: Proposta, propostas: readonly Proposta[], es
   if (apps.length > 0) {
     const chips = apps.map(({ slug }) => {
       const nomeApp = nomeDoApp(estado, slug);
-      const temLogo = Boolean(estado.marketplace.find((m) => m.slug === slug)?.logo);
-      return `<span class="pc-app">${logoApp(slug, nomeApp, temLogo)}${esc(nomeApp)}</span>`;
+      return `<span class="pc-app">${logoApp(estado, slug, nomeApp)}${esc(nomeApp)}</span>`;
     }).join("");
     // App ainda por conectar não trava o card: a rotina nasce e pede o acesso quando precisar (pré-voo, ADR-044).
     const faltam = apps.filter(({ slug }) => !conectorDoApp(estado, slug)?.habilitado).map(({ slug }) => nomeDoApp(estado, slug));
