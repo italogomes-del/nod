@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { acaoArriscadaNoApp, decidirAprovacao, REGRA_APROVACAO_PERMANENTE, REGRA_CONSULTA_SEM_DECISAO, type EntradaAprovacao } from "../../../src/domain/aprovacao-permanente.ts";
 import { comandoArriscado, classificarComando } from "../../../src/domain/comando.ts";
-import { decidirPeloModo, ehModoAprovacao, gateDaRotinaObrigaPessoa, REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, type SituacaoDaAcao } from "../../../src/domain/modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, ehModoAprovacao, gateDaRotinaObrigaPessoa, REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, type SituacaoDaAcao } from "../../../src/domain/modo-aprovacao.ts";
 
 const limpa: SituacaoDaAcao = { arriscada: false, credencial: false, conteudoDeFora: false, travaHerdada: false };
 
@@ -135,9 +135,26 @@ describe("decidirAprovacao com o modo do bot (ADR-059)", () => {
     expect(decidirAprovacao({ plano: plano(), destino: criar, origemSensivel: false, modo: "automatico" })).toMatchObject({ automatico: true, regra: REGRA_MODO_AUTOMATICO });
   });
 
-  it("automático para no arriscado: apagar (grupo Apagar e desfazer) e merge (nunca permanente)", () => {
-    expect(decidirAprovacao({ plano: plano(), destino: excluir, origemSensivel: false, modo: "automatico", arriscada: true })).toEqual({ automatico: false, motivo: "acao_arriscada" });
+  it("automático para no arriscado fora da conversa: apagar (grupo Apagar e desfazer) e merge (nunca permanente) numa rotina", () => {
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "rotina" }), destino: excluir, origemSensivel: false, modo: "automatico", arriscada: true })).toEqual({ automatico: false, motivo: "acao_arriscada" });
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "delegacao" }), destino: merge, origemSensivel: false, modo: "automatico" })).toEqual({ automatico: false, motivo: "acao_arriscada" });
+    // Plano sem o modo do turno (antigo): não é conversa — fail-closed.
     expect(decidirAprovacao({ plano: plano(), destino: merge, origemSensivel: false, modo: "automatico" })).toEqual({ automatico: false, motivo: "acao_arriscada" });
+  });
+
+  it("emenda de 30/09: apagar e merge que a pessoa pediu NA CONVERSA saem sozinhos no automático", () => {
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "conversa" }), destino: excluir, origemSensivel: false, modo: "automatico", arriscada: true })).toMatchObject({ automatico: true, regra: REGRA_MODO_AUTOMATICO });
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "criacao" }), destino: merge, origemSensivel: false, modo: "automatico" })).toMatchObject({ automatico: true, regra: REGRA_MODO_AUTOMATICO });
+    // No manual, nada muda: continua pedindo.
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "conversa" }), destino: excluir, origemSensivel: false, modo: "manual", arriscada: true })).toEqual({ automatico: false, motivo: "sem_regra_permanente" });
+    // Conteúdo de fora continua parando, mesmo na conversa.
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "conversa", confiancaEntrada: "nao_confiavel" }), destino: excluir, origemSensivel: false, modo: "automatico", arriscada: true })).toEqual({ automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" });
+  });
+
+  it("conversaComAPessoa: conversa e criação sim; rotina, sala, pedido de colega e plano sem modo, não", () => {
+    expect(["conversa", "criacao"].every((m) => conversaComAPessoa(m as "conversa"))).toBe(true);
+    expect(["rotina", "sala", "delegacao", "peer"].some((m) => conversaComAPessoa(m as "rotina"))).toBe(false);
+    expect(conversaComAPessoa(undefined)).toBe(false);
   });
 
   it("automático para depois de conteúdo de fora, mesmo com a escrita fora do catálogo reduzido", () => {

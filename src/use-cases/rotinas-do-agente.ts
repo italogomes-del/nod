@@ -8,6 +8,8 @@ import { mesmosAcessos } from "../domain/rotina-acessos.ts";
 import { resumoCron, validarAtualizacaoRotina } from "../domain/rotina-texto.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { agenteVisivel, assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
+import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "./aplicar-proposta-rotina.ts";
+import { confirmacaoPeloModo, semCard } from "./confirmar-pelo-modo.ts";
 import { acessosDeclarados } from "./criar-rotina.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
 import { ehColega } from "./ver-colegas.ts";
@@ -161,6 +163,13 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
     };
     const precisa = payload.acessos?.length ? ` · precisa de ${payload.acessos.map((a) => `${nomeDoApp(a.conector)} (${a.nivel})`).join(", ")}` : "";
     const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}${precisa}`);
+    // ADR-059 (emenda de 2026-09-30): no automático e no total o modo confirma na hora — a proposta fica como
+    // registro do que mudou, fechada pela regra, e a rotina já vale.
+    const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false });
+    if (porRegra) {
+      const aplicada = await aplicarAtualizacaoRotina(deps, { propostaId: proposta.id, porRegra });
+      return { data: { proposta_id: proposta.id, resumo: normalizada.resumo, aplicada: true }, events: [...semCard(events), ...(aplicada.events ?? [])] };
+    }
     return { data: { proposta_id: proposta.id, resumo: normalizada.resumo }, events };
   } catch (e) {
     if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
@@ -175,6 +184,12 @@ export const excluirRotinaPeloAgente: CasoNod<Deps, "excluir_rotina"> = async (d
     const resumo = resumoCron(atual.cron, atual.fusoIana);
     const payload: PayloadPropostaRotinaExclusao = { kind: "rotina_exclusao", rotinaId: atual.id, resumo, instrucao: atual.instrucao };
     const { proposta, events } = await propor(deps, input, payload, `Exclusão de rotina proposta: ${resumo} — ${atual.instrucao}`);
+    // ADR-059: excluir é o "apagar" da rotina — o automático só confirma quando a pessoa pediu na conversa.
+    const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: true });
+    if (porRegra) {
+      const aplicada = await aplicarExclusaoRotina(deps, { propostaId: proposta.id, porRegra });
+      return { data: { proposta_id: proposta.id, resumo, aplicada: true }, events: [...semCard(events), ...(aplicada.events ?? [])] };
+    }
     return { data: { proposta_id: proposta.id, resumo }, events };
   } catch (e) {
     if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
