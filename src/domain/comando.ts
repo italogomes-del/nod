@@ -218,6 +218,42 @@ function redirecionamentoInofensivo(operador: string, alvo: string | undefined):
   return (operador === ">" || operador === ">>" || operador === "&>") && alvo === "/dev/null";
 }
 
+/**
+ * O que o modo automático nunca aprova sozinho (definido em 2026-09-29, ADR-059): o que não se desfaz, mexe no
+ * trabalho de outras pessoas ou roda com mais poder que o da pessoa. Lido no TEXTO inteiro, sem tokenizar, de
+ * propósito: o `git commit -m "$(cat <<EOF …)"` que o Claude Code escreve não tokeniza e seria "arriscado" por
+ * isso, e um "rm -rf" dentro de uma mensagem de commit só custa um card. `[^;&|\n]*` prende cada regra ao próprio
+ * comando da linha. Guarda contra acidente, não contra quem quer esconder o comando: contra texto de fora vale a
+ * pausa por conteúdo de fora (decidirPeloModo), que vem antes desta lista.
+ */
+const ARRISCADOS: readonly (readonly [RegExp, string])[] = [
+  [/(^|[\s;&|(])(sudo|doas)\s|(^|[;&|]\s*)su(\s|$)/, "roda como administrador do Mac"],
+  [/(^|[\s;&|(])rm\s+([^;&|\n]*\s)?(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b/, "apaga pastas inteiras"],
+  [/(^|[\s;&|(])find\s+([^;&|\n]*\s)?-delete\b/, "apaga arquivos em massa"],
+  [/\bgit\s[^;&|\n]*\bpush\b[^;&|\n]*(\s(-f|--force|--force-with-lease|--force-if-includes|--mirror|--delete|-d|--prune)(\s|=|$)|\s\+\S|\s:\S)/, "reescreve ou apaga no remoto"],
+  [/\bgit\s[^;&|\n]*\bpush\b[^;&|\n]*\s(\S+:)?(refs\/heads\/)?(main|master)(\s|$)/, "empurra direto na main"],
+  [/\bgit\s[^;&|\n]*\b(reset\s[^;&|\n]*--hard|clean\s[^;&|\n]*-[a-zA-Z]*f|checkout\s+(--\s+)?\.(\s|$)|branch\s+([^;&|\n]*\s)?-D\b|stash\s+(drop|clear)\b|filter-branch|filter-repo|update-ref\s+-d\b|reflog\s+(expire|delete)\b)/, "descarta trabalho que não volta"],
+  [/\bgit\s[^;&|\n]*\brestore\b(?![^;&|\n]*--staged)[^;&|\n]*\s\.(\s|$|\/)/, "descarta trabalho que não volta"],
+  [/\bgh\s+(pr\s+merge|pr\s+review\s[^;&|\n]*(-a|--approve)\b|repo\s+(delete|archive|rename)|release\s+delete|secret\s|variable\s+(set|delete))/, "mexe no trabalho de outras pessoas no GitHub"],
+  [/\bgh\s+api\s[^;&|\n]*(-X|--method)[\s=]*DELETE\b/, "apaga no GitHub"],
+  [/\b(npm|pnpm|yarn|bun)\s+(publish|unpublish|deprecate)\b|\bcargo\s+publish\b|\btwine\s+upload\b|\bgem\s+push\b|\bdocker\s+push\b/, "publica para fora"],
+  [/\b(curl|wget)\s[^;&\n]*\|\s*(sudo\s+)?(sh|bash|zsh|fish|python3?|node|ruby|perl)\b/, "baixa e roda código"],
+  [/\beval\s/, "roda um texto como comando"],
+  [/(^|[\s;&|(])(mkfs(\.\w+)?|shutdown|reboot|halt|csrutil|spctl|nvram)(\s|$)|\bdd\s[^;&|\n]*\bof=|\bdiskutil\s+(erase|partition|zero|secureErase)\w*|\blaunchctl\s+(unload|remove|bootout)\b|\btmutil\s+delete\b/, "mexe no sistema do Mac"],
+  [/\bch(mod|own|grp)\s+(-[a-zA-Z]*R|--recursive)\b|\bchmod\s[^;&|\n]*\b777\b/, "muda permissões em massa"],
+  [/(^|[\s;&|(])(killall|pkill)\s/, "encerra processos pelo nome"],
+  [/\bdrop\s+(table|database|schema|owned)\b|\btruncate\s|\bdropdb\b/i, "apaga dados de um banco"],
+  [/\bdocker\s+(system\s+prune|volume\s+(rm|prune)|compose\s[^;&|\n]*\bdown\s[^;&|\n]*(-v|--volumes)\b|rm\s[^;&|\n]*-f)/, "apaga containers ou volumes"],
+  [/\bcrontab\s+-r\b/, "apaga os agendamentos do Mac"],
+  [/>>?\s*\S*(\.zshrc|\.zprofile|\.bashrc|\.bash_profile|\.profile)\b|Library\/Launch(Agents|Daemons)/, "mexe no que roda ao abrir o terminal ou o Mac"],
+];
+
+/** Por que o comando é arriscado, ou null. Só o modo automático consulta (ADR-059); o manual já pede tudo que altera. */
+export function comandoArriscado(comando: string): string | null {
+  for (const [re, motivo] of ARRISCADOS) if (re.test(comando)) return motivo;
+  return null;
+}
+
 export function classificarComando(comando: string): ClasseComando {
   const texto = comando.trim();
   if (texto === "") return altera("comando vazio");

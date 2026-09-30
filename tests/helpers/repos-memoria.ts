@@ -291,6 +291,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (!a) return null;
         a.excluidoEm = em;
         a.fixado = false;
+        a.modoAprovacao = "manual";
         b.geracoes.set(id, (b.geracoes.get(id) ?? 0) + 1);
         for (const r of doTenant(b.rotinas).filter((r) => r.agenteId === id)) r.estado = "pausada";
         b.concessoes = b.concessoes.filter((c) => c.agenteId !== id);
@@ -350,6 +351,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           // 0037: null volta ao padrão do modelo; ausente não mexe (o coalesce não serve aqui).
           esforco: perfil.esforco === undefined ? a.esforco ?? null : perfil.esforco,
         });
+        return a;
+      },
+      async definirModoAprovacao(id, modo) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm);
+        if (!a) return null;
+        a.modoAprovacao = modo;
         return a;
       },
       async fixar(id, fixado) {

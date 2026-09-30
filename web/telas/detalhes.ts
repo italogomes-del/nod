@@ -5,6 +5,7 @@ import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../li
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { nomeInteligencia } from "./inteligencia.ts";
+import { MODOS } from "./aprovacoes.ts";
 import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type NivelAtual } from "./app-acesso.ts";
 import { logoApp } from "./marketplace.ts";
 
@@ -171,6 +172,7 @@ export function renderDetalhes(estado: Estado): string {
       ${dona ? botao("abrir-workspace", "Pasta de trabalho", { classe: "atalho", id: a.id }) : ""}
       ${dona && a.harness !== "codex-cli" ? `<p class="mudo">Pasta no seu Mac: <code>${esc(caminhoDaPastaDoBot(a.nome))}</code></p>` : ""}
       ${dona ? botao("inteligencia", `✦ ${nomeInteligencia(a, estado.executor?.harnesses)}`, { classe: "atalho", id: a.id, titulo: "Inteligência do agente: modelo e harness" }) : ""}
+      ${dona ? botao("modo-aprovacao", `Aprovações · ${esc(MODOS[a.modoAprovacao ?? "manual"].curto)}`, { classe: "atalho", id: a.id, titulo: `${MODOS[a.modoAprovacao ?? "manual"].titulo}: ${MODOS[a.modoAprovacao ?? "manual"].descricao}` }) : `<p class="mudo">Aprovações: ${esc(MODOS[a.modoAprovacao ?? "manual"].titulo)}</p>`}
       <p class="mudo">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p>
     </section>`;
 }

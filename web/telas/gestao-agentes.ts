@@ -10,7 +10,7 @@ export function renderGestao(dados: FrotaDto | null, pessoaId?: string): string 
   return `<section class="tela tela-gestao"><header class="tela-cab"><h1>Gerenciar agentes</h1>${botao("atualizar-gestao", "Atualizar")}</header><p class="intro">Organize sua equipe e encontre os bots que saíram da barra lateral.</p>${!dados ? '<p role="status">Carregando…</p>' : grupo("Ativos", bots.filter((a) => !a.excluidoEm && !a.oculto)) + grupo("Ocultos", bots.filter((a) => !a.excluidoEm && a.oculto)) + '<p class="mudo">Ocultar não pausa o bot nem suas rotinas.</p>' + grupo("Excluídos", bots.filter((a) => a.excluidoEm)) + '<p class="mudo">Restaurar recupera o perfil e o histórico. Rotinas continuam pausadas e acessos precisam ser concedidos novamente.</p>'}</section>`;
 }
 
-function dialogo(html: string, menu = false): HTMLDialogElement {
+export function dialogo(html: string, menu = false): HTMLDialogElement {
   document.getElementById("gestao-dialogo")?.remove();
   const d = document.createElement("dialog");
   d.id = "gestao-dialogo";

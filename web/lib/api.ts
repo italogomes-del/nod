@@ -2,7 +2,7 @@ import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
-import type { Agente, FormaAgente, CorAgente } from "../../src/contracts/agente.ts";
+import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
@@ -134,6 +134,8 @@ export function criarApi(escopo: Escopo) {
     relatos: () => get<{ relatos: Relato[] }>("relatos"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
+    // ADR-059: o chip de aprovações do campo; o servidor escreve a troca na conversa do bot.
+    mudarModoAprovacao: (id: string, modo: ModoAprovacao) => post<{ agente: Agente; mudou: boolean }>(`agentes/${id}/modo-aprovacao`, { modo }),
     fixar: (id: string, fixado?: boolean) => post<{ agente: Agente }>(`agentes/${id}/fixar`, fixado === undefined ? {} : { fixado }),
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
     duplicar: (id: string) => post<{ agente: Agente; conversa: Conversa }>(`agentes/${id}/duplicar`),

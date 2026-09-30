@@ -63,6 +63,9 @@ const REGRA_HUMANA: Readonly<Record<string, string>> = {
   "regra:gemea_resolvida": "resolvido junto do pedido igual",
   "regra:retomada_substituida": "fechado: uma retomada mais nova tomou o lugar",
   "regra:aprovacao_permanente": "aprovado pela regra que você criou",
+  // ADR-059: o bot aprovou sozinho pelo modo que a dona escolheu.
+  "regra:modo_automatico": "aprovado sozinho: aprovação automática",
+  "regra:modo_total": "aprovado sozinho: sem aprovações",
   // definido em 2026-09-24 (emenda da ADR-044, migração 0026): a sobra de um pedido de rotina repetido.
   "regra:pedido_de_acesso_unico": "fechado: o mesmo acesso já estava pedido",
 };
@@ -219,6 +222,23 @@ function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
  * justificativa visível, e traz o contador de volta ao botão ("Pode fazer 1 de 2") — só aparece
  * contagem quando ela carrega informação. Marcar um sensível exige a pessoa (CHECK marcado_por).
  */
+/**
+ * definido em 2026-09-29 (ADR-059): o card que parou mesmo com o bot em aprovação automática diz por quê — senão a
+ * pessoa lê "está no automático e mesmo assim pediu" como defeito. Só os motivos em que o modo parou de propósito;
+ * a frase do risco no terminal vem do domínio (`comandoArriscado`), gravada em `justificativa`.
+ */
+export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoManual" | "justificativa" | "origemSensivel">): string {
+  const ic = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  const frase = i.motivoManual === "acao_arriscada"
+    ? `Parou para você: ${!i.origemSensivel && i.justificativa ? `${i.justificativa}. ` : "é uma ação arriscada. "}Na aprovação automática, o arriscado sempre pergunta.`
+    : i.motivoManual === "toca_credencial"
+      ? "Parou para você: toca uma credencial do Mac. Isso pede você em qualquer modo."
+      : i.motivoManual === "regra_suspensa_conteudo_nao_confiavel"
+        ? "Parou para você: veio depois de o bot ler conteúdo de fora nesta tarefa (web, e-mail, mensagem de fora)."
+        : "";
+  return frase ? `<p class="ap-porque">${ic}<span>${esc(frase)}</span></p>` : "";
+}
+
 function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conectores"]): string {
   const itens = item.itensAprovacao;
   const marcados = itens.filter((i) => i.selecionado).length;
@@ -229,6 +249,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
       <div class="ap-oque">${esc(i.textoFinal)}</div>
       <div class="ap-onde">${esc(ondeAcontece(conectores, i.destino.conector))}</div>
       ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}
+      ${aberta ? porqueDaPausa(i) : ""}
       ${aberta ? detalheTecnico(i) : ""}
       ${tagDesfecho(i, aberta)}
     </div>
@@ -254,6 +275,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
     const resto = unico.destino.conector === "computador" || unico.destino.conector === "terminal" ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: item.decisao.id }) : "";
     return `<div class="ap-unico">
       ${acao}<div class="ap-onde">${esc(ondeAcontece(conectores, unico.destino.conector))}</div>
+      ${aberta ? porqueDaPausa(unico) : ""}
       ${aberta ? detalheTecnico(unico) : ""}
       ${tagDesfecho(unico, aberta)}
     </div>

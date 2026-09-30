@@ -117,6 +117,8 @@ export const ROTAS = [
   { metodo: "POST", caminho: "executor", lane: "L9" },
   { metodo: "POST", caminho: "agentes", lane: "L6" },
   { metodo: "PATCH", caminho: "agentes/:id", lane: "L6" },
+  /** definido em 2026-09-29 (ADR-059): o modo de aprovação do bot, pelo chip do campo; só a dona. */
+  { metodo: "POST", caminho: "agentes/:id/modo-aprovacao", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/fixar", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/ocultar", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/duplicar", lane: "L6" },

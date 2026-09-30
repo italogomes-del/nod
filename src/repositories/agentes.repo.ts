@@ -1,5 +1,5 @@
 import type { PreferenciaHarness } from "../contracts/harness.ts";
-import type { Agente, CorAgente, DonoAgente, EsforcoAgente, FormaAgente, Visibilidade } from "../contracts/agente.ts";
+import type { Agente, CorAgente, DonoAgente, EsforcoAgente, FormaAgente, ModoAprovacao, Visibilidade } from "../contracts/agente.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
 
@@ -20,6 +20,7 @@ interface Linha {
   modelo: string;
   harness?: PreferenciaHarness;
   esforco: EsforcoAgente | null;
+  modo_aprovacao: ModoAprovacao;
   duplicado_de: string | null;
   secao: string;
   nao_lido: boolean;
@@ -27,7 +28,7 @@ interface Linha {
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, duplicado_de, criado_em, secao, nao_lido, excluido_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, nao_lido, excluido_em";
 
 function paraAgente(l: Linha): Agente {
   return {
@@ -47,6 +48,7 @@ function paraAgente(l: Linha): Agente {
     modelo: l.modelo,
     harness: l.harness ?? "auto",
     esforco: l.esforco ?? null,
+    modoAprovacao: l.modo_aprovacao ?? "manual",
     duplicadoDe: l.duplicado_de,
     secao: l.secao,
     naoLido: l.nao_lido,
@@ -98,7 +100,8 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
     },
     async excluir(id: string, agora: number): Promise<Agente | null> {
       await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${id}))`;
-      const [l] = await conn<Linha[]>`update agentes set excluido_em = ${new Date(agora)}, fixado = false, geracao_execucao = geracao_execucao + 1
+      // ADR-059: excluir volta o modo a 'manual' — restaurar não devolve autonomia, como não devolve concessões (ADR-034).
+      const [l] = await conn<Linha[]>`update agentes set excluido_em = ${new Date(agora)}, fixado = false, geracao_execucao = geracao_execucao + 1, modo_aprovacao = 'manual'
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       if (!l) return null;
@@ -162,6 +165,14 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
           modelo = coalesce(${perfil.modelo ?? null}, modelo),
           harness = coalesce(${perfil.harness ?? null}, harness),
           esforco = case when ${perfil.esforco !== undefined} then ${perfil.esforco ?? null} else esforco end
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraAgente(l) : null;
+    },
+
+    /** ADR-059: só a dona muda (filtro por owner_id, como o perfil); null = não é dela, não existe ou foi excluído. */
+    async definirModoAprovacao(id: string, modo: ModoAprovacao): Promise<Agente | null> {
+      const [l] = await conn<Linha[]>`update agentes set modo_aprovacao = ${modo}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;

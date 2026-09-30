@@ -1,6 +1,10 @@
+import type { ModoAprovacao } from "../contracts/agente.ts";
+import type { CapacidadeConector } from "../contracts/conector.ts";
 import type { DestinoItem } from "../contracts/item-aprovacao.ts";
 import type { MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
+import { grupoDaCapacidade } from "./grupos-de-acesso.ts";
+import { decidirPeloModo, gateDaRotinaObrigaPessoa, type RegraDoModo } from "./modo-aprovacao.ts";
 
 /**
  * DUAS regras nomeadas, não uma (ADR-042 claim 5): os ciclos de vida são opostos.
@@ -28,7 +32,7 @@ export const VERSAO_APROVACAO_PERMANENTE = 2 as const;
  * mudança de superfície nem por desempenho. A versão vai gravada na linha, nunca lida deste módulo
  * na hora de renderizar: a trilha de seis meses atrás tem que dizer sob qual semântica decidiu.
  */
-export type RegraAprovacao = typeof REGRA_CONSULTA_SEM_DECISAO | typeof REGRA_APROVACAO_PERMANENTE;
+export type RegraAprovacao = typeof REGRA_CONSULTA_SEM_DECISAO | typeof REGRA_APROVACAO_PERMANENTE | RegraDoModo;
 
 /**
  * Ações que NUNCA viram "Sempre permitir" (definido em 2026-09-24, ADR-047): aprovar e fazer merge
@@ -59,6 +63,15 @@ export function nuncaPermanente(nome: string, readOnlyHint?: boolean): boolean {
   return NUNCA_PERMANENTE.some((r) => r.test(capacidade));
 }
 
+/**
+ * Ação de app que o modo automático não aprova sozinho (ADR-059): a que nunca vira regra permanente (merge, aprovar
+ * e revisar PR) e a do grupo "Apagar e desfazer" (`destructiveHint` da sonda ou o verbo do nome, ADR-049). Mesma
+ * direção de falha da ADR-042: o nome só pode tornar a ação MAIS arriscada, nunca menos.
+ */
+export function acaoArriscadaNoApp(cap: Pick<CapacidadeConector, "nome" | "readOnlyHint" | "destructiveHint">): boolean {
+  return nuncaPermanente(cap.nome, cap.readOnlyHint) || grupoDaCapacidade(cap) === "apagar";
+}
+
 export type DecisaoAutomatica =
   | { automatico: true; regra: RegraAprovacao; versao: number }
   | { automatico: false; motivo: MotivoAprovacaoManual };
@@ -69,6 +82,10 @@ export type EntradaAprovacao = {
   destino: DestinoItem;
   /** Já calculado pelo caso de uso a partir da DECLARAÇÃO do conector de origem (ADR-002). */
   origemSensivel: boolean;
+  /** ADR-059: o modo ATUAL do agente, lido pelo caso de uso na hora do pedido. Ausente = 'manual'. */
+  modo?: ModoAprovacao;
+  /** ADR-059: `acaoArriscadaNoApp` da capacidade de destino, calculada pelo caso de uso sobre o catálogo do conector. */
+  arriscada?: boolean;
 };
 
 /**
@@ -95,28 +112,39 @@ export type EntradaAprovacao = {
  * `ferramentasDeConectores` (plano-turno.ts) lê `readOnlyHint` da SONDA. Ferramenta nod tem o campo
  * fixo em `false`, e computador/workspace vêm de lista escrita no código — nenhuma delas entra por
  * esta porta, mesmo que pareça inofensiva.
+ *
+ * ADR-059: o MODO do bot entra onde o manual perguntaria (passos 4, 5, 7 e 9), por `decidirPeloModo`, e no
+ * passo 3, que só obriga pessoa quando `gateDaRotinaObrigaPessoa`. No modo manual nada muda. Sem plano, origem
+ * sensível, computador e terminal continuam antes de qualquer modo (os dois últimos se decidem nos próprios
+ * caminhos). Fora do catálogo em turno CONFIÁVEL continua perguntando em todo modo: ali a ferramenta falta por
+ * conector desligado, não pela redução por confiança.
  */
 export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   const { plano } = entrada;
   if (!plano) return { automatico: false, motivo: "sem_plano" };
   if (entrada.origemSensivel) return { automatico: false, motivo: "origem_sensivel" };
-  if (plano.politicaExecucao.efeitoExternoSoPorAprovacao) return { automatico: false, motivo: "gate_de_rotina" };
+  const travaHerdada = plano.politicaExecucao.travaHerdada === true;
+  if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && gateDaRotinaObrigaPessoa(entrada.modo, travaHerdada)) return { automatico: false, motivo: "gate_de_rotina" };
   if (entrada.destino.conector === "computador") return { automatico: false, motivo: "destino_computador" };
   // ADR-055: comando no terminal do Mac se decide por autorizar-comando.ts, nunca por regra de conector.
   if (entrada.destino.conector === "terminal") return { automatico: false, motivo: "destino_terminal" };
 
   const nome = `${entrada.destino.conector}__${entrada.destino.ferramenta}`;
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === nome);
-  if (!ferramenta || ferramenta.origem !== "conector") return { automatico: false, motivo: "fora_do_catalogo" };
+  const naoConfiavel = plano.confiancaEntrada === "nao_confiavel";
+  const situacao = { arriscada: entrada.arriscada === true, credencial: false, conteudoDeFora: naoConfiavel, travaHerdada };
+  // No turno não confiável o catálogo reduzido tirou a escrita do plano, e é por aqui que ela passa: o modo decide
+  // (a concessão já foi conferida pelo caso de uso, no catálogo do conector).
+  if (!ferramenta || ferramenta.origem !== "conector") return (naoConfiavel ? decidirPeloModo(entrada.modo, situacao) : null) ?? { automatico: false, motivo: "fora_do_catalogo" };
 
   if (ferramenta.readOnlyHint) return { automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO, versao: VERSAO_CONSULTA_SEM_DECISAO };
 
   // A regra da PESSOA cai inteira em turno contaminado; a do CONECTOR (acima) não, porque
   // catalogoReduzido já deixa readOnly passar direto e executá-la aqui não amplia nada.
-  if (plano.confiancaEntrada === "nao_confiavel") return { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
-  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return { automatico: false, motivo: "sem_regra_permanente" };
+  if (naoConfiavel) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
+  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return decidirPeloModo(entrada.modo, { ...situacao, arriscada: true }) ?? { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
-  return { automatico: false, motivo: "sem_regra_permanente" };
+  return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "sem_regra_permanente" };
 }
 
 /**
