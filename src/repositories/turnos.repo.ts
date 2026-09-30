@@ -3,6 +3,7 @@ import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
+import { paraProfundidade } from "../domain/profundidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
@@ -61,7 +62,7 @@ function paraTurno(l: Linha): Turno {
     motivoFalha: l.motivo_falha,
     semNovidadeMotivo: l.sem_novidade_motivo,
     retomaTurnoId: l.retoma_turno_id,
-    profundidade: l.profundidade === 1 ? 1 : 0,
+    profundidade: paraProfundidade(l.profundidade),
     reenvios: l.reenvios,
     pararSolicitadoEm: msOuNull(l.parar_solicitado_em),
     entradaTexto: l.entrada_texto,

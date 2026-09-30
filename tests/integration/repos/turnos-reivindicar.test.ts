@@ -103,7 +103,7 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
     });
   });
 
-  it("interromper é terminal e idempotente; 'interrompido' sem motivo é recusado pelo CHECK; profundidade só 0|1", async () => {
+  it("interromper é terminal e idempotente; 'interrompido' sem motivo é recusado pelo CHECK; profundidade só de 0 a 3 (0043, ADR-063)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const t = await repos.turnos.enfileirar(base(conversaId, agenteId));
@@ -116,9 +116,17 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
       await expectRejected(
         trx,
         () => trx`insert into turnos (owner_id, conversa_id, agente_id, origem, prazo_em, profundidade, entrada_texto, entrada_confianca, modelo)
-          values (${PESSOA_MARLON}, ${conversaId}, ${agenteId}, 'peer', now(), 2, 'x', 'confiavel', 'm')`,
+          values (${PESSOA_MARLON}, ${conversaId}, ${agenteId}, 'peer', now(), 4, 'x', 'confiavel', 'm')`,
         "23514",
       );
+      await expectRejected(
+        trx,
+        () => trx`insert into turnos (owner_id, conversa_id, agente_id, origem, prazo_em, profundidade, entrada_texto, entrada_confianca, modelo)
+          values (${PESSOA_MARLON}, ${conversaId}, ${agenteId}, 'peer', now(), -1, 'x', 'confiavel', 'm')`,
+        "23514",
+      );
+      // 3 é o limite da corrente e cabe no CHECK (nasce interrompido para não entrar na fila deste teste).
+      expect((await repos.turnos.enfileirar(base(conversaId, agenteId, { profundidade: 3, interrompidoCom: "executor_indisponivel" })))?.profundidade).toBe(3);
       // Nasce já interrompido (executor indisponível): nunca entra na fila.
       const morto = await repos.turnos.enfileirar(base(conversaId, agenteId, { interrompidoCom: "executor_indisponivel" }));
       expect(morto).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });

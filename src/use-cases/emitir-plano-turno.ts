@@ -54,8 +54,9 @@ export const MOTOR_CLI = "claude-cli";
  * (ADR-044): a RETOMADA de um turno de rotina continua rotina — antes ela caía em 'conversa' e voltava
  * com o catálogo inteiro e sem o gate, depois de ter lido e-mail como entrada não confiável.
  * `ligadoADelegacao` (definido em 2026-09-24, ADR-047): o pedido de colega e as retomadas dele são 'delegacao'.
- * revisto em 2026-09-29 (ADR-058): profundidade 1 não é mais 'peer' — ela só corta o salto. A continuação de
- * quem pediu (retomada do turno dele, em profundidade 1) volta no modo dele: conversa, sala ou rotina.
+ * revisto em 2026-09-29 (ADR-058): profundidade não é mais 'peer' — no limite (ADR-063) ela só corta o salto. A
+ * continuação de quem pediu (retomada do turno dele, um passe mais funda) volta no modo dele: conversa, sala, rotina
+ * ou, se quem pediu cumpria um pedido de colega, delegação.
  * 'peer' fica para o turno legado de perguntar_a_bot que ainda estiver na fila.
  */
 export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false, ligadoADelegacao = false): ModoTurno {
