@@ -430,6 +430,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscarPropriaDoAgente(agenteId) {
         return doTenant(b.conversas).find((c) => c.tipo === "propria" && c.agenteId === agenteId) ?? null;
       },
+      async propriasDosAgentes(agenteIds) {
+        const saida = new Map<string, Conversa>();
+        for (const id of agenteIds) {
+          const c = doTenant(b.conversas).find((x) => x.tipo === "propria" && x.agenteId === id);
+          if (c) saida.set(id, c);
+        }
+        return saida;
+      },
       async buscarDaSala(salaId) {
         return doTenant(b.conversas).find((c) => c.tipo === "sala" && c.salaId === salaId) ?? null;
       },
@@ -577,6 +585,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async ultimaDaConversa(conversaId) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas[todas.length - 1] ?? null;
+      },
+      async ultimasDasConversas(conversaIds) {
+        const saida = new Map<string, Mensagem>();
+        for (const id of conversaIds) {
+          const todas = doTenant(b.mensagens).filter((m) => m.conversaId === id).sort((x, y) => x.criadoEm - y.criadoEm);
+          const ultima = todas[todas.length - 1];
+          if (ultima) saida.set(id, ultima);
+        }
+        return saida;
       },
       async pedidoDaTarefa(turnoId) {
         return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
@@ -855,6 +872,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (b.entregas.has(chave)) return false;
         b.entregas.add(chave);
         return true;
+      },
+      async concluidosPorConversa(conversaIds) {
+        const saida = new Map<string, number>();
+        for (const id of conversaIds) {
+          const n = doTenant(b.turnos).filter((t) => t.conversaId === id && t.estado === "concluido").length;
+          if (n > 0) saida.set(id, n);
+        }
+        return saida;
       },
       async listarDaConversa(conversaId, limite = 50) {
         const todos = doTenant(b.turnos).filter((t) => t.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
@@ -1359,6 +1384,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async doAgente(agenteId) {
         return doTenant(b.concessoes).filter((c) => c.agenteId === agenteId);
+      },
+      async contarPorAgente(agenteIds) {
+        const saida = new Map<string, number>();
+        for (const id of agenteIds) {
+          const n = doTenant(b.concessoes).filter((c) => c.agenteId === id).length;
+          if (n > 0) saida.set(id, n);
+        }
+        return saida;
       },
       // Sem concorrência em memória: a trava advisory não tem o que serializar.
       async travar() {

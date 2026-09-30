@@ -68,6 +68,16 @@ export function conversasRepo(conn: Conn, escopo: Escopo) {
       return l ? paraConversa(l) : null;
     },
 
+    /** buscarPropriaDoAgente de vários agentes numa consulta (a frota, definido em 2026-09-30): agenteId → a conversa mais antiga. */
+    async propriasDosAgentes(agenteIds: readonly string[]): Promise<Map<string, Conversa>> {
+      if (agenteIds.length === 0) return new Map();
+      const linhas = await conn<Linha[]>`
+        select distinct on (agente_id) ${conn.unsafe(COLUNAS)} from conversas
+        where tenant_id = ${escopo.tenantId} and tipo = 'propria' and agente_id = any(${[...agenteIds]}::uuid[])
+        order by agente_id, criado_em`;
+      return new Map(linhas.map((l) => [l.agente_id as string, paraConversa(l)]));
+    },
+
     async buscarDaSala(salaId: string): Promise<Conversa | null> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from conversas where tenant_id = ${escopo.tenantId} and tipo = 'sala' and sala_id = ${salaId} order by criado_em limit 1`;

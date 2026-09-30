@@ -55,6 +55,16 @@ export function concessoesRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraConcessao);
     },
 
+    /** Quantas concessões cada agente tem, numa consulta (a frota mostra só o número, definido em 2026-09-30). Agente sem nenhuma fica de fora. */
+    async contarPorAgente(agenteIds: readonly string[]): Promise<Map<string, number>> {
+      if (agenteIds.length === 0) return new Map();
+      const linhas = await conn<{ agente_id: string; n: number }[]>`
+        select agente_id, count(*)::int as n from concessoes
+        where tenant_id = ${escopo.tenantId} and agente_id = any(${[...agenteIds]}::uuid[])
+        group by agente_id`;
+      return new Map(linhas.map((l) => [l.agente_id, l.n]));
+    },
+
     /**
      * Trava (agente, conector) até o fim da tx (definido em 2026-09-24, emenda da ADR-044). O pré-voo da
      * rotina (lê concessões → abre ou reaproveita o card) e o clique que concede (decidir-acesso.ts)
