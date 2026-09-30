@@ -78,7 +78,8 @@ export interface ServicesNod<Trx> {
     /** pedir_a_bot (ADR-058) para quem só tem o turnoId. */
     pedir(trx: Trx, p: { turnoId: string; agente: string; pedido: string; contexto?: string }): Promise<{ tarefaId: string }>;
   };
-  barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse };
+  /** null = um `turno.delta` guardado para sair junto com os próximos (src/services/barramento.ts, juntarDeltasMs). */
+  barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse | null };
 }
 
 /**
