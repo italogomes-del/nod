@@ -20,6 +20,7 @@ import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
 import { esquecerRegiao, regiao, regiaoMudaria } from "./lib/regioes.ts";
+import { criarRascunhos } from "./lib/rascunhos.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
@@ -56,6 +57,11 @@ const CANCELAR_DESFAZER_MS = 5_000;
 let api: Api | null = null;
 let live: LiveEvents | null = null;
 let composerDe: string | null = null;
+/**
+ * O que estava digitado em cada conversa (definido em 2026-09-30): trocar de conversa recriava o campo vazio e a pessoa
+ * perdia o texto. Agora ele fica com a conversa de onde ela saiu e volta quando ela volta — também depois de recarregar.
+ */
+const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { return null; } });
 let reidratando = false;
 let ambienteBanco: AmbienteBancoDto | null = null;
 /** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
@@ -499,12 +505,20 @@ function renderPrincipal(): void {
   if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
   if (composer?.chave !== composerDe) {
+    const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
     composerDe = composer?.chave ?? null;
     esquecerRegiao("composer");
     esquecerRegiao("composer-pergunta");
     esquecerRegiao("composer-aviso");
     regiao("composer", composer?.html ?? "");
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    const rascunho = composerDe ? rascunhos.ler(composerDe) : "";
+    if (ta && rascunho) {
+      ta.value = rascunho;
+      ajustarAltura(ta);
+      ta.setSelectionRange(rascunho.length, rascunho.length);
+    }
     ta?.focus();
     redesenharAnexos();
   }
@@ -630,6 +644,8 @@ function render(): void {
 
 async function iniciarSessao(escopo: Escopo): Promise<void> {
   conexoes.cancelarTodas();
+  // Os rascunhos são da pessoa: outra sessão, outros rascunhos.
+  rascunhos.usar(`${escopo.tenantId}.${escopo.pessoaId}`);
   api = criarApi(escopo);
   // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
   avisador.reiniciar();
@@ -948,8 +964,31 @@ async function comandoDoNod(texto: string, alvo: { conversaId: string; salaId?: 
   return false;
 }
 
+/** A altura do campo acompanha o texto, até 170 px. */
+function ajustarAltura(ta: HTMLTextAreaElement): void {
+  ta.style.height = "auto";
+  ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
+}
+
+/**
+ * Depois de enviar, o campo e o rascunho só se esvaziam se ainda têm o texto enviado: o que a pessoa digitou enquanto
+ * a mensagem ia ao servidor, ou numa conversa para onde ela foi no meio, fica onde está.
+ */
+function limparDepoisDeEnviar(ta: HTMLTextAreaElement, chave: string | null, texto: string): void {
+  const naTela = ta.isConnected && composerDe === chave;
+  if (naTela && ta.value.trim() === texto) {
+    ta.value = "";
+    ta.style.height = "auto";
+    atualizarBarra(ta);
+  }
+  if (!chave) return;
+  if (naTela) rascunhos.guardar(chave, ta.value);
+  else if (rascunhos.ler(chave).trim() === texto) rascunhos.guardar(chave, "");
+}
+
 async function enviarComposer(): Promise<void> {
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  const chave = composerDe;
   const alvo = conversaAtual();
   if (!ta || !alvo || !api) return;
   const texto = ta.value.trim();
@@ -961,9 +1000,7 @@ async function enviarComposer(): Promise<void> {
   // definido em 2026-09-24 (emenda da ADR-045): com pergunta aberta, a mensagem RESPONDE por
   // POST decisoes/:id/responder (a retomada nasce lá), salvo "Outro assunto".
   if (ids.length === 0 && (await comandoDoNod(texto, alvo))) {
-    ta.value = "";
-    ta.style.height = "auto";
-    atualizarBarra(ta);
+    limparDepoisDeEnviar(ta, chave, texto);
     return;
   }
   const destino = destinoDoEnvio(modoDoComposer(estado, alvo.conversaId));
@@ -974,9 +1011,7 @@ async function enviarComposer(): Promise<void> {
       recusarAnexoNaResposta();
       return;
     }
-    ta.value = "";
-    ta.style.height = "auto";
-    atualizarBarra(ta);
+    limparDepoisDeEnviar(ta, chave, texto);
     if (r.enviado === "mensagem") limparAnexos(alvo.conversaId);
     // A escolha do campo vale até este envio: a próxima mensagem volta ao padrão.
     dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: null });
@@ -1266,7 +1301,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
+    if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; if (composerDe) rascunhos.guardar(composerDe, ta.value); }
   },
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
   gaveta: (el) => {
@@ -1680,8 +1715,8 @@ document.addEventListener("input", (ev) => {
   }
   if (ta.id === "busca-bots" || ta.id === "busca-destinatario") { filtrarBots(ta.value, ta.id === "busca-bots" ? "#sidebar" : ".contact-picker"); return; }
   if (ta.id !== "composer-texto") return;
-  ta.style.height = "auto";
-  ta.style.height = `${Math.min(ta.scrollHeight, 170)}px`;
+  ajustarAltura(ta);
+  if (composerDe) rascunhos.guardar(composerDe, ta.value);
   atualizarBarra(ta);
   const caixa = document.getElementById("autocomplete");
   if (!caixa) return;
