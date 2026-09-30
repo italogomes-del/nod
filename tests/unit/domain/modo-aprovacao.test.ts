@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { acaoArriscadaNoApp, decidirAprovacao, REGRA_APROVACAO_PERMANENTE, REGRA_CONSULTA_SEM_DECISAO, type EntradaAprovacao } from "../../../src/domain/aprovacao-permanente.ts";
-import { comandoArriscado, classificarComando } from "../../../src/domain/comando.ts";
+import { comandoArriscado, classificarComando, tocaCredencial } from "../../../src/domain/comando.ts";
 import { conversaComAPessoa, decidirPeloModo, ehModoAprovacao, gateDaRotinaObrigaPessoa, REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, type SituacaoDaAcao } from "../../../src/domain/modo-aprovacao.ts";
 
 const limpa: SituacaoDaAcao = { arriscada: false, credencial: false, conteudoDeFora: false, travaHerdada: false };
@@ -63,8 +63,6 @@ describe("comandoArriscado: o que o automático nunca aprova sozinho", () => {
     ["git restore .", "descarta trabalho que não volta"],
     ["git branch -D feat/velha", "descarta trabalho que não volta"],
     ["git stash drop", "descarta trabalho que não volta"],
-    ["gh pr merge 421 --squash", "mexe no trabalho de outras pessoas no GitHub"],
-    ["gh pr review 421 --approve", "mexe no trabalho de outras pessoas no GitHub"],
     ["gh repo delete marlonwlv/x --yes", "mexe no trabalho de outras pessoas no GitHub"],
     ["gh api -X DELETE repos/o/r/git/refs/heads/x", "apaga no GitHub"],
     ["npm publish", "publica para fora"],
@@ -76,7 +74,6 @@ describe("comandoArriscado: o que o automático nunca aprova sozinho", () => {
     ["docker compose down -v", "apaga containers ou volumes"],
     ["docker volume rm nod_nod_pgdata", "apaga containers ou volumes"],
     ["echo 'export X=1' >> ~/.zshrc", "mexe no que roda ao abrir o terminal ou o Mac"],
-    ["eval \"$CMD\"", "roda um texto como comando"],
   ])("%s → %s", (comando, motivo) => {
     expect(comandoArriscado(comando)).toBe(motivo);
   });
@@ -96,8 +93,19 @@ describe("comandoArriscado: o que o automático nunca aprova sozinho", () => {
     "node scripts/gerar.mjs",
     // o commit que o Claude Code escreve: substituição de comando, que o classificador de leitura nem tokeniza
     "git commit -m \"$(cat <<'EOF'\nfix: acento no filtro\nEOF\n)\"",
+    // revisto em 2026-09-30: o preâmbulo das skills do gstack, que parou o Milton às 09:39 ("roda um texto como comando")
+    "export OPENCLAW_SESSION=1; cd ~/nod/Milton; eval \"$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)\" 2>/dev/null; echo \"SLUG: ${SLUG:-unknown}\"; echo \"BRANCH: $(git branch --show-current 2>/dev/null || echo unknown)\"; mkdir -p ~/.gstack/projects/${SLUG:-unknown}; ls -t ~/.gstack/projects/${SLUG:-unknown}/*-design-*.md 2>/dev/null; ls ~/.gstack/projects/ 2>/dev/null | head; whoami",
+    // merge e aprovar PR pedidos na conversa saem sozinhos (emenda da ADR-059); o terminal só existe na conversa
+    "gh pr merge 421 --squash --delete-branch",
+    "gh pr review 421 --approve",
   ])("%s não é arriscado (o automático aprova)", (comando) => {
     expect(comandoArriscado(comando)).toBeNull();
+    expect(tocaCredencial(comando)).toBe(false);
+  });
+
+  it("credencial: arquivo de chave pelo nome, não propriedade de código (e.key parava o gstack-learn até no total)", () => {
+    for (const c of ["cat ~/certs/server.key", "head server.pem", "openssl x509 -in \"cert.p12\"", "**/*.pem", "cat ~/.ssh/id_ed25519", "gh auth token"]) expect(tocaCredencial(c), c).toBe(true);
+    for (const c of ["node -e \"const dk = (e.key||'') + '|' + (e.type||'')\"", "jq '.[] | .key' dados.json", "echo $(obj.keyboard)"]) expect(tocaCredencial(c), c).toBe(false);
   });
 
   it("arriscado não muda a classificação de leitura do manual (ADR-055): é outra pergunta", () => {

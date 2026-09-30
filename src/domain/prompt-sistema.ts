@@ -90,7 +90,7 @@ const INSTRUCAO_APROVACAO: Record<Exclude<ModoAprovacao, "manual">, string> = {
 /** A frase do terminal sobre o que pede aprovação, pelo modo (ADR-055 no manual; ADR-059 nos outros dois). */
 const TERMINAL_POR_MODO: Record<ModoAprovacao, string> = {
   manual: "o que muda algo (git commit/push, gh pr create/merge/comment, npm install, rm) vira um pedido de aprovação na conversa e o comando espera a resposta dela.",
-  automatico: "o que muda algo (git commit/push, gh pr create, npm install) também roda direto, porque você aprova as próprias ações; o arriscado (rm -r, push --force, reset --hard, gh pr merge, sudo), o que toca credencial e qualquer comando depois de WebFetch ou WebSearch viram um pedido de aprovação na conversa e o comando espera a resposta dela.",
+  automatico: "o que muda algo (git commit/push, gh pr create, npm install) também roda direto, porque você aprova as próprias ações; o arriscado (rm -r, push --force, reset --hard, sudo), o que toca credencial e qualquer comando depois de WebFetch ou WebSearch viram um pedido de aprovação na conversa e o comando espera a resposta dela.",
   total: "o que muda algo também roda direto, porque este bot está sem aprovações; só o que toca uma credencial do Mac vira um pedido de aprovação na conversa.",
 };
 
