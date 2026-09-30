@@ -237,7 +237,16 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
      * estado, a recusa é a explicação que a pessoa lê). Ação que nunca é permanente (ADR-047: aprovar
      * PR, merge) sai mesmo com linha ativa — uma regra gravada antes da lista não vale.
      */
-    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : (entrada.semprePermitir ?? []).filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector" && !nuncaPermanente(n, f.readOnlyHint))),
+    semprePermitir: entrada.confianca === "nao_confiavel" ? [] : semprePermitirNoCatalogo(entrada.semprePermitir ?? [], ferramentas),
     expiraEm: Math.min(entrada.turno.prazoEm, entrada.agora + PLANO_VALIDADE_MS),
   };
+}
+
+/**
+ * As regras "Sempre permitir" que valem num catálogo: só ferramenta de conector que está nele e que pode ser
+ * permanente (ADR-047). O plano usa no PUXAR; desde 2026-09-30 (ADR-062) o pedir_aprovacao e a chamada direta usam
+ * de novo, lendo as regras AGORA, para o clique valer já no turno que ainda está rodando.
+ */
+export function semprePermitirNoCatalogo(nomes: readonly string[], ferramentas: readonly FerramentaPlano[]): string[] {
+  return nomes.filter((n) => ferramentas.some((f) => f.nome === n && f.origem === "conector" && !nuncaPermanente(n, f.readOnlyHint)));
 }

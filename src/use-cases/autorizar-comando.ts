@@ -21,8 +21,8 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  *
  *  1. só lê (classificarComando) e o turno não trouxe conteúdo da web → roda;
  *  2. a pessoa já aprovou ESTE comando nesta tarefa (a retomada refaz o que ela aprovou depois da espera) → roda;
- *  3. ela respondeu "Pode fazer e o resto desta tarefa" num comando, e o turno está limpo e fora do gate de
- *     rotina → roda;
+ *  3. ela respondeu "Pode fazer e o resto desta tarefa" num comando, o turno está limpo e fora do gate de
+ *     rotina, e o comando não toca credencial nem é arriscado → roda;
  *  4. ADR-059: o modo do bot aprova (`decidirPeloModo`): no automático, o que não é arriscado num turno limpo;
  *     no total, tudo. Credencial do Mac nunca passa por aqui → card em qualquer modo;
  *  5. senão → card de aprovação na conversa, e o hook espera a resposta no próprio turno.
@@ -38,14 +38,18 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string },
   const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
   if (classificarComando(texto).tipo === "leitura" && !contaminado) return { data: { permitir: true, porque: "leitura" } };
   if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { data: { permitir: true, porque: "aprovado" } };
-  if (!contaminado && !plano.politicaExecucao.efeitoExternoSoPorAprovacao && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
+  const risco = comandoArriscado(texto);
+  const credencial = tocaCredencial(texto);
+  // definido em 2026-09-30 (ADR-062, auditoria das aprovações): "o resto desta tarefa" libera o comando comum, não
+  // a credencial nem o arriscado — antes esta linha vinha antes das duas cercas, e um "pode fazer" num `ls` liberava
+  // o `security find-generic-password` e o `rm -rf` seguintes, que nem o modo total libera sem a pessoa.
+  if (!contaminado && !credencial && risco === null && !plano.politicaExecucao.efeitoExternoSoPorAprovacao && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
     return { data: { permitir: true, porque: "liberado_na_tarefa" } };
   }
   const agente = await deps.repos.agentes.buscar(plano.agenteId);
-  const risco = comandoArriscado(texto);
   const doModo = decidirPeloModo(agente?.modoAprovacao, {
     arriscada: risco !== null,
-    credencial: tocaCredencial(texto),
+    credencial,
     conteudoDeFora: contaminado,
     travaHerdada: plano.politicaExecucao.travaHerdada === true,
   });

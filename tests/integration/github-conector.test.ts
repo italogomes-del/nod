@@ -20,6 +20,7 @@ import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { concluirItemNaMaquina, expirarItensNaMaquina, itensParaAMaquina } from "../../src/use-cases/itens-na-maquina.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
+import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
 import { registrarConector } from "../../src/use-cases/registrar-conector.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
@@ -406,8 +407,14 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       const { deps, repos } = depsGithub(trx, MARLON, true);
       await githubComAcesso(deps, repos, conversaId, agenteId);
       const turnoId = await turnoDaConversa(repos, conversaId, agenteId);
-      const plano = { ...(await planoDoTurno(deps, turnoId, true)), semprePermitir: ["github__pr_comentar"] };
-      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 1, texto: "oi" } } }] });
+      const plano = await planoDoTurno(deps, turnoId, true);
+      const comentar = () => pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 1, texto: "oi" } } }] });
+      // ADR-062: a regra vale pela linha ativa AGORA — o clique no primeiro card já dispensa o segundo, no mesmo turno.
+      const primeiro = await comentar();
+      const primeiroId = primeiro.data.estado === "pendente" ? primeiro.data.decisao_id : "";
+      const [origem] = await repos.itensAprovacao.listar(primeiroId);
+      expect((await permitirSempre(deps, { decisaoId: primeiroId, itemIds: [origem?.id ?? ""] })).data.criadas).toHaveLength(1);
+      const pedido = await comentar();
       expect(pedido.data).toMatchObject({ estado: "pendente" });
       const decisaoId = pedido.data.estado === "pendente" ? pedido.data.decisao_id : "";
       expect(await repos.decisoes.buscar(decisaoId)).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra" } });

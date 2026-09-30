@@ -43,5 +43,9 @@ export async function enfileirarRetomada(deps: Deps, r: NovaRetomada): Promise<{
     ...(r.reenvios !== undefined ? { reenvios: r.reenvios } : {}),
     ...(r.executor ? { executor: r.executor } : {}),
   });
+  // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a marca da web (0033) também não se lava. Ela mora na
+  // linha do turno, e a retomada nascia limpa, embora retome a MESMA sessão pelo --resume, com a página ainda no
+  // contexto. O número de cards dependia de quanto a pessoa demorava para responder.
+  if (turno && (await deps.repos.turnos.contaminado(r.original.id))) await deps.repos.turnos.contaminar(turno.id, deps.agora());
   return { turno, nova: turno !== null };
 }

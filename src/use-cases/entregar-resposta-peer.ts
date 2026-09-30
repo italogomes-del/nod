@@ -120,6 +120,12 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
     harness: remetente.harness,
   });
   if (!continuacao) throw new ErroDeDominio("estado_invalido", { cause: "turno de continuação não criado" });
+  // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a resposta traz o que o colega leu. Se a tarefa dele
+  // (ou a cadeia dela) leu a web ou nasceu de conteúdo de fora, a continuação herda a marca — senão o pedido a um
+  // colega lavava a página lida e quem pediu seguia com "Sempre permitir" e o modo automático valendo.
+  const cadeia = delegada ? await cadeiaDaDelegacao(deps, tarefa) : [tarefa];
+  const trouxeDeFora = cadeia.some((t) => t.entradaConfianca !== "confiavel") || (await Promise.all(cadeia.map((t) => deps.repos.turnos.contaminado(t.id)))).some(Boolean);
+  if (trouxeDeFora || (pediu && (await deps.repos.turnos.contaminado(pediu.id)))) await deps.repos.turnos.contaminar(continuacao.id, agora);
   const mensagem = await deps.repos.mensagens.criar({
     conversaId: conversaRemetente.id,
     turnoId: continuacao.id,

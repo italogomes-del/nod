@@ -1,13 +1,15 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
-import { FERRAMENTAS_NOD, type ContratoFerramentaNod, type JsonSchema, type NomeFerramentaNod } from "../contracts/ferramentas-nod.ts";
+import { FERRAMENTAS_NOD, type ContratoFerramentaNod, type NomeFerramentaNod } from "../contracts/ferramentas-nod.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
-import { nuncaPermanente } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirAprovacao, nuncaPermanente } from "../domain/aprovacao-permanente.ts";
+import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
+import { semprePermitirVivo } from "./regras-vivas.ts";
 import { nomeParaTrilha, registrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -37,45 +39,7 @@ export const REGRA_CHAMADA = "regra:chamar_ferramenta" as const;
 export const VERSAO_REGRA_CHAMADA = 1 as const;
 
 // ---------------------------------------------------------------------------------------------
-// Validação de argumentos pelo subconjunto JSON Schema de src/contracts/ferramentas-nod.ts.
-
-function tipoDe(v: unknown): string {
-  if (v === null) return "null";
-  if (Array.isArray(v)) return "array";
-  return typeof v;
-}
-
-export function errosDoSchema(schema: JsonSchema, valor: unknown, caminho = "$"): string[] {
-  const erros: string[] = [];
-  if (schema.anyOf && !schema.anyOf.some((s) => errosDoSchema(s, valor, caminho).length === 0)) return [`${caminho}: nenhuma alternativa válida`];
-  if (schema.oneOf && schema.oneOf.filter((s) => errosDoSchema(s, valor, caminho).length === 0).length !== 1) return [`${caminho}: esperado uma alternativa válida`];
-  const t = tipoDe(valor);
-  const esperado = schema.type === "integer" ? "number" : schema.type;
-  if (schema.type && t !== esperado) return [`${caminho}: esperado ${schema.type}, veio ${t}`];
-  if (schema.type === "integer" && !Number.isInteger(valor)) erros.push(`${caminho}: esperado inteiro`);
-  if (schema.type === "string") {
-    const s = valor as string;
-    if (schema.minLength !== undefined && s.length < schema.minLength) erros.push(`${caminho}: mínimo ${schema.minLength} caracteres`);
-    if (schema.maxLength !== undefined && s.length > schema.maxLength) erros.push(`${caminho}: máximo ${schema.maxLength} caracteres`);
-    if (schema.enum && !schema.enum.includes(s)) erros.push(`${caminho}: valor fora de [${schema.enum.join(", ")}]`);
-  }
-  if (schema.type === "array") {
-    const a = valor as unknown[];
-    if (schema.minItems !== undefined && a.length < schema.minItems) erros.push(`${caminho}: mínimo ${schema.minItems} itens`);
-    if (schema.maxItems !== undefined && a.length > schema.maxItems) erros.push(`${caminho}: máximo ${schema.maxItems} itens`);
-    if (schema.items) a.forEach((item, i) => erros.push(...errosDoSchema(schema.items as JsonSchema, item, `${caminho}[${i}]`)));
-  }
-  if (schema.type === "object") {
-    const o = valor as Record<string, unknown>;
-    for (const r of schema.required ?? []) if (!(r in o)) erros.push(`${caminho}.${r}: obrigatório`);
-    for (const [k, v] of Object.entries(o)) {
-      const sub = schema.properties?.[k];
-      if (sub) erros.push(...errosDoSchema(sub, v, `${caminho}.${k}`));
-      else if (schema.additionalProperties === false) erros.push(`${caminho}.${k}: propriedade não prevista`);
-    }
-  }
-  return erros;
-}
+export { errosDoSchema } from "../domain/schema-args.ts";
 
 /**
  * Parse validado: devolve os args TIPADOS da ferramenta nod ou a lista de erros. O único `as` deste
@@ -219,6 +183,18 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
   // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".
   if (nuncaPermanente(ferramenta.nome, ferramenta.readOnlyHint)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  // definido em 2026-09-30 (ADR-062): a chamada direta passa pela MESMA decisão do card. Antes, escrever e até apagar
+  // direto rodavam sem card no modo manual (só o prompt pedia pedir_aprovacao), e um colega apagava direto no
+  // automático o que, pedido por item, pararia em `acao_arriscada`. Quem não passaria sozinho no card recebe a
+  // negação transitória "peça aprovação" e cai no pedir_aprovacao, com o motivo gravado no item.
+  if (!ferramenta.readOnlyHint) {
+    const modo = (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual";
+    const capacidade = conector.catalogo.find((c) => c.nome === tool);
+    const semprePermitir = await semprePermitirVivo(deps, input.agenteId, plano);
+    const destino = { conector: conector.slug, ferramenta: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> };
+    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada: capacidade ? acaoArriscadaNoApp(capacidade) : true });
+    if (!d.automatico) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  }
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
 

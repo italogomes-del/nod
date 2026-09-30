@@ -58,6 +58,8 @@ describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na A
         expect(r.data, nome).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
       }
       expect(chamadas.conectores).toEqual([]);
+      // ADR-062: comentar direto segue o modo de quem recebe — no automático, roda; aprovar PR e merge, não, em modo nenhum.
+      await deps.repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
       expect((await chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano })).data).toMatchObject({ ok: true });
       expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_comentar"]);
     });

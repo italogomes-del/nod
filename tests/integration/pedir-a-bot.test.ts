@@ -88,9 +88,11 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       expect(plano.data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
       expect(plano.data.promptSistema).toContain("Modo de pedido de colega: Taga, outro bot de");
       expect(plano.data.entrada.sessaoCli).toBeNull();
-      // Sem trava, a escrita concedida roda direto pelo proxy.
-      const escrita = await chamarFerramenta(deps, { turnoId: tarefa?.id ?? "", agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano: plano.data });
-      expect(escrita.data).toMatchObject({ ok: true });
+      // Sem trava, a escrita concedida segue o MODO de quem recebe (ADR-062): no manual, pede card; no automático, roda direto.
+      const comentar = () => chamarFerramenta(deps, { turnoId: tarefa?.id ?? "", agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano: plano.data });
+      expect((await comentar()).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+      await repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
+      expect((await comentar()).data).toMatchObject({ ok: true });
       expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_comentar"]);
     });
   });

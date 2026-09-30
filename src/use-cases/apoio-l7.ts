@@ -179,9 +179,15 @@ export async function travaDoPedido(repos: Repos, tarefa: Turno): Promise<boolea
   if (!pedido || pedido.payload?.kind !== "peer_pedido") return true;
   const remetente = await repos.turnos.buscar(pedido.payload.turnoOrigemId);
   if (!remetente) return true;
+  // definido em 2026-09-30 (ADR-062, decisão do Marlon): entre bots da MESMA pessoa, a rotina de um não trava o
+  // outro — quem decide é o modo de quem recebe. A rotina do Chico pedia ao Milton e virava card na conversa do Milton
+  // (e o contrário), mesmo com os dois no automático e "Sempre permitir" ativo. A trava continua quando o pedido veio
+  // de OUTRA pessoa ou de um turno que leu conteúdo de fora: é por aí que um texto de fora mandaria no outro bot.
+  // A rotina sem janela continua travando antes disso (E7.3): sem a janela, não se sabe de onde ela veio.
   const ligacao = await rotinaDoTurno(repos, remetente.id);
-  if (ligacao) return ligacao.rotina.exigeAprovacao;
-  return remetente.origem === "rotina";
+  if (!ligacao && remetente.origem === "rotina") return true;
+  if (remetente.ownerId === tarefa.ownerId && remetente.entradaConfianca === "confiavel" && !(await repos.turnos.contaminado(remetente.id))) return false;
+  return ligacao ? ligacao.rotina.exigeAprovacao : false;
 }
 
 /**
