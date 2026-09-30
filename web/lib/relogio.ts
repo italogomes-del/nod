@@ -1,4 +1,5 @@
 import type { EpochMs, IsoUtc } from "../../src/contracts/ids.ts";
+import { formatoData } from "./formato-data.ts";
 
 /**
  * O servidor manda instante ABSOLUTO em UTC; o cliente só interpola (ADR-007). Nada aqui lê
@@ -39,12 +40,12 @@ export function interpolar(instante: IsoUtc | EpochMs, agora: number): string {
 /** 'HH:MM' no fuso da pessoa (default UTC). */
 export function horaMinuto(instante: IsoUtc | EpochMs, fusoIana = "UTC"): string {
   const t = typeof instante === "number" ? instante : Date.parse(instante);
-  return new Intl.DateTimeFormat("pt-BR", { timeZone: fusoIana, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t));
+  return formatoData("pt-BR", { timeZone: fusoIana, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t));
 }
 
 /** O dia civil do instante no fuso (AAAA-MM-DD): o "hoje" e o "ontem" são do fuso da rotina, não de UTC. */
 function diaNoFuso(t: number, fusoIana: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: fusoIana, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
+  return formatoData("en-CA", { timeZone: fusoIana, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
 }
 
 /**

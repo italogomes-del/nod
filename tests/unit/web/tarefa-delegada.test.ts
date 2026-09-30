@@ -49,7 +49,7 @@ describe("'Sempre permitir' não é oferecido para aprovar PR (ADR-047)", () => 
     decisao: { tenantId: "t", id: "d", ownerId: "marlon", decisorId: "marlon", agenteId: "a", conversaId: "c", turnoId: null, tipo: "aprovacao", estado: "pendente", prazoDecisaoEm: "2026-09-25T00:00:00Z", prazoExecucaoEm: null, frase: "Revisar o PR", desfecho: null, vistaEm: null, criadoEm: "2026-09-24T00:00:00Z", fioId: null },
     estadoColuna: "pendente", agenteNome: "Dev 1", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, gemeas: [], itensAprovacao: [], proposta: null, fio: null, rotinaParada: null,
   };
-  const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "marlon", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+  const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "marlon", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
   const com = (i: SuaVezDto["itens"][number]): Estado => ({ ...estado, suaVez: { itens: [i], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } });
 
   it("só aprovar PR: o botão aparece desabilitado com o motivo", () => {

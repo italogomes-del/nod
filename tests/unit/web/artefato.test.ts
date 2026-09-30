@@ -21,7 +21,7 @@ function mensagem(id: string, versao: number, extra: Partial<Mensagem> = {}): Me
   };
 }
 function estadoCom(mensagens: Mensagem[]): Estado {
-  const c: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+  const c: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
   return { ...estadoInicial, agora: AGORA, sessao: { tenantId: "t", pessoaId: "p" }, conversas: { c }, frota: { agentes: [{ id: "a", nome: "Ada", ownerId: "p", conversaId: "c" }] } as never };
 }
 

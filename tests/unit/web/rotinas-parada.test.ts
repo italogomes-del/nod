@@ -117,7 +117,7 @@ describe("o card do acesso que a rotina pediu", () => {
   });
 
   it("no chat, o card de um clique leva a mesma tag, o desde e a linha", () => {
-    const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c1", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [proposta], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+    const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c1", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [proposta], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
     const html = renderTimeline(conversa, com(item(proposta, parada)));
     expect(html).toMatch(/<div class="ac-titulo">.*?<\/div><span class="tag tag-ambar dec-rotina-parada"/);
     expect(html).toContain("desde ontem 13:00");

@@ -16,7 +16,35 @@ const LINHAS_VISIVEIS = 8;
 /** Com até 10 linhas a tabela vem inteira: esconder 1 ou 2 linhas atrás de um botão só atrapalha. */
 const LINHAS_SEM_MOSTRAR_MAIS = 10;
 
+/**
+ * O HTML de uma mensagem só muda quando muda o texto dela: a timeline é redesenhada a cada frame, e
+ * reformatar as mesmas mensagens em cada redesenho custava caro. medido em 2026-09-30: markdown, links e o
+ * TSV das tabelas somaram ~49 s de CPU dos 118 s do perfil com 8 bots escrevendo e uma conversa de 200
+ * mensagens aberta (scripts/carga-tela). A memória é por `chave` (a mensagem) e confere o texto; o dia
+ * entra porque o chip de link do Slack diz "mensagem das HH:MM" no mesmo dia e "de DD/MM" depois. Quem
+ * passa `agora` (os testes) formata direto.
+ */
+const MEMORIA_MAX = 2_000;
+const memoria = new Map<string, { texto: string; html: string }>();
+let diaDaMemoria = "";
+
 export function textoFormatado(texto: string, opcoes: OpcoesTexto = {}): string {
+  if (opcoes.agora || !opcoes.chave) return formatar(texto, opcoes);
+  const dia = new Date().toDateString();
+  if (dia !== diaDaMemoria) {
+    memoria.clear();
+    diaDaMemoria = dia;
+  }
+  const guardado = memoria.get(opcoes.chave);
+  if (guardado && guardado.texto === texto) return guardado.html;
+  const html = formatar(texto, opcoes);
+  memoria.delete(opcoes.chave);
+  memoria.set(opcoes.chave, { texto, html });
+  if (memoria.size > MEMORIA_MAX) memoria.delete(memoria.keys().next().value ?? "");
+  return html;
+}
+
+function formatar(texto: string, opcoes: OpcoesTexto): string {
   let tabelas = 0;
   return texto.split(/(```[\s\S]*?```)/g).map((trecho, i) => {
     if (i % 2 === 1) return `<pre><code>${esc(trecho.slice(3, -3).replace(/^\w*\n/, ""))}</code></pre>`;
