@@ -3,13 +3,23 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "excluir" | "restaurar"; secao?: string; naoLido?: boolean }, { agente: Agente }> = async (deps, input) => {
+/** definido em 2026-09-30 (0041): uma ordem da barra tem no máximo isto de bots — muito acima de qualquer grupo real. */
+const MAX_ORDEM = 200;
+
+/**
+ * definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): soltar um bot arrastado é UM pedido — fixa ou desafixa,
+ * troca a seção e grava a ordem do grupo de destino (`ordem`, os ids na ordem em que aparecem, com o próprio bot).
+ */
+export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "excluir" | "restaurar"; secao?: string; naoLido?: boolean; fixado?: boolean; ordem?: string[] }, { agente: Agente }> = async (deps, input) => {
   const atual = await deps.repos.agentes.buscar(input.agenteId, true);
   if (!atual) throw new ErroDeDominio("nao_encontrado");
   if (atual.ownerId !== deps.escopo.pessoaId) throw new ErroDeDominio("nao_permitido");
   if (input.secao !== undefined && (typeof input.secao !== "string" || input.secao.trim().length > 60)) throw new ErroDeDominio("entrada_invalida");
   if (input.naoLido !== undefined && typeof input.naoLido !== "boolean") throw new ErroDeDominio("entrada_invalida");
-  if (input.acao === "organizar" && input.secao === undefined && input.naoLido === undefined) throw new ErroDeDominio("entrada_invalida");
+  if (input.fixado !== undefined && typeof input.fixado !== "boolean") throw new ErroDeDominio("entrada_invalida");
+  if (input.ordem !== undefined && !ordemValida(input.ordem, atual.id)) throw new ErroDeDominio("entrada_invalida");
+  if (input.acao === "organizar" && input.secao === undefined && input.naoLido === undefined && input.fixado === undefined && input.ordem === undefined) throw new ErroDeDominio("entrada_invalida");
+  if (input.acao === "organizar" && atual.excluidoEm && (input.fixado !== undefined || input.ordem !== undefined)) throw new ErroDeDominio("estado_invalido");
   const agora = deps.agora();
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(atual.id);
   const pendentes = input.acao === "excluir" ? (await deps.repos.turnos.pendentesDaPessoa()).filter((t) => t.agenteId === atual.id) : [];
@@ -18,10 +28,21 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
     if (input.naoLido) await deps.repos.leituras.marcarNaoLida(conversa.id);
     else await deps.repos.leituras.marcarLida(conversa.id);
   }
-  const agente = input.acao === "excluir" ? await deps.repos.agentes.excluir(atual.id, agora)
+  let agente = input.acao === "excluir" ? await deps.repos.agentes.excluir(atual.id, agora)
     : input.acao === "restaurar" ? await deps.repos.agentes.restaurar(atual.id)
     : input.secao !== undefined ? await deps.repos.agentes.organizar(atual.id, { secao: input.secao.trim() })
     : atual;
+  if (input.acao === "organizar" && agente && input.fixado !== undefined && input.fixado !== agente.fixado) agente = await deps.repos.agentes.fixar(atual.id, input.fixado);
+  if (input.acao === "organizar" && agente && input.ordem !== undefined) {
+    await deps.repos.agentes.ordenar(input.ordem);
+    agente = await deps.repos.agentes.buscar(atual.id);
+  }
   if (!agente) throw new ErroDeDominio("estado_invalido");
   return { data: { agente }, events: [...pendentes.map((t) => evento(deps.escopo, { kind: "turno_interrompido", autoria: autoriaPessoa(deps.escopo), agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa" } })), evento(deps.escopo, { kind: "agente_atualizado", conversaId: conversa?.id ?? null, autoria: autoriaPessoa(deps.escopo), agora, dados: { agente_id: agente.id, acao: input.acao } })] };
 };
+
+/** A ordem traz o próprio bot, sem repetir, e só ids em texto: o formato (uuid) o Postgres confere (22P02 → 400). */
+function ordemValida(ordem: unknown, agenteId: string): ordem is string[] {
+  return Array.isArray(ordem) && ordem.length > 0 && ordem.length <= MAX_ORDEM && ordem.every((id) => typeof id === "string" && id.length > 0)
+    && new Set(ordem).size === ordem.length && ordem.includes(agenteId);
+}

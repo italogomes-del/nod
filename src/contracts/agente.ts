@@ -55,6 +55,8 @@ export type Agente = {
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;
   secao?: string;
+  /** A ordem na barra lateral, dentro da grade de fixados ou da seção (0041); null = nunca arrastado, vem depois. */
+  posicao?: number | null;
   naoLido?: boolean;
   excluidoEm?: EpochMs | null;
   criadoEm: EpochMs;

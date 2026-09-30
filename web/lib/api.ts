@@ -101,7 +101,7 @@ export function criarApi(escopo: Escopo) {
     urlEventos: `${base}/eventos`,
     frota: () => get<FrotaDto>("frota"),
     gestaoAgentes: () => get<FrotaDto>("gestao-agentes"),
-    organizarAgente: (id: string, campos: { secao?: string; naoLido?: boolean }) => patch<{ agente: Agente }>(`agentes/${id}/organizacao`, campos),
+    organizarAgente: (id: string, campos: { secao?: string; naoLido?: boolean; fixado?: boolean; ordem?: string[] }) => patch<{ agente: Agente }>(`agentes/${id}/organizacao`, campos),
     /** Não lidos (definido em 2026-09-29, 0039). */
     naoLidos: () => get<NaoLidosDto>("nao-lidos"),
     marcarLida: (conversaId: string) => post<RespostaMutacao>(`conversas/${conversaId}/lida`),

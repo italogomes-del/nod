@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SuaVezDto } from "../../../src/contracts/api.ts";
-import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
+import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, SUBTITULO_ESPERANDO } from "../../../web/telas/sua-vez.ts";
 import { nomeLegivel, renderDetalhes } from "../../../web/telas/detalhes.ts";
 
@@ -95,19 +95,30 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
   };
   const dona: Estado = { ...base, sessao: { tenantId: "t", pessoaId: "p" } };
 
-  it("traz rotinas com controle real, sem exigir a tela cheia", () => {
+  // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): a visão geral tem uma linha por rotina e por app; o resto
+  // (Testar, histórico, as ações do app, Revogar) abre no nível de cada um, dentro da gaveta.
+  const no = (estado: Estado, nivel: NonNullable<Estado["gaveta"]>["nivel"]): Estado => ({ ...estado, gaveta: { agenteId: "a1", nivel } });
+
+  it("traz rotinas com controle real, sem exigir a tela cheia; Testar e Ajustar ficam no nível da rotina", () => {
     const estado: Estado = {
       ...base,
-      rotinas: [{ rotina: { id: "r1", agenteId: "a1", conversaId: "c1", instrucao: "Resumo dos PRs", cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", estado: "ativa", exigeAprovacao: true, fonte: "", entregavel: "", limitesAprovacao: "", politicaSemDado: "" }, proximaExecucao: 10_000 } as never],
+      rotinas: [{ rotina: { id: "r1", agenteId: "a1", conversaId: "c1", instrucao: "Resumo dos PRs. Um por repositório.", cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", estado: "ativa", exigeAprovacao: true, fonte: "", entregavel: "", limitesAprovacao: "", politicaSemDado: "" }, proximaExecucao: 10_000, resumo: "dias úteis às 08:00 (America/Sao_Paulo)" } as never],
       agora: 0,
     };
     const html = renderDetalhes(estado);
     expect(html).toContain("Resumo dos PRs");
     expect(html).toContain('data-act="pausar-rotina"');
-    expect(html).toContain('data-act="executar-rotina"');
+    expect(html).toContain("Dias úteis às 08:00 · próxima");
+    expect(html).toContain('data-act="gaveta" data-nivel="rotina" data-agente="a1" data-id="r1"');
+    const nivel = renderDetalhes(no(estado, { tipo: "rotina", id: "r1" }));
+    expect(nivel).toContain('data-act="gaveta-voltar"');
+    expect(nivel).toContain('data-act="executar-rotina"');
+    expect(nivel).toContain("Dias úteis às 08:00 (America/Sao_Paulo)");
+    // Ajustar só escreve o pedido no campo; quem muda a rotina é o bot (ADR-043).
+    expect(nivel).toContain('data-act="preencher-prompt" data-texto="Ajuste a rotina “Resumo dos PRs”: "');
   });
 
-  it("escreve o acesso concedido com o nome do conector e deixa revogar ali mesmo", () => {
+  it("escreve o acesso concedido com o nome do conector e deixa revogar no nível do app", () => {
     const estado: Estado = {
       ...base,
       conectores: [{ id: "k1", nome: "GitHub", slug: "github", catalogo: [], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
@@ -115,15 +126,17 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     };
     const html = renderDetalhes(estado);
     expect(html).toContain("GitHub");
-    expect(html).toContain("ler_issues");
-    expect(html).toContain('data-act="revogar-acessos"');
-    expect(html).toContain('data-ids="g1"');
     // Sem a sonda dizer que é leitura, o painel não promete "só leitura".
     expect(html).toContain("<small>pode alterar</small>");
-    expect(html).toContain("1 ação permitida");
+    expect(html).toContain('data-nivel="acesso" data-agente="a1" data-id="github"');
+    const nivel = renderDetalhes(no(estado, { tipo: "acesso", id: "github" }));
+    expect(nivel).toContain("ler_issues");
+    expect(nivel).toContain('data-act="revogar-acessos"');
+    expect(nivel).toContain('data-ids="g1"');
+    expect(nivel).toContain("1 ação permitida");
   });
 
-  it("ADR-044: só leitura vira 'Gmail · só leitura · N ações', com os nomes técnicos só no <details>", () => {
+  it("ADR-044: só leitura vira uma linha 'Gmail · só leitura'; os nomes técnicos só no title, dentro do nível", () => {
     const catalogo = [
       { nome: "GMAIL_FETCH_EMAILS", readOnlyHint: true },
       { nome: "GMAIL_LIST_LABELS", readOnlyHint: true },
@@ -139,16 +152,18 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     const html = renderDetalhes(estado);
     expect(html.match(/class="acesso"/g)).toHaveLength(1);
     expect(html).toContain("<small>só leitura</small>");
-    expect(html).toContain("2 ações permitidas");
-    expect(html).toContain("Não envia nem altera nada.");
-    expect(html).toContain('data-ids="g1,g2"');
-    expect(html).not.toContain("Deixar só leitura");
-    expect(html.indexOf("<details")).toBeLessThan(html.indexOf("GMAIL_FETCH_EMAILS"));
-    expect(html).not.toContain('data-act="revogar"');
+    expect(html).not.toContain("GMAIL_FETCH_EMAILS");
+    const nivel = renderDetalhes(no(estado, { tipo: "acesso", id: "gmail" }));
+    expect(nivel).toContain("2 ações permitidas");
+    expect(nivel).toContain("Não envia nem altera nada.");
+    expect(nivel).toContain('data-ids="g1,g2"');
+    expect(nivel).not.toContain("Deixar só leitura");
+    expect(nivel).toContain('<li title="GMAIL_FETCH_EMAILS">Fetch emails</li>');
+    expect(nivel).not.toContain('data-act="revogar"');
   });
 
   // definido em 2026-09-29 (emenda da ADR-044): um card por app e nível repetia Gmail/Slack/ClickUp.
-  it("UM card por app: leitura e escrita juntas, com o logo do Marketplace e 'Deixar só leitura'", () => {
+  it("UMA linha por app: leitura e escrita juntas, com o logo do Marketplace; no nível, 'Deixar só leitura'", () => {
     const catalogo = [
       { nome: "GMAIL_FETCH_EMAILS", readOnlyHint: true },
       { nome: "GMAIL_LIST_LABELS", readOnlyHint: true },
@@ -160,8 +175,8 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       marketplace: [{ slug: "gmail", nome: "Gmail", logo: "https://logos.composio.dev/gmail.svg" } as never],
       // Dois registros do mesmo app (o antigo, fora do ar, e o habilitado) continuam sendo uma ferramenta.
       conectores: [
-        { ...conector, id: "k1", habilitado: true, ultimaFalha: null } as never,
-        { ...conector, id: "k0", habilitado: false, ultimaFalha: { motivo: "conector_indisponivel", em: 1 } } as never,
+        { ...conector, id: "k1", ownerId: "p", habilitado: true, ultimaFalha: null } as never,
+        { ...conector, id: "k0", ownerId: "p", habilitado: false, ultimaFalha: { motivo: "conector_indisponivel", em: 1 } } as never,
       ],
       concessoes: { a1: [
         { id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_FETCH_EMAILS" } as never,
@@ -172,16 +187,19 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     const html = renderDetalhes(estado);
     expect(html.match(/class="acesso"/g)).toHaveLength(1);
     expect(html).toContain('src="/api/t/t/marketplace/gmail/logo"');
-    expect(html).not.toContain("acesso-marca");
     expect(html).toContain("<small>pode ler e alterar</small>");
-    expect(html).toContain("Pode consultar e fazer alterações em seu nome.");
-    expect(html).toContain("3 ações permitidas");
     expect(html).toContain("indisponível");
+    const nivel = renderDetalhes(no(estado, { tipo: "acesso", id: "gmail" }));
+    expect(nivel).toContain("Pode consultar e fazer alterações em seu nome.");
+    expect(nivel).toContain("3 ações permitidas");
+    expect(nivel).toContain("Fora do ar");
     // Revogar tira tudo; "Deixar só leitura" tira só a de escrita.
-    expect(html).toContain('data-ids="g1,g2,g3"');
-    expect(html).toMatch(/data-act="revogar-acessos"[^>]*data-ids="g3"[^>]*>Deixar só leitura</);
-    expect(html.indexOf("Consulta · 2")).toBeLessThan(html.indexOf("Altera · 1"));
-    expect(html.indexOf("Altera · 1")).toBeLessThan(html.indexOf("Send email"));
+    expect(nivel).toContain('data-ids="g1,g2,g3"');
+    expect(nivel).toMatch(/data-act="revogar-acessos"[^>]*data-ids="g3"[^>]*>Deixar só leitura</);
+    expect(nivel.indexOf("Consulta · 2")).toBeLessThan(nivel.indexOf("Altera · 1"));
+    expect(nivel.indexOf("Altera · 1")).toBeLessThan(nivel.indexOf("Send email"));
+    // A dona escolhe o nível ali mesmo (o mesmo controle do "+ Dar acesso").
+    expect(nivel).toContain('data-act="nivel-bot" data-id="a1" data-conector="k1" data-nivel="leitura"');
   });
 
   it("só escrita: 'pode alterar', sem seções nem 'Deixar só leitura'", () => {
@@ -190,11 +208,11 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       conectores: [{ id: "k1", nome: "Slack", slug: "slack", catalogo: [{ nome: "SLACK_SEND_MESSAGE", readOnlyHint: false }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
       concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "SLACK_SEND_MESSAGE" } as never] },
     };
-    const html = renderDetalhes(estado);
-    expect(html).toContain("<small>pode alterar</small>");
-    expect(html).toContain("Pode fazer alterações em seu nome.");
-    expect(html).not.toContain("Deixar só leitura");
-    expect(html).not.toContain("acesso-grupo");
+    expect(renderDetalhes(estado)).toContain("<small>pode alterar</small>");
+    const nivel = renderDetalhes(no(estado, { tipo: "acesso", id: "slack" }));
+    expect(nivel).toContain("Pode fazer alterações em seu nome.");
+    expect(nivel).not.toContain("Deixar só leitura");
+    expect(nivel).not.toContain("acesso-grupo");
   });
 
   it("o nome legível tira o prefixo pelo slug quando o nome do app tem espaço", () => {
@@ -203,7 +221,7 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       conectores: [{ id: "k1", nome: "Google Calendar", slug: "googlecalendar", catalogo: [{ nome: "GOOGLECALENDAR_EVENTS_LIST", readOnlyHint: true }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
       concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "GOOGLECALENDAR_EVENTS_LIST" } as never] },
     };
-    expect(renderDetalhes(estado)).toContain(">Events list</li>");
+    expect(renderDetalhes(no(estado, { tipo: "acesso", id: "googlecalendar" }))).toContain(">Events list</li>");
   });
 
   it("cada ação vira uma linha legível; a descrição do catálogo fica só no title (definido em 2026-09-24)", () => {
@@ -215,42 +233,50 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       conectores: [{ id: "k1", nome: "Slack", slug: "slack", catalogo: [{ nome: "SLACK_WHO_AM_I", descricao: "Return the identity (user + workspace).", readOnlyHint: true }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
       concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "SLACK_WHO_AM_I" } as never] },
     };
-    const html = renderDetalhes(estado);
-    expect(html).toContain('<li title="Return the identity (user + workspace).">Who am i</li>');
+    expect(renderDetalhes(no(estado, { tipo: "acesso", id: "slack" }))).toContain('<li title="Return the identity (user + workspace).">Who am i</li>');
   });
 
-  it("o histórico da rotina abre e fecha; um evento que recarrega a lista não o reabre", () => {
-    const rotina = { rotina: { id: "r1", agenteId: "a1", conversaId: "c1", instrucao: "Resumo", cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", estado: "ativa" }, proximaExecucao: 10_000 } as never;
-    const fechado: Estado = { ...base, rotinas: [rotina], execucoes: { r1: [] }, agora: 0 };
-    expect(renderDetalhes(fechado)).toContain(">Histórico</button>");
-    expect(renderDetalhes(fechado)).not.toContain("nunca executou");
-    const aberto = reduzir(fechado, { tipo: "alternar-historico", rotinaId: "r1" });
-    expect(renderDetalhes(aberto)).toContain(">Ocultar histórico</button>");
-    expect(renderDetalhes(aberto)).toContain("nunca executou");
-    const fechadoDeNovo = reduzir(reduzir(aberto, { tipo: "alternar-historico", rotinaId: "r1" }), { tipo: "hidratar-execucoes", rotinaId: "r1", execucoes: [] });
-    expect(renderDetalhes(fechadoDeNovo)).not.toContain("nunca executou");
+  it("o nível da rotina mostra as últimas execuções — a silenciosa também —, e diz quando ainda não rodou", () => {
+    const rotina = { rotina: { id: "r1", agenteId: "a1", conversaId: "c1", instrucao: "Resumo", cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", estado: "ativa" }, proximaExecucao: 10_000, resumo: "todo dia às 08:00 (America/Sao_Paulo)" } as never;
+    const nivel = (execucoes: Estado["execucoes"]) => renderDetalhes(no({ ...base, rotinas: [rotina], execucoes, agora: 0 }, { tipo: "rotina", id: "r1" }));
+    expect(nivel({})).toContain("carregando…");
+    expect(nivel({ r1: [] })).toContain("nunca executou");
+    const uma = nivel({ r1: [{ id: "e1", rotinaId: "r1", desfecho: "sem_novidade", motivo: null, em: 1, instanteAgendado: 1 } as never] });
+    expect(uma).toContain('class="exec exec-sem_novidade"');
+    expect(uma).not.toContain("nunca executou");
+    // A gaveta de OUTRO bot não herda o nível: abre na visão geral.
+    expect(renderDetalhes({ ...base, rotinas: [rotina], gaveta: { agenteId: "outro", nivel: { tipo: "rotina", id: "r1" } } })).not.toContain('data-act="gaveta-voltar"');
   });
 
   it("sem acessos, convida a dar acesso em vez de deixar a seção muda", () => {
     const html = renderDetalhes(dona);
     expect(html).toContain("ainda não usa nenhuma ferramenta externa");
-    expect(html).toContain('data-act="dar-acesso" data-id="a1"');
+    expect(html).toContain('data-act="gaveta" data-nivel="dar-acesso" data-agente="a1"');
   });
 
-  // definido em 2026-09-25 (jornadas de conexão): "+ Dar acesso" abre, no próprio painel, os apps já
-  // conectados com o nível deste bot e os que faltam conectar com "Conectar" ali mesmo.
+  // definido em 2026-09-25 (jornadas de conexão): "+ Dar acesso" mostra os apps já conectados com o nível deste bot e os
+  // que faltam conectar com "Conectar" ali mesmo. Desde 2026-09-30 é um nível da gaveta.
   it("'+ Dar acesso' aberto: conectados com Nenhum / Ler / Ler e alterar; os outros com Conectar", () => {
     const slack = { tenantId: "t", id: "cs", ownerId: "p", visibility: "privado" as const, nome: "Slack", slug: "slack", transporte: "http" as const, comando: null, args: [], url: null, env: {}, declaracao: "toca" as const, habilitado: true, catalogo: [{ nome: "SLACK_READ", descricao: "", schema: {}, readOnlyHint: true, grupo: "ler" as const }], sondadoEm: 1, ultimaFalha: null, criadoEm: 0 };
-    const html = renderDetalhes({
+    const html = renderDetalhes(no({
       ...dona,
-      dandoAcesso: "a1",
       conectores: [slack],
       marketplace: [{ slug: "slack", nome: "Slack", descricao: "", categoria: "", logo: null }, { slug: "notion", nome: "Notion", descricao: "", categoria: "", logo: null }],
       concessoes: { a1: [] },
-    });
-    expect(html).toContain("Dar a ");
+    }, { tipo: "dar-acesso" }));
+    expect(html).toContain("Dar acesso a Vera");
     expect(html).toContain('data-act="nivel-bot" data-id="a1" data-conector="cs" data-nivel="leitura"');
     expect(html).toContain('data-act="conectar-app" data-id="notion"');
     expect(html).not.toContain('data-act="conectar-app" data-id="slack"');
+  });
+
+  it("Editar perfil abre enxuto na gaveta: mascote, nome, título e missão — sem a escolha de modelo", () => {
+    const html = renderDetalhes(no(dona, { tipo: "perfil" }));
+    expect(html).toContain('data-form="editar-perfil" data-id="a1"');
+    expect(html).toContain('name="nome" value="Vera"');
+    expect(html).toContain('name="forma"');
+    expect(html).toContain('name="cor"');
+    expect(html).not.toContain('name="inteligencia"');
+    expect(html).not.toContain("Catálogo Bloub");
   });
 });

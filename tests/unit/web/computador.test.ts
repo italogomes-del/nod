@@ -38,7 +38,7 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
   });
 
   it("painel: o botão Computador do bot (em Ambiente) ganha o chip 'fora do ar'; respondendo, não — e o cabeçalho fica limpo", () => {
-    expect(renderDetalhes(comFrota(nina(FORA)))).toMatch(/data-act="abrir-computador"[^>]*>Computador do bot <span class="tag tag-vermelha">fora do ar<\/span>/);
+    expect(renderDetalhes(comFrota(nina(FORA)))).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot<\/span><span class="tag tag-vermelha">fora do ar<\/span>/);
     expect(renderDetalhes(comFrota(nina(null)))).not.toContain("fora do ar");
     expect(renderCabecalhoConversa(comFrota(nina(FORA)), "a1")).not.toContain("abrir-computador");
   });

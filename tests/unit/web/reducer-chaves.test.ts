@@ -4,22 +4,32 @@ import { estadoInicial, invalidacoesDaTela, reduzir } from "../../../web/estado/
 
 const emitida: ChaveEmitidaDto = { chave: "abc.segredo", dados: { id: "k1", nome: "MacBook", prefixo: "segredo1", criadaEm: 1, ultimoUsoEm: null, revogadaEm: null } };
 
+// definido em 2026-09-30: as chaves moram na seção Computadores de Seu espaço (camada por cima da tela), não numa tela.
 describe("reducer: Minhas chaves (ADR-031)", () => {
-  it("a tela de chaves pede a lista quando ainda não carregou; depois de hidratar, não pede mais", () => {
-    const naTela = reduzir(estadoInicial, { tipo: "navegar", tela: { tipo: "chaves" } });
-    expect(invalidacoesDaTela(naTela)).toContain("chaves");
-    const hidratado = reduzir(naTela, { tipo: "hidratar-chaves", chaves: [emitida.dados] });
+  it("a seção Computadores pede a lista quando ainda não carregou; depois de hidratar, não pede mais", () => {
+    const naSecao = reduzir(estadoInicial, { tipo: "espaco", secao: "computadores" });
+    expect(invalidacoesDaTela(naSecao)).toContain("chaves");
+    expect(invalidacoesDaTela(reduzir(estadoInicial, { tipo: "espaco", secao: "conexao" }))).not.toContain("chaves");
+    const hidratado = reduzir(naSecao, { tipo: "hidratar-chaves", chaves: [emitida.dados] });
     expect(invalidacoesDaTela(hidratado)).not.toContain("chaves");
   });
 
-  it("a chave crua fica só enquanto a pessoa está na tela: some ao fechar, ao sair da tela e ao trocar de sessão", () => {
-    const naTela = reduzir(estadoInicial, { tipo: "navegar", tela: { tipo: "chaves" } });
-    const comChave = reduzir(naTela, { tipo: "chave-emitida", emitida });
+  it("a chave crua fica só enquanto a pessoa está em Computadores: some ao fechar, ao trocar de seção, ao navegar e ao trocar de sessão", () => {
+    const naSecao = reduzir(estadoInicial, { tipo: "espaco", secao: "computadores" });
+    const comChave = reduzir(naSecao, { tipo: "chave-emitida", emitida });
     expect(comChave.chaveEmitida?.chave).toBe("abc.segredo");
     expect(comChave.invalidacoes).toContain("chaves");
-    expect(reduzir(comChave, { tipo: "navegar", tela: { tipo: "chaves" } }).chaveEmitida).not.toBeNull();
+    expect(reduzir(comChave, { tipo: "espaco", secao: "computadores" }).chaveEmitida).not.toBeNull();
     expect(reduzir(comChave, { tipo: "chave-emitida", emitida: null }).chaveEmitida).toBeNull();
+    expect(reduzir(comChave, { tipo: "espaco", secao: "avisos" }).chaveEmitida).toBeNull();
+    expect(reduzir(comChave, { tipo: "espaco", secao: null }).chaveEmitida).toBeNull();
     expect(reduzir(comChave, { tipo: "navegar", tela: { tipo: "rotinas" } }).chaveEmitida).toBeNull();
     expect(reduzir(comChave, { tipo: "sessao", escopo: { tenantId: "t", pessoaId: "outra" } }).chaveEmitida).toBeNull();
+  });
+
+  it("navegar para outro lugar (o clique num aviso) fecha Seu espaço", () => {
+    const aberto = reduzir(estadoInicial, { tipo: "espaco", secao: "agentes" });
+    expect(aberto.espaco).toEqual({ secao: "agentes" });
+    expect(reduzir(aberto, { tipo: "navegar", tela: { tipo: "sua-vez" } }).espaco).toBeNull();
   });
 });

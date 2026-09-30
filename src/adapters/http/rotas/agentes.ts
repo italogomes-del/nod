@@ -26,7 +26,8 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
     { metodo: "PATCH", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
       const corpo = corpoObjeto(await ctx.corpo());
       ctx.json(200, await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "organizar",
-        secao: corpo.secao as string | undefined, naoLido: corpo.naoLido as boolean | undefined }));
+        secao: corpo.secao as string | undefined, naoLido: corpo.naoLido as boolean | undefined,
+        fixado: corpo.fixado as boolean | undefined, ordem: corpo.ordem as string[] | undefined }));
     } },
     { metodo: "DELETE", padrao: new RegExp(`^/agentes/${ID}$`), async handler(ctx) {
       const resultado = await executar(ctx.escopo, gerirAgente, { agenteId: ctx.params.id ?? "", acao: "excluir" });

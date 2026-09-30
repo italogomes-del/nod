@@ -23,6 +23,11 @@ const MOTIVO: Record<Negacao["motivo"], string> = {
   timeout_transporte: "tempo esgotado no transporte",
 };
 
+/** O motivo em palavras, sem a frase inteira (a linha de "Fora do ar" em Seu espaço). */
+export function textoMotivo(m: Negacao["motivo"]): string {
+  return MOTIVO[m];
+}
+
 export function textoNegacao(n: Negacao, agora: number): string {
   switch (n.classe) {
     case "conector_indisponivel":

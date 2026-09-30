@@ -1,0 +1,249 @@
+/* =====================================================================================
+   Menu, sidebar e gaveta (definido em 2026-09-30, canvas "Nod — tela do agente", página "Menu, sidebar e gaveta").
+   Vem depois de interface.css: o menu da conta, Seu espaço em tela cheia, o arrastar na barra e a gaveta por níveis.
+   ===================================================================================== */
+
+/* Abaixo de 900 px a barra tem 220: o mascote dos fixados volta a 40 para a grade de 4 caber. */
+@media (max-width: 900px) {
+  .fixado-bt .icon.lg { width: 40px; height: 40px; border-radius: 15px; }
+}
+
+/* ---- Arrastar na barra --------------------------------------------------------------
+   A origem esmaece, a grade mostra a vaga "Fixar", a seção de destino ganha fundo e a linha diz onde o bot entra.
+   "+ Nova seção", a grade vazia e "Meus agentes" vazio só aparecem enquanto se arrasta. */
+#sidebar [draggable="true"] { -webkit-user-drag: element; }
+#sidebar .origem-arrasto { opacity: .35; }
+.fantasma-arrasto { position: fixed; top: -1000px; left: -1000px; z-index: 50; background: #fff; border-radius: 14px;
+  box-shadow: 0 16px 36px rgba(20, 24, 40, .2), 0 0 0 1px rgba(20, 24, 40, .06); }
+.fixados[data-vazio], .section[data-vazio], .nova-secao-alvo { display: none; }
+.arrastando-bot .fixados[data-vazio] { display: grid; }
+.arrastando-bot .section[data-vazio] { display: block; min-height: 44px; }
+.fixados-vazio { grid-column: 1 / -1; margin: 0; padding: 18px 12px; border: 1.5px dashed #c3cad8; border-radius: 14px; text-align: center;
+  font-size: 12.5px; color: var(--ink-3); }
+.vaga-fixar { display: flex; align-items: flex-end; justify-content: center; min-height: 118px; padding-bottom: 12px; box-sizing: border-box;
+  border: 1.5px dashed #9fb3d9; border-radius: 14px; background: #f3f7ff; font-size: 11px; color: var(--blue); }
+.section.alvo-soltar { border-radius: 14px; background: #f3f7ff; box-shadow: inset 0 0 0 1.5px #c9d7f0; }
+.section.alvo-soltar > h3::after { content: "Soltar aqui"; font-size: 12px; color: var(--blue); }
+.linha-insercao { position: relative; height: 2px; margin: 0 6px; border-radius: 1px; background: var(--blue); }
+.linha-insercao::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
+.arrastando-bot .nova-secao-alvo { display: block; margin: 6px 0 10px; padding: 12px; border: 1.5px dashed #c3cad8; border-radius: 12px;
+  text-align: center; font-size: 13px; color: var(--ink-3); }
+.nova-secao-alvo.alvo-soltar { border-color: var(--blue); background: #f3f7ff; color: var(--blue); }
+
+/* ---- Menu da conta (canvas "Menu 1") -------------------------------------------------
+   Nasce acima do avatar, da largura da barra menos as margens. A faixa do topo só aparece quando algo precisa de você. */
+.bot-menu.menu-conta { width: 316px; padding: 8px; border-radius: 18px; box-shadow: 0 14px 44px rgba(20, 24, 40, .16), 0 0 0 1px rgba(20, 24, 40, .06); }
+.menu-conta button { padding: 10px 12px; font-size: 14.5px; color: var(--ink); }
+.menu-conta button > svg { width: 18px; height: 18px; color: var(--ink-2); }
+.menu-conta .mc-nome { flex: 1; width: auto; font-size: inherit; }
+.menu-conta .mc-meta { width: auto; font-size: 13px; color: var(--ink-3); }
+.menu-conta button > svg:last-child:not(:first-child) { width: 16px; height: 16px; color: #a3a9b8; }
+.menu-conta kbd { font: 12px var(--f); color: #9aa1b3; }
+.mc-faixa { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; padding: 10px 10px 10px 14px; border-radius: 12px; background: #fdf3e4; }
+.mc-faixa > span { flex: 1; font-size: 14px; color: #8a4b08; }
+.menu-conta .mc-faixa button { width: auto; padding: 6px 14px; border-radius: 10px; background: var(--ink); color: #fff; font-size: 13px; font-weight: 500; }
+.menu-conta .mc-faixa button:hover, .menu-conta .mc-faixa button:focus-visible { background: #2c3446; }
+.mc-chave { position: relative; flex-shrink: 0; width: 40px !important; height: 24px; border-radius: 12px; background: #d7dbe2; }
+.mc-chave > span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: left .12s; }
+[aria-checked="true"] > .mc-chave { background: var(--ok); }
+[aria-checked="true"] > .mc-chave > span { left: 19px; }
+.mc-banco { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px 4px; font-size: 12px; color: var(--ink-3); }
+.mc-banco > span, .espaco-banco > span { width: 7px; height: 7px; border-radius: 50%; background: #7b8494; }
+.mc-banco.banco-persistente > span, .espaco-banco.banco-persistente > span { background: #15a34a; }
+.mc-banco.banco-efemero > span, .espaco-banco.banco-efemero > span { background: #d18a12; }
+
+/* ---- Seu espaço em tela cheia (canvas "Menu 2") --------------------------------------
+   As seções na coluna da esquerda, no lugar da barra; um botão só para sair: "‹ <de onde veio>", mais o Esc. */
+#espaco { position: fixed; inset: 0; z-index: 30; background: #fff; }
+.espaco { display: flex; height: 100%; }
+.espaco-nav { display: flex; flex-direction: column; flex-shrink: 0; width: 340px; box-sizing: border-box; padding: 16px 12px;
+  background: #fafbfd; border-right: 1px solid var(--line); }
+.espaco-volta { display: flex; align-items: center; gap: 10px; }
+.espaco-volta kbd { font: 11.5px var(--f); color: #9aa1b3; }
+.espaco-voltar { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border: 1px solid #e3e6ec; border-radius: 10px;
+  background: #fff; font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
+.espaco-voltar:hover, .espaco-voltar:focus-visible { background: var(--panel-soft); }
+.espaco-voltar .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.espaco-voltar .icon.sm svg { width: 17px; height: 17px; }
+.espaco-nav h1 { margin: 0; padding: 26px 12px 12px; font-size: 22px; font-weight: 600; letter-spacing: -.3px; }
+.espaco-itens { display: flex; flex-direction: column; gap: 2px; }
+.espaco-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: none;
+  font: inherit; font-size: 14.5px; color: var(--ink); text-align: left; cursor: pointer; }
+.espaco-item > svg { color: var(--ink-2); }
+.espaco-item:hover, .espaco-item:focus-visible { background: #f1f2f6; }
+.espaco-item[aria-current="page"] { background: #eceef4; font-weight: 500; }
+.espaco-banco { display: flex; align-items: center; gap: 8px; margin: auto 0 0; padding: 0 12px; font-size: 12px; color: var(--ink-3); }
+.espaco-conteudo { flex: 1; min-width: 0; overflow: auto; padding: 64px 88px; }
+.espaco-conteudo > * { max-width: 720px; }
+.espaco-conteudo .tela { margin: 0; padding: 0; }
+.espaco-conteudo .espaco-secao > h2, .espaco-conteudo .tela-cab h1, .espaco-conteudo .tela > h1 { margin: 0 0 6px; font-size: 26px; font-weight: 600; letter-spacing: -.4px; }
+.espaco-conteudo .intro { margin: 0 0 18px; font-size: 14.5px; }
+.espaco-cartao { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.espaco-ia { display: flex; align-items: center; gap: 12px; padding: 16px 18px; }
+.espaco-ia > div { flex: 1; min-width: 0; }
+.espaco-ia b { display: block; font-size: 15px; font-weight: 500; }
+.espaco-ia small { display: block; margin-top: 2px; font-size: 13px; color: var(--ink-3); }
+.espaco-ponto { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: #15a34a; }
+.espaco-ponto.falha { background: #d8364a; }
+.espaco-conteudo .bt.sm { padding: 7px 14px; border: 1px solid #e3e6ec; border-radius: 10px; background: #fff; font-size: 13px; font-weight: 500; color: var(--ink); }
+.espaco-cartao .conexao-avancada { margin: 0; border-top: 1px solid var(--line); }
+.espaco-cartao .conexao-avancada > summary { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; font-size: 14px;
+  color: var(--ink); list-style: none; }
+.espaco-cartao .conexao-avancada > summary::-webkit-details-marker { display: none; }
+.espaco-cartao .conexao-avancada > summary::after { content: "›"; font-size: 18px; color: #a3a9b8; transition: transform .12s; }
+.espaco-cartao .conexao-avancada[open] > summary::after { transform: rotate(90deg); }
+.espaco-cartao .conexao-avancada[open] > summary { margin: 0; }
+.espaco-cartao .conexao-avancada > :not(summary) { padding: 0 18px 12px; }
+.espaco-subtitulo { margin: 28px 0 10px; font-size: 13px; font-weight: 400; color: var(--ink-3); }
+.espaco-fora { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px 14px; border: 1px solid #f0d5a8; border-radius: 12px; background: #fdf3e4; }
+.espaco-fora > div { flex: 1; min-width: 0; font-size: 14px; }
+.espaco-fora b { font-weight: 500; }
+.espaco-fora span { color: #8a4b08; }
+.espaco-fora small { display: block; margin-top: 2px; font-size: 12.5px; color: #8a6a3c; }
+.espaco-fora .app-logo { width: 28px; height: 28px; min-width: 28px; border-radius: 7px; font-size: 13px; }
+.espaco-fora .bt.sm { border-color: #e3c9a0; }
+@media (max-width: 900px) {
+  .espaco-nav { width: 240px; }
+  .espaco-conteudo { padding: 40px 28px; }
+}
+
+/* ---- A gaveta do bot (canvas "Gaveta 1–4") -------------------------------------------
+   380 px, topo fixo com ⋯ e o painel (ou ‹ e o título num nível), corpo que rola e, nos níveis, o rodapé com as ações. */
+.com-detalhes .detalhes { flex-direction: column; padding: 0; overflow: hidden; background: #fff; }
+@media (min-width: 1100px) { .com-detalhes .detalhes { display: flex; } }
+.gv-topo { display: flex; flex-shrink: 0; align-items: center; gap: 8px; height: 64px; box-sizing: border-box; padding: 0 14px; }
+.gv-lado { display: flex; gap: 6px; width: 76px; }
+.gv-direita { justify-content: flex-end; }
+.gv-topo .gv-titulo { flex: 1; min-width: 0; margin: 0; text-align: center; font-size: 14.5px; font-weight: 600; letter-spacing: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-icone { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; padding: 0; border: 1px solid transparent;
+  border-radius: 10px; background: #fff; color: var(--ink-2); cursor: pointer; }
+.gv-icone:hover, .gv-icone:focus-visible { background: var(--panel-soft); }
+.gv-painel, .gv-voltar { border-color: #e3e6ec; }
+.gv-form { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
+.gv-corpo { display: flex; flex-direction: column; gap: 22px; flex: 1; min-height: 0; overflow: auto; padding: 0 18px 18px; }
+.gv-rodape { display: flex; flex-shrink: 0; gap: 8px; padding: 14px 18px 18px; border-top: 1px solid var(--line); }
+.gv-bt { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; height: 40px; padding: 0 10px; border: 0;
+  border-radius: 12px; background: #f4f5f8; font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); text-align: center; cursor: pointer; white-space: nowrap; }
+.gv-bt:hover, .gv-bt:focus-visible { background: #eceef3; }
+.gv-bt:disabled { opacity: .5; cursor: default; }
+.gv-bt.pri { background: var(--ink); color: #fff; }
+.gv-bt.pri:hover, .gv-bt.pri:focus-visible { background: #2c3446; }
+.gv-bt.perigo { border: 1px solid #f1c7c2; background: #fff; color: #b42318; }
+.gv-bt.perigo:hover, .gv-bt.perigo:focus-visible { background: #fdf3f2; }
+
+.gv-identidade { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.gv-identidade .icon.mascote.xl { width: 76px; height: 76px; }
+.gv-identidade h2 { margin: 10px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.3px; }
+.gv-identidade > span { margin-top: 3px; font-size: 13px; color: var(--ink-3); }
+.gv-descricao { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 12px 0 0;
+  font-size: 13px; line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
+.gv-pilula { margin-top: 12px; padding: 7px 16px; border: 1px solid #e3e6ec; border-radius: 999px; background: #fff; font: inherit;
+  font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer; }
+.gv-pilula:hover, .gv-pilula:focus-visible { background: var(--panel-soft); }
+
+.gv-secao h3, .gv-bloco h3 { margin: 0 0 8px; padding: 0 4px; font-size: 13px; font-weight: 400; color: var(--ink-3); letter-spacing: 0; }
+.gv-secao-cab { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px; }
+.gv-secao-cab h3 { margin: 0; padding: 0; }
+.gv-link { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; color: var(--blue); cursor: pointer; }
+.gv-cartao { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.gv-cartao > * + * { border-top: 1px solid var(--line); }
+.gv-linha { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 11px 14px; border: 0; background: none;
+  font: inherit; font-size: 13.5px; color: var(--ink); text-align: left; cursor: pointer; }
+.gv-linha:hover, .gv-linha:focus-visible { background: #f7f8fb; }
+.gv-linha > svg { flex-shrink: 0; color: var(--ink-2); }
+.gv-linha > svg:last-child:not(:first-child) { width: 16px; height: 16px; color: #a3a9b8; }
+.gv-linha-txt { flex: 1; min-width: 0; }
+.gv-linha-txt b { display: block; font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-linha-txt small { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-linha-txt code { font-size: 11px; }
+.gv-linha-txt .tag { margin-top: 5px; }
+.gv-meta { flex-shrink: 0; font-size: 13px; color: var(--ink-3); }
+.gv-linha .app-logo { width: 28px; height: 28px; min-width: 28px; border-radius: 7px; font-size: 13px; }
+.gv-linha .icon.sm { width: 28px; height: 28px; min-width: 28px; }
+.gv-cartao .detalhe-rotina { display: flex; flex-wrap: wrap; align-items: center; gap: 0; padding: 0 14px 0 0; }
+.gv-cartao .detalhe-rotina .dr-parada { margin: -4px 0 0; padding: 0 0 12px 14px; }
+.gv-cartao .detalhe-rotina .dr-parada small { font-size: 12px; color: var(--ink-3); }
+.gv-cartao .detalhe-rotina .gv-linha { flex: 1; }
+.gv-cartao .detalhe-rotina .chave { width: 40px; height: 24px; border-radius: 12px; }
+.gv-cartao .detalhe-rotina .chave span { top: 3px; left: 3px; width: 18px; height: 18px; }
+.gv-cartao .detalhe-rotina .chave[aria-checked="true"] span { left: 19px; }
+.gv-nota { margin: 8px 4px 0; }
+
+/* Os níveis: bloco com rótulo cinza, texto da instrução, execuções com ponto, dl do combinado. */
+.gv-bloco p { margin: 0; }
+.detalhes .gv-bloco .mudo, .detalhes .gv-secao > .mudo { padding: 0 4px; font-size: 13px; line-height: 1.55; }
+.gv-texto { padding: 0 4px; font-size: 13.5px; line-height: 1.6; color: #242b3d; white-space: pre-line; overflow-wrap: anywhere; }
+.gv-quando { display: flex; align-items: center; gap: 8px; padding: 0 4px; font-size: 13.5px; color: #242b3d; }
+.gv-quando svg { flex-shrink: 0; color: var(--ink-2); }
+.gv-proxima { display: block; margin-top: 6px; padding: 0 4px; font-size: 12.5px; color: var(--ink-3); }
+.gv-execucoes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0 4px; list-style: none; }
+.gv-execucoes li { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
+.gv-exec-ponto { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #b4b7bd; }
+.exec-executou .gv-exec-ponto { background: #15a34a; }
+.exec-falhou .gv-exec-ponto, .exec-interrompida .gv-exec-ponto { background: #d8364a; }
+.exec-bloqueada .gv-exec-ponto { background: #e0a526; }
+.gv-exec-quando { width: 112px; flex-shrink: 0; color: var(--ink-3); }
+.gv-dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; padding: 0 4px; font-size: 12.5px; }
+.gv-dl dt { color: var(--ink-3); }
+.gv-dl dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.gv-app { display: flex; align-items: center; gap: 12px; }
+.gv-app > div { flex: 1; min-width: 0; }
+.gv-app .app-logo { width: 44px; height: 44px; min-width: 44px; border-radius: 11px; font-size: 20px; }
+.gv-app b { display: block; font-size: 17px; font-weight: 600; }
+.gv-app small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--ink-3); }
+.gv-aviso { padding: 12px 14px; border: 1px solid #f0d5a8; border-radius: 12px; background: #fdf3e4; font-size: 13px; line-height: 1.5; color: #7a4a0c; }
+.gv-aviso b { font-weight: 600; }
+.gv-aviso > div { margin-top: 8px; }
+.gv-bloco .segmentado { margin: 0 4px 8px; }
+.gv-bloco .segmentado .seg { flex: 1 1 0; padding: 8px 6px; font-size: 13px; text-align: center; }
+.gv-bloco .acesso-frase { margin: 0; padding: 0 4px; font-size: 13px; color: var(--ink-2); }
+.gv-acoes { padding: 2px 14px 6px; border: 1px solid var(--line); border-radius: 14px; }
+.gv-acoes .acesso-acoes { margin: 0; padding: 0; border: 0; }
+.gv-acoes .acesso-acoes li { padding: 8px 0; font-size: 13px; color: #242b3d; border-top: 1px solid var(--line); }
+.gv-acoes .acesso-acoes li::before { display: none; }
+.gv-acoes .acesso-acoes li:first-child { border-top: 0; }
+.gv-acoes .acesso-grupo { margin-top: 10px; padding-top: 8px; }
+.gv-acoes .acesso-grupo:first-child { margin-top: 4px; border-top: 0; }
+.gv-dar-acesso { position: static; margin: 0; padding: 0; border: 0; box-shadow: none; }
+
+/* Editar perfil: o mascote com as 8 formas e as 12 cores embaixo, depois os três campos. */
+.gv-mascote { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.gv-mascote .icon.mascote.xl { width: 84px; height: 84px; }
+.gv-formas, .gv-cores { display: flex; justify-content: space-between; width: 100%; }
+.gv-cores { padding: 0 4px; box-sizing: border-box; }
+.gv-forma { position: relative; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; cursor: pointer; }
+.gv-forma:hover { background: #f3f4f8; }
+.gv-forma .icon.sm { width: 26px; height: 26px; min-width: 26px; }
+.gv-forma:has(input:checked) { background: #eef0f5; box-shadow: inset 0 0 0 1.5px var(--ink); }
+.gv-cor { position: relative; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; }
+.gv-cor .cor-amostra { width: 22px; height: 22px; }
+.gv-cor:has(input:checked) { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--ink); }
+.gv-forma input, .gv-cor input { position: absolute; opacity: 0; pointer-events: none; }
+.gv-forma:has(input:focus-visible), .gv-cor:has(input:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
+.gv-campo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-3); }
+.gv-campo input, .gv-campo textarea, .gv-campo select, .gv-anotar input, .gv-anotar select, .gv-memoria input, .gv-memoria select {
+  box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #e3e6ec; border-radius: 10px; background: #fff;
+  font: inherit; font-size: 14px; color: var(--ink); }
+.gv-campo textarea { resize: vertical; line-height: 1.55; }
+.gv-dupla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.gv-detalhes summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.gv-detalhes[open] summary { margin-bottom: 12px; }
+.gv-detalhes .gv-campo + .gv-campo { margin-top: 12px; }
+.gv-form .inteligencia-card { margin: 0; }
+.gv-anotar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "texto texto" "tipo botao"; gap: 8px; }
+.gv-anotar input { grid-area: texto; }
+.gv-anotar select { grid-area: tipo; }
+.gv-anotar .gv-bt { grid-area: botao; padding: 0 18px; }
+.gv-memorias { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.gv-memoria { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.gv-memoria-cab { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.gv-memoria-cab select { width: auto; padding: 4px 8px; font-size: 12.5px; }
+
+/* O botão do painel no cabeçalho da conversa só aparece quando a gaveta está escondida: aberta, ele mora no topo dela. */
+@media (min-width: 1100px) {
+  .app.com-detalhes:not(.detalhes-ocultos) .cab-acoes .toggle-detalhes { display: none; }
+}
+@media (max-width: 1099px) {
+  .app.com-detalhes.detalhes-abertos .cab-acoes .toggle-detalhes { display: none; }
+}

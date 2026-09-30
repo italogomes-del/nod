@@ -6,6 +6,7 @@
     <title>nod</title>
     <link rel="stylesheet" href="/estilos.css" />
     <link rel="stylesheet" href="/interface.css" />
+    <link rel="stylesheet" href="/navegacao.css" />
   </head>
   <body>
     <!-- Regiões fixas (web/lib/render.ts): cada uma só é regravada quando o HTML muda; o composer nunca é regravado dentro da mesma conversa. -->
@@ -19,6 +20,8 @@
       </main>
       <aside class="detalhes" id="detalhes" aria-label="Detalhes do bot"></aside>
     </div>
+    <!-- Seu espaço (2026-09-30): camada de tela cheia por cima do app; a tela de baixo continua montada. -->
+    <div id="espaco" hidden></div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>
