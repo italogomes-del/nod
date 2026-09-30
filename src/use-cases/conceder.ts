@@ -16,7 +16,15 @@ export type EntradaConceder = {
 
 export type SaidaConceder = { concessaoId: string; mensagemId: string; naoInclui: string[] };
 
-export type EntradaConcederLote = Omit<EntradaConceder, "capacidade"> & { capacidades: readonly string[] };
+export type EntradaConcederLote = Omit<EntradaConceder, "capacidade"> & {
+  capacidades: readonly string[];
+  /**
+   * ADR-059 (emenda de 2026-09-30): a concessão saiu pelo modo do bot, que a pessoa escolheu — não por um clique
+   * neste pedido. O consentimento continua sendo da pessoa (a escolha do modo é dela), com a regra em
+   * `decidido_por` e dito no texto, para a trilha não confundir com um clique.
+   */
+  porRegra?: { regra: `regra:${string}`; regraVersao: number };
+};
 
 /**
  * `concessoes`: uma por capacidade pedida, na ordem do pedido, cada uma com a mensagem de
@@ -65,16 +73,17 @@ export const concederLote: CasoDeUso<EntradaConcederLote, SaidaConcederLote> = a
   let mensagemId: string | null = null;
   if (novas.length > 0) {
     const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
+    const autoria = input.porRegra ? { ...autoriaDaPessoa(deps.escopo), decidido_por: input.porRegra.regra, regra_versao: input.porRegra.regraVersao } : autoriaDaPessoa(deps.escopo);
     const mensagem = await deps.repos.mensagens.criar({
       conversaId: conversa.id,
-      autoria: autoriaDaPessoa(deps.escopo),
+      autoria,
       kind: "consentimento",
       texto: redigir("consentimento", agora, {
         pessoa: pessoa?.nome ?? "a pessoa",
         quando: quandoUtc(agora),
         escopo: novas.map((cap) => `${conector.slug}.${cap}`).join(", "),
         naoInclui: naoInclui.length === 0 ? "nada mais deste conector" : naoInclui.join("; "),
-      }),
+      }) + (input.porRegra ? " Pela aprovação automática deste bot, sem clique neste pedido." : ""),
       payload: { kind: "consentimento", conectorId: conector.id, slug: conector.slug, capacidades: novas, naoInclui },
       confianca: "confiavel",
     });
@@ -88,7 +97,7 @@ export const concederLote: CasoDeUso<EntradaConcederLote, SaidaConcederLote> = a
         id: randomUUID(),
         createdAt: agora,
         kind: "concessao_criada",
-        autoria: autoriaDaPessoa(deps.escopo),
+        autoria,
         pessoaDestinoId: deps.escopo.pessoaId,
         conversaId: conversa.id,
         dados: { concessao_id: concessao.id, mensagem_id: mensagem.id, agente_id: agente.id, conector_id: conector.id, slug: conector.slug, capacidade },

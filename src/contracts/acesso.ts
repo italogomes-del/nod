@@ -18,8 +18,16 @@ export type AcessoPedido = {
  * sozinho o agente e a pessoa entendiam que o acesso já estava dado; a instrução é literal para o
  * modelo dizer que PEDIU e encerrar, em vez de anunciar uma concessão que não houve.
  */
-export type ResultadoPedirAcesso = {
-  proposta_id: string;
-  estado: "aguardando_pessoa";
-  instrucao: "o acesso ainda NÃO foi concedido: diga que pediu e encerre o turno";
-};
+export type ResultadoPedirAcesso =
+  | {
+    proposta_id: string;
+    estado: "aguardando_pessoa";
+    instrucao: "o acesso ainda NÃO foi concedido: diga que pediu e encerre o turno";
+  }
+  // ADR-059: o modo do bot concedeu na hora. A ferramenta nova só entra no catálogo do PRÓXIMO turno, que
+  // já está na fila: este turno encerra e a tarefa retoma sozinha.
+  | {
+    proposta_id: string;
+    estado: "concedido";
+    instrucao: "o acesso foi concedido pela aprovação automática: encerre o turno agora; a tarefa retoma sozinha com a ferramenta nova";
+  };

@@ -8,6 +8,7 @@ import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { concederLote } from "./conceder.ts";
 import { dispararRotina } from "./disparar-rotina.ts";
+import type { PorRegra } from "./confirmar-pelo-modo.ts";
 import { avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
@@ -27,6 +28,11 @@ export type EntradaDecidirAcesso = {
    * parte do que o pedido mostrou, nunca algo a mais; ausente = tudo o que foi pedido.
    */
   capacidades?: readonly string[];
+  /**
+   * ADR-059 (emenda de 2026-09-30): o modo do bot concede, sem clique — chamado por pedirAcesso na conversa. A
+   * decisão fecha pela regra (decidida_por nulo), o consentimento diz que foi o modo, e a retomada também.
+   */
+  porRegra?: PorRegra;
 };
 
 export type SaidaDecidirAcesso = { decisao: Decisao; concessoes: number; consentimentoId: string | null; rotinaId: string | null; turnoId: string | null };
@@ -88,11 +94,13 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
     const pedidas = new Set(proposta?.payload.kind === "acesso" ? proposta.payload.capacidades : []);
     if (input.capacidades.length === 0 || input.capacidades.some((c) => !pedidas.has(c))) throw new ErroDeDominio("entrada_invalida", { cause: "capacidades fora do pedido" });
   }
-  const decisao = await deps.repos.decisoes.decidir(input.decisaoId, { por: input.por ?? deps.escopo.pessoaId, agora });
+  const decisao = input.porRegra
+    ? await deps.repos.decisoes.fecharPorRegra(input.decisaoId, { ...input.porRegra, agora })
+    : await deps.repos.decisoes.decidir(input.decisaoId, { por: input.por ?? deps.escopo.pessoaId, agora });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão já fechada ou inexistente" });
   if (decisao.tipo !== "acesso" || !proposta || proposta.payload.kind !== "acesso" || proposta.payload.conectar) throw new ErroDeDominio("estado_invalido", { cause: "decisão de acesso sem proposta" });
   const p = proposta.payload;
-  const autoria = autoriaPessoa(deps.escopo);
+  const autoria = input.porRegra ? { ...autoriaPessoa(deps.escopo), decidido_por: input.porRegra.regra, regra_versao: input.porRegra.regraVersao } : autoriaPessoa(deps.escopo);
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { decisao_id: decisao.id, tipo: decisao.tipo, recusada: input.recusar } })];
   // definido em 2026-09-24: o card "×N" prometia "decidir aqui resolve todos" — os pedidos iguais
   // abertos fecham por regra na MESMA transação, e as propostas deles seguem este clique.
@@ -113,7 +121,7 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
   if (proposta.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "confirmada");
   const conector = doPedido;
   if (!conector) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
-  const lote = await concederLote(deps, { agenteId: proposta.agenteId, conectorId: conector.id, capacidades: input.capacidades ?? p.capacidades, autorTipo: "pessoa" });
+  const lote = await concederLote(deps, { agenteId: proposta.agenteId, conectorId: conector.id, capacidades: input.capacidades ?? p.capacidades, autorTipo: "pessoa", ...(input.porRegra ? { porRegra: input.porRegra } : {}) });
   events.push(...(lote.events ?? []));
 
   let turnoId: string | null = null;
@@ -133,7 +141,7 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
     events.push(...(disparo.events ?? []));
     if ("turno" in disparo.data) turnoId = disparo.data.turno.id;
   } else {
-    const retomada = await retomarAposAcesso(deps, { decisao, proposta });
+    const retomada = await retomarAposAcesso(deps, { decisao, proposta, peloModo: input.porRegra !== undefined });
     events.push(...(retomada.events ?? []));
     turnoId = retomada.data.turnoId;
   }

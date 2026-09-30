@@ -133,5 +133,6 @@ export type ArgsAtualizarRotina = {
 export type ArgsExcluirRotina = { rotina_id: string };
 
 /** Como criar_rotina: nasce PROPOSTA, nada é aplicado. O modelo não deve anunciar mudança feita. */
-export type ResultadoPropostaRotina = { proposta_id: string; resumo: string } | { erro: CodigoErro };
-export type ResultadoCriarRotina = { proposta_id: string; proxima_execucao: number; resumo: string } | { erro: CodigoErro };
+/** `aplicada: true` (ADR-059): o modo do bot confirmou na hora — a mudança JÁ vale, sem card. */
+export type ResultadoPropostaRotina = { proposta_id: string; resumo: string; aplicada?: true } | { erro: CodigoErro };
+export type ResultadoCriarRotina = { proposta_id: string; proxima_execucao: number; resumo: string; aplicada?: true } | { erro: CodigoErro };

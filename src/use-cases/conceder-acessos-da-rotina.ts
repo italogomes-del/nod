@@ -8,6 +8,8 @@ export type EntradaConcederAcessosDaRotina = {
   agenteId: string;
   /** Os acessos que a rotina declarou, já normalizados (payload da proposta). null/ausente = nada a conceder. */
   acessos: readonly AcessoPedido[] | null | undefined;
+  /** ADR-059: a rotina foi confirmada pelo modo do bot, não por clique; o consentimento diz isso. */
+  porRegra?: { regra: `regra:${string}`; regraVersao: number };
 };
 
 export type SaidaConcederAcessosDaRotina = {
@@ -49,7 +51,7 @@ export const concederAcessosDaRotina: CasoDeUso<EntradaConcederAcessosDaRotina, 
       continue;
     }
     await deps.repos.concessoes.travar(input.agenteId, conector.id);
-    const lote = await concederLote(deps, { agenteId: input.agenteId, conectorId: conector.id, capacidades, autorTipo: "pessoa" });
+    const lote = await concederLote(deps, { agenteId: input.agenteId, conectorId: conector.id, capacidades, autorTipo: "pessoa", ...(input.porRegra ? { porRegra: input.porRegra } : {}) });
     events.push(...(lote.events ?? []));
     saida.concedidos.push({ slug: acesso.conector, capacidades: lote.data.concessoes.map((c) => c.capacidade), consentimentoId: lote.data.mensagemId });
   }

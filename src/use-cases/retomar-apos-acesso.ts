@@ -5,7 +5,7 @@ import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta }, { turnoId: string | null }> = async (deps, { decisao, proposta }) => {
+export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta; peloModo?: boolean }, { turnoId: string | null }> = async (deps, { decisao, proposta, peloModo }) => {
   const p = proposta.payload;
   if (p.kind !== "acesso" || decisao.tipo !== "acesso" || decisao.estado !== "decidida" || decisao.id !== proposta.id) throw new ErroDeDominio("estado_invalido");
   const turnoId = decisao.turnoId ?? p.turnoId;
@@ -18,7 +18,8 @@ export const retomarAposAcesso: CasoDeUso<{ decisao: Decisao; proposta: Proposta
     original,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
     entradaTexto: [
-      `A pessoa concedeu acesso a ${p.conector}: ${p.capacidades.join(", ")}.`,
+      // ADR-059: a concessão pelo modo do bot não foi clique de ninguém — o modelo não deve dizer que a pessoa clicou.
+      peloModo ? `A aprovação automática deste bot concedeu acesso a ${p.conector}: ${p.capacidades.join(", ")}.` : `A pessoa concedeu acesso a ${p.conector}: ${p.capacidades.join(", ")}.`,
       "Retome a tarefa que motivou esse pedido de acesso, usando o contexto da conversa e a entrada original abaixo.",
       "A concessão não executou nenhuma ação. Confira o que já foi feito e não duplique envios. Preserve as regras de aprovação de ações; peça apenas os dados que ainda faltarem.",
       "Entrada do turno original:",

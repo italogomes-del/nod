@@ -1,5 +1,6 @@
 import { MODOS_APROVACAO, type ModoAprovacao } from "../contracts/agente.ts";
 import type { MotivoAprovacaoManual } from "../contracts/motivos.ts";
+import type { ModoTurno } from "../contracts/plano-turno.ts";
 
 /**
  * O modo de aprovação do bot (ADR-059), escolhido pela dona no chip do campo. Duas regras NOMEADAS, como as da
@@ -23,6 +24,16 @@ export const ROTULO_MODO: Readonly<Record<ModoAprovacao, string>> = {
 
 export function ehModoAprovacao(x: unknown): x is ModoAprovacao {
   return typeof x === "string" && (MODOS_APROVACAO as readonly string[]).includes(x);
+}
+
+/**
+ * A pessoa está falando com o bot neste turno? (definido em 2026-09-30, emenda da ADR-059). Conversa e criação,
+ * inclusive as retomadas delas; rotina, sala e pedido de colega não. No automático, apagar num app e merge que a
+ * pessoa pediu na conversa saem sem card — a Clarice parou para excluir 50 tasks que o Marlon tinha acabado de
+ * pedir. A lista de arriscados do TERMINAL não usa isto: ali o risco é a máquina, não o escopo do pedido.
+ */
+export function conversaComAPessoa(modoTurno: ModoTurno | undefined): boolean {
+  return modoTurno === "conversa" || modoTurno === "criacao";
 }
 
 /** O que o servidor sabe da ação na hora de decidir, já calculado por quem chama. */

@@ -229,6 +229,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
       ...(modo === "delegacao" && entrada.delegacao?.trava === true && entrada.rotina?.exigeAprovacao === true ? { travaHerdada: true } : {}),
     },
     modoAprovacao: entrada.agente.modoAprovacao ?? "manual",
+    modoTurno: modo,
     /**
      * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado e já reduzido — a regra
      * evita a pergunta, nunca amplia alcance (ADR-038). Turno não confiável recebe lista VAZIA: o
