@@ -52,10 +52,10 @@ describe("aplicarFrame por TipoFrame", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Olá, " }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "mundo" }), AGORA);
-    expect(e.conversas[CONVERSA]?.atividades[TURNO]?.atual).toBe("Olá, mundo");
+    expect(e.atividades[CONVERSA]?.[TURNO]?.atual).toBe("Olá, mundo");
     expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
     e = aplicarFrame(e, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
-    expect(e.conversas[CONVERSA]?.atividades).toEqual({});
+    expect(e.atividades[CONVERSA]).toEqual({});
     expect(e.turnosVivos[TURNO]).toBeUndefined();
     expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota"]);
   });
@@ -67,7 +67,7 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
     e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "mcp__nod__gmail__label_thread", rotulo: "Alterou Gmail" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "44 processados." }), AGORA);
-    expect(e.conversas[CONVERSA]?.atividades[TURNO]).toEqual({
+    expect(e.atividades[CONVERSA]?.[TURNO]).toEqual({
       atual: "44 processados.",
       etapas: [{ texto: "Continuando com o próximo lote.", ferramentas: 2 }],
       totalEtapas: 1,
@@ -82,8 +82,8 @@ describe("aplicarFrame por TipoFrame", () => {
     const tarefas = [{ id: "1", titulo: "Ler o diff", estado: "feita" }, { id: "2", titulo: "Checar SQL", estado: "andamento" }];
     e = aplicarFrame(e, frame("turno.tarefas", { conversaId: CONVERSA, turnoId: TURNO, tarefas: [...tarefas, { id: 3, titulo: "x", estado: "?" }] }), AGORA);
     e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Bash", rotulo: "Rodou um comando" }), AGORA);
-    expect(e.conversas[CONVERSA]?.atividades[TURNO]?.tarefas).toEqual(tarefas);
-    expect(e.conversas[CONVERSA]?.atividades[TURNO]?.ferramentas).toBe(1);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.tarefas).toEqual(tarefas);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.ferramentas).toBe(1);
   });
 
   it("turno.interrompido limpa o vivo e invalida conversa, frota e sua-vez (pode ter nascido 'retomar?')", () => {
@@ -144,7 +144,7 @@ describe("reduzir: hidratar e navegar", () => {
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "x" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: "outro", texto: "morto" }), AGORA);
     e = reduzir(e, { tipo: "hidratar-conversa", conversa: conversaVazia(), agora: AGORA });
-    expect(Object.keys(e.conversas[CONVERSA]?.atividades ?? {})).toEqual([TURNO]);
+    expect(Object.keys(e.atividades[CONVERSA] ?? {})).toEqual([TURNO]);
   });
 
   it("hidratar-conversa recria o turno que a página não viu nascer (recarregou no meio dele), com o desde do banco", () => {

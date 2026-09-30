@@ -19,6 +19,31 @@ describe("atividade do turno vivo", () => {
     expect(a.totalEtapas).toBe(ETAPAS_GUARDADAS + 6);
     expect(a.etapas.at(-1)?.texto).toBe(`passo ${ETAPAS_GUARDADAS + 4}.`);
   });
+  it("resumoEtapa lendo só o começo do texto dá o mesmo resumo que lendo o texto inteiro (texto longo, com marcação e listas)", () => {
+    // A referência: a mesma limpeza e a mesma frase sobre o texto INTEIRO.
+    const completo = (texto: string, max = 140): string => {
+      const limpo = texto.replace(/[*_`#>]+/g, "").replace(/^\s*[-•]\s+/gm, "").replace(/\s+/g, " ").trim();
+      const frase = /^(.+?[.!?…])(?:\s|$)/.exec(limpo)?.[1] ?? limpo;
+      return frase.length > max ? `${frase.slice(0, max - 1).trimEnd()}…` : frase;
+    };
+    let semente = 7;
+    const sorteio = (n: number): number => {
+      semente = (semente * 1103515245 + 12345) % 2 ** 31;
+      return semente % n;
+    };
+    const pedacos = ["palavra ", "**negrito** ", "`código` ", "3.5 ", "fim. ", "pergunta? ", "\n", "\n- item ", "\n  • outro ", "## título\n", "> citação ", "     ", "***", "___"];
+    for (let caso = 0; caso < 400; caso++) {
+      let texto = "";
+      const alvo = 1_500 + sorteio(4_000);
+      while (texto.length < alvo) texto += pedacos[sorteio(pedacos.length)];
+      const max = [20, 140, 400][caso % 3];
+      expect(resumoEtapa(texto, max)).toBe(completo(texto, max));
+    }
+    // Começo só de marcação e espaço: o prefixo limpo fica curto e o resumo cai no texto inteiro.
+    const vazio = `${"*** ".repeat(700)}Enfim uma frase. E outra.`;
+    expect(resumoEtapa(vazio)).toBe(completo(vazio));
+  });
+
   it("resumoEtapa: primeira frase, uma linha, sem marcação, com teto", () => {
     expect(resumoEtapa("**Identifiquei** um padrão claro: a maior parte é ClickUp. Vou seguir.")).toBe("Identifiquei um padrão claro: a maior parte é ClickUp.");
     expect(resumoEtapa("11 processados, total agora 322.\nContinuando.")).toBe("11 processados, total agora 322.");

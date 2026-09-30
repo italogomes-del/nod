@@ -70,8 +70,6 @@ export type ConexaoApp = { url: string | null; falhou: string | null };
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
 export type ConversaEstado = ConversaDto & {
-  /** Turno vivo por turnoId (turno.delta + turno.atividade), descartado ao encerrar. */
-  atividades: Record<string, AtividadeTurno>;
   carregadaEm: number;
 };
 
@@ -98,6 +96,13 @@ export type Estado = {
   /** Interruptor de executor da máquina (catcher ⇄ claude-cli): estado escrito de cada opção e a última recusa. */
   executor: EstadoExecutor | null;
   conversas: Record<string, ConversaEstado>;
+  /**
+   * O turno vivo de cada conversa carregada (turno.delta, turno.atividade, turno.tarefas), por conversaId e
+   * turnoId, descartado ao encerrar. definido em 2026-09-30: mora fora de `conversas` porque muda a cada
+   * pedaço de texto de cada bot; dentro da conversa, cada pedaço trocava a referência dela e forçava a
+   * timeline inteira a ser refeita (web/lib/lembrar.ts).
+   */
+  atividades: Record<string, Record<string, AtividadeTurno>>;
   turnosVivos: Record<string, TurnoVivo>;
   /** Cancelar da fila tem 5 s de Desfazer antes de ir ao servidor (turnoId → instante do clique). */
   cancelando: Record<string, number>;
@@ -111,6 +116,12 @@ export type Estado = {
    */
   novasDesde: Record<string, { mensagemId: string; em: number }>;
   rotinas: RotinaDto[];
+  /**
+   * O que já chegou do servidor ao menos uma vez (definido em 2026-09-30): lista vazia é resposta, não falta.
+   * Antes `rotinas.length === 0` contava como "não carregou" e quem não tinha rotina relia /rotinas (e
+   * redesenhava a tela) a cada ação e a cada frame; o mesmo valia para salas e para o marketplace.
+   */
+  carregado: { rotinas: boolean; salas: boolean; conectores: boolean };
   execucoes: Record<string, ExecucaoRotina[]>;
   /** Rotinas com o histórico aberto no painel. Separado de `execucoes`: um evento recarrega a lista, mas não a reabre. */
   historicoAberto: Record<string, boolean>;
@@ -207,6 +218,7 @@ export const estadoInicial: Estado = {
   inventario: null,
   executor: null,
   conversas: {},
+  atividades: {},
   turnosVivos: {},
   cancelando: {},
   salas: [],
@@ -214,6 +226,7 @@ export const estadoInicial: Estado = {
   naoLidos: null,
   novasDesde: {},
   rotinas: [],
+  carregado: { rotinas: false, salas: false, conectores: false },
   execucoes: {},
   historicoAberto: {},
   listaDePasta: {},
@@ -269,11 +282,17 @@ function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
 
 function semDelta(estado: Estado, conversaId: string | null, turnoId: string | null): Estado {
   if (!conversaId || !turnoId) return estado;
-  const c = estado.conversas[conversaId];
-  if (!c || !(turnoId in c.atividades)) return estado;
-  const atividades = { ...c.atividades };
-  delete atividades[turnoId];
-  return { ...estado, conversas: { ...estado.conversas, [conversaId]: { ...c, atividades } } };
+  const daConversa = estado.atividades[conversaId];
+  if (!daConversa || !(turnoId in daConversa)) return estado;
+  const restantes = { ...daConversa };
+  delete restantes[turnoId];
+  return { ...estado, atividades: { ...estado.atividades, [conversaId]: restantes } };
+}
+
+/** O turno vivo `turnoId` da conversa, trocado por `mudar` (o resto de `atividades` fica com a mesma referência). */
+function comAtividade(estado: Estado, conversaId: string, turnoId: string, mudar: (a: AtividadeTurno | undefined) => AtividadeTurno): Estado["atividades"] {
+  const daConversa = estado.atividades[conversaId] ?? {};
+  return { ...estado.atividades, [conversaId]: { ...daConversa, [turnoId]: mudar(daConversa[turnoId]) } };
 }
 
 /** Um handler por TipoFrame — a tabela é TOTAL: um tipo novo no contrato não compila sem entrar aqui. */
@@ -302,28 +321,25 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const conversaId = texto(f.dados.conversaId);
     const trecho = typeof f.dados.texto === "string" ? f.dados.texto : "";
     if (!turnoId || !conversaId) return e;
-    const c = e.conversas[conversaId];
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
-    if (!c) return { ...e, turnosVivos };
-    return { ...e, turnosVivos, conversas: { ...e.conversas, [conversaId]: { ...c, atividades: { ...c.atividades, [turnoId]: comTexto(c.atividades[turnoId], trecho) } } } };
+    if (!e.conversas[conversaId]) return turnosVivos === e.turnosVivos ? e : { ...e, turnosVivos };
+    return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comTexto(a, trecho)) };
   },
   "turno.atividade": (e, f) => {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    const c = conversaId ? e.conversas[conversaId] : undefined;
-    if (!turnoId || !c) return e;
+    if (!turnoId || !conversaId || !e.conversas[conversaId]) return e;
     const rotulo = texto(f.dados.rotulo) ?? "Usou uma ferramenta";
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
-    return { ...e, turnosVivos, conversas: { ...e.conversas, [c.conversa.id]: { ...c, atividades: { ...c.atividades, [turnoId]: comFerramenta(c.atividades[turnoId], rotulo) } } } };
+    return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comFerramenta(a, rotulo)) };
   },
   "turno.tarefas": (e, f) => {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    const c = conversaId ? e.conversas[conversaId] : undefined;
-    if (!turnoId || !c) return e;
-    return { ...e, conversas: { ...e.conversas, [c.conversa.id]: { ...c, atividades: { ...c.atividades, [turnoId]: comTarefas(c.atividades[turnoId], tarefasDoFrame(f.dados.tarefas)) } } } };
+    if (!turnoId || !conversaId || !e.conversas[conversaId]) return e;
+    return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comTarefas(a, tarefasDoFrame(f.dados.tarefas))) };
   },
   "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
   "turno.interrompido": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
@@ -384,7 +400,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
       return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
-        naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {} };
+        naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
+        carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado };
     case "navegar":
       return resolverInicio({
         ...estado,
@@ -431,18 +448,22 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, executor: acao.executor };
     case "hidratar-conversa": {
       const conversaId = acao.conversa.conversa.id;
-      const anterior = estado.conversas[conversaId];
       // Turno aberto que a web não viu nascer (página recarregada no meio dele): o REST o devolve e ele
       // volta a ser vivo, com o `desde` do banco. O frame turno.iniciado não se repete para quem chegou depois.
-      const turnosVivos = { ...estado.turnosVivos };
-      for (const t of acao.conversa.turnosEmCurso ?? []) {
-        if (turnosVivos[t.id]) continue;
-        turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde };
-      }
+      const novos = (acao.conversa.turnosEmCurso ?? []).filter((t) => !estado.turnosVivos[t.id]);
+      const turnosVivos = novos.length === 0 ? estado.turnosVivos : { ...estado.turnosVivos };
+      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde };
+      // O texto em streaming de um turno que já acabou sai; o dos que continuam vivos fica.
       const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
-      const atividades: Record<string, AtividadeTurno> = {};
-      for (const [turnoId, t] of Object.entries(anterior?.atividades ?? {})) if (vivosDaConversa.has(turnoId)) atividades[turnoId] = t;
-      return { ...estado, turnosVivos, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, atividades, carregadaEm: acao.agora } } };
+      const anteriores = estado.atividades[conversaId] ?? {};
+      const mortos = Object.keys(anteriores).filter((turnoId) => !vivosDaConversa.has(turnoId));
+      let atividades = estado.atividades;
+      if (mortos.length > 0) {
+        const restantes = { ...anteriores };
+        for (const turnoId of mortos) delete restantes[turnoId];
+        atividades = { ...estado.atividades, [conversaId]: restantes };
+      }
+      return { ...estado, turnosVivos, atividades, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, carregadaEm: acao.agora } } };
     }
     case "hidratar-sua-vez": {
       // A escolha do campo só vale enquanto a conversa tem pergunta aberta: respondida ou deixada pra lá
@@ -452,7 +473,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, suaVez: acao.suaVez, composer };
     }
     case "hidratar-rotinas":
-      return { ...estado, rotinas: acao.rotinas };
+      return { ...estado, rotinas: acao.rotinas, carregado: estado.carregado.rotinas ? estado.carregado : { ...estado.carregado, rotinas: true } };
     case "hidratar-execucoes":
       return { ...estado, execucoes: { ...estado.execucoes, [acao.rotinaId]: acao.execucoes } };
     case "alternar-historico":
@@ -470,13 +491,13 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "aviso-conexao":
       return { ...estado, avisoConexao: acao.texto };
     case "hidratar-conectores":
-      return { ...estado, conectores: acao.conectores, marketplace: acao.marketplace ?? estado.marketplace, composioConfigurado: acao.composioConfigurado ?? estado.composioConfigurado };
+      return { ...estado, conectores: acao.conectores, marketplace: acao.marketplace ?? estado.marketplace, composioConfigurado: acao.composioConfigurado ?? estado.composioConfigurado, carregado: estado.carregado.conectores ? estado.carregado : { ...estado.carregado, conectores: true } };
     case "hidratar-concessoes":
       return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes } };
     case "hidratar-memorias":
       return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
     case "hidratar-salas":
-      return { ...estado, salas: acao.salas };
+      return { ...estado, salas: acao.salas, carregado: estado.carregado.salas ? estado.carregado : { ...estado.carregado, salas: true } };
     case "hidratar-nao-lidos":
       return { ...estado, naoLidos: acao.naoLidos };
     case "novas-desde":
@@ -509,6 +530,26 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "ocupado":
       return { ...estado, ocupado: acao.valor };
   }
+}
+
+/**
+ * O que mudou entre dois estados aparece na tela? definido em 2026-09-30: o frame de um bot que NÃO está
+ * na tela (turno.delta, turno.atividade, turno.tarefas) só mexe em `atividades` da conversa dele, e só a
+ * timeline da conversa aberta lê `atividades`. medido em 2026-09-30: redesenhar a tela inteira a cada um
+ * desses frames travou a página por 118 s com 8 bots escrevendo e uma conversa de 200 mensagens aberta
+ * (scripts/carga-tela). `invalidacoes` também não aparece: só o laço de reidratação a lê, e o que ele
+ * busca redesenha ao chegar. Qualquer outra referência nova conta como mudança.
+ */
+export function mudouNaTela(antes: Estado, depois: Estado): boolean {
+  if (antes === depois) return false;
+  const t = depois.tela;
+  const naTela = t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null;
+  for (const k of Object.keys(depois) as (keyof Estado)[]) {
+    if (k === "invalidacoes" || antes[k] === depois[k]) continue;
+    if (k === "atividades" && (naTela === null || antes.atividades[naTela] === depois.atividades[naTela])) continue;
+    return true;
+  }
+  return false;
 }
 
 export function agenteDaTela(estado: Estado): string | null {
@@ -544,8 +585,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (secao === "agentes" && !estado.gestao) faltas.push("gestao");
   if (!estado.frota) faltas.push("frota");
   if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
-  if (t.tipo === "sala" && estado.salas.length === 0) faltas.push("salas");
-  if (t.tipo === "nova-sala" && estado.salas.length === 0) faltas.push("salas");
+  if (t.tipo === "sala" && !estado.carregado.salas) faltas.push("salas");
+  if (t.tipo === "nova-sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "conversa" && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
   // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.
   const nivel = t.tipo === "conversa" && estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
@@ -555,10 +596,10 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "conectores") for (const a of estado.frota?.agentes ?? []) if (a.ownerId === estado.sessao?.pessoaId && !estado.concessoes[a.id]) faltas.push(`concessoes:${a.id}`);
   // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam
   // chegar junto com ela — não só na tela dedicada.
-  if ((t.tipo === "rotinas" || t.tipo === "conversa") && estado.rotinas.length === 0) faltas.push("rotinas");
+  if ((t.tipo === "rotinas" || t.tipo === "conversa") && !estado.carregado.rotinas) faltas.push("rotinas");
   // definido em 2026-09-24 ("rotina nasce com o acesso"): "Sua vez" também, porque o card da rotina proposta
   // diz se o app que ela precisa já está conectado ("Conectar {App}" ou "Criar rotina e permitir leitura").
-  if ((t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "sua-vez") && estado.marketplace.length === 0) faltas.push("conectores");
+  if ((t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "sua-vez") && !estado.carregado.conectores) faltas.push("conectores");
   // A fila alimenta o badge ⚑ da sidebar e a faixa de chamada em QUALQUER tela: sem o rail, ela é o
   // único aviso de que há decisão parada.
   if (!estado.suaVez) faltas.push("sua-vez");

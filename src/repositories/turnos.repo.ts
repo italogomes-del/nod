@@ -423,18 +423,30 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * EMENDA 13: turno pendente bloqueado é renderizável — "na fila — Vera está respondendo em #revisão".
      * conversaId aponta para ONDE o agente está ocupado (outra conversa) ou para a própria, quando a
      * serialização é por conversa. Pendente sem bloqueio conhecido não entra (vai ser reivindicado já).
+     *
+     * revisto em 2026-09-30: em dois passos, e o segundo só quando há pendente (o caso comum é nenhum). A versão com as
+     * duas subconsultas correlacionadas custava uma varredura de turnos por linha estimada, e a estimativa sob RLS
+     * contava todos os turnos da conversa (1.020 estimados, 0 pendentes de fato): medido em 2026-09-30, custo 504 mil,
+     * acima do limiar do JIT, e 1,36 s por GET conversa; o índice turnos_por_conversa (0042) sozinho não resolvia
+     * (o custo seguiu acima de 500 mil), porque a subconsulta por agente seguia varrendo a tabela.
      */
     async pendentesRenderizaveis(conversaId: string): Promise<TurnoPendenteDto[]> {
-      const linhas = await conn<{ id: string; ocupado_em: string }[]>`
-        select p.id,
-               coalesce(
-                 (select d.conversa_id from turnos d where d.tenant_id = p.tenant_id and d.agente_id = p.agente_id and d.estado = 'despachando' order by d.criado_em limit 1),
-                 (select d.conversa_id from turnos d where d.tenant_id = p.tenant_id and d.conversa_id = p.conversa_id and d.estado = 'despachando' limit 1)
-               ) as ocupado_em
-        from turnos p
-        where p.tenant_id = ${escopo.tenantId} and p.conversa_id = ${conversaId} and p.estado = 'pendente'
-        order by p.criado_em`;
-      return linhas.filter((l) => l.ocupado_em !== null).map((l) => ({ id: l.id, motivo: "agente_ocupado_em", conversaId: l.ocupado_em }));
+      const pendentes = await conn<{ id: string; agente_id: string }[]>`
+        select id, agente_id from turnos
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente'
+        order by criado_em`;
+      if (pendentes.length === 0) return [];
+      // O mais antigo despachando de cada agente ganha, como o `order by criado_em limit 1` de antes; sem nenhum do
+      // agente, um despachando na própria conversa (serialização por conversa) aponta para ela mesma.
+      const agentes = [...new Set(pendentes.map((p) => p.agente_id))];
+      const ocupados = await conn<{ agente_id: string; conversa_id: string }[]>`
+        select agente_id, conversa_id from turnos
+        where tenant_id = ${escopo.tenantId} and estado = 'despachando' and (agente_id = any(${agentes}::uuid[]) or conversa_id = ${conversaId})
+        order by criado_em`;
+      return pendentes.flatMap((p): TurnoPendenteDto[] => {
+        const ocupado = ocupados.find((d) => d.agente_id === p.agente_id) ?? ocupados.find((d) => d.conversa_id === conversaId);
+        return ocupado ? [{ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversa_id }] : [];
+      });
     },
 
     /** Entrega idempotente (ADR-021): true só na primeira vez de (turno, seq_local). */
@@ -443,6 +455,19 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         insert into turno_entregas (tenant_id, owner_id, turno_id, seq_local) values (${escopo.tenantId}, ${escopo.pessoaId}, ${turnoId}, ${seqLocal})
         on conflict (tenant_id, turno_id, seq_local) do nothing returning id`;
       return linhas.length === 1;
+    },
+
+    /**
+     * Turnos concluídos por conversa, numa consulta (as execuções da frota, definido em 2026-09-30): a contagem real, no
+     * índice turnos_por_conversa (0042). Conversa sem nenhum fica de fora.
+     */
+    async concluidosPorConversa(conversaIds: readonly string[]): Promise<Map<string, number>> {
+      if (conversaIds.length === 0) return new Map();
+      const linhas = await conn<{ conversa_id: string; n: number }[]>`
+        select conversa_id, count(*)::int as n from turnos
+        where tenant_id = ${escopo.tenantId} and conversa_id = any(${[...conversaIds]}::uuid[]) and estado = 'concluido'
+        group by conversa_id`;
+      return new Map(linhas.map((l) => [l.conversa_id, l.n]));
     },
 
     async listarDaConversa(conversaId: string, limite = 50): Promise<Turno[]> {

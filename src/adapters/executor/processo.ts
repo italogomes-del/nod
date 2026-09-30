@@ -34,6 +34,37 @@ const STDERR_MAX_CHARS = 65_536;
 
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Divide o stdout em linhas procurando o "\n" só no pedaço que acabou de chegar; os pedaços da linha ainda aberta são
+ * colados uma vez, quando ela fecha. medido em 2026-09-30 (bancada em Node, pedaços de 64 KiB): com
+ * `resto += pedaco; resto.indexOf("\n")` cada pedaço relia a linha acumulada inteira — uma linha de 2 MB custava
+ * 39–52 ms somados e uma de 6 MB, 0,3–1 s; assim, 3 ms e 5 ms. Linha de vários MB existe: o tool_result de computador_*
+ * traz a captura de tela em base64, e o CLI repete o conteúdo em `tool_use_result`. Linha vazia sai como antes; o resto
+ * sem "\n" só sai no fechar.
+ */
+export function criarDivisorDeLinhas(aoLinha: (linha: string) => void): { empurrar(pedaco: string): void; fechar(): void } {
+  let aberta: string[] = [];
+  return {
+    empurrar(pedaco) {
+      let inicio = 0;
+      let quebra = pedaco.indexOf("\n");
+      while (quebra !== -1) {
+        const final = pedaco.slice(inicio, quebra);
+        aoLinha(aberta.length === 0 ? final : aberta.join("") + final);
+        aberta = [];
+        inicio = quebra + 1;
+        quebra = pedaco.indexOf("\n", inicio);
+      }
+      if (inicio < pedaco.length) aberta.push(pedaco.slice(inicio));
+    },
+    fechar() {
+      const resto = aberta.join("");
+      aberta = [];
+      if (resto.trim() !== "") aoLinha(resto);
+    },
+  };
+}
+
 export function iniciarProcesso(o: {
   bin: string;
   args: readonly string[];
@@ -52,20 +83,12 @@ export function iniciarProcesso(o: {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
   const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"] });
   let stderr = "";
-  let resto = "";
+  const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;
   let interrompido = false;
 
   filho.stdout?.setEncoding("utf8");
-  filho.stdout?.on("data", (pedaco: string) => {
-    resto += pedaco;
-    let quebra = resto.indexOf("\n");
-    while (quebra !== -1) {
-      o.aoLinha(resto.slice(0, quebra));
-      resto = resto.slice(quebra + 1);
-      quebra = resto.indexOf("\n");
-    }
-  });
+  filho.stdout?.on("data", (pedaco: string) => linhas.empurrar(pedaco));
   filho.stderr?.setEncoding("utf8");
   filho.stderr?.on("data", (pedaco: string) => {
     if (stderr.length < STDERR_MAX_CHARS) stderr += pedaco.slice(0, STDERR_MAX_CHARS - stderr.length);
@@ -81,8 +104,7 @@ export function iniciarProcesso(o: {
       if (resolvido) return;
       resolvido = true;
       terminou = true;
-      if (resto.trim() !== "") o.aoLinha(resto);
-      resto = "";
+      linhas.fechar();
       resolve(r);
     };
     filho.on("error", (erro) => concluir({ exitCode: null, signal: null, stderr, erroSpawn: erro }));

@@ -140,6 +140,19 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return l ? paraMensagem(l) : null;
     },
 
+    /** ultimaDaConversa de várias conversas numa consulta (a prévia da frota, definido em 2026-09-30): um LATERAL por conversa no índice mensagens_por_conversa. */
+    async ultimasDasConversas(conversaIds: readonly string[]): Promise<Map<string, Mensagem>> {
+      if (conversaIds.length === 0) return new Map();
+      const linhas = await conn<LinhaMensagem[]>`
+        select u.* from unnest(${[...conversaIds]}::uuid[]) as c(id)
+        cross join lateral (
+          select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+          where tenant_id = ${escopo.tenantId} and conversa_id = c.id
+          order by criado_em desc, id desc limit 1
+        ) u`;
+      return new Map(linhas.map((l) => [l.conversa_id, paraMensagem(l)]));
+    },
+
     async marcarParcial(id: string, parcial: boolean): Promise<boolean> {
       const r = await conn`update mensagens set parcial = ${parcial} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;

@@ -150,6 +150,9 @@ body.ocupado { cursor: progress; }
   border-radius: 8px; font-size: 13px; }
 .timeline-wrap { flex: 1; overflow: auto; min-height: 0; padding: 14px 16px 18px; }
 .timeline { max-width: 880px; margin: 0 auto; width: 100%; }
+/* As duas partes da timeline (histórico e ao vivo) e os blocos do histórico são regiões de render, não caixas:
+   o layout é o de antes (web/lib/regioes.ts regiaoPorBlocos). */
+.timeline-parte, .timeline-parte > .bloco { display: contents; }
 .composer-wrap { flex: none; border-top: 1px solid var(--line); padding: 8px 12px 10px; background: #fff; }
 .composer-wrap:empty { display: none; }
 

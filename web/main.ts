@@ -12,14 +12,16 @@ import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
-import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import type { FrameSse } from "../src/contracts/frame.ts";
+import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
-import { esquecerRegiao, regiao, regiaoMudaria } from "./lib/regioes.ts";
+import { lembrar } from "./lib/lembrar.ts";
+import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
@@ -30,7 +32,7 @@ import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
-import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/conversa.ts";
+import { blocosAoVivo, blocosDoHistorico, htmlComposer, renderCabecalhoConversa, renderTimeline, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
@@ -152,9 +154,9 @@ function lerConversaDaTela(): void {
 }
 
 /** O ponto de não lido: a conversa aberta, com a pessoa olhando, nunca pisca como nova enquanto a leitura vai ao servidor. */
-function temNovas(conversaId: string): boolean {
-  if (!naoLidaDe(estado, conversaId)) return false;
-  const t = estado.tela;
+function temNovas(conversaId: string, e: Estado = estado): boolean {
+  if (!naoLidaDe(e, conversaId)) return false;
+  const t = e.tela;
   const aberta = (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId;
   return !(aberta && naFrente() && deixarNaoLida !== conversaId);
 }
@@ -163,6 +165,29 @@ function dispatch(acao: Acao): void {
   estado = reduzir(estado, acao);
   render();
   void reidratar();
+}
+
+/**
+ * Frames do SSE (definido em 2026-09-30): o estado muda na hora, mas a tela é redesenhada no máximo uma vez
+ * por quadro, e só quando o frame mudou algo que ela mostra (`mudouNaTela`). Cada pedaço de texto de cada
+ * bot é um frame: vários bots escrevendo são centenas por segundo. As ações da pessoa continuam
+ * redesenhando na hora (dispatch), porque quem clica espera o DOM novo na linha seguinte (foco, rolagem).
+ */
+let quadroPendente = 0;
+function renderNoQuadro(): void {
+  if (quadroPendente) return;
+  quadroPendente = window.requestAnimationFrame(() => {
+    quadroPendente = 0;
+    render();
+  });
+}
+
+function receberFrame(frame: FrameSse): void {
+  const antes = estado;
+  estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
+  if (mudouNaTela(antes, estado)) renderNoQuadro();
+  // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
+  if (estado.invalidacoes !== antes.invalidacoes) void reidratar();
 }
 
 function erroDe(e: unknown): { codigo: string; mensagem: string; correlationId?: string | null } {
@@ -253,13 +278,15 @@ async function alternarModoDev(): Promise<void> {
 async function reidratar(): Promise<void> {
   if (!api || reidratando) return;
   const pendentes = [...new Set([...estado.invalidacoes, ...invalidacoesDaTela(estado)])];
-  if (pendentes.length === 0) return;
+  // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
+  const relevantes = pendentes.filter((q) => relevante(q));
+  // definido em 2026-09-30: nada relevante, nada a buscar nem a redesenhar. A conversa de outro bot fica marcada
+  // até ser aberta, e antes cada frame caía aqui e redesenhava a tela inteira de forma síncrona.
+  if (relevantes.length === 0) return;
   const telaAntes = estado.tela;
   reidratando = true;
   let lerDepois = false;
   try {
-    // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
-    const relevantes = pendentes.filter((q) => relevante(q));
     // definido em 2026-09-17: consumir antes do GET preserva frames recebidos durante a busca.
     estado = reduzir(estado, { tipo: "invalidacoes-tratadas", quais: relevantes });
     for (const q of relevantes) {
@@ -311,7 +338,12 @@ function relevante(q: Invalidacao): boolean {
 // Marketplace são do bot (painel Detalhes) e Chaves é da conta ("Seu espaço"). As telas continuam
 // existindo e roteáveis; o que saiu foi a entrada fixa.
 
-function renderSidebar(): string {
+/**
+ * A barra lateral lê o estado pelo PARÂMETRO (que encobre o `estado` do módulo de propósito): ela é desenhada
+ * por `lembrar` (web/lib/lembrar.ts), que só enxerga o que passa pelo parâmetro. O que ela lê de fora do
+ * estado entra nos extras de `redesenharSidebar`.
+ */
+function renderSidebar(estado: Estado): string {
   const agentes = estado.frota?.agentes ?? [];
   const abertas = abertasPorAgente(estado);
   const perguntas = perguntasPorAgente(estado);
@@ -327,7 +359,7 @@ function renderSidebar(): string {
     // diz quando o bot trabalha. Selos ⚑, estrela de fixado e pontos soltos saíram.
     const perguntando = perguntas.get(a.id) ?? 0;
     // definido em 2026-09-24 (emenda da ADR-044): "rotina parada" (âmbar) quando uma rotina dele espera acesso.
-    const nova = temNovas(a.conversaId);
+    const nova = temNovas(a.conversaId, estado);
     const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : nova ? "nao-lido" : "";
     const rotuloAviso = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
@@ -347,7 +379,7 @@ function renderSidebar(): string {
   // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
   const bloco = (a: (typeof agentes)[number]) => {
     const perguntando = perguntas.get(a.id) ?? 0;
-    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : temNovas(a.conversaId) ? "nao-lido" : "";
+    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : temNovas(a.conversaId, estado) ? "nao-lido" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
     return `<div class="fixado" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
@@ -361,7 +393,7 @@ function renderSidebar(): string {
     .map(
       (s) =>
         // definido em 2026-09-29 (0039): a sala não tem mascote, então o ponto de não lido fica à direita.
-        `<button class="row"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"${temNovas(s.sala.conversaId) ? ` aria-label="Abrir a sala ${esc(s.sala.nome)} (mensagem nova)"` : ""}><span class="g">#</span><span class="txt"><b>${esc(s.sala.nome)}</b></span><span class="meta">${temNovas(s.sala.conversaId) ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</span></button>`,
+        `<button class="row"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"${temNovas(s.sala.conversaId, estado) ? ` aria-label="Abrir a sala ${esc(s.sala.nome)} (mensagem nova)"` : ""}><span class="g">#</span><span class="txt"><b>${esc(s.sala.nome)}</b></span><span class="meta">${temNovas(s.sala.conversaId, estado) ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</span></button>`,
     )
     .join("");
 
@@ -387,7 +419,7 @@ function renderSidebar(): string {
   // sino e +. A busca é um ícone; o campo aparece ao clicar, com ⌘K, ou enquanto tem texto.
   const buscando = buscaAberta || termoBusca() !== "";
   // definido em 2026-09-29 (0039, canvas "Não lidos"): o ícone só existe com algo não lido (ou com a tela aberta).
-  const comNovas = (estado.naoLidos?.conversas ?? []).some((c) => temNovas(c.conversaId));
+  const comNovas = (estado.naoLidos?.conversas ?? []).some((c) => temNovas(c.conversaId, estado));
   const naoLidos = comNovas || t.tipo === "nao-lidos"
     ? `<button class="icone-topo nao-lidos-bt" data-act="navegar" data-tela="nao-lidos" aria-current="${t.tipo === "nao-lidos" ? "page" : "false"}" aria-label="${esc(rotuloNaoLidos(estado))}" title="Não lidos">${BANDEJA}${comNovas ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</button>`
     : "";
@@ -415,6 +447,7 @@ function renderPrincipal(): void {
   const erro = estado.erro ? `<div class="erro" role="alert">${esc(estado.erro.codigo)} — ${esc(estado.erro.mensagem)} ${botao("fechar-erro", "×", { classe: "sm" })}</div>` : "";
   let cabecalho = "";
   let corpo = "";
+  let partes: PartesDaTimeline | null = null;
   let composer: { chave: string; html: string } | null = null;
   switch (t.tipo) {
     case "novo-bot":
@@ -442,29 +475,86 @@ function renderPrincipal(): void {
       break;
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
-      corpo = renderTimeline(conversaDaTela(estado), estado);
+      partes = partesDaTimeline();
+      corpo = partes ? CASCA_TIMELINE : renderTimeline(null, estado);
       composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
-      corpo = renderTimeline(conversaDaTela(estado), estado);
+      partes = partesDaTimeline();
+      corpo = partes ? CASCA_TIMELINE : renderTimeline(null, estado);
       composer = { chave: `sala:${t.salaId}`, html: htmlComposer(PLACEHOLDER_SALA, nomesDosMembros(estado, t.salaId)) };
       break;
   }
   // Um formulário da gaveta com algo digitado não é regravado por um frame qualquer; ele volta a acompanhar o estado
   // quando a pessoa salva, cancela ou sai do nível.
-  if (gavetaSuja !== chaveDaGaveta()) regiao("detalhes", renderDetalhes(estado));
+  if (gavetaSuja !== chaveDaGaveta()) regiao("detalhes", lembrar("detalhes", estado, [], renderDetalhes));
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
   regiao("cabecalho", cabecalho);
   regiao("erro", erro);
+  const cascaMuda = regiaoMudaria("timeline", corpo);
+  const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
+  const aoVivoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-ao-vivo", partes.aoVivo));
+  if (historicoMuda || aoVivoMuda) regravarTimeline(corpo, partes, { cascaMuda, historicoMuda, aoVivoMuda });
+  // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
+  if (composer?.chave !== composerDe) {
+    const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
+    composerDe = composer?.chave ?? null;
+    esquecerRegiao("composer");
+    esquecerRegiao("composer-pergunta");
+    esquecerRegiao("composer-aviso");
+    regiao("composer", composer?.html ?? "");
+    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    const rascunho = composerDe ? rascunhos.ler(composerDe) : "";
+    if (ta && rascunho) {
+      ta.value = rascunho;
+      ajustarAltura(ta);
+      ta.setSelectionRange(rascunho.length, rascunho.length);
+    }
+    ta?.focus();
+    redesenharAnexos();
+  }
+  atualizarComposer();
+  document.body.classList.toggle("ocupado", estado.ocupado);
+}
+
+type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[] };
+
+/**
+ * A timeline de uma conversa em duas partes (definido em 2026-09-30, web/telas/conversa.ts): a casca fica e
+ * cada parte é uma região por blocos. O histórico vem da lembrança (web/lib/lembrar.ts) e só é refeito quando
+ * algo que ele lê muda; a parte ao vivo é refeita a cada quadro, e só o bloco do turno que escreveu é regravado.
+ */
+const CASCA_TIMELINE = '<div class="timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+function partesDaTimeline(): PartesDaTimeline | null {
+  const c = conversaDaTela(estado);
+  if (!c) return null;
+  // O chip de link do Slack diz "mensagem das HH:MM" no mesmo dia e "de DD/MM" depois: o dia é um extra.
+  const historico = lembrar("timeline-historico", estado, [new Date().toDateString()], (e) => {
+    const conversa = conversaDaTela(e);
+    return conversa ? blocosDoHistorico(conversa, e) : [];
+  });
+  return { historico, aoVivo: blocosAoVivo(c, estado) };
+}
+
+/**
+ * Regrava os blocos que mudaram guardando o que a pessoa tem aberto ou digitado neles, e mantém no fim quem estava no
+ * fim. Com o histórico parado, só a parte ao vivo é mexida, e só nela se procura o que guardar: procurar no documento
+ * inteiro (dezenas de milhares de nós numa conversa longa) a cada quadro de streaming custava mais que o próprio desenho.
+ */
+function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: { cascaMuda: boolean; historicoMuda: boolean; aoVivoMuda: boolean }): void {
+  const t = estado.tela;
   const timeline = document.getElementById("timeline");
+  const escopo: ParentNode = muda.historicoMuda ? document : document.getElementById("timeline-ao-vivo") ?? document;
   const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
-  const abertos = [...document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
-  const buscas = ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" }));
+  const abertos = [...escopo.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
+  const buscas = muda.cascaMuda ? ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" })) : [];
   // A pasta marcada no card de pasta sobrevive a um frame que re-renderiza a conversa no meio da escolha.
-  const pastasMarcadas = [...document.querySelectorAll<HTMLInputElement>("input[data-pasta-de]:checked")].map((el) => ({ de: el.dataset.pastaDe ?? "", valor: el.value, foco: document.activeElement === el }));
-  const respostas = [...document.querySelectorAll<HTMLInputElement>("[data-decisao] input")].map((el) => ({
+  const pastasMarcadas = [...escopo.querySelectorAll<HTMLInputElement>("input[data-pasta-de]:checked")].map((el) => ({ de: el.dataset.pastaDe ?? "", valor: el.value, foco: document.activeElement === el }));
+  const respostas = [...escopo.querySelectorAll<HTMLInputElement>("[data-decisao] input")].map((el) => ({
     decisao: el.closest<HTMLElement>("[data-decisao]")?.dataset.decisao ?? "",
     atributo: el.hasAttribute("data-resposta") ? "data-resposta" : el.hasAttribute("data-item-texto") ? "data-item-texto" : "data-item",
     chave: el.dataset.resposta ?? el.dataset.itemTexto ?? el.dataset.item ?? "",
@@ -473,8 +563,16 @@ function renderPrincipal(): void {
   }));
   // ADR-051: o iframe do artefato sai antes de a timeline ser regravada e volta sem recarregar (moveBefore),
   // no hidratar() logo abaixo — depois de os <details> reabrirem; sem moveBefore, ele é recriado do cache.
-  if (regiaoMudaria("timeline", corpo)) artefatos.estacionar();
+  if (muda.historicoMuda) artefatos.estacionar();
   regiao("timeline", corpo);
+  if (muda.cascaMuda) {
+    esquecerRegiao("timeline-historico");
+    esquecerRegiao("timeline-ao-vivo");
+  }
+  if (partes) {
+    if (muda.historicoMuda) regiaoPorBlocos("timeline-historico", partes.historico);
+    if (muda.aoVivoMuda) regiaoPorBlocos("timeline-ao-vivo", partes.aoVivo);
+  }
   for (const resposta of respostas) {
     const el = document.querySelector<HTMLInputElement>(`[data-decisao="${CSS.escape(resposta.decisao)}"] input[${resposta.atributo}="${CSS.escape(resposta.chave)}"]`);
     if (!el || el.disabled || el.defaultValue !== resposta.inicial || el.defaultChecked !== resposta.marcadoInicial) continue;
@@ -498,32 +596,14 @@ function renderPrincipal(): void {
     el.checked = true;
     if (marcada.foco) el.focus({ preventScroll: true });
   }
-  filtrarBots((document.getElementById("busca-destinatario") as HTMLInputElement | null)?.value ?? "", ".contact-picker");
-  filtrarApps((document.getElementById("busca-marketplace") as HTMLInputElement | null)?.value ?? "");
-  for (const el of document.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
-  artefatos.hidratar(timeline ?? document);
-  if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
-  // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
-  if (composer?.chave !== composerDe) {
-    const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
-    composerDe = composer?.chave ?? null;
-    esquecerRegiao("composer");
-    esquecerRegiao("composer-pergunta");
-    esquecerRegiao("composer-aviso");
-    regiao("composer", composer?.html ?? "");
-    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    const rascunho = composerDe ? rascunhos.ler(composerDe) : "";
-    if (ta && rascunho) {
-      ta.value = rascunho;
-      ajustarAltura(ta);
-      ta.setSelectionRange(rascunho.length, rascunho.length);
-    }
-    ta?.focus();
-    redesenharAnexos();
+  // A busca do seletor de contatos e a do marketplace só existem nas telas que não são conversa (casca inteira).
+  if (muda.cascaMuda) {
+    filtrarBots((document.getElementById("busca-destinatario") as HTMLInputElement | null)?.value ?? "", ".contact-picker");
+    filtrarApps((document.getElementById("busca-marketplace") as HTMLInputElement | null)?.value ?? "");
   }
-  atualizarComposer();
-  document.body.classList.toggle("ocupado", estado.ocupado);
+  for (const el of escopo.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
+  if (muda.historicoMuda) artefatos.hidratar(timeline ?? document);
+  if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
 }
 
 const PLACEHOLDER_SALA = "Mensagem para a sala — @Nome dirige a pergunta";
@@ -615,6 +695,11 @@ function renderEntrada(): string {
 }
 
 function render(): void {
+  // Um redesenho síncrono já cobre o que o quadro pendente ia mostrar.
+  if (quadroPendente) {
+    window.cancelAnimationFrame(quadroPendente);
+    quadroPendente = 0;
+  }
   if (!estado.sessao) {
     document.querySelector(".app")?.classList.add("sem-sessao");
     regiao("detalhes", "");
@@ -625,18 +710,29 @@ function render(): void {
     return;
   }
   document.querySelector(".app")?.classList.remove("sem-sessao");
-  const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
-  const valorBusca = busca?.value ?? "";
-  const focoBusca = document.activeElement === busca;
-  if (!arrastandoBot) regiao("sidebar", renderSidebar());
+  if (!arrastandoBot) redesenharSidebar();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
   regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDoEspaco()) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco);
+  renderPrincipal();
+}
+
+/**
+ * A barra lateral só é refeita quando algo que ela lê muda (definido em 2026-09-30): durante o streaming nada
+ * nela muda, e o texto da busca e o filtro das linhas só precisam ser reaplicados quando as linhas são novas
+ * (digitar na busca filtra direto, no ouvinte de input).
+ */
+function redesenharSidebar(): void {
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida], renderSidebar);
+  if (!regiaoMudaria("sidebar", html)) return;
+  const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
+  const valorBusca = busca?.value ?? "";
+  const focoBusca = document.activeElement === busca;
+  regiao("sidebar", html);
   const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
   if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus(); }
   filtrarBots(valorBusca);
-  renderPrincipal();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -662,7 +758,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
     aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
   });
   live.subscribe((ev) => {
-    if (ev.tipo === "frame") dispatch({ tipo: "frame", frame: ev.frame, agora: Date.now() });
+    if (ev.tipo === "frame") receberFrame(ev.frame);
     else if (ev.tipo === "conexao") dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
   });
   live.connect();

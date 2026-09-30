@@ -34,6 +34,7 @@ import { criarInterruptor, type InterruptorNod } from "../../services/interrupto
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
+import { JUNTAR_DELTAS_MS } from "../../shared/constantes.ts";
 import { servicoRotinas } from "../../use-cases/ativar-rotina.ts";
 import { atualizarPerfil } from "../../use-cases/atualizar-perfil.ts";
 import { motorDe } from "../../use-cases/autoria-evento.ts";
@@ -198,7 +199,8 @@ export function comporApp(o: OpcoesCompor): App {
     ligarRegistryResolvido = r;
   });
 
-  const barramento = criarBarramento();
+  // NOD_JUNTAR_DELTAS_MS=0 volta a um frame por pedaço de texto (para medir ou isolar um problema).
+  const barramento = criarBarramento({ juntarDeltasMs: env.NOD_JUNTAR_DELTAS_MS === undefined ? JUNTAR_DELTAS_MS : Math.max(0, Number(env.NOD_JUNTAR_DELTAS_MS) || 0) });
   const interruptor = criarInterruptor();
   const tokens = criarTokenTurno({ agora: relogio });
 

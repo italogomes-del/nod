@@ -28,7 +28,7 @@ function proposta(c: PayloadPropostaPasta["candidatas"], id = "pp"): Proposta {
   return { tenantId: "t", id, conversaId: "c", agenteId: "a", kind: "pasta", estado: "pendente", criadoEm: AGORA, payload: { kind: "pasta", turnoId: "t1", candidatas: c, motivo: "Para montar a árvore de arquivos do PR #466", buscaTermo: "leapy" } } as Proposta;
 }
 function conversa(p: Proposta[], mensagens: Mensagem[] = []): ConversaEstado {
-  return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: p, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+  return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: p, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
 }
 const estado: Estado = { ...estadoInicial, agora: AGORA, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [{ id: "a", nome: "Dev 1", ownerId: "p", conversaId: "c" }] } as never };
 const quantas = (html: string, trecho: string) => html.split(trecho).length - 1;

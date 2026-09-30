@@ -67,6 +67,14 @@ export const SALA_MAX = 6;
 export const BUFFER_SSE_FRAMES = 500;
 
 /**
+ * Janela em que os pedaços de texto de um turno viram UM frame `turno.delta` (src/services/barramento.ts). O claude-cli
+ * manda um evento por pedaço, e cada um era um frame. medido em 2026-09-30: 10 turnos simultâneos com duas abas
+ * abertas publicaram 4.631 frames sem juntar e ~900 com 100 ms (bancada do servidor com o catcher a 40 pedaços/s por
+ * turno); o texto continua aparecendo ~10 vezes por segundo, e o buffer de replay cobre cinco vezes mais tempo.
+ */
+export const JUNTAR_DELTAS_MS = 100;
+
+/**
  * Teto de caracteres da fala e do texto do resultado numa Entrega. A rota da máquina
  * (ponte-validacao.ts) recusa acima disso, e o laço (laco.ts) corta antes de entregar, com marcador
  * visível. definido em 2026-09-28: o valor que a rota já aplicava; o corte existe porque a fala agora
