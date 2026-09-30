@@ -11,6 +11,8 @@ import { normalizarAcessosDeclarados } from "../domain/rotina-acessos.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { validarRotinaNormalizada, type RotinaNormalizada } from "../domain/rotina-texto.ts";
 import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
+import { ativarRotina } from "./ativar-rotina.ts";
+import { confirmacaoPeloModo } from "./confirmar-pelo-modo.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaRotina = {
@@ -112,6 +114,17 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
   const events: RuntimeEvent[] = [
     evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: "rotina", proximaExecucao: payload.proximaExecucao }, { conversaId: input.conversaId, turnoId: input.turnoId }),
   ];
+  // ADR-059 (emenda de 2026-09-30): no automático e no total a rotina nasce ativa — o modo confirma na hora.
+  const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false });
+  if (porRegra) {
+    try {
+      const ativada = await ativarRotina(deps, { propostaId: proposta.id, porRegra });
+      return { data: { proposta_id: proposta.id, proxima_execucao: ativada.data.rotina.proximaExecucao, resumo: payload.resumo, aplicada: true }, events: [...events, ...(ativada.events ?? [])] };
+    } catch (e) {
+      // Teto de rotinas etc.: a proposta fica no card, como no manual, e o modelo lê o código.
+      if (!ehErroDeDominio(e)) throw e;
+    }
+  }
   if (decisao) events.push(evento(deps, "decisao_criada", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: input.conversaId, turnoId: input.turnoId }));
   return { data: { proposta_id: proposta.id, proxima_execucao: payload.proximaExecucao, resumo: payload.resumo }, events };
 };

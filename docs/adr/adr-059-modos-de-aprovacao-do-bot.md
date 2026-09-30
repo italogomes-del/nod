@@ -144,3 +144,51 @@ e `regra:consulta_sem_decisao`: o que o modo aprova é escolha explícita da don
 - **Manual não força card para escrita direta de app** num turno de conversa confiável: continua como antes, pedido
   no prompt ("efeito externo só por item aprovado") e barrado no servidor só sob gate, contaminação ou merge/aprovar.
 - **Modo por rotina** (uma rotina no total e as outras no automático) e **teto de gasto** por noite.
+
+## Emenda de 2026-09-30: o modo cobre rotina e acesso; apagar pedido na conversa não para
+
+**Contexto.** Às 07:36 de 30/09 o Marlon pôs a Clarice em "Aprovar automaticamente". Mesmo assim vieram três cards:
+- às 08:20, duas **"Mudança de rotina proposta"** (`atualizar_rotina`), que a pessoa confirmou às 08:28;
+- às 08:37, o **pedido de acesso** para excluir 50 tasks do ClickUp que ele tinha acabado de pedir
+  (`pedir_acesso` com `CLICKUP_DELETE_TASK`).
+
+E, com o acesso concedido, a exclusão pararia de novo: apagar num app era "arriscado" no automático.
+
+O motivo: só `pedir_aprovacao`, o terminal e o computador consultavam o modo. Criar, mudar e excluir rotina e
+pedir acesso eram propostas com card próprio, e nenhum modo tocava nelas. A decisão 1 desta ADR dizia "o modo não
+concede nada"; o Marlon quer que o automático aprove também isso.
+
+**Decisão.**
+1. **Rotina e acesso passam pelo modo** (`confirmacaoPeloModo`, `src/use-cases/confirmar-pelo-modo.ts`), com a mesma
+   regra e o mesmo modo atual do agente. Quando o modo confirma:
+   - a proposta nasce e fecha na mesma chamada, pela regra (`fecharPorRegra`, `decidida_por` nulo);
+   - a aplicação é a mesma do botão: `ativarRotina`, `aplicarAtualizacaoRotina`, `aplicarExclusaoRotina` e
+     `decidirAcesso`, com `porRegra`;
+   - a autoria da rotina aplicada é do agente sob a regra;
+   - o consentimento do acesso continua sendo da pessoa, porque escolher o modo foi escolha dela, mas com a regra
+     em `decidido_por` e a frase "Pela aprovação automática deste bot, sem clique neste pedido";
+   - a ferramenta devolve `aplicada: true` ou `estado: "concedido"`.
+2. **Acesso concedido pelo modo retoma a tarefa sozinho.** A ferramenta nova só entra no catálogo do próximo turno
+   (o plano é fixo por turno, ADR-024), e a retomada já sai na fila, como depois do clique.
+3. **O que continua com a pessoa:**
+   - conectar um app, porque o login é dela e o card de conexão nem chega ao modo;
+   - o pedido de acesso de uma rotina, que passa por `garantirPedidoDeAcesso` e pelo pré-voo;
+   - perfil do bot (`atualizar_perfil`) e pasta de projeto (`workspace_propor_pasta`).
+4. **Apagar num app, merge e aprovar PR que a pessoa pediu na conversa não são arriscados para o automático**
+   (`conversaComAPessoa(plano.modoTurno)`: conversa e criação, inclusive as retomadas delas; o plano ganhou
+   `modoTurno`). Numa rotina ou num pedido de colega ninguém pediu, e o automático para (`acao_arriscada`). Vale
+   também para excluir rotina e para o acesso que inclui apagar. A lista de arriscados do terminal não muda: ali o
+   risco é a máquina (`rm -r`, `push --force`, `sudo`), não o escopo do pedido.
+
+**Riscos aceitos.**
+- Conteúdo de app lido na conversa (uma descrição de task, um PR pelo conector) não contamina o turno (ADR-052). Um
+  texto desses pode induzir, no automático, uma exclusão no app sem card. Antes desta emenda o automático parava;
+  agora só o manual para.
+- Um bot no automático pode se dar acesso de escrita a um app já conectado quando a tarefa pede, e até a apagar
+  numa conversa. Revogar continua sendo um clique no painel do bot.
+
+**Gatilho de reversão.**
+- Uma concessão pelo modo (`consentimento` com `decidido_por = regra:modo_*`) revogada pela dona em menos de 24 h,
+  duas vezes no mesmo mês: o acesso volta a ser só por clique.
+- Uma exclusão num app, feita pelo automático numa conversa, que a dona diga não ter pedido: o apagar do app volta a
+  parar no automático.

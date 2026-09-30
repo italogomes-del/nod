@@ -8,8 +8,11 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { SLUG_GITHUB } from "../contracts/github.ts";
 import { capacidadesDoNivel } from "../domain/grupos-de-acesso.ts";
 import { normalizarPedidoAcesso } from "../domain/pedido-acesso.ts";
+import { acaoArriscadaNoApp } from "../domain/aprovacao-permanente.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { evento } from "./autoria-evento.ts";
+import { confirmacaoPeloModo, semCard } from "./confirmar-pelo-modo.ts";
+import { decidirAcesso } from "./decidir-acesso.ts";
 import { garantirGithubSemConfiguracao } from "./conectar-github.ts";
 import { abrirDecisaoDeAcesso, eventosDoPedido, garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -17,6 +20,10 @@ import type { Deps } from "./tipos.ts";
 
 function aguardandoPessoa(propostaId: string): ResultadoPedirAcesso {
   return { proposta_id: propostaId, estado: "aguardando_pessoa", instrucao: "o acesso ainda NÃO foi concedido: diga que pediu e encerre o turno" };
+}
+
+function concedidoPeloModo(propostaId: string): ResultadoPedirAcesso {
+  return { proposta_id: propostaId, estado: "concedido", instrucao: "o acesso foi concedido pela aprovação automática: encerre o turno agora; a tarefa retoma sozinha com a ferramenta nova" };
 }
 
 /**
@@ -127,5 +134,18 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
     return { data: aguardandoPessoa(proposta.id), events: [criada] };
   }
   const aberto = await abrirPedidoDeAcesso(deps, { conversaId: input.conversaId, agenteId: input.agenteId, turnoId: input.turnoId, payload, conector, autoria });
+  // ADR-059 (emenda de 2026-09-30): no automático e no total o modo concede na hora, pelo mesmo decidirAcesso do
+  // botão. O que é "Apagar e desfazer" (e merge/aprovar PR) só sai sozinho na conversa com a pessoa; conectar
+  // um app (login) continua sendo dela, porque o card de conexão nem chega aqui.
+  const arriscada = pedido.capacidades.some((nome) => {
+    const cap = conector.catalogo.find((c) => c.nome === nome);
+    return cap ? acaoArriscadaNoApp(cap) : true;
+  });
+  const porRegra = await confirmacaoPeloModo(deps, input, { arriscada });
+  if (porRegra) {
+    // `executor` só serve ao disparo de rotina, e o pedido da rotina não passa por aqui (garantirPedidoDeAcesso).
+    const decidido = await decidirAcesso(deps, { decisaoId: aberto.proposta.id, recusar: false, executor: "catcher", porRegra });
+    return { data: concedidoPeloModo(aberto.proposta.id), events: [...semCard(aberto.events), ...(decidido.events ?? [])] };
+  }
   return { data: aguardandoPessoa(aberto.proposta.id), events: aberto.events };
 };

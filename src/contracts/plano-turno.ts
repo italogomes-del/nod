@@ -98,6 +98,11 @@ export type PlanoTurno = {
    */
   modoAprovacao?: ModoAprovacao;
   /**
+   * definido em 2026-09-30 (ADR-059, emenda): o modo do TURNO. Conversa e criação = a pessoa está falando com o bot;
+   * no automático, apagar num app e merge que ela pediu ali saem sem card. Ausente (plano antigo) = não é conversa.
+   */
+  modoTurno?: ModoTurno;
+  /**
    * definido em 2026-09-21 (ADR-042): ferramentas que a PESSOA marcou como "sempre permitir",
    * resolvidas no PUXAR e embarcadas aqui — a avaliação é LOCAL, nunca consulta por chamada
    * (ADR-013). Nomes no mesmo namespace de `FerramentaPlano.nome` (`${slug}__${tool}`), e sempre

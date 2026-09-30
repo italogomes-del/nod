@@ -4,8 +4,9 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import type { Tx } from "../shared/types.ts";
-import { autoriaPessoa, evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { concederAcessosDaRotina } from "./conceder-acessos-da-rotina.ts";
+import { autoriaDeQuemConfirma, fecharDecisaoDaProposta, type PorRegra } from "./confirmar-pelo-modo.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
 
 export type SaidaAtivarRotina = { rotina: Rotina; jaExistia: boolean };
@@ -22,7 +23,8 @@ export type SaidaAtivarRotina = { rotina: Rotina; jaExistia: boolean };
  * rotina e permitir leitura". Os dois caminhos de confirmação (confirmarProposta e a decisão 'rotina' em
  * decisoes.ts) passam por este caso via services.rotinas.ativar; a segunda ativação não concede de novo.
  */
-export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean }, SaidaAtivarRotina> = async (deps, input) => {
+/** `porRegra` (ADR-059): o modo do bot confirmou no turno — sem clique; autoria do agente e decisão fechada por regra. */
+export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean; porRegra?: PorRegra }, SaidaAtivarRotina> = async (deps, input) => {
   const proposta = exigir(await deps.repos.propostas.buscar(input.propostaId), "nao_encontrado", "proposta");
   if (proposta.payload.kind !== "rotina") throw new ErroDeDominio("estado_invalido", { cause: "proposta não é de rotina" });
   if (proposta.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
@@ -51,7 +53,7 @@ export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean
     acessos: p.acessos ?? null,
   });
   if (!rotina) throw new ErroDeDominio("estado_invalido", { cause: "rotina não criada" });
-  const autoria = autoriaPessoa(deps.escopo.pessoaId);
+  const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
   // Rotina que vem com o perfil (ADR-050): a confirmação do perfil escreve uma linha só com todas.
   if (!input.semMensagem) {
     await deps.repos.mensagens.criar({
@@ -65,9 +67,9 @@ export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean
   const events: RuntimeEvent[] = [
     evento(deps, "rotina_criada", autoria, { rotinaId: rotina.id, propostaId: proposta.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana }, { conversaId: rotina.conversaId }),
   ];
-  events.push(...((await concederAcessosDaRotina(deps, { agenteId: rotina.agenteId, acessos: rotina.acessos })).events ?? []));
+  events.push(...((await concederAcessosDaRotina(deps, { agenteId: rotina.agenteId, acessos: rotina.acessos, ...(input.porRegra ? { porRegra: input.porRegra } : {}) })).events ?? []));
   // A decisão 'rotina' de "Sua vez" tem o mesmo id; se ainda estava aberta, fica decidida aqui.
-  const decisao = await deps.repos.decisoes.decidir(proposta.id, { por: deps.escopo.pessoaId, agora });
+  const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
   if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: rotina.conversaId }));
   return { data: { rotina, jaExistia: false }, events };
 };

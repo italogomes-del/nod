@@ -4,7 +4,7 @@ import type { DestinoItem } from "../contracts/item-aprovacao.ts";
 import type { MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { grupoDaCapacidade } from "./grupos-de-acesso.ts";
-import { decidirPeloModo, gateDaRotinaObrigaPessoa, type RegraDoModo } from "./modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, gateDaRotinaObrigaPessoa, type RegraDoModo } from "./modo-aprovacao.ts";
 
 /**
  * DUAS regras nomeadas, não uma (ADR-042 claim 5): os ciclos de vida são opostos.
@@ -78,7 +78,7 @@ export type DecisaoAutomatica =
 
 export type EntradaAprovacao = {
   /** Ausente = nunca automático. O caminho do computador não carrega plano (ADR-042 claim 1). */
-  plano: Pick<PlanoTurno, "catalogo" | "politicaExecucao" | "confiancaEntrada" | "semprePermitir"> | null;
+  plano: Pick<PlanoTurno, "catalogo" | "politicaExecucao" | "confiancaEntrada" | "semprePermitir"> & Partial<Pick<PlanoTurno, "modoTurno">> | null;
   destino: DestinoItem;
   /** Já calculado pelo caso de uso a partir da DECLARAÇÃO do conector de origem (ADR-002). */
   origemSensivel: boolean;
@@ -118,6 +118,8 @@ export type EntradaAprovacao = {
  * sensível, computador e terminal continuam antes de qualquer modo (os dois últimos se decidem nos próprios
  * caminhos). Fora do catálogo em turno CONFIÁVEL continua perguntando em todo modo: ali a ferramenta falta por
  * conector desligado, não pela redução por confiança.
+ * Emenda de 2026-09-30: no automático, o arriscado do app (apagar, merge, aprovar PR) só para fora da conversa
+ * com a pessoa (`conversaComAPessoa(plano.modoTurno)`): numa rotina ou num pedido de colega, ninguém pediu.
  */
 export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   const { plano } = entrada;
@@ -132,7 +134,9 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   const nome = `${entrada.destino.conector}__${entrada.destino.ferramenta}`;
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === nome);
   const naoConfiavel = plano.confiancaEntrada === "nao_confiavel";
-  const situacao = { arriscada: entrada.arriscada === true, credencial: false, conteudoDeFora: naoConfiavel, travaHerdada };
+  // Emenda de 2026-09-30: apagar e merge que a pessoa pediu NA CONVERSA não são arriscados para o automático.
+  const pessoaPediu = conversaComAPessoa(plano.modoTurno);
+  const situacao = { arriscada: entrada.arriscada === true && !pessoaPediu, credencial: false, conteudoDeFora: naoConfiavel, travaHerdada };
   // No turno não confiável o catálogo reduzido tirou a escrita do plano, e é por aqui que ela passa: o modo decide
   // (a concessão já foi conferida pelo caso de uso, no catálogo do conector).
   if (!ferramenta || ferramenta.origem !== "conector") return (naoConfiavel ? decidirPeloModo(entrada.modo, situacao) : null) ?? { automatico: false, motivo: "fora_do_catalogo" };
@@ -142,7 +146,7 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   // A regra da PESSOA cai inteira em turno contaminado; a do CONECTOR (acima) não, porque
   // catalogoReduzido já deixa readOnly passar direto e executá-la aqui não amplia nada.
   if (naoConfiavel) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
-  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return decidirPeloModo(entrada.modo, { ...situacao, arriscada: true }) ?? { automatico: false, motivo: "sem_regra_permanente" };
+  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return decidirPeloModo(entrada.modo, { ...situacao, arriscada: !pessoaPediu }) ?? { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
   return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "sem_regra_permanente" };
 }
