@@ -30,9 +30,6 @@ export type Tela =
   | { tipo: "inicio" }
   | { tipo: "conversa"; conversaId: string; agenteId: string }
   | { tipo: "sala"; salaId: string; conversaId: string }
-  | { tipo: "gestao" }
-  | { tipo: "perfil"; agenteId: string }
-  | { tipo: "memoria"; agenteId: string }
   | { tipo: "rotinas" }
   | { tipo: "nova-rotina"; agenteId?: string }
   | { tipo: "novo-bot" }
@@ -45,11 +42,28 @@ export type Tela =
   | { tipo: "sua-vez" }
   /** Não lidos (definido em 2026-09-29, 0039): tudo o que chegou, a conversa mais recente em cima. */
   | { tipo: "nao-lidos" }
-  | { tipo: "nova-sala" }
-  | { tipo: "chaves" }
-  | { tipo: "relatos" }
-  /** Configuração da conta: conexão, computadores e administração (substituiu o rail em 2026-09-18). */
-  | { tipo: "espaco" };
+  | { tipo: "nova-sala" };
+
+/**
+ * "Seu espaço" (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é da CONTA abre pelo menu do avatar numa
+ * camada de tela cheia POR CIMA da tela atual, que continua montada embaixo — sair devolve a conversa exata (rolagem,
+ * rascunho, gaveta). Gerenciar agentes, Relatos e Computadores deixaram de ser telas e viraram seções daqui.
+ */
+export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "computadores" | "agentes" | "relatos";
+
+/**
+ * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
+ * com ‹ para voltar à visão geral — a conversa continua ao lado. Editar perfil e Memória deixaram de ser telas.
+ * `acesso.id` é o app (slug; o id do conector quando não há slug).
+ */
+export type NivelGaveta =
+  | { tipo: "rotina"; id: string }
+  | { tipo: "acesso"; id: string }
+  | { tipo: "dar-acesso" }
+  | { tipo: "perfil" }
+  | { tipo: "memoria" }
+  | { tipo: "inteligencia" }
+  | { tipo: "nova-rotina" };
 
 export type ConexaoApp = { url: string | null; falhou: string | null };
 
@@ -76,6 +90,8 @@ export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotina
 export type Estado = {
   sessao: Escopo | null;
   tela: Tela;
+  /** Seu espaço aberto por cima da tela, na seção escolhida; null = fechado. */
+  espaco: { secao: SecaoEspaco } | null;
   frota: FrotaDto | null;
   gestao?: FrotaDto | null;
   inventario: Inventario | null;
@@ -112,8 +128,8 @@ export type Estado = {
    * tentar de novo. Some quando conecta ou quando a pessoa cancela.
    */
   conectando: Record<string, ConexaoApp>;
-  /** O bot cujo "+ Dar acesso" do painel está aberto. */
-  dandoAcesso: string | null;
+  /** O nível aberto na gaveta de um bot; outro bot na tela = visão geral. */
+  gaveta: { agenteId: string; nivel: NivelGaveta } | null;
   avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
   memorias: Record<string, Memoria[]>;
@@ -145,10 +161,11 @@ export type Estado = {
 
 export type Acao =
   | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
-  | { tipo: "dar-acesso"; agenteId: string | null }
+  | { tipo: "gaveta"; agenteId: string; nivel: NivelGaveta | null }
   | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
+  | { tipo: "espaco"; secao: SecaoEspaco | null }
   | { tipo: "tick"; agora: number }
   | { tipo: "cancelando-turno"; turnoId: string; agora: number }
   | { tipo: "desfazer-cancelamento"; turnoId: string }
@@ -185,6 +202,7 @@ export type Acao =
 export const estadoInicial: Estado = {
   sessao: null,
   tela: { tipo: "inicio" },
+  espaco: null,
   frota: null,
   inventario: null,
   executor: null,
@@ -203,7 +221,7 @@ export const estadoInicial: Estado = {
   marketplace: [],
   composioConfigurado: false,
   conectando: {},
-  dandoAcesso: null,
+  gaveta: null,
   avisoConexao: null,
   concessoes: {},
   memorias: {},
@@ -371,14 +389,20 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return resolverInicio({
         ...estado,
         tela: acao.tela,
+        // Ir a outro lugar (o clique num aviso, por exemplo) fecha Seu espaço: a pessoa foi para onde pediu.
+        espaco: null,
         erro: null,
-        dandoAcesso: null,
+        // A gaveta só continua num nível interno se a conversa é do mesmo bot; outro bot abre na visão geral.
+        gaveta: acao.tela.tipo === "conversa" && estado.gaveta?.agenteId === acao.tela.agenteId ? estado.gaveta : null,
         faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
-        // Saiu da tela de chaves: a chave crua some da memória (ela aparece uma vez só).
-        chaveEmitida: acao.tela.tipo === "chaves" ? estado.chaveEmitida : null,
+        // Saiu de Computadores: a chave crua some da memória (ela aparece uma vez só).
+        chaveEmitida: null,
         // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
         novasDesde: {},
       });
+    case "espaco":
+      // A chave crua só vive enquanto a pessoa está em Computadores; trocar de seção ou fechar a descarta.
+      return { ...estado, espaco: acao.secao ? { secao: acao.secao } : null, chaveEmitida: acao.secao === "computadores" ? estado.chaveEmitida : null, erro: null };
     case "cancelando-turno":
       return { ...estado, cancelando: { ...estado.cancelando, [acao.turnoId]: acao.agora } };
     case "desfazer-cancelamento": {
@@ -439,8 +463,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       else delete conectando[acao.slug];
       return { ...estado, conectando, avisoConexao: acao.valor ? null : estado.avisoConexao };
     }
-    case "dar-acesso":
-      return { ...estado, dandoAcesso: acao.agenteId };
+    case "gaveta":
+      return { ...estado, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null };
     case "lista-de-pasta":
       return { ...estado, listaDePasta: { ...estado.listaDePasta, [acao.propostaId]: acao.lista } };
     case "aviso-conexao":
@@ -489,7 +513,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
 
 export function agenteDaTela(estado: Estado): string | null {
   const t = estado.tela;
-  if (t.tipo === "conversa" || t.tipo === "perfil" || t.tipo === "memoria") return t.agenteId;
+  if (t.tipo === "conversa") return t.agenteId;
   return null;
 }
 
@@ -516,13 +540,17 @@ export function resolverInicio(estado: Estado): Estado {
 export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const t = estado.tela;
   const faltas: Invalidacao[] = [];
-  if (estado.tela.tipo === "gestao" && !estado.gestao) faltas.push("gestao");
+  const secao = estado.espaco?.secao;
+  if (secao === "agentes" && !estado.gestao) faltas.push("gestao");
   if (!estado.frota) faltas.push("frota");
   if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (t.tipo === "sala" && estado.salas.length === 0) faltas.push("salas");
   if (t.tipo === "nova-sala" && estado.salas.length === 0) faltas.push("salas");
-  if (t.tipo === "memoria" && !estado.memorias[t.agenteId]) faltas.push(`memoria:${t.agenteId}`);
-  if ((t.tipo === "perfil" || t.tipo === "conversa") && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
+  if (t.tipo === "conversa" && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
+  // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.
+  const nivel = t.tipo === "conversa" && estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
+  if (nivel?.tipo === "memoria" && !estado.memorias[estado.gaveta?.agenteId ?? ""]) faltas.push(`memoria:${estado.gaveta?.agenteId ?? ""}`);
+  if (nivel?.tipo === "rotina" && !estado.execucoes[nivel.id]) faltas.push(`execucoes:${nivel.id}`);
   // definido em 2026-09-25: o marketplace diz quais bots usam cada app, então precisa das concessões de todos os bots da pessoa.
   if (t.tipo === "conectores") for (const a of estado.frota?.agentes ?? []) if (a.ownerId === estado.sessao?.pessoaId && !estado.concessoes[a.id]) faltas.push(`concessoes:${a.id}`);
   // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam
@@ -536,8 +564,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (!estado.suaVez) faltas.push("sua-vez");
   // O ícone de Não lidos e o ponto de cada linha da barra valem em qualquer tela, como a fila.
   if (!estado.naoLidos) faltas.push("nao-lidos");
-  if ((t.tipo === "chaves" || t.tipo === "espaco") && !estado.chaves) faltas.push("chaves");
-  // O frame relato.criado não invalida nada (é registro), então a tela busca quando ainda não tem.
-  if (t.tipo === "relatos" && !estado.relatos) faltas.push("relatos");
+  if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
+  // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
+  if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }

@@ -5,14 +5,14 @@ import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
-import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo, avisoFechado, fecharAviso, reabrirAviso } from "./lib/menu-modo.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
-import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
@@ -23,9 +23,8 @@ import { esquecerRegiao, regiao, regiaoMudaria } from "./lib/regioes.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
-import { renderChaves } from "./telas/chaves.ts";
-import { renderRelatos } from "./telas/relatos.ts";
-import { renderEspaco } from "./telas/espaco.ts";
+import { renderEspaco, situacaoCurtaAvisos, textoAmbiente, type Volta } from "./telas/espaco.ts";
+import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
@@ -34,13 +33,12 @@ import { htmlComposer, renderCabecalhoConversa, renderTimeline } from "./telas/c
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
-import { renderMemoria } from "./telas/memoria.ts";
-import { renderPerfil } from "./telas/perfil.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { BANDEJA, naoLidaDe, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
+import { frotaAoSoltar, ordemAoSoltar, type Destino } from "./lib/arrastar.ts";
 import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
@@ -132,7 +130,7 @@ const lendo = new Set<string>();
 
 function lerConversaDaTela(): void {
   const t = estado.tela;
-  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || !naFrente()) return;
+  if (!api || !estado.naoLidos || (t.tipo !== "conversa" && t.tipo !== "sala") || !naFrente() || estado.espaco) return;
   const conversaId = t.conversaId;
   const comLinha = linhaEm === conversaId || primeiraLeitura;
   linhaEm = null;
@@ -283,14 +281,15 @@ async function reidratar(): Promise<void> {
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
   if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos") return true;
-  if (q === "gestao") return t.tipo === "gestao" || t.tipo === "perfil";
+  const secao = estado.espaco?.secao;
+  if (q === "gestao") return secao === "agentes";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
-  if (q === "conectores") return t.tipo === "conectores" || t.tipo === "perfil" || t.tipo === "conversa" || t.tipo === "sala";
-  if (q === "chaves") return t.tipo === "chaves" || t.tipo === "espaco";
-  if (q === "relatos") return t.tipo === "relatos";
+  if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
+  if (q === "chaves") return secao === "computadores";
+  if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
-  if (q.startsWith("memoria:")) return t.tipo === "memoria" && t.agenteId === q.slice(8);
-  if (q.startsWith("concessoes:")) return (t.tipo === "perfil" || t.tipo === "conversa") && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
+  if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
+  if (q.startsWith("concessoes:")) return t.tipo === "conversa" && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
   // 2026-09-21: o painel de detalhes (tela conversa) também mostra o histórico — é onde a pessoa
   // confere que uma rotina silenciosa (desfecho sem_novidade, que não escreve no chat) rodou.
   if (q.startsWith("execucoes:")) return t.tipo === "rotinas" || t.tipo === "conversa";
@@ -313,6 +312,9 @@ function renderSidebar(): string {
   const paradas = rotinasParadasPorAgente(estado);
   const t = estado.tela;
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
+  // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): os bots da pessoa se arrastam — para a grade (fixa), entre
+  // seções ou para uma seção nova. Os da equipe não: fixar e seção são da dona.
+  const arrastavel = (a: (typeof agentes)[number]) => (a.ownerId === estado.sessao?.pessoaId ? ` draggable="true" data-arrastavel="${esc(a.id)}"` : "");
   const linha = (a: (typeof agentes)[number]) => {
     // definido em 2026-09-24 (revisão da interface): a linha só tem UM sinal, o ponto do próprio mascote.
     // A cor diz o tipo — âmbar decisão, azul pergunta, cinza mensagem não lida —; o mascote animado já
@@ -328,10 +330,13 @@ function renderSidebar(): string {
     // baixo é a última mensagem; os estados que pedem ação (fora do ar, pergunta, rotina parada) ganham dela.
     const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
     const chip = a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "";
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
+    // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
-  const grupo = (nome: string, lista: typeof agentes) => lista.length ? `<section class="section"><h3>${esc(nome)}</h3>${lista.map(linha).join("")}</section>` : "";
+  // Cada seção é um alvo de soltar (data-grupo); "Meus agentes" é a seção "" e continua alvo mesmo vazia (só aparece arrastando).
+  const grupo = (nome: string, secao: string, lista: typeof agentes) => `<section class="section" data-grupo="secao" data-secao="${esc(secao)}"${lista.length ? "" : " data-vazio"}><h3>${esc(nome)}</h3>${lista.map(linha).join("")}</section>`;
   // definido em 2026-09-24 (sidebar no estilo do Grok): fixados em grade de 4 — avatar grande, nome e o
   // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
   const bloco = (a: (typeof agentes)[number]) => {
@@ -339,12 +344,12 @@ function renderSidebar(): string {
     const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : temNovas(a.conversaId) ? "nao-lido" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
-    return `<div class="fixado" data-bot-contexto="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button><button class="bot-overflow" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}">•••</button></div>`;
+    return `<div class="fixado" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
   };
   const secoes = [...new Set(meus.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
   const fixados = meus.filter((a) => a.fixado);
-  const grade = fixados.length ? `<section class="fixados" aria-label="Fixados">${fixados.map(bloco).join("")}</section>` : "";
-  const bots = grupo("Meus agentes", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, meus.filter((a) => !a.fixado && a.secao === s))).join("");
+  const grade = meus.length ? `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>` : "";
+  const bots = meus.length ? grupo("Meus agentes", "", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, meus.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
   const equipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId).map(linha).join("");
   const salas = estado.salas
     .map(
@@ -354,8 +359,10 @@ function renderSidebar(): string {
     )
     .join("");
 
-  const ambiente = ambienteBanco
-    ? `<div class="ambiente-banco ambiente-${esc(ambienteBanco.regime)}" role="status" title="Banco usado por esta instância do Nod"><span></span>${ambienteBanco.regime === "persistente" ? "Persistente" : ambienteBanco.regime === "efemero" ? "Efêmero" : "Banco não identificado"}${ambienteBanco.porta ? ` · DB ${ambienteBanco.porta}` : ""}</div>`
+  // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o banco persistente é o de todo dia e foi para o rodapé do
+  // menu da conta; o efêmero e o não identificado continuam na barra, porque pedem atenção.
+  const ambiente = ambienteBanco && ambienteBanco.regime !== "persistente"
+    ? `<div class="ambiente-banco ambiente-${esc(ambienteBanco.regime)}" role="status" title="Banco usado por esta instância do Nod"><span></span>${ambienteBanco.regime === "efemero" ? "Efêmero" : "Banco não identificado"}${ambienteBanco.porta ? ` · DB ${ambienteBanco.porta}` : ""}</div>`
     : "";
   // Sem o rail e sem o inventário na tela inicial, o rodapé é o ÚNICO lugar sempre visível que pode
   // avisar que o motor não está pronto (ADR-029: falha vira estado escrito, nunca só um ícone).
@@ -385,14 +392,14 @@ function renderSidebar(): string {
     ${renderIncidentes(estado)}
     <div class="list">
       ${grade}
-      ${bots || (grade ? "" : '<p class="mudo">Nenhum agente visível.</p>')}
+      ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
       <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
     ${ambiente}
     ${falhaMotor ? `<p class="me-aviso" role="status">${esc(situacaoMotor)}</p>` : ""}
     <div class="rodape">
-      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="navegar" data-tela="espaco" aria-current="${t.tipo === "espaco" ? "true" : "false"}" aria-label="Seu espaço: ${esc(situacaoMotor)}" title="Seu espaço · ${esc(situacaoMotor)}"><span class="av-me">eu</span><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
+      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}" title="Menu da conta · ${esc(situacaoMotor)}"><span class="av-me">eu</span><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
       <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}">${LOJA}Marketplace</button>
     </div>`;
 }
@@ -424,26 +431,8 @@ function renderPrincipal(): void {
     case "conectores":
       corpo = renderConectores(estado);
       break;
-    case "gestao":
-      corpo = renderGestao(estado.gestao ?? null, estado.sessao?.pessoaId);
-      break;
-    case "perfil":
-      corpo = renderPerfil(estado, t.agenteId);
-      break;
-    case "memoria":
-      corpo = renderMemoria(estado, t.agenteId);
-      break;
     case "nova-sala":
       corpo = renderNovaSala(estado);
-      break;
-    case "chaves":
-      corpo = renderChaves(estado);
-      break;
-    case "relatos":
-      corpo = renderRelatos(estado);
-      break;
-    case "espaco":
-      corpo = renderEspaco(estado, ambienteBanco, canalAvisos.estado());
       break;
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
@@ -456,7 +445,9 @@ function renderPrincipal(): void {
       composer = { chave: `sala:${t.salaId}`, html: htmlComposer(PLACEHOLDER_SALA, nomesDosMembros(estado, t.salaId)) };
       break;
   }
-  regiao("detalhes", renderDetalhes(estado));
+  // Um formulário da gaveta com algo digitado não é regravado por um frame qualquer; ele volta a acompanhar o estado
+  // quando a pessoa salva, cancela ou sai do nível.
+  if (gavetaSuja !== chaveDaGaveta()) regiao("detalhes", renderDetalhes(estado));
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
   regiao("cabecalho", cabecalho);
@@ -623,7 +614,11 @@ function render(): void {
   const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
   const valorBusca = busca?.value ?? "";
   const focoBusca = document.activeElement === busca;
-  regiao("sidebar", renderSidebar());
+  if (!arrastandoBot) regiao("sidebar", renderSidebar());
+  // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
+  regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDoEspaco()) : "");
+  document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
+  document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco);
   const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
   if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus(); }
   filtrarBots(valorBusca);
@@ -742,8 +737,6 @@ function propostaDoEstado(id: string): Proposta | null {
 // Ações (delegação por data-act e data-form). A web só pede; o servidor decide.
 
 function navegar(tela: Tela): void {
-  // O menu "Avisos no Mac" muda a preferência sem passar pela página: "Seu espaço" relê ao abrir.
-  if (tela.tipo === "espaco") void canalAvisos.reler();
   linhaEm = tela.tipo === "conversa" || tela.tipo === "sala" ? tela.conversaId : null;
   deixarNaoLida = null;
   dispatch({ tipo: "navegar", tela });
@@ -760,7 +753,7 @@ async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
 
 function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   const executar = (fn: () => Promise<unknown>) => void agir(async () => { await mudarGestao(fn); });
-  if (acao === "perfil") { navegar({ tipo: "perfil", agenteId: a.id }); return; }
+  if (acao === "perfil") { abrirNivel(a.id, { tipo: "perfil" }); return; }
   if (acao === "renomear") {
     pedirGestao("Renomear bot", `<label>Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60" /></label>`, "Salvar", async (d) => mudarGestao(() => api!.editarPerfil(a.id, { nome: String(d.get("nome")) }))); return;
   }
@@ -781,7 +774,7 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   }
   if (acao === "excluir") {
     pedirGestao(`Excluir ${a.nome}?`, "<p>O bot vai para Excluídos. Novos trabalhos serão bloqueados, rotinas pausadas e acessos revogados. Trabalhos em andamento receberão um pedido de interrupção; ações externas já realizadas não podem ser desfeitas.</p><p>Você pode recuperar o perfil e o histórico em Gerenciar agentes.</p>", "Excluir agente", async () => {
-      await mudarGestao(() => api!.excluirAgente(a.id)); navegar({ tipo: "gestao" });
+      await mudarGestao(() => api!.excluirAgente(a.id)); abrirEspaco("agentes");
     }, true); return;
   }
   if (acao === "copiar") {
@@ -789,7 +782,7 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   }
   if (acao === "ocultar" && !a.oculto) {
     pedirGestao("Ocultar da barra lateral?", "<p>O bot e suas rotinas continuam funcionando. Para trazê-lo de volta, abra Gerenciar agentes → Ocultos.</p>", "Ocultar", async () => {
-      await mudarGestao(() => api!.ocultar(a.id, true)); navegar({ tipo: "gestao" });
+      await mudarGestao(() => api!.ocultar(a.id, true)); abrirEspaco("agentes");
     }); return;
   }
   if (acao === "nao-lido") {
@@ -825,7 +818,10 @@ function botGerido(id: string | undefined): BotGerido | undefined {
 
 function menuDoBot(el: HTMLElement): void {
   const a = botGerido(el.dataset.id);
-  if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, el, (acao) => acaoDoBot(a, acao));
+  // O ⋯ do topo da gaveta abre o menu logo abaixo dele, alinhado pela direita (canvas "Gaveta 1").
+  const r = el.getBoundingClientRect();
+  const ponto = el.closest("#detalhes") ? { x: r.right - 268, y: r.bottom } : undefined;
+  if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, el, (acao) => acaoDoBot(a, acao), ponto);
 }
 
 function conversaAtual(): { conversaId: string; salaId: string | null } | null {
@@ -1096,6 +1092,8 @@ function filtrarApps(texto: string): void {
 function abrirInteligencia(agenteId: string | undefined): void {
   const a = botGerido(agenteId);
   if (!a || a.ownerId !== estado.sessao?.pessoaId) return;
+  // definido em 2026-09-30: com a conversa do bot na tela, a escolha abre na gaveta dele; fora dela, no diálogo.
+  if (estado.tela.tipo === "conversa" && estado.tela.agenteId === a.id) { abrirNivel(a.id, { tipo: "inteligencia" }); return; }
   pedirGestao(`Inteligência de ${a.nome}`, renderInteligencia(a, estado.executor?.harnesses, true), "Salvar escolha", async (d) => mudarGestao(() => api!.editarPerfil(a.id, escolhaInteligencia(d))));
 }
 
@@ -1135,9 +1133,17 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
-    const tela = el.dataset.tela as Tela["tipo"] | undefined;
-    if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "chaves" || tela === "relatos" || tela === "novo-bot" || tela === "nova-rotina" || tela === "espaco" || tela === "gestao") navegar({ tipo: tela });
+    const tela = el.dataset.tela;
+    if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
+    // As antigas telas da conta são seções de Seu espaço desde 2026-09-30.
+    else if (tela === "chaves") abrirEspaco("computadores");
+    else if (tela === "relatos") abrirEspaco("relatos");
+    else if (tela === "gestao") abrirEspaco("agentes");
+    else if (tela === "espaco") abrirEspaco("conexao");
   },
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; } }),
+  "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
+  "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
   // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha
   // (web/lib/conexao.ts). Sem "Verificar conexão" e sem ir ao marketplace no meio de uma conversa.
@@ -1180,7 +1186,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.decidir(id, grupos.length > 0 ? { capacidades } : {});
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "conectores", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
-  "dar-acesso": (el) => dispatch({ tipo: "dar-acesso", agenteId: estado.dandoAcesso === el.dataset.id ? null : el.dataset.id ?? null }),
+  "dar-acesso": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "dar-acesso" }),
   // definido em 2026-09-25: a rotina que lê um app ainda desconectado — um botão conecta e, quando o login
   // termina, cria a rotina (o confirmar concede o que ela declarou, conceder-acessos-da-rotina.ts).
   "conectar-e-confirmar": (el) => {
@@ -1253,7 +1259,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const app = document.querySelector(".app");
     if (!app) return;
     // Estreita, o painel é sobreposto e abre/fecha a cada vez; larga, esconder é preferência que fica.
-    if (window.matchMedia("(max-width: 1250px)").matches) { app.classList.toggle("detalhes-abertos"); return; }
+    if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); return; }
     const oculto = !app.classList.contains("detalhes-ocultos");
     app.classList.toggle("detalhes-ocultos", oculto);
     try { localStorage.setItem(CHAVE_PAINEL_OCULTO, oculto ? "1" : "0"); } catch { /* sem storage, vale só nesta aba */ }
@@ -1262,7 +1268,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; }
   },
-  "nova-rotina": (el) => navegar({ tipo: "nova-rotina", agenteId: el.dataset.id }),
+  // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
+  gaveta: (el) => {
+    const tipo = el.dataset.nivel;
+    const id = el.dataset.id ?? "";
+    const nivel: NivelGaveta | null = tipo === "rotina" || tipo === "acesso" ? { tipo, id } : tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" ? { tipo } : null;
+    if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
+  },
+  "gaveta-voltar": () => voltarNivel(),
   // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo (`ids.bloqueada`), o teste não roda —
   // a conversa abre com o card de acesso "rotina parada" e o botão que a destrava; "Sua vez" relê.
   "executar-rotina": (el) => agir(async () => {
@@ -1286,8 +1299,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
-  "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),
-  "ir-memoria": (el) => navegar({ tipo: "memoria", agenteId: el.dataset.id ?? "" }),
+  "ir-perfil": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "perfil" }),
+  "ir-memoria": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "memoria" }),
   "fechar-erro": () => dispatch({ tipo: "erro", erro: null }),
   // Sem agir(): no navegador, o pedido de permissão precisa sair direto do clique.
   "alternar-avisos": () => canalAvisos.alternar(),
@@ -1346,13 +1359,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "revogar-acessos": (el) => agir(async () => void (await api!.revogarAcessos(el.dataset.agente ?? "", (el.dataset.ids ?? "").split(",").filter(Boolean)), dispatch({ tipo: "invalidar", quais: [`concessoes:${el.dataset.agente ?? ""}`, "frota"] }))),
   "salvar-memoria": (el) =>
     agir(async () => {
+      gavetaSuja = null;
       const li = el.closest("[data-memoria]");
       const texto = li?.querySelector<HTMLInputElement>('[data-campo="texto"]')?.value ?? "";
       const tipo = li?.querySelector<HTMLSelectElement>('[data-campo="tipo"]')?.value as "preferencia" | "fato" | "resumo" | undefined;
       await api!.editarMemoria(el.dataset.agente ?? "", el.dataset.id ?? "", { texto, tipo });
       dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] });
     }),
-  "apagar-memoria": (el) => agir(async () => void (await api!.apagarMemoria(el.dataset.agente ?? "", el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] }))),
+  "apagar-memoria": (el) => agir(async () => void (gavetaSuja = null, await api!.apagarMemoria(el.dataset.agente ?? "", el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] }))),
   "pausar-rotina": (el) => agir(async () => void (await api!.pausarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ativar-rotina": (el) => agir(async () => void (await api!.ativarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ver-execucoes": (el) => {
@@ -1433,24 +1447,37 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
       dispatch({ tipo: "invalidar", quais: ["frota"] });
       navegar({ tipo: "conversa", conversaId: r.conversa.id, agenteId: r.agente.id });
     }),
-  "criar-rotina": (form) => agir(async () => {
-    const d = new FormData(form);
+  "criar-rotina": (form) => { const d = new FormData(form); const naGaveta = !!form.closest("#detalhes"); return agir(async () => {
     const [hora, minuto] = String(d.get("horario")).split(":").map(Number);
     await api!.criarRotina({ agenteId: String(d.get("agenteId")), cron: String(d.get("frequencia")).startsWith("intervalo:") ? `*/${String(d.get("frequencia")).split(":")[1]} * * * *` : d.get("frequencia") === "hora" ? "0 * * * *" : `${minuto} ${hora} * * ${d.get("frequencia")}`, fusoIana: String(d.get("fusoIana")), instrucao: String(d.get("instrucao")), fonte: String(d.get("fonte")), entregavel: String(d.get("entregavel")), limitesAprovacao: String(d.get("limitesAprovacao")), politicaSemDado: String(d.get("politicaSemDado")) });
     dispatch({ tipo: "invalidar", quais: ["rotinas"] });
-    navegar({ tipo: "rotinas" });
-  }),
-  "editar-perfil": (form) =>
-    agir(async () => {
-      const d = new FormData(form);
-      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), ...escolhaInteligencia(d), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
-      dispatch({ tipo: "invalidar", quais: ["frota"] });
-    }),
+    // Da gaveta, a rotina criada aparece na visão geral do bot; da tela cheia, na lista de rotinas.
+    if (naGaveta) fecharNivel();
+    else navegar({ tipo: "rotinas" });
+  }); },
+  // definido em 2026-09-30: o perfil enxuto da gaveta não traz a escolha de modelo — sem o campo, ela não muda (antes,
+  // o formulário sem "inteligencia" voltaria o bot para Automático).
+  "editar-perfil": (form) => {
+    const d = new FormData(form);
+    return agir(async () => {
+      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), ...(d.has("inteligencia") ? escolhaInteligencia(d) : {}), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
+      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+      fecharNivel();
+    });
+  },
+  inteligencia: (form) => {
+    const d = new FormData(form);
+    return agir(async () => {
+      await mudarGestao(() => api!.editarPerfil(form.dataset.id ?? "", escolhaInteligencia(d)));
+      fecharNivel();
+    });
+  },
   "criar-memoria": (form) =>
     agir(async () => {
       const d = new FormData(form);
       await api!.criarMemoria(form.dataset.id ?? "", String(d.get("tipo") ?? "fato") as "preferencia" | "fato" | "resumo", String(d.get("texto") ?? ""));
       form.reset();
+      gavetaSuja = null;
       dispatch({ tipo: "invalidar", quais: [`memoria:${form.dataset.id ?? ""}`] });
     }),
   "criar-sala": (form) =>
@@ -1612,9 +1639,11 @@ document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
   if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
+  if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
-  if (ev.key === "Escape" && estado.dandoAcesso) { ev.preventDefault(); dispatch({ tipo: "dar-acesso", agenteId: null }); return; }
+  // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
+  if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;
   if (ta.id !== "composer-texto") return;
   if (teclaNaBarra(ev, ta)) { ev.preventDefault(); return; }
@@ -1635,6 +1664,7 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
+  if (ta.closest?.("#detalhes") && estado.gaveta) gavetaSuja = chaveDaGaveta();
   if (ta.matches("[data-customiza-mascote]")) {
     const form = ta.closest<HTMLFormElement>('form[data-form="editar-perfil"]');
     const preview = form?.querySelector<HTMLElement>("[data-mascote-preview]");
@@ -1785,10 +1815,209 @@ document.addEventListener("keydown", (ev) => {
   if (acao) void acao(el);
 });
 
+// O menu do bot na barra lateral: abre onde o cursor está; pelo teclado (Shift+F10, tecla de menu) o evento vem sem
+// posição e o menu abre ao lado do bot.
 document.addEventListener("contextmenu", (ev) => {
   const row = (ev.target as HTMLElement).closest<HTMLElement>("[data-bot-contexto]");
   if (!row) return;
   ev.preventDefault();
-  const botao = row.querySelector<HTMLElement>("[data-act=menu-agente]");
-  if (botao) menuDoBot(botao);
+  const a = botGerido(row.dataset.botContexto);
+  const ponto = ev.clientX || ev.clientY ? { x: ev.clientX, y: ev.clientY } : undefined;
+  if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, row, (acao) => acaoDoBot(a, acao), ponto);
 });
+
+// ---- arrastar na barra lateral (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") ---------------------------------
+// Soltar na grade fixa, numa seção move, em "+ Nova seção" pede o nome. A barra se reorganiza na hora (frotaAoSoltar) e o
+// servidor recebe a ordem inteira do grupo de destino (0041). Esc ou soltar fora devolve o bot: o navegador cancela o arrasto.
+let arrastandoBot: string | null = null;
+let alvoArrasto: { destino: Destino | "nova"; indice: number; el: HTMLElement } | null = null;
+
+function limparIndicadores(): void {
+  for (const n of document.querySelectorAll("#sidebar .vaga-fixar, #sidebar .linha-insercao")) n.remove();
+  for (const n of document.querySelectorAll("#sidebar .alvo-soltar")) n.classList.remove("alvo-soltar");
+}
+
+function encerrarArrasto(): void {
+  if (!arrastandoBot) return;
+  limparIndicadores();
+  document.getElementById("sidebar")?.classList.remove("arrastando-bot");
+  for (const n of document.querySelectorAll("#sidebar .origem-arrasto")) n.classList.remove("origem-arrasto");
+  arrastandoBot = null;
+  alvoArrasto = null;
+  render();
+}
+
+/** O índice é contado entre os OUTROS bots do grupo; a vaga e a linha não entram na conta, então não oscilam. */
+function marcarAlvo(grupo: HTMLElement, x: number, y: number): void {
+  if (grupo.dataset.grupo === "nova-secao") {
+    if (alvoArrasto?.el === grupo) return;
+    limparIndicadores();
+    grupo.classList.add("alvo-soltar");
+    alvoArrasto = { destino: "nova", indice: 0, el: grupo };
+    return;
+  }
+  const fixados = grupo.dataset.grupo === "fixados";
+  const itens = [...grupo.querySelectorAll<HTMLElement>(fixados ? ":scope > .fixado" : ":scope > .bot-row")].filter((n) => n.dataset.arrastavel !== arrastandoBot);
+  let indice = itens.length;
+  for (const [i, n] of itens.entries()) {
+    const r = n.getBoundingClientRect();
+    if (fixados ? y < r.top || (y <= r.bottom && x < r.left + r.width / 2) : y < r.top + r.height / 2) { indice = i; break; }
+  }
+  if (alvoArrasto?.el === grupo && alvoArrasto.indice === indice) return;
+  limparIndicadores();
+  alvoArrasto = { destino: fixados ? { grupo: "fixados" } : { grupo: "secao", secao: grupo.dataset.secao ?? "" }, indice, el: grupo };
+  const antesDe = itens[indice] ?? (fixados ? grupo.querySelector(".fixados-vazio") : null);
+  const marca = document.createElement("div");
+  marca.setAttribute("aria-hidden", "true");
+  if (fixados) { marca.className = "vaga-fixar"; marca.textContent = "Fixar"; } else { marca.className = "linha-insercao"; grupo.classList.add("alvo-soltar"); }
+  grupo.insertBefore(marca, antesDe);
+}
+
+function soltarBot(id: string, destino: Destino, indice: number): void {
+  const frota = estado.frota;
+  const pessoaId = estado.sessao?.pessoaId;
+  if (!frota || !pessoaId || !api) return;
+  const ordem = ordemAoSoltar(frota.agentes, pessoaId, id, destino, indice);
+  dispatch({ tipo: "hidratar-frota", frota: { ...frota, agentes: frotaAoSoltar(frota.agentes, id, destino, ordem) } });
+  void agir(async () => {
+    await mudarGestao(() => api!.organizarAgente(id, destino.grupo === "fixados" ? { fixado: true, ordem } : { fixado: false, secao: destino.secao, ordem }));
+  });
+}
+
+function pedirNovaSecao(id: string): void {
+  const nome = botGerido(id)?.nome ?? "o bot";
+  pedirGestao("Nova seção", `<p>${esc(nome)} vai para a seção nova.</p><label>Nome da seção<input name="secao" required maxlength="60" placeholder="Produto e Engenharia" /></label>`, "Criar seção", async (d) => {
+    const secao = String(d.get("secao") ?? "").trim();
+    if (secao) await mudarGestao(() => api!.organizarAgente(id, { fixado: false, secao, ordem: [id] }));
+  });
+}
+
+document.addEventListener("dragstart", (ev) => {
+  const el = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar [data-arrastavel]");
+  if (!el || !ev.dataTransfer) return;
+  arrastandoBot = el.dataset.arrastavel ?? null;
+  ev.dataTransfer.effectAllowed = "move";
+  ev.dataTransfer.setData("application/x-nod-bot", arrastandoBot ?? "");
+  // O fantasma é uma cópia do bot com sombra, fora da tela: o navegador fotografa e ela sai no mesmo quadro.
+  const r = el.getBoundingClientRect();
+  const fantasma = el.cloneNode(true) as HTMLElement;
+  fantasma.classList.add("fantasma-arrasto");
+  fantasma.style.width = `${r.width}px`;
+  document.body.append(fantasma);
+  ev.dataTransfer.setDragImage(fantasma, ev.clientX - r.left, ev.clientY - r.top);
+  window.setTimeout(() => fantasma.remove(), 0);
+  // A origem esmaece e os alvos aparecem só depois da foto do fantasma.
+  window.requestAnimationFrame(() => {
+    if (arrastandoBot !== el.dataset.arrastavel) return;
+    el.classList.add("origem-arrasto");
+    document.getElementById("sidebar")?.classList.add("arrastando-bot");
+  });
+});
+document.addEventListener("dragover", (ev) => {
+  if (!arrastandoBot) return;
+  const grupo = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar [data-grupo]");
+  if (!grupo) {
+    if (alvoArrasto) { limparIndicadores(); alvoArrasto = null; }
+    return;
+  }
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  marcarAlvo(grupo, ev.clientX, ev.clientY);
+});
+document.addEventListener("drop", (ev) => {
+  if (!arrastandoBot) return;
+  ev.preventDefault();
+  const id = arrastandoBot;
+  const alvo = alvoArrasto;
+  encerrarArrasto();
+  if (!alvo) return;
+  if (alvo.destino === "nova") pedirNovaSecao(id);
+  else soltarBot(id, alvo.destino, alvo.indice);
+});
+document.addEventListener("dragend", () => encerrarArrasto());
+
+// ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
+function abrirEspaco(secao: SecaoEspaco): void {
+  // O menu "Avisos no Mac" muda a preferência sem passar por aqui: a seção relê ao abrir.
+  if (secao === "avisos") void canalAvisos.reler();
+  const jaAberto = !!estado.espaco;
+  dispatch({ tipo: "espaco", secao });
+  document.querySelector<HTMLElement>(jaAberto ? `#espaco [data-secao="${secao}"]` : "#espaco .espaco-voltar")?.focus();
+}
+
+/** Volta exatamente para onde estava: a tela de baixo nunca saiu do lugar. O que chegou enquanto isso ganha a linha "Novas". */
+function fecharEspaco(): void {
+  if (!estado.espaco) return;
+  dispatch({ tipo: "espaco", secao: null });
+  const t = estado.tela;
+  if (t.tipo === "conversa" || t.tipo === "sala") linhaEm = t.conversaId;
+  lerConversaDaTela();
+  document.querySelector<HTMLElement>("#sidebar .rodape .me")?.focus();
+}
+
+/** "‹ <de onde veio>": o bot com o mascote, a sala com #, ou o nome da tela. */
+function voltaDoEspaco(): Volta {
+  const t = estado.tela;
+  if (t.tipo === "conversa") {
+    const a = botGerido(t.agenteId);
+    return a ? { rotulo: a.nome, icone: iconeAgente(a, "sm") } : { rotulo: "a conversa", icone: "" };
+  }
+  if (t.tipo === "sala") return { rotulo: `# ${estado.salas.find((x) => x.sala.id === t.salaId)?.sala.nome ?? "sala"}`, icone: "" };
+  const nomes: Partial<Record<Tela["tipo"], string>> = { conectores: "Marketplace", "nao-lidos": "Não lidos", "sua-vez": "Sua vez", "novo-bot": "Novo bot", "nova-sala": "Nova sala", rotinas: "Rotinas", "nova-rotina": "Nova rotina" };
+  return { rotulo: nomes[t.tipo] ?? "Voltar", icone: "" };
+}
+
+function dadosMenuConta(): DadosMenuConta {
+  const inv = inventarioEmUso(estado);
+  const falha = !!inv && inv.estado !== "pronto";
+  const fora = [...new Set((estado.frota?.negacoes ?? []).filter((n) => n.classe === "conector_indisponivel").map((n) => estado.conectores.find((c) => c.slug === n.nome || c.nome === n.nome)?.nome ?? n.nome))];
+  const faixa = falha
+    ? { texto: inv.estado === "nao_autenticado" ? "Sua IA não está conectada" : "Sua IA não foi encontrada", botao: "Conectar" }
+    : fora.length ? { texto: faixaDeConectores(fora), botao: "Ver" } : null;
+  const banco = textoAmbiente(ambienteBanco);
+  return {
+    faixa,
+    conexao: !estado.executor ? "Verificando" : falha ? "Desconectada" : estado.executor.atual === "catcher" ? "Simulação" : "Conectada",
+    avisos: situacaoCurtaAvisos(canalAvisos.estado()),
+    modoDev: estado.modoDev.ligado,
+    banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
+  };
+}
+
+// ---- a gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -------------------------------
+/** O nível da gaveta com algo digitado e ainda não salvo (a chave de chaveDaGaveta); null = nada pendente. */
+let gavetaSuja: string | null = null;
+
+function chaveDaGaveta(): string {
+  return JSON.stringify(estado.gaveta);
+}
+
+/** Abre o nível na gaveta do bot; se a conversa na tela é de outro bot, vai para a dele antes. Escondida, a gaveta aparece. */
+function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
+  const a = botGerido(agenteId);
+  if (!a) return;
+  const t = estado.tela;
+  if (t.tipo !== "conversa" || t.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
+  gavetaSuja = null;
+  const app = document.querySelector(".app");
+  if (window.matchMedia("(max-width: 1099px)").matches) app?.classList.add("detalhes-abertos");
+  else if (painelOculto()) { try { localStorage.setItem(CHAVE_PAINEL_OCULTO, "0"); } catch { /* sem storage, vale só nesta aba */ } }
+  dispatch({ tipo: "gaveta", agenteId: a.id, nivel });
+  document.querySelector<HTMLElement>("#detalhes .gv-voltar")?.focus();
+}
+
+function fecharNivel(): void {
+  gavetaSuja = null;
+  const g = estado.gaveta;
+  if (g) dispatch({ tipo: "gaveta", agenteId: g.agenteId, nivel: null });
+  document.querySelector<HTMLElement>("#detalhes .gv-painel")?.focus();
+}
+
+/** ‹ (ou Esc): com mudança não salva, pergunta antes; o que está salvo não pergunta nada. */
+function voltarNivel(): void {
+  if (gavetaSuja && gavetaSuja === chaveDaGaveta()) {
+    pedirGestao("Descartar as mudanças?", "<p>O que você mudou aqui ainda não foi salvo.</p>", "Descartar", async () => fecharNivel(), true);
+    return;
+  }
+  fecharNivel();
+}

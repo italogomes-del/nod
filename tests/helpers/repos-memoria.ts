@@ -286,6 +286,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         Object.assign(a, campos);
         return a;
       },
+      async ordenar(ids) {
+        let n = 0;
+        ids.forEach((id, i) => {
+          const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
+          if (a) { a.posicao = i; n += 1; }
+        });
+        return n;
+      },
       async excluir(id, em) {
         const a = doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm);
         if (!a) return null;
@@ -335,7 +343,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar(opcoes = {}) {
         return doTenant(b.agentes)
           .filter((a) => (opcoes.incluirExcluidos || !a.excluidoEm) && (opcoes.incluirOcultos || !a.oculto))
-          .sort((x, y) => Number(y.fixado) - Number(x.fixado) || x.criadoEm - y.criadoEm);
+          .sort((x, y) => Number(y.fixado) - Number(x.fixado) || (x.posicao ?? Infinity) - (y.posicao ?? Infinity) || x.criadoEm - y.criadoEm);
       },
       async atualizarPerfil(id, perfil) {
         const a = doTenant(b.agentes).find((x) => x.id === id);

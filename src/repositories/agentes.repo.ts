@@ -23,12 +23,13 @@ interface Linha {
   modo_aprovacao: ModoAprovacao;
   duplicado_de: string | null;
   secao: string;
+  posicao: number | null;
   nao_lido: boolean;
   excluido_em: Date | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, nao_lido, excluido_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em";
 
 function paraAgente(l: Linha): Agente {
   return {
@@ -51,6 +52,7 @@ function paraAgente(l: Linha): Agente {
     modoAprovacao: l.modo_aprovacao ?? "manual",
     duplicadoDe: l.duplicado_de,
     secao: l.secao,
+    posicao: l.posicao,
     naoLido: l.nao_lido,
     excluidoEm: l.excluido_em ? ms(l.excluido_em) : null,
     criadoEm: ms(l.criado_em),
@@ -97,6 +99,16 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;
+    },
+    /**
+     * A ordem inteira de um grupo da barra (0041): cada id recebe o próprio índice. Só os bots da pessoa mudam —
+     * id de outra pessoa, excluído ou inexistente fica de fora em silêncio. Devolve quantos mudaram.
+     */
+    async ordenar(ids: readonly string[]): Promise<number> {
+      const r = await conn`update agentes set posicao = o.i - 1
+        from unnest(${[...ids]}::uuid[]) with ordinality as o(id, i)
+        where agentes.tenant_id = ${escopo.tenantId} and agentes.owner_id = ${escopo.pessoaId} and agentes.id = o.id and agentes.excluido_em is null`;
+      return r.count;
     },
     async excluir(id: string, agora: number): Promise<Agente | null> {
       await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${id}))`;
@@ -149,7 +161,7 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
         select ${conn.unsafe(COLUNAS)} from agentes where tenant_id = ${escopo.tenantId}
           ${opcoes.incluirExcluidos ? conn`` : conn`and excluido_em is null`}
           ${opcoes.incluirOcultos ? conn`` : conn`and oculto = false`}
-        order by fixado desc, criado_em`;
+        order by fixado desc, posicao asc nulls last, criado_em`;
       return linhas.map(paraAgente);
     },
 

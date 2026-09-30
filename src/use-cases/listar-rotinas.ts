@@ -1,6 +1,7 @@
 import type { RotinaDto } from "../contracts/api.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { ExecucaoRotina } from "../contracts/rotina.ts";
+import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
 import { bloqueioDaRotina } from "./pre-voo-rotina.ts";
@@ -24,10 +25,15 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
       if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
       bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
     }
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio });
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana) });
   }
   return { data: { rotinas: dtos } };
 };
+
+/** Um cron que o parser não aceita (linha antiga, gravada à mão) não derruba a lista: fica o cron cru. */
+function resumoDe(cron: string, fusoIana: string): string {
+  try { return resumoCron(cron, fusoIana); } catch { return `${cron} (${fusoIana})`; }
+}
 
 /** GET rotinas/:id/execucoes: as 20 mais recentes (Grok Bot), mais recente primeiro. */
 export const listarExecucoes: CasoDeUso<{ rotinaId: string }, { execucoes: ExecucaoRotina[] }> = async (deps, input) => {

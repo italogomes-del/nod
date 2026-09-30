@@ -471,7 +471,7 @@ body.ocupado { cursor: progress; }
   body.com-raio-x .app { box-sizing: border-box; padding-right: min(600px, 100vw); }
   body.com-raio-x .app .detalhes { display: none; }
 }
-@media (min-width: 1251px) { body.com-raio-x .app.com-detalhes { grid-template-columns: 292px minmax(360px, 1fr); } }
+@media (min-width: 1100px) { body.com-raio-x .app.com-detalhes { grid-template-columns: 340px minmax(360px, 1fr); } }
 @media (max-width: 1099px) { .raio-x { box-shadow: var(--shadow); } }
 
 .rx-cab { display: flex; align-items: flex-start; gap: 12px; padding: 18px 22px 12px; background: var(--panel); }

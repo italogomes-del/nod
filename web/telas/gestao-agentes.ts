@@ -1,14 +1,9 @@
-import type { FrotaDto } from "../../src/contracts/api.ts";
-import { esc, iconeAgente, botao } from "../lib/render.ts";
+import type { SecaoEspaco } from "../estado/reducer.ts";
+import { esc } from "../lib/render.ts";
+import type { AcaoGestao, BotGerido } from "./gestao.ts";
+import { htmlMenuConta, type DadosMenuConta } from "./menu-conta.ts";
 
-export type BotGerido = FrotaDto["agentes"][number];
-export type AcaoGestao = "fixar" | "mover" | "nao-lido" | "renomear" | "perfil" | "duplicar" | "copiar" | "ocultar" | "excluir" | "restaurar";
-
-export function renderGestao(dados: FrotaDto | null, pessoaId?: string): string {
-  const bots = dados?.agentes.filter((a) => a.ownerId === pessoaId) ?? [];
-  const grupo = (titulo: string, lista: BotGerido[]) => `<section class="gestao-grupo"><h2>${titulo} <small>${lista.length}</small></h2>${lista.length ? lista.map((a) => `<article class="gestao-row">${iconeAgente(a)}<div><b>${esc(a.nome)}</b><p>${esc(a.titulo || "Sem título")}${a.secao ? ` · ${esc(a.secao)}` : ""}</p></div>${a.excluidoEm ? botao("restaurar-agente", "Restaurar", { id: a.id }) : botao("menu-agente", "•••", { id: a.id, titulo: `Ações de ${a.nome}` })}</article>`).join("") : '<p class="mudo">Nenhum agente aqui.</p>'}</section>`;
-  return `<section class="tela tela-gestao"><header class="tela-cab"><h1>Gerenciar agentes</h1>${botao("atualizar-gestao", "Atualizar")}</header><p class="intro">Organize sua equipe e encontre os bots que saíram da barra lateral.</p>${!dados ? '<p role="status">Carregando…</p>' : grupo("Ativos", bots.filter((a) => !a.excluidoEm && !a.oculto)) + grupo("Ocultos", bots.filter((a) => !a.excluidoEm && a.oculto)) + '<p class="mudo">Ocultar não pausa o bot nem suas rotinas.</p>' + grupo("Excluídos", bots.filter((a) => a.excluidoEm)) + '<p class="mudo">Restaurar recupera o perfil e o histórico. Rotinas continuam pausadas e acessos precisam ser concedidos novamente.</p>'}</section>`;
-}
+export type { AcaoGestao, BotGerido } from "./gestao.ts";
 
 export function dialogo(html: string, menu = false): HTMLDialogElement {
   document.getElementById("gestao-dialogo")?.remove();
@@ -26,7 +21,7 @@ export function dialogo(html: string, menu = false): HTMLDialogElement {
   return d;
 }
 
-export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, executar: (acao: AcaoGestao) => void): void {
+export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, executar: (acao: AcaoGestao) => void, ponto?: { x: number; y: number }): void {
   const caminhos: Record<AcaoGestao, string> = {
     fixar: "M16 3l5 5-4 1-4 4v4l-2 2-3-5-5-3 2-2h4l4-4z M8 16l-5 5",
     mover: "M3 5h6l2 3h10v12H3z",
@@ -41,9 +36,12 @@ export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, exec
   };
   const item = (acao: AcaoGestao, _icone: string, texto: string, perigo = false) => `<button type="button" role="menuitem" data-gestao="${acao}"${perigo ? ' class="danger"' : ""}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${caminhos[acao]}"/></svg>${texto}</button>`;
   const d = dialogo(`<div role="menu" aria-label="Ações de ${esc(a.nome)}"><p class="menu-nome">${esc(a.nome)}</p>${dona ? item("fixar", "♧", a.fixado ? "Desafixar" : "Fixar") + item("mover", "▱", "Mover para…") + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("renomear", "✎", "Renomear bot") + item("perfil", "⚙", "Editar perfil") : ""}${item("duplicar", "▣", "Duplicar")}<hr>${item("copiar", "▢", "Copiar ID da conversa")}${dona ? '<hr>' + item("ocultar", "◌", a.oculto ? "Mostrar na barra lateral" : "Ocultar da barra lateral") + item("excluir", "♲", "Excluir", true) : ""}</div>`, true);
+  // definido em 2026-09-30: no clique direito o menu nasce no cursor; sem ponto, ao lado do que o abriu.
   const r = ancora.getBoundingClientRect();
-  d.style.left = `${Math.max(12, Math.min(r.right, window.innerWidth - 308))}px`;
-  d.style.top = `${Math.max(12, Math.min(r.top, window.innerHeight - d.offsetHeight - 12))}px`;
+  const x = ponto ? ponto.x + 4 : r.right;
+  const y = ponto ? ponto.y + 4 : r.top;
+  d.style.left = `${Math.max(12, Math.min(x, window.innerWidth - d.offsetWidth - 12))}px`;
+  d.style.top = `${Math.max(12, Math.min(y, window.innerHeight - d.offsetHeight - 12))}px`;
   d.addEventListener("click", (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-gestao]");
     if (btn) { const acao = btn.dataset.gestao as AcaoGestao; d.close(); executar(acao); }
@@ -72,4 +70,30 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
     });
   });
   d.querySelector<HTMLInputElement>("input")?.select();
+}
+
+/** O menu da conta (web/telas/menu-conta.ts) sobre o mesmo diálogo dos menus do bot. */
+export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean> }): void {
+  const d = dialogo(htmlMenuConta(dados), true);
+  d.classList.add("menu-conta");
+  // Nasce acima do avatar, alinhado à esquerda da barra (a largura dela menos as margens).
+  const r = ancora.getBoundingClientRect();
+  d.style.left = `${Math.max(12, r.left)}px`;
+  d.style.top = `${Math.max(12, r.top - d.offsetHeight - 10)}px`;
+  d.addEventListener("click", (e) => {
+    const alvo = e.target as HTMLElement;
+    const secao = alvo.closest<HTMLElement>("[data-secao]")?.dataset.secao as SecaoEspaco | undefined;
+    if (secao) { d.close(); acoes.secao(secao); return; }
+    const chave = alvo.closest<HTMLElement>("[data-modo-dev]");
+    if (chave) void acoes.modoDev().then((ligado) => chave.setAttribute("aria-checked", String(ligado)));
+  });
+  d.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const itens = [...d.querySelectorAll<HTMLButtonElement>("button")];
+    const atual = itens.indexOf(document.activeElement as HTMLButtonElement);
+    const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
+    itens[proximo]?.focus();
+  });
+  d.querySelector<HTMLButtonElement>("[data-secao]:not(.mc-faixa [data-secao])")?.focus();
 }
