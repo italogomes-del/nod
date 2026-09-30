@@ -49,10 +49,11 @@ decisões, nenhum sabendo do outro.
 
    - **Arriscado no terminal** é uma lista curta de expressões sobre o texto inteiro: `rm -r`, `find -delete`,
      `git push --force`/`--delete`/`+ref`/direto na `main`, `reset --hard`, `clean -f`, `checkout -- .`, `branch -D`,
-     `gh pr merge`, `gh pr review --approve`, `gh repo delete`, `gh api -X DELETE`, `npm publish`, `curl … | sh`,
-     `sudo`, `chmod -R`, `killall`, `DROP TABLE`, `docker volume rm`, `compose down -v`, `eval`, e gravar em
-     `~/.zshrc`/LaunchAgents. Não tokeniza de propósito: o `git commit -m "$(cat <<EOF …)"` que o Claude Code escreve
-     não passa pelo tokenizador da ADR-055, e seria "arriscado" só por isso.
+     `gh repo delete`, `gh api -X DELETE`, `npm publish`, `curl … | sh`, `sudo`, `chmod -R`, `killall`,
+     `DROP TABLE`, `docker volume rm`, `compose down -v`, e gravar em `~/.zshrc`/LaunchAgents (`gh pr merge`,
+     `gh pr review --approve` e `eval` saíram na segunda emenda de 2026-09-30, abaixo). Não tokeniza de propósito: o
+     `git commit -m "$(cat <<EOF …)"` que o Claude Code escreve não passa pelo tokenizador da ADR-055, e seria
+     "arriscado" só por isso.
    - **Arriscado no app** é o que nunca vira regra permanente (merge, aprovar e revisar PR — ADR-047) e o grupo
      "Apagar e desfazer" (`destructiveHint` da sonda ou o verbo do nome — ADR-049). O nome só torna a ação mais
      arriscada, nunca menos: a mesma direção de falha da ADR-042.
@@ -192,3 +193,32 @@ concede nada"; o Marlon quer que o automático aprove também isso.
   duas vezes no mesmo mês: o acesso volta a ser só por clique.
 - Uma exclusão num app, feita pelo automático numa conversa, que a dona diga não ter pedido: o apagar do app volta a
   parar no automático.
+
+## Segunda emenda de 2026-09-30: a lista do terminal medida nas skills do Mac
+
+**Contexto.** Às 09:39 o Milton, em aprovação automática, parou num comando que só lia o ambiente:
+`eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"`, seguido de `echo`, `mkdir -p`, `ls` e `whoami`. O
+card dizia "roda um texto como comando". É o preâmbulo padrão das skills do gstack.
+
+Medido com `comandoArriscado` e `tocaCredencial` sobre os blocos bash das skills instaladas no Mac do Marlon
+(1.498 SKILL.md em `~/.claude/skills` e no cache de plugins, 15.565 blocos):
+
+| Regra | Blocos parados antes | Depois |
+|---|---|---|
+| `eval` ("roda um texto como comando") | 2.502, quase todos o preâmbulo do gstack | 0 |
+| credencial por `.key` (`e.key` em JavaScript embutido, gstack-learn) | 11, parando até no total | 0 |
+| `gh pr merge` (gstack-land-and-deploy) | 22 | 0 |
+| o que sobrou: `rm -rf` e `reset --hard` do gstack-upgrade, um `find -delete` | 60 | 60 |
+
+**Decisão.**
+- **`eval` sai da lista.** Ele esconde o comando, não destrói nada, e a lista é contra acidente, não contra quem
+  esconde (decisão 2).
+- **`gh pr merge` e `gh pr review --approve` saem.** O terminal só existe na conversa com a pessoa (ADR-052/055), e a
+  emenda anterior já deixa merge e aprovar PR pedidos na conversa sair pelo app. `gh repo delete`, `release delete`,
+  `secret` e `variable` continuam.
+- **A credencial por extensão exige nome de arquivo:** `server.key`, `**/*.pem` e `"cert.p12"` param; `e.key`,
+  `jq '.key'` e `obj.keyboard`, não.
+
+**Como medir de novo:** `npx tsx scripts/medir-arriscados.ts` roda `comandoArriscado` e `tocaCredencial` sobre cada
+bloco ```bash dos SKILL.md do Mac, sem chamar modelo. Toda mudança em `ARRISCADOS` ou `CREDENCIAL` deve vir com essa
+contagem.

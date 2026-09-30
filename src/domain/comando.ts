@@ -31,7 +31,10 @@ const SIMPLES = new Set([
  * depois mandar para fora (WebFetch, um comentário) é o caminho de um texto malicioso num PR: por isso nunca é
  * leitura livre. Casa no texto do comando e no caminho das ferramentas de arquivo.
  */
-const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube)(\/|$|[\s"'])|id_(rsa|ed25519|ecdsa|dsa)\b|\.(pem|p12|pfx|key)\b|(^|[\s;&|])security\s+(find|dump|export)|gh\s+auth\s+token|Library\/Keychains/;
+// revisto em 2026-09-30: `.key`/`.pem` só como NOME DE ARQUIVO (argumento que começa depois de espaço, aspa, `=` ou
+// `:` e termina num separador). `\.(pem|…|key)\b` casava `e.key` em JavaScript embutido: 11 blocos das skills do
+// Marlon (gstack-learn) paravam por credencial, e credencial pede a pessoa até no modo total.
+const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube)(\/|$|[\s"'])|id_(rsa|ed25519|ecdsa|dsa)\b|(^|[\s"'=:])[\w./~*?-]*[\w*?]\.(pem|p12|pfx|key)(?=$|[\s"';|&)])|(^|[\s;&|])security\s+(find|dump|export)|gh\s+auth\s+token|Library\/Keychains/;
 
 /** O comando ou o caminho toca uma credencial da pessoa (chaves SSH, AWS, login do gh, Keychain)? */
 export function tocaCredencial(texto: string): boolean {
@@ -225,6 +228,10 @@ function redirecionamentoInofensivo(operador: string, alvo: string | undefined):
  * isso, e um "rm -rf" dentro de uma mensagem de commit só custa um card. `[^;&|\n]*` prende cada regra ao próprio
  * comando da linha. Guarda contra acidente, não contra quem quer esconder o comando: contra texto de fora vale a
  * pausa por conteúdo de fora (decidirPeloModo), que vem antes desta lista.
+ * revisto em 2026-09-30: `eval` saiu. Medido nas skills do Mac do Marlon (1.498 SKILL.md, 15.565 blocos bash):
+ * 2.502 blocos paravam só por ele, quase todos o preâmbulo do gstack (`eval "$(…/gstack-slug)"`), e o Milton
+ * parou no automático num comando que só lia. `eval` esconde o comando, não destrói nada — e esta lista é contra
+ * acidente, não contra quem esconde.
  */
 const ARRISCADOS: readonly (readonly [RegExp, string])[] = [
   [/(^|[\s;&|(])(sudo|doas)\s|(^|[;&|]\s*)su(\s|$)/, "roda como administrador do Mac"],
@@ -234,11 +241,12 @@ const ARRISCADOS: readonly (readonly [RegExp, string])[] = [
   [/\bgit\s[^;&|\n]*\bpush\b[^;&|\n]*\s(\S+:)?(refs\/heads\/)?(main|master)(\s|$)/, "empurra direto na main"],
   [/\bgit\s[^;&|\n]*\b(reset\s[^;&|\n]*--hard|clean\s[^;&|\n]*-[a-zA-Z]*f|checkout\s+(--\s+)?\.(\s|$)|branch\s+([^;&|\n]*\s)?-D\b|stash\s+(drop|clear)\b|filter-branch|filter-repo|update-ref\s+-d\b|reflog\s+(expire|delete)\b)/, "descarta trabalho que não volta"],
   [/\bgit\s[^;&|\n]*\brestore\b(?![^;&|\n]*--staged)[^;&|\n]*\s\.(\s|$|\/)/, "descarta trabalho que não volta"],
-  [/\bgh\s+(pr\s+merge|pr\s+review\s[^;&|\n]*(-a|--approve)\b|repo\s+(delete|archive|rename)|release\s+delete|secret\s|variable\s+(set|delete))/, "mexe no trabalho de outras pessoas no GitHub"],
+  // revisto em 2026-09-30 (emenda da ADR-059): `gh pr merge` e `gh pr review --approve` saíram — o terminal só
+  // existe na conversa com a pessoa, e merge e aprovar PR pedidos na conversa já saem sozinhos pelo app.
+  [/\bgh\s+(repo\s+(delete|archive|rename)|release\s+delete|secret\s|variable\s+(set|delete))/, "mexe no trabalho de outras pessoas no GitHub"],
   [/\bgh\s+api\s[^;&|\n]*(-X|--method)[\s=]*DELETE\b/, "apaga no GitHub"],
   [/\b(npm|pnpm|yarn|bun)\s+(publish|unpublish|deprecate)\b|\bcargo\s+publish\b|\btwine\s+upload\b|\bgem\s+push\b|\bdocker\s+push\b/, "publica para fora"],
   [/\b(curl|wget)\s[^;&\n]*\|\s*(sudo\s+)?(sh|bash|zsh|fish|python3?|node|ruby|perl)\b/, "baixa e roda código"],
-  [/\beval\s/, "roda um texto como comando"],
   [/(^|[\s;&|(])(mkfs(\.\w+)?|shutdown|reboot|halt|csrutil|spctl|nvram)(\s|$)|\bdd\s[^;&|\n]*\bof=|\bdiskutil\s+(erase|partition|zero|secureErase)\w*|\blaunchctl\s+(unload|remove|bootout)\b|\btmutil\s+delete\b/, "mexe no sistema do Mac"],
   [/\bch(mod|own|grp)\s+(-[a-zA-Z]*R|--recursive)\b|\bchmod\s[^;&|\n]*\b777\b/, "muda permissões em massa"],
   [/(^|[\s;&|(])(killall|pkill)\s/, "encerra processos pelo nome"],
