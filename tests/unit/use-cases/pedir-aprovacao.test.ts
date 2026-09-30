@@ -121,6 +121,9 @@ describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
   it("escrita na regra da pessoa também dispensa o card, e a autoria nomeia a regra dela", async () => {
     const { deps, banco } = depsFalsos();
     const c = await cenario(deps);
+    // ADR-062: a regra vale pela LINHA ativa agora, não pela lista congelada no plano.
+    const email = await deps.repos.conectores.buscarPorSlug("email");
+    await deps.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: email?.id ?? "", capacidade: "enviar", itemOrigemId: "i", mensagemId: "m", regraVersao: 1 });
     const r = await pedirAprovacao(deps, {
       turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "enviar",
       itens: [{ texto: "email para a Ana", destino }],

@@ -154,7 +154,9 @@ export type ArgsPedirABot = { agente: string; pedido: string; contexto?: string 
 export type ResultadoLembrar = { ok: true; id: string };
 export type ResultadoPedirAprovacao =
   | { estado: "decidida"; itens: { idx: number; desfecho: string }[] }
-  | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" };
+  | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" }
+  /** ADR-062: argumento fora do schema do conector — nenhum card nasce; o bot corrige e pede de novo. */
+  | { estado: "recusada"; erros: string[]; instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" };
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
 export type ResultadoPedirABot = { tarefa_id: string };

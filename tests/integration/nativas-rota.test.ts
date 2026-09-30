@@ -69,6 +69,8 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
 
   it("WebFetch marca o turno: escrita em conector que passava vira negação do gate", async () => {
     const t = await turno(NATIVAS_DO_TERMINAL);
+    // ADR-062: a chamada direta passa pela decisão do card — no manual ela já pararia; no automático, só a web a para.
+    await t.repos.agentes.definirModoAprovacao(t.agenteId, "automatico");
     const enviar = async () => (await (await t.interno("POST", `ferramentas/${t.slug}__enviar`, { argumentos: {} })).json()) as { ok: boolean; negacao?: { motivo: string } };
     expect((await enviar()).ok).toBe(true);
     expect(await t.repos.turnos.contaminado(t.turnoId)).toBe(false);

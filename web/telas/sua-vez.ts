@@ -185,13 +185,28 @@ function detalheTecnico(i: Item["itensAprovacao"][number]): string {
  * ação cifrada (ADR-037). A regra vale para a FERRAMENTA inteira, qualquer destino — o título diz.
  * Aprovar PR e merge também não (definido em 2026-09-24, ADR-047): o servidor manda os ids em
  * `nuncaPermanente`, porque a lista mora no domínio e a web só importa tipos.
+ *
+ * definido em 2026-09-30 (ADR-062, auditoria das aprovações): também desabilita quando o item parou por um motivo
+ * que regra nenhuma pula — a rotina que pede aprovação, a tarefa que leu conteúdo de fora, a ferramenta fora do
+ * alcance. O botão ligado ali gravava a regra, e o card seguinte aparecia igual: "cliquei em Sempre e continua".
  */
+const REGRA_NAO_PULA: Partial<Record<NonNullable<Item["itensAprovacao"][number]["motivoManual"]>, string>> = {
+  gate_de_rotina: "A rotina de onde isto veio pede a sua aprovação antes de agir fora, e uma regra não pula esse pedido.",
+  regra_suspensa_conteudo_nao_confiavel: "Nesta tarefa o bot leu conteúdo de fora (web, e-mail, GitHub): até ela acabar, o que altera algo passa por você, com regra ou sem.",
+  fora_do_catalogo: "Esta ferramenta não está no alcance do bot agora (app desligado ou sem acesso); uma regra não vale para ela.",
+  sem_plano: "Esta ação chegou sem o plano do turno, então não há regra que se aplique a ela.",
+};
+
 function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
   const nunca = new Set(item.nuncaPermanente ?? []);
-  const elegiveis = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nunca.has(i.id));
+  const viram = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nunca.has(i.id));
+  const elegiveis = viram.filter((i) => !(i.motivoManual && REGRA_NAO_PULA[i.motivoManual]));
   const nomes = [...new Set(elegiveis.map((i) => `${i.destino.conector}.${i.destino.ferramenta}`))];
   if (nomes.length === 0) {
-    const motivo = item.itensAprovacao.some((i) => i.destino.conector === "computador")
+    const travado = viram.find((i) => i.motivoManual && REGRA_NAO_PULA[i.motivoManual]);
+    const motivo = travado?.motivoManual
+      ? (REGRA_NAO_PULA[travado.motivoManual] ?? "")
+      : item.itensAprovacao.some((i) => i.destino.conector === "computador")
       ? "Ação no computador é aprovada uma a uma: ela está presa à tela que o bot observou."
       : item.itensAprovacao.some((i) => i.destino.conector === "terminal")
         ? "Comando no seu Mac é aprovado um a um. Para não repetir nesta tarefa, use \"Pode fazer e o resto desta tarefa\"."
@@ -208,7 +223,7 @@ function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
   const rotulo = nomes.length === 1 ? `Sempre permitir ${esc(nomes[0] ?? "")}` : `Sempre permitir estas ${nomes.length} ferramentas`;
   return botao("decidir-aprovacao-sempre", rotulo, {
     id: item.decisao.id,
-    titulo: `Vale para ${comNome.join(" e ")}, em qualquer destino, a partir do próximo turno. Você pode revogar quando quiser.`,
+    titulo: `Vale já para ${comNome.join(" e ")}, em qualquer destino, enquanto o bot não tiver lido conteúdo de fora na tarefa.`,
   });
 }
 
@@ -226,6 +241,8 @@ function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
  * definido em 2026-09-29 (ADR-059): o card que parou mesmo com o bot em aprovação automática diz por quê — senão a
  * pessoa lê "está no automático e mesmo assim pediu" como defeito. Só os motivos em que o modo parou de propósito;
  * a frase do risco no terminal vem do domínio (`comandoArriscado`), gravada em `justificativa`.
+ * Emenda de 2026-09-30 (ADR-062): também a trava da rotina e a ferramenta fora do alcance, os motivos que nenhuma
+ * regra "Sempre permitir" pula — sem a frase, o card depois do clique parecia a regra falhando.
  */
 export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoManual" | "justificativa" | "origemSensivel">): string {
   const ic = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
@@ -234,8 +251,12 @@ export function porqueDaPausa(i: Pick<Item["itensAprovacao"][number], "motivoMan
     : i.motivoManual === "toca_credencial"
       ? "Parou para você: toca uma credencial do Mac. Isso pede você em qualquer modo."
       : i.motivoManual === "regra_suspensa_conteudo_nao_confiavel"
-        ? "Parou para você: veio depois de o bot ler conteúdo de fora nesta tarefa (web, e-mail, mensagem de fora)."
-        : "";
+        ? "Parou para você: nesta tarefa o bot leu conteúdo de fora (web, e-mail, GitHub). Até ela acabar, o que altera algo passa por você."
+        : i.motivoManual === "gate_de_rotina"
+          ? "Parou para você: a rotina de onde isto veio pede a sua aprovação antes de agir fora."
+          : i.motivoManual === "fora_do_catalogo"
+            ? "Parou para você: esta ferramenta não está no alcance do bot agora (app desligado ou sem acesso)."
+            : "";
   return frase ? `<p class="ap-porque">${ic}<span>${esc(frase)}</span></p>` : "";
 }
 

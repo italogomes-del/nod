@@ -13,6 +13,14 @@ export type AppMarketplace = {
    * grade mesmo sem auth config no Composio — o Composio é só um dos jeitos de conectá-lo.
    */
   nativo?: true;
+  /**
+   * definido em 2026-09-30 (ADR-062, pergunta do Marlon "é o modelo que considera ou é hard coded?"): o que o app
+   * devolve é escrito SÓ por gente da empresa (workspace fechado), então ler ele não é "conteúdo de fora" (ADR-026).
+   * Curadoria à mão, nunca do modelo — é justamente o modelo que um texto de fora tentaria convencer. Sem a marca,
+   * o app conta como de fora (falha fechada): e-mail, GitHub, Drive, agenda (convite de gente de fora), web e todo
+   * app novo até alguém revisar. Risco aceito: canal do Slack compartilhado com gente de fora (Slack Connect).
+   */
+  conteudoInterno?: true;
 };
 
 /**
@@ -23,14 +31,14 @@ export type AppMarketplace = {
  * no painel e ausente daqui aparece com o nome do provedor e a descrição genérica de CATEGORIA_PADRAO.
  */
 export const APPS_MARKETPLACE: readonly AppMarketplace[] = [
-  { slug: "slack", nome: "Slack", descricao: "Encontre conversas, acompanhe sua equipe e prepare mensagens.", categoria: "Comunicação" },
+  { slug: "slack", nome: "Slack", descricao: "Encontre conversas, acompanhe sua equipe e prepare mensagens.", categoria: "Comunicação", conteudoInterno: true },
   { slug: "github", nome: "GitHub", descricao: "Revise pull requests, leia código e acompanhe issues. Usa o gh já logado nesta máquina quando houver.", categoria: "Desenvolvimento", naoIncluiNaLeitura: ["comentar", "revisar pull requests"], nativo: true },
   { slug: "gmail", nome: "Gmail", descricao: "Leia e organize emails, prepare respostas e acompanhe sua caixa de entrada.", categoria: "Comunicação", naoIncluiNaLeitura: ["enviar", "apagar", "arquivar"] },
-  { slug: "notion", nome: "Notion", descricao: "Encontre documentos e mantenha as informações do time organizadas.", categoria: "Conhecimento" },
-  { slug: "linear", nome: "Linear", descricao: "Acompanhe projetos, organize issues e descubra o que está bloqueado.", categoria: "Projetos" },
+  { slug: "notion", nome: "Notion", descricao: "Encontre documentos e mantenha as informações do time organizadas.", categoria: "Conhecimento", conteudoInterno: true },
+  { slug: "linear", nome: "Linear", descricao: "Acompanhe projetos, organize issues e descubra o que está bloqueado.", categoria: "Projetos", conteudoInterno: true },
   { slug: "googlesheets", nome: "Google Sheets", descricao: "Consulte planilhas, analise resultados e prepare relatórios.", categoria: "Produtividade" },
   { slug: "googlecalendar", nome: "Google Calendar", descricao: "Consulte sua agenda e organize compromissos.", categoria: "Produtividade" },
-  { slug: "clickup", nome: "ClickUp", descricao: "Acompanhe tarefas, prazos e prioridades dos seus projetos.", categoria: "Projetos" },
+  { slug: "clickup", nome: "ClickUp", descricao: "Acompanhe tarefas, prazos e prioridades dos seus projetos.", categoria: "Projetos", conteudoInterno: true },
   // definido em 2026-09-21: os quatro auth configs que existiam no painel e não tinham curadoria.
   { slug: "supabase", nome: "Supabase", descricao: "Consulte tabelas, inspecione dados e acompanhe o estado do banco.", categoria: "Desenvolvimento" },
   { slug: "sentry", nome: "Sentry", descricao: "Investigue erros em produção, veja o impacto e priorize correções.", categoria: "Desenvolvimento" },

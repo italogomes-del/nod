@@ -181,7 +181,8 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Cuida dos e-mails" });
       const gmail = await conectorPronto(repos, { slug: "gmail", nome: "Gmail", catalogo: GMAIL });
       await concederLote(deps, { agenteId, conectorId: gmail.id, capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"], autorTipo: "pessoa" });
-      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "Responder e-mails", fonte: "Gmail", entregavel: "respostas", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
+      // ADR-062: fonte que não cita app de fora (ler o Gmail tornaria a rotina não confiável, e o catálogo já cairia).
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "Responder e-mails", fonte: "planilha de clientes", entregavel: "respostas", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
       if (!rotina) throw new Error("rotina");
       const disparado = await disparar(deps, repos, rotina.id, JANELA);
       const pergunta = await pedirAPessoa(deps, { turnoId: disparado, conversaId, agenteId, tipo: "pergunta", texto: "respondo o cliente?" });

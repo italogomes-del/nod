@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
-import type { MotivoInatividadePermissao } from "../contracts/motivos.ts";
+import type { MotivoAprovacaoManual, MotivoInatividadePermissao } from "../contracts/motivos.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import { nuncaPermanente, VERSAO_APROVACAO_PERMANENTE } from "../domain/aprovacao-permanente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -11,8 +11,13 @@ import type { CasoDeUso } from "./tipos.ts";
  * O mesmo filtro que a web aplica ao botão (via `nuncaPermanente` do DTO): sensível, computador e ADR-047 ficam de
  * fora. O terminal também (ADR-055): a regra de conector vale para a ferramenta inteira, e "todo comando" seria
  * tirar a aprovação do Mac; para não repetir o card, existe "Pode fazer e o resto desta tarefa".
+ * Nem o item que parou por motivo que regra nenhuma pula (ADR-062, 2026-09-30): a web desabilita o botão para ele
+ * (`REGRA_NAO_PULA` em sua-vez.ts), e num lote misto a regra nasce só para o que o rótulo do botão nomeou.
  */
-export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino">): boolean {
+const MOTIVOS_QUE_REGRA_NAO_PULA: readonly MotivoAprovacaoManual[] = ["gate_de_rotina", "regra_suspensa_conteudo_nao_confiavel", "fora_do_catalogo", "sem_plano"];
+
+export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino" | "motivoManual">): boolean {
+  if (i.motivoManual && MOTIVOS_QUE_REGRA_NAO_PULA.includes(i.motivoManual)) return false;
   return !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nuncaPermanente(i.destino.ferramenta);
 }
 
@@ -37,8 +42,17 @@ export const permitirSempre: CasoDeUso<EntradaPermitirSempre, SaidaPermitirSempr
   if (alvos.length === 0) return { data: { criadas: [], mensagemId: null } };
 
   // Uma regra por FERRAMENTA distinta: o mesmo conector.ferramenta em dois itens é uma regra só.
-  const porFerramenta = new Map<string, (typeof alvos)[number]>();
-  for (const i of alvos) porFerramenta.set(`${i.destino.conector}.${i.destino.ferramenta}`, i);
+  const porFerramenta = new Map<string, { item: (typeof alvos)[number]; conectorId: string }>();
+  const ativas = await deps.repos.permissoesPermanentes.ativasDoAgente(decisao.agenteId);
+  for (const i of alvos) {
+    const conector = await deps.repos.conectores.buscarPorSlug(i.destino.conector);
+    // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a regra que já vale não nasce de novo, e sem regra
+    // nova não há consentimento. Antes, 16 de 28 cliques gravavam "passa a permitir" sobre uma regra que já existia
+    // (o card tinha parado por outro motivo), e a conversa afirmava uma mudança que não aconteceu.
+    if (!conector || ativas.some((a) => a.conectorId === conector.id && a.capacidade === i.destino.ferramenta)) continue;
+    porFerramenta.set(`${i.destino.conector}.${i.destino.ferramenta}`, { item: i, conectorId: conector.id });
+  }
+  if (porFerramenta.size === 0) return { data: { criadas: [], mensagemId: null } };
 
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
   const nomes = [...porFerramenta.keys()];
@@ -64,12 +78,10 @@ export const permitirSempre: CasoDeUso<EntradaPermitirSempre, SaidaPermitirSempr
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "consentimento não gravado" });
 
   const criadas: string[] = [];
-  for (const item of porFerramenta.values()) {
-    const conector = await deps.repos.conectores.buscarPorSlug(item.destino.conector);
-    if (!conector) continue;
+  for (const { item, conectorId } of porFerramenta.values()) {
     const p = await deps.repos.permissoesPermanentes.criar({
       agenteId: decisao.agenteId,
-      conectorId: conector.id,
+      conectorId,
       capacidade: item.destino.ferramenta,
       itemOrigemId: item.id,
       mensagemId: mensagem.id,

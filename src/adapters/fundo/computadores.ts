@@ -254,8 +254,9 @@ export function criarComputadores(o: Opcoes) {
         try { acao = validarAcaoComputador({ ...args, ...(nome !== "computador_interagir" ? { tipo: nome.slice(11) } : {}), ...(nome === "computador_arquivos" ? { caminho: args.caminho ?? "." } : {}) }); }
         catch { return negar("args_invalidos"); }
         // definido em 2026-09-28 (emenda da ADR-037): "Pode fazer e o resto desta tarefa" dispensa o card nas próximas
-        // ações da MESMA tarefa. Nunca vence o gate de rotina, nunca vale em turno não confiável (ADR-026).
-        const liberadaNaTarefa = !plano.politicaExecucao.efeitoExternoSoPorAprovacao && plano.confiancaEntrada === "confiavel" && alteraComputador(acao) && await computadorLiberadoNaTarefa(d, plano.turnoId);
+        // ações da MESMA tarefa. Nunca vence o gate de rotina, nunca vale em turno não confiável (ADR-026) nem depois
+        // da web (ADR-062: a marca de 0033 ficava de fora, e o terminal já a olhava — autorizar-comando.ts).
+        const liberadaNaTarefa = !plano.politicaExecucao.efeitoExternoSoPorAprovacao && plano.confiancaEntrada === "confiavel" && alteraComputador(acao) && !(await d.repos.turnos.contaminado(plano.turnoId)) && await computadorLiberadoNaTarefa(d, plano.turnoId);
         // ADR-059: o modo do bot aprova a ação no computador DELE como aprova o resto. Nada ali é "arriscado" no
         // sentido do Mac (o computador é isolado, ADR-037); o que para é conteúdo de fora e a trava herdada.
         const aprovadaPeloModo = async () => {

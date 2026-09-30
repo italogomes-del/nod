@@ -165,6 +165,32 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.chamadas.map((x) => x.tool)).toEqual(["somar"]);
   });
 
+  it("ADR-062: a escrita direta passa pela decisão do card — no manual pede aprovação, com regra ou no automático roda", async () => {
+    const c = await cenario();
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+    // A regra "Sempre permitir" vale pela linha ativa agora, no mesmo turno.
+    const regra = await c.deps.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", itemOrigemId: "i", mensagemId: c.consentimentoId, regraVersao: 1 });
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    await c.deps.repos.permissoesPermanentes.desativar(regra?.id ?? "", "revogada_pela_pessoa", AGORA);
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+    await c.deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    expect(c.chamadas.map((x) => x.tool)).toEqual(["enviar", "enviar"]);
+  });
+
+  it("ADR-062: pedir_aprovacao confere os argumentos no schema do conector — o erro volta ao bot como dado, sem card", async () => {
+    const c = await cenario();
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+    const r = await c.chamar("pedir_aprovacao", { resumo: "enviar", itens: [{ texto: "a", destino: { conector: "exemplo", ferramenta: "enviar", argumentos: {} } }] });
+    expect(r.data).toMatchObject({ ok: true });
+    const volta = JSON.parse((r.data as { conteudo: string }).conteudo) as { estado: string; erros: string[]; instrucao: string };
+    expect(volta.estado).toBe("recusada");
+    expect(volta.erros.join(" ")).toContain("para");
+    expect(volta.erros.join(" ")).toContain("exemplo.enviar");
+    expect(c.banco.decisoes).toHaveLength(0);
+  });
+
   it("conector que cai → conector_indisponivel transitória, ultimaFalha gravada; args fora do schema do conector → args_invalidos", async () => {
     const c = await cenario({ responder: () => { throw new Error("conector_indisponivel"); } });
     const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });

@@ -105,14 +105,18 @@ describe("dispararRotina", () => {
     expect(new Date(r.data.proximaExecucao).toISOString()).toBe("2026-09-21T11:00:00.000Z");
   });
 
-  it("fonte que cita conector habilitado que TOCA dado de aprendiz → entrada nao_confiavel; conector nao-toca → confiavel", async () => {
+  // revisto em 2026-09-30 (ADR-062): o critério é a curadoria de conteúdo de fora, não a declaração de dado de aprendiz.
+  it("fonte que cita app de conteúdo de fora (sem curadoria, GitHub, Gmail) → nao_confiavel; app interno curado (ClickUp, Slack) → confiavel", async () => {
     const d = depsMemoria({ agora: () => AGORA });
-    const toca = await d.deps.repos.conectores.criar({ nome: "Alunos", slug: "alunos", transporte: "stdio", comando: "node", declaracao: "toca" });
-    await d.deps.repos.conectores.registrarSonda(toca?.id ?? "", { ok: true, catalogo: [], agora: AGORA });
-    const naoToca = await d.deps.repos.conectores.criar({ nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
-    await d.deps.repos.conectores.registrarSonda(naoToca?.id ?? "", { ok: true, catalogo: [], agora: AGORA });
+    for (const [nome, slug, declaracao] of [["Alunos", "alunos", "toca"], ["GitHub", "github", "nao-toca"], ["ClickUp", "clickup", "toca"], ["Slack", "slack", "toca"]] as const) {
+      const c = await d.deps.repos.conectores.criar({ nome, slug, transporte: "stdio", comando: "node", declaracao });
+      await d.deps.repos.conectores.registrarSonda(c?.id ?? "", { ok: true, catalogo: [], agora: AGORA });
+    }
     expect(await confiancaDaFonte(d.deps, "lista de Alunos do conector alunos")).toBe("nao_confiavel");
-    expect(await confiancaDaFonte(d.deps, "PRs abertos no GitHub")).toBe("confiavel");
+    // Declarado 'nao-toca' (sem dado de aprendiz) não o faz interno: um PR ou issue pode vir de qualquer pessoa.
+    expect(await confiancaDaFonte(d.deps, "PRs abertos no GitHub")).toBe("nao_confiavel");
+    // Marcados 'toca' como todo app do marketplace, e mesmo assim internos: é o caso do Milton (fonte "ClickUp, Slack").
+    expect(await confiancaDaFonte(d.deps, "tasks do ClickUp e mensagens no Slack")).toBe("confiavel");
     expect(await confiancaDaFonte(d.deps, "planilha interna")).toBe("confiavel");
   });
 

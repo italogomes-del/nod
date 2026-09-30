@@ -37,7 +37,7 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "sem-acessos-nunca-executou": "sem acessos · nunca executou",
   "turno-interrompido": "Turno interrompido: {motivo}. O que já saiu fica marcado como parcial; nada foi reenviado.",
   "parada-nada-rodando": "Nada estava rodando. Nenhum turno foi interrompido.",
-  "permissao-permanente": "{pessoa} permitiu para sempre: {ferramentas}. Vale para qualquer destino destas ferramentas, a partir do próximo turno; você pode revogar quando quiser.",
+  "permissao-permanente": "{pessoa} permitiu para sempre: {ferramentas}. Vale já, para qualquer destino destas ferramentas, enquanto o bot não tiver lido conteúdo de fora na tarefa.",
   "memoria-nao-e-fonte": "Memória do agente: não substitui fonte autoritativa. Se um dado importa, confira na origem.",
   "proposta-confirmada": "Confirmado por {pessoa}. A partir de agora vale: {resumo}.",
   "rotina-proxima-execucao": "Rotina ativa: {resumo} · próxima execução: {proxima} ({fuso}).",
