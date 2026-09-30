@@ -183,3 +183,23 @@ describe("catálogo de workspace conforme haja projeto autorizado", () => {
     expect(montarPlano({ ...base, modo: "criacao", workspace: true, workspaceVinculado: true }).catalogo.ferramentas.some((f) => f.nome === "workspace_terminal")).toBe(true);
   });
 });
+
+describe("montarPlano: o modo de aprovação (ADR-059)", () => {
+  it("leva o modo do agente e diz ao modelo que ele aprova as próprias ações", () => {
+    expect(montarPlano(base).modoAprovacao).toBe("manual");
+    expect(montarPlano(base).promptSistema).not.toContain("Aprovações:");
+    const auto = montarPlano({ ...base, agente: { ...agente, modoAprovacao: "automatico" } });
+    expect(auto.modoAprovacao).toBe("automatico");
+    expect(auto.promptSistema).toContain("Aprovações: este bot está em Aprovar automaticamente");
+    const total = montarPlano({ ...base, agente: { ...agente, modoAprovacao: "total" } });
+    expect(total.promptSistema).toContain("Aprovações: este bot está em Ignorar todas as aprovações");
+  });
+
+  it("a trava que veio da rotina de quem pediu é marcada como herdada; a da própria rotina, não", () => {
+    const pedido = montarPlano({ ...base, modo: "delegacao", profundidade: 1, rotina: { exigeAprovacao: true }, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice", trava: true } });
+    expect(pedido.politicaExecucao).toMatchObject({ efeitoExternoSoPorAprovacao: true, travaHerdada: true });
+    const propria = montarPlano({ ...base, modo: "rotina", rotina: { exigeAprovacao: true } });
+    expect(propria.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+    expect(propria.politicaExecucao.travaHerdada).toBeUndefined();
+  });
+});

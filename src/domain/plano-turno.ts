@@ -225,7 +225,10 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
       // definido em 2026-09-24 (ADR-044): o gate vem da ROTINA ligada, não da origem — a retomada de um
       // turno de rotina (origem 'retomada') perdia o gate e voltava com o catálogo da conversa.
       efeitoExternoSoPorAprovacao: entrada.rotina?.exigeAprovacao === true,
+      // ADR-059: a trava que veio da rotina de quem pediu (ADR-058) não é desligada pelo modo automático de quem recebe.
+      ...(modo === "delegacao" && entrada.delegacao?.trava === true && entrada.rotina?.exigeAprovacao === true ? { travaHerdada: true } : {}),
     },
+    modoAprovacao: entrada.agente.modoAprovacao ?? "manual",
     /**
      * ADR-042: resolvido aqui, no PUXAR, e cruzado com o catálogo JÁ montado e já reduzido — a regra
      * evita a pergunta, nunca amplia alcance (ADR-038). Turno não confiável recebe lista VAZIA: o

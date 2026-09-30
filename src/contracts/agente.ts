@@ -17,6 +17,14 @@ export const ESFORCOS_AGENTE = ["low", "medium", "high", "xhigh", "max"] as cons
 export type EsforcoAgente = (typeof ESFORCOS_AGENTE)[number];
 
 /**
+ * Como o bot aprova as próprias ações (ADR-059, 0040): 'manual' pede a pessoa para o que muda algo; 'automatico'
+ * aprova sozinho e para no arriscado, na credencial e no que vem depois de conteúdo de fora; 'total' aprova tudo,
+ * menos o que toca credencial. Só a dona muda.
+ */
+export const MODOS_APROVACAO = ["manual", "automatico", "total"] as const;
+export type ModoAprovacao = (typeof MODOS_APROVACAO)[number];
+
+/**
  * Agente (bot). Nasce 'Novo agente' (EMENDA 17) e o modelo propõe o perfil por `atualizar_perfil`.
  * Sem `cwd` (EMENDA 11, ADR-014 literal): o driver cria um mkdtemp por turno e apaga no finally.
  */
@@ -42,6 +50,8 @@ export type Agente = {
   harness?: PreferenciaHarness;
   /** O `--effort` do Claude Code (0037). Ausente ou null = o padrão do modelo. */
   esforco?: EsforcoAgente | null;
+  /** ADR-059 (0040). Ausente = 'manual' (planos e fixtures anteriores ao modo). */
+  modoAprovacao?: ModoAprovacao;
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;
   secao?: string;

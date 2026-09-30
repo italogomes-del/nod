@@ -3,6 +3,7 @@ import type { Workspaces } from "../../fundo/workspaces.ts";
 import type { ClasseNegacao } from "../../../contracts/negacao.ts";
 import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_TOTAL } from "../../../domain/modo-aprovacao.ts";
 import { NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
@@ -176,11 +177,16 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         }
         if (ferramenta === "Bash" && typeof c?.comando !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "Bash sem comando" });
         const aguardar = await deps.dentro(ctx.escopo, async (d) => {
+          // ADR-059: o comando que o MODO aprovou leva a regra do modo na trilha. Sem isso ele fica igual a uma
+          // leitura, e o gatilho da ADR-055 ("nativa__Bash sem decisão correspondente") dispararia à toa.
+          let regra: { regra: `regra:${string}`; regraVersao: number } = { regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA };
           if (ferramenta === "Bash") {
             const r = await executar(d, autorizarComando, { plano, comando: String(c?.comando) });
             if ("aguardar" in r) return r.aguardar;
+            if (r.porque === "modo_automatico") regra = { regra: REGRA_MODO_AUTOMATICO, regraVersao: VERSAO_MODO_AUTOMATICO };
+            if (r.porque === "modo_total") regra = { regra: REGRA_MODO_TOTAL, regraVersao: VERSAO_MODO_TOTAL };
           }
-          await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA });
+          await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", ...regra });
           if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());
           return null;
         });

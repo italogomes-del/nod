@@ -216,3 +216,64 @@ describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
     expect(itens.every((i) => i.selecionado)).toBe(true);
   });
 });
+
+describe("pedirAprovacao com o modo do bot (ADR-059)", () => {
+  const pedir = (deps: Deps, c: Awaited<ReturnType<typeof cenario>>, plano: PlanoTurno, d: { conector: string; ferramenta: string; argumentos: Record<string, unknown> } = destino) =>
+    pedirAprovacao(deps, { turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "enviar", itens: [{ texto: "email para a Ana", destino: d }], plano });
+
+  it("automático: a escrita sai sem card, pela regra do modo, e a fala diz que foi a aprovação automática", async () => {
+    const { deps, banco, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    const r = await pedir(deps, c, planoCom(["email__enviar"]));
+    expect(r.data).toEqual({ estado: "decidida", itens: [{ idx: 0, desfecho: "executado" }] });
+    expect(chamadas).toHaveLength(1);
+    expect(banco.decisoes[0]?.desfecho).toMatchObject({ tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 1 });
+    const msg = banco.mensagens.find((m) => m.kind === "resultado_aprovacao");
+    expect(msg?.texto).toContain("Fiz sem perguntar (1 ação) · aprovação automática:");
+    expect(msg?.autoria).toMatchObject({ autor_tipo: "agente", decidido_por: "regra:modo_automatico" });
+  });
+
+  it("automático também libera a rotina do próprio bot (gate), mas não o turno que leu a web", async () => {
+    const { deps, chamadas } = depsFalsos();
+    const c = await cenario(deps);
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    expect((await pedir(deps, c, planoCom(["email__enviar"], { gateRotina: true }))).data.estado).toBe("decidida");
+    await deps.repos.turnos.contaminar(c.turnoId, Date.now());
+    const r = await pedir(deps, c, planoCom(["email__enviar"]));
+    expect(r.data.estado).toBe("pendente");
+    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect((await deps.repos.itensAprovacao.listar(r.data.decisao_id))[0]?.motivoManual).toBe("regra_suspensa_conteudo_nao_confiavel");
+    expect(chamadas).toHaveLength(1);
+  });
+
+  it("automático para no arriscado: apagar no app vira card com o motivo", async () => {
+    const { deps } = depsFalsos();
+    const c = await cenario(deps);
+    const email = await deps.repos.conectores.buscarPorSlug("email");
+    await deps.repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [...(email?.catalogo ?? []), { nome: "excluir_mensagem", descricao: "apaga", schema: { type: "object" }, readOnlyHint: false }], agora: 2 });
+    await deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: email?.id ?? "", capacidade: "excluir_mensagem", mensagemId: "m" });
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    const r = await pedir(deps, c, planoCom(["email__excluir_mensagem"]), { conector: "email", ferramenta: "excluir_mensagem", argumentos: {} });
+    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect((await deps.repos.itensAprovacao.listar(r.data.decisao_id))[0]?.motivoManual).toBe("acao_arriscada");
+  });
+
+  it("sem aprovações: sai até num turno não confiável, em que o catálogo reduzido tirou a escrita", async () => {
+    const { deps, banco } = depsFalsos();
+    const c = await cenario(deps);
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "total");
+    const r = await pedir(deps, c, planoCom([], { confianca: "nao_confiavel" }));
+    expect(r.data.estado).toBe("decidida");
+    expect(banco.mensagens.find((m) => m.kind === "resultado_aprovacao")?.texto).toContain("· sem aprovações:");
+  });
+
+  it("o modo é o ATUAL do agente: voltar para o manual vale no pedido seguinte do mesmo turno", async () => {
+    const { deps } = depsFalsos();
+    const c = await cenario(deps);
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    expect((await pedir(deps, c, planoCom(["email__enviar"]))).data.estado).toBe("decidida");
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "manual");
+    expect((await pedir(deps, c, planoCom(["email__enviar"]))).data.estado).toBe("pendente");
+  });
+});

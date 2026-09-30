@@ -1,0 +1,121 @@
+import { expect, it } from "vitest";
+import type { ModoAprovacao } from "../../src/contracts/agente.ts";
+import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import { vincularEscopo } from "../../src/db/tx.ts";
+import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
+import { criarRepos } from "../../src/repositories/index.ts";
+import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
+import { mudarModoAprovacao } from "../../src/use-cases/mudar-modo-aprovacao.ts";
+import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+/**
+ * ADR-059 no Postgres: o modo mora em agentes.modo_aprovacao (0040), só a dona o muda, e cada comando do terminal
+ * é decidido com o modo ATUAL do agente — automático roda o que muda algo e para no arriscado, na credencial e
+ * depois da web; total só para na credencial.
+ */
+const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];
+
+function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }): PlanoTurno {
+  return {
+    tenantId: TENANT_LEAPY, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
+    decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada: "confiavel", profundidade: 0,
+    catalogo: { ferramentas: [], servidores: [] }, promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" },
+    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false }, semprePermitir: [], tokenDeTurno: "tok",
+    expiraEm: Date.now() + 60_000, nativas: [...NATIVAS_DO_TERMINAL],
+  };
+}
+
+async function cenario(trx: Trx, modo: ModoAprovacao) {
+  const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
+  const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
+  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo });
+  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "sobe e abre o PR", entradaConfianca: "confiavel", modelo: "m" });
+  if (!turno) throw new Error("turno");
+  const plano = planoDe({ turnoId: turno.id, agenteId, conversaId });
+  const autorizar = (comando: string) => autorizarComando(deps, { plano, comando });
+  const motivoDoCard = async (comando: string) => {
+    const r = await autorizar(comando);
+    if (!("aguardar" in r.data)) throw new Error(`esperava card para ${comando}`);
+    return (await repos.itensAprovacao.listar(r.data.aguardar))[0];
+  };
+  return { repos, deps, turno, agenteId, conversaId, autorizar, motivoDoCard };
+}
+
+describeIntegracao("modo de aprovação do bot (ADR-059)", () => {
+  it("a coluna nasce 'manual', aceita só os três modos e a troca vira linha na conversa do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx, "manual");
+      expect((await c.repos.agentes.buscar(c.agenteId))?.modoAprovacao).toBe("manual");
+      await mudarModoAprovacao(c.deps, { agenteId: c.agenteId, modo: "automatico" });
+      expect((await c.repos.agentes.buscar(c.agenteId))?.modoAprovacao).toBe("automatico");
+      expect((await c.repos.mensagens.ultimaDaConversa(c.conversaId))?.texto).toContain("para Aprovar automaticamente");
+      await expect(trx`update agentes set modo_aprovacao = 'auto' where id = ${c.agenteId}`).rejects.toMatchObject({ code: "23514" });
+    });
+  });
+
+  it("só a dona muda: o update de outra pessoa não acha a linha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx, "manual");
+      await trx`update agentes set visibility = 'equipe' where id = ${c.agenteId}`;
+      await vincularEscopo(trx, ANA);
+      expect(await criarRepos(trx, ANA).agentes.definirModoAprovacao(c.agenteId, "total")).toBeNull();
+      await vincularEscopo(trx, MARLON);
+      expect((await c.repos.agentes.buscar(c.agenteId))?.modoAprovacao).toBe("manual");
+    });
+  });
+
+  it("automático: o que muda algo roda sem card; o arriscado e a credencial viram card com o motivo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx, "automatico");
+      expect((await c.autorizar("git commit -am 'fix: acento'")).data).toEqual({ permitir: true, porque: "modo_automatico" });
+      expect((await c.autorizar("gh pr create --fill")).data).toEqual({ permitir: true, porque: "modo_automatico" });
+      expect((await c.autorizar("git status")).data).toEqual({ permitir: true, porque: "leitura" });
+      expect(await c.motivoDoCard("git push --force origin fix/x")).toMatchObject({ motivoManual: "acao_arriscada", justificativa: "reescreve ou apaga no remoto" });
+      expect(await c.motivoDoCard("cat ~/.aws/credentials")).toMatchObject({ motivoManual: "toca_credencial" });
+    });
+  });
+
+  it("automático para tudo que não é leitura depois da web; total segue", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const auto = await cenario(trx, "automatico");
+      await auto.repos.turnos.contaminar(auto.turno.id, Date.now());
+      expect(await auto.motivoDoCard("git commit -am x")).toMatchObject({ motivoManual: "regra_suspensa_conteudo_nao_confiavel" });
+      const total = await cenario(trx, "total");
+      await total.repos.turnos.contaminar(total.turno.id, Date.now());
+      expect((await total.autorizar("git push --force origin fix/x")).data).toEqual({ permitir: true, porque: "modo_total" });
+      expect((await total.autorizar("git status")).data).toEqual({ permitir: true, porque: "modo_total" });
+      expect(await total.motivoDoCard("gh auth token")).toMatchObject({ motivoManual: "toca_credencial" });
+    });
+  });
+
+  it("manual continua como a ADR-055: o que muda algo é card com destino_terminal", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx, "manual");
+      expect(await c.motivoDoCard("git commit -am x")).toMatchObject({ motivoManual: "destino_terminal" });
+    });
+  });
+
+  it("voltar para o manual vale no comando seguinte do mesmo turno", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx, "total");
+      expect((await c.autorizar("npm install")).data).toEqual({ permitir: true, porque: "modo_total" });
+      await mudarModoAprovacao(c.deps, { agenteId: c.agenteId, modo: "manual" });
+      expect("aguardar" in (await c.autorizar("npm install left-pad")).data).toBe(true);
+    });
+  });
+
+  it("excluir o bot volta o modo para manual", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx, "total");
+      await c.repos.agentes.excluir(c.agenteId, Date.now());
+      await c.repos.agentes.restaurar(c.agenteId);
+      expect((await c.repos.agentes.buscar(c.agenteId))?.modoAprovacao).toBe("manual");
+    });
+  });
+});

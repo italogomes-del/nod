@@ -5,7 +5,8 @@ import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
-import { decidirLote, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirLote, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
+import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
 import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
@@ -51,6 +52,8 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
   if (!Array.isArray(input.itens) || input.itens.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "itens vazios" });
   const propostas: PropostaItem[] = [];
   const conectorIdPorIdx: (string | null)[] = [];
+  // ADR-059: a capacidade de destino é arriscada (apagar, merge, aprovar PR)? Lido do catálogo do CONECTOR.
+  const arriscadaPorIdx: boolean[] = [];
   let concessoes: Concessao[] | undefined;
   for (const item of input.itens) {
     if (item.destino.conector === "computador") {
@@ -62,11 +65,13 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
       if (!c || !a || a.computadorId !== c.id || a.turnoId !== input.turnoId || a.estado !== "pendente") throw new ErroDeDominio("nao_permitido");
       propostas.push({ texto: item.texto, destino: item.destino, origemSensivel: false });
       conectorIdPorIdx.push(null);
+      arriscadaPorIdx.push(false);
       continue;
     }
     const conector = await deps.repos.conectores.buscarPorSlug(item.destino.conector);
     if (!conector) throw new ErroDeDominio("entrada_invalida", { cause: `conector ${item.destino.conector} não registrado` });
-    if (!conector.catalogo.some((c) => c.nome === item.destino.ferramenta)) {
+    const capacidade = conector.catalogo.find((c) => c.nome === item.destino.ferramenta);
+    if (!capacidade) {
       throw new ErroDeDominio("entrada_invalida", { cause: `ferramenta ${item.destino.ferramenta} fora do catálogo de ${conector.slug}` });
     }
     // definido em 2026-09-24 (revisão da ADR-047): o catálogo do CONECTOR não é o do agente. Sem concessão,
@@ -90,12 +95,15 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
       origemSensivel,
     });
     conectorIdPorIdx.push(conector.id);
+    arriscadaPorIdx.push(acaoArriscadaNoApp(capacidade));
   }
 
   // ADR-052 (0033): turno que trouxe a web pelas nativas não usa "Sempre permitir" — a mesma regra do não confiável.
   const contaminado = input.plano ? await deps.repos.turnos.contaminado(input.turnoId) : false;
   const plano = input.plano && contaminado ? { ...input.plano, confiancaEntrada: "nao_confiavel" as const } : input.plano ?? null;
-  const { automatico, porItem } = decidirLote(propostas.map((p) => ({ plano, destino: p.destino, origemSensivel: p.origemSensivel })));
+  // ADR-059: o modo ATUAL do agente, não o do plano — trocar para mais restrito vale já na próxima ação.
+  const modo = plano ? (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual" : "manual";
+  const { automatico, porItem } = decidirLote(propostas.map((p, idx) => ({ plano, destino: p.destino, origemSensivel: p.origemSensivel, modo, arriscada: arriscadaPorIdx[idx] === true })));
 
   const decisao = await deps.repos.decisoes.criar({
     tipo: "aprovacao",
@@ -128,9 +136,12 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
   // com a versão da regra (ADR-023: autoria não se infere de outro campo).
   // A regra que MAIS concede manda no registro: se a pessoa criou uma permissão, é ela que
   // responde "sob que autoridade isto saiu?", mesmo que outros itens tenham passado por leitura.
-  const daPessoa = porItem.find((d) => d.automatico && d.regra === REGRA_APROVACAO_PERMANENTE);
-  const regra = daPessoa?.automatico ? daPessoa.regra : primeiraRegra(porItem);
-  const regraVersao = daPessoa?.automatico ? daPessoa.versao : primeiraVersao(porItem);
+  // ADR-059: o modo do bot concede mais que a regra por ferramenta — total, depois automático, depois a permanente.
+  const quemMaisConcede = [REGRA_MODO_TOTAL, REGRA_MODO_AUTOMATICO, REGRA_APROVACAO_PERMANENTE]
+    .map((r) => porItem.find((d) => d.automatico && d.regra === r))
+    .find((d) => d !== undefined);
+  const regra = quemMaisConcede?.automatico ? quemMaisConcede.regra : primeiraRegra(porItem);
+  const regraVersao = quemMaisConcede?.automatico ? quemMaisConcede.versao : primeiraVersao(porItem);
   await deps.repos.decisoes.fecharPorRegra(decisao.id, { regra, regraVersao, agora });
   // ADR-048: item que roda no gh do Mac (servidor compartilhado) ainda não tem desfecho: o turno espera
   // pelo long-poll de `aguardar` enquanto o app desktop da pessoa executa; a fala "Fiz sem perguntar"
@@ -144,7 +155,7 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     conversaId: input.conversaId,
     turnoId: input.turnoId,
     kind: "resultado_aprovacao",
-    texto: textoAutomatico(criados, desfechos),
+    texto: textoAutomatico(criados, desfechos, regra),
     confianca: "confiavel",
     autoria,
   });
@@ -176,13 +187,19 @@ const primeiraVersao = (ds: readonly DecisaoAutomatica[]): number => {
   return a?.automatico ? a.versao : 1;
 };
 
+/** ADR-059: o modo que aprovou vai na fala, para quem lê de manhã saber por que nada pediu clique. */
+const PELO_MODO: Readonly<Record<string, string>> = {
+  [REGRA_MODO_AUTOMATICO]: " · aprovação automática",
+  [REGRA_MODO_TOTAL]: " · sem aprovações",
+};
+
 /** Fala na conversa do que saiu sem perguntar: "precisa ficar no chat" foi requisito explícito. */
-export function textoAutomatico(itens: readonly ItemAprovacao[], desfechos: readonly { itemId: string; desfecho: DesfechoItem }[]): string {
+export function textoAutomatico(itens: readonly ItemAprovacao[], desfechos: readonly { itemId: string; desfecho: DesfechoItem }[], regra?: string): string {
   const linhas = itens.map((i) => {
     const d = desfechos.find((x) => x.itemId === i.id)?.desfecho ?? "falhou_na_execucao";
     return `- ${i.textoFinal} (${i.destino.conector}.${i.destino.ferramenta}): ${d.replaceAll("_", " ")}`;
   });
-  return `Fiz sem perguntar (${itens.length === 1 ? "1 ação" : `${itens.length} ações`}):\n${linhas.join("\n")}`;
+  return `Fiz sem perguntar (${itens.length === 1 ? "1 ação" : `${itens.length} ações`})${(regra && PELO_MODO[regra]) ?? ""}:\n${linhas.join("\n")}`;
 }
 
 function eventoCriada(deps: Deps, input: { agenteId: string; conversaId: string; turnoId: string }, decisaoId: string, itens: readonly ItemAprovacao[], agora: number): RuntimeEvent {

@@ -5,6 +5,7 @@ import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
+import { decidirPeloModo } from "../../domain/modo-aprovacao.ts";
 import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
 import { computadorLiberadoNaTarefa } from "../../use-cases/liberar-na-tarefa.ts";
@@ -255,7 +256,14 @@ export function criarComputadores(o: Opcoes) {
         // definido em 2026-09-28 (emenda da ADR-037): "Pode fazer e o resto desta tarefa" dispensa o card nas próximas
         // ações da MESMA tarefa. Nunca vence o gate de rotina, nunca vale em turno não confiável (ADR-026).
         const liberadaNaTarefa = !plano.politicaExecucao.efeitoExternoSoPorAprovacao && plano.confiancaEntrada === "confiavel" && alteraComputador(acao) && await computadorLiberadoNaTarefa(d, plano.turnoId);
-        if (alteraComputador(acao) && !liberadaNaTarefa && (c.politica === "supervisionado" || plano.politicaExecucao.efeitoExternoSoPorAprovacao)) {
+        // ADR-059: o modo do bot aprova a ação no computador DELE como aprova o resto. Nada ali é "arriscado" no
+        // sentido do Mac (o computador é isolado, ADR-037); o que para é conteúdo de fora e a trava herdada.
+        const aprovadaPeloModo = async () => {
+          const agente = await d.repos.agentes.buscar(plano.agenteId);
+          const conteudoDeFora = plano.confiancaEntrada !== "confiavel" || await d.repos.turnos.contaminado(plano.turnoId);
+          return decidirPeloModo(agente?.modoAprovacao, { arriscada: false, credencial: false, conteudoDeFora, travaHerdada: plano.politicaExecucao.travaHerdada === true })?.automatico === true;
+        };
+        if (alteraComputador(acao) && !liberadaNaTarefa && (c.politica === "supervisionado" || plano.politicaExecucao.efeitoExternoSoPorAprovacao) && !(await aprovadaPeloModo())) {
           const registro = await d.repos.computadores.registrar({ computadorId: c.id, turnoId: plano.turnoId, autor: "bot", tipo: acao.tipo, estado: "pendente", argumentosCifrados: o.cifrar(JSON.stringify(acao)) });
           const pedido = await pedirAprovacaoComputador(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, resumo: "Ação no computador do bot", itens: [{ texto: resumoAcaoComputador(acao), destino: { conector: "computador", ferramenta: "executar", argumentos: { acaoId: registro.id } } }] });
           if (pedido.events?.length) await d.repos.events.gravarComOutbox(pedido.events);

@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import { classificarComando } from "../domain/comando.ts";
+import { classificarComando, comandoArriscado, tocaCredencial } from "../domain/comando.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { decidirPeloModo, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -12,7 +13,7 @@ import type { CasoDeUso } from "./tipos.ts";
 export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as const;
 
 /** Por que o comando rodou sem card — vai à trilha e aos testes, nunca ao modelo como permissão. */
-export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprovado" | "liberado_na_tarefa" } | { aguardar: string };
+export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprovado" | "liberado_na_tarefa" | "modo_automatico" | "modo_total" } | { aguardar: string };
 
 /**
  * Cada comando do terminal do Mac da pessoa (definido em 2026-09-28, ADR-055, "terminal de verdade, como o
@@ -22,10 +23,13 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  *  2. a pessoa já aprovou ESTE comando nesta tarefa (a retomada refaz o que ela aprovou depois da espera) → roda;
  *  3. ela respondeu "Pode fazer e o resto desta tarefa" num comando, e o turno está limpo e fora do gate de
  *     rotina → roda;
- *  4. senão → card de aprovação na conversa, e o hook espera a resposta no próprio turno.
+ *  4. ADR-059: o modo do bot aprova (`decidirPeloModo`): no automático, o que não é arriscado num turno limpo;
+ *     no total, tudo. Credencial do Mac nunca passa por aqui → card em qualquer modo;
+ *  5. senão → card de aprovação na conversa, e o hook espera a resposta no próprio turno.
  *
  * Turno contaminado pela web (0033) pede até a leitura: um texto de página pode ter mandado o modelo "só olhar"
- * algo que vaza. Plano sem Bash é recusa — o hook de uma máquina antiga não abre porta.
+ * algo que vaza. Plano sem Bash é recusa — o hook de uma máquina antiga não abre porta. O modo é o ATUAL do
+ * agente, lido aqui: a dona que volta para o manual no meio de uma tarefa vale no comando seguinte.
  */
 export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string }, SaidaAutorizarComando> = async (deps, { plano, comando }) => {
   if (!(plano.nativas ?? []).includes("Bash")) throw new ErroDeDominio("nao_permitido", { cause: "Bash fora do plano deste turno" });
@@ -37,9 +41,17 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string },
   if (!contaminado && !plano.politicaExecucao.efeitoExternoSoPorAprovacao && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
     return { data: { permitir: true, porque: "liberado_na_tarefa" } };
   }
+  const agente = await deps.repos.agentes.buscar(plano.agenteId);
+  const risco = comandoArriscado(texto);
+  const doModo = decidirPeloModo(agente?.modoAprovacao, {
+    arriscada: risco !== null,
+    credencial: tocaCredencial(texto),
+    conteudoDeFora: contaminado,
+    travaHerdada: plano.politicaExecucao.travaHerdada === true,
+  });
+  if (doModo?.automatico) return { data: { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" } };
 
   const agora = deps.agora();
-  const agente = await deps.repos.agentes.buscar(plano.agenteId);
   const decisao = await deps.repos.decisoes.criar({
     tipo: "aprovacao",
     agenteId: plano.agenteId,
@@ -49,7 +61,9 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string },
     frase: `${agente?.nome ?? "O bot"} quer rodar um comando no seu Mac`,
   });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão não criada" });
-  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino: { ...DESTINO_TERMINAL, argumentos: { comando: texto } }, origemSensivel: false, motivoManual: "destino_terminal" }]);
+  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino: { ...DESTINO_TERMINAL, argumentos: { comando: texto } }, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",
+    // ADR-059: o porquê do arriscado, em frase fixa do domínio (nunca texto do modelo), para o card dizer o que parou.
+    ...(doModo?.motivo === "acao_arriscada" && risco ? { justificativa: risco } : {}) }]);
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
     id: randomUUID(),

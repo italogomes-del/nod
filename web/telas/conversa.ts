@@ -21,6 +21,7 @@ import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
+import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -475,7 +476,7 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * quando há pergunta aberta (web/telas/pergunta.ts), e `data-padrao` / `data-titulo` guardam a dica e
  * a dica do clipe de sempre, para o main voltar a elas quando o campo sai do modo resposta.
  */
-export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean } = {}): string {
+export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
   const aceita = opcoes.anexos;
   const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
@@ -488,6 +489,9 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
   // O "/" (definido em 2026-09-28): a lista abre acima do campo; a dica diz o que o comando escrito faz.
   const barra = opcoes.comandos ? '<div class="barra-lista" id="barra-lista" role="listbox" aria-label="Comandos" hidden></div><div class="barra-dica" id="barra-dica" hidden></div>' : "";
   const nota = `Enter envia · Shift+Enter quebra linha${dica}`;
-  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}">${lista}${anexar}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  // ADR-059: o chip do modo de aprovação (só na conversa própria) e o aviso acima do campo; main.ts troca o miolo.
+  const aviso = opcoes.aprovacao ? '<div class="composer-aviso" id="composer-aviso"></div>' : "";
+  const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
+  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao="${esc(nota)}">${esc(nota)}</p></div>`;
 }

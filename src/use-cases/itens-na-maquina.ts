@@ -52,7 +52,7 @@ async function fecharSeTerminou(deps: Deps, decisaoId: string, porRegra: boolean
   const agora = deps.agora();
   const autoria = autoriaDoAgente(deps.escopo, decisao.agenteId);
   const desfechos = itens.map((i) => ({ itemId: i.id, desfecho: i.desfecho ?? "falhou_na_execucao" }));
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: decisao.conversaId, turnoId: decisao.turnoId, kind: "resultado_aprovacao", texto: textoAutomatico(itens, desfechos), confianca: "confiavel", autoria });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: decisao.conversaId, turnoId: decisao.turnoId, kind: "resultado_aprovacao", texto: textoAutomatico(itens, desfechos, decisao.desfecho?.tipo === "decidida_por_regra" ? decisao.desfecho.regra : undefined), confianca: "confiavel", autoria });
   return {
     events: [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "mensagem_criada", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { decisao_id: decisao.id, mensagem_id: mensagem?.id ?? null, itens: itens.length, executados: itens.filter((i) => i.desfecho === "executado").length } }],
   };

@@ -55,7 +55,7 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     }));
     const interno = (metodo: string, caminho: string, corpo?: unknown) =>
       fetch(`${srv.url}/api/interno/${caminho}`, { method: metodo, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
-    return { repos, turnoId, slug, interno };
+    return { repos, turnoId, slug, interno, agenteId };
   }
 
   it("só a nativa que está no plano é confirmada, e cada uma deixa linha na trilha", async () => {
@@ -76,5 +76,16 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     expect((await t.interno("POST", "nativas", { ferramenta: "WebFetch", contamina: false })).status).toBe(200);
     expect(await t.repos.turnos.contaminado(t.turnoId)).toBe(true);
     expect(await enviar()).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+  });
+
+  it("ADR-059: o comando que o modo aprovou leva a regra do modo na trilha (o gatilho da ADR-055 não dispara à toa)", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    await t.repos.agentes.definirModoAprovacao(t.agenteId, "automatico");
+    expect(await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "git commit -am x" })).json()).toEqual({ ok: true });
+    expect(await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "git status" })).json()).toEqual({ ok: true });
+    const trilha = await t.repos.trilha.doTurno(t.turnoId);
+    expect(trilha.map((l) => [l.ferramenta, l.regra])).toEqual([["nativa__Bash", "regra:modo_automatico"], ["nativa__Bash", "regra:chamar_ferramenta"]]);
+    const arriscado = await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "rm -rf dist" })).json() as { aguardar?: string };
+    expect(typeof arriscado.aguardar).toBe("string");
   });
 });

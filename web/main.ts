@@ -6,6 +6,8 @@ import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, pedirGestao, renderGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
+import { abrirMenuModo, avisoFechado, fecharAviso, reabrirAviso } from "./lib/menu-modo.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
@@ -446,7 +448,7 @@ function renderPrincipal(): void {
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       corpo = renderTimeline(conversaDaTela(estado), estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true }) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -509,6 +511,7 @@ function renderPrincipal(): void {
     composerDe = composer?.chave ?? null;
     esquecerRegiao("composer");
     esquecerRegiao("composer-pergunta");
+    esquecerRegiao("composer-aviso");
     regiao("composer", composer?.html ?? "");
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     ta?.focus();
@@ -549,6 +552,42 @@ function atualizarComposer(): void {
     if (titulo) clipe.title = titulo;
     else clipe.removeAttribute("title");
   }
+  atualizarModoNoComposer();
+}
+
+/**
+ * ADR-059: o chip do modo de aprovação e o aviso acima do campo seguem o bot da conversa. O composer não se regrava
+ * (ADR-020), então o miolo do chip é trocado no próprio nó, só quando muda — o texto digitado fica onde está.
+ */
+function atualizarModoNoComposer(): void {
+  const chip = document.getElementById("composer-modo") as HTMLButtonElement | null;
+  const t = estado.tela;
+  const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
+  if (!chip) return;
+  if (!bot) { chip.hidden = true; regiao("composer-aviso", ""); return; }
+  const modo = bot.modoAprovacao ?? "manual";
+  const dona = bot.ownerId === estado.sessao?.pessoaId;
+  const r = renderChipModo(modo, dona);
+  chip.hidden = false;
+  if (chip.dataset.modo !== modo || chip.dataset.dona !== String(dona)) {
+    chip.innerHTML = r.html;
+    chip.dataset.modo = modo;
+    chip.dataset.dona = String(dona);
+    chip.title = r.titulo;
+    chip.setAttribute("aria-label", `Aprovações: ${r.titulo}`);
+    chip.setAttribute("aria-disabled", String(!dona));
+  }
+  regiao("composer-aviso", avisoFechado(bot.id, modo) ? "" : renderAvisoModo(bot.nome, modo));
+}
+
+function abrirModoAprovacao(el: HTMLElement): void {
+  const t = estado.tela;
+  const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
+  if (!bot || bot.ownerId !== estado.sessao?.pessoaId) return;
+  abrirMenuModo(el, bot.nome, bot.modoAprovacao ?? "manual", (modo) => {
+    reabrirAviso(bot.id, modo);
+    void agir(async () => { await mudarGestao(() => api!.mudarModoAprovacao(bot.id, modo)); });
+  });
 }
 
 /**
@@ -1237,6 +1276,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "menu-agente": (el) => menuDoBot(el),
   "inteligencia": (el) => abrirInteligencia(el.dataset.id),
+  // ADR-059: o chip do campo abre os três modos; o × do aviso o fecha para este bot e este modo.
+  "modo-aprovacao": (el) => abrirModoAprovacao(el),
+  "fechar-aviso-modo": () => {
+    const t = estado.tela;
+    const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
+    if (bot) fecharAviso(bot.id, bot.modoAprovacao ?? "manual");
+    atualizarModoNoComposer();
+  },
   "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
   "ir-perfil": (el) => navegar({ tipo: "perfil", agenteId: el.dataset.id ?? "" }),

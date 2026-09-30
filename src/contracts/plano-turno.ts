@@ -1,5 +1,5 @@
 import type { AnexoMeta } from "./anexo.ts";
-import type { EsforcoAgente } from "./agente.ts";
+import type { EsforcoAgente, ModoAprovacao } from "./agente.ts";
 import type { IdHarness } from "./harness.ts";
 import type { Autoria, Executor } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
@@ -86,7 +86,17 @@ export type PlanoTurno = {
     orcamentoResultadoChars: number;
     /** EMENDA 15: rotina com exige_aprovacao só produz efeito externo via item aprovado. */
     efeitoExternoSoPorAprovacao: boolean;
+    /**
+     * ADR-059: o gate acima veio da rotina de OUTRO bot, pelo pedido de colega (ADR-058). O modo automático de quem
+     * recebe não o desliga; o da própria rotina, sim. Ausente = false.
+     */
+    travaHerdada?: boolean;
   };
+  /**
+   * ADR-059: o modo de aprovação do agente NA EMISSÃO, para o prompt e o Raio-X. Quem decide cada pedido lê o modo
+   * ATUAL do agente (trocar vale na próxima ação); este campo só diz ao modelo como o turno começou. Ausente = 'manual'.
+   */
+  modoAprovacao?: ModoAprovacao;
   /**
    * definido em 2026-09-21 (ADR-042): ferramentas que a PESSOA marcou como "sempre permitir",
    * resolvidas no PUXAR e embarcadas aqui — a avaliação é LOCAL, nunca consulta por chamada
