@@ -26,8 +26,12 @@ export type EstadoTurno = "pendente" | "despachando" | "concluido" | "interrompi
  */
 export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer" | "delegacao";
 
-/** Profundidade estrutural (E12.4): 0 = normal; 1 = cumprindo um pedido de colega, ou a continuação de quem pediu — sem novo salto. */
-export type Profundidade = 0 | 1;
+/**
+ * Profundidade estrutural (E12.4; revisto em 2026-09-30, ADR-063): quantos passes seguidos entre bots este fio já
+ * teve. 0 = o trabalho começou por uma pessoa ou por uma rotina; cada pedido a colega e cada resposta que volta
+ * somam 1. Em PROFUNDIDADE_MAXIMA (src/domain/profundidade.ts) o salto some.
+ */
+export type Profundidade = 0 | 1 | 2 | 3;
 
 export type Turno = {
   tenantId: TenantId;

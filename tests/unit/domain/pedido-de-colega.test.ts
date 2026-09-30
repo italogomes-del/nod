@@ -11,7 +11,8 @@ import { modoDoTurno } from "../../../src/use-cases/emitir-plano-turno.ts";
 
 /**
  * Pedido de colega (ADR-047; revisto em 2026-09-29, ADR-058): quem recebe um pedido_a_bot trabalha com os
- * acessos dele, em profundidade 1 (sem novo salto), herdando a trava da rotina de quem pediu.
+ * acessos dele, herdando a trava da rotina de quem pediu. Desde 2026-09-30 (ADR-063) ele também pede a outro
+ * colega, até o limite da corrente (profundidade 3).
  */
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "chico", ownerId: "p", visibility: "privado", nome: "Chico", titulo: "Tech Lead", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -28,7 +29,7 @@ const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map(
 describe("quem recebe um pedido de colega usa os acessos dele", () => {
   it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso e os caminhos de aprovação; sem computador", () => {
     const p = montarPlano({ ...base, computador: true });
-    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "ler_mais"]);
+    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot", "ler_mais"]);
     expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar"]));
     expect(p.confiancaEntrada).toBe("confiavel");
     expect(p.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
@@ -42,9 +43,29 @@ describe("quem recebe um pedido de colega usa os acessos dele", () => {
     expect(p.promptSistema).toContain("O pedido nasceu de uma rotina que exige aprovação: efeito externo só por item aprovado via pedir_aprovacao.");
   });
 
-  it("não repassa: sem pedir_a_bot, encaminhar nem rotina", () => {
-    const p = montarPlano(base);
-    for (const n of ["pedir_a_bot", "encaminhar", "criar_rotina", "pausar_rotina"]) expect(nomes(p)).not.toContain(n);
+  it("repassa abaixo do limite (ADR-063): pedir_a_bot em 1 e 2, fora em 3; encaminhar e rotina nunca", () => {
+    for (const profundidade of [1, 2] as const) {
+      const p = montarPlano({ ...base, turno: { ...turno, profundidade }, profundidade });
+      expect(nomes(p)).toContain("pedir_a_bot");
+      for (const n of ["encaminhar", "criar_rotina", "pausar_rotina"]) expect(nomes(p)).not.toContain(n);
+    }
+    const noLimite = montarPlano({ ...base, turno: { ...turno, profundidade: 3 }, profundidade: 3 });
+    for (const n of ["pedir_a_bot", "encaminhar", "criar_rotina", "pausar_rotina"]) expect(nomes(noLimite)).not.toContain(n);
+  });
+
+  it("o prompt da delegação: abaixo do limite ensina a pedir e a esperar os pedidos; no limite, diz a verdade a quem pediu", () => {
+    const abaixo = montarPlano(base).promptSistema;
+    expect(abaixo).not.toContain("Você não pode repassar a outro bot neste turno");
+    expect(abaixo).toContain("Se precisar de um colega para cumprir o pedido, peça com pedir_a_bot");
+    expect(abaixo).toContain("Sua resposta final volta para Clarice depois que os seus pedidos voltarem");
+    expect(abaixo).toContain("Diretório de colegas autorizados");
+    expect(abaixo).not.toContain("Limite da corrente:");
+    const noLimite = montarPlano({ ...base, turno: { ...turno, profundidade: 3 }, profundidade: 3 }).promptSistema;
+    expect(noLimite).not.toContain("peça com pedir_a_bot");
+    expect(noLimite).toContain("Sua resposta final volta para Clarice:");
+    // O texto do Marlon (2026-09-30); na delegação, só o trecho do meio muda.
+    expect(noLimite.split("\n")).toContain("Limite da corrente: três passes entre bots sem uma pessoa no meio, e o nod corta a ligação antes que vire telefone sem fio. Neste turno você não pede nada a colegas. Faça o que der e diga na sua resposta a Clarice, com uma pitada de humor, o que falta e para quem — nunca que a ferramenta caiu. Uma pessoa ou uma rotina reabre a linha.");
+    expect(noLimite).not.toContain("Faça o que der e diga, com uma pitada de humor,");
   });
 
   it("autoria do plano sai 'Chico · por Marlon': sob_procuracao_de vem do turno, a conta continua a do dono", () => {

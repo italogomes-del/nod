@@ -51,8 +51,10 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  *
  * delegacao (definido em 2026-09-24, ADR-047; revisto em 2026-09-29, ADR-058): o turno de quem cumpre um
  * pedido de colega (pedir_a_bot), com os acessos dele. Tem pedir_acesso (inclusive escrita) e os caminhos
- * de aprovação; não tem salto (profundidade 1), nem rotina. pedir_a_bot entra em todo modo em que um bot
- * trabalha para a pessoa: criação, conversa, sala e rotina. peer é legado (perguntar_a_bot saiu na ADR-058).
+ * de aprovação; não tem rotina. pedir_a_bot entra em todo modo em que um bot trabalha para a pessoa: criação,
+ * conversa, sala e rotina — e, desde 2026-09-30 (ADR-063), também na delegação: o Chico, pedido pela Clarice a
+ * acionar os Devs, não tinha como. Quem corta o salto é a profundidade (montarFerramentas), não o modo.
+ * peer é legado (perguntar_a_bot saiu na ADR-058).
  *
  * publicar_artefato/ler_artefato (definido em 2026-09-28, ADR-051) entram onde o bot fala com UMA pessoa
  * na conversa dele: conversa e rotina — e a retomada, que cai num dos dois (modoDoTurno). Fora da sala
@@ -65,7 +67,7 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
   rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"],
   peer: ["lembrar"],
-  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa"],
+  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot"],
 };
 
 /** definido em 2026-09-16: 1 h = janela do cache ephemeral_1h do CLI (mapa-cli); plano mais velho que isso é fail-closed. */
@@ -154,9 +156,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaAprendiz, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
 
-  // revisto em 2026-09-29 (ADR-058): profundidade 1 não é mais "peer". Ela corta o salto (montarFerramentas
-  // tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é 'delegacao', e a
-  // continuação de quem pediu é a retomada do turno dele (conversa, sala ou rotina, com a trava da rotina).
+  // revisto em 2026-09-29 (ADR-058): profundidade não é mais "peer". No limite (ADR-063: três passes) ela corta o
+  // salto (montarFerramentas tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é
+  // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
   const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
@@ -217,7 +219,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,

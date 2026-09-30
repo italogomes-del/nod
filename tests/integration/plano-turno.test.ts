@@ -134,7 +134,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
     expect(modoDoTurno({ origem: "conversa", profundidade: 0 }, { tipo: "propria" }, { confirmado: false })).toBe("criacao");
     expect(modoDoTurno({ origem: "conversa", profundidade: 0 }, { tipo: "propria" }, { confirmado: true })).toBe("conversa");
     expect(modoDoTurno({ origem: "sala", profundidade: 0 }, { tipo: "sala" }, { confirmado: true })).toBe("sala");
-    // ADR-058: profundidade 1 só corta o salto; o modo vem da origem (peer é o turno legado de perguntar_a_bot).
+    // ADR-058/062: a profundidade só corta o salto (no limite); o modo vem da origem (peer é o turno legado de perguntar_a_bot).
     expect(modoDoTurno({ origem: "conversa", profundidade: 1 }, null, { confirmado: true })).toBe("conversa");
     expect(modoDoTurno({ origem: "peer", profundidade: 1 }, null, { confirmado: true })).toBe("peer");
     await withRollback(MARLON, async (trx) => {

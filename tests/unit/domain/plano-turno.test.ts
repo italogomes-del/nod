@@ -44,13 +44,23 @@ describe("montarPlano", () => {
     expect(off.catalogo.servidores).toEqual([]);
   });
 
-  it("profundidade 1 corta o salto — sem pedir_a_bot nem encaminhar (E12.4) — e mantém o modo (ADR-058)", () => {
-    const p = montarPlano({ ...base, modo: "sala", profundidade: 1 });
+  it("no limite (profundidade 3) corta o salto — sem pedir_a_bot nem encaminhar (E12.4) — e mantém o modo (ADR-058/062)", () => {
+    const p = montarPlano({ ...base, modo: "sala", profundidade: 3 });
     expect(nomes(p)).not.toContain("pedir_a_bot");
     expect(nomes(p)).not.toContain("encaminhar");
     expect(nomes(p)).toContain("passar");
-    expect(p.profundidade).toBe(1);
+    expect(p.profundidade).toBe(3);
     expect(p.promptSistema).toContain("Modo de sala");
+    expect(p.promptSistema).toContain("Limite da corrente:");
+  });
+
+  it("em profundidade 1 e 2 o salto fica (ADR-063): a continuação de quem pediu ainda pede a outro colega", () => {
+    for (const profundidade of [1, 2] as const) {
+      const p = montarPlano({ ...base, modo: "sala", profundidade });
+      expect(nomes(p)).toEqual(expect.arrayContaining(["pedir_a_bot", "encaminhar", "passar"]));
+      expect(p.profundidade).toBe(profundidade);
+      expect(p.promptSistema).not.toContain("Limite da corrente:");
+    }
   });
 
   it("entrada nao_confiavel: só readOnly de conector; nod fica; decididoPor nomeia a regra", () => {
@@ -105,17 +115,21 @@ describe("montarPlano", () => {
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
   });
 
-  it("agente acordado por rotina pode pedir a colega; quem recebe (delegacao) tem o catálogo dele e não repassa (ADR-058)", () => {
+  it("agente acordado por rotina pode pedir a colega; quem recebe (delegacao) tem o catálogo dele e repassa até o limite (ADR-058/062)", () => {
     const rotina = montarPlano({ ...base, modo: "rotina", turno: { ...turno, origem: "rotina" }, confianca: "nao_confiavel", rotina: { exigeAprovacao: true } });
     expect(nomes(rotina)).toContain("pedir_a_bot");
     expect(nomes(rotina)).toContain("exemplo__listar_contatos");
     expect(nomes(rotina)).not.toContain("exemplo__enviar_email");
     expect(rotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
     const colega = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 1 }, profundidade: 1, confianca: "confiavel", rotina: { exigeAprovacao: true } });
-    expect(nomes(colega)).not.toContain("pedir_a_bot");
+    // O Chico, pedido pela Clarice a acionar os Devs, não tinha como (2026-09-30): agora quem recebe também pede.
+    expect(nomes(colega)).toContain("pedir_a_bot");
     expect(nomes(colega)).toEqual(expect.arrayContaining(["exemplo__listar_contatos", "exemplo__enviar_email"]));
     // A trava herdada da rotina de quem pediu segura a escrita no proxy, não no catálogo.
     expect(colega.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+    const noLimite = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 3 }, profundidade: 3, confianca: "confiavel", rotina: { exigeAprovacao: true } });
+    expect(nomes(noLimite)).not.toContain("pedir_a_bot");
+    expect(noLimite.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
   });
 
   it("EMENDA 15: origem rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; conversa não", () => {

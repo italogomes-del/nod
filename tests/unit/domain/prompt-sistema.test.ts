@@ -210,3 +210,48 @@ describe("montarPromptSistema", () => {
     });
   });
 });
+
+describe("montarPromptSistema: o limite da corrente entre bots (ADR-063)", () => {
+  const colegas = [{ id: "dev2", nome: "Dev 2", titulo: "Dev", descricao: "implementa" }];
+  const base = { agente, memorias: [], pessoaNome: "Marlon", colegas };
+  // O texto é do Marlon (2026-09-30), literal.
+  const LIMITE = "Limite da corrente: três passes entre bots sem uma pessoa no meio, e o nod corta a ligação antes que vire telefone sem fio. Neste turno você não pede nada a colegas. Faça o que der e diga, com uma pitada de humor, o que falta e para quem — nunca que a ferramenta caiu. Uma pessoa ou uma rotina reabre a linha.";
+
+  it("em profundidade 3, sem pedir_a_bot, diz a verdade com humor, o texto do Marlon inteiro na mesma linha", () => {
+    const p = montarPromptSistema({ ...base, modo: "conversa", ferramentas: [f("ver_colegas")], profundidade: 3 });
+    expect(p.split("\n")).toContain(LIMITE);
+    // O diretório continua lá (ver_colegas): ele sabe quem são os colegas, só não pede agora.
+    expect(p).toContain('"nome":"Dev 2"');
+    expect(p).not.toContain("chame pedir_a_bot");
+    const linha = p.split("\n").find((l) => l.startsWith("Limite da corrente:")) ?? "";
+    expect(secaoDaLinha(linha)).toBe("colegas");
+  });
+
+  it("de 0 a 2 não há linha do limite; em 2 avisa que quem receber não repassa", () => {
+    const aviso = "Quem receber um pedido seu agora já estará no último passe da corrente e não poderá repassá-lo: peça direto a quem resolve.";
+    for (const profundidade of [0, 1, 2] as const) {
+      const p = montarPromptSistema({ ...base, modo: "conversa", ferramentas: [f("pedir_a_bot"), f("ver_colegas")], profundidade });
+      expect(p).not.toContain("Limite da corrente:");
+      expect(p).toContain("chame pedir_a_bot com o pedido autocontido");
+      if (profundidade === 2) expect(p).toContain(aviso);
+      else expect(p).not.toContain(aviso);
+    }
+    expect(montarPromptSistema({ ...base, modo: "conversa", ferramentas: [f("pedir_a_bot")] })).not.toContain("Limite da corrente:");
+  });
+
+  it("rotina: 'consultando colegas' só com pedir_a_bot no catálogo — a retomada no limite não promete o que não tem", () => {
+    const comColega = montarPromptSistema({ ...base, modo: "rotina", ferramentas: [f("pedir_a_bot")], profundidade: 1 });
+    expect(comColega).toContain("seguindo sua missão permanente, inclusive consultando colegas quando ela pedir. Não confirme ativação");
+    const noLimite = montarPromptSistema({ ...base, modo: "rotina", ferramentas: [f("sem_novidade")], profundidade: 3 });
+    expect(noLimite).toContain("seguindo sua missão permanente. Não confirme ativação");
+    expect(noLimite).not.toContain("consultando colegas");
+    expect(noLimite).toContain(LIMITE);
+    // A linha do modo continua na seção do modo no Raio-X, com ou sem o trecho.
+    for (const p of [comColega, noLimite]) expect(secaoDaLinha(p.split("\n").find((l) => l.startsWith("Você foi acordado")) ?? "")).toBe("modo");
+  });
+
+  it("peer (legado) nunca ganha a linha do limite: a linha do modo dele já diz que não repassa", () => {
+    const p = montarPromptSistema({ ...base, modo: "peer", ferramentas: [f("lembrar")], profundidade: 3 });
+    expect(p).not.toContain("Limite da corrente:");
+  });
+});
