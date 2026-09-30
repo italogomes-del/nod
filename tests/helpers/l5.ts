@@ -10,6 +10,7 @@ import { criarTokenTurno, type TokenTurno } from "../../src/services/token-turno
 import type { Repos } from "../../src/repositories/tipos.ts";
 import type { Escopo, Transacao, Tx } from "../../src/shared/types.ts";
 import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts";
+import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
@@ -113,6 +114,9 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     verColegas: async () => ({ data: { colegas: [] } }),
     publicarArtefato,
     lerArtefato,
+    anotarPendencia,
+    concluirPendencia,
+    descartarPendencia,
     ...sobrescrita,
   };
 }

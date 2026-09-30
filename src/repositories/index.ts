@@ -21,6 +21,7 @@ import { memoriasRepo } from "./memorias.repo.ts";
 import { mensagensRepo } from "./mensagens.repo.ts";
 import { outboxRepo } from "./outbox.repo.ts";
 import { paradasRepo } from "./paradas.repo.ts";
+import { pendenciasRepo } from "./pendencias.repo.ts";
 import { pessoasRepo } from "./pessoas.repo.ts";
 import { procuracoesRepo } from "./procuracoes.repo.ts";
 import { propostasRepo } from "./propostas.repo.ts";
@@ -45,6 +46,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     outbox: outboxRepo(conn, escopo),
     agentes: agentesRepo(conn, escopo),
     memorias: memoriasRepo(conn, escopo),
+    pendencias: pendenciasRepo(conn, escopo),
     conversas: conversasRepo(conn, escopo),
     mensagens: mensagensRepo(conn, escopo),
     anexos: anexosRepo(conn, escopo),

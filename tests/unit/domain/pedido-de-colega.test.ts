@@ -27,9 +27,9 @@ const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("quem recebe um pedido de colega usa os acessos dele", () => {
-  it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso e os caminhos de aprovação; sem computador", () => {
+  it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso, os caminhos de aprovação e anotar o que fica para depois; sem computador", () => {
     const p = montarPlano({ ...base, computador: true });
-    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot", "ler_mais"]);
+    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot", "anotar_pendencia", "ler_mais"]);
     expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar"]));
     expect(p.confiancaEntrada).toBe("confiavel");
     expect(p.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);

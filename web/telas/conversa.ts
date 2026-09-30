@@ -22,6 +22,7 @@ import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
 import { HTML_CHIP_MODO } from "./aprovacoes.ts";
+import { renderAFazerNaConversa } from "./pendencias.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -483,6 +484,8 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   return [
     { chave: "sep", html: sep },
     ...blocosDasMensagens(c.mensagens, estado, sala),
+    // ADR-064: o "a fazer" do bot fica logo abaixo da última mensagem da conversa própria dele.
+    { chave: "a-fazer", html: c.conversa.tipo === "propria" && c.conversa.agenteId ? renderAFazerNaConversa(estado, c.conversa.agenteId) : "" },
     { chave: "acolhimento", html: acolhimento },
     ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, new Set(propostas.map((p) => p.id))) },

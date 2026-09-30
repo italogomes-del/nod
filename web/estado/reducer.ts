@@ -8,6 +8,7 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
+import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
@@ -83,7 +84,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}`;
+export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -144,6 +145,12 @@ export type Estado = {
   avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
   memorias: Record<string, Memoria[]>;
+  /**
+   * O "a fazer" de cada bot (definido em 2026-09-30, ADR-064): as pendências abertas, da mais nova para a mais antiga;
+   * ausente = ainda não carregou. `aFazerAberto` é a lista aberta embaixo da última mensagem — estado de tela.
+   */
+  pendencias: Record<string, Pendencia[]>;
+  aFazerAberto: Record<string, boolean>;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
   chaves: ChaveMaquinaDto[] | null;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
@@ -197,6 +204,8 @@ export type Acao =
   | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
+  | { tipo: "hidratar-pendencias"; agenteId: string; pendencias: Pendencia[] }
+  | { tipo: "a-fazer"; agenteId: string; aberto: boolean }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-relatos"; relatos: Relato[] }
@@ -238,6 +247,8 @@ export const estadoInicial: Estado = {
   avisoConexao: null,
   concessoes: {},
   memorias: {},
+  pendencias: {},
+  aFazerAberto: {},
   chaves: null,
   relatos: null,
   modoDev: { ligado: false, raioX: {} },
@@ -369,6 +380,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
+    // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de
+    // sistema do resolver e a fala do Fazer agora chegam pelos frames delas (mensagem.nova, turno.iniciado).
+    if (String(f.dados.acao).startsWith("pendencia_")) return agenteId ? invalidar(e, `pendencias:${agenteId}`) : e;
     const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
     const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
     return invalidar(e, "frota", "gestao", "nao-lidos", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
@@ -496,6 +510,13 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes } };
     case "hidratar-memorias":
       return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
+    case "hidratar-pendencias": {
+      // Sem nenhuma, o indicador some; a lista aberta fecha junto, para a próxima pendência não reabrir sozinha.
+      const aFazerAberto = acao.pendencias.length === 0 && estado.aFazerAberto[acao.agenteId] ? { ...estado.aFazerAberto, [acao.agenteId]: false } : estado.aFazerAberto;
+      return { ...estado, pendencias: { ...estado.pendencias, [acao.agenteId]: acao.pendencias }, aFazerAberto };
+    }
+    case "a-fazer":
+      return { ...estado, aFazerAberto: { ...estado.aFazerAberto, [acao.agenteId]: acao.aberto } };
     case "hidratar-salas":
       return { ...estado, salas: acao.salas, carregado: estado.carregado.salas ? estado.carregado : { ...estado.carregado, salas: true } };
     case "hidratar-nao-lidos":
@@ -588,6 +609,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "nova-sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "conversa" && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
+  // ADR-064: o "a fazer" aparece embaixo da última mensagem e na gaveta, então chega junto com a conversa.
+  if (t.tipo === "conversa" && !estado.pendencias[t.agenteId]) faltas.push(`pendencias:${t.agenteId}`);
   // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.
   const nivel = t.tipo === "conversa" && estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
   if (nivel?.tipo === "memoria" && !estado.memorias[estado.gaveta?.agenteId ?? ""]) faltas.push(`memoria:${estado.gaveta?.agenteId ?? ""}`);

@@ -85,6 +85,9 @@ export function useCasesFalsos(): UseCasesNod {
     verColegas,
     publicarArtefato: naoImplementado("useCases.publicarArtefato"),
     lerArtefato: naoImplementado("useCases.lerArtefato"),
+    anotarPendencia: naoImplementado("useCases.anotarPendencia"),
+    concluirPendencia: naoImplementado("useCases.concluirPendencia"),
+    descartarPendencia: naoImplementado("useCases.descartarPendencia"),
   };
 }
 

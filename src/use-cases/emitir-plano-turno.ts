@@ -11,6 +11,7 @@ import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { marcarExecucaoNaMaquina } from "../domain/github.ts";
+import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
@@ -151,6 +152,12 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     estado: r.estado,
   }));
 
+  // definido em 2026-09-30 (ADR-064): a lista do que o bot deixou para depois entra quando alguém de fora da corrente
+  // de colegas chamou o bot — a pessoa ou uma rotina (profundidade 0: conversa, criação, rotina e as retomadas
+  // delas). É isso que "na próxima rotina ou conversa" quer dizer; no meio de um pedido de colega, ela não aparece.
+  const comPendencias = turno.profundidade === 0 && (modo === "conversa" || modo === "criacao" || modo === "rotina");
+  const pendencias = comPendencias ? pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(agente.id), agora) : [];
+
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
 
@@ -200,6 +207,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];
     }),
+    pendencias,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     terminal: executor === "local" && (escolha ? escolha.harness === "claude-cli" : true),
