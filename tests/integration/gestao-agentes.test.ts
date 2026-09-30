@@ -140,6 +140,34 @@ describeIntegracao("gestão de agentes: ciclo de vida e organização", () => {
     });
   });
 
+  it("soltar um bot arrastado fixa e grava a ordem do grupo num pedido só; id de outra pessoa não muda nada (0041)", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const [a, b, c] = [(await criarAgente(d, { dono: "pessoa", nome: "Primeiro" })).data, (await criarAgente(d, { dono: "pessoa", nome: "Segundo" })).data, (await criarAgente(d, { dono: "pessoa", nome: "Terceiro" })).data];
+      await fixarAgente(d, { agenteId: a.agente.id, fixado: true });
+      await fixarAgente(d, { agenteId: b.agente.id, fixado: true });
+      await vincularEscopo(tx, ANA);
+      const daAna = (await criarAgente(depsSobreTrx(tx, ANA), { dono: "pessoa", nome: "Da Ana" })).data;
+      await vincularEscopo(tx, MARLON);
+      // O Terceiro é solto no começo da grade, antes dos dois que já estavam lá.
+      const { data } = await gerirAgente(d, { agenteId: c.agente.id, acao: "organizar", fixado: true, ordem: [c.agente.id, a.agente.id, daAna.agente.id, b.agente.id] });
+      expect(data.agente).toMatchObject({ fixado: true, posicao: 0 });
+      const fixados = (await listarFrota(d, {})).data.agentes.filter((x) => x.fixado && [a, b, c].some((y) => y.agente.id === x.id));
+      expect(fixados.map((x) => x.nome)).toEqual(["Terceiro", "Primeiro", "Segundo"]);
+      await vincularEscopo(tx, ANA);
+      expect((await depsSobreTrx(tx, ANA).repos.agentes.buscar(daAna.agente.id))?.posicao).toBeNull();
+      await vincularEscopo(tx, MARLON);
+      // Desafixar para uma seção: sai da grade e entra na seção, na ordem mandada.
+      await gerirAgente(d, { agenteId: a.agente.id, acao: "organizar", fixado: false, secao: "Devs", ordem: [a.agente.id] });
+      expect(await d.repos.agentes.buscar(a.agente.id)).toMatchObject({ fixado: false, secao: "Devs", posicao: 0 });
+      await esperarErro(() => gerirAgente(d, { agenteId: a.agente.id, acao: "organizar", ordem: [b.agente.id] }), "entrada_invalida");
+      await esperarErro(() => gerirAgente(d, { agenteId: a.agente.id, acao: "organizar", ordem: [a.agente.id, a.agente.id] }), "entrada_invalida");
+      await esperarErro(() => gerirAgente(d, { agenteId: a.agente.id, acao: "organizar", fixado: "sim" as never }), "entrada_invalida");
+      await gerirAgente(d, { agenteId: b.agente.id, acao: "excluir" });
+      await esperarErro(() => gerirAgente(d, { agenteId: b.agente.id, acao: "organizar", fixado: true }), "estado_invalido");
+    });
+  });
+
   it("agente de equipe não pode ser organizado, excluído ou restaurado por outra pessoa", async () => {
     await withRollback(MARLON, async (tx) => {
       const d = depsSobreTrx(tx, MARLON);

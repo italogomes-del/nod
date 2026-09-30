@@ -50,6 +50,6 @@ describe("aviso de queda do Mac (ADR-045): incidente não é decisão", () => {
     const agente = { id: "a1", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c1", confirmado: true, fixado: false, oculto: false } as never;
     const html = renderDetalhes({ ...estadoInicial, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" }, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [agente], negacoes: [] } as never });
     expect(html).toContain("Computador do bot");
-    expect(html).toMatch(/data-act="abrir-computador"[^>]*>Computador do bot</);
+    expect(html).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot</);
   });
 });
