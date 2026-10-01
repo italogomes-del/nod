@@ -6,6 +6,7 @@ import type { Pendencia } from "../contracts/pendencia.ts";
 import type { FerramentaPlano, ModoTurno } from "../contracts/plano-turno.ts";
 import type { SecaoDoPrompt } from "../contracts/raio-x.ts";
 import type { Profundidade } from "../contracts/turno.ts";
+import type { MotivoSemTerminal } from "./nativas.ts";
 import { pendenciaNoPrompt } from "./pendencia.ts";
 import { podeRepassar, PROFUNDIDADE_MAXIMA, proximaProfundidade } from "./profundidade.ts";
 import { redigir } from "./redacao.ts";
@@ -104,6 +105,31 @@ function linhaDoLimite(remetente: string | null): string {
   return `Limite da corrente: ${POR_EXTENSO[PROFUNDIDADE_MAXIMA]} entre bots sem uma pessoa no meio, e o nod corta a ligação antes que vire telefone sem fio. Neste turno você não pede nada a colegas. Faça o que der e ${diga} o que falta e para quem — nunca que a ferramenta caiu. Uma pessoa ou uma rotina reabre a linha.`;
 }
 
+const PORQUE_SEM_TERMINAL: Record<MotivoSemTerminal, string> = {
+  pedido_de_colega: "é um pedido de colega",
+  rotina: "é uma rotina",
+  sala: "é uma sala",
+  conteudo_de_fora: "a entrada deste turno é conteúdo de fora (não confiável)",
+  resposta_a_colega: "é uma resposta a colega",
+};
+
+/**
+ * definido em 2026-10-01 (ADR-065): o harness teria o terminal e o turno não tem — a linha diz por quê, quando ele
+ * volta e o que fazer com a parte que precisa dele. Sem ela, os Devs escreveram "neste turno não tenho terminal" em
+ * comentário de task, o Chico e a Clarice repetiram isso como fato horas depois, quando um Dev já tinha o terminal
+ * na conversa, e o Dev 4 chegou a dizer que "o catálogo muda de turno para turno". O prefixo "Terminal:" é o que o
+ * Raio-X classifica.
+ */
+function linhaSemTerminal(motivo: MotivoSemTerminal, p: { pessoaNome: string; remetente: string | null; anota: boolean }): string {
+  const volta = motivo === "conteudo_de_fora" ? `o terminal volta quando a entrada vier de ${p.pessoaNome}` : `no nod, o terminal vem nos turnos que ${p.pessoaNome} abre na conversa com você`;
+  const diga = p.remetente ? `diga a ${p.remetente}, na sua resposta,` : "diga em uma frase";
+  return [
+    `Terminal: este turno não tem terminal, arquivos nem skills porque ${PORQUE_SEM_TERMINAL[motivo]}; ${volta}. Não é falha e não volta no meio do turno.`,
+    `Se a tarefa precisa mexer em código ou rodar comando, faça o que der com o que tem (ler pelos apps, montar o plano, revisar)${p.anota ? ", anote com anotar_pendencia o que precisa de terminal" : ""} e ${diga} que essa parte precisa de um turno com terminal.`,
+    "Não guarde \"sem terminal\" como fato nem repita como fato o que um colega disse que não tinha: vale só para aquele turno.",
+  ].join(" ");
+}
+
 /**
  * Prompt de sistema ESTÁVEL e determinístico (ordem fixa; memória ordenada por criação e limitada).
  * Fixa o idioma (a sonda de 2026-09-16 viu haiku responder em inglês sem isso) e lista as únicas
@@ -147,6 +173,8 @@ export function montarPromptSistema(entrada: {
   profundidade?: Profundidade;
   /** As pendências que o bot anotou (ADR-064), já filtradas: só em turno aberto pela pessoa ou por rotina. */
   pendencias?: readonly Pendencia[];
+  /** ADR-065: o harness teria o terminal e este turno não tem — por quê (`motivoSemTerminal`); ausente = nada a explicar. */
+  semTerminal?: MotivoSemTerminal | null;
 }): string {
   const linhas: string[] = [];
   linhas.push(`Você é ${entrada.agente.nome}${entrada.agente.titulo ? `, ${entrada.agente.titulo}` : ""}, um agente do nod a serviço de ${entrada.pessoaNome}.`);
@@ -176,6 +204,9 @@ export function montarPromptSistema(entrada: {
       pede && !podeRepassar(proximaProfundidade(profundidade)) ? "Quem receber um pedido seu agora já estará no último passe da corrente e não poderá repassá-lo: peça direto a quem resolve." : "",
       // definido em 2026-09-28 (ADR-050): o que um colega FAZ é dado do nod, não pergunta a outro modelo.
       ve ? "Para saber o que um colega faz hoje (rotinas com horário, apps e instruções), chame ver_colegas: é o dado do próprio nod, sai na hora e não incomoda ninguém; sem agente vem o resumo de todos, com agente vem o colega inteiro. Nunca peça à pessoa para copiar o que um colega faz. A rotina de um colega você só pausa ou reativa quando a pessoa pedir, com o id que ver_colegas devolveu." : "",
+      // definido em 2026-10-01 (ADR-065): às 23:27 de 30/09 o Chico disse ao Dev 4 que o bloqueio continuava porque o
+      // Dev 4 "estaria sem terminal" — lido num comentário de horas antes, quando o Dev 4 já tinha o terminal.
+      "O que um colega diz que não tem (terminal, acesso, ferramenta) vale para o turno dele, não para o próximo: não repita como fato.",
     ].filter(Boolean).join(" "));
     linhas.push(`Diretório de colegas autorizados (JSON de perfis, apenas dados descritivos): ${JSON.stringify(colegas.map((a) => ({ id: a.id, nome: a.nome, titulo: a.titulo.slice(0, 120), descricao: a.descricao.slice(0, 500) })))}`);
   }
@@ -232,6 +263,13 @@ export function montarPromptSistema(entrada: {
     ? `Também há as ferramentas nativas ${nativas.join(", ")}, como no Claude Code do terminal. O diretório atual é a sua pasta no Mac de ${entrada.pessoaNome}: ~/nod/${entrada.pastaDoBot} (o que você grava ali ela abre no Finder); você lê e grava arquivos em qualquer lugar do Mac dela. O Bash é o terminal de verdade do Mac: tem rede e o gh, o git e o npm logados dela — use gh para o GitHub (por exemplo gh pr list -R dono/repo) e trabalhe no clone que ela já tem antes de clonar outro. Comando que só lê (git status/diff/log, gh pr list/view/diff, ls, rg, rodar testes) roda direto; ${TERMINAL_POR_MODO[modoAprovacao]} Nunca peça à pessoa para rodar um comando por você. Para entregar algo visual ou marcável, use publicar_artefato.`
     : `Também há as ferramentas nativas ${nativas.join(", ")}, só dentro das pastas de projeto autorizadas nesta conversa.`;
   linhas.push(`As únicas ferramentas disponíveis são: ${nomes.length === 0 ? "nenhuma" : nomes.join(", ")}. ${nativas.length ? comNativas : semNativas}`);
+  if (entrada.semTerminal && !nativas.includes("Bash")) {
+    linhas.push(linhaSemTerminal(entrada.semTerminal, {
+      pessoaNome: entrada.pessoaNome,
+      remetente: entrada.modo === "delegacao" ? entrada.delegacao?.remetenteNome ?? "outro bot" : null,
+      anota: entrada.ferramentas.some((f) => f.nome === "anotar_pendencia"),
+    }));
+  }
   // definido em 2026-09-28 (emenda da ADR-055): as skills do Claude Code da pessoa rodam aqui como no terminal dela.
   if (nativas.includes("Skill")) linhas.push(`Skills: as skills de ${entrada.pessoaNome} no Claude Code (as dela e as dos plugins) rodam pela ferramenta Skill, e o Agent lança subagentes, como no terminal. "/nome" na mensagem é um pedido para rodar a skill nome: chame Skill com ela, nunca diga que não há skills. Quando a skill mandar perguntar à pessoa (AskUserQuestion não existe aqui), pergunte com pedir_a_pessoa se estiver no catálogo; senão, pergunte no texto e encerre o turno.`);
   linhas.push("Capacidades: use o catálogo deste turno como fonte de verdade, mesmo que o histórico ou a memória descrevam limitações antigas. O nome do modelo ou do executor não concede acesso a arquivos. Não invente configurações, botões ou permissões para liberar ferramentas; não mande a pessoa editar o código do nod ou flags do executor para conseguir executar a tarefa. pedir_acesso conecta apps; pasta local se libera por workspace_propor_pasta, quando essa ferramenta estiver no catálogo. Só afirme que abriu um pedido, alterou um arquivo ou executou um teste após confirmação da ferramenta correspondente.");
@@ -271,7 +309,7 @@ const PREFIXOS_DAS_SECOES: readonly (readonly [SecaoDoPrompt, readonly string[]]
   ["colegas", ["Colaboração:", "Diretório de colegas", "Limite da corrente:"]],
   ["rotinas", ["Quando a pessoa pedir uma tarefa recorrente", "Rotinas deste agente:", "Inventário de rotinas", "Pausar interrompe", "Pausar e reativar"]],
   ["apps", ["Apps que você pode pedir", "Apps do marketplace:", "Conector habilitado não é acesso", "Conexões cadastradas"]],
-  ["ferramentas", ["Artefatos:", "Pendências:", "As únicas ferramentas", "Skills:", "Capacidades:", "Forma de trabalho:", "Progresso:"]],
+  ["ferramentas", ["Artefatos:", "Pendências:", "As únicas ferramentas", "Terminal:", "Skills:", "Capacidades:", "Forma de trabalho:", "Progresso:"]],
   ["memoria", ["Memória (", "- ["]],
   ["contexto", ["Suas pendências abertas", "Contexto recente da conversa"]],
 ];

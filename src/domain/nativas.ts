@@ -1,4 +1,5 @@
 import { tocaCredencial } from "./comando.ts";
+import { gitForaDaPastaDoBot, type ContextoDaPasta } from "./git-na-pasta-do-bot.ts";
 import { FERRAMENTAS_DE_TAREFA } from "./tarefas-do-bot.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
@@ -48,6 +49,27 @@ export function nativasDoTurno(t: { modo: ModoTurno; confianca: Confianca; pasta
   return t.pastasAutorizadas ? NATIVAS_DE_ARQUIVO : [];
 }
 
+/** Por que um turno de harness com terminal ficou sem ele: o modo, ou a entrada que veio de fora. */
+export type MotivoSemTerminal = "pedido_de_colega" | "rotina" | "sala" | "conteudo_de_fora" | "resposta_a_colega";
+
+/**
+ * definido em 2026-10-01 (ADR-065): o motivo vai ao prompt, porque sem ele o bot não sabe por que tem terminal num
+ * turno e não no outro. Em 30/09 os Devs responderam "neste turno não tenho terminal" a 6 de 6 pedidos de implementar
+ * do Chico, a Clarice gravou na memória que os Devs "não têm terminal" e o Marlon perguntou cinco vezes como
+ * desbloqueá-los. Sai da MESMA regra de `nativasDoTurno`: se ela mudar, o motivo acompanha. null = o turno tem o
+ * terminal, ou o harness nunca o teria (Codex, máquina sem o hook) — aí não há o que explicar.
+ */
+export function motivoSemTerminal(t: { modo: ModoTurno; confianca: Confianca; terminal?: boolean }): MotivoSemTerminal | null {
+  if (!t.terminal) return null;
+  if (nativasDoTurno({ modo: t.modo, confianca: t.confianca, pastasAutorizadas: false, terminal: true }).includes("Bash")) return null;
+  // Confiável, o mesmo modo teria o terminal: o que tirou foi a entrada.
+  if (nativasDoTurno({ modo: t.modo, confianca: "confiavel", pastasAutorizadas: false, terminal: true }).includes("Bash")) return "conteudo_de_fora";
+  if (t.modo === "delegacao") return "pedido_de_colega";
+  if (t.modo === "rotina") return "rotina";
+  if (t.modo === "sala") return "sala";
+  return "resposta_a_colega";
+}
+
 /** Nome da pasta do bot no Mac da pessoa (~/nod/<nome>): o nome dele, sem o que o sistema de arquivos não aceita. */
 export function pastaDoBot(nome: string): string {
   const limpo = nome.normalize("NFC").replace(/[/\\:\0]/g, "-").replace(/^\.+/, "").replace(/\s+/g, " ").trim().slice(0, 60);
@@ -67,7 +89,7 @@ export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: bool
  * as credenciais dela, e por isso cada comando passa pelo servidor. Fail-closed: ferramenta desconhecida e Bash
  * sem comando → nega.
  */
-export function decidirNativa(p: { ferramenta: string; entrada: Record<string, unknown> }): DecisaoNativa {
+export function decidirNativa(p: { ferramenta: string; entrada: Record<string, unknown>; pasta?: ContextoDaPasta }): DecisaoNativa {
   // Ferramenta MCP do nod não é nativa: quem decide é o proxy (ADR-013), que também grava a trilha. Medido ao
   // vivo em 2026-09-28: com o matcher "*", o CLI consultava o hook para MCP e ele negava publicar_artefato.
   if (p.ferramenta.startsWith("mcp__")) return { permitir: true, motivo: "ferramenta do nod: quem decide é o proxy", contamina: false };
@@ -86,9 +108,10 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     }
     case "Bash": {
       const comando = typeof p.entrada.command === "string" ? p.entrada.command : "";
-      return comando.trim() === ""
-        ? { permitir: false, motivo: "comando vazio", contamina: false }
-        : { permitir: true, motivo: "o servidor do nod decide o comando", contamina: false, comando };
+      if (comando.trim() === "") return { permitir: false, motivo: "comando vazio", contamina: false };
+      // ADR-065: git que mexe na pasta de trabalho só na pasta do bot — cerca local, antes do servidor, em qualquer modo.
+      const fora = p.pasta ? gitForaDaPastaDoBot(comando, p.pasta) : null;
+      return fora ? { permitir: false, motivo: fora, contamina: false } : { permitir: true, motivo: "o servidor do nod decide o comando", contamina: false, comando };
     }
     case "WebFetch":
     case "WebSearch":

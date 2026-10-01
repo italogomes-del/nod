@@ -155,7 +155,8 @@ export type ArgsSemNovidade = { motivo: MotivoSemNovidade };
 export type ArgsEncaminhar = { para_agente: string; motivo: string };
 export type ArgsPedirABot = { agente: string; pedido: string; contexto?: string };
 
-export type ResultadoLembrar = { ok: true; id: string };
+/** ADR-065: capacidade que muda de turno para turno não vira memória — volta recusada, com o motivo para o bot ler. */
+export type ResultadoLembrar = { ok: true; id: string } | { ok: false; recusado: string };
 export type ResultadoPedirAprovacao =
   | { estado: "decidida"; itens: { idx: number; desfecho: string }[] }
   | { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a decisão retoma depois" }
