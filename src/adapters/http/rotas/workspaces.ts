@@ -1,3 +1,4 @@
+import type { WorkspaceDto } from "../../../contracts/workspace.ts";
 import type { Workspaces } from "../../fundo/workspaces.ts";
 import type { Rota } from "../roteador.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -27,7 +28,11 @@ export function rotasWorkspaces(w?: Workspaces, dentro?: DentroDeTx): Rota[] {
       const r = await dentro(c.escopo, (deps) => executar(deps, retomarAposPasta, { proposta, pasta: projeto.pasta }));
       c.json(200, { ok: true, ids: { proposta: proposta.id, ...(r.turnoId ? { turnoRetomada: r.turnoId } : {}) } });
     } },
-    { metodo: "GET", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) { c.json(200, { disponivel: Boolean(w), vinculo: w ? await w.consultar(c.escopo, c.params.id!) : null }); } },
+    { metodo: "GET", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace$/, async handler(c) {
+      // Tipado pelo contrato que a web lê: mudar o formato aqui sem mudar lá não compila.
+      const corpo: WorkspaceDto = { disponivel: Boolean(w), vinculo: w ? await w.consultar(c.escopo, c.params.id!) : null };
+      c.json(200, corpo);
+    } },
     { metodo: "POST", padrao: /^\/conversas\/(?<id>[^/]+)\/workspace\/pastas$/, async handler(c) {
       if (!w) throw new ErroDeDominio("nao_permitido");
       const b = await c.corpo() as { caminho?: unknown };

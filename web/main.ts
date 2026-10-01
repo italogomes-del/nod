@@ -23,6 +23,7 @@ import { estadoMascoteNaConversa } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
+import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
@@ -573,7 +574,7 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
     decisao: el.closest<HTMLElement>("[data-decisao]")?.dataset.decisao ?? "",
     atributo: el.hasAttribute("data-resposta") ? "data-resposta" : el.hasAttribute("data-item-texto") ? "data-item-texto" : "data-item",
     chave: el.dataset.resposta ?? el.dataset.itemTexto ?? el.dataset.item ?? "",
-    valor: el.value, marcado: el.checked, inicial: el.defaultValue, marcadoInicial: el.defaultChecked,
+    campo: guardarCampo(el),
     foco: document.activeElement === el, inicio: el.selectionStart, fim: el.selectionEnd,
   }));
   // ADR-051: o iframe do artefato sai antes de a timeline ser regravada e volta sem recarregar (moveBefore),
@@ -590,9 +591,7 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   }
   for (const resposta of respostas) {
     const el = document.querySelector<HTMLInputElement>(`[data-decisao="${CSS.escape(resposta.decisao)}"] input[${resposta.atributo}="${CSS.escape(resposta.chave)}"]`);
-    if (!el || el.disabled || el.defaultValue !== resposta.inicial || el.defaultChecked !== resposta.marcadoInicial) continue;
-    el.value = resposta.valor;
-    el.checked = resposta.marcado;
+    if (!el || !restaurarCampo(el, resposta.campo)) continue;
     if (resposta.foco) {
       el.focus({ preventScroll: true });
       if (resposta.inicio !== null && resposta.fim !== null) el.setSelectionRange(resposta.inicio, resposta.fim);

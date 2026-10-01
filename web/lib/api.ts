@@ -19,6 +19,7 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 
 /**
@@ -91,7 +92,7 @@ export function criarApi(escopo: Escopo) {
   const del = <T>(caminho: string) => pedir<T>("DELETE", `${base}/${caminho}`);
   return {
     escopo,
-    workspace: (id: string) => get<{ disponivel: boolean; vinculo: { pasta: string; preparado: { caminho: string; modo: string } | null } | null }>(`conversas/${id}/workspace`),
+    workspace: (id: string) => get<WorkspaceDto>(`conversas/${id}/workspace`),
     pastasWorkspace: (id: string, caminho?: string) => post<{ caminho: string; pai: string; selecionavel: boolean; pastas: { nome: string; caminho: string }[] }>(`conversas/${id}/workspace/pastas`, { caminho }),
     escolherWorkspace: (id: string, pasta: string) => post(`conversas/${id}/workspace`, { pasta }),
     revogarWorkspace: (id: string) => del(`conversas/${id}/workspace`),
