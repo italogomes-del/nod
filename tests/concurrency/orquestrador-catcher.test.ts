@@ -86,6 +86,7 @@ afterEach(async () => {
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from catcher_registros where owner_id = ${p}`;
     await trx`delete from decisoes where owner_id = ${p}`;
+    await trx`delete from pendencias where owner_id = ${p}`;
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from propostas where owner_id = ${p}`;
     await trx`delete from agente_memorias where owner_id = ${p}`;

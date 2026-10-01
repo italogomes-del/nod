@@ -13,6 +13,7 @@ import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp,
 import { logoApp } from "./marketplace.ts";
 import { renderMemoriaNaGaveta } from "./memoria.ts";
 import { renderNovaRotinaNaGaveta } from "./nova-rotina.ts";
+import { renderAFazerNaGaveta } from "./pendencias.ts";
 import { textoMotivo } from "./negacao.ts";
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];
@@ -105,7 +106,9 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     : `<p class="mudo">Aprovações: ${esc(modo.titulo)}</p>`;
   const ambienteHtml = `<section class="gv-secao"><h3>Ambiente</h3>${ambiente}<p class="mudo gv-nota">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p></section>`;
 
-  return identidade + computador + atalhos + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
+  // ADR-064: o "a fazer" do bot acima de Rotinas, com as mesmas ações da lista embaixo da conversa.
+  const aFazer = dona ? renderAFazerNaGaveta(estado, a.id) : "";
+  return identidade + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------

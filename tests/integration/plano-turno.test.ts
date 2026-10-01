@@ -112,8 +112,8 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const rotina = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "rotina", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
       const planoRotina = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
       expect(planoRotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      // ADR-044: pedir_acesso entra na rotina (só propõe; a pessoa decide num botão). ADR-051: publicar/ler artefato também.
-      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+      // ADR-044: pedir_acesso entra na rotina (só propõe; a pessoa decide num botão). ADR-051: publicar/ler artefato também. ADR-064: as pendências também.
+      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]);
 
       // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004): sem janela o gate fica ligado.
       const r = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", exigeAprovacao: false, proximaExecucao: agora() + 1000 });

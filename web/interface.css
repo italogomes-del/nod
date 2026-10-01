@@ -893,3 +893,35 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
 /* O porquê de um card que parou mesmo com o modo automático (motivo_manual, 0040). */
 .ap-porque { display: flex; align-items: flex-start; gap: 7px; margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: #9a5a0c; }
 .ap-porque svg { flex: none; margin-top: 1px; }
+/* O "a fazer" do bot (ADR-064; canvas "Pendências", pranchas F6 e F7): o indicador embaixo da última mensagem abre a
+   lista ali mesmo, alinhado ao balão do bot (avatar de 38 px + 14 px); a gaveta repete os itens acima de Rotinas. */
+.a-fazer { margin: -15px 0 25px 52px; max-width: min(86%, 760px); }
+.a-fazer-bt { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 11px; border: 1px solid #e3e6ec; border-radius: 999px; background: var(--panel); font-size: 13px; color: #242b3d; }
+.a-fazer-bt:hover, .a-fazer-bt:focus-visible { border-color: #c9ced9; background: #f7f8fb; }
+.a-fazer-bt b, .a-fazer-cab b { font-weight: 500; }
+.a-fazer-quando { color: var(--ink-3); }
+.a-fazer-bt svg:last-child, .a-fazer-cab svg:last-child { color: var(--ink-3); }
+.a-fazer-lista { border: 1px solid #e3e6ec; border-radius: 14px; overflow: hidden; background: var(--panel); }
+.a-fazer-cab { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px; border: 0; background: #f8f9fb; font-size: 13px; color: #242b3d; text-align: left; }
+.a-fazer-cab:hover, .a-fazer-cab:focus-visible { background: #f1f3f7; }
+.a-fazer-fechar { margin-left: auto; font-size: 12.5px; color: var(--ink-3); }
+.pd-lista { margin: 0; padding: 0; list-style: none; }
+.a-fazer-lista .pd-item { border-top: 1px solid var(--line); }
+.pd-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; }
+.pd-marca { flex-shrink: 0; box-sizing: border-box; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 1.5px solid #b3bacb; }
+.pd-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pd-texto { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.pd-meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.pd-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: #f1f2f6; color: var(--ink-2); font-weight: 500; }
+.pd-chip.pd-proxima { background: #eef3fc; color: #2554a2; }
+.pd-acoes { display: flex; gap: 14px; }
+.pd-acoes .bt.link { padding: 2px 0; font-size: 12.5px; }
+.pd-acoes .bt.link.pd-fazer { font-weight: 500; color: #2554a2; }
+.pd-acoes .bt.link.pd-descartar { color: #5b6478; }
+.pd-acoes .bt.link:hover { text-decoration: underline; }
+/* Na gaveta, dentro do cartão dela (gv-cartao): os mesmos itens, um pouco mais compactos. */
+.secao-a-fazer .pd-item { gap: 10px; padding: 11px 12px 12px 14px; }
+.secao-a-fazer .pd-marca { width: 16px; height: 16px; }
+.secao-a-fazer .pd-texto { font-size: 13.5px; font-weight: 500; line-height: 1.4; }
+.secao-a-fazer .pd-corpo { gap: 5px; }
+@media (max-width: 700px) { .a-fazer { margin-left: 35px; max-width: 89%; } }

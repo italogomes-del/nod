@@ -8,6 +8,7 @@ import { FERRAMENTAS_NOD, type NomeFerramentaNod } from "../contracts/ferramenta
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Memoria } from "../contracts/memoria.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
+import type { Pendencia } from "../contracts/pendencia.ts";
 import type { FerramentaPlano, ModoTurno, PlanoTurno, ServidorPlano } from "../contracts/plano-turno.ts";
 import type { Profundidade, Turno } from "../contracts/turno.ts";
 import { ORCAMENTO_RESULTADO_CHARS } from "../shared/constantes.ts";
@@ -60,14 +61,19 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * na conversa dele: conversa e rotina — e a retomada, que cai num dos dois (modoDoTurno). Fora da sala
  * (o estado é por pessoa e a sala tem várias; a RLS do artefato não tem perna de sala), da criação, do
  * peer (quem lê é outro bot) e da delegação (o resultado volta ao remetente, não à pessoa).
+ *
+ * Pendências (definido em 2026-09-30, ADR-064): anotar_pendencia entra em todo modo em que o bot trabalha —
+ * criação, conversa, sala, rotina e delegação —, inclusive no limite da corrente de colegas, que é justamente
+ * quando algo fica para depois. concluir/descartar_pendencia entram onde a lista aparece: conversa, criação e
+ * rotina (emitir-plano-turno.ts só a manda em profundidade 0).
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato"],
-  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
+  sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "anotar_pendencia"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
   peer: ["lembrar"],
-  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot"],
+  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot", "anotar_pendencia"],
 };
 
 /** definido em 2026-09-16: 1 h = janela do cache ephemeral_1h do CLI (mapa-cli); plano mais velho que isso é fail-closed. */
@@ -139,6 +145,11 @@ export type EntradaPlano = {
    * rotina de onde o pedido nasceu vale aqui (`trava`, que também chega por `rotina`), para a linha do prompt.
    */
   delegacao?: { pessoaNome: string; remetenteNome: string; trava?: boolean } | null;
+  /**
+   * As pendências que o bot anotou (ADR-064), já filtradas por pendenciasDoPrompt: só nos turnos em que a pessoa
+   * ou uma rotina chamou o bot (profundidade 0). Ausente ou vazia = a linha não entra.
+   */
+  pendencias?: readonly Pendencia[];
   /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
   pastasAutorizadas?: boolean;
   /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
@@ -219,7 +230,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade }),
+    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.pendencias }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,

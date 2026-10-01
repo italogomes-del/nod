@@ -80,7 +80,7 @@ describe("montarPlano", () => {
     for (const n of ["ver_colegas", "pedir_a_bot", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]);
     // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
@@ -113,6 +113,37 @@ describe("montarPlano", () => {
     expect(plano.promptSistema).toContain("publicar_artefato");
     expect(plano.promptSistema).toContain("window.nod.salvar");
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
+  });
+
+  it("ADR-064: anotar_pendencia em todo modo em que o bot trabalha, inclusive no limite de 3; concluir e descartar só onde ele vê a lista", () => {
+    const comLista = ["conversa", "criacao", "rotina"] as const;
+    for (const modo of comLista) {
+      expect(nomes(montarPlano({ ...base, modo })), modo).toEqual(expect.arrayContaining(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]));
+    }
+    for (const modo of ["sala", "delegacao"] as const) {
+      const n = nomes(montarPlano({ ...base, modo, turno: { ...turno, origem: modo === "sala" ? "sala" : "delegacao", profundidade: 1 }, profundidade: 1 }));
+      expect(n, modo).toContain("anotar_pendencia");
+      expect(n, modo).not.toContain("concluir_pendencia");
+      expect(n, modo).not.toContain("descartar_pendencia");
+    }
+    // No limite da corrente (ADR-063) o salto sai; anotar fica: é o jeito de o pedido não se perder.
+    const noLimite = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 3 }, profundidade: 3 });
+    expect(nomes(noLimite)).toContain("anotar_pendencia");
+    expect(nomes(noLimite)).not.toContain("pedir_a_bot");
+    // Turno não confiável: as ferramentas do nod ficam no catálogo reduzido (confianca.ts).
+    expect(nomes(montarPlano({ ...base, confianca: "nao_confiavel" }))).toEqual(expect.arrayContaining(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]));
+  });
+
+  it("ADR-064: a lista das pendências entra na parte dinâmica do prompt, depois da parte estável; sem pendências, nada", () => {
+    const pendencia = { tenantId: "t", id: "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e", agenteId: "a1", conversaId: "c1", turnoId: "t0", texto: "Cobrar do Dev 1 o parecer do PR #475", aPartirDe: null, cuidado: false, profundidade: 0 as const, estado: "aberta" as const, resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: agora - 60_000 };
+    const sem = montarPlano(base).promptSistema;
+    const com = montarPlano({ ...base, pendencias: [pendencia] }).promptSistema;
+    expect(sem).not.toContain("Suas pendências abertas");
+    expect(com).toContain("Suas pendências abertas");
+    expect(com).toContain("\"texto\":\"Cobrar do Dev 1 o parecer do PR #475\"");
+    // A parte estável (tudo antes da lista) é a mesma com e sem pendências: a lista não quebra o cache do CLI.
+    const inicio = com.indexOf("Suas pendências abertas");
+    expect(sem.startsWith(com.slice(0, com.lastIndexOf("\n", inicio)))).toBe(true);
   });
 
   it("agente acordado por rotina pode pedir a colega; quem recebe (delegacao) tem o catálogo dele e repassa até o limite (ADR-058/062)", () => {

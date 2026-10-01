@@ -138,7 +138,8 @@ O parágrafo do `pedir_a_bot` não some mais calado: sem a ferramenta, a linha d
 ## Não implementado
 
 - **Pendência que sobrevive ao turno** (o item 3 da conversa de 2026-09-30, relatos das 14:50 e 14:59). No limite, o
-  bot só diz o que falta; nada guarda o pedido para o próximo turno de profundidade 0. Está em discussão.
+  bot só diz o que falta; nada guarda o pedido para o próximo turno de profundidade 0. Resolvido pela
+  [ADR-064](adr-064-pendencias-do-bot.md): no limite, o bot anota com `anotar_pendencia`.
 - **Subpedido que nunca termina.** Só turno `despachando` com lease vencido é varrido (`turnos.vencidos`). Um
   subpedido parado em `pendente` para sempre já deixava sem resposta quem o fez, e agora segura também a entrega a
   quem pediu antes dele (`aguardando_colega`). Parar e o fim do turno avisam; cancelar da fila, não

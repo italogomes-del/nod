@@ -76,6 +76,9 @@ const DESPACHO: Despacho = {
   ver_colegas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_colegas](deps, { ...ctx, ...args }),
   publicar_artefato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.publicar_artefato](deps, { ...ctx, ...args }),
   ler_artefato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ler_artefato](deps, { ...ctx, ...args }),
+  anotar_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.anotar_pendencia](deps, { ...ctx, ...args }),
+  concluir_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.concluir_pendencia](deps, { ...ctx, ...args }),
+  descartar_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.descartar_pendencia](deps, { ...ctx, ...args }),
 };
 
 /**
