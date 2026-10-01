@@ -761,6 +761,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async contaminado(id: string) {
         return b.contaminados.has(id);
       },
+      // ADR-066: os repositórios em memória não guardam sessão do CLI — a retomada de rotina/delegação começa nova.
+      async sessaoDoTurno() {
+        return null;
+      },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,

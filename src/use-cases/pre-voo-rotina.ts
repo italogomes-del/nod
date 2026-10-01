@@ -5,10 +5,14 @@ import type { MotivoBloqueioRotina } from "../contracts/motivos.ts";
 import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { BloqueioRotina, ParadaDaRotina, Rotina } from "../contracts/rotina.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
+import { acaoArriscadaNoApp } from "../domain/aprovacao-permanente.ts";
+import { decidirPeloModo } from "../domain/modo-aprovacao.ts";
 import { nomeDoApp } from "../domain/pedido-acesso.ts";
 import { faltaDeAcesso, janelasQueNaoRodaram, necessidadesDaRotina, type ConectorRegistrado, type NecessidadeDaRotina } from "../domain/rotina-acessos.ts";
 import type { Repos } from "../repositories/tipos.ts";
 import { autoriaPessoa, rotinaDoTurno } from "./apoio-l7.ts";
+import { semCard } from "./confirmar-pelo-modo.ts";
+import { decidirAcesso } from "./decidir-acesso.ts";
 import { garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -60,6 +64,21 @@ export async function preVooDaRotina(deps: Deps, rotina: Rotina, opcoes: { agend
   const registrados = await deps.repos.conectores.listar();
   const necessidades = await necessidadesAtuais(deps.repos, rotina, registrados);
   for (const id of [...new Set(necessidades.flatMap((n) => (n.conector ? [n.conector.id] : [])))].sort()) await deps.repos.concessoes.travar(rotina.agenteId, id);
+  // ADR-066: cada app que falta e que o modo concede sai do caminho; o primeiro que ele não concede para a janela.
+  for (let i = 0; i <= necessidades.length; i++) {
+    const bloqueio = await faltaOuConcede(deps, rotina, necessidades);
+    if (bloqueio !== "concedido") return bloqueio ?? (opcoes.agendada && (await perguntaAbertaDaRotina(deps.repos, rotina)) ? { motivo: "aguardando_resposta", propostaId: null, events: [] } : null);
+  }
+  return null;
+}
+
+/**
+ * O primeiro app que falta: card aberto (garantido) e bloqueio; ou "concedido", quando o modo do bot concede na hora;
+ * ou null, quando nada falta. revisto em 2026-10-01 (ADR-066): no automático e no total o pré-voo concede como o
+ * turno já concedia — antes era o único lugar em que o total ainda esperava um clique, e cada janela saía bloqueada.
+ * Conectar um app (login) continua sendo da pessoa. O que é "Apagar e desfazer" para no automático, como no turno.
+ */
+async function faltaOuConcede(deps: Deps, rotina: Rotina, necessidades: readonly NecessidadeDaRotina[]): Promise<BloqueioDoPreVoo | "concedido" | null> {
   const falta = faltaDeAcesso(necessidades, await deps.repos.concessoes.doAgente(rotina.agenteId));
   if (falta) {
     const g = await garantirPedidoDeAcesso(deps, {
@@ -74,9 +93,24 @@ export async function preVooDaRotina(deps: Deps, rotina: Rotina, opcoes: { agend
       turnoId: null,
       autoria: autoriaPessoa(deps.escopo.pessoaId, REGRA_PRE_VOO),
     });
+    const p = g.proposta.payload;
+    if (falta.motivo !== "sem_conexao" && falta.necessidade.conector && g.decisao && (g.decisao.estado === "pendente" || g.decisao.estado === "reaberta") && p.kind === "acesso" && !p.conectar) {
+      const catalogo = falta.necessidade.conector.catalogo;
+      const arriscada = p.capacidades.some((nome) => {
+        const cap = catalogo.find((c) => c.nome === nome);
+        return cap ? acaoArriscadaNoApp(cap) : true;
+      });
+      const d = decidirPeloModo((await deps.repos.agentes.buscar(rotina.agenteId))?.modoAprovacao, { arriscada, credencial: false });
+      if (d?.automatico) {
+        const r = await decidirAcesso(deps, { decisaoId: g.decisao.id, recusar: false, executor: "catcher", porRegra: { regra: d.regra, regraVersao: d.versao }, semDisparar: true });
+        // O disparo segue no mesmo passo e só devolve os eventos do turno: estes vão direto ao outbox (como no computador).
+        const eventos = [...semCard(g.events), ...(r.events ?? [])];
+        if (eventos.length) await deps.repos.events.gravarComOutbox(eventos);
+        return "concedido";
+      }
+    }
     return { motivo: falta.motivo, propostaId: g.proposta.id, events: g.events };
   }
-  if (opcoes.agendada && (await perguntaAbertaDaRotina(deps.repos, rotina))) return { motivo: "aguardando_resposta", propostaId: null, events: [] };
   return null;
 }
 

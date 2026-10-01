@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { CapacidadeConector } from "../../src/contracts/conector.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
+import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
 import { chamarFerramenta } from "../../src/use-cases/chamar-ferramenta.ts";
@@ -53,21 +54,29 @@ async function githubDoDev1(repos: Repos, dev1: { agenteId: string; conversaId: 
   return sondado;
 }
 
-/** Um turno de rotina de verdade: rotina, janela reivindicada e turno ligado a ela. */
-async function turnoDeRotina(repos: Repos, de: { agenteId: string; conversaId: string }, exigeAprovacao: boolean) {
+/**
+ * Um turno de rotina de verdade: rotina, janela reivindicada e turno ligado a ela. A entrada da rotina é sempre
+ * confiável (ADR-066, disparar-rotina.ts); `leuDeFora` = o turno já leu um app de fora (chamar-ferramenta.ts o marca).
+ */
+async function turnoDeRotina(repos: Repos, de: { agenteId: string; conversaId: string }, exigeAprovacao: boolean, o: { leuDeFora?: boolean } = {}) {
   const rotina = await repos.rotinas.criar({ agenteId: de.agenteId, conversaId: de.conversaId, cron: "*/10 * * * *", fusoIana: "UTC", instrucao: "Ler o Slack", fonte: "Slack", entregavel: "chat", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, exigeAprovacao });
-  const turno = await repos.turnos.enfileirar({ conversaId: de.conversaId, agenteId: de.agenteId, origem: "rotina", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "Execução agendada", entradaConfianca: "nao_confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ conversaId: de.conversaId, agenteId: de.agenteId, origem: "rotina", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "Execução agendada", entradaConfianca: "confiavel", modelo: "m" });
   await repos.rotinaJanelas.reivindicar({ rotinaId: rotina!.id, instanteAgendado: AGORA, machineId: randomUUID(), executor: "catcher" });
   await repos.rotinaJanelas.vincularTurno({ rotinaId: rotina!.id, instanteAgendado: AGORA, turnoId: turno!.id });
+  if (o.leuDeFora) await repos.turnos.contaminar(turno!.id, AGORA);
   return turno!;
 }
+
+/** A política de execução sem gate nem trava (ADR-066): só prazo e orçamento. */
+const SEM_GATE = ["orcamentoResultadoChars", "prazoMs"];
+const chavesDaPolitica = (p: { politicaExecucao: object }) => Object.keys(p.politicaExecucao).sort();
 
 async function planoDe(deps: Deps, turnoId: string) {
   return emitirPlanoTurno(deps, { turnoId, machineId: randomUUID(), executor: "catcher" });
 }
 
 describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () => {
-  it("de uma conversa: turno 'delegacao' confiável sob procuração de Marlon; a mensagem dele vai junto; o plano tem o catálogo inteiro e nenhuma trava", async () => {
+  it("de uma conversa: turno 'delegacao' confiável sob procuração de Marlon; a mensagem dele vai junto; o plano tem o catálogo inteiro (ADR-066: ver_colegas, artefato e, no Claude Code, o kit do terminal) e nenhuma trava", async () => {
     await withRollback(MARLON, async (trx) => {
       const { taga, dev1, deps, repos, chamadas, turnoTaga } = await cenario(trx);
       await githubDoDev1(repos, dev1);
@@ -85,46 +94,69 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const plano = await planoDe(deps, tarefa?.id ?? "");
       expect(plano.events?.[0]?.dados.modo).toBe("delegacao");
       expect(plano.data.autoria.sob_procuracao_de).toBe(PESSOA_MARLON);
-      expect(plano.data.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar", "pedir_acesso", "pedir_aprovacao"]));
-      expect(plano.data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+      expect(plano.data.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "publicar_artefato", "ler_artefato"]));
+      expect(chavesDaPolitica(plano.data)).toEqual(SEM_GATE);
       expect(plano.data.promptSistema).toContain("Modo de pedido de colega: Taga, outro bot de");
       expect(plano.data.entrada.sessaoCli).toBeNull();
+      // Quem pediu não tinha lido nada de fora: o turno de quem recebe nasce sem marca.
+      expect(await repos.turnos.contaminado(tarefa?.id ?? "")).toBe(false);
       // Sem trava, a escrita concedida segue o MODO de quem recebe (ADR-062): no manual, pede card; no automático, roda direto.
       const comentar = () => chamarFerramenta(deps, { turnoId: tarefa?.id ?? "", agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano: plano.data });
       expect((await comentar()).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
       await repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
       expect((await comentar()).data).toMatchObject({ ok: true });
       expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_comentar"]);
+
+      // ADR-066: com o Claude Code e o hook do nod (executor local), quem recebe tem o kit do terminal — antes a
+      // delegação ficava sem, e em 30/09 os Devs não implementaram nenhum dos pedidos do Chico.
+      await repos.inventario.registrar("claude-cli", { estado: "pronto", versao: "2.1.272", em: AGORA });
+      const local = await emitirPlanoTurno(deps, { turnoId: tarefa?.id ?? "", machineId: randomUUID(), executor: "local" });
+      expect(local.data.nativas).toEqual([...NATIVAS_DO_TERMINAL]);
     });
   });
 
-  it("de uma rotina com exige_aprovacao — o caso da Clarice: o colega lê livre, mas a escrita dele só sai por item aprovado", async () => {
+  it("de uma rotina com exige_aprovacao — o caso da Clarice (ADR-066): sem trava herdada; se a rotina leu algo de fora, o turno do colega nasce marcado e só o manual pede", async () => {
     await withRollback(MARLON, async (trx) => {
       const { taga, dev1, deps, repos, chamadas } = await cenario(trx);
       await githubDoDev1(repos, dev1);
-      const daRotina = await turnoDeRotina(repos, taga, true);
+      // O "Sempre permitir" que Marlon clicou em comentar no PR, para o Dev 1 (ADR-042).
+      const d = await repos.decisoes.criar({ tipo: "aprovacao", agenteId: dev1.agenteId, conversaId: dev1.conversaId, turnoId: null, prazoDecisaoEm: AGORA + 86_400_000, frase: "Comentar no PR" });
+      const itens = await repos.itensAprovacao.criarLote(d?.id ?? "", [{ idx: 0, texto: "Comentar no PR 466", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: {} }, origemSensivel: false }]);
+      expect((await permitirSempre(deps, { decisaoId: d?.id ?? "", itemIds: itens.map((i) => i.id) })).data.criadas).toHaveLength(1);
+
+      // A rotina do Taga leu um app de fora antes de pedir.
+      const daRotina = await turnoDeRotina(repos, taga, true, { leuDeFora: true });
       const r = await pedir(deps, { turnoId: daRotina.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
       const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
       expect(tarefa).toMatchObject({ origem: "delegacao", entradaConfianca: "confiavel" });
       expect(tarefa?.entradaTexto).not.toContain("pedido_da_pessoa");
+      // A página que a rotina leu não se lava pelo pedido (ADR-062): a marca passa a quem recebe, no lugar da trava.
+      expect(await repos.turnos.contaminado(tarefa?.id ?? "")).toBe(true);
 
       const plano = await planoDe(deps, tarefa?.id ?? "");
       expect(plano.data.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar"]));
-      expect(plano.data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      expect(plano.data.promptSistema).toContain("O pedido nasceu de uma rotina que exige aprovação");
-      const leitura = await chamarFerramenta(deps, { turnoId: tarefa?.id ?? "", agenteId: dev1.agenteId, nome: "github__pr_ver", argumentos: {}, plano: plano.data });
-      expect(leitura.data).toMatchObject({ ok: true });
-      const escrita = await chamarFerramenta(deps, { turnoId: tarefa?.id ?? "", agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano: plano.data });
-      expect(escrita.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
-      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_ver"]);
+      expect(chavesDaPolitica(plano.data)).toEqual(SEM_GATE);
+      expect(plano.data.promptSistema).not.toContain("O pedido nasceu de uma rotina");
+      const chamar = (turnoId: string, nome: string, p = plano.data) => chamarFerramenta(deps, { turnoId, agenteId: dev1.agenteId, nome, argumentos: {}, plano: p });
+      expect((await chamar(tarefa?.id ?? "", "github__pr_ver")).data).toMatchObject({ ok: true });
+      // Manual: depois de conteúdo de fora o "Sempre permitir" cai, e a escrita direta recebe "peça aprovação".
+      expect((await chamar(tarefa?.id ?? "", "github__pr_comentar")).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
 
-      // Rotina sem a trava: nada herdado.
-      const semTrava = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, false)).id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      expect((await planoDe(deps, semTrava.data.tarefa_id)).data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+      // Rotina que não leu nada de fora, mesmo com exige_aprovacao: nada passa a quem recebe, e a regra dele vale.
+      const limpa = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, true)).id, agenteId: taga.agenteId, conversaId: taga.conversaId });
+      expect(await repos.turnos.contaminado(limpa.data.tarefa_id)).toBe(false);
+      const planoLimpo = await planoDe(deps, limpa.data.tarefa_id);
+      expect(chavesDaPolitica(planoLimpo.data)).toEqual(SEM_GATE);
+      expect((await chamar(limpa.data.tarefa_id, "github__pr_comentar", planoLimpo.data)).data).toMatchObject({ ok: true });
+
+      // Automático: a marca não para — o pedido nascido da rotina que leu algo de fora comenta sozinho.
+      await repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
+      expect((await chamar(tarefa?.id ?? "", "github__pr_comentar")).data).toMatchObject({ ok: true });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_ver", "pr_comentar", "pr_comentar"]);
     });
   });
 
-  it("pede de qualquer turno abaixo do limite (retomada, sem mensagem, não confiável, delegação em 1 e 2), um passe mais fundo; em 3 não repassa; turno de outro bot não serve", async () => {
+  it("pede de qualquer turno abaixo do limite (retomada, sem mensagem, não confiável, delegação em 1 e 2), um passe mais fundo — o de entrada não confiável passa a marca (ADR-066); em 3 não repassa; turno de outro bot não serve", async () => {
     await withRollback(MARLON, async (trx) => {
       const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
       const base = { conversaId: taga.conversaId, agenteId: taga.agenteId, prazoEm: AGORA + 60_000, entradaTexto: "x", modelo: "m" };
@@ -138,7 +170,8 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       ];
       for (const t of aceitos) {
         const tarefa = await repos.turnos.buscar((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).data.tarefa_id);
-        expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: (t?.profundidade ?? 0) + 1 });
+        expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: (t?.profundidade ?? 0) + 1, entradaConfianca: "confiavel" });
+        expect(await repos.turnos.contaminado(tarefa?.id ?? "")).toBe(t?.entradaConfianca === "nao_confiavel");
       }
 
       const noLimite = [
@@ -151,7 +184,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
     });
   });
 
-  it("a 0043 aceita 0 a 3 e recusa 4; a corrente Taga → Dev 1 → Chico → Dev 2 para no terceiro passe, com a trava da rotina de ponta a ponta", async () => {
+  it("a 0043 aceita 0 a 3 e recusa 4; a corrente Taga → Dev 1 → Chico → Dev 2 para no terceiro passe; ADR-066: sem trava em nenhum passe, e a marca da rotina que leu algo de fora vai de ponta a ponta", async () => {
     await withRollback(MARLON, async (trx) => {
       const { taga, dev1, deps, repos } = await cenario(trx);
       const chico = await agenteComConversa(trx, MARLON, { nome: "Chico" });
@@ -162,14 +195,17 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       await expectRejected(trx, () => trx`insert into turnos (tenant_id, owner_id, conversa_id, agente_id, origem, prazo_em, profundidade, entrada_texto, entrada_confianca, modelo)
         values (${TENANT_LEAPY}, ${PESSOA_MARLON}, ${taga.conversaId}, ${taga.agenteId}, 'conversa', now(), 4, 'x', 'confiavel', 'm')`, "23514");
 
-      const rotina = await turnoDeRotina(repos, taga, true);
+      const rotina = await turnoDeRotina(repos, taga, true, { leuDeFora: true });
       const tarefa = async (de: { agenteId: string; conversaId: string }, turnoId: string, agente: string) => (await repos.turnos.buscar((await pedir(deps, { turnoId, agenteId: de.agenteId, conversaId: de.conversaId }, agente)).data.tarefa_id))!;
       const d1 = await tarefa(taga, rotina.id, "Dev 1");
       const d2 = await tarefa(dev1, d1.id, "Chico");
       const d3 = await tarefa(chico, d2.id, "Dev 2");
       expect([d1, d2, d3].map((t) => t.profundidade)).toEqual([1, 2, 3]);
       await expect(pedir(deps, { turnoId: d3.id, agenteId: dev2.agenteId, conversaId: dev2.conversaId }, "Taga")).rejects.toMatchObject({ codigo: "nao_permitido" });
-      for (const t of [d1, d2, d3]) expect((await planoDe(deps, t.id)).data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+      for (const t of [d1, d2, d3]) {
+        expect(chavesDaPolitica((await planoDe(deps, t.id)).data)).toEqual(SEM_GATE);
+        expect(await repos.turnos.contaminado(t.id)).toBe(true);
+      }
       const noUltimo = (await planoDe(deps, d3.id)).data;
       expect(noUltimo.catalogo.ferramentas.map((f) => f.nome)).not.toContain("pedir_a_bot");
       expect(noUltimo.promptSistema).toContain("Limite da corrente:");

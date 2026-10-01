@@ -45,33 +45,36 @@ async function cenario(trx: Tx, pedido = "Taga, pede ao Dev 1 para revisar o PR 
 }
 
 describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na ADR-058)", () => {
-  it("[1] aprovar PR e merge nunca rodam por chamada direta, nem com concessão de escrita num pedido de colega confiável; comentar roda", async () => {
+  it("[1] ADR-066: aprovar PR e merge pela chamada direta seguem o modo de quem recebe — no manual pedem a pessoa, mesmo com a concessão de escrita; no automático comentar, aprovar PR e merge rodam", async () => {
     await withRollback(MARLON, async (trx) => {
       const { dev1, deps, chamadas, github, delegar } = await cenario(trx);
       await concederLote(deps, { agenteId: dev1.agenteId, conectorId: github.id, capacidades: ["pr_ver", "pr_comentar", "pr_revisar", "pr_merge"], autorTipo: "pessoa" });
       const { data } = await delegar();
       const plano = (await emitirPlanoTurno(deps, { turnoId: data.tarefa_id, machineId: randomUUID(), executor: "catcher" })).data;
       expect(plano.confiancaEntrada).toBe("confiavel");
-      expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
-      for (const nome of ["github__pr_revisar", "github__pr_merge"]) {
-        const r = await chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome, argumentos: {}, plano });
-        expect(r.data, nome).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
-      }
+      expect(Object.keys(plano.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+      const chamar = (nome: string) => chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome, argumentos: {}, plano });
+      // Manual: aprovar PR e merge nunca viram "Sempre permitir" (nuncaPermanente) e pedem a pessoa toda vez.
+      for (const nome of ["github__pr_revisar", "github__pr_merge"]) expect((await chamar(nome)).data, nome).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
       expect(chamadas.conectores).toEqual([]);
-      // ADR-062: comentar direto segue o modo de quem recebe — no automático, roda; aprovar PR e merge, não, em modo nenhum.
+      // Automático: antes desta ADR, aprovar PR e merge eram negados na chamada direta em todo modo (só por item
+      // aprovado), e o modelo dava a volta até o pedir_aprovacao. Agora passam pela decisão do card, e nem aprovar nem
+      // fazer merge de PR são ação arriscada — saem sozinhos também no pedido de colega, onde ninguém pediu na conversa.
       await deps.repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
-      expect((await chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano })).data).toMatchObject({ ok: true });
-      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_comentar"]);
+      for (const nome of ["github__pr_comentar", "github__pr_revisar", "github__pr_merge"]) expect((await chamar(nome)).data, nome).toMatchObject({ ok: true });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_comentar", "pr_revisar", "pr_merge"]);
     });
   });
 
-  it("[2] ADR-058: o que quem pede leu antes (conector, computador, pasta, sessão retomada, resposta de bot) não reduz o catálogo de quem recebe", async () => {
+  it("[2] ADR-058/066: o que quem pede leu antes (conector, computador, pasta, sessão retomada, resposta de bot) não reduz o catálogo de quem recebe; o app de fora que ele leu faz o turno de quem recebe nascer marcado, e no automático isso não para", async () => {
     await withRollback(MARLON, async (trx) => {
-      const { taga, dev1, deps, repos, github, turnoTaga, delegar } = await cenario(trx, "resume meus e-mails e pede ao Dev 1 para responder o que for de PR");
+      const { taga, dev1, deps, repos, chamadas, github, turnoTaga, delegar } = await cenario(trx, "resume meus e-mails e pede ao Dev 1 para responder o que for de PR");
       await concederLote(deps, { agenteId: taga.agenteId, conectorId: github.id, capacidades: ["pr_ver"], autorTipo: "pessoa" });
       await concederLote(deps, { agenteId: dev1.agenteId, conectorId: github.id, capacidades: ["pr_ver", "pr_comentar"], autorTipo: "pessoa" });
       const planoTaga = (await emitirPlanoTurno(deps, { turnoId: turnoTaga.id, machineId: randomUUID(), executor: "catcher" })).data;
       expect((await chamarFerramenta(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, nome: "github__pr_ver", argumentos: {}, plano: planoTaga })).data).toMatchObject({ ok: true, confianca: "nao_confiavel" });
+      // ADR-066: o GitHub está fora da curadoria de conteúdo interno — lê-lo marca o turno de quem lê.
+      expect(await repos.turnos.contaminado(turnoTaga.id)).toBe(true);
       await repos.trilha.registrar({ agenteId: taga.agenteId, turnoId: turnoTaga.id, ferramenta: "computador_observar", kind: "tool_call", regra: "regra:chamar_ferramenta", regraVersao: 1 });
       await repos.mensagens.criar({ conversaId: taga.conversaId, autoria: { ...autoriaPessoa(PESSOA_MARLON), autor_tipo: "agente", autor_id: dev1.agenteId }, kind: "peer_ask", texto: "resposta antiga de colega", confianca: "nao_confiavel" });
       await repos.conversas.atualizarSessaoCli(taga.conversaId, randomUUID(), "catcher");
@@ -80,7 +83,12 @@ describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na A
       expect(await repos.turnos.buscar(data.tarefa_id)).toMatchObject({ origem: "delegacao", entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON });
       const plano = (await emitirPlanoTurno(deps, { turnoId: data.tarefa_id, machineId: randomUUID(), executor: "catcher" })).data;
       expect(plano.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["pedir_acesso", "pedir_aprovacao", "github__pr_ver", "github__pr_comentar"]));
-      expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+      expect(Object.keys(plano.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+      // No lugar da trava herdada: a marca de quem pediu passa a quem recebe — só pesa no manual.
+      expect(await repos.turnos.contaminado(data.tarefa_id)).toBe(true);
+      await repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
+      expect((await chamarFerramenta(deps, { turnoId: data.tarefa_id, agenteId: dev1.agenteId, nome: "github__pr_comentar", argumentos: {}, plano })).data).toMatchObject({ ok: true });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["pr_ver", "pr_comentar"]);
     });
   });
 

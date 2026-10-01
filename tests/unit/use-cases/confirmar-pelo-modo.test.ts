@@ -41,7 +41,7 @@ async function cenario(modo: ModoAprovacao) {
 }
 
 describe("rotina pelo modo do bot", () => {
-  it("automático: criar nasce ativa e mudar já vale, sem card — a proposta fica fechada pela regra", async () => {
+  it("automático: criar nasce ativa e mudar já vale, sem card — a proposta fica fechada pela regra (versão 2 desde a ADR-066)", async () => {
     const c = await cenario("automatico");
     const criada = (await criarRotina(c.deps, { ...c.ctx(), ...rotinaValida() })).data;
     if ("erro" in criada) throw new Error(criada.erro);
@@ -54,7 +54,7 @@ describe("rotina pelo modo do bot", () => {
     expect(mudanca.aplicada).toBe(true);
     expect(c.banco.rotinas.find((x) => x.id === criada.proposta_id)?.cron).toBe("0 12 * * 1-5");
     const decisao = c.banco.decisoes.find((d) => d.id === mudanca.proposta_id);
-    expect(decisao).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 1 } });
+    expect(decisao).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 2 } });
     expect(c.banco.propostas.find((p) => p.id === mudanca.proposta_id)?.estado).toBe("confirmada");
     // Nenhum frame de card: a decisão nunca esteve pendente para a pessoa.
     expect(r.events?.map((e) => e.kind)).not.toContain("decisao_criada");
@@ -72,8 +72,21 @@ describe("rotina pelo modo do bot", () => {
     expect(c.banco.decisoes[0]?.estado).toBe("pendente");
   });
 
-  it("automático depois de conteúdo de fora continua propondo", async () => {
+  it("ADR-066: conteúdo de fora não para mais o automático — entrada não confiável ou turno que leu algo de fora, a rotina nasce ativa", async () => {
     const c = await cenario("automatico");
+    const r = (await criarRotina(c.deps, { ...c.ctx(c.plano("conversa", { confiancaEntrada: "nao_confiavel" })), ...rotinaValida() })).data;
+    if ("erro" in r) throw new Error(r.erro);
+    expect(r.aplicada).toBe(true);
+    expect(c.banco.decisoes[0]).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 2 } });
+    await c.deps.repos.turnos.contaminar(c.turnoId, AGORA);
+    const depoisDaWeb = (await criarRotina(c.deps, { ...c.ctx(), ...rotinaValida() })).data;
+    if ("erro" in depoisDaWeb) throw new Error(depoisDaWeb.erro);
+    expect(depoisDaWeb.aplicada).toBe(true);
+  });
+
+  it("ADR-066: no manual, conteúdo de fora continua propondo — o modo é quem decide, e o manual pede", async () => {
+    const c = await cenario("manual");
+    await c.deps.repos.turnos.contaminar(c.turnoId, AGORA);
     const r = (await criarRotina(c.deps, { ...c.ctx(c.plano("conversa", { confiancaEntrada: "nao_confiavel" })), ...rotinaValida() })).data;
     if ("erro" in r) throw new Error(r.erro);
     expect(r.aplicada).toBeUndefined();
@@ -131,5 +144,13 @@ describe("pedir_acesso pelo modo do bot", () => {
   it("total concede até depois de conteúdo de fora", async () => {
     const c = await cenario("total");
     expect((await pedirAcesso(c.deps, { ...c.ctx(c.plano("conversa", { confiancaEntrada: "nao_confiavel" })), ...excluir })).data).toMatchObject({ estado: "concedido" });
+  });
+
+  it("ADR-066: o automático também concede depois de conteúdo de fora; o arriscado fora da conversa continua parando", async () => {
+    const c = await cenario("automatico");
+    await c.deps.repos.turnos.contaminar(c.turnoId, AGORA);
+    const naoConfiavel = c.plano("conversa", { confiancaEntrada: "nao_confiavel" });
+    expect((await pedirAcesso(c.deps, { ...c.ctx(naoConfiavel), conector: "clickup", capacidades: ["CLICKUP_CREATE_TASK"], nivel: "escrita", nao_pedido: [] })).data).toMatchObject({ estado: "concedido" });
+    expect((await pedirAcesso(c.deps, { ...c.ctx(c.plano("delegacao", { confiancaEntrada: "nao_confiavel" })), ...excluir })).data).toMatchObject({ estado: "aguardando_pessoa" });
   });
 });

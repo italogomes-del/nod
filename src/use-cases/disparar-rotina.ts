@@ -1,15 +1,12 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
-import type { Confianca } from "../contracts/mensagem.ts";
 import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
 import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { redigir } from "../domain/redacao.ts";
-import { conectoresCitados } from "../domain/rotina-acessos.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
@@ -55,22 +52,6 @@ export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): s
     `Limites de aprovação: ${rotina.limitesAprovacao}`,
     `Se não houver dado: ${rotina.politicaSemDado}`,
   ].join("\n");
-}
-
-/**
- * A fonte da rotina é prosa; o que decide confiança é dado TIPADO: se a fonte cita (por slug ou
- * nome) um conector habilitado que traz conteúdo de fora, a entrada nasce nao_confiavel e o plano
- * reduz o catálogo (ADR-026). Não é interpretação de intenção: é casar nomes de conectores.
- * revisto em 2026-09-30 (ADR-062): o critério era "toca dado de aprendiz" (a declaração do conector), e todo app do
- * marketplace nasce declarado assim — 440 de 440 rotinas do Marlon nasciam não confiáveis, e o automático e o
- * "Sempre permitir" nunca valiam nelas. Agora é a curadoria de conteúdo de fora: ClickUp e Slack não contaminam.
- */
-export async function confiancaDaFonte(deps: Pick<Deps, "repos">, fonte: string): Promise<Confianca> {
-  // definido em 2026-09-24 (emenda da ADR-044): o casamento mora em conectoresCitados, o mesmo do pré-voo.
-  for (const c of conectoresCitados(fonte, await deps.repos.conectores.listarHabilitados())) {
-    if (conectorTrazConteudoDeFora(c)) return "nao_confiavel";
-  }
-  return "confiavel";
 }
 
 /**
@@ -166,7 +147,10 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
     entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
-    entradaConfianca: await confiancaDaFonte(deps, rotina.fonte),
+    // revisto em 2026-10-01 (ADR-066): a entrada da rotina é confiável — é a instrução que a pessoa confirmou. Antes
+    // ela nascia não confiável quando a FONTE citava um app de fora (GitHub, Gmail), e o catálogo perdia a escrita:
+    // 1.040 de 1.130 turnos de rotina saíram assim até 30/09. A marca agora vem do que o bot lê (chamar-ferramenta.ts).
+    entradaConfianca: "confiavel",
     modelo: agente.modelo,
     harness: agente.harness,
     executor: input.executor,

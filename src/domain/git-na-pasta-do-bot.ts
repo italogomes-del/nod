@@ -57,6 +57,19 @@ function aviso(acao: string, alvo: string | null, pastaDoBot: string): string {
   return `${acao} ${onde}. Cada task numa worktree sua: git -C <clone> fetch origin && git -C <clone> worktree add "${pastaDoBot}/<repo>-<task>" -b <branch> origin/main, e rode os comandos dentro dela. Os clones de fora da sua pasta não são mexidos por bots.`;
 }
 
+/**
+ * O arquivo que Write/Edit/NotebookEdit gravaria, quando fica FORA de ~/nod/<bot> (definido em 2026-10-01, ADR-066):
+ * aí a gravação segue o modo de aprovação, como o comando do terminal já seguia — no manual, card; no automático e
+ * no total, grava. Dentro da pasta do bot (a worktree dele), sempre livre. Caminho que não dá para resolver conta
+ * como fora: fail-closed para o card, nunca para a gravação calada.
+ */
+export function arquivoForaDaPastaDoBot(caminho: string, ctx: ContextoDaPasta): string | null {
+  const base = ctx.cwd === null ? null : resolver(ctx.cwd, null, ctx.home);
+  const alvo = resolver(caminho, base, ctx.home);
+  if (alvo !== null && dentro(alvo, ctx.pastaDoBot)) return null;
+  return alvo ?? caminho;
+}
+
 /** Por que este comando mexeria numa pasta de trabalho fora de ~/nod/<bot>, ou null se pode rodar. */
 export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): string | null {
   if (!/\b(git|gh)\b/.test(comando)) return null;

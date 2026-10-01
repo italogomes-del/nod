@@ -283,6 +283,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.sim === true;
     },
 
+    /** ADR-066: a sessão do CLI que o turno abriu e o executor dele — a retomada de rotina ou de pedido de colega volta nela. */
+    async sessaoDoTurno(id: string): Promise<{ sessaoCli: string; executor: string } | null> {
+      const [l] = await conn<{ sessao_cli: string | null; executor: string }[]>`select sessao_cli, executor from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.sessao_cli ? { sessaoCli: l.sessao_cli, executor: l.executor } : null;
+    },
+
     /** "Pode fazer e o resto desta tarefa" (0032): marca a RAIZ; vale para ela e as retomadas dela. */
     async liberarComputador(raizId: string, agora: number): Promise<boolean> {
       const r = await conn`update turnos set computador_liberado_em = coalesce(computador_liberado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${raizId}`;

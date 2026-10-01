@@ -4,13 +4,13 @@ import type { ModoTurno } from "../contracts/plano-turno.ts";
 
 /**
  * O modo de aprovação do bot (ADR-059), escolhido pela dona no chip do campo. Duas regras NOMEADAS, como as da
- * ADR-042, porque os alcances são opostos: `modo_automatico` para no arriscado e no que vem depois de conteúdo de
- * fora; `modo_total` só para na credencial. Underscore, nunca hífen (CHECK trilha_sem_texto_livre, 0001).
+ * ADR-042, porque os alcances são opostos: `modo_automatico` para no arriscado (revisto em 2026-10-01, ADR-066: não para
+ * mais depois de conteúdo de fora); `modo_total` só para na credencial. Underscore, nunca hífen (CHECK trilha_sem_texto_livre, 0001).
  * A versão sobe quando muda o CONJUNTO de ações que a regra deixa passar (por exemplo, sair um item da lista de
  * arriscados), para a trilha dizer sob qual semântica o bot agiu.
  */
 export const REGRA_MODO_AUTOMATICO = "regra:modo_automatico" as const;
-export const VERSAO_MODO_AUTOMATICO = 1 as const;
+export const VERSAO_MODO_AUTOMATICO = 2 as const;
 export const REGRA_MODO_TOTAL = "regra:modo_total" as const;
 export const VERSAO_MODO_TOTAL = 1 as const;
 export type RegraDoModo = typeof REGRA_MODO_AUTOMATICO | typeof REGRA_MODO_TOTAL;
@@ -42,10 +42,6 @@ export type SituacaoDaAcao = {
   arriscada: boolean;
   /** O comando toca uma credencial do Mac (`tocaCredencial`). */
   credencial: boolean;
-  /** O turno leu conteúdo de fora: entrada não confiável (ADR-026) ou web pelas nativas (0033). */
-  conteudoDeFora: boolean;
-  /** O gate veio da rotina de OUTRO bot (ADR-058): o automático de quem recebe não o desliga. */
-  travaHerdada: boolean;
 };
 
 export type DecisaoDoModo =
@@ -58,10 +54,13 @@ export type DecisaoDoModo =
  *
  *  1. credencial do Mac      → para, em QUALQUER modo (ADR-055 §3: credencial nunca foi aprovação, é cerca)
  *  2. total                  → aprova
- *  3. trava herdada          → para (ADR-058: a trava é da rotina de quem pediu; o automático de quem recebe não a desliga)
- *  4. conteúdo de fora       → para (ADR-042 claim 6: é por aí que um texto de fora manda no bot)
- *  5. arriscada              → para
- *  6. automático             → aprova
+ *  3. arriscada              → para
+ *  4. automático             → aprova
+ *
+ * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram a trava herdada da rotina de
+ * outro bot e a parada depois de conteúdo de fora. O Marlon decidiu: depois de ler algo de fora, o manual pede, e o
+ * automático e o total seguem sem pedir. A trava herdada vira, no manual, a marca de conteúdo de fora que passa
+ * de quem pediu para quem recebe (pedir-a-bot.ts). A ordem é igual em toda origem de turno.
  *
  * Quem chama só consulta o modo onde o manual pediria a pessoa: leitura, "o resto desta tarefa" e as regras da
  * ADR-042 continuam valendo antes, e o que o modo não muda (sem plano, origem sensível, concessão) vem antes dele.
@@ -70,20 +69,6 @@ export function decidirPeloModo(modo: ModoAprovacao | undefined, s: SituacaoDaAc
   if (!modo || modo === "manual") return null;
   if (s.credencial) return { automatico: false, motivo: "toca_credencial" };
   if (modo === "total") return { automatico: true, regra: REGRA_MODO_TOTAL, versao: VERSAO_MODO_TOTAL };
-  if (s.travaHerdada) return { automatico: false, motivo: "gate_de_rotina" };
-  if (s.conteudoDeFora) return { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
   if (s.arriscada) return { automatico: false, motivo: "acao_arriscada" };
   return { automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO };
-}
-
-/**
- * O gate da rotina (EMENDA 15, `efeitoExternoSoPorAprovacao`) ainda obriga uma pessoa neste modo? No manual,
- * sempre. No automático, só quando veio da rotina de outro bot (ADR-058); a do próprio bot é satisfeita pelo modo
- * que a dona escolheu para ele, e o efeito externo continua passando por item (a trilha não perde nada). No total,
- * nunca. Em qualquer caso a escrita direta segue negada sob o gate (chamar-ferramenta.ts): o caminho é pedir_aprovacao.
- */
-export function gateDaRotinaObrigaPessoa(modo: ModoAprovacao | undefined, travaHerdada: boolean): boolean {
-  if (!modo || modo === "manual") return true;
-  if (modo === "total") return false;
-  return travaHerdada;
 }

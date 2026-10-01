@@ -5,7 +5,8 @@ import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
-import { acaoArriscadaNoApp, decidirAprovacao, nuncaPermanente } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirAprovacao } from "../domain/aprovacao-permanente.ts";
+import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
@@ -178,14 +179,11 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const tool = ferramenta.nome.startsWith(`${conector.slug}__`) ? ferramenta.nome.slice(conector.slug.length + 2) : ferramenta.nome;
   const concessoes = await deps.repos.concessoes.doAgente(input.agenteId);
   if (!concessoes.some((c) => c.conectorId === conectorId && c.capacidade === tool)) return negar("capacidade_desligada", "ferramenta_negada", conectorId);
-  // definido em 2026-09-28 (ADR-052, 0033): o turno que trouxe conteúdo da web pelas nativas vira, dali em
-  // diante, turno com gate — escrita em conector só por item aprovado, como o catálogo reduzido faria.
-  const soPorAprovacao = plano.politicaExecucao.efeitoExternoSoPorAprovacao || (await deps.repos.turnos.contaminado(input.turnoId));
-  if (soPorAprovacao && !ferramenta.readOnlyHint) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
-  // definido em 2026-09-24 (revisão da ADR-047): aprovar PR e merge NUNCA rodam por chamada direta, em
-  // nenhum modo — nem com a concessão de escrita. Só como item aprovado de pedir_aprovacao, que executa
-  // por outro caminho (decidir.ts). Negação transitória, como a do gate de rotina: "peça aprovação".
-  if (nuncaPermanente(ferramenta.nome, ferramenta.readOnlyHint)) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+  // revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram as duas negações que vinham
+  // antes desta decisão — a do gate da rotina e da web lida (escrita só por item) e a do merge e aprovar PR (só por
+  // item, em qualquer modo). As duas viraram uma ida e volta até o pedir_aprovacao, que no automático e no total
+  // aprovava sozinho; o Dev 3 tentou três vezes um comentário em 30/09. Agora tudo passa pela decisão abaixo, e o
+  // modo diz quando parar. No manual, merge e aprovar PR seguem pedindo a pessoa e nunca viram "Sempre permitir".
   // definido em 2026-09-30 (ADR-062): a chamada direta passa pela MESMA decisão do card. Antes, escrever e até apagar
   // direto rodavam sem card no modo manual (só o prompt pedia pedir_aprovacao), e um colega apagava direto no
   // automático o que, pedido por item, pararia em `acao_arriscada`. Quem não passaria sozinho no card recebe a
@@ -195,13 +193,18 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
     const capacidade = conector.catalogo.find((c) => c.nome === tool);
     const semprePermitir = await semprePermitirVivo(deps, input.agenteId, plano);
     const destino = { conector: conector.slug, ferramenta: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> };
-    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada: capacidade ? acaoArriscadaNoApp(capacidade) : true });
+    const contaminado = await deps.repos.turnos.contaminado(input.turnoId);
+    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada: capacidade ? acaoArriscadaNoApp(capacidade) : true, contaminado });
     if (!d.automatico) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
   }
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
 
   await registrarChamada(conectorId);
+  // definido em 2026-10-01 (ADR-066): chamar um app de fora (Gmail, GitHub, MCP próprio) marca o turno, como a web já
+  // marcava — também quando roda no gh do Mac (ADR-048). Substitui a rotina "desconfiada" pelo nome do app na fonte: a
+  // marca vem do que o bot leu, não do que a instrução cita. Só pesa no manual (a regra "Sempre permitir" cai).
+  if (conectorTrazConteudoDeFora(conector)) await deps.repos.turnos.contaminar(input.turnoId, agora);
   if (plano.executor === "catcher") await deps.repos.catcher.registrar({ turnoId: input.turnoId, tipo: "tool_call", dados: { nome: input.nome, origem: "conector", conector_id: conectorId } });
   // ADR-048: todos os portões acima valem igual; só o EFEITO muda de lugar — o gh é o do Mac do turno.
   if (ferramenta.execucao === "maquina") return { data: { executarLocal: { capacidade: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> } }, events };

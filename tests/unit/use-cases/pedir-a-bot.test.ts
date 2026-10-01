@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { OrigemTurno, Profundidade } from "../../../src/contracts/turno.ts";
 import { montarPlano } from "../../../src/domain/plano-turno.ts";
-import { travaDoPedido } from "../../../src/use-cases/apoio-l7.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../../src/use-cases/entregar-resposta-peer.ts";
 import { pedirABot } from "../../../src/use-cases/pedir-a-bot.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
@@ -10,8 +9,9 @@ import { PESSOA_ANA, TENANT_LEAPY } from "../../helpers/ids.ts";
 
 /**
  * pedir_a_bot (definido em 2026-09-29, ADR-058): UM jeito de um bot pedir a outro — pergunta ou tarefa —, e
- * quem recebe usa os acessos dele, venha o pedido de conversa, sala ou rotina. Um salto; a trava da rotina de
- * quem pediu é herdada; a resposta volta como retomada do turno que pediu.
+ * quem recebe usa os acessos dele, venha o pedido de conversa, sala ou rotina. Até três passes (ADR-063); a marca de
+ * quem leu algo de fora passa adiante, no lugar da trava herdada (ADR-066); a resposta volta como retomada do turno
+ * que pediu.
  */
 const AGORA = 1_700_000_000_000;
 type D = ReturnType<typeof depsMemoria>;
@@ -120,34 +120,6 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     await expect(pedir(d, vera, t.id, "Zé", "oi")).rejects.toMatchObject({ codigo: "nao_encontrado" });
     await expect(pedir(d, vera, t.id, "Vera", "oi")).rejects.toMatchObject({ codigo: "entrada_invalida" });
     await expect(pedir(d, vera, t.id, "Tuca", " ")).rejects.toMatchObject({ codigo: "texto_vazio" });
-  });
-});
-
-describe("a trava da rotina de quem pediu vale para quem recebe", () => {
-  async function turnoDaRotina(d: D, de: { id: string; conversaId: string }, exigeAprovacao: boolean) {
-    const rotina = await d.deps.repos.rotinas.criar({ agenteId: de.id, conversaId: de.conversaId, cron: "*/10 * * * *", fusoIana: "UTC", instrucao: "Ler o Slack", fonte: "Slack", entregavel: "chat", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, exigeAprovacao });
-    const t = await turno(d, de.id, de.conversaId, "rotina", { confianca: "nao_confiavel" });
-    await d.deps.repos.rotinaJanelas.reivindicar({ rotinaId: rotina!.id, instanteAgendado: AGORA, executor: "catcher", machineId: randomUUID() });
-    await d.deps.repos.rotinaJanelas.vincularTurno({ rotinaId: rotina!.id, instanteAgendado: AGORA, turnoId: t.id });
-    return t;
-  }
-
-  it("rotina com exige_aprovacao trava; sem, não trava; conversa não trava; sem o pedido, trava (fail-closed)", async () => {
-    const d = depsMemoria({ agora: () => AGORA });
-    const clarice = await bot(d, "Clarice");
-    await bot(d, "Chico");
-    const comTrava = await pedir(d, clarice, (await turnoDaRotina(d, clarice, true)).id, "Chico", "leia o PR");
-    const semTrava = await pedir(d, clarice, (await turnoDaRotina(d, clarice, false)).id, "Chico", "leia o PR");
-    const daConversa = await pedir(d, clarice, (await turno(d, clarice.id, clarice.conversaId)).id, "Chico", "leia o PR");
-    const tarefa = (id: string) => d.banco.turnos.find((x) => x.id === id)!;
-    expect(await travaDoPedido(d.deps.repos, tarefa(comTrava.data.tarefa_id))).toBe(true);
-    expect(await travaDoPedido(d.deps.repos, tarefa(semTrava.data.tarefa_id))).toBe(false);
-    expect(await travaDoPedido(d.deps.repos, tarefa(daConversa.data.tarefa_id))).toBe(false);
-    // Rotina sem janela (criada fora do scheduler) trava, como no gate da própria rotina (E7.3).
-    const semJanela = await pedir(d, clarice, (await turno(d, clarice.id, clarice.conversaId, "rotina")).id, "Chico", "leia o PR");
-    expect(await travaDoPedido(d.deps.repos, tarefa(semJanela.data.tarefa_id))).toBe(true);
-    const orfa = await turno(d, clarice.id, clarice.conversaId, "delegacao", { profundidade: 1 });
-    expect(await travaDoPedido(d.deps.repos, orfa)).toBe(true);
   });
 });
 
@@ -262,7 +234,7 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     await expect(pedir(d, chico, ultima.data.continuacao.id, "Dev", "mais uma?")).rejects.toMatchObject({ codigo: "nao_permitido" });
   });
 
-  it("a trava da rotina atravessa a cadeia: rotina com aprovação → Clarice → Chico → Dev trava no Dev, também pela continuação; de conversa, não", async () => {
+  it("ADR-066: a marca de quem leu algo de fora atravessa a cadeia — rotina de fora → Clarice → Chico → Dev, também pela continuação; exige_aprovacao não trava ninguém; de conversa ou rotina limpa, sem marca", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const clarice = await bot(d, "Clarice");
     const chico = await bot(d, "Chico");
@@ -272,19 +244,20 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
       const d2 = tarefaDe(d, (await pedir(d, chico, d1.id, "Dev", "revise o PR")).data.tarefa_id);
       return { d1, d2 };
     };
-    const comTrava = await cadeia(await turnoDaRotina(d, clarice, true));
-    expect(await travaDoPedido(d.deps.repos, comTrava.d1)).toBe(true);
-    expect(await travaDoPedido(d.deps.repos, comTrava.d2)).toBe(true);
-    const volta = await entregarRespostaPeer(d.deps, { tarefaId: comTrava.d2.id, texto: "feito" });
+    const marcado = (t: { id: string }) => d.deps.repos.turnos.contaminado(t.id);
+    const deFora = await cadeia(await turnoDaRotina(d, clarice, true));
+    expect(await marcado(deFora.d1)).toBe(true);
+    expect(await marcado(deFora.d2)).toBe(true);
+    const volta = await entregarRespostaPeer(d.deps, { tarefaId: deFora.d2.id, texto: "feito" });
     if (!("continuacao" in volta.data)) throw new Error("deveria entregar ao Chico");
+    expect(await marcado(volta.data.continuacao)).toBe(true);
     const d3 = tarefaDe(d, (await pedir(d, chico, volta.data.continuacao.id, "Dev", "e o CI?")).data.tarefa_id);
-    expect(await travaDoPedido(d.deps.repos, d3)).toBe(true);
-    expect(await travaDoPedido(d.deps.repos, (await cadeia(await turnoDaRotina(d, clarice, false))).d2)).toBe(false);
-    expect(await travaDoPedido(d.deps.repos, (await cadeia(await turno(d, clarice.id, clarice.conversaId))).d2)).toBe(false);
-    // ADR-062 em cada passe: rotina limpa (fonte da empresa) da mesma pessoa não trava ninguém na cadeia, nem com aprovação.
+    expect(await marcado(d3)).toBe(true);
+    expect(await marcado((await cadeia(await turno(d, clarice.id, clarice.conversaId))).d2)).toBe(false);
+    // ADR-062 em cada passe: rotina limpa (fonte da empresa) não marca ninguém na cadeia, nem com exige_aprovacao.
     const limpa = await cadeia(await turnoDaRotina(d, clarice, true, "confiavel"));
-    expect(await travaDoPedido(d.deps.repos, limpa.d1)).toBe(false);
-    expect(await travaDoPedido(d.deps.repos, limpa.d2)).toBe(false);
+    expect(await marcado(limpa.d1)).toBe(false);
+    expect(await marcado(limpa.d2)).toBe(false);
   });
 
   it("a entrega espera os subpedidos: a Clarice recebe UMA entrega, a final, e não o 'pedi aos Devs, aguardo'", async () => {

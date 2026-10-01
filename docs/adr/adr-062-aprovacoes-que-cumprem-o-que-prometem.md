@@ -1,6 +1,7 @@
 # ADR-062 — Aprovações que cumprem o que prometem: conteúdo de fora por curadoria, regra que vale na hora, chamada direta no mesmo portão
 
-Status: aceito · Data: 2026-09-30 · Emenda ADR-026 (o que é conteúdo de fora), ADR-042 (a regra vale já, não "a partir
+Status: aceito, emendada pela [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) (saíram o gate da
+rotina, a trava herdada e a confiança pela fonte da rotina) · Data: 2026-09-30 · Emenda ADR-026 (o que é conteúdo de fora), ADR-042 (a regra vale já, não "a partir
 do próximo turno"), ADR-052 (a marca da web não se lava), ADR-055 ("o resto desta tarefa"), ADR-058 (a trava herdada
 entre bots da mesma pessoa) e ADR-059 (a chamada direta passa pelo modo). É a Onda 1 da auditoria das aprovações; a
 Onda 2 e a Onda 3 estão em "Não implementado".

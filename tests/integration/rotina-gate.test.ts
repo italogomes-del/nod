@@ -18,7 +18,12 @@ const TZ = "America/Sao_Paulo";
 const JANELA = Date.parse("2026-09-17T08:00:00-03:00");
 const AGORA = JANELA + 30_000;
 
-describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, zero efeito externo, política no plano (EMENDA 15)", () => {
+/**
+ * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): a política do plano não carrega mais o
+ * gate da rotina (EMENDA 15, `efeitoExternoSoPorAprovacao`). O que segue de pé aqui é o gate como DECISÃO: a aprovação
+ * pedida pelo turno da rotina segura a janela e, vencida, vira passou_em_branco.
+ */
+describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, zero efeito externo; sem gate na política do plano (ADR-066)", () => {
   it("gate vencido sem resposta → execução 'passou_em_branco' motivo ninguem_respondeu_o_gate, mensagem 'nada foi enviado', zero chamadas no conector falso; erro técnico → 'falhou'", async () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
@@ -87,7 +92,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
     });
   });
 
-  it("o plano de um turno de rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; rotinaDoTurno acha a rotina pela janela", async () => {
+  it("ADR-066: o plano de um turno de rotina com exige_aprovacao não liga gate nenhum — entrada confiável, política só com prazo e orçamento, ver_colegas no catálogo; rotinaDoTurno acha a rotina pela janela", async () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
@@ -97,6 +102,9 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const ligacao = await rotinaDoTurno(repos, r.data.turno.id);
       expect(ligacao?.rotina.id).toBe(rotina?.id);
       expect(ligacao?.instanteAgendado).toBe(JANELA);
+      // A rotina continua dizendo que exige aprovação (é o texto que a pessoa confirmou); o plano não traduz isso em gate.
+      expect(ligacao?.rotina.exigeAprovacao).toBe(true);
+      expect(r.data.turno.entradaConfianca).toBe("confiavel");
       const agente = await repos.agentes.buscar(agenteId);
       const plano = montarPlano({
         turno: r.data.turno,
@@ -111,13 +119,15 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
         executor: "catcher",
         sessaoCli: null,
         pessoaNome: "Marlon",
-        rotina: { exigeAprovacao: ligacao?.rotina.exigeAprovacao ?? false },
         agora: AGORA,
       });
-      expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      // ADR-044: pedir_acesso entra na rotina (só propõe; a pessoa decide num botão). ADR-051: o artefato também
-      // (fica no nod: publicar não é efeito externo, e o gate da EMENDA 15 vale para conector). ADR-064: as pendências também.
-      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "lembrar", "ler_artefato", "pedir_a_bot", "pedir_a_pessoa", "pedir_acesso", "pedir_aprovacao", "publicar_artefato", "sem_novidade"]);
+      // Quem decide quando o bot para e pergunta é o modo de aprovação, igual em toda origem: a política só tem prazo e orçamento.
+      expect(plano.politicaExecucao).toEqual({ prazoMs: expect.any(Number), orcamentoResultadoChars: expect.any(Number) });
+      expect(plano.confiancaEntrada).toBe("confiavel");
+      expect(plano.modoTurno).toBe("rotina");
+      // ADR-044: pedir_acesso entra na rotina (o modo concede; no manual, a pessoa decide num botão). ADR-051: o artefato
+      // também. ADR-064: as pendências também. ADR-066: ver_colegas também (leitura que não incomoda ninguém).
+      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "lembrar", "ler_artefato", "pedir_a_bot", "pedir_a_pessoa", "pedir_acesso", "pedir_aprovacao", "publicar_artefato", "sem_novidade", "ver_colegas"]);
       // turno de conversa comum não liga a flag
       const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       expect(await rotinaDoTurno(repos, comum?.id ?? "")).toBeNull();

@@ -24,7 +24,8 @@ export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; per
 
 /** O que o servidor respondeu sobre a chamada; `motivo` volta ao modelo quando nega. */
 export type Confirmacao = { permitir: boolean; motivo?: string };
-export type Confirmar = (p: { ferramenta: string; contamina: boolean; comando?: string }) => Promise<Confirmacao>;
+/** `arquivo` (ADR-066): a gravação fora de ~/nod/<bot>, que o servidor decide pelo modo — e o hook espera, como no Bash. */
+export type Confirmar = (p: { ferramenta: string; contamina: boolean; comando?: string; arquivo?: string }) => Promise<Confirmacao>;
 
 const saida = (permitir: boolean, motivo: string): SaidaHook => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: permitir ? "allow" : "deny", permissionDecisionReason: `nod: ${motivo}` } });
 
@@ -42,7 +43,7 @@ export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?
   if (!d.permitir) return saida(false, d.motivo);
   // MCP: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).
   if (ferramenta.startsWith("mcp__")) return saida(true, d.motivo);
-  const c = await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}) });
+  const c = await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}), ...(d.arquivo !== undefined ? { arquivo: d.arquivo } : {}) });
   return c.permitir ? saida(true, d.motivo) : saida(false, c.motivo ?? "o servidor do nod não confirmou esta chamada");
 }
 
@@ -60,12 +61,12 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
   const buscar = opcoes.fetch ?? fetch;
   const base = cfg.url.replace(/\/+$/, "");
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
-  return async ({ ferramenta, contamina, comando }) => {
+  return async ({ ferramenta, contamina, comando, arquivo }) => {
     const pedir = async (): Promise<RespostaNativa | Confirmacao> => {
       const r = await buscar(`${base}/api/interno/nativas`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}) }),
+        body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}), ...(arquivo !== undefined ? { arquivo } : {}) }),
         signal: AbortSignal.timeout(10_000),
       });
       const corpo = (await r.json().catch(() => ({}))) as RespostaNativa;

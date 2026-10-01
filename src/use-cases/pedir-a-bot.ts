@@ -48,7 +48,9 @@ async function mensagensDaPessoa(deps: Deps, turno: Turno): Promise<Mensagem[]> 
  *
  * O turno do alvo nasce na conversa própria dele: origem 'delegacao', um passe a mais que o de quem pediu,
  * `sob_procuracao_de` = a pessoa dona dos dois e entrada CONFIÁVEL — catálogo inteiro das concessões dele.
- * A trava da rotina de onde o pedido nasceu é resolvida no plano (travaDoPedido, emitir-plano-turno.ts).
+ * revisto em 2026-10-01 (ADR-066): a trava da rotina de onde o pedido nasceu saiu. No lugar dela, se quem pediu já
+ * tinha lido algo de fora (entrada marcada ou turno contaminado), o turno de quem recebe nasce com a mesma marca —
+ * ela só pesa no modo manual, e a página lida não se lava pelo pedido (ADR-062).
  * Na conversa do alvo fica o `peer_pedido` (fala do remetente, "remetente · por pessoa", ADR-023); na de
  * origem, o `handoff`. Os dois são texto de modelo e continuam marcados não confiáveis (ADR-026: a marca é
  * do conteúdo); o que mudou é que ela não reduz mais o catálogo de quem recebe.
@@ -86,6 +88,7 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     harness: alvo.harness,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do pedido não criado" });
+  if (turnoRemetente.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turnoRemetente.id))) await deps.repos.turnos.contaminar(turno.id, agora);
   const autoria = autoriaAgente(remetente.id, pessoaId, pessoaId);
   const mensagem = await deps.repos.mensagens.criar({
     conversaId: conversaAlvo.id,

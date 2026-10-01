@@ -36,13 +36,17 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * - Rita — conservadora, bot em MANUAL. Quer card antes de toda escrita em app; mas "Sempre permitir" clicado
  *   = nunca mais aquela ação; e leitura de um app aprovada = nenhum outro card de leitura do mesmo app.
  * - Marlon — lê às vezes, bot em AUTOMÁTICO. O bot trabalha sozinho (lê e escreve no ClickUp/Slack que ele
- *   conectou) e só para no arriscado (apagar, merge, credencial). Clicou "Sempre permitir" em comentar e criar
- *   task no ClickUp. Os bots dele leem ClickUp, Slack e e-mail o tempo todo e conversam entre si (pedir_a_bot).
+ *   conectou) e só para no arriscado (apagar que ninguém pediu na conversa, comando arriscado, credencial). Clicou
+ *   "Sempre permitir" em comentar e criar task no ClickUp. Os bots dele leem ClickUp, Slack e e-mail o tempo todo e
+ *   conversam entre si (pedir_a_bot).
  * - Bruno — autonomia total, bot em TOTAL ("Ignorar todas as aprovações"). Nunca quer card, exceto credencial.
  *
  * Os testes ASSERTAM O COMPORTAMENTO ATUAL. Foram escritos sobre a main em 024b1ac (2026-09-30) e revistos com a
- * Onda 1 da ADR-062 — onde o comportamento mudou, o comentário diz "ADR-062". Onde ele ainda diverge da expectativa
- * da persona (leitura por app e "Sempre permitir" por grupo ficam para a Onda 2) há um "ESPERADO PELA PERSONA: …".
+ * Onda 1 da ADR-062 — onde o comportamento mudou, o comentário diz "ADR-062" — e com a ADR-066 (2026-10-01, "o bot
+ * tem o que você deu; o modo decide": sem gate de rotina nem trava herdada, catálogo igual em toda origem, conteúdo
+ * de fora só pesa no manual, merge e aprovar PR fora do arriscado) — onde mudou, "ADR-066". Onde ele ainda diverge da
+ * expectativa da persona (leitura por app e "Sempre permitir" por grupo ficam para a Onda 2) há um "ESPERADO PELA
+ * PERSONA: …".
  *
  * A persona é o MODO do bot. As três rodam sob a identidade do Marlon (ids.ts) — o caminho de aprovação não olha
  * quem é a pessoa, só o dono do bot e o modo dele. Cada bot tem um colega do mesmo dono, no mesmo modo.
@@ -71,6 +75,8 @@ const roda = (regra: string): Resultado => ({ tipo: "roda", regra });
 const card = (...motivos: (string | null)[]): Resultado => ({ tipo: "card", motivos });
 const EXECUTOU: Resultado = { tipo: "executou" };
 const negado = (motivo: string): Resultado => ({ tipo: "negado", motivo });
+/** A política de execução de todo turno desde a ADR-066: só prazo e orçamento — sem gate da rotina nem trava herdada. */
+const SEM_GATE = ["orcamentoResultadoChars", "prazoMs"];
 
 type App = "clickup" | "slack" | "github";
 const cap = (nome: string, readOnlyHint = false): CapacidadeConector => ({ nome, descricao: nome.toLowerCase(), schema: { type: "object" }, readOnlyHint });
@@ -196,7 +202,7 @@ async function pedirAoColega(m: Mundo, p: PlanoTurno): Promise<Turno> {
 
 async function terminal(m: Mundo, p: PlanoTurno, comando: string): Promise<{ r: Resultado; decisaoId: string | null }> {
   // O kit do terminal é do harness Claude Code real (executor local); a decisão de cada comando só olha nativas,
-  // confiança, contaminação, gate e o modo ATUAL do agente — o resto do plano é o mesmo.
+  // confiança, contaminação e o modo ATUAL do agente — o resto do plano é o mesmo.
   const a = await autorizarComando(m.deps, { plano: { ...p, nativas: [...NATIVAS_DO_TERMINAL] }, comando });
   if ("aguardar" in a.data) {
     const [item] = await m.repos.itensAprovacao.listar(a.data.aguardar);
@@ -253,9 +259,25 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         const t = await turnoConversa(m);
         const p = await plano(m, t.id);
         expect(await direto(m, p, "clickup", "CLICKUP_GET_TASK")).toEqual(EXECUTOU);
-        // O resultado do conector volta 'nao_confiavel' ao modelo (ADR-026), mas só a web pelas nativas contamina (0033).
+        // O resultado do conector volta 'nao_confiavel' ao modelo (ADR-026), mas o ClickUp é conteúdo interno (curadoria,
+        // ADR-062): ler não marca o turno. Ler um app de fora marca (ADR-066, o teste seguinte).
         expect(await m.repos.turnos.contaminado(t.id)).toBe(false);
         const ATUAL: Record<NomePersona, Resultado> = { Rita: card("sem_regra_permanente"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
+        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
+        expect(await direto(m, p, "clickup", "CLICKUP_UPDATE_TASK")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
+      });
+    });
+
+    it.each(PERSONAS)("$nome ($modo): ADR-066 — depois de LER o GitHub pelo conector (app de fora) o turno é marcado; só o manual volta a pedir", async (persona) => {
+      await withRollback(ESCOPO, async (trx) => {
+        const m = await montar(trx, persona);
+        const t = await turnoConversa(m);
+        const p = await plano(m, t.id);
+        expect(await direto(m, p, "github", "GITHUB_GET_A_PULL_REQUEST")).toEqual(EXECUTOU);
+        // PR e issue podem ser de qualquer pessoa: o GitHub não está na curadoria de conteúdo interno, e a marca vem do
+        // que o bot leu (chamar-ferramenta.ts), como a web pelas nativas (0033).
+        expect(await m.repos.turnos.contaminado(t.id)).toBe(true);
+        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("regra_suspensa_conteudo_nao_confiavel"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
         expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
         expect(await direto(m, p, "clickup", "CLICKUP_UPDATE_TASK")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
       });
@@ -276,7 +298,7 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): depois da resposta de um colega que leu a WEB, a continuação herda a marca", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): depois da resposta de um colega que leu a WEB, a continuação herda a marca — ADR-066: só o manual pede", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
         const t = await turnoConversa(m);
@@ -288,22 +310,22 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         // ADR-062: antes a continuação nascia limpa — pedir a um colega lavava a página que ele leu.
         expect(await m.repos.turnos.contaminado(entrega.data.continuacao.id)).toBe(true);
         const p = await plano(m, entrega.data.continuacao.id);
-        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("regra_suspensa_conteudo_nao_confiavel"), Marlon: card("regra_suspensa_conteudo_nao_confiavel"), Bruno: roda("regra:modo_total") };
+        // ADR-066: a marca só tira o manual do "segue sem perguntar"; o automático não para mais depois de conteúdo de fora.
+        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("regra_suspensa_conteudo_nao_confiavel"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
         expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): depois da web, a RETOMADA do card continua marcada", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): depois da web, a RETOMADA do card continua marcada (ADR-066: o card só nasce no manual)", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
         const t = await turnoConversa(m);
         const p = await plano(m, t.id);
         await m.repos.turnos.contaminar(t.id, Date.now());
-        const { decisaoId } = await pedir(m, p, [["clickup", "CLICKUP_UPDATE_TASK"]]);
-        if (!decisaoId) {
-          expect(persona.modo).toBe("total");
-          return;
-        }
+        const { r, decisaoId } = await pedir(m, p, [["clickup", "CLICKUP_UPDATE_TASK"]]);
+        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("regra_suspensa_conteudo_nao_confiavel"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
+        expect(r).toEqual(ATUAL[persona.nome]);
+        if (!decisaoId) return;
         // O turno não está vivo: a decisão abre a retomada (a sessão volta pelo --resume, com a página no contexto).
         const d = await decidir(m.deps, { decisaoId });
         const retomada = d.data.turnoRetomadaId ?? "";
@@ -313,7 +335,7 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): depois de ler a WEB pelas nativas (turno contaminado)", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): depois de ler a WEB pelas nativas (turno contaminado) — ADR-066: o automático e o total seguem", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
         const t = await turnoConversa(m);
@@ -322,14 +344,15 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         await m.repos.turnos.contaminar(t.id, Date.now());
         const ATUAL: Record<NomePersona, Resultado> = {
           Rita: card("regra_suspensa_conteudo_nao_confiavel"),
-          // ESPERADO PELA PERSONA (Marlon): comentar no ClickUp dele sem card — ele só quer parar no arriscado. A ADR-059
-          // escolheu parar tudo depois de conteúdo de fora no automático ("quem quer seguir escolhe o total").
-          Marlon: card("regra_suspensa_conteudo_nao_confiavel"),
+          // ADR-066 (decisão do Marlon: "depois de ler algo de fora: manual pede; auto e total não pedem"). Antes a
+          // ADR-059 parava tudo depois de conteúdo de fora no automático — o que a persona não queria.
+          Marlon: roda("regra:modo_automatico"),
           Bruno: roda("regra:modo_total"),
         };
         expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
-        // A chamada direta é negada em TODO modo, até no total: o modelo recebe a negação e tem de refazer por pedir_aprovacao.
-        expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(negado("alcance_insuficiente"));
+        // A chamada direta segue a mesma decisão. Antes desta ADR era negada em TODO modo, até no total, e o modelo
+        // tinha de refazer por pedir_aprovacao.
+        expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
       });
     });
   });
@@ -373,7 +396,7 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
       });
     });
 
-    it.each([MARLON, BRUNO])("$nome ($modo): a regra ganha do modo na conversa; depois da web só o total segue", async (persona) => {
+    it.each([MARLON, BRUNO])("$nome ($modo): a regra ganha do modo na conversa; depois da web a regra cai e o modo segue (ADR-066)", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona, { semprePermitir: ["CLICKUP_CREATE_TASK_COMMENT", "CLICKUP_CREATE_TASK"] });
         const t2 = await turnoConversa(m);
@@ -386,8 +409,9 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         await m.repos.turnos.contaminar(t4.id, Date.now());
         const ATUAL: Record<NomePersona, Resultado> = {
           Rita: card("regra_suspensa_conteudo_nao_confiavel"),
-          // ESPERADO PELA PERSONA (Marlon): clicou "Sempre permitir" em comentar — não quer card, só no arriscado.
-          Marlon: card("regra_suspensa_conteudo_nao_confiavel"),
+          // A regra da pessoa cai depois da web (ADR-042 claim 6), mas o modo assina no lugar dela. ADR-066: antes o
+          // automático parava aqui — e a persona, que clicou "Sempre permitir" em comentar, não queria card.
+          Marlon: roda("regra:modo_automatico"),
           Bruno: roda("regra:modo_total"),
         };
         expect(await aprovar(m, p4, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
@@ -432,14 +456,16 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): numa rotina, [comentar (com regra), apagar task]", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): numa rotina, [comentar (com regra), apagar task] — ADR-066: sem gate, a regra vale na rotina como na conversa", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona, { semprePermitir: ["CLICKUP_CREATE_TASK_COMMENT"] });
         await conceder(m, m.bot, "clickup", ["CLICKUP_DELETE_TASK"]);
         const p = await plano(m, (await turnoDeRotina(m, "a agenda do dia")).id);
         const ATUAL: Record<NomePersona, Resultado> = {
-          // ESPERADO PELA PERSONA (Rita): o comentário com "Sempre permitir" não voltaria; o gate da rotina vem antes da regra.
-          Rita: card("gate_de_rotina", "gate_de_rotina"),
+          // ADR-066: antes o gate da rotina vinha antes da regra e os dois itens pediam (gate_de_rotina). Agora é o lote
+          // misto da conversa: o comentário vai ao card sem motivo, só o apagar pede.
+          // ESPERADO PELA PERSONA (Rita): não ver o comentário de novo; ver só o "apagar".
+          Rita: card(null, "sem_regra_permanente"),
           // O comentário passaria; o apagar para — e o lote inteiro espera. Para Marlon, parar no apagar é o esperado.
           Marlon: card(null, "acao_arriscada"),
           Bruno: roda("regra:modo_total"),
@@ -493,24 +519,34 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): na ROTINA, falta de leitura vira card em todo modo — no pré-voo e no pedir_acesso do turno", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): na ROTINA o modo decide a falta de acesso como na conversa (ADR-066) — no manual vira card, no pré-voo e no pedir_acesso do turno; no automático e no total concede, até a escrita", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
-        // Pré-voo: a rotina cita o Slack e o bot não lê o Slack → a janela para sem turno, com card de acesso.
+        // Pré-voo: a rotina cita o Slack e o bot não lê o Slack.
         const rotina = await m.repos.rotinas.criar({ agenteId: m.bot.agenteId, conversaId: m.bot.conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "Resumo do canal", fonte: "o canal #deploy do Slack", entregavel: "chat", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: JANELA });
         const disparo = await dispararRotina(m.deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
-        if (!("bloqueada" in disparo.data)) throw new Error("esperava a rotina bloqueada");
-        // ESPERADO PELA PERSONA (Bruno): nunca ver card (só credencial). Marlon: a rotina da noite para por um acesso de leitura.
-        expect(disparo.data.bloqueada).toBe("sem_acesso");
-        expect(await m.repos.decisoes.buscar(disparo.data.propostaId ?? "")).toMatchObject({ tipo: "acesso", estado: "pendente" });
-        // No turno de rotina, pedir_acesso nunca passa pelo modo (pedir-acesso.ts: o ramo da rotina volta antes).
-        const p = await plano(m, (await turnoDeRotina(m, "a agenda do dia")).id);
-        expect((await pedirAcesso(m, p, "slack", [])).estado).toBe("aguardando_pessoa");
+        if (persona.modo === "manual") {
+          // Manual: a janela para sem turno, com card de acesso; e o pedir_acesso do turno de rotina espera a pessoa.
+          if (!("bloqueada" in disparo.data)) throw new Error("esperava a rotina bloqueada");
+          expect(disparo.data.bloqueada).toBe("sem_acesso");
+          expect(await m.repos.decisoes.buscar(disparo.data.propostaId ?? "")).toMatchObject({ tipo: "acesso", estado: "pendente" });
+          const p = await plano(m, (await turnoDeRotina(m, "a agenda do dia")).id);
+          expect((await pedirAcesso(m, p, "slack", [])).estado).toBe("aguardando_pessoa");
+          return;
+        }
+        // Automático e total: o pré-voo concede a leitura pelo modo e a janela roda no mesmo disparo. Antes desta ADR a
+        // rotina era o único lugar em que o total ainda esperava um clique, e cada janela seguinte saía bloqueada.
+        if (!("turno" in disparo.data)) throw new Error(`esperava a rotina rodando: ${JSON.stringify(disparo.data)}`);
+        const p = await plano(m, disparo.data.turno.id);
+        expect(p.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining([`${m.slug.slack}__SLACK_SEARCH_MESSAGES`, `${m.slug.slack}__SLACK_FETCH_CONVERSATION_HISTORY`]));
+        // E o turno de rotina pede a escrita que a tarefa exige — antes só pedia leitura (ou a escrita declarada).
+        expect((await pedirAcesso(m, p, "slack", ["SLACK_SEND_MESSAGE"], "escrita")).estado).toBe("concedido");
+        expect((await m.repos.concessoes.doAgente(m.bot.agenteId)).filter((c) => c.conectorId === m.conectorId.slack).map((c) => c.capacidade).sort()).toEqual(["SLACK_FETCH_CONVERSATION_HISTORY", "SLACK_SEARCH_MESSAGES", "SLACK_SEND_MESSAGE"]);
       });
     });
   });
 
-  describe("7. ação arriscada: apagar task e merge de PR", () => {
+  describe("7. ação arriscada: apagar task (arriscado) e merge de PR (ADR-066: não é mais arriscado, mas nunca vira regra)", () => {
     it.each(PERSONAS)("$nome ($modo): quem dá o acesso de apagar — na conversa, o modo concede sozinho", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
@@ -525,30 +561,35 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         await conceder(m, m.bot, "clickup", ["CLICKUP_DELETE_TASK"]);
         const p = await plano(m, (await turnoConversa(m)).id);
         const ATUAL: Record<NomePersona, Resultado> = { Rita: card("sem_regra_permanente"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
-        // Emenda de 2026-09-30: apagar e merge que a pessoa pediu na conversa saem sozinhos no automático.
+        // Emenda de 2026-09-30: apagar que a pessoa pediu na conversa sai sozinho no automático. O merge, desde a ADR-066,
+        // sai sozinho em qualquer origem; no manual pede sempre (nuncaPermanente).
         expect(await aprovar(m, p, [["clickup", "CLICKUP_DELETE_TASK"]])).toEqual(ATUAL[persona.nome]);
         expect(await aprovar(m, p, [["github", "GITHUB_MERGE_A_PULL_REQUEST"]])).toEqual(ATUAL[persona.nome]);
-        // Direto: o merge é negado em todo modo (nuncaPermanente). ADR-062: o APAGAR direto segue a decisão do card —
-        // antes rodava sem card até no manual.
-        expect(await direto(m, p, "github", "GITHUB_MERGE_A_PULL_REQUEST")).toEqual(negado("alcance_insuficiente"));
+        // Direto: ADR-066 tirou a negação do merge em todo modo — a chamada direta segue a decisão do card, como o
+        // APAGAR desde a ADR-062 (antes rodava sem card até no manual).
+        expect(await direto(m, p, "github", "GITHUB_MERGE_A_PULL_REQUEST")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
         expect(await direto(m, p, "clickup", "CLICKUP_DELETE_TASK")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): pedido numa ROTINA (sem conteúdo de fora)", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): pedido numa ROTINA (sem conteúdo de fora) — ADR-066: sem gate; o apagar que ninguém pediu para no automático, o merge não", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
         await conceder(m, m.bot, "clickup", ["CLICKUP_DELETE_TASK"]);
         const p = await plano(m, (await turnoDeRotina(m, "a agenda do dia")).id);
-        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("gate_de_rotina"), Marlon: card("acao_arriscada"), Bruno: roda("regra:modo_total") };
-        expect(await aprovar(m, p, [["clickup", "CLICKUP_DELETE_TASK"]])).toEqual(ATUAL[persona.nome]);
-        expect(await aprovar(m, p, [["github", "GITHUB_MERGE_A_PULL_REQUEST"]])).toEqual(ATUAL[persona.nome]);
-        // Sob o gate da rotina a escrita direta é negada em todo modo.
-        expect(await direto(m, p, "clickup", "CLICKUP_DELETE_TASK")).toEqual(negado("alcance_insuficiente"));
+        // ADR-066: antes a Rita via gate_de_rotina; agora o motivo é o da conversa.
+        const APAGAR: Record<NomePersona, Resultado> = { Rita: card("sem_regra_permanente"), Marlon: card("acao_arriscada"), Bruno: roda("regra:modo_total") };
+        expect(await aprovar(m, p, [["clickup", "CLICKUP_DELETE_TASK"]])).toEqual(APAGAR[persona.nome]);
+        // ADR-066 (decisão do Marlon: "não quero que merge volte para ação arriscada"): antes o merge parava o automático aqui.
+        const MERGE: Record<NomePersona, Resultado> = { Rita: card("sem_regra_permanente"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
+        expect(await aprovar(m, p, [["github", "GITHUB_MERGE_A_PULL_REQUEST"]])).toEqual(MERGE[persona.nome]);
+        // A escrita direta segue a mesma decisão (antes, sob o gate da rotina, era negada em todo modo).
+        expect(await direto(m, p, "clickup", "CLICKUP_DELETE_TASK")).toEqual(persona.modo === "total" ? EXECUTOU : negado("alcance_insuficiente"));
+        expect(await direto(m, p, "github", "GITHUB_MERGE_A_PULL_REQUEST")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): pedido de COLEGA nascido na conversa (sem trava) — o colega apaga", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): pedido de COLEGA nascido na conversa — o colega apaga; ninguém pediu na conversa dele, então o automático para", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
         await conceder(m, m.colega, "clickup", ["CLICKUP_DELETE_TASK"]);
@@ -564,22 +605,17 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
     });
   });
 
-  describe("8. rotina da própria pessoa (gate efeitoExternoSoPorAprovacao) e pedido de colega (trava herdada)", () => {
-    it.each(PERSONAS)("$nome ($modo): rotina própria que não lê app (entrada confiável), com \"Sempre permitir\" de comentar", async (persona) => {
+  describe("8. rotina da própria pessoa e pedido de colega — ADR-066: sem gate da rotina nem trava herdada; o modo decide", () => {
+    it.each(PERSONAS)("$nome ($modo): rotina própria que não lê app (entrada confiável), com \"Sempre permitir\" de comentar — a regra vale na rotina", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona, { semprePermitir: ["CLICKUP_CREATE_TASK_COMMENT"] });
         const p = await plano(m, (await turnoDeRotina(m, "a agenda do dia")).id);
-        expect({ gate: p.politicaExecucao.efeitoExternoSoPorAprovacao, confianca: p.confiancaEntrada }).toEqual({ gate: true, confianca: "confiavel" });
-        const ATUAL: Record<NomePersona, Resultado> = {
-          // ESPERADO PELA PERSONA (Rita): clicou "Sempre permitir" em comentar; na rotina o gate vem antes da regra.
-          Rita: card("gate_de_rotina"),
-          // No automático e no total o gate da rotina própria não obriga pessoa, e a regra permanente assina (passo 8,
-          // antes do modo) — o mesmo "Sempre permitir" que na Rita não vale.
-          Marlon: roda("regra:aprovacao_permanente"),
-          Bruno: roda("regra:aprovacao_permanente"),
-        };
-        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
-        expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(negado("alcance_insuficiente"));
+        expect({ politica: Object.keys(p.politicaExecucao).sort(), confianca: p.confiancaEntrada }).toEqual({ politica: SEM_GATE, confianca: "confiavel" });
+        // ADR-066: antes o gate da rotina vinha antes da regra no manual (gate_de_rotina) — a Rita clicava "Sempre permitir"
+        // e a rotina perguntava de novo. Agora a regra assina nos três modos (passo 8, antes do modo).
+        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(roda("regra:aprovacao_permanente"));
+        // A escrita direta segue a mesma decisão: antes, sob o gate, era negada em todo modo.
+        expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(EXECUTOU);
       });
     });
 
@@ -588,59 +624,67 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         const m = await montar(trx, persona, { semprePermitir: ["CLICKUP_CREATE_TASK_COMMENT"] });
         await conceder(m, m.bot, "slack", ["SLACK_SEARCH_MESSAGES"]);
         const p = await plano(m, (await turnoDeRotina(m, "as tasks atrasadas do ClickUp e as mensagens no Slack")).id);
-        // ADR-062: a confiança é da curadoria de conteúdo de fora, não da declaração 'toca' — com ela, 440 de 440 rotinas
-        // do Marlon nasciam não confiáveis, e o automático e o "Sempre permitir" nunca valiam numa rotina.
         expect({ confianca: p.confiancaEntrada, semprePermitir: p.semprePermitir }).toEqual({ confianca: "confiavel", semprePermitir: [`${m.slug.clickup}__CLICKUP_CREATE_TASK_COMMENT`] });
-        const ATUAL: Record<NomePersona, Resultado> = {
-          // ESPERADO PELA PERSONA (Rita): clicou "Sempre permitir" em comentar; na rotina o gate vem antes da regra.
-          Rita: card("gate_de_rotina"),
-          Marlon: roda("regra:aprovacao_permanente"),
-          Bruno: roda("regra:aprovacao_permanente"),
-        };
-        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
+        // ADR-066: sem gate, o "Sempre permitir" da Rita vale também na rotina.
+        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(roda("regra:aprovacao_permanente"));
+        // Ler o Slack (conteúdo interno, ADR-062) não marca o turno: a regra continua valendo.
+        expect(await direto(m, p, "slack", "SLACK_SEARCH_MESSAGES")).toEqual(EXECUTOU);
+        expect(await m.repos.turnos.contaminado(p.turnoId)).toBe(false);
+        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(roda("regra:aprovacao_permanente"));
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): rotina própria cuja FONTE cita o GitHub (conteúdo de fora → turno não confiável)", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): rotina própria cuja FONTE cita o GitHub — ADR-066: a entrada é confiável; a marca vem quando o bot LÊ o GitHub, e só o manual volta a pedir", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona, { semprePermitir: ["CLICKUP_CREATE_TASK_COMMENT"] });
         const p = await plano(m, (await turnoDeRotina(m, "os PRs abertos no GitHub")).id);
-        // Issue e PR podem ser de qualquer pessoa: o GitHub não está na curadoria (conteudoInterno), como todo app novo.
-        expect({ confianca: p.confiancaEntrada, semprePermitir: p.semprePermitir }).toEqual({ confianca: "nao_confiavel", semprePermitir: [] });
-        expect(p.catalogo.ferramentas.map((f) => f.nome)).not.toContain(`${m.slug.clickup}__CLICKUP_CREATE_TASK_COMMENT`);
+        // ADR-066: antes a fonte que citava um app de fora fazia a entrada nascer não confiável, e o catálogo perdia a
+        // escrita calado (1.040 de 1.130 turnos de rotina até 30/09). Agora a entrada da rotina é sempre confiável e o
+        // catálogo é o mesmo da conversa.
+        expect({ confianca: p.confiancaEntrada, semprePermitir: p.semprePermitir }).toEqual({ confianca: "confiavel", semprePermitir: [`${m.slug.clickup}__CLICKUP_CREATE_TASK_COMMENT`] });
+        expect(p.catalogo.ferramentas.map((f) => f.nome)).toContain(`${m.slug.clickup}__CLICKUP_CREATE_TASK_COMMENT`);
+        expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(roda("regra:aprovacao_permanente"));
+        // Issue e PR podem ser de qualquer pessoa: o GitHub não está na curadoria (conteudoInterno). Lido, marca o turno.
+        expect(await direto(m, p, "github", "GITHUB_GET_A_PULL_REQUEST")).toEqual(EXECUTOU);
+        expect(await m.repos.turnos.contaminado(p.turnoId)).toBe(true);
         const ATUAL: Record<NomePersona, Resultado> = {
-          Rita: card("gate_de_rotina"),
-          Marlon: card("regra_suspensa_conteudo_nao_confiavel"),
+          Rita: card("regra_suspensa_conteudo_nao_confiavel"),
+          Marlon: roda("regra:modo_automatico"),
           Bruno: roda("regra:modo_total"),
         };
         expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): pedido de COLEGA nascido de uma rotina confiável com gate — entre bots da mesma pessoa, sem trava", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): pedido de COLEGA nascido de uma rotina confiável — entre bots da mesma pessoa, sem trava nem marca", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
         const tarefa = await pedirAoColega(m, await plano(m, (await turnoDeRotina(m, "a agenda do dia")).id));
         const p = await plano(m, tarefa.id);
         // ADR-062 (decisão do Marlon): a rotina de um bot não trava o colega da MESMA pessoa — quem decide é o modo de
         // quem recebe. Antes, os bots do Marlon no automático viravam card um na conversa do outro.
-        expect({ modo: p.modoTurno, trava: p.politicaExecucao.travaHerdada, confianca: p.confiancaEntrada }).toEqual({ modo: "delegacao", trava: undefined, confianca: "confiavel" });
+        expect({ modo: p.modoTurno, politica: Object.keys(p.politicaExecucao).sort(), confianca: p.confiancaEntrada }).toEqual({ modo: "delegacao", politica: SEM_GATE, confianca: "confiavel" });
+        expect(await m.repos.turnos.contaminado(tarefa.id)).toBe(false);
         const ATUAL: Record<NomePersona, Resultado> = { Rita: card("sem_regra_permanente"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
         expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
         expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
       });
     });
 
-    it.each(PERSONAS)("$nome ($modo): pedido de COLEGA nascido de uma rotina que lê conteúdo de fora (trava herdada)", async (persona) => {
+    it.each(PERSONAS)("$nome ($modo): pedido de COLEGA nascido de uma rotina que LEU conteúdo de fora — ADR-066: sem trava; o turno do colega nasce marcado e só o manual pede", async (persona) => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, persona);
-        const tarefa = await pedirAoColega(m, await plano(m, (await turnoDeRotina(m, "os PRs abertos no GitHub")).id));
+        const pRotina = await plano(m, (await turnoDeRotina(m, "os PRs abertos no GitHub")).id);
+        expect(await direto(m, pRotina, "github", "GITHUB_GET_A_PULL_REQUEST")).toEqual(EXECUTOU);
+        const tarefa = await pedirAoColega(m, pRotina);
         const p = await plano(m, tarefa.id);
-        // A trava continua quando quem pediu leu conteúdo de fora: é por aí que um texto de fora mandaria no colega.
-        expect({ modo: p.modoTurno, trava: p.politicaExecucao.travaHerdada, confianca: p.confiancaEntrada }).toEqual({ modo: "delegacao", trava: true, confianca: "confiavel" });
-        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("gate_de_rotina"), Marlon: card("gate_de_rotina"), Bruno: roda("regra:modo_total") };
+        // Antes: trava herdada (gate_de_rotina no manual E no automático, escrita direta negada em todo modo). Agora a
+        // página lida não se lava pelo pedido (ADR-062): a marca passa ao colega, e ela só pesa no manual.
+        expect({ modo: p.modoTurno, politica: Object.keys(p.politicaExecucao).sort(), confianca: p.confiancaEntrada }).toEqual({ modo: "delegacao", politica: SEM_GATE, confianca: "confiavel" });
+        expect(await m.repos.turnos.contaminado(tarefa.id)).toBe(true);
+        const ATUAL: Record<NomePersona, Resultado> = { Rita: card("regra_suspensa_conteudo_nao_confiavel"), Marlon: roda("regra:modo_automatico"), Bruno: roda("regra:modo_total") };
         expect(await aprovar(m, p, [["clickup", "CLICKUP_CREATE_TASK_COMMENT"]])).toEqual(ATUAL[persona.nome]);
-        expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(negado("alcance_insuficiente"));
+        expect(await direto(m, p, "clickup", "CLICKUP_CREATE_TASK_COMMENT")).toEqual(persona.modo === "manual" ? negado("alcance_insuficiente") : EXECUTOU);
       });
     });
 
@@ -649,7 +693,7 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         const m = await montar(trx, persona, { semprePermitir: ["CLICKUP_CREATE_TASK_COMMENT"] });
         const tarefa = await pedirAoColega(m, await plano(m, (await turnoConversa(m)).id));
         const p = await plano(m, tarefa.id);
-        expect(p.politicaExecucao.travaHerdada).toBeUndefined();
+        expect(Object.keys(p.politicaExecucao).sort()).toEqual(SEM_GATE);
         const ATUAL: Record<NomePersona, Resultado> = {
           // ESPERADO PELA PERSONA (Rita): "Sempre permitir" comentar — mas a regra é por (bot, ferramenta) e o colega é outro bot.
           Rita: card("sem_regra_permanente"),
@@ -678,10 +722,14 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         // ADR-062: "o resto desta tarefa" não cobre o arriscado nem a credencial — antes os dois passavam sem card.
         expect((await terminal(m, p, "rm -rf dist")).r).toEqual(card("destino_terminal"));
         expect((await terminal(m, p, "cat ~/.aws/credentials")).r).toEqual(card("destino_terminal"));
+        // Depois da web, no manual (ADR-066: só no manual), até a leitura pede, e "o resto desta tarefa" deixa de valer.
+        await m.repos.turnos.contaminar(t.id, Date.now());
+        expect((await terminal(m, p, "git status")).r).toEqual(card("destino_terminal"));
+        expect((await terminal(m, p, "npm install is-odd")).r).toEqual(card("destino_terminal"));
       });
     });
 
-    it("Marlon (automático): escrita roda, arriscado para; depois da web até a LEITURA vira card", async () => {
+    it("Marlon (automático): escrita roda, arriscado para; ADR-066: depois da web segue igual — leitura e escrita pelo modo, arriscado e credencial param", async () => {
       await withRollback(ESCOPO, async (trx) => {
         const m = await montar(trx, MARLON);
         const t = await turnoConversa(m);
@@ -693,9 +741,12 @@ describeIntegracao("personas × aprovações (Rita manual · Marlon automático 
         expect((await terminal(m, p, "rm -rf dist")).r).toEqual(card("acao_arriscada"));
         expect((await terminal(m, p, "cat ~/.aws/credentials")).r).toEqual(card("toca_credencial"));
         await m.repos.turnos.contaminar(t.id, Date.now());
-        // ESPERADO PELA PERSONA: comando que só lê roda sempre; parar só no arriscado.
-        expect((await terminal(m, p, "git log --oneline -5")).r).toEqual(card("regra_suspensa_conteudo_nao_confiavel"));
-        expect((await terminal(m, p, "git commit -am x")).r).toEqual(card("regra_suspensa_conteudo_nao_confiavel"));
+        // ADR-066: antes, depois da web até a leitura virava card (regra_suspensa_conteudo_nao_confiavel) — o que a
+        // persona não queria. A leitura deixa de ser "leitura" livre, mas o modo a aprova.
+        expect((await terminal(m, p, "git log --oneline -5")).r).toEqual(roda("modo_automatico"));
+        expect((await terminal(m, p, "git commit -am x")).r).toEqual(roda("modo_automatico"));
+        expect((await terminal(m, p, "rm -rf build")).r).toEqual(card("acao_arriscada"));
+        expect((await terminal(m, p, "cat ~/.aws/credentials")).r).toEqual(card("toca_credencial"));
       });
     });
 

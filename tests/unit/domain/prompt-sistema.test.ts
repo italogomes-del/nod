@@ -15,7 +15,11 @@ describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
     expect(comTerminal("manual")).not.toContain("Aprovações:");
     const auto = comTerminal("automatico");
     expect(auto).toContain("Siga a tarefa até o fim sem perguntar se pode");
-    expect(auto).toContain("no que toca uma credencial do Mac, no apagar ou merge que ninguém pediu na conversa");
+    expect(auto).toContain("no que toca uma credencial do Mac e no apagar que ninguém pediu na conversa");
+    // ADR-066: depois de ler algo de fora, o automático segue — e merge não para mais (decisão do Marlon).
+    expect(auto).toContain("Ler a web, um e-mail ou um PR não muda isso.");
+    expect(auto).not.toContain("depois de conteúdo de fora");
+    expect(auto).not.toContain("apagar ou merge que ninguém pediu");
     expect(auto).toContain("pedir_acesso também voltam já aplicados");
     const total = comTerminal("total");
     expect(total).toContain("inclusive depois de ler a web ou um e-mail");
@@ -24,7 +28,13 @@ describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
 
   it("a frase do terminal muda com o modo: no manual o que muda algo é card; no automático só o arriscado", () => {
     expect(comTerminal("manual")).toContain("o que muda algo (git commit/push, gh pr create/merge/comment, npm install, rm) vira um pedido de aprovação");
-    expect(comTerminal("automatico")).toContain("também roda direto, porque você aprova as próprias ações; o arriscado (rm -r, push --force");
+    expect(comTerminal("automatico")).toContain("também roda direto, porque você aprova as próprias ações; só o arriscado (rm -r, push --force");
+    expect(comTerminal("automatico")).not.toContain("depois de WebFetch ou WebSearch");
+    // ADR-065/066: a worktree por task e a gravação fora da pasta seguindo o modo, em todo modo de aprovação.
+    for (const modo of ["manual", "automatico", "total"] as const) {
+      expect(comTerminal(modo)).toContain("worktree add ~/nod/Vera/<repo>-<task> -b <branch> origin/main");
+      expect(comTerminal(modo)).toContain("Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo.");
+    }
     expect(comTerminal("total")).toContain("só o que toca uma credencial do Mac vira um pedido de aprovação");
   });
 
@@ -141,9 +151,9 @@ describe("montarPromptSistema", () => {
     expect(a).toContain("x".repeat(INSTRUCAO_ROTINA_NO_PROMPT));
   });
 
-  it("ADR-044: rotina sem acesso pede por pedir_acesso (leitura, capacidades []) e encerra — nunca por pedir_a_pessoa", () => {
+  it("ADR-044, revisto pela ADR-066: rotina sem acesso pede por pedir_acesso no nível que a tarefa exige e encerra se não vier concedido — nunca por pedir_a_pessoa", () => {
     const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso"), f("pedir_a_pessoa")], pessoaNome: "Marlon", modo: "rotina" });
-    expect(p).toContain("Se faltar acesso a um app, chame pedir_acesso com o slug, capacidades [] e nivel leitura, e encerre");
+    expect(p).toContain("Se faltar acesso a um app, chame pedir_acesso com o slug, capacidades [] e o nível que a tarefa exige (escrita se ela cria, envia ou altera algo), e encerre se não vier concedido");
     expect(p).toContain("a rotina roda de novo sozinha");
     expect(p).toContain("Nunca use pedir_a_pessoa para pedir acesso");
     expect(p).toContain("Se a consulta falhar por erro técnico, diga o erro em uma frase");

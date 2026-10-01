@@ -1,6 +1,7 @@
 # ADR-063 — Pedido entre bots até três passes
 
-Status: aceito · Data: 2026-09-30 · Emenda a ADR-058 (a trava 2, "um salto", vira até três passes). Convive com a
+Status: aceito, emendada pela [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) (o que atravessa a
+cadeia é a marca de quem leu algo de fora, não mais a trava da rotina) · Data: 2026-09-30 · Emenda a ADR-058 (a trava 2, "um salto", vira até três passes). Convive com a
 [ADR-062](adr-062-aprovacoes-que-cumprem-o-que-prometem.md), do mesmo dia (sem trava entre bots da mesma pessoa).
 
 ## Contexto

@@ -69,7 +69,7 @@ function planoDeTeste(dir: string, parcial: Partial<PlanoTurno["entrada"]> = {})
     promptSistema: "Você é a sonda do nod.",
     entrada: { texto: `Some 17 e 25 (${dir})`, sessaoCli: null, modelo: "claude-haiku-4-5-20251001", ...parcial },
     semprePermitir: [],
-    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
+    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000 },
     tokenDeTurno: "token-de-turno-teste",
     expiraEm: Date.now() + 60_000,
   };

@@ -4,15 +4,18 @@ import type { Concessao } from "../../../src/contracts/concessao.ts";
 import type { Conector } from "../../../src/contracts/conector.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
+import { decidirAprovacao, REGRA_CONSULTA_SEM_DECISAO } from "../../../src/domain/aprovacao-permanente.ts";
 import { entradaDoPedido, neutralizarBlocos, neutralizarPedido } from "../../../src/domain/delegacao.ts";
+import { REGRA_MODO_AUTOMATICO } from "../../../src/domain/modo-aprovacao.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
 import { modoDoTurno } from "../../../src/use-cases/emitir-plano-turno.ts";
 
 /**
  * Pedido de colega (ADR-047; revisto em 2026-09-29, ADR-058): quem recebe um pedido_a_bot trabalha com os
- * acessos dele, herdando a trava da rotina de quem pediu. Desde 2026-09-30 (ADR-063) ele também pede a outro
- * colega, até o limite da corrente (profundidade 3).
+ * acessos dele. Desde 2026-09-30 (ADR-063) ele também pede a outro colega, até o limite da corrente
+ * (profundidade 3). Desde 2026-10-01 (ADR-066) não há trava herdada da rotina de quem pediu: o catálogo é o
+ * mesmo de toda origem, e quem decide cada ação é o modo de aprovação de quem recebe.
  */
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "chico", ownerId: "p", visibility: "privado", nome: "Chico", titulo: "Tech Lead", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -27,20 +30,29 @@ const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("quem recebe um pedido de colega usa os acessos dele", () => {
-  it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso, os caminhos de aprovação e anotar o que fica para depois; sem computador", () => {
-    const p = montarPlano({ ...base, computador: true });
-    expect(nomes(p).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "pedir_a_pessoa", "pedir_a_bot", "anotar_pendencia", "ler_mais"]);
-    expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar"]));
+  it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso, os caminhos de aprovação, ver_colegas, o artefato, anotar o que fica para depois e o computador (ADR-066)", () => {
+    const p = montarPlano({ ...base, computador: true, workspace: true, workspaceVinculado: true });
+    expect(p.catalogo.ferramentas.filter((f) => f.origem === "nod").map((f) => f.nome)).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia"]);
+    expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar", "github__pr_revisar", "ler_mais"]));
     expect(p.confiancaEntrada).toBe("confiavel");
-    expect(p.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
-    expect(p.catalogo.ferramentas.some((f) => f.origem === "computador" || f.origem === "workspace")).toBe(false);
+    expect(p.politicaExecucao).toEqual({ prazoMs: 86_400_000, orcamentoResultadoChars: expect.any(Number) });
+    // ADR-066: a delegação tem computador e workspace como toda origem menos o peer legado.
+    expect(p.catalogo.ferramentas.some((f) => f.origem === "computador")).toBe(true);
+    expect(p.catalogo.ferramentas.some((f) => f.origem === "workspace")).toBe(true);
   });
 
-  it("a trava herdada da rotina de quem pediu liga o gate do proxy e vai para o prompt; ler continua livre", () => {
-    const p = montarPlano({ ...base, rotina: { exigeAprovacao: true }, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice", trava: true } });
-    expect(p.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    expect(nomes(p)).toContain("github__pr_ver");
-    expect(p.promptSistema).toContain("O pedido nasceu de uma rotina que exige aprovação: efeito externo só por item aprovado via pedir_aprovacao.");
+  it("ADR-066: sem trava herdada — nem gate no plano nem linha no prompt; com a marca de conteúdo de fora, a escrita fica no catálogo e o modo de quem recebe decide", () => {
+    const p = montarPlano({ ...base, confianca: "nao_confiavel" });
+    expect(Object.keys(p.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+    expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar", "github__pr_revisar"]));
+    expect(p.decididoPor).toBe("regra:montagem-ferramentas");
+    expect(p.promptSistema).not.toContain("O pedido nasceu de uma rotina");
+    // O automático aprova a escrita; no manual, a regra da pessoa cai e pede (aprovacao-permanente.ts).
+    const comentar = { conector: "github", ferramenta: "pr_comentar", argumentos: {} };
+    expect(decidirAprovacao({ plano: p, destino: comentar, origemSensivel: false, modo: "automatico" })).toMatchObject({ automatico: true, regra: REGRA_MODO_AUTOMATICO });
+    expect(decidirAprovacao({ plano: p, destino: comentar, origemSensivel: false, modo: "manual" })).toEqual({ automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" });
+    // Ler continua livre, em qualquer modo.
+    expect(decidirAprovacao({ plano: p, destino: { conector: "github", ferramenta: "pr_ver", argumentos: {} }, origemSensivel: false, modo: "manual" })).toMatchObject({ automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO });
   });
 
   it("repassa abaixo do limite (ADR-063): pedir_a_bot em 1 e 2, fora em 3; encaminhar e rotina nunca", () => {

@@ -33,6 +33,11 @@ export type EntradaDecidirAcesso = {
    * decisão fecha pela regra (decidida_por nulo), o consentimento diz que foi o modo, e a retomada também.
    */
   porRegra?: PorRegra;
+  /**
+   * definido em 2026-10-01 (ADR-066): o pré-voo concede pelo modo no MEIO de um disparo da rotina — disparar de novo
+   * daria dois turnos da mesma janela. Concede e devolve; quem chamou segue com o disparo.
+   */
+  semDisparar?: boolean;
 };
 
 export type SaidaDecidirAcesso = { decisao: Decisao; concessoes: number; consentimentoId: string | null; rotinaId: string | null; turnoId: string | null };
@@ -125,6 +130,7 @@ export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> 
   events.push(...(lote.events ?? []));
 
   let turnoId: string | null = null;
+  if (rotina && input.semDisparar) return { data: { decisao, concessoes: lote.data.concessoes.length, consentimentoId: lote.data.mensagemId, rotinaId: rotina.id, turnoId: null }, events };
   if (rotina) {
     // Agente excluído ou de outra geração (ADR-034) não roda sozinho — a mesma trava de
     // retomarAposAcesso: a concessão fica registrada, o disparo não acontece. O card do pré-voo nasce sem

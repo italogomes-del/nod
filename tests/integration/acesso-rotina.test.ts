@@ -43,7 +43,7 @@ async function disparar(deps: Deps, repos: Repos, rotinaId: string, instante: nu
 }
 
 describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
-  it("rotina sem acesso pede leitura por botão; o disparo seguinte reaproveita; permitir concede o lote com UM consentimento e roda a rotina de novo em modo rotina", async () => {
+  it("rotina sem acesso pede por botão (leitura ou escrita, ADR-066); o disparo seguinte reaproveita; permitir concede o lote com UM consentimento e roda a rotina de novo em modo rotina", async () => {
     await withRollback(MARLON, async (trx) => {
       let agora = JANELA + 30_000;
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
@@ -72,7 +72,8 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       const treze = await dispararRotina(deps, { rotina: rotinaDas13, instanteAgendado: JANELA + 5 * 3_600_000, machineId: randomUUID(), executor: "catcher" });
       expect(treze.data).toMatchObject({ bloqueada: "sem_acesso", propostaId: pedido.data.proposta_id });
       expect((await pedirAcesso(deps, { turnoId: oito, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] })).data.proposta_id).toBe(pedido.data.proposta_id);
-      await expect(pedirAcesso(deps, { turnoId: oito, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "escrita", nao_pedido: [] })).rejects.toMatchObject({ codigo: "nao_permitido" });
+      // ADR-066: a rotina também pede escrita (antes, nao_permitido); com o card do app aberto, é ele que responde — UM por app.
+      expect((await pedirAcesso(deps, { turnoId: oito, conversaId, agenteId, conector: "gmail", capacidades: [], nivel: "escrita", nao_pedido: [] })).data).toMatchObject({ proposta_id: pedido.data.proposta_id, estado: "aguardando_pessoa" });
       expect((await repos.propostas.pendentesDaConversa(conversaId)).filter((p) => p.kind === "acesso")).toHaveLength(1);
 
       // "Sua vez" leva a proposta junto, para a web rotular "Permitir e rodar agora".
@@ -127,13 +128,15 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
     });
   });
 
-  it("SEGURANÇA: a retomada de um turno de rotina não confiável continua nao_confiavel, em modo rotina, com o gate e em sessão nova", async () => {
+  // revisto em 2026-10-01 (ADR-066): a rotina não nasce mais não confiável pelo app que a fonte cita (confiancaDaFonte saiu),
+  // e o catálogo não encolhe. A marca de conteúdo de fora vem do que o bot LÊ, e a retomada a herda — não se lava.
+  it("ADR-066: rotina que cita app de fora nasce confiável e com a escrita no catálogo; LER o app marca o turno, e a retomada herda a marca, em modo rotina e em sessão nova", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = JANELA + 30_000;
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
-      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => agora });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Cuida da turma" });
-      // Fonte que toca dado de aprendiz: a rotina nasce nao_confiavel (confiancaDaFonte, ADR-026).
+      // App sem curadoria de conteúdo interno (e que toca dado de aprendiz): antes a rotina nascia nao_confiavel.
       const diario = await conectorPronto(repos, { slug: "diario", nome: "Diário de classe", catalogo: [cap("LER_NOTAS", true), cap("LANCAR_NOTA", false)], toca: true });
       await concederLote(deps, { agenteId, conectorId: diario.id, capacidades: ["LER_NOTAS", "LANCAR_NOTA"], autorTipo: "pessoa" });
       await repos.conversas.atualizarSessaoCli(conversaId, randomUUID(), "catcher");
@@ -141,47 +144,60 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       if (!rotina) throw new Error("rotina");
       const disparado = await disparar(deps, repos, rotina.id, JANELA);
       const original = await repos.turnos.buscar(disparado);
-      expect(original?.entradaConfianca).toBe("nao_confiavel");
+      expect(original?.entradaConfianca).toBe("confiavel");
+      expect(await repos.turnos.contaminado(disparado)).toBe(false);
+
+      const doDisparo = await emitirPlanoTurno(deps, { turnoId: disparado, machineId: randomUUID(), executor: "catcher" });
+      expect(doDisparo.data.confiancaEntrada).toBe("confiavel");
+      expect(doDisparo.data.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["diario__LER_NOTAS", "diario__LANCAR_NOTA"]));
+      // Ler o app de fora é o que marca o turno (chamar-ferramenta.ts).
+      expect((await chamarFerramenta(deps, { turnoId: disparado, agenteId, nome: "diario__LER_NOTAS", argumentos: {}, plano: doDisparo.data })).data).toMatchObject({ ok: true });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["LER_NOTAS"]);
+      expect(await repos.turnos.contaminado(disparado)).toBe(true);
 
       const pergunta = await pedirAPessoa(deps, { turnoId: disparado, conversaId, agenteId, tipo: "falta_de_dado", texto: "falta a planilha de faltas", dado: "planilha de faltas" });
       const { data: fechada } = await fecharComResposta(deps, { decisaoId: pergunta.data.decisao_id, texto: "está no drive" });
       const { data: resposta } = await retomarComResposta(deps, { decisao: fechada.decisao, texto: "está no drive", respondidaPor: { id: PESSOA_MARLON, nome: "Marlon" }, executor: "catcher" });
       const retomada = resposta.turno;
-      expect(retomada).toMatchObject({ origem: "retomada", retomaTurnoId: disparado });
-      // Antes: "confiavel" fixo. A resposta da pessoa não limpa o que a rotina já leu.
-      expect(retomada?.entradaConfianca).toBe("nao_confiavel");
+      expect(retomada).toMatchObject({ origem: "retomada", retomaTurnoId: disparado, entradaConfianca: "confiavel" });
+      // A resposta da pessoa não lava o que a rotina já leu: a marca passa para a retomada (enfileirar-retomada.ts).
+      expect(await repos.turnos.contaminado(retomada?.id ?? "")).toBe(true);
       expect(retomada?.entradaTexto).toContain("Entrada original da rotina:");
       expect(retomada?.entradaTexto).toContain(original?.entradaTexto ?? "—");
 
       const plano = await emitirPlanoTurno(deps, { turnoId: retomada?.id ?? "", machineId: randomUUID(), executor: "catcher" });
       const nomes = plano.data.catalogo.ferramentas.map((f) => f.nome);
       expect(plano.events?.[0]?.dados.modo).toBe("rotina");
-      expect(plano.data.confiancaEntrada).toBe("nao_confiavel");
-      expect(plano.data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+      expect(plano.data.confiancaEntrada).toBe("confiavel");
+      expect(plano.data.politicaExecucao).not.toHaveProperty("efeitoExternoSoPorAprovacao");
+      // Nunca a sessão da conversa; a do turno que ela continua só vale se ele abriu uma (este nunca rodou).
       expect(plano.data.entrada.sessaoCli).toBeNull();
-      expect(nomes).toContain("diario__LER_NOTAS");
-      expect(nomes).not.toContain("diario__LANCAR_NOTA");
-      expect(nomes).toContain("pedir_acesso");
+      expect(nomes).toEqual(expect.arrayContaining(["diario__LER_NOTAS", "diario__LANCAR_NOTA", "pedir_acesso"]));
       // O kit da CONVERSA não volta pela retomada: nada de mexer em rotina nem criar outra.
       for (const n of ["listar_rotinas", "pausar_rotina", "criar_rotina", "excluir_rotina"]) expect(nomes).not.toContain(n);
 
+      // SEGURANÇA, agora pelo modo: no manual a escrita do turno marcado pede a pessoa (peça aprovação), sem chegar ao app.
+      const lancar = await chamarFerramenta(deps, { turnoId: retomada?.id ?? "", agenteId, nome: "diario__LANCAR_NOTA", argumentos: {}, plano: plano.data });
+      expect(lancar.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["LER_NOTAS"]);
+
       // Dois saltos de retomada continuam ligados à rotina.
-      const deNovo = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "retomada", retomaTurnoId: retomada?.id, prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "nao_confiavel", modelo: "m" });
+      const deNovo = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "retomada", retomaTurnoId: retomada?.id, prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
       const segundo = await emitirPlanoTurno(deps, { turnoId: deNovo?.id ?? "", machineId: randomUUID(), executor: "catcher" });
       expect(segundo.events?.[0]?.dados.modo).toBe("rotina");
-      expect(segundo.data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+      expect(segundo.data.politicaExecucao).not.toHaveProperty("efeitoExternoSoPorAprovacao");
     });
   });
 
-  it("SEGURANÇA: retomada de rotina CONFIÁVEL ainda passa pelo gate — ferramenta de escrita é negada fora de item aprovado", async () => {
+  // revisto em 2026-10-01 (ADR-066): não há mais gate de rotina; a escrita direta passa pela MESMA decisão do card, e o modo decide.
+  it("ADR-066: na retomada de rotina a escrita direta passa pela decisão do modo — no manual é negada (peça aprovação, transitória); no automático sai", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = JANELA + 30_000;
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
-      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      const { deps, repos, chamadas } = depsSobre(trx, MARLON, { agora: () => agora });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Cuida dos e-mails" });
       const gmail = await conectorPronto(repos, { slug: "gmail", nome: "Gmail", catalogo: GMAIL });
       await concederLote(deps, { agenteId, conectorId: gmail.id, capacidades: ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"], autorTipo: "pessoa" });
-      // ADR-062: fonte que não cita app de fora (ler o Gmail tornaria a rotina não confiável, e o catálogo já cairia).
       const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "Responder e-mails", fonte: "planilha de clientes", entregavel: "respostas", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
       if (!rotina) throw new Error("rotina");
       const disparado = await disparar(deps, repos, rotina.id, JANELA);
@@ -190,9 +206,44 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       const { data: resposta } = await retomarComResposta(deps, { decisao: fechada.decisao, texto: "pode", respondidaPor: { id: PESSOA_MARLON, nome: "Marlon" }, executor: "catcher" });
       const plano = (await emitirPlanoTurno(deps, { turnoId: resposta.turno?.id ?? "", machineId: randomUUID(), executor: "catcher" })).data;
       expect(plano.catalogo.ferramentas.map((f) => f.nome)).toContain("gmail__GMAIL_SEND_EMAIL");
-      expect(plano.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      const chamada = await chamarFerramenta(deps, { turnoId: resposta.turno?.id ?? "", agenteId, nome: "gmail__GMAIL_SEND_EMAIL", argumentos: {}, plano });
-      expect(chamada.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+      expect(plano.politicaExecucao).not.toHaveProperty("efeitoExternoSoPorAprovacao");
+      const enviar = () => chamarFerramenta(deps, { turnoId: resposta.turno?.id ?? "", agenteId, nome: "gmail__GMAIL_SEND_EMAIL", argumentos: {}, plano });
+      expect((await enviar()).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+      expect(chamadas.conectores).toEqual([]);
+      await repos.agentes.definirModoAprovacao(agenteId, "automatico");
+      expect((await enviar()).data).toMatchObject({ ok: true });
+      expect(chamadas.conectores.map((c) => c.tool)).toEqual(["GMAIL_SEND_EMAIL"]);
+    });
+  });
+
+  // definido em 2026-10-01 (ADR-066): no automático e no total o pré-voo concede como o turno já concedia, sem disparar de
+  // novo (`semDisparar`) — o disparo segue no mesmo passo. No banco de verdade: a concessão, a decisão fechada pela regra,
+  // os eventos no outbox e UM turno para a janela.
+  it("ADR-066: no automático o pré-voo concede pelo modo e a janela roda — decisão fechada pela regra, eventos no outbox, UM turno, nada bloqueado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = JANELA + 30_000;
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Cuida dos e-mails" });
+      await repos.agentes.definirModoAprovacao(agenteId, "automatico");
+      const gmail = await conectorPronto(repos, { slug: "gmail", nome: "Gmail (Composio)", catalogo: GMAIL });
+      // A fonte cita o app e o bot não tem acesso: no manual a janela pararia no pré-voo (rotina-bloqueio.test.ts).
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "Resumo do Gmail", fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: JANELA });
+      if (!rotina) throw new Error("rotina");
+      const turnoId = await disparar(deps, repos, rotina.id, JANELA);
+
+      expect((await repos.concessoes.doAgente(agenteId)).filter((g) => g.conectorId === gmail.id).map((g) => g.capacidade).sort()).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_LIST_LABELS"]);
+      const [proposta] = (await repos.propostas.pendentesDaConversa(conversaId)).filter((p) => p.kind === "acesso");
+      expect(proposta).toBeUndefined();
+      const decisoes = await trx<{ id: string; estado: string; desfecho: { tipo: string; regra: string; regraVersao: number } | null }[]>`select id, estado, desfecho from decisoes where conversa_id = ${conversaId} and tipo = 'acesso'`;
+      expect(decisoes).toHaveLength(1);
+      expect(decisoes[0]).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 2 } });
+      expect((await repos.propostas.buscar(decisoes[0]?.id ?? ""))).toMatchObject({ estado: "confirmada", payload: { kind: "acesso", rotinaId: rotina.id } });
+      expect((await repos.turnos.listarDaConversa(conversaId, 50)).map((t) => t.id)).toEqual([turnoId]);
+      expect((await repos.rotinaExecucoes.listar(rotina.id)).filter((e) => e.desfecho === "bloqueada")).toHaveLength(0);
+      const kinds = (await trx<{ kind: string }[]>`select kind from events where conversa_id = ${conversaId}`).map((k) => k.kind);
+      expect(kinds).toEqual(expect.arrayContaining(["decisao_decidida", "concessao_criada"]));
+      expect(kinds).not.toContain("decisao_criada");
     });
   });
 });

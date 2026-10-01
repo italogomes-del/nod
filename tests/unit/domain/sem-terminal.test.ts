@@ -7,14 +7,13 @@ import { montarPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-si
 const ferramenta = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: {} });
 
 describe("o turno sem terminal diz por quê (ADR-065)", () => {
-  it("o motivo sai da mesma regra das nativas: nada a explicar quando o turno tem o terminal ou o harness nunca teria", () => {
-    expect(motivoSemTerminal({ modo: "conversa", confianca: "confiavel", terminal: true })).toBeNull();
-    expect(motivoSemTerminal({ modo: "criacao", confianca: "confiavel", terminal: true })).toBeNull();
+  it("o motivo sai da mesma regra das nativas: com o harness do terminal (ADR-066), só o peer legado fica sem", () => {
+    for (const modo of ["conversa", "criacao", "rotina", "delegacao", "sala"] as ModoTurno[]) {
+      for (const confianca of ["confiavel", "nao_confiavel"] as const) expect(motivoSemTerminal({ modo, confianca, terminal: true }), `${modo}/${confianca}`).toBeNull();
+    }
+    expect(motivoSemTerminal({ modo: "peer", confianca: "confiavel", terminal: true })).toBe("resposta_a_colega");
     // Codex ou máquina sem o hook: não é o turno que tirou, é o harness que não tem.
     expect(motivoSemTerminal({ modo: "delegacao", confianca: "confiavel", terminal: false })).toBeNull();
-    expect(motivoSemTerminal({ modo: "conversa", confianca: "nao_confiavel", terminal: true })).toBe("conteudo_de_fora");
-    const esperado: Record<Exclude<ModoTurno, "conversa" | "criacao">, string> = { delegacao: "pedido_de_colega", rotina: "rotina", sala: "sala", peer: "resposta_a_colega" };
-    for (const [modo, motivo] of Object.entries(esperado)) expect(motivoSemTerminal({ modo: modo as ModoTurno, confianca: "confiavel", terminal: true }), modo).toBe(motivo);
   });
 
   it("no pedido de colega a linha diz o motivo, quando o terminal vem e a quem dizer o que ficou de fora", () => {

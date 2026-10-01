@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decidirHook, type Confirmar } from "../../../src/adapters/executor/hook-nativas.ts";
-import { gitForaDaPastaDoBot } from "../../../src/domain/git-na-pasta-do-bot.ts";
+import { arquivoForaDaPastaDoBot, gitForaDaPastaDoBot } from "../../../src/domain/git-na-pasta-do-bot.ts";
 
 const HOME = "/Users/m";
 const PASTA = "/Users/m/nod/Dev 4";
@@ -45,6 +45,23 @@ describe("git que mexe na pasta de trabalho só dentro de ~/nod/<bot> (ADR-065)"
     expect(naPasta("cd $REPO && git commit -m x")).toContain("roda numa pasta que não deu para conferir");
     expect(naPasta("git commit -m x", null)).toContain("não deu para conferir");
     expect(naPasta("git status", null)).toBeNull();
+  });
+
+  it("ADR-066: gravar fora da pasta do bot vai ao servidor com o arquivo (o modo decide); dentro, só a trilha", async () => {
+    expect(arquivoForaDaPastaDoBot(`${CLONE}/apps/web/filtros.tsx`, { cwd: PASTA, pastaDoBot: PASTA, home: HOME })).toBe(`${CLONE}/apps/web/filtros.tsx`);
+    expect(arquivoForaDaPastaDoBot(`${PASTA}/leapy-86akr9u9u/apps/web/filtros.tsx`, { cwd: CLONE, pastaDoBot: PASTA, home: HOME })).toBeNull();
+    expect(arquivoForaDaPastaDoBot("notas.md", { cwd: PASTA, pastaDoBot: PASTA, home: HOME })).toBeNull();
+    const pedidos: unknown[] = [];
+    const confirmar: Confirmar = async (p) => { pedidos.push(p); return { permitir: true }; };
+    const pastas = { pastaDoBot: PASTA, home: HOME };
+    await decidirHook({ tool_name: "Edit", tool_input: { file_path: `${CLONE}/apps/web/filtros.tsx` }, cwd: PASTA }, confirmar, pastas);
+    await decidirHook({ tool_name: "Write", tool_input: { file_path: `${PASTA}/leapy-x/a.ts` }, cwd: PASTA }, confirmar, pastas);
+    await decidirHook({ tool_name: "Read", tool_input: { file_path: `${CLONE}/README.md` }, cwd: PASTA }, confirmar, pastas);
+    expect(pedidos).toEqual([
+      { ferramenta: "Edit", contamina: false, arquivo: `${CLONE}/apps/web/filtros.tsx` },
+      { ferramenta: "Write", contamina: false },
+      { ferramenta: "Read", contamina: false },
+    ]);
   });
 
   it("o hook nega antes do servidor quando o config traz a pasta do bot; config antigo não liga a cerca", async () => {

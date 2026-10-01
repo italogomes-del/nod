@@ -1,5 +1,5 @@
 import { tocaCredencial } from "./comando.ts";
-import { gitForaDaPastaDoBot, type ContextoDaPasta } from "./git-na-pasta-do-bot.ts";
+import { arquivoForaDaPastaDoBot, gitForaDaPastaDoBot, type ContextoDaPasta } from "./git-na-pasta-do-bot.ts";
 import { FERRAMENTAS_DE_TAREFA } from "./tarefas-do-bot.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
@@ -42,11 +42,17 @@ export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch
  * aberta pela pessoa; antes ela nem tinha pasta, e bot novo com workspace_* sem Write/Edit ficaria pela metade.
  * revisto em 2026-09-28 (ADR-052): com o harness Claude Code (`terminal`), o turno de conversa confiável tem o
  * kit do terminal mesmo sem pasta de projeto — a pasta do bot (~/nod/<bot>) é sempre dele.
+ * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): com o hook, o kit vale em TODO modo —
+ * rotina, pedido de colega, sala — e com qualquer confiança da entrada. O motivo de desligar ("as nativas não passam
+ * pelo proxy, o único gate é não ligá-las") caiu com a ADR-052: o hook leva cada chamada ao servidor, o Bash é
+ * decidido pelo modo e, desde esta ADR, o Edit/Write fora da pasta do bot também. Em 30/09 os Devs não
+ * implementaram nenhum dos 6 pedidos do Chico porque o pedido de colega não tinha terminal. Só o peer legado fica
+ * sem. Sem o hook (driver antigo, só --restricted), ninguém decide as nativas: elas ficam na conversa confiável.
  */
 export function nativasDoTurno(t: { modo: ModoTurno; confianca: Confianca; pastasAutorizadas: boolean; terminal?: boolean }): readonly string[] {
-  if (!(t.modo === "conversa" || t.modo === "criacao") || t.confianca !== "confiavel") return [];
+  if (t.modo === "peer") return [];
   if (t.terminal) return NATIVAS_DO_TERMINAL;
-  return t.pastasAutorizadas ? NATIVAS_DE_ARQUIVO : [];
+  return t.pastasAutorizadas && (t.modo === "conversa" || t.modo === "criacao") && t.confianca === "confiavel" ? NATIVAS_DE_ARQUIVO : [];
 }
 
 /** Por que um turno de harness com terminal ficou sem ele: o modo, ou a entrada que veio de fora. */
@@ -80,7 +86,11 @@ export function pastaDoBot(nome: string): string {
  * `comando` = o Bash: quem decide é o SERVIDOR (autorizar-comando.ts), com o comando na mão — só lê roda direto,
  * o resto vira card. O hook nunca decide um comando sozinho.
  */
-export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string };
+/**
+ * `arquivo` (definido em 2026-10-01, ADR-066): Write/Edit/NotebookEdit fora de ~/nod/<bot> — o servidor decide pelo
+ * modo, como o comando. Só com o contexto da pasta (config do hook novo); sem ele, a gravação passa como antes.
+ */
+export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string; arquivo?: string };
 
 /**
  * A decisão do hook do nod para UMA chamada nativa, pura. revisto em 2026-09-28 (ADR-055, "terminal de verdade,
@@ -102,9 +112,12 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     case "Grep": {
       // ADR-055: o Mac inteiro, menos onde moram as credenciais — lê-las é o primeiro passo para vazá-las.
       const caminhos = ["file_path", "notebook_path", "path", "pattern"].map((k) => p.entrada[k]).filter((v): v is string => typeof v === "string");
-      return caminhos.some(tocaCredencial)
-        ? { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false }
-        : { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false };
+      if (caminhos.some(tocaCredencial)) return { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false };
+      // ADR-066: gravar fora da pasta do bot segue o modo de aprovação (o servidor decide); ler continua livre.
+      const grava = p.ferramenta === "Write" || p.ferramenta === "Edit" || p.ferramenta === "NotebookEdit";
+      const alvo = typeof p.entrada.file_path === "string" ? p.entrada.file_path : typeof p.entrada.notebook_path === "string" ? p.entrada.notebook_path : null;
+      const arquivo = grava && p.pasta && alvo !== null ? arquivoForaDaPastaDoBot(alvo, p.pasta) : null;
+      return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false, ...(arquivo ? { arquivo } : {}) };
     }
     case "Bash": {
       const comando = typeof p.entrada.command === "string" ? p.entrada.command : "";

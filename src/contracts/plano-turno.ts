@@ -81,16 +81,14 @@ export type PlanoTurno = {
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
   entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente };
+  /**
+   * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram o gate da rotina
+   * (`efeitoExternoSoPorAprovacao`, EMENDA 15) e a trava herdada (ADR-058/059). Quem decide quando o bot para e
+   * pergunta é só o modo de aprovação, igual em toda origem de turno.
+   */
   politicaExecucao: {
     prazoMs: number;
     orcamentoResultadoChars: number;
-    /** EMENDA 15: rotina com exige_aprovacao só produz efeito externo via item aprovado. */
-    efeitoExternoSoPorAprovacao: boolean;
-    /**
-     * ADR-059: o gate acima veio da rotina de OUTRO bot, pelo pedido de colega (ADR-058). O modo automático de quem
-     * recebe não o desliga; o da própria rotina, sim. Ausente = false.
-     */
-    travaHerdada?: boolean;
   };
   /**
    * ADR-059: o modo de aprovação do agente NA EMISSÃO, para o prompt e o Raio-X. Quem decide cada pedido lê o modo
