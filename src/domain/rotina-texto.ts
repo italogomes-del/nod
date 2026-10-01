@@ -15,6 +15,8 @@ export type RotinaNormalizada = {
   politicaSemDado: string;
   /** Gate SEMPRE ligado: não sai do texto (E7.3). */
   exigeAprovacao: true;
+  /** definido em 2026-10-01 (item 7 da ADR-066): só acorda com pendência visível; ausente na entrada = false. */
+  soComPendencia: boolean;
   proximaExecucao: number;
   resumo: string;
 };
@@ -50,6 +52,17 @@ function textoObrigatorio(valor: unknown, campo: string): string {
 }
 
 /**
+ * O flag `so_com_pendencia` (definido em 2026-10-01, item 7 da ADR-066): ausente = false; presente tem de ser
+ * boolean de verdade. "true" em texto ou 1 é recusado em vez de lido como intenção — o schema da ferramenta já
+ * diz boolean, e o domínio não adivinha (Regra 9).
+ */
+function flagOpcional(valor: unknown, campo: string): boolean {
+  if (valor === undefined) return false;
+  if (typeof valor !== "boolean") throw new RotinaInvalida("entrada_invalida", `${campo} não é boolean`);
+  return valor;
+}
+
+/**
  * Valida a rotina TIPADA vinda de criar_rotina e devolve a forma persistível com próxima execução.
  * Lança fuso_invalido / cron_sem_futuro / entrada_invalida; nunca lê intenção de texto.
  */
@@ -61,6 +74,7 @@ export function validarRotinaNormalizada(entrada: {
   entregavel: string;
   limitesAprovacao: string;
   politicaSemDado: string;
+  soComPendencia?: boolean;
   agora: number;
 }): RotinaNormalizada {
   assertFusoIana(entrada.fusoIana);
@@ -76,13 +90,14 @@ export function validarRotinaNormalizada(entrada: {
     limitesAprovacao: textoObrigatorio(entrada.limitesAprovacao, "limitesAprovacao"),
     politicaSemDado: textoObrigatorio(entrada.politicaSemDado, "politicaSemDado"),
     exigeAprovacao: true,
+    soComPendencia: flagOpcional(entrada.soComPendencia, "soComPendencia"),
     proximaExecucao,
     resumo: resumoCron(cron, entrada.fusoIana),
   };
 }
 
 /** Os campos que atualizar_rotina pode mudar; ausente = fica como está. */
-export type CamposRotinaAtualizaveis = Partial<Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado">>;
+export type CamposRotinaAtualizaveis = Partial<Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "soComPendencia">>;
 
 /**
  * Atualização PARCIAL: funde o pedido sobre a rotina atual e revalida o conjunto INTEIRO pelo
@@ -91,15 +106,18 @@ export type CamposRotinaAtualizaveis = Partial<Pick<RotinaNormalizada, "cron" | 
  * `mudou` lista os campos que de fato mudam — pedido que não muda nada é `entrada_invalida`,
  * porque virar proposta vazia só gastaria a confirmação da pessoa. `mudaAcessos` (definido em
  * 2026-09-24, "rotina nasce com o acesso"): a mudança que só declara acessos novos também é mudança.
+ * `soComPendencia` (definido em 2026-10-01, item 7 da ADR-066): trocar só o flag é mudança; ausente no `atual`
+ * (chamada anterior à 0045) conta como false.
  */
 export function validarAtualizacaoRotina(entrada: {
-  atual: Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado">;
+  atual: Pick<RotinaNormalizada, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado"> & { soComPendencia?: boolean };
   pedido: CamposRotinaAtualizaveis;
   agora: number;
   mudaAcessos?: boolean;
 }): { normalizada: RotinaNormalizada; mudou: (keyof CamposRotinaAtualizaveis)[] } {
   const chaves = ["cron", "fusoIana", "instrucao", "fonte", "entregavel", "limitesAprovacao", "politicaSemDado"] as const;
-  const fundido = { ...entrada.atual };
+  const { soComPendencia: flagAtual, ...textos } = entrada.atual;
+  const fundido = { ...textos, soComPendencia: flagAtual ?? false };
   const mudou: (keyof CamposRotinaAtualizaveis)[] = [];
   for (const k of chaves) {
     const v = entrada.pedido[k];
@@ -108,6 +126,13 @@ export function validarAtualizacaoRotina(entrada: {
     if (limpo === entrada.atual[k]) continue;
     fundido[k] = limpo;
     mudou.push(k);
+  }
+  if (entrada.pedido.soComPendencia !== undefined) {
+    const flag = flagOpcional(entrada.pedido.soComPendencia, "soComPendencia");
+    if (flag !== fundido.soComPendencia) {
+      fundido.soComPendencia = flag;
+      mudou.push("soComPendencia");
+    }
   }
   if (mudou.length === 0 && entrada.mudaAcessos !== true) throw new RotinaInvalida("entrada_invalida", "nenhum campo muda");
   return { normalizada: validarRotinaNormalizada({ ...fundido, agora: entrada.agora }), mudou };

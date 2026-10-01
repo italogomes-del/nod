@@ -1157,6 +1157,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora(),
           excluidoEm: null,
           acessos: r.acessos ?? null,
+          soComPendencia: r.soComPendencia ?? false,
         };
         b.rotinas.push(rotina);
         return rotina;

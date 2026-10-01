@@ -57,6 +57,11 @@ export type PayloadPropostaRotina = {
    * Confirmar concede o que estiver conectado. Ausente = a rotina não declarou (proposta anterior).
    */
   acessos?: AcessoPedido[];
+  /**
+   * definido em 2026-10-01 (item 7 da ADR-066, 0045): a rotina só acorda com pendência visível. Só vem quando
+   * true; ausente = false (proposta anterior ou rotina de toda janela).
+   */
+  soComPendencia?: true;
 };
 /**
  * definido em 2026-09-21: atualizar uma rotina que já existe. Guarda só o que MUDA (campo ausente
@@ -76,6 +81,8 @@ export type PayloadPropostaRotinaAtualizacao = {
   politicaSemDado?: string;
   /** A lista NOVA de acessos declarados, inteira (emenda de 2026-09-24); aplicar concede o que for novo. */
   acessos?: AcessoPedido[];
+  /** O valor NOVO do flag (definido em 2026-10-01, 0045), só quando muda; ausente = fica como está. */
+  soComPendencia?: boolean;
   /** Recalculado na confirmação a partir de agora; este é o previsto quando a proposta nasceu. */
   proximaExecucao: EpochMs;
   resumo: string;
