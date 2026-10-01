@@ -29,6 +29,7 @@ import { COMANDO_GITHUB_NATIVO } from "../../contracts/github.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
 import { concluirItemNaMaquina, itensParaAMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { configGithubNativo, criarDetectorGh, sondaGithubNativa, type DetectorGh } from "../conectores-locais/github/nativo.ts";
+import { criarSubidaComposio } from "../integracoes/arquivo-composio.ts";
 import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
@@ -276,6 +277,8 @@ export function comporApp(o: OpcoesCompor): App {
   const conectoresVivos = criarConectoresVivos({
     agora: relogio,
     ambiente: env,
+    // ADR-068: o nod local está no Mac da pessoa e sobe o arquivo que o bot cita; o compartilhado não o alcança.
+    ...(compartilhado ? {} : { subirArquivo: criarSubidaComposio() }),
     async carregar(conectorId, contexto) {
       const escopos = donoDoConector.has(conectorId) ? [donoDoConector.get(conectorId) as Escopo] : (await listar()).map((p) => ({ tenantId: p.tenantId, pessoaId: p.id }));
       for (const escopo of escopos) {

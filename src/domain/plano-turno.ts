@@ -15,6 +15,7 @@ import { ORCAMENTO_RESULTADO_CHARS } from "../shared/constantes.ts";
 import { nuncaPermanente } from "./aprovacao-permanente.ts";
 import { conectorTocaAprendiz } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
+import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
@@ -110,7 +111,8 @@ function ferramentasDeConectores(conectores: readonly Conector[], concessoes: re
     servidores.push({ conectorId: c.id, nome: c.slug, trust: "untrusted", transporte: c.transporte });
     for (const cap of caps) {
       const nome = `${c.slug}__${cap.nome}`;
-      ferramentas.push({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.id, readOnlyHint: cap.readOnlyHint, tocaAprendiz: conectorTocaAprendiz(c), schema: cap.schema });
+      // ADR-068: o campo de arquivo do app (`s3key`) diz ao bot que aceita o caminho do Mac.
+      ferramentas.push({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.id, readOnlyHint: cap.readOnlyHint, tocaAprendiz: conectorTocaAprendiz(c), schema: comArquivoDoMac(cap.schema) });
     }
   }
   return { ferramentas, servidores };
