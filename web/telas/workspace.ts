@@ -1,4 +1,5 @@
 import type { Api } from "../lib/api.ts";
+import { projetoAtivo, textoDaPasta } from "../lib/pasta-de-trabalho.ts";
 import { esc } from "../lib/render.ts";
 
 export function abrirWorkspace(api: Api, conversaId: string): void {
@@ -50,8 +51,8 @@ export function abrirWorkspace(api: Api, conversaId: string): void {
   void tratar(async () => {
     const r = await api.workspace(conversaId);
     if (!r.disponivel) { q("[data-estado]").textContent = "Esta instalação ainda não oferece associação de pastas locais. Conectar uma inteligência não concede acesso aos arquivos do seu Mac."; return; }
-    q("[data-estado]").textContent = r.vinculo ? `Associada: ${r.vinculo.pasta}${r.vinculo.preparado ? ` · Trabalhando em: ${r.vinculo.preparado.caminho}` : ""}` : "Nenhuma pasta associada.";
+    q("[data-estado]").textContent = textoDaPasta(r.vinculo);
     q("[data-revogar]").hidden = !r.vinculo;
-    await navegar(r.vinculo?.pasta);
+    await navegar(projetoAtivo(r.vinculo)?.pasta);
   });
 }
