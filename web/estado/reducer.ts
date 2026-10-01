@@ -300,6 +300,22 @@ function semDelta(estado: Estado, conversaId: string | null, turnoId: string | n
   return { ...estado, atividades: { ...estado.atividades, [conversaId]: restantes } };
 }
 
+/** A conversa que a tela mostra (conversa ou sala), já carregada ou ainda chegando. */
+function conversaIdNaTela(estado: Estado): string | null {
+  const t = estado.tela;
+  return t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null;
+}
+
+/**
+ * O texto ao vivo de uma conversa é guardado quando ela está carregada OU é a que a tela está abrindo.
+ * definido em 2026-10-01: abrir um bot no meio da resposta põe o GET da conversa para correr junto com os
+ * deltas, e o que chegava antes dele era descartado, então a fala aparecia começando no meio (achado da
+ * revisão do PR #99). Conversa fora da tela e nunca aberta continua sem guardar (ADR-061, mudouNaTela).
+ */
+function guardaAoVivo(estado: Estado, conversaId: string): boolean {
+  return Boolean(estado.conversas[conversaId]) || conversaIdNaTela(estado) === conversaId;
+}
+
 /** O turno vivo `turnoId` da conversa, trocado por `mudar` (o resto de `atividades` fica com a mesma referência). */
 function comAtividade(estado: Estado, conversaId: string, turnoId: string, mudar: (a: AtividadeTurno | undefined) => AtividadeTurno): Estado["atividades"] {
   const daConversa = estado.atividades[conversaId] ?? {};
@@ -334,13 +350,13 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (!turnoId || !conversaId) return e;
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
-    if (!e.conversas[conversaId]) return turnosVivos === e.turnosVivos ? e : { ...e, turnosVivos };
+    if (!guardaAoVivo(e, conversaId)) return turnosVivos === e.turnosVivos ? e : { ...e, turnosVivos };
     return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comTexto(a, trecho)) };
   },
   "turno.atividade": (e, f) => {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    if (!turnoId || !conversaId || !e.conversas[conversaId]) return e;
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
     const rotulo = texto(f.dados.rotulo) ?? "Usou uma ferramenta";
     const vivo = e.turnosVivos[turnoId];
     const turnosVivos = vivo && vivo.estado !== "rodando" ? { ...e.turnosVivos, [turnoId]: { ...vivo, estado: "rodando" as const } } : e.turnosVivos;
@@ -349,7 +365,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "turno.tarefas": (e, f) => {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
-    if (!turnoId || !conversaId || !e.conversas[conversaId]) return e;
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
     return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comTarefas(a, tarefasDoFrame(f.dados.tarefas))) };
   },
   "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
@@ -563,8 +579,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
  */
 export function mudouNaTela(antes: Estado, depois: Estado): boolean {
   if (antes === depois) return false;
-  const t = depois.tela;
-  const naTela = t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null;
+  const naTela = conversaIdNaTela(depois);
   for (const k of Object.keys(depois) as (keyof Estado)[]) {
     if (k === "invalidacoes" || antes[k] === depois[k]) continue;
     if (k === "atividades" && (naTela === null || antes.atividades[naTela] === depois.atividades[naTela])) continue;

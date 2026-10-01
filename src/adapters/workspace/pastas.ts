@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, realpath, rename, unlink, writeFile } from "n
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { lerTexto, gravarTexto } from "../../../infra/computador/texto.mjs";
-import type { PedidoWorkspace, WorkspacePreparado } from "../../contracts/workspace.ts";
+import type { PedidoWorkspace, ProjetoWorkspace, VinculoWorkspace, WorkspacePreparado } from "../../contracts/workspace.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { validarAcaoComputador } from "../../domain/computador.ts";
 import { buscarPastas } from "./busca-pastas.ts";
@@ -11,14 +11,10 @@ import { criarPreparadorWorkspace } from "./preparar.ts";
 import { executarNoWorkspace } from "./terminal.ts";
 
 type Identidade = { tenantId: string; pessoaId: string; conversaId: string };
-/** Um projeto autorizado: pasta escolhida pela pessoa mais o ambiente já preparado para ela. */
-export type Projeto = { id: string; pasta: string; preparado: WorkspacePreparado | null; autorizadoEm: number; ultimoUsoEm: number };
-/**
- * definido em 2026-09-18: o bot é uma sessão viva, então a conversa guarda VÁRIOS projetos e um
- * ativo, não uma pasta só. Autorizar o segundo projeto não revoga o primeiro nem descarta o
- * ambiente preparado dele. O formato antigo (uma pasta) é migrado na leitura.
- */
-export type Vinculo = { projetos: Projeto[]; ativoId: string | null };
+/** O formato está no contrato (src/contracts/workspace.ts), que a web também lê. */
+export type Projeto = ProjetoWorkspace;
+/** O formato antigo (uma pasta) é migrado na leitura. */
+export type Vinculo = VinculoWorkspace;
 type VinculoAntigo = { pasta: string; id: string; preparado: WorkspacePreparado | null };
 /** Teto por conversa: o excedente sai pelo uso mais antigo, para o registro não crescer sem fim. */
 export const MAX_PROJETOS = 20;

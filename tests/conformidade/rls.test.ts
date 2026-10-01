@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { MESES_A_FRENTE, mesesAPartirDe } from "../../src/adapters/fundo/particoes.ts";
 import { nomeParticao, particoesIniciais, sqlParticao } from "../../src/db/schema/events.ts";
 import { db } from "../helpers/db.ts";
 import { withRollbackDono } from "../helpers/db-dono.ts";
@@ -52,8 +53,9 @@ describeIntegracao("gate: RLS por pessoa em toda tabela", () => {
   it("uma partição NOVA criada com sqlParticao (a forma que garantirParticoes deve usar) passa no gate; com GRANT direto, o gate acusa", async () => {
     // EMENDA 2, opção (b), provada por EXECUÇÃO: DDL como nod_dono sob rollback — a partição nasce,
     // o gate a lê no catálogo e ela some no rollback.
-    const ano = 2027;
-    const mes = 9; // primeiro mês DEPOIS das 12 iniciais (2026-09..2027-08)
+    // O primeiro mês depois da janela que garantirParticoes cobre hoje: nenhum boot o criou. definido em 2026-10-01:
+    // o mês fixo (2027-09) venceu na virada do mês, quando o boot de qualquer servidor de teste passou a criá-lo.
+    const { ano, mes } = mesesAPartirDe(Date.now(), MESES_A_FRENTE + 1).at(-1)!;
     const nome = nomeParticao(ano, mes);
     await withRollbackDono(async (trxDono) => {
       await trxDono.unsafe(sqlParticao(ano, mes));

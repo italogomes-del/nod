@@ -169,3 +169,38 @@ describe("reduzir: hidratar e navegar", () => {
     expect(e.tela).toEqual({ tipo: "sua-vez" });
   });
 });
+
+describe("texto ao vivo que chega antes do GET da conversa", () => {
+  const OUTRA = "33333333-3333-4333-8333-333333333333";
+  const abrindo = (): Estado => reduzir(estadoInicial, { tipo: "navegar", tela: { tipo: "conversa", conversaId: CONVERSA, agenteId: "a" } });
+
+  it("a conversa que a tela está abrindo guarda o começo da fala, e ele continua depois de hidratar", () => {
+    let e = aplicarFrame(abrindo(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Começo " }), AGORA);
+    e = reduzir(e, { tipo: "hidratar-conversa", conversa: conversaVazia(), agora: AGORA });
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "e fim." }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.atual).toBe("Começo e fim.");
+  });
+
+  it("página recarregada no meio do turno: texto, tarefas e ferramenta de antes do GET ficam, porque o GET devolve o turno em curso", () => {
+    const tarefas = [{ id: "1", titulo: "Ler o diff", estado: "andamento" }];
+    let e = aplicarFrame(abrindo(), frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Primeiro trecho." }), AGORA);
+    e = aplicarFrame(e, frame("turno.tarefas", { conversaId: CONVERSA, turnoId: TURNO, tarefas }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, rotulo: "Leu um arquivo" }), AGORA);
+    const conversa = { ...conversaVazia(), turnosEmCurso: [{ id: TURNO, estado: "despachando" as const, desde: AGORA - 1000, mensagemId: null }] };
+    e = reduzir(e, { tipo: "hidratar-conversa", conversa, agora: AGORA });
+    expect(e.atividades[CONVERSA]?.[TURNO]).toMatchObject({ etapas: [{ texto: "Primeiro trecho.", ferramentas: 1 }], ferramentas: 1, ultimaFerramenta: "Leu um arquivo", tarefas });
+  });
+
+  it("vale também para a sala aberta", () => {
+    const sala = reduzir(estadoInicial, { tipo: "navegar", tela: { tipo: "sala", salaId: "s", conversaId: CONVERSA } });
+    expect(aplicarFrame(sala, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "oi" }), AGORA).atividades[CONVERSA]?.[TURNO]?.atual).toBe("oi");
+  });
+
+  it("conversa fora da tela e nunca aberta continua sem guardar (ADR-061)", () => {
+    const antes = abrindo();
+    expect(aplicarFrame(antes, frame("turno.delta", { conversaId: OUTRA, turnoId: TURNO, texto: "x" }), AGORA)).toBe(antes);
+    expect(aplicarFrame(antes, frame("turno.atividade", { conversaId: OUTRA, turnoId: TURNO, rotulo: "y" }), AGORA)).toBe(antes);
+    expect(aplicarFrame(antes, frame("turno.tarefas", { conversaId: OUTRA, turnoId: TURNO, tarefas: [] }), AGORA)).toBe(antes);
+  });
+});
