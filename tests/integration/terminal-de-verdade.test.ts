@@ -15,6 +15,8 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * ADR-055, "terminal de verdade, como o inhouse" (2026-09-28), no Postgres: o Bash do bot roda no Mac do Marlon
  * sem sandbox, e cada comando passa por autorizarComando. O que só lê roda; o que muda algo vira card; aprovado,
  * roda — inclusive na retomada, sem segundo card; "e o resto desta tarefa" libera os próximos da mesma tarefa.
+ * revisto em 2026-10-01 (ADR-066): não há mais gate de rotina; o que segura "o resto desta tarefa" e a leitura livre
+ * é a marca de conteúdo de fora, e ela só pesa no manual (os outros modos: modo-aprovacao.test.ts).
  */
 const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
 type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];
@@ -24,7 +26,7 @@ function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }, e
     tenantId: TENANT_LEAPY, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada: "confiavel", profundidade: 0,
     catalogo: { ferramentas: [], servidores: [] }, promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" },
-    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false }, semprePermitir: [], tokenDeTurno: "tok",
+    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 }, semprePermitir: [], tokenDeTurno: "tok",
     expiraEm: Date.now() + 60_000, nativas: [...NATIVAS_DO_TERMINAL], ...extra,
   };
 }
@@ -90,7 +92,7 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
     });
   });
 
-  it("'e o resto desta tarefa': libera os próximos comandos da MESMA tarefa, nunca de outra", async () => {
+  it("'e o resto desta tarefa': libera os próximos comandos da MESMA tarefa, nunca de outra; ADR-066: sem gate de rotina, só a marca de conteúdo de fora o segura", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       const r = await c.autorizar("git checkout -b feat/x");
@@ -105,12 +107,14 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
       expect(await c.repos.turnos.computadorLiberado(c.turno.id)).toBe(false);
       const outraTarefa = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra", entradaConfianca: "confiavel", modelo: "m" });
       expect("aguardar" in (await c.autorizar("git push", planoDe({ turnoId: outraTarefa?.id ?? "", agenteId: c.agenteId, conversaId: c.conversaId }))).data).toBe(true);
-      // Nem vence o gate de rotina.
-      expect("aguardar" in (await c.autorizar("git push", { ...c.plano, politicaExecucao: { ...c.plano.politicaExecucao, efeitoExternoSoPorAprovacao: true } })).data).toBe(true);
+      // ADR-066: não há gate de rotina para vencer — o que segura a liberação é a marca de conteúdo de fora: depois
+      // da web, no manual, o comando volta a pedir a pessoa.
+      await c.repos.turnos.contaminar(c.turno.id, Date.now());
+      expect("aguardar" in (await c.autorizar("git push")).data).toBe(true);
     });
   });
 
-  it("turno que leu a web pede até a leitura; plano sem Bash é recusado", async () => {
+  it("no manual, turno que leu a web pede até a leitura (ADR-066: nos outros modos, não); plano sem Bash é recusado", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       await c.repos.turnos.contaminar(c.turno.id, Date.now());

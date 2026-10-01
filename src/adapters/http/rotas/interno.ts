@@ -167,7 +167,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       // revisto em 2026-09-28 (ADR-055): o Bash vem com o comando, e quem decide é autorizarComando — o que só lê
       // roda; o resto abre um card e a resposta diz ao hook qual decisão esperar. Trilha só do que roda.
       async handler(ctx) {
-        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown } | null;
+        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown; arquivo?: unknown } | null;
         const ferramenta = typeof c?.ferramenta === "string" ? c.ferramenta : "";
         const turnoId = ctx.params.turnoId ?? "";
         const plano = deps.tokens.planoDe(turnoId);
@@ -180,8 +180,10 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           // ADR-059: o comando que o MODO aprovou leva a regra do modo na trilha. Sem isso ele fica igual a uma
           // leitura, e o gatilho da ADR-055 ("nativa__Bash sem decisão correspondente") dispararia à toa.
           let regra: { regra: `regra:${string}`; regraVersao: number } = { regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA };
-          if (ferramenta === "Bash") {
-            const r = await executar(d, autorizarComando, { plano, comando: String(c?.comando) });
+          // ADR-066: a gravação fora de ~/nod/<bot> (o hook manda `arquivo`) passa pela mesma decisão do comando.
+          const arquivo = ["Write", "Edit", "NotebookEdit"].includes(ferramenta) && typeof c?.arquivo === "string" ? c.arquivo : null;
+          if (ferramenta === "Bash" || arquivo !== null) {
+            const r = await executar(d, autorizarComando, arquivo !== null ? { plano, arquivo } : { plano, comando: String(c?.comando) });
             if ("aguardar" in r) return r.aguardar;
             if (r.porque === "modo_automatico") regra = { regra: REGRA_MODO_AUTOMATICO, regraVersao: VERSAO_MODO_AUTOMATICO };
             if (r.porque === "modo_total") regra = { regra: REGRA_MODO_TOTAL, regraVersao: VERSAO_MODO_TOTAL };

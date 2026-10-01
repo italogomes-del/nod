@@ -10,9 +10,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 /**
  * O artefato do nod (ADR-051): o bot publica HTML que aparece DENTRO da conversa. Nada sai do nod — é
  * uma mensagem nova na conversa do turno e uma linha de versão —, por isso publicar_artefato não tem
- * efeito externo e fica no catálogo reduzido de turno não confiável como as demais ferramentas nod
- * (catalogoReduzido, confianca.ts). Quem isola o HTML é a web: iframe sandbox sem allow-same-origin,
- * CSP sem rede, postMessage filtrado pela origem do próprio iframe.
+ * efeito externo e vale em todo turno, com entrada confiável ou não (ADR-066). Quem isola o HTML é a web:
+ * iframe sandbox sem allow-same-origin, CSP sem rede, postMessage filtrado pela origem do próprio iframe.
  */
 
 /**

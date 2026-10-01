@@ -4,6 +4,7 @@ import type { Concessao } from "../../../src/contracts/concessao.ts";
 import type { Conector } from "../../../src/contracts/conector.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
+import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
 import { FERRAMENTAS_NOD_POR_MODO, montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 
 const agora = 1_000_000;
@@ -63,16 +64,20 @@ describe("montarPlano", () => {
     }
   });
 
-  it("entrada nao_confiavel: só readOnly de conector; nod fica; decididoPor nomeia a regra", () => {
-    const p = montarPlano({ ...base, confianca: "nao_confiavel" });
+  it("ADR-066: entrada nao_confiavel não encolhe o catálogo — leitura E escrita do conector ficam, decididoPor é a regra de montagem; só a regra 'Sempre permitir' sai", () => {
+    const p = montarPlano({ ...base, confianca: "nao_confiavel", semprePermitir: ["exemplo__enviar_email"] });
     expect(nomes(p)).toContain("exemplo__listar_contatos");
-    expect(nomes(p)).not.toContain("exemplo__enviar_email");
+    expect(nomes(p)).toContain("exemplo__enviar_email");
     expect(nomes(p)).toContain("pedir_aprovacao");
+    expect(nomes(p).sort()).toEqual(nomes(montarPlano(base)).sort());
     expect(p.confiancaEntrada).toBe("nao_confiavel");
-    expect(p.decididoPor).toBe("regra:reducao_por_confianca");
+    expect(p.decididoPor).toBe("regra:montagem-ferramentas");
+    // O conteúdo de fora só pesa no manual, na hora de cada ação (aprovacao-permanente.ts): a regra da pessoa não vem.
+    expect(p.semprePermitir).toEqual([]);
+    expect(montarPlano({ ...base, semprePermitir: ["exemplo__enviar_email"] }).semprePermitir).toEqual(["exemplo__enviar_email"]);
   });
 
-  it("modos: criacao é o kit da conversa mais atualizar_perfil; rotina permite consulta a colega, pedir acesso e silêncio; sala tem passar/encaminhar", () => {
+  it("modos: criacao é o kit da conversa mais atualizar_perfil; rotina permite ver e pedir a colega (ver_colegas desde a ADR-066), pedir acesso e silêncio; sala tem passar/encaminhar", () => {
     // ADR-050: bot novo é bot completo — perfil vazio não tira ferramenta nenhuma da conversa.
     const criacao = nomes(montarPlano({ ...base, modo: "criacao" })).filter((n) => !n.includes("__"));
     expect(criacao.filter((n) => n !== "atualizar_perfil").sort()).toEqual(nomes(montarPlano(base)).filter((n) => !n.includes("__")).sort());
@@ -80,7 +85,7 @@ describe("montarPlano", () => {
     for (const n of ["ver_colegas", "pedir_a_bot", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]);
     // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
@@ -93,23 +98,21 @@ describe("montarPlano", () => {
     expect(sala).not.toContain("sem_novidade");
   });
 
-  it("ADR-051: artefato em conversa, criação e rotina; fora de sala, peer e delegação; ler_artefato só lê", () => {
+  it("ADR-051: artefato em conversa, criação, rotina e delegação (ADR-066: roda na conversa própria de quem recebe); fora de sala e peer; ler_artefato só lê", () => {
     // A criação tem o kit da conversa desde a ADR-050 (bot novo é bot completo), artefato incluído.
-    for (const modo of ["conversa", "criacao", "rotina"] as const) {
-      expect(nomes(montarPlano({ ...base, modo }))).toEqual(expect.arrayContaining(["publicar_artefato", "ler_artefato"]));
+    for (const modo of ["conversa", "criacao", "rotina", "delegacao"] as const) {
+      expect(nomes(montarPlano({ ...base, modo })), modo).toEqual(expect.arrayContaining(["publicar_artefato", "ler_artefato"]));
     }
-    for (const modo of ["sala", "delegacao"] as const) {
-      expect(nomes(montarPlano({ ...base, modo })), modo).not.toContain("publicar_artefato");
-    }
+    expect(nomes(montarPlano({ ...base, modo: "sala" }))).not.toContain("publicar_artefato");
     expect(nomes(montarPlano({ ...base, modo: "peer", profundidade: 1 }))).not.toContain("publicar_artefato");
     const plano = montarPlano({ ...base, modo: "conversa" });
     const ler = plano.catalogo.ferramentas.find((f) => f.nome === "ler_artefato");
     const publicar = plano.catalogo.ferramentas.find((f) => f.nome === "publicar_artefato");
     expect(ler).toMatchObject({ origem: "nod", readOnlyHint: true });
     expect(publicar).toMatchObject({ origem: "nod", readOnlyHint: false });
-    // Turno não confiável: nod fica no catálogo reduzido (confianca.ts) — publicar não sai do nod.
-    const reduzido = montarPlano({ ...base, modo: "conversa", confianca: "nao_confiavel" });
-    expect(nomes(reduzido)).toEqual(expect.arrayContaining(["publicar_artefato", "ler_artefato"]));
+    // Turno não confiável: o catálogo não encolhe (ADR-066) — publicar continua.
+    const deFora = montarPlano({ ...base, modo: "conversa", confianca: "nao_confiavel" });
+    expect(nomes(deFora)).toEqual(expect.arrayContaining(["publicar_artefato", "ler_artefato"]));
     expect(plano.promptSistema).toContain("publicar_artefato");
     expect(plano.promptSistema).toContain("window.nod.salvar");
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
@@ -130,7 +133,7 @@ describe("montarPlano", () => {
     const noLimite = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 3 }, profundidade: 3 });
     expect(nomes(noLimite)).toContain("anotar_pendencia");
     expect(nomes(noLimite)).not.toContain("pedir_a_bot");
-    // Turno não confiável: as ferramentas do nod ficam no catálogo reduzido (confianca.ts).
+    // Turno não confiável: o catálogo não encolhe (ADR-066), as ferramentas do nod ficam.
     expect(nomes(montarPlano({ ...base, confianca: "nao_confiavel" }))).toEqual(expect.arrayContaining(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]));
   });
 
@@ -146,39 +149,43 @@ describe("montarPlano", () => {
     expect(sem.startsWith(com.slice(0, com.lastIndexOf("\n", inicio)))).toBe(true);
   });
 
-  it("agente acordado por rotina pode pedir a colega; quem recebe (delegacao) tem o catálogo dele e repassa até o limite (ADR-058/062)", () => {
-    const rotina = montarPlano({ ...base, modo: "rotina", turno: { ...turno, origem: "rotina" }, confianca: "nao_confiavel", rotina: { exigeAprovacao: true } });
+  it("agente acordado por rotina pede a colega com o catálogo inteiro, mesmo não confiável; quem recebe (delegacao) tem o catálogo dele e repassa até o limite (ADR-058/062/066)", () => {
+    const rotina = montarPlano({ ...base, modo: "rotina", turno: { ...turno, origem: "rotina" }, confianca: "nao_confiavel" });
     expect(nomes(rotina)).toContain("pedir_a_bot");
-    expect(nomes(rotina)).toContain("exemplo__listar_contatos");
-    expect(nomes(rotina)).not.toContain("exemplo__enviar_email");
-    expect(rotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    const colega = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 1 }, profundidade: 1, confianca: "confiavel", rotina: { exigeAprovacao: true } });
+    // ADR-066: em 30/09 a Clarice não mandava Slack na rotina porque a escrita sumia calada do catálogo.
+    expect(nomes(rotina)).toEqual(expect.arrayContaining(["exemplo__listar_contatos", "exemplo__enviar_email"]));
+    expect(Object.keys(rotina.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+    const colega = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 1 }, profundidade: 1, confianca: "confiavel" });
     // O Chico, pedido pela Clarice a acionar os Devs, não tinha como (2026-09-30): agora quem recebe também pede.
     expect(nomes(colega)).toContain("pedir_a_bot");
     expect(nomes(colega)).toEqual(expect.arrayContaining(["exemplo__listar_contatos", "exemplo__enviar_email"]));
-    // A trava herdada da rotina de quem pediu segura a escrita no proxy, não no catálogo.
-    expect(colega.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    const noLimite = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 3 }, profundidade: 3, confianca: "confiavel", rotina: { exigeAprovacao: true } });
+    // ADR-066: sem trava herdada da rotina de quem pediu — quem decide a escrita é o modo de quem recebe.
+    expect(Object.keys(colega.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+    const noLimite = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 3 }, profundidade: 3, confianca: "confiavel" });
     expect(nomes(noLimite)).not.toContain("pedir_a_bot");
-    expect(noLimite.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
+    expect(nomes(noLimite)).toContain("exemplo__enviar_email");
   });
 
-  it("EMENDA 15: origem rotina com exige_aprovacao liga efeitoExternoSoPorAprovacao; conversa não", () => {
-    const rot = montarPlano({ ...base, turno: { ...turno, origem: "rotina" }, modo: "rotina", rotina: { exigeAprovacao: true } });
-    expect(rot.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    const rotSemGate = montarPlano({ ...base, turno: { ...turno, origem: "rotina" }, modo: "rotina", rotina: { exigeAprovacao: false } });
-    expect(rotSemGate.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
-    expect(montarPlano(base).politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+  it("ADR-066: a rotina não tem gate — política só de prazo e orçamento, como a conversa, e o catálogo inteiro, com escrita e terminal", () => {
+    const rot = montarPlano({ ...base, turno: { ...turno, origem: "rotina" }, modo: "rotina", terminal: true });
+    expect(rot.politicaExecucao).toEqual({ prazoMs: 86_400_000, orcamentoResultadoChars: expect.any(Number) });
+    expect(rot.politicaExecucao).toEqual(montarPlano(base).politicaExecucao);
+    expect(nomes(rot)).toContain("exemplo__enviar_email");
+    expect(rot.nativas).toEqual(NATIVAS_DO_TERMINAL);
+    expect(rot.promptSistema).not.toContain("Terminal: este turno não tem terminal");
+    // O mesmo vale para a conversa e para a rotina não confiável: a origem não muda o catálogo.
+    expect(montarPlano({ ...base, terminal: true }).nativas).toEqual(NATIVAS_DO_TERMINAL);
+    expect(montarPlano({ ...base, turno: { ...turno, origem: "rotina" }, modo: "rotina", confianca: "nao_confiavel", terminal: true }).nativas).toEqual(NATIVAS_DO_TERMINAL);
   });
 
-  it("ADR-044: o gate vem da rotina LIGADA, não da origem — a retomada de uma rotina com gate continua com gate", () => {
-    const retomada = montarPlano({ ...base, turno: { ...turno, origem: "retomada", retomaTurnoId: "t0" }, modo: "rotina", confianca: "nao_confiavel", rotina: { exigeAprovacao: true } });
-    expect(retomada.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    expect(nomes(retomada)).not.toContain("exemplo__enviar_email");
+  it("ADR-066: a retomada de uma rotina, mesmo não confiável, segue no modo rotina sem gate e com a escrita; o ciclo de vida de rotina continua fora", () => {
+    const retomada = montarPlano({ ...base, turno: { ...turno, origem: "retomada", retomaTurnoId: "t0" }, modo: "rotina", confianca: "nao_confiavel" });
+    expect(Object.keys(retomada.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+    expect(nomes(retomada)).toContain("exemplo__enviar_email");
     expect(nomes(retomada)).not.toContain("pausar_rotina");
     expect(retomada.promptSistema).toContain("Você foi acordado por um agendamento");
-    // Retomada sem rotina ligada é conversa: sem gate.
-    expect(montarPlano({ ...base, turno: { ...turno, origem: "retomada" } }).politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+    // Retomada de conversa: a mesma política.
+    expect(montarPlano({ ...base, turno: { ...turno, origem: "retomada" } }).politicaExecucao).toEqual(retomada.politicaExecucao);
   });
 
   it("inventário não pronto → executor_indisponivel (nunca promove em silêncio)", () => {
@@ -219,10 +226,14 @@ describe("catálogo de workspace conforme haja projeto autorizado", () => {
   it("sem o serviço de workspace não oferece nenhuma", () => {
     expect(montarPlano({ ...base, workspace: false, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
   });
-  it("fora da conversa própria não oferece nenhuma", () => {
-    for (const modo of ["sala", "rotina"] as const) {
-      expect(montarPlano({ ...base, modo, workspace: true, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
+  it("ADR-066: em todo modo menos o peer legado — sala, rotina e pedido de colega também trabalham na pasta", () => {
+    for (const modo of ["sala", "rotina", "delegacao"] as const) {
+      const p = montarPlano({ ...base, modo, workspace: true, workspaceVinculado: true });
+      expect(p.catalogo.ferramentas.some((f) => f.nome === "workspace_terminal"), modo).toBe(true);
+      // Sem projeto autorizado, a mesma regra de sempre: só consultar e propor.
+      expect(montarPlano({ ...base, modo, workspace: true, workspaceVinculado: false }).catalogo.ferramentas.filter((f) => f.origem === "workspace").map((f) => f.nome).sort(), modo).toEqual(["workspace_consultar", "workspace_propor_pasta"]);
     }
+    expect(montarPlano({ ...base, modo: "peer", profundidade: 1, workspace: true, workspaceVinculado: true }).catalogo.ferramentas.filter((f) => f.origem === "workspace")).toHaveLength(0);
   });
   it("a criação é conversa própria: bot novo também trabalha na pasta (ADR-050)", () => {
     expect(montarPlano({ ...base, modo: "criacao", workspace: true, workspaceVinculado: true }).catalogo.ferramentas.some((f) => f.nome === "workspace_terminal")).toBe(true);
@@ -240,11 +251,15 @@ describe("montarPlano: o modo de aprovação (ADR-059)", () => {
     expect(total.promptSistema).toContain("Aprovações: este bot está em Ignorar todas as aprovações");
   });
 
-  it("a trava que veio da rotina de quem pediu é marcada como herdada; a da própria rotina, não", () => {
-    const pedido = montarPlano({ ...base, modo: "delegacao", profundidade: 1, rotina: { exigeAprovacao: true }, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice", trava: true } });
-    expect(pedido.politicaExecucao).toMatchObject({ efeitoExternoSoPorAprovacao: true, travaHerdada: true });
-    const propria = montarPlano({ ...base, modo: "rotina", rotina: { exigeAprovacao: true } });
-    expect(propria.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-    expect(propria.politicaExecucao.travaHerdada).toBeUndefined();
+  it("ADR-066: nem trava herdada nem gate da própria rotina — em todo modo a política é só prazo e orçamento, e quem decide é o modo do agente, que vai no plano", () => {
+    for (const modo of ["conversa", "criacao", "sala", "rotina", "delegacao"] as const) {
+      const p = montarPlano({ ...base, modo, profundidade: modo === "delegacao" ? 1 : 0, agente: { ...agente, modoAprovacao: "automatico" }, delegacao: modo === "delegacao" ? { pessoaNome: "Marlon", remetenteNome: "Clarice" } : null });
+      expect(Object.keys(p.politicaExecucao).sort(), modo).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+      expect(p.modoAprovacao, modo).toBe("automatico");
+      expect(p.modoTurno, modo).toBe(modo);
+    }
+    // O automático não para mais depois de conteúdo de fora, e o prompt diz isso.
+    const deFora = montarPlano({ ...base, confianca: "nao_confiavel", agente: { ...agente, modoAprovacao: "automatico" } });
+    expect(deFora.promptSistema).toContain("Ler a web, um e-mail ou um PR não muda isso.");
   });
 });

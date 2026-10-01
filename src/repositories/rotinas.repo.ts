@@ -22,10 +22,11 @@ interface Linha {
   criado_em: Date;
   excluido_em: Date | null;
   acessos: AcessoPedido[] | null;
+  so_com_pendencia: boolean;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao, politica_sem_dado, exige_aprovacao, case when exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.geracao_execucao = rotinas.geracao_execucao and a.excluido_em is null) then estado else 'pausada'::estado_rotina end as estado, proxima_execucao, criado_em, excluido_em, acessos";
+  "tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao, politica_sem_dado, exige_aprovacao, case when exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.geracao_execucao = rotinas.geracao_execucao and a.excluido_em is null) then estado else 'pausada'::estado_rotina end as estado, proxima_execucao, criado_em, excluido_em, acessos, so_com_pendencia";
 
 const paraRotina = (l: Linha): Rotina => ({
   tenantId: l.tenant_id,
@@ -46,6 +47,7 @@ const paraRotina = (l: Linha): Rotina => ({
   criadoEm: ms(l.criado_em),
   excluidoEm: l.excluido_em ? ms(l.excluido_em) : null,
   acessos: l.acessos,
+  soComPendencia: l.so_com_pendencia,
 });
 
 export type NovaRotina = {
@@ -65,6 +67,8 @@ export type NovaRotina = {
   proximaExecucao: number;
   /** Omitido = null (rotina sem declaração; o pré-voo lê a fonte). 0027. */
   acessos?: AcessoPedido[] | null;
+  /** Omitido = DEFAULT false da coluna (0045): a rotina acorda em toda janela. */
+  soComPendencia?: boolean;
 };
 
 /** Rotinas (ADR-011): quem avalia cron é o servidor; o repositório só guarda proxima_execucao. */
@@ -73,10 +77,11 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
     async criar(r: NovaRotina): Promise<Rotina | null> {
       const [l] = await conn<Linha[]>`
         insert into rotinas (tenant_id, id, owner_id, agente_id, conversa_id, cron, fuso_iana, instrucao, fonte, entregavel, limites_aprovacao,
-          politica_sem_dado, exige_aprovacao, estado, proxima_execucao, acessos)
+          politica_sem_dado, exige_aprovacao, estado, proxima_execucao, acessos, so_com_pendencia)
         values (${escopo.tenantId}, ${r.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${r.agenteId}, ${r.conversaId}, ${r.cron}, ${r.fusoIana},
           ${r.instrucao}, ${r.fonte}, ${r.entregavel}, ${r.limitesAprovacao}, ${r.politicaSemDado},
-          ${r.exigeAprovacao === undefined ? conn`default` : r.exigeAprovacao}, ${r.estado ?? "ativa"}, ${data(r.proximaExecucao)}, ${r.acessos ? conn.json(r.acessos) : null})
+          ${r.exigeAprovacao === undefined ? conn`default` : r.exigeAprovacao}, ${r.estado ?? "ativa"}, ${data(r.proximaExecucao)}, ${r.acessos ? conn.json(r.acessos) : null},
+          ${r.soComPendencia === undefined ? conn`default` : r.soComPendencia})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraRotina(l) : null;
     },
@@ -125,8 +130,10 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
      * excluído não levanta 23514 — conferido em 2026-09-21.
      * `acessos` (0027): presente troca a lista inteira; ausente fica como está (coalesce não serve — a
      * lista vazia é uma declaração, não "sem mudança").
+     * `soComPendencia` (0045): presente troca, ausente fica como está — ramo explícito como o de `acessos`,
+     * não `coalesce`: é boolean, e o false é um valor a gravar, nunca "sem mudança".
      */
-    async atualizar(id: string, campos: Partial<Pick<Rotina, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "proximaExecucao">> & { acessos?: AcessoPedido[] }): Promise<Rotina | null> {
+    async atualizar(id: string, campos: Partial<Pick<Rotina, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "proximaExecucao" | "soComPendencia">> & { acessos?: AcessoPedido[] }): Promise<Rotina | null> {
       const [l] = await conn<Linha[]>`
         update rotinas set
           cron = coalesce(${campos.cron ?? null}, cron),
@@ -137,7 +144,8 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
           limites_aprovacao = coalesce(${campos.limitesAprovacao ?? null}, limites_aprovacao),
           politica_sem_dado = coalesce(${campos.politicaSemDado ?? null}, politica_sem_dado),
           proxima_execucao = coalesce(${campos.proximaExecucao === undefined ? null : data(campos.proximaExecucao)}, proxima_execucao),
-          acessos = ${campos.acessos === undefined ? conn`acessos` : conn.json(campos.acessos)}
+          acessos = ${campos.acessos === undefined ? conn`acessos` : conn.json(campos.acessos)},
+          so_com_pendencia = ${campos.soComPendencia === undefined ? conn`so_com_pendencia` : campos.soComPendencia}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraRotina(l) : null;

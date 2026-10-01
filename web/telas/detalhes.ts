@@ -74,7 +74,8 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   // quando, histórico, Testar) abre no nível dela. A rotina parada por falta de acesso diz o app ali mesmo (ADR-044).
   const linhaRotina = ({ rotina: r, proximaExecucao, bloqueio, resumo }: RotinaDto) => {
     const ativa = r.estado === "ativa";
-    const quando = [resumo ? capitalizar(semFuso(resumo)) : "", ativa ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : "Pausada"].filter(Boolean).join(" · ");
+    // "só com pendência" (definido em 2026-10-01, item 7 da ADR-066): a próxima janela só vira turno se o bot tiver pendência.
+    const quando = [resumo ? capitalizar(semFuso(resumo)) : "", ativa ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : "Pausada", r.soComPendencia ? "só com pendência" : ""].filter(Boolean).join(" · ");
     const chave = `<button type="button" class="chave" role="switch" aria-checked="${ativa}" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}" aria-label="${ativa ? "Pausar" : "Ativar"} a rotina ${esc(r.instrucao)}"><span></span></button>`;
     // A parada por falta de acesso fica à vista na linha, com o botão de um clique (emenda da ADR-044): é o que pede a pessoa.
     const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
@@ -158,7 +159,7 @@ function nivelRotina(estado: Estado, a: Bot, id: string): Nivel {
   const corpo = `${parada}
     <section class="gv-bloco"><h3>Instrução</h3><p class="gv-texto">${esc(r.instrucao)}</p></section>
     <section class="gv-bloco"><h3>Quando executar</h3><p class="gv-quando">${ICONE.relogio}<span>${esc(resumo ? capitalizar(resumo) : `${r.cron} (${r.fusoIana})`)}</span></p>
-      <small class="gv-proxima">${ativa ? `Próxima: ${esc(dataHora(proximaExecucao, r.fusoIana))} · ${esc(interpolar(proximaExecucao, estado.agora))}` : "Pausada"}</small></section>
+      <small class="gv-proxima">${ativa ? `Próxima: ${esc(dataHora(proximaExecucao, r.fusoIana))} · ${esc(interpolar(proximaExecucao, estado.agora))}` : "Pausada"}</small>${r.soComPendencia ? '<small class="gv-proxima">Só acorda quando o bot tem pendência aberta; sem nenhuma, a janela passa sem turno e sem custo.</small>' : ""}</section>
     <section class="gv-bloco"><h3>Últimas execuções</h3>${execucoes}</section>
     <section class="gv-bloco"><h3>Combinado</h3><dl class="gv-dl">${detalhe("Fonte", r.fonte)}${detalhe("Resultado", r.entregavel)}${detalhe("Antes de agir fora do nod", r.limitesAprovacao)}${detalhe("Se faltar informação", r.politicaSemDado)}</dl></section>`;
   // definido em 2026-09-30: quem muda a instrução ou o horário é o bot (ADR-043); "Ajustar" só escreve o pedido no campo.

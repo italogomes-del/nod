@@ -19,7 +19,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
-import { delegacaoDoTurno, rotinaDoTurno, travaDoPedido } from "./apoio-l7.ts";
+import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import { ehColega } from "./ver-colegas.ts";
 
@@ -123,25 +123,30 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // `!escolha` desligava o --resume de todo turno real desde os harnesses (18/09), e cada mensagem abria uma
   // sessão com 20 falas de 1.000 caracteres. Só o Claude Code retoma sessão hoje (o Codex devolve null).
   const sessaoDoHarness = escolha ? escolha.harness === "claude-cli" && conversa?.sessaoHarness === escolha.harness : true;
-  const sessaoCli = sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const sessaoDaConversa = sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  // definido em 2026-10-01 (ADR-066): a retomada de rotina ou de pedido de colega volta na sessão DO TURNO que ela
+  // continua (nunca na da conversa, pelos motivos acima). Antes ela começava do zero: em 30/09 o Milton, retomado 13
+  // min depois de uma aprovação cujo comentário falhou, leu a task, chamou sem_novidade e não refez nem avisou. Com o
+  // terminal fora da conversa, a sessão é o que guarda os arquivos mexidos e o resultado dos testes.
+  const continuaCadeia = !sessaoDaConversa && turno.origem === "retomada" && turno.retomaTurnoId !== null && (ligacao !== null || ehDelegacao) && input.permitirResume !== false && (escolha ? escolha.harness === "claude-cli" : true);
+  const daCadeia = continuaCadeia && turno.retomaTurnoId ? await deps.repos.turnos.sessaoDoTurno(turno.retomaTurnoId) : null;
+  const sessaoDaCadeia = daCadeia && daCadeia.executor === executor ? daCadeia.sessaoCli : null;
+  const sessaoCli = sessaoDaConversa ?? sessaoDaCadeia;
   const autorDe = (m: (typeof mensagens)[number]) => (m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot");
   // /nova-sessao (0038): o bot começa do zero — o histórico do prompt só leva o que veio depois do recomeço.
   const recomeco = conversa?.recomecoEm ?? null;
   const historico = !sessaoCli ? mensagens.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
   // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
-  const vistaAte = sessaoCli ? conversa?.sessaoEm ?? null : null;
+  // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
+  const vistaAte = sessaoDaConversa ? conversa?.sessaoEm ?? null : null;
   const desdeSuaUltimaVez = vistaAte === null ? [] : mensagens
     .filter((m) => m.criadoEm > vistaAte && m.criadoEm < turno.criadoEm && m.id !== turno.mensagemOrigemId)
     .slice(-HISTORICO_NO_PLANO)
     .map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, TEXTO_DESDE_A_SESSAO), confianca: m.confianca }));
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico, ...(desdeSuaUltimaVez.length ? { desdeSuaUltimaVez } : {}) });
-  // Turno de rotina sem janela (criado fora do scheduler) = gate LIGADO (fail-closed, E7.3). A retomada
-  // ligada a uma rotina herda o gate DELA (ADR-044); retomada sem rotina não tem gate.
-  // definido em 2026-09-29 (ADR-058): quem cumpre um pedido de colega herda o gate da rotina de quem pediu;
-  // cadeia de delegação sem raiz achada trava (fail-closed, como o modo acima).
-  const trava = ehDelegacao ? (delegacao ? await travaDoPedido(deps.repos, delegacao) : true) : false;
-  const rotina: { exigeAprovacao: boolean } | null = ehDelegacao ? (trava ? { exigeAprovacao: true } : null) : ligacao ? { exigeAprovacao: ligacao.rotina.exigeAprovacao } : turno.origem === "rotina" ? { exigeAprovacao: true } : null;
+  // revisto em 2026-10-01 (ADR-066): saíram o gate da rotina (E7.3/ADR-044) e a trava da rotina de quem pediu
+  // (ADR-058). Quem decide quando o bot para e pergunta é o modo de aprovação, igual em toda origem.
 
   // Inventário para o modelo escolher SOBRE QUAL rotina agir (o estado vem computado por COLUNAS:
   // geração antiga do agente lê como 'pausada'). resumoCron traduz o cron para o texto humano.
@@ -198,11 +203,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     contextoConversa,
     pessoaNome: pessoa?.nome ?? "a pessoa",
     colegas: visiveis.filter((a) => ehColega(agente, a)),
-    rotina,
     rotinasDoAgente,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
     // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
-    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "a pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot", trava } : null,
+    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "a pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
     semprePermitir: permissoes.flatMap((p) => {
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];

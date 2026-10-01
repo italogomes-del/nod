@@ -1,6 +1,8 @@
 # ADR-058 — Um pedido entre bots, com os acessos de quem recebe
 
-Status: aceito, emendada pela [ADR-063](adr-063-pedido-entre-bots-ate-tres-passes.md) · Data: 2026-09-29 ·
+Status: aceito, emendada pela [ADR-063](adr-063-pedido-entre-bots-ate-tres-passes.md) e pela
+[ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) (a trava herdada saiu: no lugar dela, o turno de quem
+recebe nasce marcado se quem pediu leu algo de fora) · Data: 2026-09-29 ·
 Substitui a divisão `perguntar_a_bot` × `delegar_tarefa` da ADR-047.
 Emenda a ADR-026 (a marca de não confiável deixa de reduzir o catálogo de quem recebe um pedido de colega)
 e a ADR-035 (rotina também pede a colega com os acessos dele).

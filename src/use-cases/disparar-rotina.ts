@@ -1,14 +1,12 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { TipoDecisao } from "../contracts/decisao.ts";
-import type { Confianca } from "../contracts/mensagem.ts";
-import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoSemNovidade } from "../contracts/motivos.ts";
+import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
 import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { redigir } from "../domain/redacao.ts";
-import { conectoresCitados } from "../domain/rotina-acessos.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
@@ -31,12 +29,15 @@ export type EntradaDisparo = {
  * `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045).
  * `bloqueada` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno — o
  * motivo, o card de acesso que a destrava (null quando é a pergunta que espera) e a próxima execução.
+ * `semPendencia` (definido em 2026-10-01, item 7 da ADR-066): a rotina só acorda com pendência e o agente não tinha
+ * nenhuma visível — a janela passou sem turno (registrarSemPendencia) e a agenda andou.
  */
 export type SaidaDisparo =
   | { turno: Turno; proximaExecucao: number }
   | { janelaDeOutro: true }
   | { pulada: true; turnoAbertoId: string; proximaExecucao: number }
-  | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number };
+  | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number }
+  | { semPendencia: true; proximaExecucao: number };
 
 /**
  * Entrada de um turno de rotina é a instrução normalizada mais o contexto fixo (fonte, entregável,
@@ -51,22 +52,6 @@ export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): s
     `Limites de aprovação: ${rotina.limitesAprovacao}`,
     `Se não houver dado: ${rotina.politicaSemDado}`,
   ].join("\n");
-}
-
-/**
- * A fonte da rotina é prosa; o que decide confiança é dado TIPADO: se a fonte cita (por slug ou
- * nome) um conector habilitado que traz conteúdo de fora, a entrada nasce nao_confiavel e o plano
- * reduz o catálogo (ADR-026). Não é interpretação de intenção: é casar nomes de conectores.
- * revisto em 2026-09-30 (ADR-062): o critério era "toca dado de aprendiz" (a declaração do conector), e todo app do
- * marketplace nasce declarado assim — 440 de 440 rotinas do Marlon nasciam não confiáveis, e o automático e o
- * "Sempre permitir" nunca valiam nelas. Agora é a curadoria de conteúdo de fora: ClickUp e Slack não contaminam.
- */
-export async function confiancaDaFonte(deps: Pick<Deps, "repos">, fonte: string): Promise<Confianca> {
-  // definido em 2026-09-24 (emenda da ADR-044): o casamento mora em conectoresCitados, o mesmo do pré-voo.
-  for (const c of conectoresCitados(fonte, await deps.repos.conectores.listarHabilitados())) {
-    if (conectorTrazConteudoDeFora(c)) return "nao_confiavel";
-  }
-  return "confiavel";
 }
 
 /**
@@ -90,6 +75,31 @@ async function registrarBloqueio(deps: Deps, input: EntradaDisparo, bloqueio: Bl
   };
 }
 
+/** Quem decidiu que a janela passa sem turno: regra do servidor, não fala do modelo. */
+export const REGRA_SEM_PENDENCIA = "regra:rotina-sem-pendencia" as const;
+
+/**
+ * A janela da rotina que só acorda com pendência e não tem nenhuma (definido em 2026-10-01, item 7 da ADR-066): UMA
+ * execução 'sem_novidade' com motivo 'sem_pendencia' e SEM turno — nenhum modelo rodou, custo zero —, poda para as
+ * 20, a agenda anda como num disparo normal e NENHUMA mensagem no chat (o mesmo silêncio de sem_novidade). Só o
+ * agendador chega aqui, então a agenda sempre anda.
+ * O evento é `rotina_executou`, com os mesmos dados da execução silenciosa de registrarDesfechoRotina: o despachante
+ * já o leva ao frame 'rotina.executou', que faz a web reler a lista e o histórico da rotina. Um kind novo só
+ * repetiria esse efeito com mais uma entrada em FRAME_POR_EVENTO; o motivo nos dados diferencia quem lê a trilha.
+ */
+async function registrarSemPendencia(deps: Deps, input: EntradaDisparo, agora: number): Promise<{ data: SaidaDisparo; events: RuntimeEvent[] }> {
+  const { rotina, instanteAgendado } = input;
+  const motivo: MotivoSemPendencia = "sem_pendencia";
+  const execucao = await deps.repos.rotinaExecucoes.registrar({ rotinaId: rotina.id, instanteAgendado, turnoId: null, desfecho: "sem_novidade", motivo, em: agora });
+  if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução sem pendência não registrada" });
+  await deps.repos.rotinaExecucoes.podar(rotina.id);
+  const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
+  await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
+  const autoria = autoriaPessoa(deps.escopo.pessoaId, REGRA_SEM_PENDENCIA);
+  const dados = { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: "sem_novidade", motivo, instanteAgendado };
+  return { data: { semPendencia: true, proximaExecucao }, events: [evento(deps, "rotina_executou", autoria, dados, { conversaId: rotina.conversaId })] };
+}
+
 /**
  * ÚNICO lugar que avalia cron em execução (ADR-011): reivindica a janela canônica (UNIQUE por
  * tenant/rotina/instante — false = outro processo ganhou, silencioso), enfileira o turno origem
@@ -98,7 +108,8 @@ async function registrarBloqueio(deps: Deps, input: EntradaDisparo, bloqueio: Bl
  * (servidor fora do ar) NÃO são repostas — uma rotina das 8h que só rodou às 14h é uma execução,
  * não seis. A execução em `rotina_execucoes` só nasce com desfecho (executou | falhou |
  * passou_em_branco): o enum não tem 'pendente', e a janela com turno_id é o registro do "em curso".
- * A janela que o pré-voo para nasce 'bloqueada', sem turno (registrarBloqueio).
+ * A janela que o pré-voo para nasce 'bloqueada', sem turno (registrarBloqueio). A da rotina `soComPendencia` sem
+ * pendência visível nasce 'sem_novidade'/'sem_pendencia', também sem turno (registrarSemPendencia).
  */
 export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (deps, input) => {
   const { rotina, instanteAgendado } = input;
@@ -123,6 +134,12 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   // agendador, porque "executar agora" é ato da pessoa.
   const bloqueio = input.aposConceder ? null : await preVooDaRotina(deps, rotina, { agendada: !input.preservarAgenda });
   if (bloqueio) return registrarBloqueio(deps, input, bloqueio, agora);
+  // definido em 2026-10-01 (item 7 da ADR-066): depois do pré-voo (a rotina parada por acesso segue parada, com o
+  // card dela) e antes do turno. Só no agendador: "Executar agora" e "Permitir e rodar agora" (preservarAgenda) são
+  // atos da pessoa e rodam sempre. Visível = a mesma regra do prompt: aberta e com a_partir_de já passado.
+  if (rotina.soComPendencia && !input.preservarAgenda && pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0) {
+    return registrarSemPendencia(deps, input, agora);
+  }
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,
@@ -130,7 +147,10 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
     entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
-    entradaConfianca: await confiancaDaFonte(deps, rotina.fonte),
+    // revisto em 2026-10-01 (ADR-066): a entrada da rotina é confiável — é a instrução que a pessoa confirmou. Antes
+    // ela nascia não confiável quando a FONTE citava um app de fora (GitHub, Gmail), e o catálogo perdia a escrita:
+    // 1.040 de 1.130 turnos de rotina saíram assim até 30/09. A marca agora vem do que o bot lê (chamar-ferramenta.ts).
+    entradaConfianca: "confiavel",
     modelo: agente.modelo,
     harness: agente.harness,
     executor: input.executor,
@@ -150,9 +170,10 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
  * `pedido_dispensado` (definido em 2026-09-24): a pessoa dispensou, ainda aberto, o pedido que a
  * execução fez (dispensar-decisao.ts). `pergunta_sem_resposta` (mesma data, fio da pergunta): a
  * pergunta da execução venceu sem resposta (varredor-expiracao.ts). rotina_execucoes.motivo é text com
- * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração.
+ * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração. `sem_pendencia` (definido em 2026-10-01, item 7
+ * da ADR-066) hoje só nasce em registrarSemPendencia, sem turno; está na união para o histórico ter um tipo só.
  */
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null };
+export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null };
 
 /** O motivo do passou_em_branco em palavras na conversa; o código fica na execução. Sem tradução sai como está. */
 const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {

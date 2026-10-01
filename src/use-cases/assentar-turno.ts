@@ -9,6 +9,7 @@ import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
+import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
@@ -164,7 +165,11 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (resultado.comandos) await deps.repos.comandos.gravar(resultado.comandos);
 
   for (const nome of resultado.negacoesPermissao) {
-    const negacao = { classe: "ferramenta_negada" as const, nome, motivo: "fora_do_catalogo" as const, desde: agora, terminal: false };
+    // definido em 2026-10-01 (ADR-066): a nativa do kit do terminal que o CLI negou foi o HOOK do nod que negou — comando
+    // esperando aprovação, recusado ou numa cerca —, não o catálogo. 5 das 6 falas "Bash negada: fora do catálogo deste
+    // turno" de 29 e 30/09 (Clarice, Chico, Nina) eram comandos esperando aprovação, num turno com o Bash no plano.
+    const motivo = (NATIVAS_DO_TERMINAL as readonly string[]).includes(nome) ? ("alcance_insuficiente" as const) : ("fora_do_catalogo" as const);
+    const negacao = { classe: "ferramenta_negada" as const, nome, motivo, desde: agora, terminal: false };
     const m = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,

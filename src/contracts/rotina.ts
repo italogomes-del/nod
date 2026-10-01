@@ -36,6 +36,12 @@ export type Rotina = {
    * pré-voo lê a fonte. Presente, mesmo vazia, ganha da fonte.
    */
   acessos: AcessoPedido[] | null;
+  /**
+   * definido em 2026-10-01 (item 7 da ADR-066, migração 0045): a rotina só acorda quando o agente tem pendência
+   * visível (ADR-064). Sem nenhuma, a janela agendada passa sem turno de modelo — execução 'sem_novidade' com
+   * motivo 'sem_pendencia', custo zero. "Executar agora" da pessoa roda sempre. DEFAULT false na coluna.
+   */
+  soComPendencia: boolean;
 };
 
 /**

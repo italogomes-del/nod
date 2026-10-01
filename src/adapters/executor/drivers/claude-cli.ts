@@ -292,7 +292,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               if (pastaBot && lig.hookPath) {
                 await mkdir(pastaBot, { recursive: true });
                 const config = join(tmpdir, "hook-nativas.json");
-                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno }), { mode: 0o600 });
+                // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts).
+                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home }), { mode: 0o600 });
                 const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
                 // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
                 const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);

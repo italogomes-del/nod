@@ -1,6 +1,7 @@
 import type { Memoria, TipoMemoria } from "../contracts/memoria.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { falaDeCapacidadeDoTurno, RECUSA_CAPACIDADE_DO_TURNO } from "../domain/memoria-de-capacidade.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, UseCasesNod } from "./tipos.ts";
@@ -49,8 +50,13 @@ export const registrarMemoria: CasoDeUso<EntradaRegistrarMemoria, { memoria: Mem
   return { data: { memoria, mensagem }, events };
 };
 
-/** Ferramenta nod `lembrar` (EMENDA 5): o agente do token grava na própria memória; origem 'agente'. */
+/**
+ * Ferramenta nod `lembrar` (EMENDA 5): o agente do token grava na própria memória; origem 'agente'.
+ * definido em 2026-10-01 (ADR-065): a frase que diz que falta terminal, pasta ou colega neste turno não grava — é do
+ * turno, não do bot. Só o bot passa por aqui; a pessoa grava pela tela o que quiser.
+ */
 export const lembrar: UseCasesNod["lembrar"] = async (deps, input) => {
+  if (falaDeCapacidadeDoTurno(input.texto)) return { data: { ok: false, recusado: RECUSA_CAPACIDADE_DO_TURNO } };
   const r = await registrarMemoria(deps, {
     agenteId: input.agenteId,
     conversaId: input.conversaId,

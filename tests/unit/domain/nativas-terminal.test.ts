@@ -3,14 +3,22 @@ import { decidirNativa, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL, nativasDoTurno,
 
 const decidir = (ferramenta: string, entrada: Record<string, unknown>) => decidirNativa({ ferramenta, entrada });
 
-describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
-  it("conversa e criação confiáveis com o harness Claude recebem o kit; sem ele, só arquivo e só com pasta", () => {
-    expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: false, terminal: true })).toEqual(NATIVAS_DO_TERMINAL);
-    expect(nativasDoTurno({ modo: "criacao", confianca: "confiavel", pastasAutorizadas: false, terminal: true })).toEqual(NATIVAS_DO_TERMINAL);
+describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
+  it("ADR-066: com o harness Claude (hook), o kit vale em todo modo menos o peer e com qualquer confiança; sem ele, só arquivo, só na conversa confiável e com pasta", () => {
+    for (const modo of ["conversa", "criacao", "rotina", "delegacao", "sala"] as const) {
+      for (const confianca of ["confiavel", "nao_confiavel"] as const) {
+        for (const pastasAutorizadas of [false, true]) {
+          expect(nativasDoTurno({ modo, confianca, pastasAutorizadas, terminal: true }), `${modo} ${confianca} ${pastasAutorizadas}`).toEqual(NATIVAS_DO_TERMINAL);
+        }
+      }
+    }
+    // Só o peer legado fica sem, com ou sem o hook.
+    expect(nativasDoTurno({ modo: "peer", confianca: "confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
+    // Sem o hook (só --restricted), ninguém decide as nativas: ficam na conversa confiável com pasta.
     expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: true })).toEqual(NATIVAS_DE_ARQUIVO);
     expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: false })).toEqual([]);
-    expect(nativasDoTurno({ modo: "conversa", confianca: "nao_confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
-    expect(nativasDoTurno({ modo: "rotina", confianca: "confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
+    expect(nativasDoTurno({ modo: "conversa", confianca: "nao_confiavel", pastasAutorizadas: true })).toEqual([]);
+    expect(nativasDoTurno({ modo: "rotina", confianca: "confiavel", pastasAutorizadas: true })).toEqual([]);
   });
 
   it("emenda da ADR-055: as skills da pessoa e os subagentes estão no kit, e o hook os deixa passar", () => {

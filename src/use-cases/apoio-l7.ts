@@ -5,7 +5,6 @@ import type { Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { autorizarDelegacao } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { PROFUNDIDADE_MAXIMA } from "../domain/profundidade.ts";
 import { redigir } from "../domain/redacao.ts";
 import { assentar, HANDOFFS_POR_RODADA, type DesfechoRodada, type Fala } from "../domain/rodada-sala.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
@@ -107,14 +106,22 @@ export function carimbo(instante: number, fusoIana = "UTC"): string {
   return fusoIana === "UTC" ? `${texto} UTC` : texto;
 }
 
-/** Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). */
-export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao">, agora: number): string {
-  return redigir("rotina-proxima-execucao", agora, {
+/**
+ * Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). A rotina que só acorda com
+ * pendência (definido em 2026-10-01, item 7 da ADR-066) diz isso na mesma linha: a "próxima execução" dela só vira
+ * turno se houver pendência aberta.
+ */
+export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao"> & { soComPendencia?: boolean }, agora: number): string {
+  const texto = redigir("rotina-proxima-execucao", agora, {
     resumo: resumoCron(rotina.cron, rotina.fusoIana),
     proxima: carimbo(rotina.proximaExecucao, rotina.fusoIana),
     fuso: rotina.fusoIana,
   });
+  return rotina.soComPendencia ? `${texto} ${TEXTO_SO_COM_PENDENCIA}` : texto;
 }
+
+/** A frase da rotina que só acorda com pendência na linha de sistema da conversa (ativar, atualizar, reativar). */
+export const TEXTO_SO_COM_PENDENCIA = "Só acorda quando o bot tem pendência aberta; sem nenhuma, a janela passa sem turno e sem custo.";
 
 export function exigir<T>(valor: T | null | undefined, codigo: "nao_encontrado" | "estado_invalido" = "nao_encontrado", cause?: string): T {
   if (valor === null || valor === undefined) throw new ErroDeDominio(codigo, { cause });
@@ -167,40 +174,6 @@ export async function delegacaoDoTurno(repos: Repos, turno: Turno): Promise<Turn
     atual = await repos.turnos.buscar(atual.retomaTurnoId);
   }
   return atual?.origem === "delegacao" ? atual : null;
-}
-
-/**
- * A trava que quem cumpre um pedido de colega herda (definido em 2026-09-29, ADR-058): o turno de quem pediu,
- * achado pelo `peer_pedido` da tarefa, era de rotina com exige_aprovacao, ou uma retomada ligada a ela? Então
- * o efeito externo de quem recebe também só sai por item aprovado. Sem achar o pedido ou quem pediu, trava
- * (fail-closed); turno de rotina sem janela também trava (E7.3).
- *
- * revisto em 2026-09-30 (ADR-063): com a corrente até três passes, quem pediu pode estar ele mesmo cumprindo um
- * pedido (delegação, ou a retomada dela). A trava dele passa adiante — senão uma rotina que leu conteúdo de fora →
- * Clarice → Chico → Dev escreveria sem card no Dev. Entre bots da mesma pessoa com entrada limpa, a regra da ADR-062
- * vale em cada passe: ninguém trava. Subida limitada pela profundidade; cadeia mais funda que isso, ou retomada com
- * procuração cuja raiz não aparece, trava.
- */
-export async function travaDoPedido(repos: Repos, tarefa: Turno, subidas = 0): Promise<boolean> {
-  if (subidas > PROFUNDIDADE_MAXIMA) return true;
-  const pedido = await repos.mensagens.pedidoDaTarefa(tarefa.id);
-  if (!pedido || pedido.payload?.kind !== "peer_pedido") return true;
-  const remetente = await repos.turnos.buscar(pedido.payload.turnoOrigemId);
-  if (!remetente) return true;
-  // definido em 2026-09-30 (ADR-062, decisão do Marlon): entre bots da MESMA pessoa, a rotina de um não trava o
-  // outro — quem decide é o modo de quem recebe. A rotina do Chico pedia ao Milton e virava card na conversa do Milton
-  // (e o contrário), mesmo com os dois no automático e "Sempre permitir" ativo. A trava continua quando o pedido veio
-  // de OUTRA pessoa ou de um turno que leu conteúdo de fora: é por aí que um texto de fora mandaria no outro bot.
-  // A rotina sem janela continua travando antes disso (E7.3): sem a janela, não se sabe de onde ela veio.
-  const ligacao = await rotinaDoTurno(repos, remetente.id);
-  if (!ligacao && remetente.origem === "rotina") return true;
-  // definido em 2026-09-30 (ADR-063): quem pediu cumpria ele mesmo um pedido de colega — a trava que ele carregava
-  // passa adiante, e um passe a mais na corrente não lava a rotina nem o conteúdo de fora lá de trás. Retomada com
-  // procuração cuja delegação não aparece (além do teto de saltos) trava: não se sabe o que ela carregava.
-  const delegacaoDeQuemPediu = await delegacaoDoTurno(repos, remetente);
-  if (delegacaoDeQuemPediu ? await travaDoPedido(repos, delegacaoDeQuemPediu, subidas + 1) : Boolean(remetente.sobProcuracaoDe)) return true;
-  if (remetente.ownerId === tarefa.ownerId && remetente.entradaConfianca === "confiavel" && !(await repos.turnos.contaminado(remetente.id))) return false;
-  return ligacao ? ligacao.rotina.exigeAprovacao : false;
 }
 
 /**

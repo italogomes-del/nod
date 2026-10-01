@@ -48,6 +48,8 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
     politicaSemDado: p.politicaSemDado,
     proximaExecucao,
     acessos: p.acessos,
+    // definido em 2026-10-01 (item 7 da ADR-066): só vem no payload quando muda; ausente fica como está.
+    soComPendencia: p.soComPendencia,
   });
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona atualiza a rotina" });
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);

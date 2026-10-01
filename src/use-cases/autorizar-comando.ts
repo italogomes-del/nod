@@ -27,32 +27,35 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  *     no total, tudo. Credencial do Mac nunca passa por aqui → card em qualquer modo;
  *  5. senão → card de aprovação na conversa, e o hook espera a resposta no próprio turno.
  *
- * Turno contaminado pela web (0033) pede até a leitura: um texto de página pode ter mandado o modelo "só olhar"
- * algo que vaza. Plano sem Bash é recusa — o hook de uma máquina antiga não abre porta. O modo é o ATUAL do
+ * Turno contaminado pela web (0033) pede até a leitura no manual: um texto de página pode ter mandado o modelo "só
+ * olhar" algo que vaza. Plano sem Bash é recusa — o hook de uma máquina antiga não abre porta. O modo é o ATUAL do
  * agente, lido aqui: a dona que volta para o manual no meio de uma tarefa vale no comando seguinte.
+ *
+ * `arquivo` (definido em 2026-10-01, ADR-066): Write/Edit/NotebookEdit fora de ~/nod/<bot> passam pela MESMA decisão —
+ * nunca é leitura, nunca é arriscado (o arriscado de arquivo é a credencial, que o hook já nega). Antes a gravação
+ * ignorava o modo: no manual, o bot gravava em qualquer arquivo do Mac sem card.
  */
-export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string }, SaidaAutorizarComando> = async (deps, { plano, comando }) => {
-  if (!(plano.nativas ?? []).includes("Bash")) throw new ErroDeDominio("nao_permitido", { cause: "Bash fora do plano deste turno" });
-  const texto = comando.trim();
-  if (texto === "" || texto.length > 8_000) throw new ErroDeDominio("entrada_invalida", { cause: "comando" });
+export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } | { plano: PlanoTurno; arquivo: string }, SaidaAutorizarComando> = async (deps, entrada) => {
+  const { plano } = entrada;
+  const arquivo = "arquivo" in entrada ? entrada.arquivo.trim() : null;
+  const nativa = arquivo === null ? "Bash" : "Write";
+  if (!(plano.nativas ?? []).includes(nativa)) throw new ErroDeDominio("nao_permitido", { cause: `${nativa} fora do plano deste turno` });
+  const texto = arquivo === null ? ("comando" in entrada ? entrada.comando.trim() : "") : `Gravar ${arquivo}`;
+  if (texto === "" || arquivo === "" || texto.length > 8_000) throw new ErroDeDominio("entrada_invalida", { cause: arquivo === null ? "comando" : "arquivo" });
   const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
-  if (classificarComando(texto).tipo === "leitura" && !contaminado) return { data: { permitir: true, porque: "leitura" } };
+  if (arquivo === null && classificarComando(texto).tipo === "leitura" && !contaminado) return { data: { permitir: true, porque: "leitura" } };
   if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { data: { permitir: true, porque: "aprovado" } };
-  const risco = comandoArriscado(texto);
-  const credencial = tocaCredencial(texto);
+  const risco = arquivo === null ? comandoArriscado(texto) : null;
+  const credencial = tocaCredencial(arquivo ?? texto);
   // definido em 2026-09-30 (ADR-062, auditoria das aprovações): "o resto desta tarefa" libera o comando comum, não
   // a credencial nem o arriscado — antes esta linha vinha antes das duas cercas, e um "pode fazer" num `ls` liberava
   // o `security find-generic-password` e o `rm -rf` seguintes, que nem o modo total libera sem a pessoa.
-  if (!contaminado && !credencial && risco === null && !plano.politicaExecucao.efeitoExternoSoPorAprovacao && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
+  if (!contaminado && !credencial && risco === null && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
     return { data: { permitir: true, porque: "liberado_na_tarefa" } };
   }
   const agente = await deps.repos.agentes.buscar(plano.agenteId);
-  const doModo = decidirPeloModo(agente?.modoAprovacao, {
-    arriscada: risco !== null,
-    credencial,
-    conteudoDeFora: contaminado,
-    travaHerdada: plano.politicaExecucao.travaHerdada === true,
-  });
+  // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo.
+  const doModo = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial });
   if (doModo?.automatico) return { data: { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" } };
 
   const agora = deps.agora();
@@ -62,10 +65,10 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string },
     conversaId: plano.conversaId,
     turnoId: plano.turnoId,
     prazoDecisaoEm: agora + PRAZO_DECISAO_MS,
-    frase: `${agente?.nome ?? "O bot"} quer rodar um comando no seu Mac`,
+    frase: `${agente?.nome ?? "O bot"} quer ${arquivo === null ? "rodar um comando" : "gravar um arquivo"} no seu Mac`,
   });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão não criada" });
-  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino: { ...DESTINO_TERMINAL, argumentos: { comando: texto } }, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",
+  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino: { ...DESTINO_TERMINAL, argumentos: arquivo === null ? { comando: texto } : { arquivo } }, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",
     // ADR-059: o porquê do arriscado, em frase fixa do domínio (nunca texto do modelo), para o card dizer o que parou.
     ...(doModo?.motivo === "acao_arriscada" && risco ? { justificativa: risco } : {}) }]);
   const evento: RuntimeEvent = {

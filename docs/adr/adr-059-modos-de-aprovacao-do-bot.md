@@ -1,6 +1,7 @@
 # ADR-059 — Três modos de aprovação por bot: manual, automático e sem aprovações
 
-Status: aceito · Data: 2026-09-29 · Emenda ADR-042 (o gatilho dos 70 % pedia "outro ADR": é este), ADR-055 (a
+Status: aceito, emendada pela [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) (depois de ler algo
+de fora, o automático não para mais; merge deixa de ser arriscado) · Data: 2026-09-29 · Emenda ADR-042 (o gatilho dos 70 % pedia "outro ADR": é este), ADR-055 (a
 alternativa "tudo liberado, sem card" vira opção da dona), ADR-058 (a trava herdada) e ADR-037 (o computador do bot).
 Canvas "Nod — tela do agente", página "Aprovações".
 
