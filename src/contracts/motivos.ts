@@ -29,7 +29,10 @@ export const MOTIVOS_INTERRUPCAO = [
   "lancamento_falhou",
   "sessao_rejeitada",
   "executor_indisponivel",
-  /** definido em 2026-09-18: ficou mudo sem ferramenta pendente; o watchdog de atividade encerrou. */
+  /**
+   * definido em 2026-09-18: ficou mudo sem ferramenta pendente; o watchdog de atividade encerrou. Ninguém mais o
+   * grava desde 2026-10-01 (ADR-067, o vigia saiu); fica no enum para o histórico dos turnos antigos.
+   */
   "turno_travado",
   /** definido em 2026-09-18: produziu trabalho e não concluiu — não confundir com sem_progresso. */
   "trabalho_incompleto",

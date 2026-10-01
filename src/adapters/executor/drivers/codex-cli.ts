@@ -22,14 +22,14 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * só por teste de montagem de args. Validar com o CLI real antes de anunciar paridade.
  *
  * definido em 2026-09-18 (ADR-040): o Codex nunca teve teto de passos, então é o Claude que se
- * alinha a ele quando `--max-turns` sai — nada a mudar aqui. O watchdog de atividade vive em
- * `laco.ts`, acima do SPI, e `interpretarCodex` produz os mesmos EventoStream: os dois harnesses
- * ganham a proteção pelo contrato comum, sem código específico.
+ * alinha a ele quando `--max-turns` sai — nada a mudar aqui. `interpretarCodex` produz os mesmos
+ * EventoStream do Claude. revisto em 2026-10-01 (ADR-067): o vigia de atividade de `laco.ts` saiu, e o
+ * Codex segue um prompt por turno, sem sessão viva.
  *
  * LACUNA NÃO HOMOLOGADA: não há equivalente a `--autocompact` no conjunto FLAGS_CODEX sondado, e o
  * binário não estava instalado na máquina onde a medição foi feita. Não inventar flag de janela de
- * contexto aqui sem sondar o CLI real. Assimetria inversa a registrar: este driver já tem deadline
- * absoluto por `prazoMs` (setTimeout → interromper), que o driver do Claude não tem.
+ * contexto aqui sem sondar o CLI real. revisto em 2026-10-01 (ADR-067): saiu o deadline absoluto por `prazoMs`
+ * (setTimeout → interromper) — nenhum relógio de trabalho; o turno acaba quando o Codex termina ou no Parar.
  */
 export function argsCodex(plano: PlanoTurno, config: string, imagens: readonly string[] = []): string[] {
   const pastas = plano.workspacePastas ?? null;
@@ -89,7 +89,6 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
               if ((await sondar()).estado !== "pronto" || !bin) throw new ErroDeDominio("executor_indisponivel");
               await mkdir(cfg.cwdBase, { recursive: true });
               const dir = await mkdtemp(join(cfg.cwdBase, "codex-"));
-              let prazo: ReturnType<typeof setTimeout> | undefined;
               try {
                 const launcher = join(dir, "proxy.mjs");
                 await writeFile(launcher, `process.env.NOD_URL = ${JSON.stringify(lig.urlNod)};\nprocess.env.NOD_TOKEN_TURNO = ${JSON.stringify(plano.tokenDeTurno)};\nconst proxy = await import(${JSON.stringify(pathToFileURL(lig.proxyPath).href)});\nawait proxy.main();\n`, { mode: 0o600, flag: "wx" });
@@ -108,7 +107,6 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                     sinais = novos;
                   }
                 } });
-                prazo = setTimeout(() => { void proc?.interromper(); }, plano.politicaExecucao.prazoMs);
                 if (parado) await proc.interromper();
                 else {
                   await sinks.sinal("promptSubmitted"); sinais.promptSubmitted = true;
@@ -117,7 +115,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 const fim = await proc.fim;
                 await Promise.all(pendentes);
                 return { ...classificarResultado({ eventos, ...fim, sinais, interrompidoPeloDriver: proc.interrompido() }), sessaoCli: null };
-              } finally { if (prazo) clearTimeout(prazo); if (proc) await proc.interromper(); proc = null; await rm(dir, { recursive: true, force: true }); }
+              } finally { if (proc) await proc.interromper(); proc = null; await rm(dir, { recursive: true, force: true }); }
             },
           };
         },

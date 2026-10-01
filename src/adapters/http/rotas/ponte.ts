@@ -10,7 +10,7 @@ import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { entrega, exigir, inventario, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { entrega, exigir, falas, inventario, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 
 /**
@@ -41,6 +41,8 @@ export function criarPonteHttpServidor(d: {
   ferramenta(plano: PlanoTurno, nome: string): void;
   /** A lista de tarefas do bot, inteira, quando muda (definido em 2026-09-28). */
   tarefas(plano: PlanoTurno, tarefas: TarefaDoBot[]): void;
+  /** ADR-067: uma fala da sessão viva foi gravada — a tela troca o texto ao vivo pela mensagem. */
+  fala?(plano: PlanoTurno): void;
   longpollMs?: number;
   /** ADR-048: itens aprovados que esperam o gh do Mac desta pessoa, e o desfecho que o Mac relata. */
   itensLocais?(escopo: Escopo): Promise<ItemLocal[]>;
@@ -121,7 +123,10 @@ export function criarPonteHttpServidor(d: {
       const plano = c.planos.get(turnoId);
       if (!plano) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP }); return; }
       c.ultimo = d.agora();
-      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [] });
+      // ADR-067: as falas da sessão viva e o pedido de mensagens novas viajam na renovação.
+      const fs = falas(b.falas);
+      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}) });
+      if (fs.length && r.ativo) d.fala?.(plano);
       if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(plano, b.delta);
       if (r.ativo) for (const t of trechos(b.trechos)) {
         if ("ferramenta" in t) d.ferramenta(plano, t.ferramenta);

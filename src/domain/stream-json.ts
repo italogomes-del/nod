@@ -36,6 +36,9 @@ function janelaDe(modelUsage: Obj | null): number | null {
   return janelas.length ? Math.max(...janelas) : null;
 }
 
+/** Medido em 2026-10-01 no 2.1.286: `completed`, `failed`, `killed` (task_updated) e `stopped` (task_notification). */
+const ESTADOS_FINAIS_DE_TAREFA: readonly string[] = ["completed", "failed", "killed", "stopped", "cancelled"];
+
 function textoDoConteudo(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -89,6 +92,15 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       depois: num(meta?.["post_tokens"]) ?? num(meta?.["postTokens"]),
       gatilho: str(meta?.["trigger"], "desconhecido"),
     };
+  }
+  // ADR-067: comando em segundo plano (Bash com run_in_background, Monitor). Só o que roda em segundo plano segura a
+  // sessão viva; um subagente em primeiro plano também abre `task_started`, mas termina antes do `result`.
+  if (type === "system" && subtype === "task_started" && o["is_backgrounded"] === true && str(o["task_id"]) !== "") {
+    return { tipo: "tarefa_fundo", id: str(o["task_id"]), estado: "iniciada" };
+  }
+  if (type === "system" && (subtype === "task_updated" || subtype === "task_notification") && str(o["task_id"]) !== "") {
+    const status = subtype === "task_updated" ? str(obj(o["patch"])?.["status"]) : str(o["status"]);
+    if (ESTADOS_FINAIS_DE_TAREFA.includes(status)) return { tipo: "tarefa_fundo", id: str(o["task_id"]), estado: "terminada" };
   }
   if (type === "rate_limit_event") {
     const info = obj(o["rate_limit_info"]);
@@ -307,4 +319,71 @@ export function classificarResultado(entrada: {
     return { desfecho: "interrompido", motivoInterrupcao: "sessao_rejeitada", ...base, sinais: { ...sinais, rejected: true } };
   }
   return { desfecho: "interrompido", motivoInterrupcao: "sem_progresso", ...base, sinais };
+}
+
+/** Uma rodada da sessão viva: os eventos até um `result`, inclusive. */
+function rodadas(eventos: readonly EventoStream[]): { fechadas: EventoStream[][]; aberta: EventoStream[] } {
+  const fechadas: EventoStream[][] = [];
+  let atual: EventoStream[] = [];
+  for (const ev of eventos) {
+    atual.push(ev);
+    if (ev.tipo === "result") {
+      fechadas.push(atual);
+      atual = [];
+    }
+  }
+  return { fechadas, aberta: atual };
+}
+
+/** A fala de UMA rodada fechada (eventos até o `result`): a mesma composição do fim do turno. */
+export function textoDaRodada(eventos: readonly EventoStream[]): string {
+  return classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "" }).texto;
+}
+
+const somarTokens = (a: TokensTurno, b: TokensTurno): TokensTurno => ({
+  entrada: a.entrada + b.entrada,
+  saida: a.saida + b.saida,
+  cacheLeitura: a.cacheLeitura + b.cacheLeitura,
+  cacheCriacao: a.cacheCriacao + b.cacheCriacao,
+});
+
+/**
+ * O fim de uma SESSÃO VIVA (definido em 2026-10-01, ADR-067): o CLI fica aberto enquanto há comando em segundo plano
+ * ou mensagem nova, e cada volta do modelo fecha com um `result`. Medido no 2.1.286: `total_cost_usd` é ACUMULADO na
+ * sessão (vale o do último) e `usage` é da rodada (soma-se). As rodadas já entregues como fala intermediária
+ * (`rodadasJaFaladas`) não entram de novo no texto.
+ *
+ * Com um `result` só e nada depois dele, devolve exatamente o mesmo que classificarResultado. Se depois do último
+ * `result` o modelo voltou a trabalhar e o processo foi interrompido (Parar, sinal), o turno sai interrompido com o
+ * que foi escrito desde então — e não "sucesso" pelo `result` de uma rodada anterior.
+ */
+export function classificarSessao(entrada: Parameters<typeof classificarResultado>[0] & { rodadasJaFaladas?: number }): ResultadoTurno {
+  const { fechadas, aberta } = rodadas(entrada.eventos);
+  if (fechadas.length === 0) return classificarResultado(entrada);
+  const results = fechadas.map((r) => r.at(-1)).filter((e): e is Extract<EventoStream, { tipo: "result" }> => e?.tipo === "result");
+  const ultimo = results.at(-1)!;
+  const tokens = results.reduce((t, r) => somarTokens(t, r.tokens), { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 } as TokensTurno);
+  const negacoesPermissao = [...new Set(results.flatMap((r) => r.negacoesPermissao))];
+  const trabalhouDepois = aberta.some((e) => e.tipo === "delta" || e.tipo === "texto_bloco" || e.tipo === "tool_use");
+  // Comando em segundo plano que nunca terminou: havia trabalho pendente quando o processo acabou.
+  const emFundo = new Set<string>();
+  for (const e of entrada.eventos) {
+    if (e.tipo !== "tarefa_fundo") continue;
+    if (e.estado === "iniciada") emFundo.add(e.id);
+    else emFundo.delete(e.id);
+  }
+  const pendente = trabalhouDepois || emFundo.size > 0;
+  const parou = entrada.interrompidoPeloDriver === true || entrada.signal !== null || (entrada.exitCode !== null && entrada.exitCode !== 0);
+  // A sessão de uma rodada só (o turno de sempre): nada muda, nem os espaços do texto.
+  if (fechadas.length === 1 && !(entrada.rodadasJaFaladas ?? 0) && !(pendente && parou)) return classificarResultado(entrada);
+  const cortado = pendente && parou;
+  const textoAberto = trabalhouDepois ? classificarResultado({ eventos: aberta, exitCode: null, signal: null, stderr: "", interrompidoPeloDriver: true }).texto : "";
+  const texto = juntarBlocos([...fechadas.slice(entrada.rodadasJaFaladas ?? 0).map(textoDaRodada), textoAberto]);
+  const geral = classificarResultado(entrada);
+  if (cortado) {
+    const init = entrada.eventos.find((e) => e.tipo === "init");
+    const interrompido = classificarResultado({ ...entrada, eventos: init ? [init, ...aberta] : aberta, interrompidoPeloDriver: true });
+    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, custoUsd: ultimo.custoUsd, tokens, negacoesPermissao };
+  }
+  return { ...geral, texto, tokens, negacoesPermissao };
 }

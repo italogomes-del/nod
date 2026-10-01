@@ -80,8 +80,13 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia"],
 };
 
-/** definido em 2026-09-16: 1 h = janela do cache ephemeral_1h do CLI (mapa-cli); plano mais velho que isso é fail-closed. */
-export const PLANO_VALIDADE_MS = 3_600_000;
+/**
+ * revisto em 2026-10-01 (ADR-067): o plano vale enquanto o turno vive. Era 1 h (a janela do cache ephemeral_1h do CLI,
+ * 2026-09-16) — e um turno de testes, CI ou QA que passava de uma hora ficava sem nenhuma ferramenta. Quem encerra o
+ * plano é o fim do turno: a entrega revoga o token, o Parar e a exclusão do agente negam a chamada (execucaoBloqueada,
+ * paradas) e o lease vencido assenta o turno. O campo `expiraEm` continua no contrato, com este valor.
+ */
+export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
 
@@ -249,7 +254,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
      * PR, merge) sai mesmo com linha ativa — uma regra gravada antes da lista não vale.
      */
     semprePermitir: entrada.confianca === "nao_confiavel" ? [] : semprePermitirNoCatalogo(entrada.semprePermitir ?? [], ferramentas),
-    expiraEm: Math.min(entrada.turno.prazoEm, entrada.agora + PLANO_VALIDADE_MS),
+    expiraEm: PLANO_SEM_VALIDADE,
   };
 }
 

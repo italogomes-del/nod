@@ -7,19 +7,14 @@ export const RENOVACAO_MS = 30_000;
 /** Máquina sem poll há mais que isto = offline. definido em 2026-09-16: dois pulls de 20s + folga (ADR-021, presença derivada do poll). */
 export const OFFLINE_MS = 60_000;
 /**
- * Silêncio total do agente que caracteriza turno travado. definido em 2026-09-18: substitui o teto
- * de passos (--max-turns), que cortava trabalho legítimo. Vigia ATIVIDADE, não duração: um turno
- * pode durar uma hora enquanto emite eventos. Mais curto que os 20 min do openmausbot de propósito —
- * lá o relógio corre durante o card de permissão, aqui a espera por ferramenta já é isenta.
+ * revisto em 2026-10-01 (ADR-067): saíram INATIVIDADE_TURNO_MS (5 min de silêncio), VERIFICACAO_INATIVIDADE_MS e
+ * ISENCAO_FERRAMENTA_MS (8 min com uma ferramenta aberta). O vigia de 2026-09-18 matava testes, CI e QA legítimos;
+ * o turno agora só acaba quando o bot termina, no Parar ou quando o lease vence.
+ *
+ * Checagem de mensagem nova numa sessão viva. definido em 2026-10-01 (ADR-067): 3 s — a pessoa vê a mensagem entrar
+ * quase na hora; é uma renovação de lease a mais por turno vivo a cada 3 s, barata no in-process e na ponte HTTP.
  */
-export const INATIVIDADE_TURNO_MS = 300_000;
-/** Verificação do watchdog. definido em 2026-09-18: um quinto da janela, como a batida é do lease. */
-export const VERIFICACAO_INATIVIDADE_MS = 60_000;
-/**
- * Teto da isenção por ferramenta aberta. definido em 2026-09-18: 2x o timeout de computador_* (240s),
- * a chamada mais lenta do catálogo. Sem ele, um tool_result perdido isentaria o turno para sempre.
- */
-export const ISENCAO_FERRAMENTA_MS = 480_000;
+export const CHECAGEM_MENSAGENS_MS = 3_000;
 /** Sonda de conector MCP. definido em 2026-09-16: a sonda de hoje viu um turno inteiro com MCP stdio em 8,3 s (mapa-cli); a descoberta tools/list precisa de bem menos. */
 export const PROBE_MS = 8_000;
 /** Fatia do long-poll de aprovação. definido em 2026-09-16: abaixo do teto do pull da ponte (20s no servidor, ADR-021); o teto real do tools/call do CLI é medido por scripts/sonda-mcp-timeout.ts (L4). */
@@ -27,7 +22,7 @@ export const LONGPOLL_APROVACAO_MS = 20_000;
 /**
  * definido em 2026-09-28 (0032): quanto o turno espera, com a ferramenta aberta, a pessoa decidir uma aprovação
  * (fatias de LONGPOLL_APROVACAO_MS). Aprovou nesse tempo, o MESMO turno segue — sem retomada e sem resumo
- * repetido. Abaixo da isenção do vigia (ISENCAO_FERRAMENTA_MS, 480 s), que derrubaria o turno "mudo".
+ * repetido. Era abaixo da isenção do vigia (480 s); o vigia saiu em 2026-10-01 (ADR-067) e o valor ficou.
  */
 export const ESPERA_APROVACAO_NO_TURNO_MS = 420_000;
 /** Conteúdo não confiável menor que isto não é embrulhado. definido em 2026-09-16: copiado do limiar _UNTRUSTED_WRAP_MIN_CHARS do openmausbot (ADR-026). */

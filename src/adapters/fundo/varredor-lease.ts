@@ -68,14 +68,26 @@ export async function varrer(db: Db, agora: number, opcoes: OpcoesVarredor = {})
   return saida;
 }
 
-export function iniciarVarredorLease(p: { db: Db; relogio?: Relogio; intervaloMs?: number; opcoes?: OpcoesVarredor }): { parar(): void } {
+export function iniciarVarredorLease(p: {
+  db: Db;
+  relogio?: Relogio;
+  intervaloMs?: number;
+  opcoes?: OpcoesVarredor;
+  /**
+   * revisto em 2026-10-01 (ADR-067): o token de turno não expira mais por relógio, então o turno que o varredor
+   * encerrou tem o token revogado aqui — senão ele ficaria vivo em memória até o servidor reiniciar.
+   */
+  aoInterromper?: (turnoIds: string[]) => void;
+}): { parar(): void } {
   const relogio = p.relogio ?? (() => Date.now());
   let rodando = false;
   const tick = async () => {
     if (rodando) return;
     rodando = true;
     try {
-      await varrer(p.db, relogio(), p.opcoes);
+      const r = await varrer(p.db, relogio(), p.opcoes);
+      const interrompidos = Object.values(r).flatMap((x) => x.interrompidos);
+      if (interrompidos.length) p.aoInterromper?.(interrompidos);
     } finally {
       rodando = false;
     }

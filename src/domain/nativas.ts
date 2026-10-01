@@ -27,8 +27,11 @@ export const NATIVAS_DE_SKILL = ["Skill", "Agent"] as const;
  * Cada chamada passa pelo hook PreToolUse do nod (trilha no servidor). Só no harness Claude Code, com o hook.
  * revisto em 2026-09-28 (ADR-055): sem sandbox — arquivos em qualquer lugar do Mac, Bash com rede e as
  * credenciais da pessoa, e cada comando decidido pelo servidor (leitura roda, o resto pede aprovação).
+ * revisto em 2026-10-01 (ADR-067): `Monitor` (acompanha um comando e acorda o bot a cada linha) e `TaskStop` (para um
+ * comando que o próprio bot pôs em segundo plano) — o que deixa o trabalho seguir por horas, como no Claude Code.
  */
-export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL, ...FERRAMENTAS_DE_TAREFA] as const;
+export const NATIVAS_DE_SEGUNDO_PLANO = ["Monitor", "TaskStop"] as const;
+export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", ...NATIVAS_DE_SEGUNDO_PLANO, "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL, ...FERRAMENTAS_DE_TAREFA] as const;
 
 /** As nativas que trazem conteúdo de FORA para o turno: a chamada marca o turno como contaminado (0033). */
 export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch"];
@@ -119,7 +122,9 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
       const arquivo = grava && p.pasta && alvo !== null ? arquivoForaDaPastaDoBot(alvo, p.pasta) : null;
       return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false, ...(arquivo ? { arquivo } : {}) };
     }
-    case "Bash": {
+    // ADR-067: o Monitor roda um comando como o Bash (cada linha da saída acorda o bot) — mesma cerca e mesma decisão.
+    case "Bash":
+    case "Monitor": {
       const comando = typeof p.entrada.command === "string" ? p.entrada.command : "";
       if (comando.trim() === "") return { permitir: false, motivo: "comando vazio", contamina: false };
       // ADR-065: git que mexe na pasta de trabalho só na pasta do bot — cerca local, antes do servidor, em qualquer modo.
@@ -141,6 +146,9 @@ export function decidirNativa(p: { ferramenta: string; entrada: Record<string, u
     case "TaskList":
     case "TaskUpdate":
       return { permitir: true, motivo: "lista de tarefas do bot", contamina: false };
+    // ADR-067: parar um comando que o próprio bot pôs em segundo plano não toca nada fora da sessão.
+    case "TaskStop":
+      return { permitir: true, motivo: "para um comando que o bot pôs em segundo plano", contamina: false };
     default:
       return { permitir: false, motivo: `ferramenta fora do kit do nod: ${p.ferramenta}`, contamina: false };
   }

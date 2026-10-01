@@ -1,7 +1,7 @@
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { IdHarness } from "../../contracts/harness.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { log } from "../../obs/log.ts";
 import { metricas as registroPadrao } from "../../obs/metricas.ts";
@@ -10,6 +10,7 @@ import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { assentarTurno, type SaidaAssentarTurno } from "../../use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../use-cases/despachar-turno.ts";
+import { absorverNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -55,6 +56,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   /** Harness do plano puxado (0030): a sessão que o turno devolver é deste harness. */
   const harnesses = new Map<string, IdHarness>();
   const tenantsPorPessoa = new Map<string, string>();
+  /** ADR-067: o maior `seq` de fala intermediária já gravado por turno (some na entrega). */
+  const falasGravadas = new Map<string, number>();
 
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
     if (!tenantsPorPessoa.has(pessoaId)) {
@@ -101,16 +104,32 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       }
     },
 
-    async renovar(p: PedidoRenovar) {
+    async renovar(p: PedidoRenovar): Promise<RespostaRenovar> {
       const escopo = escopos.get(p.turnoId);
       if (!escopo) return { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP };
-      const { ativo } = await abrirTxEscopada(db, escopo)(async (trx) => {
-        const repos = criarRepos(trx, escopo);
-        const r = await repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
-        if (p.eventos.length) await repos.events.gravarComOutbox(p.eventos);
-        return r;
+      const executor = executores.get(p.turnoId) ?? executorAtual();
+      // ADR-067: cada fala da sessão viva entra uma vez — a renovação que falhou na volta é repetida com as mesmas.
+      const novas = (p.falas ?? []).filter((f) => f.seq > (falasGravadas.get(p.turnoId) ?? 0)).sort((a, b) => a.seq - b.seq);
+      const { ativo, mensagens } = await abrirTxEscopada(db, escopo)(async (trx) => {
+        const d = depsDe(trx, escopo);
+        const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
+        if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
+        const events: RuntimeEvent[] = [];
+        if (novas.length) {
+          const g = await gravarFalasDaSessao(d, { turnoId: p.turnoId, machineId: p.machineId, executor, textos: novas.map((f) => f.texto) });
+          events.push(...(g.events ?? []));
+        }
+        let textos: string[] = [];
+        if (r.ativo && p.aceitaMensagens) {
+          const a = await absorverNaSessao(d, { turnoId: p.turnoId, executor });
+          textos = a.data.textos;
+          events.push(...(a.events ?? []));
+        }
+        if (events.length) await d.repos.events.gravarComOutbox(events);
+        return { ativo: r.ativo, mensagens: textos };
       });
-      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP };
+      if (novas.length) falasGravadas.set(p.turnoId, novas.at(-1)!.seq);
+      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(mensagens.length ? { mensagens } : {}) };
     },
 
     async entregar(e: Entrega) {
@@ -176,6 +195,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         escopos.delete(e.turnoId);
         executores.delete(e.turnoId);
         harnesses.delete(e.turnoId);
+        falasGravadas.delete(e.turnoId);
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
       }
