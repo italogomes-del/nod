@@ -98,6 +98,17 @@ describeIntegracao("pendências do bot (ADR-064)", () => {
     });
   });
 
+  it("a pendência anotada num turno de entrada não confiável sai com cuidado, e o Fazer agora leva a ressalva na fala", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      const deFora = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "varredura", entradaConfianca: "nao_confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const id = await c.anotar("Responder o que o e-mail pediu", { turnoId: deFora?.id ?? "" });
+      expect(await c.repos.pendencias.buscar(id)).toMatchObject({ cuidado: true });
+      const feito = await executar(c.deps, fazerPendenciaAgora, { agenteId: c.agenteId, pendenciaId: id });
+      expect(feito.data.mensagem).toMatchObject({ texto: "Fazer agora: Responder o que o e-mail pediu (anotada depois de ler conteúdo de fora: confira na fonte antes de agir)", autoria: { autor_tipo: "pessoa" } });
+    });
+  });
+
   it("RLS: Ana não vê, não resolve, não pede e não grava pendência no bot de Marlon", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);

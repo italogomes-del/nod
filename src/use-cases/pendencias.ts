@@ -142,10 +142,19 @@ export const descartarPendenciaPelaPessoa: CasoDeUso<{ agenteId: string; pendenc
   return { data: { pendencia: resolvida, mensagem }, events };
 };
 
+/** A ressalva que a fala do "Fazer agora" leva quando a pendência veio de um turno que leu conteúdo de fora. */
+export const RESSALVA_CUIDADO = "anotada depois de ler conteúdo de fora: confira na fonte antes de agir";
+
+/** A fala da pessoa: com `cuidado`, o clique dela não lava a origem da pendência (ADR-064). */
+export function falaFazerAgora(p: Pick<Pendencia, "texto" | "cuidado">): string {
+  return p.cuidado ? `Fazer agora: ${semPontoFinal(p.texto)} (${RESSALVA_CUIDADO})` : `Fazer agora: ${p.texto}`;
+}
+
 /**
  * "Fazer agora": a pessoa manda na conversa do bot a fala "Fazer agora: <texto>", pelo mesmo caminho do chat
  * (enviarMensagem) — um turno de conversa, profundidade 0, confiável: a corrente de colegas recomeça porque o
- * clique é dela. A pendência continua aberta até o bot concluir; `pedida_em` segura o duplo clique.
+ * clique é dela. A pendência continua aberta até o bot concluir; `pedida_em` segura o duplo clique. A pendência com
+ * `cuidado` leva a ressalva na fala: sem ela, o texto que veio de fora chegaria ao bot como pedido limpo da pessoa.
  */
 export const fazerPendenciaAgora: CasoDeUso<{ agenteId: string; pendenciaId: string; prazoMs?: number; executor?: Executor }, SaidaEnviarMensagem> = async (deps, input) => {
   const p = await pendenciaDoBot(deps, input.agenteId, input.pendenciaId);
@@ -153,7 +162,7 @@ export const fazerPendenciaAgora: CasoDeUso<{ agenteId: string; pendenciaId: str
   const agora = deps.agora();
   const marcada = await deps.repos.pendencias.marcarPedida(p.id, agora, REPEDIR_APOS_MS);
   if (!marcada) throw new ErroDeDominio("estado_invalido", { cause: "pedido enviado há pouco" });
-  const r = await enviarMensagem(deps, { conversaId: p.conversaId, texto: `Fazer agora: ${p.texto}`, prazoMs: input.prazoMs, executor: input.executor });
+  const r = await enviarMensagem(deps, { conversaId: p.conversaId, texto: falaFazerAgora(p), prazoMs: input.prazoMs, executor: input.executor });
   const autoria = autoriaPessoa(deps.escopo, input.executor);
   return { data: r.data, events: [...(r.events ?? []), evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: p.conversaId, dados: { agente_id: p.agenteId, acao: "pendencia_pedida", pendencia_id: p.id } })] };
 };

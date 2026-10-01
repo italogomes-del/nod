@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PENDENCIAS_ABERTAS_MAX, REPEDIR_APOS_MS } from "../../../src/domain/pendencia.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { enviarMensagem } from "../../../src/use-cases/enviar-mensagem.ts";
-import { anotarPendencia, concluirPendencia, descartarPendencia, descartarPendenciaPelaPessoa, fazerPendenciaAgora, listarPendencias } from "../../../src/use-cases/pendencias.ts";
+import { anotarPendencia, concluirPendencia, descartarPendencia, descartarPendenciaPelaPessoa, falaFazerAgora, fazerPendenciaAgora, listarPendencias } from "../../../src/use-cases/pendencias.ts";
 import { semNovidade } from "../../../src/use-cases/sem-novidade.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
@@ -125,6 +125,16 @@ describe("as ações da pessoa", () => {
     await esperarErro(() => descartarPendenciaPelaPessoa(deps, { agenteId: dev.agente.id, pendenciaId }), "nao_encontrado");
     await esperarErro(() => fazerPendenciaAgora(deps, { agenteId: dev.agente.id, pendenciaId }), "nao_encontrado");
     await esperarErro(() => listarPendencias(deps, { agenteId: randomUUID() }), "nao_encontrado");
+  });
+
+  it("Fazer agora de uma pendência com cuidado leva a ressalva na fala: o clique da pessoa não lava a origem", async () => {
+    const { deps, ctx, chico } = await cenario();
+    // Turno que não existe mais = cuidado (fail-closed), como o que leu conteúdo de fora.
+    const r = await executar(deps, anotarPendencia, { ...ctx, turnoId: randomUUID(), texto: "Responder o que o e-mail pediu." });
+    const pendenciaId = r.data.ok ? r.data.pendencia_id : "";
+    const { data } = await executar(deps, fazerPendenciaAgora, { agenteId: chico.agente.id, pendenciaId });
+    expect(data.mensagem.texto).toBe("Fazer agora: Responder o que o e-mail pediu (anotada depois de ler conteúdo de fora: confira na fonte antes de agir)");
+    expect(falaFazerAgora({ texto: "Cobrar o parecer.", cuidado: false })).toBe("Fazer agora: Cobrar o parecer.");
   });
 
   it("Fazer agora: vira a fala da pessoa na conversa do bot, turno de conversa em profundidade 0; o duplo clique não repete", async () => {

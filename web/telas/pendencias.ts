@@ -40,8 +40,14 @@ function item(p: Pendencia, agora: number): string {
   const chip = p.aPartirDe === null
     ? `<span class="pd-chip pd-proxima">${ICONE.proxima}Na próxima rotina ou conversa</span>`
     : `<span class="pd-chip">${ICONE.relogioMini}A partir de ${esc(quandoPendencia(p.aPartirDe, agora))}</span>`;
-  // Profundidade 3 = o pedido já tinha dado três passes entre bots (ADR-063): quem anotou não podia repassar.
-  const meta = [anotada(p, agora), p.profundidade === 3 ? "o pedido já tinha passado por 3 bots" : "", p.pedidaEm !== null ? `pedida às ${hora(p.pedidaEm)}` : ""].filter(Boolean).join(" · ");
+  // Profundidade 3 = o pedido já tinha dado três passes entre bots (ADR-063): quem anotou não podia repassar. O cuidado
+  // (turno que leu conteúdo de fora) fica à vista antes do Fazer agora, que o leva junto na fala.
+  const meta = [
+    anotada(p, agora),
+    p.cuidado ? "anotada depois de ler conteúdo de fora" : "",
+    p.profundidade === 3 ? "o pedido já tinha passado por 3 bots" : "",
+    p.pedidaEm !== null ? `pedida às ${hora(p.pedidaEm)}` : "",
+  ].filter(Boolean).join(" · ");
   const dados = { agente: p.agenteId };
   const acoes = botao("pendencia-fazer-agora", "Fazer agora", { id: p.id, classe: "link pd-fazer", dados, titulo: "Manda na conversa: “Fazer agora: …”" })
     + botao("pendencia-descartar", "Descartar", { id: p.id, classe: "link pd-descartar", dados, aria: `Descartar: ${p.texto}` });

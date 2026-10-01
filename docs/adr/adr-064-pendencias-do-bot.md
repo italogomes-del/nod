@@ -91,6 +91,7 @@ meio de uma corrente de colegas, ela não aparece.
   - o texto;
   - o chip "Na próxima rotina ou conversa" ou "A partir de <quando>";
   - "anotada às HH:MM";
+  - "anotada depois de ler conteúdo de fora", quando tem `cuidado`;
   - "o pedido já tinha passado por 3 bots", quando foi anotada em profundidade 3;
   - "pedida às HH:MM", depois de um Fazer agora;
   - as ações Fazer agora e Descartar.
@@ -104,6 +105,8 @@ meio de uma corrente de colegas, ela não aparece.
   conversa em profundidade 0, confiável, como se ela tivesse escrito. A pendência continua aberta até o bot concluir.
   - `pedida_em` recusa com 409 um segundo pedido feito em menos de 30 s.
   - A web ignora esse 409 e também o clique que chega com outro pedido em andamento.
+  - Com `cuidado`, a fala leva a ressalva: "Fazer agora: <texto> (anotada depois de ler conteúdo de fora: confira na
+    fonte antes de agir)". O clique da pessoa não lava a origem da pendência (revisão do PR #98, 2026-09-30).
 - **Descartar** marca a pendência como descartada pela pessoa e escreve na conversa "Você descartou: <texto>".
 
 ## Alternativas descartadas

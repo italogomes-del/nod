@@ -94,6 +94,17 @@ describe("o indicador embaixo da última mensagem", () => {
   });
 });
 
+describe("o cuidado à vista", () => {
+  it("o item anotado depois de ler conteúdo de fora diz isso na conversa e na gaveta; o sem cuidado, não", () => {
+    const lista = [pendencia("p7", "Responder o que o e-mail pediu", { cuidado: true }), pendencia("p8", "Cobrar o parecer")];
+    const conversa = renderAFazerNaConversa({ ...base, pendencias: { a1: lista }, aFazerAberto: { a1: true } }, "a1");
+    expect(conversa).toContain("anotada às 15:49 · anotada depois de ler conteúdo de fora");
+    expect(conversa.match(/anotada depois de ler conteúdo de fora/g)).toHaveLength(1);
+    const gaveta = renderDetalhes({ ...base, pendencias: { a1: lista } });
+    expect(gaveta.match(/anotada depois de ler conteúdo de fora/g)).toHaveLength(1);
+  });
+});
+
 describe("a gaveta do bot", () => {
   it("'A fazer · N' acima de Rotinas, com os mesmos itens e ações; sem pendência, sem seção", () => {
     const html = renderDetalhes({ ...base, pendencias: { a1: TRES } });
