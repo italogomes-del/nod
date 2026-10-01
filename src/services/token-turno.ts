@@ -2,7 +2,6 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { IdentidadeSemTurno, ServicesNod } from "../contracts/servicos.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { PLANO_VALIDADE_MS } from "../domain/plano-turno.ts";
 import type { Relogio } from "../shared/types.ts";
 
 /**
@@ -28,7 +27,11 @@ export type TokenTurno = ServicesNod<unknown>["tokenTurno"] & {
 
 export type OpcoesTokenTurno = {
   agora: Relogio;
-  /** definido em 2026-09-16: mesma validade do plano (PLANO_VALIDADE_MS = 1 h); token sem plano válido não serve para nada. */
+  /**
+   * revisto em 2026-10-01 (ADR-067): sem validade por relógio — o token vale enquanto o turno vive, como o plano.
+   * Some na entrega e quando o varredor assenta o turno pelo lease (revogar); o reinício do servidor apaga todos.
+   * Os testes ainda passam um valor para provar a expiração.
+   */
   validadeMs?: number;
   /** Resolve a identidade quando cunhar() vier só com o turnoId (composição da L9); sem isto e sem identidade, cunhar lança estado_invalido. */
   identidadeDe?: (turnoId: string) => IdentidadeSemTurno | null;
@@ -39,7 +42,7 @@ type Entrada = { hash: Buffer; epoch: number; expira: number; identidade: Identi
 const hashDe = (token: string): Buffer => createHash("sha256").update(token).digest();
 
 export function criarTokenTurno(opcoes: OpcoesTokenTurno): TokenTurno {
-  const validade = opcoes.validadeMs ?? PLANO_VALIDADE_MS;
+  const validade = opcoes.validadeMs ?? Number.POSITIVE_INFINITY;
   const porTurno = new Map<string, Entrada>();
   const porHash = new Map<string, string>();
 

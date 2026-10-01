@@ -31,12 +31,26 @@ export type Entrega = {
   resultado: ResultadoTurno;
 };
 
+/**
+ * Uma volta do modelo numa sessão viva que não encerrou o turno (definido em 2026-10-01, ADR-067). `seq` sobe de 1 em
+ * 1 por turno: o servidor grava cada uma uma vez só, mesmo que a renovação seja repetida.
+ */
+export type FalaIntermediaria = { seq: number; texto: string };
 export type PedidoRenovar = {
   turnoId: string;
   machineId: string;
   sinais: SinaisTurno;
   eventos: RuntimeEvent[];
+  /** ADR-067: falas da sessão viva ainda não confirmadas pelo servidor. */
+  falas?: FalaIntermediaria[];
+  /**
+   * ADR-067: a sessão viva está com a entrada aberta. Só então o servidor absorve as mensagens novas da pessoa nesta
+   * conversa e as devolve; sem isto elas esperam na fila, como antes.
+   */
+  aceitaMensagens?: boolean;
 };
+/** O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067). */
+export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[] };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
@@ -51,7 +65,7 @@ export type TrechoVivo = { texto: string } | { ferramenta: string } | { tarefas:
 export interface PonteInterna {
   conectar(m: AnuncioMaquina): Promise<void>;
   puxar(pessoaId: string): Promise<PlanoTurno | null>;
-  renovar(p: PedidoRenovar): Promise<{ ativo: boolean; versaoMinimaApp: string }>;
+  renovar(p: PedidoRenovar): Promise<RespostaRenovar>;
   entregar(e: Entrega): Promise<void>;
   desconectar(machineId: string): Promise<void>;
 }

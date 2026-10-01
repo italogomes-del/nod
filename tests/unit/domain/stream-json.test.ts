@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { EventoStream } from "../../../src/contracts/turno.ts";
 import { interpretarCodex } from "../../../src/domain/codex-stream.ts";
-import { classificarResultado, comporFala, interpretarLinhaStreamJson, NARRACAO_MAX_CHARS, reduzirSinais, SINAIS_ZERADOS } from "../../../src/domain/stream-json.ts";
+import { classificarResultado, classificarSessao, comporFala, interpretarLinhaStreamJson, NARRACAO_MAX_CHARS, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../src/domain/stream-json.ts";
 
 const FIXTURES = new URL("../../fixtures/stream-json/", import.meta.url);
 function eventosDe(nome: string): EventoStream[] {
@@ -224,5 +224,84 @@ describe("fala inteira: relatório antes da última ferramenta + texto final", (
     expect(comporFala([], "  pronto  ")).toBe("  pronto  ");
     expect(comporFala(["curto"], "")).toBe("");
     expect(comporFala([relatorio], "")).toBe(relatorio);
+  });
+});
+
+/**
+ * Sessão viva (ADR-067). s7 é a medição M1 de 01/10/2026 no CLI 2.1.286, com a entrada stream-json aberta: o modelo
+ * pôs um Bash de 40 s em segundo plano, a pessoa mandou "quanto é 2+2?" no meio, ele respondeu às duas juntas
+ * ("Disparado\n\n4"); 40 s depois o comando terminou e o CLI chamou o modelo de novo sozinho ("bg-pronto"). Cada volta
+ * abre com um `system/init` próprio e fecha com um `result`.
+ */
+describe("sessão viva (ADR-067)", () => {
+  const s7 = () => eventosDe("s7-sessao-viva.jsonl").filter((e) => e.tipo !== "ignorado");
+
+  it("comando em segundo plano: task_started (is_backgrounded) abre; task_updated e task_notification com status final fecham", () => {
+    const tarefas = s7().filter((e) => e.tipo === "tarefa_fundo");
+    expect(tarefas).toEqual([
+      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "iniciada" },
+      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "terminada" },
+      { tipo: "tarefa_fundo", id: "bcwaxdzy5", estado: "terminada" },
+    ]);
+    // Subagente em primeiro plano também abre task_started, mas não segura a sessão.
+    expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_started", task_id: "a1", is_backgrounded: false })).tipo).toBe("ignorado");
+    expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_updated", task_id: "a1", patch: { status: "running" } })).tipo).toBe("ignorado");
+    expect(interpretarLinhaStreamJson(JSON.stringify({ type: "system", subtype: "task_updated", task_id: "a1", patch: { status: "killed" } }))).toMatchObject({ estado: "terminada" });
+  });
+
+  it("duas voltas: o texto junta as duas; custo é o do último result (acumulado); tokens somam as voltas", () => {
+    const evs = s7();
+    const results = evs.filter((e): e is Extract<EventoStream, { tipo: "result" }> => e.tipo === "result");
+    expect(results).toHaveLength(2);
+    const r = classificarSessao({ eventos: evs, exitCode: 0, signal: null, stderr: "" });
+    expect(r.desfecho).toBe("sucesso");
+    expect(r.texto).toBe("Disparado\n\n4\n\nbg-pronto");
+    expect(r.custoUsd).toBe(results[1]!.custoUsd);
+    expect(r.tokens.saida).toBe(results[0]!.tokens.saida + results[1]!.tokens.saida);
+    expect(r.tokens.cacheLeitura).toBe(results[0]!.tokens.cacheLeitura + results[1]!.tokens.cacheLeitura);
+    expect(r.sessaoCli).toBe("a40747bc-97db-4a63-b621-99a40d0dda85");
+    expect(r.ferramentasChamadas).toEqual(["Bash"]);
+  });
+
+  it("a volta já entregue como fala intermediária não entra de novo na fala final", () => {
+    const r = classificarSessao({ eventos: s7(), exitCode: 0, signal: null, stderr: "", rodadasJaFaladas: 1 });
+    expect(r.texto).toBe("bg-pronto");
+    const nada = classificarSessao({ eventos: s7(), exitCode: 0, signal: null, stderr: "", rodadasJaFaladas: 2 });
+    expect(nada.texto).toBe("");
+    expect(nada.desfecho).toBe("sucesso");
+  });
+
+  it("um result só: exatamente o que classificarResultado devolve (o turno de sempre não muda)", () => {
+    for (const nome of ["s3-mcp-ok.jsonl", "s4b-negado.jsonl"]) {
+      const evs = eventosDe(nome);
+      expect(classificarSessao({ eventos: evs, exitCode: 0, signal: null, stderr: "" })).toEqual(classificarResultado({ eventos: evs, exitCode: 0, signal: null, stderr: "" }));
+    }
+  });
+
+  it("Parar no meio da volta seguinte: interrompido com o que ela escreveu, e não o sucesso da volta anterior", () => {
+    const evs = s7();
+    const primeiraVolta = evs.slice(0, evs.findIndex((e) => e.tipo === "result") + 1);
+    const depois: EventoStream[] = [{ tipo: "delta", texto: "Rodando a suíte inteira…" }, { tipo: "tool_use", id: "u9", nome: "Bash", input: { command: "npm test" } }];
+    const r = classificarSessao({ eventos: [...primeiraVolta, ...depois], exitCode: 143, signal: null, stderr: "", interrompidoPeloDriver: true, rodadasJaFaladas: 1 });
+    expect(r.desfecho).toBe("interrompido");
+    expect(r.texto).toBe("Rodando a suíte inteira…");
+    expect(r.custoUsd).toBe((primeiraVolta.at(-1) as Extract<EventoStream, { tipo: "result" }>).custoUsd);
+    expect(r.sessaoCli).toBe("a40747bc-97db-4a63-b621-99a40d0dda85");
+  });
+
+  it("Parar com um comando ainda em segundo plano (o modelo só esperava): interrompido, mesmo sem nada escrito depois", () => {
+    const evs = s7();
+    const ateOPrimeiroResult = evs.slice(0, evs.findIndex((e) => e.tipo === "result") + 1);
+    expect(ateOPrimeiroResult.some((e) => e.tipo === "tarefa_fundo" && e.estado === "iniciada")).toBe(true);
+    const r = classificarSessao({ eventos: ateOPrimeiroResult, exitCode: 143, signal: null, stderr: "", interrompidoPeloDriver: true });
+    expect(r.desfecho).toBe("interrompido");
+    expect(r.texto).toBe("Disparado\n\n4");
+    // Sem Parar, o mesmo stream (o -p de antes matava o comando ao sair) continua sucesso.
+    expect(classificarSessao({ eventos: ateOPrimeiroResult, exitCode: 0, signal: null, stderr: "" }).desfecho).toBe("sucesso");
+  });
+
+  it("textoDaRodada compõe a fala de uma volta como o fim do turno", () => {
+    const evs = s7();
+    expect(textoDaRodada(evs.slice(0, evs.findIndex((e) => e.tipo === "result") + 1))).toBe("Disparado\n\n4");
   });
 });

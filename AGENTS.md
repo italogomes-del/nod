@@ -145,13 +145,17 @@ de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura 
 Definido em 2026-09-17: as sondas usam `NOD_MODELO_SONDA` (default `claude-haiku-4-5-20251001`), separado do modelo dos agentes. `e2e:haiku` mantém o modelo barato explícito.
 
 Definido em 2026-09-18 (ADR-040): o turno **não** passa `--max-turns` — o teto de 12 passos cortava
-tarefa de código no meio. Quem limita é o watchdog de atividade em `laco.ts`: 5 min mudo encerra,
-e `tool_use` sem `tool_result` isenta (ferramenta em andamento é silêncio legítimo), com teto de
-480s. O lease continua sendo outro relógio: prova que o processo vive, não que o agente progride.
-`--max-turns` fica em `FLAG_FLOORS` porque `sonda.ts` ainda a usa com valor 1. `--autocompact` é
-condicional como `--restricted`: fora de `FLAGS_DO_TURNO`, liberada pelo `--help` da versão
-instalada. Sem contador de passos, **um agente que erra em círculo emitindo eventos não é
-interrompido sozinho** — resta o Parar; a lacuna está registrada na ADR.
+tarefa de código no meio. `--max-turns` fica em `FLAG_FLOORS` porque `sonda.ts` ainda a usa com valor 1.
+`--autocompact` é condicional como `--restricted`: fora de `FLAGS_DO_TURNO`, liberada pelo `--help` da
+versão instalada.
+
+Revisto em 2026-10-01 (ADR-067, sessão viva): **nenhum relógio de trabalho**. O driver do Claude abre o CLI
+com a entrada em `stream-json` e só fecha o stdin quando o modelo respondeu, nada roda em segundo plano
+(`system/task_*`) e o servidor não tem mensagem nova da pessoa; cada volta intermediária vira fala na hora
+(`falas` na renovação, frame `turno.fala`). Saíram o vigia de atividade, a validade de 1 h do plano e do
+token de turno e o `prazoEm` nas pastas e no computador; o Bash do CLI roda sem teto (`BASH_*_TIMEOUT_MS`).
+O turno acaba quando o bot termina, no Parar ou com o lease vencido (a máquina sumiu). **Um processo
+preso fica "trabalhando" até alguém apertar Parar** — a lacuna está na ADR-067.
 
 ## Desktop e servidor compartilhado (2026-09-17)
 

@@ -53,7 +53,7 @@ type RespostaAguardar = { estado?: string; itens?: { desfecho?: string | null }[
 
 /**
  * Fala com o servidor. Bash que precisa de aprovação: espera a decisão em fatias até ESPERA_APROVACAO_NO_TURNO_MS
- * (abaixo da isenção do vigia, ADR-040); aprovada, confirma de novo — agora o servidor acha a aprovação, grava a
+ * (era abaixo da isenção do vigia da ADR-040, que saiu na ADR-067); aprovada, confirma de novo — agora o servidor acha a aprovação, grava a
  * trilha e libera. Recusada, ou a espera acabou: nega com o motivo que o modelo precisa ler.
  */
 export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => number; fetch?: typeof fetch } = {}): Confirmar {

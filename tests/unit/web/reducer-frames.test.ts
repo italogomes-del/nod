@@ -60,6 +60,17 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota"]);
   });
 
+  it("ADR-067: turno.fala troca o texto ao vivo pela mensagem gravada — o cartão recomeça vazio e o turno segue rodando", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Disparei os testes." }), AGORA);
+    e = aplicarFrame(e, frame("turno.fala", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
+    expect(e.atividades[CONVERSA]).toEqual({});
+    expect(e.turnosVivos[TURNO]?.estado).toBe("rodando");
+    expect(e.invalidacoes).toContain(`conversa:${CONVERSA}`);
+    e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Testes verdes." }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.atual).toBe("Testes verdes.");
+  });
+
   it("turno.atividade fecha a narração numa etapa: o texto de antes e o de depois da ferramenta nunca se colam ('lote.44')", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
     e = aplicarFrame(e, frame("turno.delta", { conversaId: CONVERSA, turnoId: TURNO, texto: "Continuando com o próximo lote." }), AGORA);

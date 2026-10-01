@@ -368,6 +368,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
     return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comTarefas(a, tarefasDoFrame(f.dados.tarefas))) };
   },
+  // ADR-067: a volta do modelo virou mensagem e o turno segue rodando — a conversa relê, e o cartão ao vivo recomeça
+  // vazio para a próxima volta (senão o mesmo texto apareceria duas vezes).
+  "turno.fala": (e, f) => invalidar(semDelta(e, texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f)),
   "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
   "turno.interrompido": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),

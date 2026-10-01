@@ -41,9 +41,10 @@ async function reservar(d: Deps, c: Computador, acao: AcaoComputador, autor: "bo
   await d.repos.computadores.ocupar(c.id, operacao, d.agora() + LEASE_MS);
   return { computador: c, operacao, acao, registroId: registro, turnoId, aprovado: Boolean(registroId) };
 }
+/** revisto em 2026-10-01 (ADR-067): sem o `prazoEm` — o turno vivo usa o computador enquanto não acabou, sem relógio. */
 async function turnoPermitido(d: Deps, turnoId: string, agenteId: string, aprovado = false): Promise<boolean> {
   const t = await d.repos.turnos.buscar(turnoId);
-  return Boolean(t && (aprovado || (t.prazoEm > d.agora() && t.estado !== "concluido" && t.estado !== "interrompido")) && t.agenteId === agenteId && t.ownerId === d.escopo.pessoaId && !t.pararSolicitadoEm &&
+  return Boolean(t && (aprovado || (t.estado !== "concluido" && t.estado !== "interrompido")) && t.agenteId === agenteId && t.ownerId === d.escopo.pessoaId && !t.pararSolicitadoEm &&
     t.motivoInterrupcao !== "parado_pela_pessoa" && !(await d.repos.agentes.execucaoBloqueada(turnoId)) &&
     await d.repos.paradas.ativa(d.escopo.pessoaId, t.conversaId) === false);
 }

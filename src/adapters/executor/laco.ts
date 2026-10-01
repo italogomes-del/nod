@@ -1,10 +1,10 @@
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { AnuncioMaquina, Entrega, PonteInterna } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, Entrega, FalaIntermediaria, PonteInterna } from "../../contracts/ponte.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/turno.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../domain/stream-json.ts";
 import { log } from "../../obs/log.ts";
-import { INATIVIDADE_TURNO_MS, ISENCAO_FERRAMENTA_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS, VERIFICACAO_INATIVIDADE_MS } from "../../shared/constantes.ts";
+import { CHECAGEM_MENSAGENS_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import type { Adapter, IdDriver, Registry } from "./spi.ts";
 
@@ -26,12 +26,12 @@ export type OpcoesLaco = {
   esperaVaziaMs?: number;
   jitterMs?: number;
   renovacaoMs?: number;
-  /** Janela de silêncio que caracteriza turno travado; injetável para o teste não esperar 5 min. */
-  inatividadeMs?: number;
-  verificacaoInatividadeMs?: number;
-  isencaoFerramentaMs?: number;
+  /** ADR-067: de quanto em quanto a sessão viva pergunta por mensagem nova da pessoa (injetável no teste). */
+  checagemMensagensMs?: number;
   /** Deltas são efêmeros: vão direto ao barramento (L8), nunca pelo outbox. */
   aoDelta?: (plano: PlanoTurno, texto: string) => void;
+  /** ADR-067: o servidor gravou uma fala intermediária deste turno — a tela limpa o texto ao vivo que ela já mostrava. */
+  aoFalaGravada?: (plano: PlanoTurno) => void;
   /** Cada EventoStream interpretado, para quem persiste (catcher_registros, trilha) sem passar pela ponte. */
   aoEvento?: (plano: PlanoTurno, ev: EventoStream) => void;
   /**
@@ -86,9 +86,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
   const esperaVaziaMs = o.esperaVaziaMs ?? 1_000;
   const jitterMs = o.jitterMs ?? 300;
   const renovacaoMs = o.renovacaoMs ?? RENOVACAO_MS;
-  const inatividadeMs = o.inatividadeMs ?? INATIVIDADE_TURNO_MS;
-  const verificacaoInatividadeMs = o.verificacaoInatividadeMs ?? VERIFICACAO_INATIVIDADE_MS;
-  const isencaoFerramentaMs = o.isencaoFerramentaMs ?? ISENCAO_FERRAMENTA_MS;
+  const checagemMensagensMs = o.checagemMensagensMs ?? CHECAGEM_MENSAGENS_MS;
   let parado = false;
   let acordar: (() => void) | null = null;
   let adapterAtual: Adapter | null = null;
@@ -105,14 +103,41 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let sinais: SinaisTurno = { ...SINAIS_ZERADOS };
     let entregue = false;
     let renovando: Promise<void> | null = null;
-    let travado = false;
+    // ADR-067, sessão viva: falas ainda não confirmadas pelo servidor (reenviadas até ele confirmar; ele grava cada
+    // `seq` uma vez), quantas mensagens novas da pessoa entraram, e se ainda pedimos mensagens ao servidor.
+    let falas: FalaIntermediaria[] = [];
+    let seqFala = 0;
+    let mensagensRecebidas = 0;
+    let aceitando = true;
 
     const renovar = async (): Promise<void> => {
       if (entregue) return;
       if (renovando) return renovando;
+      let confirmou = false;
       renovando = (async () => {
+        const enviadas = falas;
+        const aceita = aceitando && adapterAtual?.aceitaMensagens?.() === true;
         try {
-          const r = await o.ponte.renovar({ turnoId: plano.turnoId, machineId: o.machineId, sinais, eventos: [] });
+          const r = await o.ponte.renovar({
+            turnoId: plano.turnoId,
+            machineId: o.machineId,
+            sinais,
+            eventos: [],
+            ...(enviadas.length ? { falas: enviadas } : {}),
+            ...(aceita ? { aceitaMensagens: true } : {}),
+          });
+          // A ponte HTTP devolve {ativo:false} quando a chamada falha: só uma resposta ativa confirma as falas. As que
+          // ficarem voltam na próxima renovação (ou antes da entrega), e o servidor ignora o `seq` já gravado.
+          confirmou = r.ativo;
+          if (enviadas.length && r.ativo) {
+            falas = falas.filter((f) => !enviadas.includes(f));
+            o.aoFalaGravada?.(plano);
+          }
+          for (const texto of r.mensagens ?? []) {
+            if (adapterAtual?.receberMensagem?.(texto)) mensagensRecebidas += 1;
+            // Só acontece se o CLI morreu entre o pedido e a resposta: a mensagem já saiu da fila e não entrou.
+            else log("aviso", "laco_mensagem_sem_sessao", { turno_id: plano.turnoId });
+          }
           if (!r.ativo && adapterAtual) await adapterAtual.interromper();
         } catch (erro) {
           log("aviso", "laco_renovar_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
@@ -120,37 +145,33 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           renovando = null;
         }
       })();
-      return renovando;
+      const atual = renovando;
+      await atual;
+      // Uma fala que chegou enquanto a renovação já ia: segue logo atrás, sem esperar a próxima batida.
+      if (confirmou && falas.length && !entregue) await renovar();
     };
     const batida = setInterval(() => void renovar(), renovacaoMs);
     batida.unref?.();
+    // ADR-067: enquanto a sessão viva aceita mensagem nova, pergunta ao servidor a cada poucos segundos — a mensagem
+    // da pessoa entra no meio do trabalho, como no Claude Code, em vez de esperar o turno acabar.
+    const checagem = setInterval(() => {
+      if (aceitando && adapterAtual?.aceitaMensagens?.() === true) void renovar();
+    }, checagemMensagensMs);
+    checagem.unref?.();
 
     /**
-     * Watchdog de ATIVIDADE (definido em 2026-09-18, no lugar do teto de passos). O lease prova que
-     * o processo vive; este relógio pergunta se o agente progride. Uma chamada de ferramenta em
-     * andamento é silêncio legítimo — computador_* leva até 240s e o proxy serializa as chamadas —
-     * então tool_use sem tool_result isenta, com teto para um resultado perdido não isentar sempre.
+     * revisto em 2026-10-01 (ADR-067): sem vigia de atividade. O watchdog de 2026-09-18 matava o turno depois de 5 min
+     * em silêncio ou de 8 min com uma ferramenta aberta — e matava testes, CI e QA legítimos (4 turnos dos Devs em 01/10).
+     * O turno acaba quando o bot termina, quando a pessoa aperta Parar (a renovação devolve {ativo:false}) ou quando a
+     * máquina some (o lease vence). Nenhum relógio de trabalho.
      */
-    let ultimaAtividade = o.relogio();
-    let ferramentaAbertaDesde: number | null = null;
-    const ferramentasAbertas = new Set<string>();
-    const marcarAtividade = () => {
-      ultimaAtividade = o.relogio();
-    };
-    const vigiar = () => {
-      if (entregue || !adapterAtual) return;
-      const agora = o.relogio();
-      const isento = ferramentasAbertas.size > 0 && ferramentaAbertaDesde !== null && agora - ferramentaAbertaDesde < isencaoFerramentaMs;
-      if (isento || agora - ultimaAtividade < inatividadeMs) return;
-      travado = true;
-      log("aviso", "turno_travado", { turno_id: plano.turnoId, mudo_ms: agora - ultimaAtividade, ferramentas_abertas: ferramentasAbertas.size });
-      void adapterAtual.interromper();
-    };
-    const vigia = setInterval(vigiar, verificacaoInatividadeMs);
-    vigia.unref?.();
-
     const entregar = async (bruto: ResultadoTurno): Promise<void> => {
       if (entregue) return;
+      // A última fala intermediária vai antes da final: senão a conversa as mostraria fora de ordem.
+      if (falas.length) {
+        if (renovando) await renovando;
+        await renovar();
+      }
       entregue = true;
       seqLocal += 1;
       const resultado = bruto.texto.length > TEXTO_ENTREGA_MAX_CHARS ? { ...bruto, texto: cortarTexto(bruto.texto) } : bruto;
@@ -187,32 +208,34 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           if (s === "promptSubmitted") await renovar();
         },
         evento(ev) {
-          marcarAtividade();
-          if (ev.tipo === "tool_use") {
-            ferramentasAbertas.add(ev.id);
-            ferramentaAbertaDesde ??= o.relogio();
-          } else if (ev.tipo === "tool_result") {
-            ferramentasAbertas.delete(ev.toolUseId);
-            if (ferramentasAbertas.size === 0) ferramentaAbertaDesde = null;
-          }
           o.aoEvento?.(plano, ev);
         },
         delta(texto) {
-          marcarAtividade();
           o.aoDelta?.(plano, texto);
         },
+        falaIntermediaria(texto) {
+          seqFala += 1;
+          falas.push({ seq: seqFala, texto: cortarTexto(texto) });
+          void renovar();
+        },
+        async ocioso() {
+          // Quantas já tinham entrado ANTES desta pergunta: uma renovação em voo também pode trazer mensagem.
+          const antes = mensagensRecebidas;
+          if (renovando) await renovando;
+          await renovar();
+          if (mensagensRecebidas > antes) return true;
+          // Síncrono com a resposta: nenhuma renovação daqui em diante pede mensagem, e o driver fecha a entrada.
+          aceitando = false;
+          return false;
+        },
       });
-      // Interrompido por este watchdog: o classificador não sabe o motivo, quem sabe é quem matou.
-      const comMotivo = travado && resultado.desfecho === "interrompido" && !resultado.motivoInterrupcao
-        ? { ...resultado, motivoInterrupcao: "turno_travado" as const }
-        : resultado;
-      await entregar({ ...comMotivo, sinais: { ...resultado.sinais, ...sinais } });
+      await entregar({ ...resultado, sinais: { ...resultado.sinais, ...sinais } });
     } catch (erro) {
       log("erro", "laco_turno_excecao", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
       await entregar(resultadoDeExcecao(erro, sinais));
     } finally {
       clearInterval(batida);
-      clearInterval(vigia);
+      clearInterval(checagem);
       adapterAtual = null;
       turnoAtual = null;
       o.aoTerminarTurno?.(plano);

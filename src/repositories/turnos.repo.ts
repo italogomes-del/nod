@@ -377,6 +377,22 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return { turno: l ? paraTurno(l) : turno, absorvidos };
     },
 
+    /**
+     * Mensagem nova no meio do trabalho (definido em 2026-10-01, ADR-067): as falas da pessoa que esperavam na fila
+     * desta conversa e deste agente entram no turno VIVO — saem interrompido/'absorvido' apontando para ele, como na
+     * fila lida junta, mas o texto vai à sessão do CLI em vez de mudar a entrada. Só fala da pessoa (conversa), e só
+     * sem anexo: o anexo espera o próximo turno, que o baixa e o entrega inteiro. Quem decide se o turno vivo aceita
+     * é o caso de uso (absorverNaSessao).
+     */
+    async absorverNaSessao(turno: Turno): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
+          and estado = 'pendente' and origem = 'conversa' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
+        returning ${conn.unsafe(COLUNAS)}`;
+      return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+    },
+
     /** Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. */
     async cancelarPendente(id: string): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`

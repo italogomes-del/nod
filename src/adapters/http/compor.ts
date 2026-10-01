@@ -397,6 +397,7 @@ export function comporApp(o: OpcoesCompor): App {
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
     ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
+    fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
     itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
@@ -610,7 +611,7 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala", dados: Record<string, unknown>): void {
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
 
@@ -634,6 +635,7 @@ export function comporApp(o: OpcoesCompor): App {
       ...p,
       ponte,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
+      aoFalaGravada: (plano) => publicarDoPlano(plano, "turno.fala", {}),
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
         else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });

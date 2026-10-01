@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as agendar } from "node:timers";
 import { setTimeout as dormir } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +36,65 @@ if (args.includes("--version")) {
   process.stdout.write(`${VERSAO} (Claude Code)\n`);
   process.exit(0);
 }
+
+// `--help` com as flags que o cenário quer anunciar (ADR-067: --input-format liga a sessão viva no driver).
+if (args.includes("--help") && process.env.NOD_FALSO_HELP) {
+  process.stdout.write(`Usage: claude [options]\n${process.env.NOD_FALSO_HELP.split(" ").map((f) => `  ${f} <x>`).join("\n")}\n`);
+  process.exit(0);
+}
+
+// ADR-067, sessão viva: com `--input-format stream-json` o CLI real lê mensagens pelo stdin enquanto ele está aberto.
+// Este cenário imita a medição M1 (01/10/2026, 2.1.286): a 1ª mensagem põe um comando em segundo plano e responde;
+// quando ele termina, o CLI volta sozinho ("Testes verdes."); cada mensagem seguinte ganha uma resposta; o processo
+// sai quando o stdin fecha e nada roda em segundo plano. SIGTERM: sai 143 sem `result`, como no s6.
+if (process.env.NOD_FALSO_CENARIO === "sessao-viva") {
+  const sessaoViva = valor("--session-id") ?? valor("--resume") ?? "00000000-0000-4000-8000-000000000000";
+  const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
+  let custo = 0;
+  let emFundo = 0;
+  let fechada = false;
+  let mensagens = 0;
+  const volta = (texto, antesDoResult = () => {}) => {
+    custo += 0.01;
+    out({ type: "system", subtype: "init", session_id: sessaoViva, tools: ["Bash", "Monitor"], model: "claude-haiku-4-5-20251001", claude_code_version: VERSAO, apiKeySource: "none" });
+    out({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: texto }] } });
+    antesDoResult();
+    out({ type: "result", subtype: "success", is_error: false, session_id: sessaoViva, result: texto, total_cost_usd: Number(custo.toFixed(2)), num_turns: 1, usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 10, cache_creation_input_tokens: 0 }, permission_denials: [] });
+  };
+  const talvezSair = () => { if (fechada && emFundo === 0) process.exit(0); };
+  process.on("SIGTERM", () => process.exit(143));
+  let resto = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (pedaco) => {
+    resto += pedaco;
+    let i;
+    while ((i = resto.indexOf("\n")) !== -1) {
+      const linha = resto.slice(0, i);
+      resto = resto.slice(i + 1);
+      if (linha.trim() === "") continue;
+      const conteudo = JSON.parse(linha).message.content;
+      const texto = typeof conteudo === "string" ? conteudo : conteudo.filter((b) => b.type === "text").map((b) => b.text).join("");
+      mensagens += 1;
+      if (mensagens === 1) {
+        volta("Disparei os testes.", () => {
+          out({ type: "system", subtype: "task_started", task_id: "bg1", is_backgrounded: true });
+          emFundo += 1;
+        });
+        agendar(() => {
+          emFundo -= 1;
+          out({ type: "system", subtype: "task_updated", task_id: "bg1", patch: { status: "completed" } });
+          out({ type: "system", subtype: "task_notification", task_id: "bg1", status: "completed" });
+          volta("Testes verdes.");
+          talvezSair();
+        }, Number(process.env.NOD_FALSO_FUNDO_MS ?? "150"));
+      } else volta(`Recebi: ${texto}`);
+    }
+  });
+  process.stdin.on("end", () => {
+    fechada = true;
+    talvezSair();
+  });
+} else {
 
 // Registro de sessões já usadas (o CLI real recusa reutilizar --session-id): um arquivo por sessão.
 const dirSessoes = process.env.NOD_FALSO_SESSOES ?? join(tmpdir(), "nod-claude-falso-sessoes");
@@ -104,3 +164,4 @@ for (const linha of linhas) {
   if (atrasoMs > 0) await dormir(atrasoMs);
 }
 process.exit(0);
+}

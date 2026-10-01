@@ -5,7 +5,7 @@ import type { Conector } from "../../../src/contracts/conector.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
-import { FERRAMENTAS_NOD_POR_MODO, montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
+import { FERRAMENTAS_NOD_POR_MODO, montarPlano, PLANO_SEM_VALIDADE, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Vera", titulo: "", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -197,11 +197,11 @@ describe("montarPlano", () => {
     }
   });
 
-  it("entrada, prazo e expiração vêm do turno/relógio; sessaoCli passa para --resume; sem cwd (EMENDA 11)", () => {
+  it("entrada e prazo vêm do turno/relógio; o plano vale enquanto o turno vive (ADR-067); sessaoCli passa para --resume; sem cwd (EMENDA 11)", () => {
     const p = montarPlano({ ...base, sessaoCli: "sess-1" });
     expect(p.entrada).toEqual({ texto: "oi", sessaoCli: "sess-1", modelo: "claude-haiku-4-5-20251001" });
     expect(p.politicaExecucao.prazoMs).toBe(86_400_000);
-    expect(p.expiraEm).toBe(agora + 3_600_000);
+    expect(p.expiraEm).toBe(PLANO_SEM_VALIDADE);
     expect("cwd" in p.politicaExecucao).toBe(false);
   });
 });
