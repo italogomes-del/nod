@@ -160,6 +160,7 @@ preso fica "trabalhando" até alguém apertar Parar** — a lacuna está na ADR-
 
 ## Desktop e servidor compartilhado (2026-09-17)
 
+Produção na GCP (VM + Cloud SQL, deploy pelo workflow `deploy`): [docs/deploy-gcp.md](docs/deploy-gcp.md).
 `NOD_MODO=compartilhado` desliga registry e orquestrador locais; os Macs usam `/api/maquina/…`
 com chave escopada. O id da chave identifica o computador; o corpo não escolhe o escopo.
 `npm run desktop:build` compila Electron, preload e proxy; a cerca do bundle recusa imports de
