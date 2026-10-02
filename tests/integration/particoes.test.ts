@@ -17,8 +17,10 @@ describeIntegracao("garantirParticoes (ADR-006): 12 meses à frente, idempotente
   });
 
   it("cria só o que falta com a forma de sqlParticao, duas chamadas deixam o catálogo igual, nenhuma partição DEFAULT, e o gate continua verde", async () => {
-    // Um ano à frente das 12 iniciais (2026-09..2027-08): 2027-09..2028-08 são todas novas — DDL como nod_dono sob rollback.
-    const agora = Date.UTC(2027, 8, 10);
+    // Doze meses que nenhum boot de hoje criou — DDL como nod_dono sob rollback. definido em 2026-10-01: o ano fixo
+    // (2027-09..2028-08) venceu na virada do mês, quando o boot de qualquer servidor de teste passou a criar 2027-09.
+    const primeiroNovo = mesesAPartirDe(Date.now(), MESES_A_FRENTE + 1).at(-1)!;
+    const agora = Date.UTC(primeiroNovo.ano, primeiroNovo.mes - 1, 10);
     const esperadas = mesesAPartirDe(agora).map((m) => nomeParticao(m.ano, m.mes));
     await withRollbackDono(async (trxDono) => {
       const antes = new Set((await lerTabelas(trxDono)).map((t) => t.nome));

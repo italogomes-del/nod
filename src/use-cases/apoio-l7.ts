@@ -106,14 +106,22 @@ export function carimbo(instante: number, fusoIana = "UTC"): string {
   return fusoIana === "UTC" ? `${texto} UTC` : texto;
 }
 
-/** Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). */
-export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao">, agora: number): string {
-  return redigir("rotina-proxima-execucao", agora, {
+/**
+ * Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). A rotina que só acorda com
+ * pendência (definido em 2026-10-01, item 7 da ADR-066) diz isso na mesma linha: a "próxima execução" dela só vira
+ * turno se houver pendência aberta.
+ */
+export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao"> & { soComPendencia?: boolean }, agora: number): string {
+  const texto = redigir("rotina-proxima-execucao", agora, {
     resumo: resumoCron(rotina.cron, rotina.fusoIana),
     proxima: carimbo(rotina.proximaExecucao, rotina.fusoIana),
     fuso: rotina.fusoIana,
   });
+  return rotina.soComPendencia ? `${texto} ${TEXTO_SO_COM_PENDENCIA}` : texto;
 }
+
+/** A frase da rotina que só acorda com pendência na linha de sistema da conversa (ativar, atualizar, reativar). */
+export const TEXTO_SO_COM_PENDENCIA = "Só acorda quando o bot tem pendência aberta; sem nenhuma, a janela passa sem turno e sem custo.";
 
 export function exigir<T>(valor: T | null | undefined, codigo: "nao_encontrado" | "estado_invalido" = "nao_encontrado", cause?: string): T {
   if (valor === null || valor === undefined) throw new ErroDeDominio(codigo, { cause });
@@ -166,22 +174,6 @@ export async function delegacaoDoTurno(repos: Repos, turno: Turno): Promise<Turn
     atual = await repos.turnos.buscar(atual.retomaTurnoId);
   }
   return atual?.origem === "delegacao" ? atual : null;
-}
-
-/**
- * A trava que quem cumpre um pedido de colega herda (definido em 2026-09-29, ADR-058): o turno de quem pediu,
- * achado pelo `peer_pedido` da tarefa, era de rotina com exige_aprovacao, ou uma retomada ligada a ela? Então
- * o efeito externo de quem recebe também só sai por item aprovado. Sem achar o pedido ou quem pediu, trava
- * (fail-closed); turno de rotina sem janela também trava (E7.3).
- */
-export async function travaDoPedido(repos: Repos, tarefa: Turno): Promise<boolean> {
-  const pedido = await repos.mensagens.pedidoDaTarefa(tarefa.id);
-  if (!pedido || pedido.payload?.kind !== "peer_pedido") return true;
-  const remetente = await repos.turnos.buscar(pedido.payload.turnoOrigemId);
-  if (!remetente) return true;
-  const ligacao = await rotinaDoTurno(repos, remetente.id);
-  if (ligacao) return ligacao.rotina.exigeAprovacao;
-  return remetente.origem === "rotina";
 }
 
 /**

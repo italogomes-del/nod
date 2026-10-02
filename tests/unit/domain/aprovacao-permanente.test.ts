@@ -19,7 +19,7 @@ function ferramenta(nome: string, extra: Partial<FerramentaPlano> = {}): Ferrame
 function plano(extra: Partial<EntradaAprovacao["plano"] & object> = {}): NonNullable<EntradaAprovacao["plano"]> {
   return {
     catalogo: { ferramentas: [ferramenta("slack__send_message"), ferramenta("slack__search", { readOnlyHint: true })], servidores: [] },
-    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 10_000, efeitoExternoSoPorAprovacao: false },
+    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 10_000 },
     confiancaEntrada: "confiavel",
     semprePermitir: [],
     ...extra,
@@ -40,19 +40,25 @@ describe("aprovação automática: o que NEGA vem antes do que PERMITE", () => {
     expect(d).toEqual({ automatico: false, motivo: "origem_sensivel" });
   });
 
-  it("gate de rotina segura mesmo item readOnly com regra (ADR-037: rotina continua exigindo)", () => {
-    const p = plano({ politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 1, efeitoExternoSoPorAprovacao: true }, semprePermitir: ["slack__search"] });
-    expect(decidirAprovacao({ plano: p, destino: buscar, origemSensivel: false })).toEqual({ automatico: false, motivo: "gate_de_rotina" });
+  it("ADR-066: a rotina não tem gate — no manual, readOnly passa pela regra do conector e a escrita, pela regra da pessoa ou pela pergunta de sempre", () => {
+    const p = plano({ modoTurno: "rotina", semprePermitir: ["slack__search", "slack__send_message"] });
+    expect(decidirAprovacao({ plano: p, destino: buscar, origemSensivel: false })).toMatchObject({ automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO });
+    expect(decidirAprovacao({ plano: p, destino: enviar, origemSensivel: false })).toEqual({ automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE });
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "rotina" }), destino: enviar, origemSensivel: false })).toEqual({ automatico: false, motivo: "sem_regra_permanente" });
   });
 
-  it("turno não confiável suspende a regra da PESSOA e diz por quê", () => {
+  it("conteúdo de fora suspende a regra da PESSOA e diz por quê: entrada não confiável ou turno contaminado (ADR-066)", () => {
     const p = plano({ confiancaEntrada: "nao_confiavel", semprePermitir: ["slack__send_message"] });
     expect(decidirAprovacao({ plano: p, destino: enviar, origemSensivel: false })).toEqual({ automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" });
+    const contaminado = plano({ semprePermitir: ["slack__send_message"] });
+    expect(decidirAprovacao({ plano: contaminado, destino: enviar, origemSensivel: false, contaminado: true })).toEqual({ automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" });
+    expect(decidirAprovacao({ plano: contaminado, destino: enviar, origemSensivel: false, contaminado: false })).toMatchObject({ automatico: true, regra: REGRA_APROVACAO_PERMANENTE });
   });
 
-  it("turno não confiável NÃO suspende a regra do CONECTOR: readOnly já passa no catálogo reduzido", () => {
+  it("conteúdo de fora NÃO suspende a regra do CONECTOR: readOnly passa (o catálogo não encolhe mais, ADR-066)", () => {
     const p = plano({ confiancaEntrada: "nao_confiavel" });
     expect(decidirAprovacao({ plano: p, destino: buscar, origemSensivel: false })).toMatchObject({ automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO });
+    expect(decidirAprovacao({ plano: plano(), destino: buscar, origemSensivel: false, contaminado: true })).toMatchObject({ automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO });
   });
 
   it("destino computador nunca é automático (ADR-037: aprovação vinculada à ação cifrada)", () => {

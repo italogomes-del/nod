@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { emitirPlanoTurno, modoDoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
@@ -63,7 +64,8 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       expect(r.data).toMatchObject({ turnoId: turno?.id, agenteId, conversaId, machineId: maquina, executor: "catcher", superficie: "maquina_da_pessoa", localidade: "local" });
       expect(r.data.autoria.machine_id).toBe(maquina);
       expect(r.data.promptSistema).toContain("revisa PRs");
-      expect(r.data.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+      // ADR-066: a política de execução é só prazo e orçamento — saíram o gate da rotina e a trava herdada.
+      expect(Object.keys(r.data.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
       expect(r.data.expiraEm).toBeGreaterThan(agora());
 
       // Token: autoriza com a identidade do turno; o plano vive junto dele; revogar derruba os dois.
@@ -95,7 +97,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
     });
   });
 
-  it("turno peer legado: sem pedir_a_bot nem encaminhar (E12.4, ADR-058); rotina sem gate identificável liga efeitoExternoSoPorAprovacao (fail-closed)", async () => {
+  it("turno peer legado: sem pedir_a_bot nem encaminhar (E12.4, ADR-058) e sem nativas; ADR-066: a rotina, com ou sem janela, não tem gate, ganha ver_colegas e, no Claude Code, o kit do terminal", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const agora = () => Date.now();
@@ -111,17 +113,26 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
 
       const rotina = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "rotina", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
       const planoRotina = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
-      expect(planoRotina.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(true);
-      // ADR-044: pedir_acesso entra na rotina (só propõe; a pessoa decide num botão). ADR-051: publicar/ler artefato também.
-      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+      // ADR-066: antes, rotina sem janela identificável ligava o gate (fail-closed). Agora não há gate a ligar.
+      expect(Object.keys(planoRotina.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+      // ADR-044: pedir_acesso entra na rotina. ADR-051: publicar/ler artefato também. ADR-064: as pendências também.
+      // ADR-066: ver_colegas também (leitura que não incomoda ninguém).
+      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]);
 
-      // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004): sem janela o gate fica ligado.
+      // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004). Com ou sem ela — e com
+      // exige_aprovacao false ou true —, a política é a mesma: quem decide quando parar é o modo do bot.
       const r = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", exigeAprovacao: false, proximaExecucao: agora() + 1000 });
       const instante = agora();
       await repos.rotinaJanelas.reivindicar({ rotinaId: r?.id ?? "", instanteAgendado: instante, machineId: randomUUID(), executor: "catcher" });
       await repos.rotinaJanelas.vincularTurno({ rotinaId: r?.id ?? "", instanteAgendado: instante, turnoId: rotina?.id ?? "" });
-      const semGate = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
-      expect(semGate.politicaExecucao.efeitoExternoSoPorAprovacao).toBe(false);
+      const comJanela = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
+      expect(Object.keys(comJanela.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
+      expect(comJanela.modoTurno).toBe("rotina");
+
+      // ADR-066: com o Claude Code e o hook do nod (executor local), o kit do terminal vale na rotina; o peer legado fica sem.
+      await repos.inventario.registrar("claude-cli", { estado: "pronto", versao: "2.1.272", em: agora() });
+      expect((await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m", executor: "local" })).data.nativas).toEqual([...NATIVAS_DO_TERMINAL]);
+      expect((await emitirPlanoTurno(deps, { turnoId: peer?.id ?? "", machineId: "m", executor: "local" })).data.nativas ?? []).toEqual([]);
 
       await expect(emitirPlanoTurno(deps, { turnoId: "00000000-0000-4000-8000-000000000000", machineId: "m" })).rejects.toMatchObject({ codigo: "nao_encontrado" });
     });
@@ -134,7 +145,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
     expect(modoDoTurno({ origem: "conversa", profundidade: 0 }, { tipo: "propria" }, { confirmado: false })).toBe("criacao");
     expect(modoDoTurno({ origem: "conversa", profundidade: 0 }, { tipo: "propria" }, { confirmado: true })).toBe("conversa");
     expect(modoDoTurno({ origem: "sala", profundidade: 0 }, { tipo: "sala" }, { confirmado: true })).toBe("sala");
-    // ADR-058: profundidade 1 só corta o salto; o modo vem da origem (peer é o turno legado de perguntar_a_bot).
+    // ADR-058/062: a profundidade só corta o salto (no limite); o modo vem da origem (peer é o turno legado de perguntar_a_bot).
     expect(modoDoTurno({ origem: "conversa", profundidade: 1 }, null, { confirmado: true })).toBe("conversa");
     expect(modoDoTurno({ origem: "peer", profundidade: 1 }, null, { confirmado: true })).toBe("peer");
     await withRollback(MARLON, async (trx) => {

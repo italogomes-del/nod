@@ -3,6 +3,7 @@ import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
+import { paraProfundidade } from "../domain/profundidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
@@ -61,7 +62,7 @@ function paraTurno(l: Linha): Turno {
     motivoFalha: l.motivo_falha,
     semNovidadeMotivo: l.sem_novidade_motivo,
     retomaTurnoId: l.retoma_turno_id,
-    profundidade: l.profundidade === 1 ? 1 : 0,
+    profundidade: paraProfundidade(l.profundidade),
     reenvios: l.reenvios,
     pararSolicitadoEm: msOuNull(l.parar_solicitado_em),
     entradaTexto: l.entrada_texto,
@@ -282,6 +283,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.sim === true;
     },
 
+    /** ADR-066: a sessão do CLI que o turno abriu e o executor dele — a retomada de rotina ou de pedido de colega volta nela. */
+    async sessaoDoTurno(id: string): Promise<{ sessaoCli: string; executor: string } | null> {
+      const [l] = await conn<{ sessao_cli: string | null; executor: string }[]>`select sessao_cli, executor from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.sessao_cli ? { sessaoCli: l.sessao_cli, executor: l.executor } : null;
+    },
+
     /** "Pode fazer e o resto desta tarefa" (0032): marca a RAIZ; vale para ela e as retomadas dela. */
     async liberarComputador(raizId: string, agora: number): Promise<boolean> {
       const r = await conn`update turnos set computador_liberado_em = coalesce(computador_liberado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${raizId}`;
@@ -370,6 +377,22 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return { turno: l ? paraTurno(l) : turno, absorvidos };
     },
 
+    /**
+     * Mensagem nova no meio do trabalho (definido em 2026-10-01, ADR-067): as falas da pessoa que esperavam na fila
+     * desta conversa e deste agente entram no turno VIVO — saem interrompido/'absorvido' apontando para ele, como na
+     * fila lida junta, mas o texto vai à sessão do CLI em vez de mudar a entrada. Só fala da pessoa (conversa), e só
+     * sem anexo: o anexo espera o próximo turno, que o baixa e o entrega inteiro. Quem decide se o turno vivo aceita
+     * é o caso de uso (absorverNaSessao).
+     */
+    async absorverNaSessao(turno: Turno): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
+          and estado = 'pendente' and origem = 'conversa' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
+        returning ${conn.unsafe(COLUNAS)}`;
+      return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+    },
+
     /** Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. */
     async cancelarPendente(id: string): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`
@@ -423,18 +446,30 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * EMENDA 13: turno pendente bloqueado é renderizável — "na fila — Vera está respondendo em #revisão".
      * conversaId aponta para ONDE o agente está ocupado (outra conversa) ou para a própria, quando a
      * serialização é por conversa. Pendente sem bloqueio conhecido não entra (vai ser reivindicado já).
+     *
+     * revisto em 2026-09-30: em dois passos, e o segundo só quando há pendente (o caso comum é nenhum). A versão com as
+     * duas subconsultas correlacionadas custava uma varredura de turnos por linha estimada, e a estimativa sob RLS
+     * contava todos os turnos da conversa (1.020 estimados, 0 pendentes de fato): medido em 2026-09-30, custo 504 mil,
+     * acima do limiar do JIT, e 1,36 s por GET conversa; o índice turnos_por_conversa (0042) sozinho não resolvia
+     * (o custo seguiu acima de 500 mil), porque a subconsulta por agente seguia varrendo a tabela.
      */
     async pendentesRenderizaveis(conversaId: string): Promise<TurnoPendenteDto[]> {
-      const linhas = await conn<{ id: string; ocupado_em: string }[]>`
-        select p.id,
-               coalesce(
-                 (select d.conversa_id from turnos d where d.tenant_id = p.tenant_id and d.agente_id = p.agente_id and d.estado = 'despachando' order by d.criado_em limit 1),
-                 (select d.conversa_id from turnos d where d.tenant_id = p.tenant_id and d.conversa_id = p.conversa_id and d.estado = 'despachando' limit 1)
-               ) as ocupado_em
-        from turnos p
-        where p.tenant_id = ${escopo.tenantId} and p.conversa_id = ${conversaId} and p.estado = 'pendente'
-        order by p.criado_em`;
-      return linhas.filter((l) => l.ocupado_em !== null).map((l) => ({ id: l.id, motivo: "agente_ocupado_em", conversaId: l.ocupado_em }));
+      const pendentes = await conn<{ id: string; agente_id: string }[]>`
+        select id, agente_id from turnos
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente'
+        order by criado_em`;
+      if (pendentes.length === 0) return [];
+      // O mais antigo despachando de cada agente ganha, como o `order by criado_em limit 1` de antes; sem nenhum do
+      // agente, um despachando na própria conversa (serialização por conversa) aponta para ela mesma.
+      const agentes = [...new Set(pendentes.map((p) => p.agente_id))];
+      const ocupados = await conn<{ agente_id: string; conversa_id: string }[]>`
+        select agente_id, conversa_id from turnos
+        where tenant_id = ${escopo.tenantId} and estado = 'despachando' and (agente_id = any(${agentes}::uuid[]) or conversa_id = ${conversaId})
+        order by criado_em`;
+      return pendentes.flatMap((p): TurnoPendenteDto[] => {
+        const ocupado = ocupados.find((d) => d.agente_id === p.agente_id) ?? ocupados.find((d) => d.conversa_id === conversaId);
+        return ocupado ? [{ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversa_id }] : [];
+      });
     },
 
     /** Entrega idempotente (ADR-021): true só na primeira vez de (turno, seq_local). */
@@ -443,6 +478,19 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         insert into turno_entregas (tenant_id, owner_id, turno_id, seq_local) values (${escopo.tenantId}, ${escopo.pessoaId}, ${turnoId}, ${seqLocal})
         on conflict (tenant_id, turno_id, seq_local) do nothing returning id`;
       return linhas.length === 1;
+    },
+
+    /**
+     * Turnos concluídos por conversa, numa consulta (as execuções da frota, definido em 2026-09-30): a contagem real, no
+     * índice turnos_por_conversa (0042). Conversa sem nenhum fica de fora.
+     */
+    async concluidosPorConversa(conversaIds: readonly string[]): Promise<Map<string, number>> {
+      if (conversaIds.length === 0) return new Map();
+      const linhas = await conn<{ conversa_id: string; n: number }[]>`
+        select conversa_id, count(*)::int as n from turnos
+        where tenant_id = ${escopo.tenantId} and conversa_id = any(${[...conversaIds]}::uuid[]) and estado = 'concluido'
+        group by conversa_id`;
+      return new Map(linhas.map((l) => [l.conversa_id, l.n]));
     },
 
     async listarDaConversa(conversaId: string, limite = 50): Promise<Turno[]> {

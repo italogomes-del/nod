@@ -3,7 +3,7 @@ import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps } from "../../../src/use-cases/tipos.ts";
 import { depsFalsos } from "./deps-l5.ts";
-import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
+import type { ModoTurno, PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 
 async function cenario(deps: Deps) {
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
@@ -25,15 +25,20 @@ async function cenario(deps: Deps) {
 const destino = { conector: "email", ferramenta: "enviar", argumentos: { para: "x" } };
 const leitura = { conector: "email", ferramenta: "buscar", argumentos: {} };
 
-/** Plano mínimo para a regra do ADR-042: só o que decidirAprovacao lê. */
-function planoCom(nomes: string[], o: { readOnly?: string[]; semprePermitir?: string[]; confianca?: "confiavel" | "nao_confiavel"; gateRotina?: boolean } = {}): PlanoTurno {
+/**
+ * Plano mínimo para a regra do ADR-042: só o que decidirAprovacao lê.
+ * revisto em 2026-10-01 (ADR-066): `politicaExecucao` não tem mais o gate da rotina; o que distingue a rotina é o
+ * `modoTurno` (o arriscado só para fora da conversa com a pessoa).
+ */
+function planoCom(nomes: string[], o: { readOnly?: string[]; semprePermitir?: string[]; confianca?: "confiavel" | "nao_confiavel"; modoTurno?: ModoTurno } = {}): PlanoTurno {
   return {
     catalogo: {
       ferramentas: nomes.map((nome) => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "conector" as const, conectorId: "c", readOnlyHint: (o.readOnly ?? []).includes(nome), tocaDadoPessoal: false, schema: { type: "object" as const } })),
       servidores: [],
     },
-    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 1, efeitoExternoSoPorAprovacao: o.gateRotina ?? false },
+    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 1 },
     confiancaEntrada: o.confianca ?? "confiavel",
+    ...(o.modoTurno ? { modoTurno: o.modoTurno } : {}),
     semprePermitir: o.semprePermitir ?? [],
   } as unknown as PlanoTurno;
 }
@@ -121,6 +126,9 @@ describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
   it("escrita na regra da pessoa também dispensa o card, e a autoria nomeia a regra dela", async () => {
     const { deps, banco } = depsFalsos();
     const c = await cenario(deps);
+    // ADR-062: a regra vale pela LINHA ativa agora, não pela lista congelada no plano.
+    const email = await deps.repos.conectores.buscarPorSlug("email");
+    await deps.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: email?.id ?? "", capacidade: "enviar", itemOrigemId: "i", mensagemId: "m", regraVersao: 1 });
     const r = await pedirAprovacao(deps, {
       turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "enviar",
       itens: [{ texto: "email para a Ana", destino }],
@@ -169,18 +177,17 @@ describe("pedirAprovacao (E4.1/E4.2/E4.4)", () => {
     expect(item?.motivoManual).toBe("regra_suspensa_conteudo_nao_confiavel");
   });
 
-  it("gate de rotina segura mesmo item de leitura (ADR-037)", async () => {
+  it("ADR-066: não há mais gate de rotina — num turno de rotina a leitura declarada sai sem card, e a escrita no manual pergunta pelo motivo de sempre", async () => {
     const { deps, chamadas } = depsFalsos();
     const c = await cenario(deps);
-    const r = await pedirAprovacao(deps, {
-      turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x",
-      itens: [{ texto: "buscar", destino: leitura }],
-      plano: planoCom(["email__buscar"], { readOnly: ["email__buscar"], gateRotina: true }),
-    });
-    expect(r.data.estado).toBe("pendente");
-    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
-    expect(chamadas).toHaveLength(0);
-    expect((await deps.repos.itensAprovacao.listar(r.data.decisao_id))[0]?.motivoManual).toBe("gate_de_rotina");
+    const base = { turnoId: c.turnoId, agenteId: c.agenteId, conversaId: c.conversaId, resumo: "x" };
+    const ler = await pedirAprovacao(deps, { ...base, itens: [{ texto: "buscar", destino: leitura }], plano: planoCom(["email__buscar"], { readOnly: ["email__buscar"], modoTurno: "rotina" }) });
+    expect(ler.data).toEqual({ estado: "decidida", itens: [{ idx: 0, desfecho: "executado" }] });
+    expect(chamadas).toHaveLength(1);
+    const escrever = await pedirAprovacao(deps, { ...base, itens: [{ texto: "email para a Ana", destino }], plano: planoCom(["email__enviar"], { modoTurno: "rotina" }) });
+    if (escrever.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect((await deps.repos.itensAprovacao.listar(escrever.data.decisao_id))[0]?.motivoManual).toBe("sem_regra_permanente");
+    expect(chamadas).toHaveLength(1);
   });
 
   it("item com origem declarada 'toca' passa a ser elegível à regra: é o conjunto que cresceu e fez a versão subir para 2", async () => {
@@ -228,23 +235,29 @@ describe("pedirAprovacao com o modo do bot (ADR-059)", () => {
     const r = await pedir(deps, c, planoCom(["email__enviar"]));
     expect(r.data).toEqual({ estado: "decidida", itens: [{ idx: 0, desfecho: "executado" }] });
     expect(chamadas).toHaveLength(1);
-    expect(banco.decisoes[0]?.desfecho).toMatchObject({ tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 1 });
+    // ADR-066: a versão subiu para 2 — o conjunto que o automático deixa passar cresceu (conteúdo de fora, merge).
+    expect(banco.decisoes[0]?.desfecho).toMatchObject({ tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 2 });
     const msg = banco.mensagens.find((m) => m.kind === "resultado_aprovacao");
     expect(msg?.texto).toContain("Fiz sem perguntar (1 ação) · aprovação automática:");
     expect(msg?.autoria).toMatchObject({ autor_tipo: "agente", decidido_por: "regra:modo_automatico" });
   });
 
-  it("automático também libera a rotina do próprio bot (gate), mas não o turno que leu a web", async () => {
+  it("ADR-066: automático libera a rotina e também o turno que leu a web — conteúdo de fora só pesa no manual, onde a regra 'Sempre permitir' cai", async () => {
     const { deps, chamadas } = depsFalsos();
     const c = await cenario(deps);
     await deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
-    expect((await pedir(deps, c, planoCom(["email__enviar"], { gateRotina: true }))).data.estado).toBe("decidida");
+    expect((await pedir(deps, c, planoCom(["email__enviar"], { modoTurno: "rotina" }))).data.estado).toBe("decidida");
     await deps.repos.turnos.contaminar(c.turnoId, Date.now());
-    const r = await pedir(deps, c, planoCom(["email__enviar"]));
-    expect(r.data.estado).toBe("pendente");
-    if (r.data.estado !== "pendente") throw new Error("esperava pendente");
-    expect((await deps.repos.itensAprovacao.listar(r.data.decisao_id))[0]?.motivoManual).toBe("regra_suspensa_conteudo_nao_confiavel");
-    expect(chamadas).toHaveLength(1);
+    const lida = await pedir(deps, c, planoCom(["email__enviar"]));
+    expect(lida.data.estado).toBe("decidida");
+    expect(await pedir(deps, c, planoCom(["email__enviar"], { confianca: "nao_confiavel", modoTurno: "rotina" }))).toMatchObject({ data: { estado: "decidida" } });
+    expect(chamadas).toHaveLength(3);
+    // No manual, o mesmo turno contaminado suspende a regra da pessoa e escreve o motivo.
+    await deps.repos.agentes.definirModoAprovacao(c.agenteId, "manual");
+    const manual = await pedir(deps, c, planoCom(["email__enviar"], { semprePermitir: ["email__enviar"] }));
+    if (manual.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect((await deps.repos.itensAprovacao.listar(manual.data.decisao_id))[0]?.motivoManual).toBe("regra_suspensa_conteudo_nao_confiavel");
+    expect(chamadas).toHaveLength(3);
   });
 
   it("automático para no arriscado: apagar no app vira card com o motivo", async () => {
@@ -259,13 +272,17 @@ describe("pedirAprovacao com o modo do bot (ADR-059)", () => {
     expect((await deps.repos.itensAprovacao.listar(r.data.decisao_id))[0]?.motivoManual).toBe("acao_arriscada");
   });
 
-  it("sem aprovações: sai até num turno não confiável, em que o catálogo reduzido tirou a escrita", async () => {
+  it("ADR-066: sem aprovações sai num turno não confiável (o catálogo não encolhe mais, a escrita está nele); fora do catálogo pergunta até no total", async () => {
     const { deps, banco } = depsFalsos();
     const c = await cenario(deps);
     await deps.repos.agentes.definirModoAprovacao(c.agenteId, "total");
-    const r = await pedir(deps, c, planoCom([], { confianca: "nao_confiavel" }));
+    const r = await pedir(deps, c, planoCom(["email__enviar"], { confianca: "nao_confiavel" }));
     expect(r.data.estado).toBe("decidida");
     expect(banco.mensagens.find((m) => m.kind === "resultado_aprovacao")?.texto).toContain("· sem aprovações:");
+    // Fora do catálogo é concessão desligada no plano: nenhum modo passa (antes o total passava no turno não confiável).
+    const fora = await pedir(deps, c, planoCom([], { confianca: "nao_confiavel" }));
+    if (fora.data.estado !== "pendente") throw new Error("esperava pendente");
+    expect((await deps.repos.itensAprovacao.listar(fora.data.decisao_id))[0]?.motivoManual).toBe("fora_do_catalogo");
   });
 
   it("o modo é o ATUAL do agente: voltar para o manual vale no pedido seguinte do mesmo turno", async () => {

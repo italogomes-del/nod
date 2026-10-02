@@ -22,8 +22,10 @@ export type OpcoesTick = {
 /**
  * `puladas`: rotinas cuja execução anterior ainda estava aberta — só reagendadas (ADR-045).
  * `bloqueadas` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno.
+ * `semPendencia` (definido em 2026-10-01, item 7 da ADR-066): rotina que só acorda com pendência, sem nenhuma — a
+ * janela passou sem turno e sem custo.
  */
-export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; puladas: string[]; bloqueadas: string[]; falhas: string[] };
+export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; puladas: string[]; bloqueadas: string[]; semPendencia: string[]; falhas: string[] };
 
 /**
  * Um tick para UMA pessoa (o teste chama isto sob withRollback com `tx = (fn) => fn(trx)`): lista
@@ -33,7 +35,7 @@ export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; p
  */
 export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTick): Promise<ResultadoTick> {
   const agora = opcoes.agora();
-  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], falhas: [] };
+  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], semPendencia: [], falhas: [] };
   const vencidas = await tx(async (trx) => criarRepos(trx, escopo).rotinas.ativasVencidas(agora));
   for (const rotina of vencidas) {
     try {
@@ -55,6 +57,13 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
           await repos.events.gravarComOutbox(r.events ?? []);
           resultado.bloqueadas.push(rotina.id);
           log("info", "rotina_bloqueada", { rotina_id: rotina.id, motivo: r.data.bloqueada, proposta_id: r.data.propostaId, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
+          return;
+        }
+        // Sem pendência visível: sem turno e sem crédito gasto; a execução 'sem_novidade' e o evento do histórico vão nesta tx.
+        if ("semPendencia" in r.data) {
+          await repos.events.gravarComOutbox(r.events ?? []);
+          resultado.semPendencia.push(rotina.id);
+          log("info", "rotina_sem_pendencia", { rotina_id: rotina.id, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
         await repos.events.gravarComOutbox(r.events ?? []);

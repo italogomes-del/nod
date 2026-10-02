@@ -4,7 +4,7 @@ import type { DestinoItem } from "../contracts/item-aprovacao.ts";
 import type { MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { grupoDaCapacidade } from "./grupos-de-acesso.ts";
-import { conversaComAPessoa, decidirPeloModo, gateDaRotinaObrigaPessoa, type RegraDoModo } from "./modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, type RegraDoModo } from "./modo-aprovacao.ts";
 
 /**
  * DUAS regras nomeadas, não uma (ADR-042 claim 5): os ciclos de vida são opostos.
@@ -63,13 +63,24 @@ export function nuncaPermanente(nome: string, readOnlyHint?: boolean): boolean {
   return NUNCA_PERMANENTE.some((r) => r.test(capacidade));
 }
 
+/** O merge de um PR (pr_merge, GITHUB_MERGE_A_PULL_REQUEST), lido no nome em camelCase, snake ou kebab. */
+function mergeDePr(nome: string): boolean {
+  const n = nome.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  return /(^|_)MERGE(_|$)/.test(n) && /(^|_)(PR|PRS|PULL|PULL_REQUEST)(_|$)/.test(n);
+}
+
 /**
- * Ação de app que o modo automático não aprova sozinho (ADR-059): a que nunca vira regra permanente (merge, aprovar
- * e revisar PR) e a do grupo "Apagar e desfazer" (`destructiveHint` da sonda ou o verbo do nome, ADR-049). Mesma
- * direção de falha da ADR-042: o nome só pode tornar a ação MAIS arriscada, nunca menos.
+ * Ação de app que o modo automático não aprova sozinho (ADR-059): a do grupo "Apagar e desfazer" (`destructiveHint`
+ * da sonda ou o verbo do nome, ADR-049). Mesma direção de falha da ADR-042: o nome só pode tornar a ação MAIS
+ * arriscada, nunca menos.
+ * revisto em 2026-10-01 (ADR-066, decisão do Marlon): merge, aprovar e revisar PR saíram — "não quero que merge volte
+ * para ação arriscada". O merge de PR sai mesmo estando no grupo "apagar" (MERGE está lá pelo merge de REGISTROS —
+ * mesclar contatos ou tasks apaga um deles —, que continua arriscado). Os três seguem em NUNCA_PERMANENTE: no manual,
+ * pedem a pessoa toda vez e não viram "Sempre permitir".
  */
 export function acaoArriscadaNoApp(cap: Pick<CapacidadeConector, "nome" | "readOnlyHint" | "destructiveHint">): boolean {
-  return nuncaPermanente(cap.nome, cap.readOnlyHint) || grupoDaCapacidade(cap) === "apagar";
+  if (mergeDePr(cap.nome)) return false;
+  return grupoDaCapacidade(cap) === "apagar";
 }
 
 export type DecisaoAutomatica =
@@ -86,6 +97,8 @@ export type EntradaAprovacao = {
   modo?: ModoAprovacao;
   /** ADR-059: `acaoArriscadaNoApp` da capacidade de destino, calculada pelo caso de uso sobre o catálogo do conector. */
   arriscada?: boolean;
+  /** ADR-066: o turno já leu algo de fora (web, e-mail, PR) — só pesa no manual, onde a regra "Sempre permitir" cai. */
+  contaminado?: boolean;
 };
 
 /**
@@ -98,55 +111,44 @@ export type EntradaAprovacao = {
  *  2. origem sensível            → perguntar ANTES do banco: o CHECK item_sensivel_marcado_exige_pessoa
  *                                  recusaria o INSERT, e um erro de constraint vira 500 em vez de
  *                                  "isto precisa de você" (ADR-029: negação é estado renderizado)
- *  3. gate de rotina ligado      → perguntar (ADR-037: rotina que exige aprovação continua exigindo;
- *                                  rotina roda sem ninguém olhando, que é quando a aprovação mais vale)
- *  4. entrada não confiável      → perguntar (ADR-042 claim 6; `semprePermitir` já chega vazia, e esta
- *                                  linha torna a intenção explícita e testável em vez de emergente)
- *  5. fora do catálogo do plano  → perguntar (readOnlyHint NUNCA se infere de nome de ferramenta)
- *  6. readOnlyHint do CONECTOR   → AUTOMÁTICO por `consulta_sem_decisao`
- *  7. ação que nunca é permanente → perguntar (ADR-047: aprovar PR, merge)
+ *  3. destino computador/terminal → perguntar aqui: cada um se decide no próprio caminho
+ *  4. fora do catálogo do plano  → perguntar, em todo modo (readOnlyHint NUNCA se infere de nome de ferramenta)
+ *  5. readOnlyHint do CONECTOR   → AUTOMÁTICO por `consulta_sem_decisao`
+ *  6. conteúdo de fora           → o modo decide; no manual, perguntar (ADR-042 claim 6: a regra da pessoa cai)
+ *  7. ação que nunca é permanente → o modo decide; no manual, perguntar (ADR-047: aprovar PR, merge)
  *  8. ferramenta em semprePermitir → AUTOMÁTICO por `aprovacao_permanente`
- *  9. senão                      → perguntar
+ *  9. senão                      → o modo decide; no manual, perguntar
  *
  * O passo 5 exigir `origem === "conector"` é o que mantém a feature honesta: só
  * `ferramentasDeConectores` (plano-turno.ts) lê `readOnlyHint` da SONDA. Ferramenta nod tem o campo
  * fixo em `false`, e computador/workspace vêm de lista escrita no código — nenhuma delas entra por
  * esta porta, mesmo que pareça inofensiva.
  *
- * ADR-059: o MODO do bot entra onde o manual perguntaria (passos 4, 5, 7 e 9), por `decidirPeloModo`, e no
- * passo 3, que só obriga pessoa quando `gateDaRotinaObrigaPessoa`. No modo manual nada muda. Sem plano, origem
- * sensível, computador e terminal continuam antes de qualquer modo (os dois últimos se decidem nos próprios
- * caminhos). Fora do catálogo em turno CONFIÁVEL continua perguntando em todo modo: ali a ferramenta falta por
- * conector desligado, não pela redução por confiança.
- * Emenda de 2026-09-30: no automático, o arriscado do app (apagar, merge, aprovar PR) só para fora da conversa
- * com a pessoa (`conversaComAPessoa(plano.modoTurno)`): numa rotina ou num pedido de colega, ninguém pediu.
+ * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram o gate da rotina e a trava
+ * herdada, e o catálogo não encolhe mais por confiança — fora do catálogo é só concessão desligada, que nenhum modo
+ * passa. Conteúdo de fora (entrada marcada ou turno que leu algo de fora) só tira a regra "Sempre permitir" do
+ * manual; o automático e o total seguem. No automático, o arriscado do app (apagar) só para fora da conversa com a
+ * pessoa (`conversaComAPessoa(plano.modoTurno)`, emenda de 2026-09-30 da ADR-059): numa rotina ou num pedido de
+ * colega, ninguém pediu.
  */
 export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   const { plano } = entrada;
   if (!plano) return { automatico: false, motivo: "sem_plano" };
   if (entrada.origemSensivel) return { automatico: false, motivo: "origem_sensivel" };
-  const travaHerdada = plano.politicaExecucao.travaHerdada === true;
-  if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && gateDaRotinaObrigaPessoa(entrada.modo, travaHerdada)) return { automatico: false, motivo: "gate_de_rotina" };
   if (entrada.destino.conector === "computador") return { automatico: false, motivo: "destino_computador" };
   // ADR-055: comando no terminal do Mac se decide por autorizar-comando.ts, nunca por regra de conector.
   if (entrada.destino.conector === "terminal") return { automatico: false, motivo: "destino_terminal" };
 
   const nome = `${entrada.destino.conector}__${entrada.destino.ferramenta}`;
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === nome);
-  const naoConfiavel = plano.confiancaEntrada === "nao_confiavel";
-  // Emenda de 2026-09-30: apagar e merge que a pessoa pediu NA CONVERSA não são arriscados para o automático.
-  const pessoaPediu = conversaComAPessoa(plano.modoTurno);
-  const situacao = { arriscada: entrada.arriscada === true && !pessoaPediu, credencial: false, conteudoDeFora: naoConfiavel, travaHerdada };
-  // No turno não confiável o catálogo reduzido tirou a escrita do plano, e é por aqui que ela passa: o modo decide
-  // (a concessão já foi conferida pelo caso de uso, no catálogo do conector).
-  if (!ferramenta || ferramenta.origem !== "conector") return (naoConfiavel ? decidirPeloModo(entrada.modo, situacao) : null) ?? { automatico: false, motivo: "fora_do_catalogo" };
-
+  if (!ferramenta || ferramenta.origem !== "conector") return { automatico: false, motivo: "fora_do_catalogo" };
   if (ferramenta.readOnlyHint) return { automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO, versao: VERSAO_CONSULTA_SEM_DECISAO };
 
-  // A regra da PESSOA cai inteira em turno contaminado; a do CONECTOR (acima) não, porque
-  // catalogoReduzido já deixa readOnly passar direto e executá-la aqui não amplia nada.
-  if (naoConfiavel) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
-  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return decidirPeloModo(entrada.modo, { ...situacao, arriscada: !pessoaPediu }) ?? { automatico: false, motivo: "sem_regra_permanente" };
+  // Emenda de 2026-09-30: apagar que a pessoa pediu NA CONVERSA não é arriscado para o automático.
+  const situacao = { arriscada: entrada.arriscada === true && !conversaComAPessoa(plano.modoTurno), credencial: false };
+  // A regra da PESSOA cai inteira depois de conteúdo de fora; a do CONECTOR (acima) não, porque só lê.
+  if (plano.confiancaEntrada === "nao_confiavel" || entrada.contaminado === true) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
+  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
   return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "sem_regra_permanente" };
 }

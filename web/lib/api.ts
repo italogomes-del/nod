@@ -14,10 +14,12 @@ import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
+import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 
 /**
@@ -90,7 +92,7 @@ export function criarApi(escopo: Escopo) {
   const del = <T>(caminho: string) => pedir<T>("DELETE", `${base}/${caminho}`);
   return {
     escopo,
-    workspace: (id: string) => get<{ disponivel: boolean; vinculo: { pasta: string; preparado: { caminho: string; modo: string } | null } | null }>(`conversas/${id}/workspace`),
+    workspace: (id: string) => get<WorkspaceDto>(`conversas/${id}/workspace`),
     pastasWorkspace: (id: string, caminho?: string) => post<{ caminho: string; pai: string; selecionavel: boolean; pastas: { nome: string; caminho: string }[] }>(`conversas/${id}/workspace/pastas`, { caminho }),
     escolherWorkspace: (id: string, pasta: string) => post(`conversas/${id}/workspace`, { pasta }),
     revogarWorkspace: (id: string) => del(`conversas/${id}/workspace`),
@@ -143,6 +145,10 @@ export function criarApi(escopo: Escopo) {
     criarMemoria: (agenteId: string, tipo: TipoMemoria, texto: string) => post<{ memoria: Memoria }>(`agentes/${agenteId}/memoria`, { tipo, texto }),
     editarMemoria: (agenteId: string, id: string, campos: { texto?: string; tipo?: TipoMemoria }) => patch<{ memoria: Memoria }>(`agentes/${agenteId}/memoria/${id}`, campos),
     apagarMemoria: (agenteId: string, id: string) => del<RespostaMutacao>(`agentes/${agenteId}/memoria/${id}`),
+    // ADR-064: o "a fazer" do bot — a lista, o Descartar da pessoa e o Fazer agora (vira mensagem na conversa).
+    pendencias: (agenteId: string) => get<RespostaPendencias>(`agentes/${agenteId}/pendencias`),
+    descartarPendencia: (agenteId: string, id: string) => post<RespostaMutacao>(`agentes/${agenteId}/pendencias/${id}/descartar`),
+    fazerPendenciaAgora: (agenteId: string, id: string) => post<RespostaMutacao>(`agentes/${agenteId}/pendencias/${id}/fazer-agora`),
     confirmarProposta: (id: string) => post<RespostaMutacao>(`propostas/${id}/confirmar`),
     recusarProposta: (id: string) => post<RespostaMutacao>(`propostas/${id}/recusar`),
     criarRotina: (entrada: { agenteId: string; cron: string; fusoIana: string; instrucao: string; fonte: string; entregavel: string; limitesAprovacao: string; politicaSemDado: string }) => post<RespostaMutacao>("rotinas", entrada),

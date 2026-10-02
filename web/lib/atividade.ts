@@ -55,9 +55,28 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string): At
   return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas };
 }
 
-/** Primeira frase da narração, numa linha, sem marcação: é o que cabe numa linha do cartão. */
+/**
+ * Primeira frase da narração, numa linha, sem marcação: é o que cabe numa linha do cartão. Só o começo do texto
+ * decide o resumo: com o começo já limpo bem maior que `max`, o corte do prefixo não chega à frase (a frase termina
+ * antes dele, ou passa de `max` e é cortada nos mesmos caracteres). definido em 2026-09-30: o cartão é redesenhado a
+ * cada atualização do turno, e limpar o texto inteiro somava ~455 ms num turno de 30 mil caracteres em 1.250 pedaços
+ * (medido em 2026-09-30, bancada em Node); o prefixo leva isso a ~26 ms.
+ */
 export function resumoEtapa(texto: string, max = 140): string {
-  const limpo = texto.replace(/[*_`#>]+/g, "").replace(/^\s*[-•]\s+/gm, "").replace(/\s+/g, " ").trim();
+  if (texto.length > PREFIXO_DO_RESUMO) {
+    const limpo = limparNarracao(texto.slice(0, PREFIXO_DO_RESUMO));
+    if (limpo.length > max + 20) return primeiraFrase(limpo, max);
+  }
+  return primeiraFrase(limparNarracao(texto), max);
+}
+
+const PREFIXO_DO_RESUMO = 2_000;
+
+function limparNarracao(texto: string): string {
+  return texto.replace(/[*_`#>]+/g, "").replace(/^\s*[-•]\s+/gm, "").replace(/\s+/g, " ").trim();
+}
+
+function primeiraFrase(limpo: string, max: number): string {
   const frase = /^(.+?[.!?…])(?:\s|$)/.exec(limpo)?.[1] ?? limpo;
   return frase.length > max ? `${frase.slice(0, max - 1).trimEnd()}…` : frase;
 }

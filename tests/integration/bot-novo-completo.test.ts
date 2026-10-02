@@ -32,7 +32,7 @@ function plano(confiancaEntrada: PlanoTurno["confiancaEntrada"]): PlanoTurno {
   return {
     tenantId: TENANT_PADRAO, turnoId: "t", conversaId: "c", agenteId: "a", localidade: "local", machineId: "m", executor: "catcher", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada, profundidade: 0, catalogo: { ferramentas: [], servidores: [] },
-    promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" }, politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false }, semprePermitir: [], tokenDeTurno: "tok", expiraEm: AGORA + 60_000,
+    promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" }, politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 }, semprePermitir: [], tokenDeTurno: "tok", expiraEm: AGORA + 60_000,
   };
 }
 

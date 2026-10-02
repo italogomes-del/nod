@@ -3,14 +3,22 @@ import { decidirNativa, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL, nativasDoTurno,
 
 const decidir = (ferramenta: string, entrada: Record<string, unknown>) => decidirNativa({ ferramenta, entrada });
 
-describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
-  it("conversa e criação confiáveis com o harness Claude recebem o kit; sem ele, só arquivo e só com pasta", () => {
-    expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: false, terminal: true })).toEqual(NATIVAS_DO_TERMINAL);
-    expect(nativasDoTurno({ modo: "criacao", confianca: "confiavel", pastasAutorizadas: false, terminal: true })).toEqual(NATIVAS_DO_TERMINAL);
+describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
+  it("ADR-066: com o harness Claude (hook), o kit vale em todo modo menos o peer e com qualquer confiança; sem ele, só arquivo, só na conversa confiável e com pasta", () => {
+    for (const modo of ["conversa", "criacao", "rotina", "delegacao", "sala"] as const) {
+      for (const confianca of ["confiavel", "nao_confiavel"] as const) {
+        for (const pastasAutorizadas of [false, true]) {
+          expect(nativasDoTurno({ modo, confianca, pastasAutorizadas, terminal: true }), `${modo} ${confianca} ${pastasAutorizadas}`).toEqual(NATIVAS_DO_TERMINAL);
+        }
+      }
+    }
+    // Só o peer legado fica sem, com ou sem o hook.
+    expect(nativasDoTurno({ modo: "peer", confianca: "confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
+    // Sem o hook (só --restricted), ninguém decide as nativas: ficam na conversa confiável com pasta.
     expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: true })).toEqual(NATIVAS_DE_ARQUIVO);
     expect(nativasDoTurno({ modo: "conversa", confianca: "confiavel", pastasAutorizadas: false })).toEqual([]);
-    expect(nativasDoTurno({ modo: "conversa", confianca: "nao_confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
-    expect(nativasDoTurno({ modo: "rotina", confianca: "confiavel", pastasAutorizadas: true, terminal: true })).toEqual([]);
+    expect(nativasDoTurno({ modo: "conversa", confianca: "nao_confiavel", pastasAutorizadas: true })).toEqual([]);
+    expect(nativasDoTurno({ modo: "rotina", confianca: "confiavel", pastasAutorizadas: true })).toEqual([]);
   });
 
   it("emenda da ADR-055: as skills da pessoa e os subagentes estão no kit, e o hook os deixa passar", () => {
@@ -65,5 +73,16 @@ describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
     expect(decidir("Task", {}).permitir).toBe(false);
     expect(decidir("mcp__nod__publicar_artefato", {})).toMatchObject({ permitir: true, contamina: false });
     expect(decidir("", {}).permitir).toBe(false);
+  });
+
+  it("ADR-067: Monitor roda um comando como o Bash — vai ao servidor com ele e passa pela cerca do git; TaskStop só para o que o bot pôs em segundo plano", () => {
+    expect(NATIVAS_DO_TERMINAL).toEqual(expect.arrayContaining(["Monitor", "TaskStop"]));
+    const ciVerde = "until gh pr checks 505 -R acme-edtech/acme | grep -qv pending; do sleep 30; done";
+    expect(decidir("Monitor", { command: ciVerde, description: "CI do #505" })).toMatchObject({ permitir: true, contamina: false, comando: ciVerde });
+    expect(decidir("Monitor", { command: " " }).permitir).toBe(false);
+    const pasta = { cwd: "/Users/m/code/acme", pastaDoBot: "/Users/m/nod/Dev 4", home: "/Users/m" };
+    expect(decidirNativa({ ferramenta: "Monitor", entrada: { command: "git checkout main && npm test" }, pasta })).toMatchObject({ permitir: false });
+    expect(decidirNativa({ ferramenta: "Bash", entrada: { command: "git checkout main && npm test" }, pasta })).toMatchObject({ permitir: false });
+    expect(decidir("TaskStop", { task_id: "b1" })).toMatchObject({ permitir: true, contamina: false });
   });
 });

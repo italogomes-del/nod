@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
 import { versaoAceita } from "../../src/domain/versao-app.ts";
-import { entrega, inventario, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { entrega, falas, inventario, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { TEXTO_ENTREGA_MAX_CHARS } from "../../src/shared/constantes.ts";
 
 describe("desktop: fronteiras HTTP", () => {
   it("só aceita HTTPS sem credenciais ou caminhos; loopback exige opção de desenvolvimento", () => {
@@ -61,5 +62,12 @@ describe("desktop: fronteiras HTTP", () => {
     expect(trechos([{ tarefas }])).toEqual([{ tarefas }]);
     expect(trechos([{ tarefas: [{ id: "1", titulo: "x", estado: "concluida" }] }, { texto: "ok" }])).toEqual([{ texto: "ok" }]);
     expect(trechos([{ tarefas: Array.from({ length: 51 }, (_, i) => ({ id: String(i), titulo: "t", estado: "pendente" })) }])).toEqual([]);
+  });
+  it("ADR-067: falas da sessão viva — seq inteiro ≥ 1 e texto dentro do teto; fora do formato a renovação é recusada (o executor reenvia)", () => {
+    expect(falas(undefined)).toEqual([]);
+    expect(falas([{ seq: 1, texto: "Disparei os testes." }, { seq: 2, texto: "Verdes." }])).toEqual([{ seq: 1, texto: "Disparei os testes." }, { seq: 2, texto: "Verdes." }]);
+    for (const ruim of [[{ seq: 0, texto: "x" }], [{ seq: 1.5, texto: "x" }], [{ seq: 1 }], [{ seq: 1, texto: "x".repeat(TEXTO_ENTREGA_MAX_CHARS + 1) }], "x", Array.from({ length: 51 }, (_, i) => ({ seq: i + 1, texto: "t" }))]) {
+      expect(() => falas(ruim), JSON.stringify(ruim).slice(0, 60)).toThrow();
+    }
   });
 });

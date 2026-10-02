@@ -69,9 +69,13 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
  * Pedido de acesso em português com escopo nomeado (E6.2). A validação é do domínio
  * (normalizarPedidoAcesso); aqui mora a ligação com o turno. App ainda não conectado vira só o card
  * de conexão; app pronto vira proposta + decisão de mesmo id, que a pessoa decide com um clique
- * (decidir-acesso.ts concede). Turno de rotina só pede leitura — ou a escrita que a rotina declarou — e
- * o pedido carrega a rotina: permitir roda a rotina de novo, recusar a pausa — e, desde 2026-09-24
- * (emenda da ADR-044), é UM por (agente, app) com o pré-voo (garantirPedidoDeAcesso). Nada é concedido aqui.
+ * (decidir-acesso.ts concede). O pedido do turno de rotina carrega a rotina: permitir roda a rotina de novo,
+ * recusar a pausa — e, desde 2026-09-24 (emenda da ADR-044), é UM por (agente, app) com o pré-voo
+ * (garantirPedidoDeAcesso).
+ * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): a rotina pede leitura ou escrita como
+ * qualquer turno, e o modo concede como na conversa e no pedido de colega. Antes a rotina só pedia leitura (ou a
+ * escrita declarada) e nunca passava pelo modo: era o único lugar em que o total ainda esperava um clique, e cada
+ * janela seguinte saía bloqueada até ele.
  */
 export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) => {
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
@@ -89,10 +93,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
       if (input.capacidades.length === 0) entrada = { ...input, capacidades: capacidadesDoNivel(r.conector.catalogo, input.nivel) };
     }
   }
-  // definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): a escrita que a rotina
-  // DECLAROU para este app — a pessoa a viu no card da rotina — pode ser pedida pelo turno; fora dela, não.
-  const declaradas = ligacao?.rotina.acessos?.filter((a) => a.conector === input.conector).flatMap((a) => a.capacidades) ?? [];
-  const pedido = normalizarPedidoAcesso({ pedido: entrada, conector, emRotina: ligacao !== null, declaradas });
+  const pedido = normalizarPedidoAcesso({ pedido: entrada, conector, emRotina: false, declaradas: [] });
   const rotina = ligacao?.rotina ?? null;
   const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
   if (rotina) {
@@ -111,6 +112,19 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
       turnoId: input.turnoId,
       autoria,
     });
+    // ADR-066: o modo concede também na rotina. A concessão roda a rotina de novo (decidir-acesso.ts), já com a
+    // ferramenta; o card de conexão (login do app) continua sendo da pessoa.
+    if (conector && g.decisao && (g.decisao.estado === "pendente" || g.decisao.estado === "reaberta")) {
+      const arriscadaNaRotina = pedido.capacidades.some((nome) => {
+        const cap = conector.catalogo.find((c) => c.nome === nome);
+        return cap ? acaoArriscadaNoApp(cap) : true;
+      });
+      const porRegraNaRotina = await confirmacaoPeloModo(deps, input, { arriscada: arriscadaNaRotina });
+      if (porRegraNaRotina) {
+        const decidido = await decidirAcesso(deps, { decisaoId: g.decisao.id, recusar: false, executor: input.plano?.executor ?? "catcher", porRegra: porRegraNaRotina });
+        return { data: concedidoPeloModo(g.proposta.id), events: [...semCard(g.events), ...(decidido.events ?? [])] };
+      }
+    }
     return { data: aguardandoPessoa(g.proposta.id), events: g.events };
   }
   const repetido = await pedidoRepetido(deps, entrada, pedido);
@@ -135,7 +149,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   }
   const aberto = await abrirPedidoDeAcesso(deps, { conversaId: input.conversaId, agenteId: input.agenteId, turnoId: input.turnoId, payload, conector, autoria });
   // ADR-059 (emenda de 2026-09-30): no automático e no total o modo concede na hora, pelo mesmo decidirAcesso do
-  // botão. O que é "Apagar e desfazer" (e merge/aprovar PR) só sai sozinho na conversa com a pessoa; conectar
+  // botão. O que é "Apagar e desfazer" só sai sozinho na conversa com a pessoa (merge de PR não, ADR-066); conectar
   // um app (login) continua sendo dela, porque o card de conexão nem chega aqui.
   const arriscada = pedido.capacidades.some((nome) => {
     const cap = conector.catalogo.find((c) => c.nome === nome);
@@ -143,7 +157,7 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   });
   const porRegra = await confirmacaoPeloModo(deps, input, { arriscada });
   if (porRegra) {
-    // `executor` só serve ao disparo de rotina, e o pedido da rotina não passa por aqui (garantirPedidoDeAcesso).
+    // `executor` só serve ao disparo de rotina, e o pedido da rotina sai pelo ramo de cima (garantirPedidoDeAcesso).
     const decidido = await decidirAcesso(deps, { decisaoId: aberto.proposta.id, recusar: false, executor: "catcher", porRegra });
     return { data: concedidoPeloModo(aberto.proposta.id), events: [...semCard(aberto.events), ...(decidido.events ?? [])] };
   }

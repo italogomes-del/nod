@@ -9,9 +9,11 @@ import { acaoArriscadaNoApp, decidirLote, REGRA_APROVACAO_PERMANENTE, type Decis
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
 import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens } from "./decidir.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
+import { semprePermitirVivo } from "./regras-vivas.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -55,7 +57,12 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
   // ADR-059: a capacidade de destino é arriscada (apagar, merge, aprovar PR)? Lido do catálogo do CONECTOR.
   const arriscadaPorIdx: boolean[] = [];
   let concessoes: Concessao[] | undefined;
-  for (const item of input.itens) {
+  // definido em 2026-09-30 (ADR-062): argumentos conferidos contra o schema do conector ANTES do card. Sem isso, um
+  // item sem campo obrigatório virava card, falhava depois do clique e o bot pedia de novo igual (o Milton teve 6
+  // comentários sem `assignee` hoje, 6 cards). Volta ao bot como resposta, não como exceção: o `cause` de um erro de
+  // domínio só vai para o log (AGENTS.md: erro nunca vaza `message`), e o bot precisa ler o que corrigir.
+  const errosDeArgs: string[] = [];
+  for (const [idxItem, item] of input.itens.entries()) {
     if (item.destino.conector === "computador") {
       if (!computador) throw new ErroDeDominio("nao_permitido");
       const id = item.destino.argumentos?.acaoId;
@@ -80,6 +87,7 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     if (!concessoes.some((c) => c.conectorId === conector.id && c.capacidade === item.destino.ferramenta)) {
       throw new ErroDeDominio("nao_permitido", { cause: `sem concessão de ${conector.slug}.${item.destino.ferramenta}: peça com pedir_acesso` });
     }
+    errosDeArgs.push(...errosDoSchema(capacidade.schema, item.destino.argumentos ?? {}, `itens[${idxItem}].destino.argumentos (${conector.slug}.${item.destino.ferramenta})`));
     let origemSensivel = false;
     if (CLASSIFICAR_ORIGEM_SENSIVEL && item.origem_conector) {
       const origem = await deps.repos.conectores.buscarPorSlug(item.origem_conector);
@@ -98,9 +106,13 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     arriscadaPorIdx.push(acaoArriscadaNoApp(capacidade));
   }
 
+  if (errosDeArgs.length > 0) return { data: { estado: "recusada", erros: errosDeArgs, instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" }, events: [] };
+
   // ADR-052 (0033): turno que trouxe a web pelas nativas não usa "Sempre permitir" — a mesma regra do não confiável.
   const contaminado = input.plano ? await deps.repos.turnos.contaminado(input.turnoId) : false;
-  const plano = input.plano && contaminado ? { ...input.plano, confiancaEntrada: "nao_confiavel" as const } : input.plano ?? null;
+  const planoDoTurno = input.plano && contaminado ? { ...input.plano, confiancaEntrada: "nao_confiavel" as const } : input.plano ?? null;
+  // ADR-062: as regras "Sempre permitir" de AGORA, não as congeladas no plano — o clique vale já neste turno.
+  const plano = planoDoTurno ? { ...planoDoTurno, semprePermitir: await semprePermitirVivo(deps, input.agenteId, planoDoTurno) } : null;
   // ADR-059: o modo ATUAL do agente, não o do plano — trocar para mais restrito vale já na próxima ação.
   const modo = plano ? (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual" : "manual";
   const { automatico, porItem } = decidirLote(propostas.map((p, idx) => ({ plano, destino: p.destino, origemSensivel: p.origemSensivel, modo, arriscada: arriscadaPorIdx[idx] === true })));

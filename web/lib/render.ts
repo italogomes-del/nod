@@ -1,6 +1,7 @@
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Autoria } from "../../src/contracts/evento.ts";
 import { esc } from "./escape.ts";
+import { formatoData } from "./formato-data.ts";
 import { htmlMascote, type EstadoMascote } from "./mascote.ts";
 export { esc } from "./escape.ts";
 export { atualizarMascote } from "./mascote.ts";
@@ -40,13 +41,13 @@ export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: 
 export function hora(instante: number | string): string {
   const t = typeof instante === "number" ? instante : Date.parse(instante);
   if (Number.isNaN(t)) return "--:--";
-  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t));
+  return formatoData("pt-BR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t));
 }
 
 export function dataHora(instante: number | string, fusoIana?: string): string {
   const t = typeof instante === "number" ? instante : Date.parse(instante);
   if (Number.isNaN(t)) return "instante inválido";
-  return new Intl.DateTimeFormat("pt-BR", { timeZone: fusoIana, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t));
+  return formatoData("pt-BR", { timeZone: fusoIana, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(t));
 }
 
 /** `rotulo` NÃO é escapado (aceita svg/span); `aria` dá nome acessível a botão só-ícone, onde o

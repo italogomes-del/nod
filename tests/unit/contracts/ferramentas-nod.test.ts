@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FERRAMENTAS_NOD, NOMES_FERRAMENTAS_NOD, type JsonSchema, type NomeFerramentaNod } from "../../../src/contracts/ferramentas-nod.ts";
 import { HTML_MAX_ARTEFATO, TITULO_MAX_ARTEFATO } from "../../../src/contracts/artefato.ts";
 import { USE_CASE_POR_FERRAMENTA } from "../../../src/contracts/servicos.ts";
+import { TEXTO_PENDENCIA_MAX } from "../../../src/domain/pendencia.ts";
 
 const ESPERADAS = [
   "lembrar", "atualizar_perfil", "pedir_acesso", "criar_rotina",
@@ -9,10 +10,11 @@ const ESPERADAS = [
   "pedir_aprovacao", "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot",
   "ver_colegas",
   "publicar_artefato", "ler_artefato",
+  "anotar_pendencia", "concluir_pendencia", "descartar_pendencia",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as DEZOITO ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058)", () => {
+  it("lista fechada com as VINTE E UMA ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });
@@ -56,6 +58,15 @@ describe("FERRAMENTAS_NOD", () => {
     expect(FERRAMENTAS_NOD.publicar_artefato.properties.html.maxLength).toBe(HTML_MAX_ARTEFATO);
     expect(FERRAMENTAS_NOD.publicar_artefato.required).toEqual(["titulo", "html"]);
     expect(FERRAMENTAS_NOD.ler_artefato.required).toEqual(["artefato_id"]);
+  });
+
+  it("ADR-064: o teto do texto da pendência é o do domínio (e o CHECK da 0044); só o texto é obrigatório ao anotar", () => {
+    expect(FERRAMENTAS_NOD.anotar_pendencia.properties.texto.maxLength).toBe(TEXTO_PENDENCIA_MAX);
+    expect(FERRAMENTAS_NOD.concluir_pendencia.properties.como.maxLength).toBe(TEXTO_PENDENCIA_MAX);
+    expect(FERRAMENTAS_NOD.descartar_pendencia.properties.por_que.maxLength).toBe(TEXTO_PENDENCIA_MAX);
+    expect(FERRAMENTAS_NOD.anotar_pendencia.required).toEqual(["texto"]);
+    expect(FERRAMENTAS_NOD.concluir_pendencia.required).toEqual(["id", "como"]);
+    expect(FERRAMENTAS_NOD.descartar_pendencia.required).toEqual(["id", "por_que"]);
   });
 
   it("cada ferramenta tem um caso de uso nomeado em UseCasesNod (EMENDA 5)", () => {

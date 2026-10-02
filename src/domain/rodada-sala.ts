@@ -3,7 +3,7 @@ import type { EstadoOrcamento, PoliticaSala } from "../contracts/sala.ts";
 import { quemResponde } from "./canal-responde.ts";
 
 /**
- * EMENDA 14, eixo 2 de profundidade: handoffs por rodada (o eixo 1 é `profundidade` 0|1 de peer).
+ * EMENDA 14, eixo 2 de profundidade: handoffs por rodada (o eixo 1 é `profundidade`, 0 a 3 passes entre bots desde a ADR-063).
  * definido em 2026-09-16: 3 encaminhamentos sem fala humana — o quarto `encaminhar` na mesma
  * rodada vira passe `teto_canal`. Uma sala de até 6 bots ainda alcança quem importa em 3 saltos;
  * mais que isso é os bots conversando entre si sem a pessoa, que é o que o orçamento existe para impedir.

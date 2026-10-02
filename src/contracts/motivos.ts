@@ -29,7 +29,10 @@ export const MOTIVOS_INTERRUPCAO = [
   "lancamento_falhou",
   "sessao_rejeitada",
   "executor_indisponivel",
-  /** definido em 2026-09-18: ficou mudo sem ferramenta pendente; o watchdog de atividade encerrou. */
+  /**
+   * definido em 2026-09-18: ficou mudo sem ferramenta pendente; o watchdog de atividade encerrou. Ninguém mais o
+   * grava desde 2026-10-01 (ADR-067, o vigia saiu); fica no enum para o histórico dos turnos antigos.
+   */
   "turno_travado",
   /** definido em 2026-09-18: produziu trabalho e não concluiu — não confundir com sem_progresso. */
   "trabalho_incompleto",
@@ -112,6 +115,14 @@ export type MotivoBloqueioRotina = (typeof MOTIVOS_BLOQUEIO_ROTINA)[number];
  */
 export const MOTIVOS_SEM_NOVIDADE = ["nada_mudou", "fonte_vazia", "ja_relatado"] as const;
 export type MotivoSemNovidade = (typeof MOTIVOS_SEM_NOVIDADE)[number];
+
+/**
+ * definido em 2026-10-01 (item 7 da ADR-066): a janela de uma rotina `so_com_pendencia` que passou SEM turno porque o
+ * agente não tinha pendência visível. É desfecho 'sem_novidade' decidido pelo servidor, não pelo modelo: vai só em
+ * rotina_execucoes.motivo (text com CHECK '^[a-z_]+$', 0002) e nunca em turnos.sem_novidade_motivo — por isso fica
+ * fora de MOTIVOS_SEM_NOVIDADE, que é o enum motivo_sem_novidade do banco (gate motivos-enum).
+ */
+export type MotivoSemPendencia = "sem_pendencia";
 
 /** Código FECHADO de erro de domínio: a mensagem sai de tabela fixa em src/adapters/http/erros.ts (ADR-002/004). */
 export const CODIGOS_ERRO = [

@@ -1,6 +1,6 @@
 import type { Estado } from "../estado/reducer.ts";
 import { avatarAgente, botao, dataHora, esc } from "../lib/render.ts";
-import { botaoDaParada, desdeDaParada, linhaNaoRodaram, motivoDaExecucao, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
+import { botaoDaParada, desdeDaParada, linhaNaoRodaram, motivoDaExecucao, rotuloExecucao, TAG_SO_COM_PENDENCIA, tagDaParada } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 
 /**
@@ -22,7 +22,7 @@ export function renderRotinas(estado: Estado): string {
           : '<p class="mudo">nunca executou</p>'
         : "";
       return `<li class="rotina rotina-${esc(r.estado)}${bloqueio ? " rotina-parada" : ""}" data-rotina="${esc(r.id)}">
-        <div class="rt-cab">${a ? avatarAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "agente")}</b> · <code>${esc(r.cron)}</code> (${esc(r.fusoIana)}) <span class="tag ${r.estado === "ativa" ? "tag-ok" : "tag-cinza"}">${esc(r.estado)}</span>${bloqueio ? tagDaParada(bloqueio) : ""}${r.exigeAprovacao ? '<span class="tag tag-ambar" title="efeito externo só por item aprovado (E7.3)">gate de aprovação ligado</span>' : ""}</div>
+        <div class="rt-cab">${a ? avatarAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "agente")}</b> · <code>${esc(r.cron)}</code> (${esc(r.fusoIana)}) <span class="tag ${r.estado === "ativa" ? "tag-ok" : "tag-cinza"}">${esc(r.estado)}</span>${bloqueio ? tagDaParada(bloqueio) : ""}${r.soComPendencia ? TAG_SO_COM_PENDENCIA : ""}${r.exigeAprovacao ? '<span class="tag tag-ambar" title="efeito externo só por item aprovado (E7.3)">gate de aprovação ligado</span>' : ""}</div>
         <div class="rt-linha"><b>próxima execução:</b> ${esc(dataHora(proximaExecucao, r.fusoIana))} (${esc(r.fusoIana)}) · ${esc(interpolar(proximaExecucao, estado.agora))}</div>
         <div class="rt-linha"><b>instrução:</b> ${esc(r.instrucao)}</div>
         <div class="rt-linha mudo">fonte: ${esc(r.fonte)} · entregável: ${esc(r.entregavel)} · limites: ${esc(r.limitesAprovacao)} · sem dado: ${esc(r.politicaSemDado)}</div>

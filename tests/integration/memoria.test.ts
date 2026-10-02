@@ -20,6 +20,8 @@ describeIntegracao("memória por bot (Grok Bot: memória não é fonte)", () => 
 
       const r = await executar(deps, lembrar, { turnoId: turno?.id ?? "", agenteId: criado.agente.id, conversaId: criado.conversa.id, tipo: "preferencia", texto: "prefere resumos em tópicos" });
       expect(r.data).toEqual({ ok: true, id: expect.any(String) });
+      if (!r.data.ok) throw new Error("lembrar recusou uma preferência comum");
+      const memoriaId = r.data.id;
       expect(r.events.map((e) => e.kind)).toEqual(["agente_atualizado", "mensagem_criada"]);
       const anotei = await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id);
       expect(anotei).toMatchObject({ kind: "sistema", turnoId: turno?.id, autoria: { autor_tipo: "agente", autor_id: criado.agente.id } });
@@ -33,13 +35,31 @@ describeIntegracao("memória por bot (Grok Bot: memória não é fonte)", () => 
         ["fato", "pessoa"],
       ]);
 
-      const editada = await executar(deps, editarMemoria, { memoriaId: r.data.id, texto: "prefere tópicos curtos", tipo: "resumo" });
+      const editada = await executar(deps, editarMemoria, { memoriaId, texto: "prefere tópicos curtos", tipo: "resumo" });
       expect(editada.data.memoria).toMatchObject({ texto: "prefere tópicos curtos", tipo: "resumo" });
-      await esperarErro(() => editarMemoria(deps, { memoriaId: r.data.id, texto: "  " }), "texto_vazio");
+      await esperarErro(() => editarMemoria(deps, { memoriaId, texto: "  " }), "texto_vazio");
       await esperarErro(() => registrarMemoria(deps, { agenteId: criado.agente.id, conversaId: null, turnoId: null, tipo: "fato", texto: "", origem: "pessoa" }), "texto_vazio");
       expect((await executar(deps, apagarMemoria, { memoriaId: daPessoa.data.memoria.id })).data.apagada).toBe(true);
       await esperarErro(() => apagarMemoria(deps, { memoriaId: randomUUID() }), "nao_encontrado");
       expect((await listarMemorias(deps, { agenteId: criado.agente.id })).data.memorias).toHaveLength(1);
+    });
+  });
+
+  it("ADR-065: o bot não grava como memória que falta terminal no turno; a pessoa grava pela tela o que quiser", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      // A frase que a Clarice gravou em 30/09, 22:50.
+      const texto = "Dev 3/Dev 4 não têm terminal nem permissão de push no GitHub";
+
+      const r = await executar(deps, lembrar, { turnoId: turno?.id ?? "", agenteId: criado.agente.id, conversaId: criado.conversa.id, tipo: "fato", texto });
+      expect(r.data).toMatchObject({ ok: false, recusado: expect.stringContaining("depende do tipo de turno") });
+      expect(r.events).toEqual([]);
+      expect((await listarMemorias(deps, { agenteId: criado.agente.id })).data.memorias).toEqual([]);
+
+      await executar(deps, registrarMemoria, { agenteId: criado.agente.id, conversaId: null, turnoId: null, tipo: "fato", texto, origem: "pessoa" });
+      expect((await listarMemorias(deps, { agenteId: criado.agente.id })).data.memorias.map((m) => m.origem)).toEqual(["pessoa"]);
     });
   });
 

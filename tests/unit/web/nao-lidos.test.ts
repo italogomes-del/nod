@@ -98,7 +98,7 @@ describe("a tela Não lidos", () => {
 
 describe("a linha Novas na conversa", () => {
   function comConversa(novasDesde: Estado["novasDesde"]): Estado {
-    const c: ConversaEstado = { conversa: { tenantId: "t", id: "c1", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [mensagem("m0", "Começando pelo #420."), mensagem("m1", "Os três pareceres estão prontos.")], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+    const c: ConversaEstado = { conversa: { tenantId: "t", id: "c1", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [mensagem("m0", "Começando pelo #420."), mensagem("m1", "Os três pareceres estão prontos.")], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
     return { ...base, conversas: { c1: c }, novasDesde };
   }
 

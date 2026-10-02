@@ -12,7 +12,7 @@ import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
 import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
-import { classificarResultado, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
+import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
 import { escreverMcpConfig } from "../mcp-config.ts";
@@ -72,9 +72,12 @@ export const JANELA_AUTOCOMPACT_TOKENS = 200_000;
  *
  * definido em 2026-09-18: SEM `--max-turns`. O teto de 12 passos foi dimensionado em 2026-09-16
  * para "lembrar → pedir_aprovacao → resposta" e cortava tarefa de código no meio (ler quatro
- * arquivos já gastava metade). O que limita o turno passa a ser ATIVIDADE: o watchdog de `laco.ts`
- * encerra o que fica mudo. `sonda.ts` continua usando `--max-turns 1`, onde o teto é o desejado,
+ * arquivos já gastava metade). `sonda.ts` continua usando `--max-turns 1`, onde o teto é o desejado,
  * então a flag segue em FLAG_FLOORS — só não é mais exigida no turno.
+ *
+ * revisto em 2026-10-01 (ADR-067, sessão viva): nada limita o turno por relógio. A entrada vai em stream-json e
+ * fica aberta enquanto há comando em segundo plano ou mensagem nova; o turno acaba quando o bot termina, no Parar
+ * ou com o lease vencido.
  */
 export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
   "--output-format",
@@ -197,6 +200,9 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
  */
 export const CLAUDE_MD_DAS_PASTAS = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD";
 
+/** definido em 2026-10-01 (ADR-067): o maior atraso que um setTimeout do Node aceita (~24,8 dias); acima disso ele dispara na hora. */
+export const SEM_TETO_DE_COMANDO_MS = 2_147_483_647;
+
 /** Env do filho: cfg.env (já sem a denylist) + PATH aumentado + HOME + teto do tools/call. */
 export function montarEnvDoFilho(env: Record<string, string>, home: string, prazoMs: number, opcoes: { claudeMdDasPastas?: boolean } = {}): Record<string, string> {
   return {
@@ -206,6 +212,10 @@ export function montarEnvDoFilho(env: Record<string, string>, home: string, praz
     // definido em 2026-09-16: uma ferramenta (aprovação em long-poll) pode esperar tanto quanto o turno, nunca menos de 60 s;
     // o teto real do CLI é o que scripts/sonda-mcp-timeout.ts mede.
     MCP_TOOL_TIMEOUT: String(Math.max(60_000, Math.floor(prazoMs))),
+    // definido em 2026-10-01 (ADR-067): sem teto de comando. Medido no 2.1.286: sem isto o Bash vai para segundo plano
+    // aos 120 s (e morria com o turno); com isto ele espera o comando acabar. Quem para é a pessoa, no Parar.
+    BASH_DEFAULT_TIMEOUT_MS: String(SEM_TETO_DE_COMANDO_MS),
+    BASH_MAX_TIMEOUT_MS: String(SEM_TETO_DE_COMANDO_MS),
     // definido em 2026-09-28: acima deste teto o CLI desviaria a resposta para um arquivo que o bot não lê.
     MAX_MCP_OUTPUT_TOKENS: String(MAX_MCP_OUTPUT_TOKENS_FILHO),
     ...(opcoes.claudeMdDasPastas ? { [CLAUDE_MD_DAS_PASTAS]: "1" } : {}),
@@ -268,8 +278,18 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
         adapter(plano: PlanoTurno): Adapter {
           let processo: Processo | null = null;
           let interromperPedido = false;
+          // ADR-067: a entrada da sessão viva fica aberta até o modelo responder sem nada em segundo plano e sem
+          // mensagem nova; só então fecha e o processo sai. Fora da sessão viva ela fecha logo depois do prompt.
+          let entradaAberta = false;
 
           return {
+            aceitaMensagens: () => entradaAberta && processo !== null,
+            receberMensagem(texto: string): boolean {
+              if (!entradaAberta || !processo) return false;
+              processo.escrever(mensagemClaude(texto, []));
+              return true;
+            },
+
             async rodarTurno(sinks): Promise<ResultadoTurno> {
               // `sinais` é marcado ANTES de cada sinal síncrono sair, para o `aoLinha` (que pode
               // receber o init enquanto um `await sinks.sinal` ainda está pendente) não o repetir.
@@ -292,7 +312,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               if (pastaBot && lig.hookPath) {
                 await mkdir(pastaBot, { recursive: true });
                 const config = join(tmpdir, "hook-nativas.json");
-                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno }), { mode: 0o600 });
+                // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts).
+                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home }), { mode: 0o600 });
                 const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
                 // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
                 const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);
@@ -325,7 +346,12 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 // Fail-closed como --autocompact: sem --input-format no help, o turno segue só com o texto e
                 // uma linha por anexo dizendo que não foi lido — nunca some com o arquivo em silêncio.
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
-                const streamJson = anexos.length > 0 && (flagsNoHelp ?? []).includes("--input-format");
+                // ADR-067: a sessão viva precisa da entrada em stream-json. O comando da conversa (/uso, /contexto,
+                // /compactar) segue de uma vez só, pelo texto, como o CLI o reconhece desde a 0038.
+                const comandoDaBarra = plano.entrada.texto.trimStart().startsWith("/");
+                const temEntradaJson = (flagsNoHelp ?? []).includes("--input-format");
+                const viva = temEntradaJson && !comandoDaBarra;
+                const streamJson = temEntradaJson && (viva || anexos.length > 0);
                 const entradaStdin = streamJson
                   ? mensagemClaude(plano.entrada.texto, anexos)
                   : [plano.entrada.texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
@@ -336,6 +362,36 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];
+                // ADR-067: o que segura a sessão viva aberta — comandos em segundo plano ainda rodando — e as voltas
+                // do modelo já fechadas por um `result` (cada uma vira fala; a última vai na entrega).
+                const emFundo = new Set<string>();
+                const rodadas: EventoStream[][] = [];
+                let inicioDaRodada = 0;
+                let rodadasFaladas = 0;
+                // Falas intermediárias saem da sessão viva; na sala, a fala passa pelos responders (postarNaSala) e
+                // vai inteira na entrega.
+                const falaNaHora = plano.modoTurno !== "sala" && sinks.falaIntermediaria !== undefined;
+                const falarRodadas = () => {
+                  if (!falaNaHora) return;
+                  for (; rodadasFaladas < rodadas.length; rodadasFaladas++) {
+                    const texto = textoDaRodada(rodadas[rodadasFaladas]!);
+                    if (texto.trim() !== "") sinks.falaIntermediaria!(texto);
+                  }
+                };
+                let decidindo: Promise<void> = Promise.resolve();
+                const fechar = () => {
+                  entradaAberta = false;
+                  processo?.fecharStdin();
+                };
+                /** Depois de cada `result`: segue (algo em segundo plano, ou chegou mensagem) ou fecha a entrada. */
+                const aposRodada = async (): Promise<void> => {
+                  if (!entradaAberta) return;
+                  if (emFundo.size > 0) return falarRodadas();
+                  const chegou = sinks.ocioso ? await sinks.ocioso() : false;
+                  if (!entradaAberta) return;
+                  if (chegou || emFundo.size > 0) return falarRodadas();
+                  fechar();
+                };
                 const proc = iniciarProcesso({
                   bin,
                   args,
@@ -349,6 +405,15 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     momentos.push(Date.now() - inicio);
                     sinks.evento(ev);
                     if (ev.tipo === "delta") sinks.delta(ev.texto);
+                    if (ev.tipo === "tarefa_fundo") {
+                      if (ev.estado === "iniciada") emFundo.add(ev.id);
+                      else emFundo.delete(ev.id);
+                    }
+                    if (ev.tipo === "result") {
+                      rodadas.push(eventos.slice(inicioDaRodada));
+                      inicioDaRodada = eventos.length;
+                      if (viva) decidindo = decidindo.then(aposRodada).catch(() => fechar());
+                    }
                     const depois = reduzirSinais(sinais, ev);
                     for (const k of chavesSinais) {
                       if (depois[k] && !sinais[k]) pendentes.push(sinks.sinal(k));
@@ -363,16 +428,19 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 sinais = { ...sinais, promptSubmitted: true };
                 await sinks.sinal("promptSubmitted");
                 proc.escrever(entradaStdin);
-                proc.fecharStdin();
+                if (viva) entradaAberta = true;
+                else proc.fecharStdin();
 
                 const fim = await proc.fim;
+                entradaAberta = false;
+                await decidindo;
                 await Promise.all(pendentes);
-                if (fim.erroSpawn) {
-                  return finalizar(classificarResultado({ eventos, exitCode: null, signal: null, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
-                }
-                return finalizar(classificarResultado({ eventos, exitCode: fim.exitCode, signal: fim.signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido() }));
+                const exitCode = fim.erroSpawn ? null : fim.exitCode;
+                const signal = fim.erroSpawn ? null : fim.signal;
+                return finalizar(classificarSessao({ eventos, exitCode, signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido(), rodadasJaFaladas: rodadasFaladas }));
               } finally {
                 processo = null;
+                entradaAberta = false;
                 await rm(tmpdir, { recursive: true, force: true });
               }
             },

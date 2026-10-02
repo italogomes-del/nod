@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { MESES_A_FRENTE, mesesAPartirDe } from "../../src/adapters/fundo/particoes.ts";
 import type { Autoria } from "../../src/contracts/evento.ts";
 import { eventsRepo } from "../../src/repositories/events.repo.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
@@ -24,7 +25,9 @@ const autoria: Autoria = {
 };
 
 describeIntegracao("events particionada sem catch-all (ADR-006)", () => {
-  it("INSERT dentro da faixa entra; em 2027-10 falha alto (sem partição DEFAULT)", async () => {
+  it("INSERT dentro da faixa entra; no primeiro mês depois da janela falha alto (sem partição DEFAULT)", async () => {
+    // definido em 2026-10-01: o mês fixo (2027-10) venceria em 2026-11-01, quando o boot de um servidor de teste o cria.
+    const fora = mesesAPartirDe(Date.now(), MESES_A_FRENTE + 1).at(-1)!;
     await withRollback(MARLON, async (trx) => {
       const repo = eventsRepo(trx, MARLON);
       const { ids } = await repo.gravarComOutbox([
@@ -34,7 +37,7 @@ describeIntegracao("events particionada sem catch-all (ADR-006)", () => {
 
       const erro = await expectRejected(
         trx,
-        () => repo.gravarComOutbox([{ kind: "mensagem_criada", createdAt: Date.UTC(2027, 9, 1), autoria, pessoaDestinoId: PESSOA_MARLON }]),
+        () => repo.gravarComOutbox([{ kind: "mensagem_criada", createdAt: Date.UTC(fora.ano, fora.mes - 1, 1), autoria, pessoaDestinoId: PESSOA_MARLON }]),
         "23514",
       );
       expect(erro.message).toContain("no partition of relation");

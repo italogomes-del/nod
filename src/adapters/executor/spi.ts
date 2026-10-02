@@ -31,12 +31,30 @@ export type SinksTurno = {
   sinal(s: keyof SinaisTurno): Promise<void>;
   evento(e: EventoStream): void;
   delta(texto: string): void;
+  /**
+   * Sessão viva (definido em 2026-10-01, ADR-067): a fala de uma volta do modelo que NÃO encerra o turno — há comando
+   * em segundo plano ou mensagem nova. O laço a manda ao servidor, que a grava na conversa na hora.
+   */
+  falaIntermediaria?(texto: string): void;
+  /**
+   * Sessão viva: o modelo respondeu e nada roda em segundo plano. O laço pergunta ao servidor se chegou mensagem nova
+   * da pessoa e a entrega por `receberMensagem` antes de responder. `true` = chegou, a sessão segue; `false` = pode
+   * fechar, e daqui em diante o servidor não absorve mais nada para este turno.
+   */
+  ocioso?(): Promise<boolean>;
 };
 
 export interface Adapter {
   rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno>;
   /** SIGTERM → 5s → SIGKILL. A sonda de 2026-09-16 mediu (s6.log): exit 143 em ~640ms, signal null, filho MCP morre junto. */
   interromper(): Promise<void>;
+  /**
+   * Sessão viva (ADR-067): uma mensagem nova da pessoa entra no meio do trabalho, como no Claude Code. `false` = este
+   * adapter não tem sessão viva ou ela já fechou a entrada; o laço então não pede mensagens ao servidor.
+   */
+  receberMensagem?(texto: string): boolean;
+  /** true enquanto o adapter aceita mensagem nova (sessão viva com a entrada aberta). */
+  aceitaMensagens?(): boolean;
 }
 
 export interface Instance {

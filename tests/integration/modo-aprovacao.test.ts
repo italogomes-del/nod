@@ -14,8 +14,9 @@ import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
  * ADR-059 no Postgres: o modo mora em agentes.modo_aprovacao (0040), só a dona o muda, e cada comando do terminal
- * é decidido com o modo ATUAL do agente — automático roda o que muda algo e para no arriscado, na credencial e
- * depois da web; total só para na credencial.
+ * é decidido com o modo ATUAL do agente — automático roda o que muda algo e para no arriscado e na credencial; total
+ * só para na credencial. revisto em 2026-10-01 (ADR-066): depois da web, o automático e o total seguem; só o manual
+ * volta a pedir, até a leitura.
  */
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
@@ -26,7 +27,7 @@ function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }): 
     tenantId: TENANT_PADRAO, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada: "confiavel", profundidade: 0,
     catalogo: { ferramentas: [], servidores: [] }, promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" },
-    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false }, semprePermitir: [], tokenDeTurno: "tok",
+    politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 }, semprePermitir: [], tokenDeTurno: "tok",
     expiraEm: Date.now() + 60_000, nativas: [...NATIVAS_DO_TERMINAL],
   };
 }
@@ -81,16 +82,23 @@ describeIntegracao("modo de aprovação do bot (ADR-059)", () => {
     });
   });
 
-  it("automático para tudo que não é leitura depois da web; total segue", async () => {
+  it("ADR-066: depois da web o automático segue (leitura e escrita pelo modo) e só para no arriscado e na credencial; o total segue; o manual pede até a leitura", async () => {
     await withRollback(MARLON, async (trx) => {
       const auto = await cenario(trx, "automatico");
       await auto.repos.turnos.contaminar(auto.turno.id, Date.now());
-      expect(await auto.motivoDoCard("git commit -am x")).toMatchObject({ motivoManual: "regra_suspensa_conteudo_nao_confiavel" });
+      expect((await auto.autorizar("git commit -am x")).data).toEqual({ permitir: true, porque: "modo_automatico" });
+      // Depois da web a leitura deixa de ser livre por si: passa pelo modo, que a aprova.
+      expect((await auto.autorizar("git status")).data).toEqual({ permitir: true, porque: "modo_automatico" });
+      expect(await auto.motivoDoCard("git push --force origin fix/x")).toMatchObject({ motivoManual: "acao_arriscada" });
+      expect(await auto.motivoDoCard("cat ~/.aws/credentials")).toMatchObject({ motivoManual: "toca_credencial" });
       const total = await cenario(trx, "total");
       await total.repos.turnos.contaminar(total.turno.id, Date.now());
       expect((await total.autorizar("git push --force origin fix/x")).data).toEqual({ permitir: true, porque: "modo_total" });
       expect((await total.autorizar("git status")).data).toEqual({ permitir: true, porque: "modo_total" });
       expect(await total.motivoDoCard("gh auth token")).toMatchObject({ motivoManual: "toca_credencial" });
+      const manual = await cenario(trx, "manual");
+      await manual.repos.turnos.contaminar(manual.turno.id, Date.now());
+      expect(await manual.motivoDoCard("git status")).toMatchObject({ motivoManual: "destino_terminal" });
     });
   });
 

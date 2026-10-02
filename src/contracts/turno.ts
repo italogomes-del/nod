@@ -26,8 +26,12 @@ export type EstadoTurno = "pendente" | "despachando" | "concluido" | "interrompi
  */
 export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer" | "delegacao";
 
-/** Profundidade estrutural (E12.4): 0 = normal; 1 = cumprindo um pedido de colega, ou a continuação de quem pediu — sem novo salto. */
-export type Profundidade = 0 | 1;
+/**
+ * Profundidade estrutural (E12.4; revisto em 2026-09-30, ADR-063): quantos passes seguidos entre bots este fio já
+ * teve. 0 = o trabalho começou por uma pessoa ou por uma rotina; cada pedido a colega e cada resposta que volta
+ * somam 1. Em PROFUNDIDADE_MAXIMA (src/domain/profundidade.ts) o salto some.
+ */
+export type Profundidade = 0 | 1 | 2 | 3;
 
 export type Turno = {
   tenantId: TenantId;
@@ -160,6 +164,13 @@ export type EventoStream =
       erroCru: string | null;
     }
   | { tipo: "rate_limit"; status: string; utilizacaoCincoHoras: number | null; utilizacaoSeteDias: number | null }
+  /**
+   * Comando em segundo plano do Claude Code (definido em 2026-10-01, ADR-067): `Bash` com run_in_background ou um
+   * `Monitor`. Enquanto um estiver "iniciada", a sessão viva não fecha: quando ele termina, o CLI chama o modelo de
+   * novo sozinho. Medido no 2.1.286: `system/task_started` (is_backgrounded) abre; `task_updated` com status final
+   * ou `task_notification` fecha.
+   */
+  | { tipo: "tarefa_fundo"; id: string; estado: "iniciada" | "terminada" }
   | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido"; tipoBruto: string | null }
   /** Passo do driver catcher (Práticas §11): `subtipo` snake_case (CHECK catcher_registros_tipo); o servidor persiste em catcher_registros. */
   | { tipo: "catcher"; subtipo: string; dados: Record<string, unknown> };

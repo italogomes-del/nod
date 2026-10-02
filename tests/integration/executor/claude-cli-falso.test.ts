@@ -69,7 +69,7 @@ function planoDeTeste(dir: string, parcial: Partial<PlanoTurno["entrada"]> = {})
     promptSistema: "Você é a sonda do nod.",
     entrada: { texto: `Some 17 e 25 (${dir})`, sessaoCli: null, modelo: "claude-haiku-4-5-20251001", ...parcial },
     semprePermitir: [],
-    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
+    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8000 },
     tokenDeTurno: "token-de-turno-teste",
     expiraEm: Date.now() + 60_000,
   };
@@ -310,4 +310,75 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     await expect(stat(stdin)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  describe("sessão viva (ADR-067)", () => {
+    const HELP = { NOD_FALSO_HELP: "--input-format --output-format" };
+
+    it("comando em segundo plano segura a sessão; a volta sozinha e a mensagem nova viram falas; fecha quando nada mais roda", async () => {
+      const { instance, registro, stdin } = await instanciar("sessao-viva", {}, HELP);
+      const adapter = instance.adapter(planoDeTeste(dir));
+      const falas: string[] = [];
+      let ociosos = 0;
+      const espiao = sinksEspiao({});
+      const resultado = await adapter.rodarTurno({
+        ...espiao.sinks,
+        falaIntermediaria: (t) => falas.push(t),
+        // 1ª vez que fica ocioso (depois da volta sozinha): a pessoa mandou mensagem. 2ª: nada — pode fechar.
+        async ocioso() {
+          ociosos += 1;
+          if (ociosos === 1) return adapter.receberMensagem!("quanto é 2+2?");
+          return false;
+        },
+      });
+
+      expect(falas).toEqual(["Disparei os testes.", "Testes verdes."]);
+      expect(ociosos).toBe(2);
+      expect(resultado.desfecho).toBe("sucesso");
+      // A última volta vai na entrega; as anteriores já saíram como fala.
+      expect(resultado.texto).toBe("Recebi: quanto é 2+2?");
+      // total_cost_usd é acumulado (vale o último); usage é por volta (soma).
+      expect(resultado.custoUsd).toBe(0.03);
+      expect(resultado.tokens).toEqual({ entrada: 3, saida: 6, cacheLeitura: 30, cacheCriacao: 0 });
+      expect(adapter.aceitaMensagens!()).toBe(false);
+      expect(adapter.receberMensagem!("tarde demais")).toBe(false);
+
+      const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+      expect(valor(r.argv, "--input-format")).toBe("stream-json");
+      // Sem teto de comando: o Bash do CLI espera o comando acabar (medido no 2.1.286).
+      expect(r.env.BASH_DEFAULT_TIMEOUT_MS).toBe("2147483647");
+      expect(r.env.BASH_MAX_TIMEOUT_MS).toBe("2147483647");
+      const entradas = (await readFile(stdin, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { type: string; message: { content: { type: string; text: string }[] } });
+      expect(entradas.map((e) => e.message.content[0]?.text)).toEqual([expect.stringContaining("Some 17 e 25"), "quanto é 2+2?"]);
+    });
+
+    it("sem o laço da sessão (sinks antigos): fecha na primeira volta sem nada em segundo plano, como antes", async () => {
+      const { instance } = await instanciar("sessao-viva", {}, { ...HELP, NOD_FALSO_FUNDO_MS: "50" });
+      const resultado = await instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao({}).sinks);
+      // Sem falaIntermediaria, as voltas vão juntas na entrega; sem ocioso, fecha assim que nada roda.
+      expect(resultado.desfecho).toBe("sucesso");
+      expect(resultado.texto).toBe("Disparei os testes.\n\nTestes verdes.");
+    });
+
+    it("comando da barra (/uso, /contexto) segue de uma vez só, pelo texto, mesmo com --input-format", async () => {
+      const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, HELP);
+      await instance.adapter(planoDeTeste(dir, { texto: "/cost" })).rodarTurno(sinksEspiao({}).sinks);
+      expect(valor((JSON.parse(await readFile(registro, "utf8")) as Registro).argv, "--input-format")).toBeNull();
+      expect(await readFile(stdin, "utf8")).toBe("/cost");
+    });
+
+    it("Parar no meio: SIGTERM com a sessão aberta sai interrompido, com a fala que já tinha saído fora da entrega", async () => {
+      const { instance } = await instanciar("sessao-viva", {}, { ...HELP, NOD_FALSO_FUNDO_MS: "60000" });
+      const adapter = instance.adapter(planoDeTeste(dir));
+      const falas: string[] = [];
+      const rodando = adapter.rodarTurno({ ...sinksEspiao({}).sinks, falaIntermediaria: (t) => falas.push(t), ocioso: async () => false });
+      const fim = Date.now() + 10_000;
+      while (falas.length === 0 && Date.now() < fim) await new Promise((r) => setTimeout(r, 20));
+      expect(falas).toEqual(["Disparei os testes."]);
+      await adapter.interromper();
+      const resultado = await rodando;
+      // O comando em segundo plano não terminou: o turno foi cortado, não concluído. A volta já falada não entra de novo.
+      expect(resultado.desfecho).toBe("interrompido");
+      expect(resultado.texto).toBe("");
+      expect(resultado.custoUsd).toBe(0.01);
+    });
+  });
 });

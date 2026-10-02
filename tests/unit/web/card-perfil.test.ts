@@ -22,7 +22,7 @@ const tarde = rotina("r2", "E-mails novos desde o último resumo", "dias úteis 
 const perfil: Proposta = { tenantId: "t", id: "p1", conversaId: "c1", agenteId: "a1", kind: "perfil", estado: "pendente", criadoEm: AGORA, payload: { kind: "perfil", nome: "Tarsila", titulo: "Assistente pessoal", descricao: "Cuida do seu dia", turnoId: "t1", rotinas: ["r1", "r2"] } };
 
 function conversa(propostas: Proposta[]): ConversaEstado {
-  return { conversa: { tenantId: "t", id: "c1", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+  return { conversa: { tenantId: "t", id: "c1", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a1", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
 }
 const estado: Estado = { ...estadoInicial, agora: AGORA, frota: { agentes: [agente], negacoes: [] } as never, conectores: [gmail] };
 

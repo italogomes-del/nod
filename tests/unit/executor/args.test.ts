@@ -28,7 +28,7 @@ function planoDeTeste(parcial: Partial<PlanoTurno["entrada"]> = {}): PlanoTurno 
     promptSistema: "Você é a Vera. Responda em português.",
     entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001", ...parcial },
     semprePermitir: [],
-    politicaExecucao: { prazoMs: 3_600_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
+    politicaExecucao: { prazoMs: 3_600_000, orcamentoResultadoChars: 8000 },
     tokenDeTurno: "tok",
     expiraEm: 1,
   };

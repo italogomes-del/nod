@@ -20,7 +20,7 @@ const MARKETPLACE: AppComLogo[] = [{ slug: "gmail", nome: "Gmail", descricao: ""
 
 const payload = (acessos: PayloadPropostaRotina["acessos"]): PayloadPropostaRotina => ({ kind: "rotina", cron: "0 8,13,18 * * *", fusoIana: "America/Sao_Paulo", instrucao: "E-mails às 8h, 13h e 18h", fonte: "Gmail do Marlon", entregavel: "resumo", limitesAprovacao: "nada sai", politicaSemDado: "silêncio", proximaExecucao: 0, resumo: "todo dia às 08:00, 13:00, 18:00 (America/Sao_Paulo)", ...(acessos ? { acessos } : {}) });
 const proposta = (acessos: PayloadPropostaRotina["acessos"]): Proposta => ({ tenantId: "t", id: "pr", conversaId: "c", agenteId: "a", kind: "rotina", estado: "pendente", payload: payload(acessos), criadoEm: 0 });
-const conversa = (p: Proposta): ConversaEstado => ({ conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [p], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 });
+const conversa = (p: Proposta): ConversaEstado => ({ conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [p], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 });
 const estado = (conectores: Conector[]): Estado => ({ ...estadoInicial, conectores, marketplace: MARKETPLACE, suaVez: { itens: [], incidentes: [], foraDoAr: [], vazio: true, ultimaDecisaoEm: null } });
 
 const LER_GMAIL = [{ conector: "gmail", capacidades: LEITURA, nivel: "leitura" as const, naoPedido: [] }];

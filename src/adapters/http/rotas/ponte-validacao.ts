@@ -1,6 +1,6 @@
 import type { Inventario } from "../../../contracts/inventario.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
-import type { Entrega, TrechoVivo } from "../../../contracts/ponte.ts";
+import type { Entrega, FalaIntermediaria, TrechoVivo } from "../../../contracts/ponte.ts";
 import { TETO_COMANDOS, TETO_DESCRICAO_COMANDO, TETO_SO_DO_TERMINAL, type CatalogoDeComandos, type ComandoDoMac } from "../../../contracts/comandos.ts";
 import {
   TETO_CHAMADAS_RAIO_X,
@@ -43,6 +43,21 @@ export function trechos(v: unknown): TrechoVivo[] {
     else if (Array.isArray(o.tarefas)) { const t = tarefasDoTrecho(o.tarefas); if (t) saida.push({ tarefas: t }); }
   }
   return total > 16_000 ? [] : saida;
+}
+/** definido em 2026-10-01 (ADR-067): falas ainda não confirmadas que cabem numa renovação; acima disso o executor reenvia. */
+const TETO_FALAS_POR_RENOVACAO = 50;
+/**
+ * Falas da sessão viva (ADR-067). Diferente dos trechos, cada fala vira mensagem gravada: fora do formato a
+ * renovação inteira é recusada (entrada_invalida), e o executor as reenvia na próxima.
+ */
+export function falas(v: unknown): FalaIntermediaria[] {
+  if (v === undefined) return [];
+  exigir(Array.isArray(v) && v.length <= TETO_FALAS_POR_RENOVACAO);
+  return v.map((f) => {
+    const o = objeto(f);
+    exigir(typeof o.seq === "number" && Number.isSafeInteger(o.seq) && o.seq >= 1 && texto(o.texto));
+    return { seq: o.seq, texto: o.texto };
+  });
 }
 /** A lista de tarefas do bot num trecho vivo: fora do formato ou acima dos tetos, o trecho some sozinho. */
 function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {

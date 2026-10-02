@@ -10,6 +10,7 @@ import { criarTokenTurno, type TokenTurno } from "../../src/services/token-turno
 import type { Repos } from "../../src/repositories/tipos.ts";
 import type { Escopo, Transacao, Tx } from "../../src/shared/types.ts";
 import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts";
+import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
@@ -50,7 +51,7 @@ export function planoDeTeste(sobrescrita: Partial<PlanoTurno> = {}): PlanoTurno 
     promptSistema: "Você é Vera.",
     entrada: { texto: "oi", sessaoCli: null, modelo: "claude-haiku-4-5-20251001" },
     semprePermitir: [],
-    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8_000, efeitoExternoSoPorAprovacao: false },
+    politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: 8_000 },
     tokenDeTurno: "tok",
     expiraEm: agora + 60_000,
     ...sobrescrita,
@@ -113,6 +114,9 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     verColegas: async () => ({ data: { colegas: [] } }),
     publicarArtefato,
     lerArtefato,
+    anotarPendencia,
+    concluirPendencia,
+    descartarPendencia,
     ...sobrescrita,
   };
 }

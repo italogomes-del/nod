@@ -28,6 +28,16 @@ describe("token de turno (ADR-024: só em memória, sha256, tempo constante)", (
     expect(tokens.ativos()).toBe(0);
   });
 
+  it("ADR-067: sem validadeMs o token vale enquanto o turno vive — horas depois ainda autoriza; só revogar o tira", () => {
+    let agora = 1_000;
+    const tokens = criarTokenTurno({ agora: () => agora });
+    const t = tokens.cunhar("t1", identidade);
+    agora += 6 * 60 * 60 * 1000;
+    expect(tokens.autorizar(t)?.turnoId).toBe("t1");
+    tokens.revogar("t1");
+    expect(tokens.autorizar(t)).toBeNull();
+  });
+
   it("revogar: autoriza uma vez, falha depois; cunhar de novo invalida o token anterior (epoch)", () => {
     const tokens = criarTokenTurno({ agora: () => 1_000 });
     const t1 = tokens.cunhar("t1", identidade);

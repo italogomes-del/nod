@@ -6,6 +6,11 @@ export type TipoFrame =
   | "turno.atividade"
   /** A lista de tarefas do bot no turno vivo (TaskCreate/TaskUpdate): {tarefas: TarefaDoBot[]}, a lista inteira. */
   | "turno.tarefas"
+  /**
+   * Sessão viva (ADR-067): uma volta do modelo foi gravada como mensagem com o turno ainda rodando. A tela troca o texto
+   * ao vivo daquele turno pela mensagem (relê a conversa e zera o trecho), e o turno segue "rodando".
+   */
+  | "turno.fala"
   | "turno.encerrado"
   | "turno.interrompido"
   | "decisao.nova"

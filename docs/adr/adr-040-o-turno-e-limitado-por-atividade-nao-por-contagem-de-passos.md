@@ -1,5 +1,8 @@
 # ADR-040 — O turno é limitado por atividade, não por contagem de passos
 
+> Revista pela [ADR-067](adr-067-sessao-viva-o-turno-segue-ate-o-bot-terminar.md) em 2026-10-01: o vigia de atividade
+> saiu. O turno segue até o bot terminar, até o Parar ou até o lease vencer, sem relógio de trabalho.
+
 Definido em 2026-09-18, a partir de um teste real. Pedindo para seguir uma implementação, o agente
 leu o servidor, entendeu como a pasta da conversa funciona, ia examinar um helper — e o turno morreu:
 

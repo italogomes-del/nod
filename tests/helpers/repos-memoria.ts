@@ -14,6 +14,7 @@ import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { ItemAprovacao } from "../../src/contracts/item-aprovacao.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
+import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
@@ -46,6 +47,8 @@ export type BancoMemoria = {
   /** agentes.geracao_execucao (ADR-034): ausente = 0. */
   geracoes: Map<string, number>;
   memorias: Memoria[];
+  /** 0044 (ADR-064): as pendências do bot, com a dona e o turno que resolveu. */
+  pendencias: (Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null })[];
   conversas: Conversa[];
   mensagens: Mensagem[];
   anexos: { tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number }[];
@@ -105,6 +108,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     agentes: [],
     geracoes: new Map(),
     memorias: [],
+    pendencias: [],
     conversas: [],
     mensagens: [],
     anexos: [],
@@ -160,6 +164,7 @@ export function reposMemoria(escopo?: Escopo): Repos {
 const agora = () => Date.now();
 const iso = (n: number) => new Date(n).toISOString();
 const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
+const semDonoPendencia = ({ ownerId: _dona, resolvidaNoTurnoId: _turno, ...p }: Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null }): Pendencia => ({ ...p });
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
@@ -408,6 +413,57 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    pendencias: {
+      async criar(n) {
+        const linha = {
+          tenantId: escopo.tenantId,
+          ownerId: escopo.pessoaId,
+          id: randomUUID(),
+          agenteId: n.agenteId,
+          conversaId: n.conversaId,
+          turnoId: n.turnoId,
+          texto: n.texto,
+          aPartirDe: n.aPartirDe,
+          cuidado: n.cuidado,
+          profundidade: n.profundidade as Pendencia["profundidade"],
+          estado: "aberta" as const,
+          resolvidaEm: null,
+          resolvidaPor: null,
+          motivo: null,
+          pedidaEm: null,
+          criadoEm: agora(),
+          resolvidaNoTurnoId: null,
+        };
+        b.pendencias.push(linha);
+        return semDonoPendencia(linha);
+      },
+      async buscar(id) {
+        const p = doTenant(b.pendencias).find((x) => x.id === id);
+        return p ? semDonoPendencia(p) : null;
+      },
+      async abertasDoAgente(agenteId) {
+        return doTenant(b.pendencias)
+          .filter((p) => p.agenteId === agenteId && p.estado === "aberta")
+          .sort((x, y) => y.criadoEm - x.criadoEm || y.id.localeCompare(x.id))
+          .map(semDonoPendencia);
+      },
+      async resolver(id, r) {
+        const p = doTenant(b.pendencias).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "aberta");
+        if (!p) return null;
+        Object.assign(p, { estado: r.estado, resolvidaEm: r.agora, resolvidaPor: r.por, resolvidaNoTurnoId: r.turnoId, motivo: r.motivo });
+        return semDonoPendencia(p);
+      },
+      async marcarPedida(id, quando, repedirAposMs) {
+        const p = doTenant(b.pendencias).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "aberta");
+        if (!p || (p.pedidaEm !== null && p.pedidaEm > quando - repedirAposMs)) return null;
+        p.pedidaEm = quando;
+        return semDonoPendencia(p);
+      },
+      async resolvidasNoTurno(turnoId) {
+        return doTenant(b.pendencias).filter((p) => p.resolvidaNoTurnoId === turnoId).length;
+      },
+    },
+
     conversas: {
       async criar(c) {
         const conversa: Conversa = {
@@ -429,6 +485,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async buscarPropriaDoAgente(agenteId) {
         return doTenant(b.conversas).find((c) => c.tipo === "propria" && c.agenteId === agenteId) ?? null;
+      },
+      async propriasDosAgentes(agenteIds) {
+        const saida = new Map<string, Conversa>();
+        for (const id of agenteIds) {
+          const c = doTenant(b.conversas).find((x) => x.tipo === "propria" && x.agenteId === id);
+          if (c) saida.set(id, c);
+        }
+        return saida;
       },
       async buscarDaSala(salaId) {
         return doTenant(b.conversas).find((c) => c.tipo === "sala" && c.salaId === salaId) ?? null;
@@ -578,6 +642,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas[todas.length - 1] ?? null;
       },
+      async ultimasDasConversas(conversaIds) {
+        const saida = new Map<string, Mensagem>();
+        for (const id of conversaIds) {
+          const todas = doTenant(b.mensagens).filter((m) => m.conversaId === id).sort((x, y) => x.criadoEm - y.criadoEm);
+          const ultima = todas[todas.length - 1];
+          if (ultima) saida.set(id, ultima);
+        }
+        return saida;
+      },
       async pedidoDaTarefa(turnoId) {
         return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
@@ -687,6 +760,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async contaminado(id: string) {
         return b.contaminados.has(id);
+      },
+      // ADR-066: os repositórios em memória não guardam sessão do CLI — a retomada de rotina/delegação começa nova.
+      async sessaoDoTurno() {
+        return null;
       },
       async enfileirar(t) {
         const turno: Turno = {
@@ -811,6 +888,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         alvo.entradaAnexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
         return { turno: alvo, absorvidos };
       },
+      async absorverNaSessao(turno) {
+        const absorvidos = doTenant(b.turnos)
+          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && t.entradaAnexos.length === 0)
+          .sort((x, y) => x.criadoEm - y.criadoEm);
+        for (const t of absorvidos) {
+          t.estado = "interrompido";
+          t.motivoInterrupcao = "absorvido";
+          t.absorvidoPor = turno.id;
+          t.leaseAte = null;
+        }
+        return absorvidos;
+      },
       async cancelarPendente(id) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");
         if (!t) return null;
@@ -855,6 +944,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (b.entregas.has(chave)) return false;
         b.entregas.add(chave);
         return true;
+      },
+      async concluidosPorConversa(conversaIds) {
+        const saida = new Map<string, number>();
+        for (const id of conversaIds) {
+          const n = doTenant(b.turnos).filter((t) => t.conversaId === id && t.estado === "concluido").length;
+          if (n > 0) saida.set(id, n);
+        }
+        return saida;
       },
       async listarDaConversa(conversaId, limite = 50) {
         const todos = doTenant(b.turnos).filter((t) => t.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
@@ -1076,6 +1173,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora(),
           excluidoEm: null,
           acessos: r.acessos ?? null,
+          soComPendencia: r.soComPendencia ?? false,
         };
         b.rotinas.push(rotina);
         return rotina;
@@ -1359,6 +1457,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async doAgente(agenteId) {
         return doTenant(b.concessoes).filter((c) => c.agenteId === agenteId);
+      },
+      async contarPorAgente(agenteIds) {
+        const saida = new Map<string, number>();
+        for (const id of agenteIds) {
+          const n = doTenant(b.concessoes).filter((c) => c.agenteId === id).length;
+          if (n > 0) saida.set(id, n);
+        }
+        return saida;
       },
       // Sem concorrência em memória: a trava advisory não tem o que serializar.
       async travar() {

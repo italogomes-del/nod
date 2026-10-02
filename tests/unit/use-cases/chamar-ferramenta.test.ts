@@ -54,7 +54,7 @@ async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno>
   return { deps, banco, chamadas, chamar, trilha, turnoAtual, turnoId, agenteId, conversaId, conectorId, consentimentoId: consentimento?.id ?? "", plano: planoBase };
 }
 
-describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA 5/10/15/16)", () => {
+describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA 5/10/16; sem o gate da EMENDA 15 desde a ADR-066)", () => {
   it("sem plano ou plano expirado → negação terminal plano_ausente, trilha escrita, turno interrompido", async () => {
     const c = await cenario();
     const r1 = await c.chamar("lembrar", { tipo: "fato", texto: "x" }, null);
@@ -155,14 +155,90 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.chamadas.length + d.chamadas.length).toBe(0);
   });
 
-  it("EMENDA 15: rotina com gate ligado recusa conector sem readOnlyHint como alcance_insuficiente TRANSITÓRIA; readOnly passa", async () => {
-    const c = await cenario({}, { politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: true } });
+  it("ADR-066: não há mais gate de rotina — num turno de rotina a escrita direta passa pela decisão do modo: no manual, alcance_insuficiente TRANSITÓRIA (peça aprovação); no automático roda; readOnly passa sempre", async () => {
+    const c = await cenario({}, { modoTurno: "rotina", politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 } });
     await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
     const r = await c.chamar("exemplo__enviar", { para: "x" });
     expect(r.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
     expect(c.turnoAtual()?.pararSolicitadoEm).toBeNull();
     expect((await c.chamar("exemplo__somar", { a: 1, b: 2 })).data).toMatchObject({ ok: true });
-    expect(c.chamadas.map((x) => x.tool)).toEqual(["somar"]);
+    await c.deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    expect(c.chamadas.map((x) => x.tool)).toEqual(["somar", "enviar"]);
+  });
+
+  it("ADR-066: ler um app de fora marca o turno; dali em diante, no manual, a regra 'Sempre permitir' cai e a escrita direta volta ao pedir_aprovacao — no automático segue", async () => {
+    const c = await cenario();
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+    await c.deps.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", itemOrigemId: "i", mensagemId: c.consentimentoId, regraVersao: 1 });
+    expect(await c.deps.repos.turnos.contaminado(c.turnoId)).toBe(false);
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    // "exemplo" não tem curadoria de conteúdo interno: chamar o app marca o turno (conectorTrazConteudoDeFora).
+    expect(await c.deps.repos.turnos.contaminado(c.turnoId)).toBe(true);
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+    await c.deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    expect(c.chamadas.map((x) => x.tool)).toEqual(["enviar", "enviar"]);
+  });
+
+  it("ADR-066: merge e aprovar PR não têm mais negação direta — no manual pedem a pessoa até com 'Sempre permitir' (nunca permanente); no automático rodam na conversa e numa rotina (merge de PR não é 'apagar'; mesclar registros continua sendo)", async () => {
+    const montar = async (capacidade: string, modoTurno: PlanoTurno["modoTurno"]) => {
+      const c = await cenario();
+      const catalogo = (await c.deps.repos.conectores.buscar(c.conectorId))?.catalogo ?? [];
+      await c.deps.repos.conectores.registrarSonda(c.conectorId, { ok: true, agora: AGORA, catalogo: [...catalogo, { nome: capacidade, descricao: capacidade, schema: { type: "object" }, readOnlyHint: false }] });
+      await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade, mensagemId: c.consentimentoId });
+      const nome = `exemplo__${capacidade}`;
+      const plano: PlanoTurno = { ...c.plano, modoTurno, catalogo: { ...c.plano.catalogo, ferramentas: [...c.plano.catalogo.ferramentas, { nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } }] } };
+      return { ...c, agir: () => c.chamar(nome, {}, plano) };
+    };
+    const manual = await montar("pr_merge", "conversa");
+    await manual.deps.repos.permissoesPermanentes.criar({ agenteId: manual.agenteId, conectorId: manual.conectorId, capacidade: "pr_merge", itemOrigemId: "i", mensagemId: manual.consentimentoId, regraVersao: 1 });
+    expect((await manual.agir()).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+    expect(manual.chamadas).toHaveLength(0);
+    // Antes da ADR-066 o merge era negado direto em QUALQUER modo (só por item de pedir_aprovacao).
+    const naConversa = await montar("pr_merge", "conversa");
+    await naConversa.deps.repos.agentes.definirModoAprovacao(naConversa.agenteId, "automatico");
+    expect((await naConversa.agir()).data).toMatchObject({ ok: true });
+    // Numa rotina (ninguém pediu na conversa), o arriscado pararia o automático: merge e revisar PR não são mais arriscados.
+    const rodados: string[] = [];
+    for (const capacidade of ["pr_merge", "GITHUB_MERGE_A_PULL_REQUEST", "pr_revisar"]) {
+      const naRotina = await montar(capacidade, "rotina");
+      await naRotina.deps.repos.agentes.definirModoAprovacao(naRotina.agenteId, "automatico");
+      expect({ capacidade, r: (await naRotina.agir()).data }).toMatchObject({ capacidade, r: { ok: true } });
+      rodados.push(...naRotina.chamadas.map((x) => x.tool));
+    }
+    expect([...naConversa.chamadas.map((x) => x.tool), ...rodados]).toEqual(["pr_merge", "pr_merge", "GITHUB_MERGE_A_PULL_REQUEST", "pr_revisar"]);
+    // Mesclar REGISTROS (apaga um deles) continua no grupo "apagar": numa rotina, o automático para.
+    const mesclar = await montar("CONTACTS_MERGE", "rotina");
+    await mesclar.deps.repos.agentes.definirModoAprovacao(mesclar.agenteId, "automatico");
+    expect((await mesclar.agir()).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+    expect(mesclar.chamadas).toHaveLength(0);
+  });
+
+  it("ADR-062: a escrita direta passa pela decisão do card — no manual pede aprovação, com regra ou no automático roda", async () => {
+    const c = await cenario();
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
+    // A regra "Sempre permitir" vale pela linha ativa agora, no mesmo turno.
+    const regra = await c.deps.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", itemOrigemId: "i", mensagemId: c.consentimentoId, regraVersao: 1 });
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    await c.deps.repos.permissoesPermanentes.desativar(regra?.id ?? "", "revogada_pela_pessoa", AGORA);
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+    await c.deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    expect((await c.chamar("exemplo__enviar", { para: "x" })).data).toMatchObject({ ok: true });
+    expect(c.chamadas.map((x) => x.tool)).toEqual(["enviar", "enviar"]);
+  });
+
+  it("ADR-062: pedir_aprovacao confere os argumentos no schema do conector — o erro volta ao bot como dado, sem card", async () => {
+    const c = await cenario();
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+    const r = await c.chamar("pedir_aprovacao", { resumo: "enviar", itens: [{ texto: "a", destino: { conector: "exemplo", ferramenta: "enviar", argumentos: {} } }] });
+    expect(r.data).toMatchObject({ ok: true });
+    const volta = JSON.parse((r.data as { conteudo: string }).conteudo) as { estado: string; erros: string[]; instrucao: string };
+    expect(volta.estado).toBe("recusada");
+    expect(volta.erros.join(" ")).toContain("para");
+    expect(volta.erros.join(" ")).toContain("exemplo.enviar");
+    expect(c.banco.decisoes).toHaveLength(0);
   });
 
   it("conector que cai → conector_indisponivel transitória, ultimaFalha gravada; args fora do schema do conector → args_invalidos", async () => {

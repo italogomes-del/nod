@@ -19,19 +19,32 @@ export function leiturasRepo(conn: Conn, escopo: Escopo) {
    */
   const nova = () => conn`m.kind in ('texto', 'artefato') and not (m.autor_tipo = 'pessoa' and m.autor_id = ${escopo.pessoaId})`;
   return {
-    /** As conversas da pessoa (os bots dela e as salas que ela lê) com fala nova, a mais recente primeiro. */
+    /**
+     * As conversas da pessoa (os bots dela e as salas que ela lê) com fala nova, a mais recente primeiro.
+     *
+     * revisto em 2026-09-30: o "lido até" sai pronto da subconsulta (o `offset 0` a impede de ser achatada) e entra no
+     * LATERAL como coluna. Escrito como coalesce(l.lido_ate, …) dentro do LATERAL, sob RLS ele ficava no filtro depois
+     * das policies em vez de limitar a busca no índice mensagens_por_conversa, e a conta lia todas as mensagens de cada
+     * conversa: medido em 2026-09-30 (banco efêmero, 32 conversas, 14,5 mil mensagens), 11.441 buffers e custo 173 mil
+     * (acima do limiar do JIT) contra 4.360 buffers e custo 58,6 mil assim; dentro do GET frota, já com jit=off, de 57
+     * para 25 ms.
+     */
     async resumo(): Promise<ResumoNaoLida[]> {
       const linhas = await conn<{ conversa_id: string; tipo: "propria" | "sala"; agente_id: string | null; sala_id: string | null; total: number; desde: Date; ultima: Date }[]>`
         select c.id as conversa_id, c.tipo, c.agente_id, c.sala_id, x.total, x.desde, x.ultima
-        from conversas c
-        left join leituras l on l.tenant_id = c.tenant_id and l.owner_id = ${escopo.pessoaId} and l.conversa_id = c.id
+        from (
+          select c.tenant_id, c.id, c.tipo, c.agente_id, c.sala_id, coalesce(l.lido_ate, '-infinity'::timestamptz) as lido_ate
+          from conversas c
+          left join leituras l on l.tenant_id = c.tenant_id and l.owner_id = ${escopo.pessoaId} and l.conversa_id = c.id
+          where c.tenant_id = ${escopo.tenantId} and (c.tipo = 'sala' or c.owner_id = ${escopo.pessoaId})
+          offset 0
+        ) c
         cross join lateral (
           select count(*)::int as total, min(m.criado_em) as desde, max(m.criado_em) as ultima
           from mensagens m
-          where m.tenant_id = c.tenant_id and m.conversa_id = c.id
-            and m.criado_em > coalesce(l.lido_ate, '-infinity'::timestamptz) and ${nova()}
+          where m.tenant_id = c.tenant_id and m.conversa_id = c.id and m.criado_em > c.lido_ate and ${nova()}
         ) x
-        where c.tenant_id = ${escopo.tenantId} and (c.tipo = 'sala' or c.owner_id = ${escopo.pessoaId}) and x.total > 0
+        where x.total > 0
         order by x.ultima desc, c.id`;
       return linhas.map((l) => ({ conversaId: l.conversa_id, tipo: l.tipo, agenteId: l.agente_id, salaId: l.sala_id, total: l.total, desde: ms(l.desde), ultimaEm: ms(l.ultima) }));
     },

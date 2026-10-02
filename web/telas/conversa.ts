@@ -22,6 +22,7 @@ import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
 import { HTML_CHIP_MODO } from "./aprovacoes.ts";
+import { renderAFazerNaConversa } from "./pendencias.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -184,6 +185,17 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
+/**
+ * Quando a rotina acorda (definido em 2026-10-01, item 7 da ADR-066): só aparece no card se a rotina nasce só com
+ * pendência, ou se a mudança troca o flag — aí em de→para, como o horário e a instrução.
+ */
+function linhaAcorda(soComPendencia: boolean | undefined, mudanca = false): string {
+  if (soComPendencia === undefined || (!mudanca && !soComPendencia)) return "";
+  const so = "só com pendência aberta (sem nenhuma, a janela passa sem turno)";
+  const texto = !mudanca ? so : soComPendencia ? `em toda janela → ${so}` : "só com pendência aberta → em toda janela";
+  return `<div class="it"><b>acorda</b>${esc(texto)}</div>`;
+}
+
 function renderProposta(p: Proposta, estado: Estado, propostas: readonly Proposta[]): string {
   const a = agenteDe(estado, p.agenteId);
   // definido em 2026-09-28 (ADR-050): o perfil que traz rotinas é um card só, com as rotinas dentro.
@@ -201,11 +213,11 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
     itens = [c.nome ? `<div class="it"><b>nome</b>${esc(c.nome)}</div>` : "", c.titulo ? `<div class="it"><b>título</b>${esc(c.titulo)}</div>` : "", c.descricao ? `<div class="it"><b>descrição</b>${esc(c.descricao)}</div>` : ""].join("");
   } else if (p.payload.kind === "rotina") {
     const c = p.payload;
-    itens = `<div class="it"><b>quando</b>${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana))} (${esc(c.fusoIana)})</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it"><b>fonte</b>${esc(c.fonte)}</div><div class="it"><b>entregável</b>${esc(c.entregavel)}</div><div class="it"><b>limites de aprovação</b>${esc(c.limitesAprovacao)}</div><div class="it"><b>sem dado</b>${esc(c.politicaSemDado)}</div>${linhasPrecisa(p, estado)}`;
+    itens = `<div class="it"><b>quando</b>${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana))} (${esc(c.fusoIana)})</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it"><b>fonte</b>${esc(c.fonte)}</div><div class="it"><b>entregável</b>${esc(c.entregavel)}</div><div class="it"><b>limites de aprovação</b>${esc(c.limitesAprovacao)}</div><div class="it"><b>sem dado</b>${esc(c.politicaSemDado)}</div>${linhaAcorda(c.soComPendencia)}${linhasPrecisa(p, estado)}`;
   } else if (p.payload.kind === "rotina_atualizacao") {
     const c = p.payload;
     // de→para: a pessoa confirma sem precisar abrir outra tela para lembrar como era.
-    itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhasPrecisa(p, estado)}`;
+    itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhaAcorda(c.soComPendencia, true)}${linhasPrecisa(p, estado)}`;
   } else if (p.payload.kind === "rotina_exclusao") {
     const c = p.payload;
     itens = `<div class="it"><b>quando</b>${esc(c.resumo)}</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it">Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</div>`;
@@ -310,15 +322,26 @@ export function renderTarefasDoBot(tarefas: readonly TarefaDoBot[]): string {
   return `<section class="atividade-tarefas" aria-label="Tarefas: ${feitas} de ${tarefas.length} feitas"><div class="atividade-tarefas-cab">Tarefas · ${feitas} de ${tarefas.length}</div><ol>${itens}</ol></section>`;
 }
 
-function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
-  const atividade = c.atividades[t.turnoId];
+/**
+ * Um turno vivo na parte ao vivo da timeline (definido em 2026-09-30): cada turno é um bloco, e só o bloco do turno
+ * que escreveu é regravado. medido em 2026-09-30: acrescentar só o pedaço novo ao balão (em vez de regravá-lo) deixou
+ * o turno pesado PIOR — o Chrome refaz o layout do parágrafo inteiro de qualquer jeito, e cada layout ficou mais caro
+ * com os nós pequenos acrescentados (2,2 → 2,9 s de layout, 55 → 44 quadros/s; scripts/carga-tela).
+ */
+function blocoDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): BlocoDaTimeline {
+  const chave = `vivo:${t.turnoId}`;
+  const atividade = estado.atividades[c.conversa.id]?.[t.turnoId];
   if (atividade && atividade.ferramentas > 0) {
     const nome = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId)?.nome ?? "O agente" : "O agente";
-    return renderCartaoAtividade(t, atividade, estado, nome);
+    return { chave, html: renderCartaoAtividade(t, atividade, estado, nome) };
   }
   if (atividade?.atual) {
-    return `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(atividade.atual)}<span class="cursor">▍</span></div></div></article>`;
+    return { chave, html: `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(atividade.atual)}<span class="cursor">▍</span></div></div></article>` };
   }
+  return { chave, html: linhaDoTurnoVivo(t, c, estado) };
+}
+
+function linhaDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
   // A mensagem que disparou o turno já mostra "Na fila" com Cancelar embaixo dela: não repete a linha.
   const origem = c.turnosEmCurso.find((e) => e.id === t.turnoId)?.mensagemId;
   if (t.estado === "na_fila" && origem && c.mensagens.some((m) => m.id === origem)) return "";
@@ -332,6 +355,17 @@ function renderTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): strin
 
 /** definido em 2026-09-17: uma linha por turno remetente; respostas se ligam pelo tarefaId, não pelo texto. */
 export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, sala = false): string {
+  return blocosDasMensagens(mensagens, estado, sala).map((b) => b.html).join("");
+}
+
+/**
+ * Um pedaço do histórico com chave estável (definido em 2026-09-30): a mensagem (o id dela), o fio e os avisos
+ * recolhidos (o id da primeira), cada proposta e as decisões. main.ts troca só os pedaços cujo HTML mudou, e a
+ * mensagem nova entra sem regravar as outras 199 (web/lib/regioes.ts `regiaoPorBlocos`).
+ */
+export type BlocoDaTimeline = { chave: string; html: string };
+
+function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean): BlocoDaTimeline[] {
   const grupos = new Map<string, Mensagem[]>();
   const tarefas = new Map<string, string>();
   for (const m of mensagens) {
@@ -370,7 +404,7 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
   // recolher os avisos — o <details> do fio não é linha de sistema.
   const linhas: LinhaDaConversa[] = mensagens.map((m, i) => ({ id: m.id, sistema: linhaDeSistema(m), html: pedacos[i] ?? "" }));
   const conversaId = mensagens[0]?.conversaId;
-  return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas);
+  return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas).filter((b) => b.html !== "");
 }
 
 function linhaNovas(em: number): string {
@@ -394,29 +428,54 @@ function linhaDeSistema(m: Mensagem): boolean {
  * elas empurravam a conversa para longe. Nada é apagado: cada linha continua lá dentro, com o seu
  * "relatar". Cada `linha` leva o HTML já renderizado da mensagem (ou do fio que a recolheu).
  */
-function recolherAvisos(linhas: readonly LinhaDaConversa[]): string {
-  const saida: string[] = [];
+function recolherAvisos(linhas: readonly LinhaDaConversa[]): BlocoDaTimeline[] {
+  const saida: BlocoDaTimeline[] = [];
   let i = 0;
   while (i < linhas.length) {
     let fim = i;
     while (linhas[fim]?.sistema) fim++;
     if (fim - i >= AVISOS_PARA_RECOLHER) {
-      saida.push(`<details class="avisos-sistema" data-disclosure="avisos-${esc(linhas[i]?.id ?? "")}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>`);
+      const id = linhas[i]?.id ?? "";
+      saida.push({ chave: `avisos-${id}`, html: `<details class="avisos-sistema" data-disclosure="avisos-${esc(id)}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>` });
       i = fim;
     } else if (fim > i) {
-      saida.push(...linhas.slice(i, fim).map((l) => l.html));
+      saida.push(...linhas.slice(i, fim).map((l) => ({ chave: l.id, html: l.html })));
       i = fim;
     } else {
-      saida.push(linhas[i]?.html ?? "");
+      const l = linhas[i];
+      if (l) saida.push({ chave: l.id, html: l.html });
       i++;
     }
   }
-  return saida.join("");
+  return saida;
 }
 
 export function renderTimeline(c: ConversaEstado | null, estado: Estado): string {
   if (!c) return `<div class="mudo">carregando conversa…</div>`;
+  return `<div class="timeline">${renderHistoricoDaTimeline(c, estado)}${renderAoVivoDaTimeline(c, estado)}</div>`;
+}
+
+/**
+ * A timeline em duas partes (definido em 2026-09-30): o HISTÓRICO (mensagens, cards, decisões) e o que está
+ * AO VIVO (turnos rodando e a faixa de parada). O streaming só muda a segunda: main.ts a regrava sozinha a
+ * cada quadro e só refaz o histórico quando o que ele lê muda (web/lib/lembrar.ts).
+ */
+export function renderAoVivoDaTimeline(c: ConversaEstado, estado: Estado): string {
+  return blocosAoVivo(c, estado).map((b) => b.html).join("");
+}
+
+/** Os turnos vivos da conversa e a faixa de parada, em blocos (um por turno). */
+export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id);
+  const blocos: BlocoDaTimeline[] = [...vivos.map((t) => blocoDoTurnoVivo(t, c, estado)), { chave: "faixa", html: renderFaixaParada(estado.faixaParada) }];
+  return blocos.filter((b) => b.html !== "");
+}
+
+export function renderHistoricoDaTimeline(c: ConversaEstado, estado: Estado): string {
+  return blocosDoHistorico(c, estado).map((b) => b.html).join("");
+}
+
+export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const sala = c.conversa.tipo === "sala";
   const primeira = c.mensagens[0];
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
@@ -433,15 +492,15 @@ export function renderTimeline(c: ConversaEstado | null, estado: Estado): string
   const noPerfil = idsNoPerfil(c.propostas);
   const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id) && !noPerfil.has(p.id));
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
-  return `<div class="timeline">
-    ${sep}
-    ${renderMensagensAgrupadas(c.mensagens, estado, sala)}
-    ${acolhimento}
-    ${propostas.map((p) => renderProposta(p, estado, c.propostas)).join("")}
-    ${renderDecisoesDaConversa(estado, c.conversa.id, new Set(propostas.map((p) => p.id)))}
-    ${vivos.map((t) => renderTurnoVivo(t, c, estado)).join("")}
-    ${renderFaixaParada(estado.faixaParada)}
-  </div>`;
+  return [
+    { chave: "sep", html: sep },
+    ...blocosDasMensagens(c.mensagens, estado, sala),
+    // ADR-064: o "a fazer" do bot fica logo abaixo da última mensagem da conversa própria dele.
+    { chave: "a-fazer", html: c.conversa.tipo === "propria" && c.conversa.agenteId ? renderAFazerNaConversa(estado, c.conversa.agenteId) : "" },
+    { chave: "acolhimento", html: acolhimento },
+    ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
+    { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, new Set(propostas.map((p) => p.id))) },
+  ].filter((b) => b.html !== "");
 }
 
 const PAINEL = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.5v13"/></svg>';

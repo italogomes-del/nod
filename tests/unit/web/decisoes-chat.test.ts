@@ -11,7 +11,7 @@ const item: SuaVezDto["itens"][number] = {
   estadoColuna: "pendente", agenteNome: "Milton", aguardandoHaMs: 0, recusaAutomaticaEmMs: 60_000, gemeas: [], itensAprovacao: [], proposta: null, fio: null, rotinaParada: null,
 };
 const estado: Estado = { ...estadoInicial, suaVez: { itens: [item], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } };
-const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], atividades: {}, carregadaEm: 0 };
+const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
 
 describe("decisões no chat", () => {
   it("mostra a autorização na conversa de origem com as mesmas ações da fila", () => {
@@ -112,6 +112,22 @@ describe("decisões no chat", () => {
     expect(html).toContain("Sempre permitir slack.send_message");
     expect(html).toContain("em qualquer destino");
     expect(html).not.toContain("disabled");
+  });
+
+  it("ADR-062: item que parou por motivo que regra nenhuma pula desabilita 'Sempre permitir' e diz por quê", () => {
+    const base = { tenantId: "t", decisaoId: "d", textoOriginal: "Comentar", textoFinal: "Comentar", selecionado: true, origemSensivel: false, justificativa: null, marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null };
+    const comMotivo = (motivoManual: "gate_de_rotina" | "regra_suspensa_conteudo_nao_confiavel" | "fora_do_catalogo" | "sem_regra_permanente", id = "i", ferramenta = "create_task_comment") => ({ ...base, id, idx: 0, destino: { conector: "clickup", ferramenta, argumentos: {} }, motivoManual });
+    const html = (itens: ReturnType<typeof comMotivo>[]) => renderTimeline(conversa, { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: itens }] } });
+    const gate = html([comMotivo("gate_de_rotina")]);
+    expect(gate).toContain("disabled");
+    expect(gate).toContain("uma regra não pula esse pedido");
+    expect(gate).toContain("a rotina de onde isto veio pede a sua aprovação");
+    expect(html([comMotivo("regra_suspensa_conteudo_nao_confiavel")])).toContain("com regra ou sem");
+    expect(html([comMotivo("fora_do_catalogo")])).toContain("não está no alcance do bot agora");
+    // Lote misto: o botão nomeia só o que vai virar regra.
+    const misto = html([comMotivo("gate_de_rotina"), comMotivo("sem_regra_permanente", "j", "update_task")]);
+    expect(misto).toContain("Sempre permitir clickup.update_task");
+    expect(misto).not.toContain("Sempre permitir clickup.create_task_comment");
   });
 
   it("card só com item sensível mostra o botão DESABILITADO com o motivo, nunca ausente", () => {

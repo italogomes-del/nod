@@ -13,7 +13,12 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   pedido_dispensado: "o pedido foi dispensado sem resposta",
   // definido em 2026-09-24 (fio da pergunta): a pergunta da execução venceu sem resposta (varredor-expiracao.ts).
   pergunta_sem_resposta: "ninguém respondeu a pergunta",
+  // definido em 2026-10-01 (item 7 da ADR-066): a rotina só acorda com pendência e não havia nenhuma — sem turno.
+  sem_pendencia: "sem pendência aberta, nenhum turno rodou",
 };
+
+/** definido em 2026-10-01 (item 7 da ADR-066): a rotina que só acorda com pendência, na lista de rotinas. */
+export const TAG_SO_COM_PENDENCIA = '<span class="tag tag-cinza" title="sem pendência aberta do bot, a janela passa sem turno e sem custo; Testar agora roda sempre">só com pendência</span>';
 
 /**
  * definido em 2026-09-24 (emenda da ADR-044): por que a janela ficou 'bloqueada' — o rótulo do histórico
@@ -30,14 +35,17 @@ export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | nu
   return e.motivo === null ? null : (MOTIVO_HUMANO[e.motivo] ?? e.motivo);
 }
 
-/** "interrompida · seu Mac parou de responder", "parada (sem acesso)"; os outros desfechos seguem só com o nome. */
+/**
+ * "interrompida · seu Mac parou de responder", "parada (sem acesso)", "sem novidade · sem pendência aberta, nenhum turno
+ * rodou" (a janela que o servidor passou sem turno, item 7 da ADR-066); os outros desfechos seguem só com o nome.
+ */
 export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo">): string {
   if (e.desfecho === "bloqueada") {
     const motivo = e.motivo !== null && Object.hasOwn(MOTIVO_DA_PARADA, e.motivo) ? MOTIVO_DA_PARADA[e.motivo as keyof typeof MOTIVO_DA_PARADA] : e.motivo;
     return motivo ? `parada (${motivo})` : "parada";
   }
   const base = e.desfecho.replaceAll("_", " ");
-  const motivo = e.desfecho === "interrompida" ? motivoDaExecucao(e) : null;
+  const motivo = e.desfecho === "interrompida" || e.motivo === "sem_pendencia" ? motivoDaExecucao(e) : null;
   return motivo ? `${base} · ${motivo}` : base;
 }
 

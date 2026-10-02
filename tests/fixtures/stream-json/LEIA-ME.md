@@ -13,6 +13,12 @@ Origem: scratchpad/sondas da sessão de 2026-09-16 (mapa-cli.json descreve cada 
   (init, status, rate_limit, message_start, 2 content_block_start, 2 thinking_tokens, 31 deltas,
   1 assistant, 1 content_block_stop), com o `session_id` do s6, e termina na última linha real do s6
   — sem `result`, como o SIGTERM deixou.
+- `s7-sessao-viva.jsonl` — REAL, FILTRADO (2026-10-01, CLI 2.1.286, haiku, ADR-067): `--input-format stream-json`
+  com o stdin ABERTO. O modelo pôs um Bash de 40 s em segundo plano (`system/task_started`, `is_backgrounded`), a
+  pessoa escreveu "quanto é 2+2?" no meio e ele respondeu às duas no mesmo `result` ("Disparado\n\n4"); quando o
+  comando terminou (`task_updated` completed + `task_notification`), o CLI abriu outro `system/init` e chamou o
+  modelo de novo sozinho (`result` "bg-pronto"). Ficaram só init, assistant, user, result e system/task_*; os
+  caminhos locais viraram `/tmp/nod-turno` e a lista de ferramentas do init foi reduzida ao kit do nod.
 - `relatorio-lembrar.jsonl` — SINTÉTICO (2026-09-28), no formato das linhas reais do s3 (uma linha
   `assistant` por bloco, deltas antes do bloco completo): o modelo escreve um relatório de mais de 280
   caracteres, chama `mcp__nod__lembrar`, recebe o tool_result e fecha com "Anotado.". O `result` traz só

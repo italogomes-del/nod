@@ -1,6 +1,9 @@
 # ADR-058 — Um pedido entre bots, com os acessos de quem recebe
 
-Status: aceito · Data: 2026-09-29 · Substitui a divisão `perguntar_a_bot` × `delegar_tarefa` da ADR-047.
+Status: aceito, emendada pela [ADR-063](adr-063-pedido-entre-bots-ate-tres-passes.md) e pela
+[ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) (a trava herdada saiu: no lugar dela, o turno de quem
+recebe nasce marcado se quem pediu leu algo de fora) · Data: 2026-09-29 ·
+Substitui a divisão `perguntar_a_bot` × `delegar_tarefa` da ADR-047.
 Emenda a ADR-026 (a marca de não confiável deixa de reduzir o catálogo de quem recebe um pedido de colega)
 e a ADR-035 (rotina também pede a colega com os acessos dele).
 
@@ -88,3 +91,12 @@ pessoa olhando a conversa do remetente.
   remetente leu conteúdo de fora, mantendo o caminho único.
 - Se o custo de turnos de colega passar de 20% do custo diário (Raio-X, modo dev), o pedido ganha teto
   por bot e por dia.
+
+## Emenda de 2026-09-30: até três passes (ADR-063)
+
+A trava 2, "um salto", virou até três passes seguidos entre bots, sem uma pessoa ou rotina no meio. Com um salto, 36
+dos 64 turnos do Chico num dia não tinham `pedir_a_bot`, e a cadeia Clarice → Chico → Devs falhou quatro vezes.
+Entre donos diferentes continua um salto só. As travas 1 e 3 continuam. A 1 agora atravessa a cadeia: `travaDoPedido`
+sobe pelas delegações de quem pediu. O gatilho de custo de 20% acima foi medido em 19% com um salto só. A ADR-063 o
+troca por 35% do custo diário em três dias úteis seguidos, valor confirmado pelo Marlon. Detalhes, textos do prompt e
+gatilhos estão na [ADR-063](adr-063-pedido-entre-bots-ate-tres-passes.md).

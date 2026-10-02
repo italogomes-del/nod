@@ -29,11 +29,13 @@ import { COMANDO_GITHUB_NATIVO } from "../../contracts/github.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
 import { concluirItemNaMaquina, itensParaAMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { configGithubNativo, criarDetectorGh, sondaGithubNativa, type DetectorGh } from "../conectores-locais/github/nativo.ts";
+import { criarSubidaComposio } from "../integracoes/arquivo-composio.ts";
 import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
+import { JUNTAR_DELTAS_MS } from "../../shared/constantes.ts";
 import { servicoRotinas } from "../../use-cases/ativar-rotina.ts";
 import { atualizarPerfil } from "../../use-cases/atualizar-perfil.ts";
 import { motorDe } from "../../use-cases/autoria-evento.ts";
@@ -47,6 +49,7 @@ import { motivoEmPortugues } from "../../domain/redacao.ts";
 import { lembrar } from "../../use-cases/lembrar.ts";
 import { passar } from "../../use-cases/passar.ts";
 import { semNovidade } from "../../use-cases/sem-novidade.ts";
+import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../use-cases/pendencias.ts";
 import { pedirAcesso } from "../../use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../use-cases/pedir-aprovacao.ts";
@@ -68,6 +71,7 @@ import { segredoEfetivo } from "./sessao.ts";
 import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
+import { criarRotasPendencias } from "./rotas/pendencias.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
@@ -198,7 +202,8 @@ export function comporApp(o: OpcoesCompor): App {
     ligarRegistryResolvido = r;
   });
 
-  const barramento = criarBarramento();
+  // NOD_JUNTAR_DELTAS_MS=0 volta a um frame por pedaço de texto (para medir ou isolar um problema).
+  const barramento = criarBarramento({ juntarDeltasMs: env.NOD_JUNTAR_DELTAS_MS === undefined ? JUNTAR_DELTAS_MS : Math.max(0, Number(env.NOD_JUNTAR_DELTAS_MS) || 0) });
   const interruptor = criarInterruptor();
   const tokens = criarTokenTurno({ agora: relogio });
 
@@ -210,7 +215,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -272,6 +277,8 @@ export function comporApp(o: OpcoesCompor): App {
   const conectoresVivos = criarConectoresVivos({
     agora: relogio,
     ambiente: env,
+    // ADR-068: o nod local está no Mac da pessoa e sobe o arquivo que o bot cita; o compartilhado não o alcança.
+    ...(compartilhado ? {} : { subirArquivo: criarSubidaComposio() }),
     async carregar(conectorId, contexto) {
       const escopos = donoDoConector.has(conectorId) ? [donoDoConector.get(conectorId) as Escopo] : (await listar()).map((p) => ({ tenantId: p.tenantId, pessoaId: p.id }));
       for (const escopo of escopos) {
@@ -393,6 +400,7 @@ export function comporApp(o: OpcoesCompor): App {
     delta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
     ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
+    fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
     itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
@@ -568,6 +576,7 @@ export function comporApp(o: OpcoesCompor): App {
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
+    ...criarRotasPendencias(depsRotas),
     ...criarRotasConversas(depsRotas),
     ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),
@@ -605,7 +614,7 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala", dados: Record<string, unknown>): void {
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
 
@@ -629,6 +638,7 @@ export function comporApp(o: OpcoesCompor): App {
       ...p,
       ponte,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
+      aoFalaGravada: (plano) => publicarDoPlano(plano, "turno.fala", {}),
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
         else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });

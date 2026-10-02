@@ -3,6 +3,7 @@ import type { ArgsPedirAcesso } from "../../../src/contracts/ferramentas-nod.ts"
 import { aplicarAtualizacaoRotina } from "../../../src/use-cases/aplicar-proposta-rotina.ts";
 import { ativarRotina } from "../../../src/use-cases/ativar-rotina.ts";
 import { criarRotina } from "../../../src/use-cases/criar-rotina.ts";
+import { decidirAcesso } from "../../../src/use-cases/decidir-acesso.ts";
 import { dispararRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { atualizarRotinaPeloAgente } from "../../../src/use-cases/rotinas-do-agente.ts";
@@ -112,7 +113,8 @@ describe("atualizar_rotina com acessos", () => {
 });
 
 describe("pedir_acesso num turno de rotina que DECLAROU escrita", () => {
-  it("a escrita declarada pode ser pedida pelo nome; a que não foi declarada continua nao_permitido", async () => {
+  // revisto em 2026-10-01 (ADR-066): a declaração diz o que a rotina precisa ao nascer; não limita mais o turno.
+  it("ADR-066: a escrita declarada pode ser pedida pelo nome, e a NÃO declarada também — cai no card aberto da rotina (UM por app) e, depois dele, vira o seu", async () => {
     const c = await cenario();
     const rotina = await c.deps.repos.rotinas.criar({
       agenteId: c.agenteId,
@@ -134,6 +136,15 @@ describe("pedir_acesso num turno de rotina que DECLAROU escrita", () => {
     const ctx = contexto(c.agenteId, c.conversaId, disparo.data.turno.id);
     const ok = await pedirAcesso(c.deps, { ...ctx, conector: "gmail", capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita", nao_pedido: [] });
     expect(c.banco.propostas.find((p) => p.id === ok.data.proposta_id)?.payload).toMatchObject({ kind: "acesso", capacidades: ["GMAIL_SEND_EMAIL"], nivel: "escrita", rotinaId: rotina.id });
-    await expect(pedirAcesso(c.deps, { ...ctx, conector: "gmail", capacidades: ["GMAIL_DELETE_MESSAGE"], nivel: "escrita", nao_pedido: [] })).rejects.toMatchObject({ codigo: "nao_permitido" });
+    // Antes: nao_permitido. Agora o pedido entra; com o card do Gmail aberto, é ele que responde.
+    const naoDeclarada = await pedirAcesso(c.deps, { ...ctx, conector: "gmail", capacidades: ["GMAIL_DELETE_MESSAGE"], nivel: "escrita", nao_pedido: [] });
+    expect(naoDeclarada.data).toMatchObject({ proposta_id: ok.data.proposta_id, estado: "aguardando_pessoa" });
+    // A pessoa permite o primeiro (a rotina roda de novo); o pedido de apagar vira o card dele, com a rotina junto.
+    await decidirAcesso(c.deps, { decisaoId: ok.data.proposta_id, recusar: false, executor: "catcher" });
+    expect(c.banco.concessoes.map((x) => x.capacidade)).toEqual(["GMAIL_SEND_EMAIL"]);
+    const apagar = await pedirAcesso(c.deps, { ...ctx, conector: "gmail", capacidades: ["GMAIL_DELETE_MESSAGE"], nivel: "escrita", nao_pedido: [] });
+    expect(apagar.data.proposta_id).not.toBe(ok.data.proposta_id);
+    expect(c.banco.propostas.find((p) => p.id === apagar.data.proposta_id)?.payload).toMatchObject({ kind: "acesso", capacidades: ["GMAIL_DELETE_MESSAGE"], nivel: "escrita", rotinaId: rotina.id });
+    expect(c.banco.decisoes.find((d) => d.id === apagar.data.proposta_id)?.estado).toBe("pendente");
   });
 });

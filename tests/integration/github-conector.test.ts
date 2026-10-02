@@ -20,6 +20,7 @@ import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { concluirItemNaMaquina, expirarItensNaMaquina, itensParaAMaquina } from "../../src/use-cases/itens-na-maquina.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
+import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
 import { registrarConector } from "../../src/use-cases/registrar-conector.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
@@ -149,7 +150,9 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
     });
   });
 
-  it("ADR-047 × ADR-048: aprovar PR marcado para a máquina é recusado antes do executarLocal; turno não confiável só leva leitura para a máquina", async () => {
+  // revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): aprovar PR não é mais negado direto em
+  // todo modo, e o catálogo do turno não confiável não encolhe mais para a leitura.
+  it("ADR-047 × ADR-048 × ADR-066: aprovar PR marcado para a máquina passa pela decisão do modo antes do executarLocal — no manual é recusado, no automático vai para a máquina (e marca o turno); turno não confiável leva o catálogo inteiro para a máquina", async () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const { deps, repos, chamadas } = depsGithub(trx, MARLON, true);
@@ -157,16 +160,30 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
 
       const plano = await planoDoTurno(deps, await turnoDaConversa(repos, conversaId, agenteId), true);
       expect(plano.catalogo.ferramentas.find((f) => f.nome === "github__pr_revisar")?.execucao).toBe("maquina");
-      const r = await chamarFerramenta(deps, { turnoId: plano.turnoId, agenteId, nome: "github__pr_revisar", argumentos: { repositorio: "acme/nod", numero: 466, evento: "approve" }, plano });
-      expect(r.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+      const aprovar = { repositorio: "acme/nod", numero: 466, evento: "approve" };
+      // Manual: aprovar PR nunca vira "Sempre permitir" e pede a pessoa — negação transitória, nada sai para a máquina.
+      const r = await chamarFerramenta(deps, { turnoId: plano.turnoId, agenteId, nome: "github__pr_revisar", argumentos: aprovar, plano });
+      expect(r.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente", terminal: false } });
       expect(r.data).not.toHaveProperty("executarLocal");
       expect(chamadas).toEqual([]);
+      expect(await repos.turnos.contaminado(plano.turnoId)).toBe(false);
+
+      // Automático: a mesma chamada passa por todos os portões e volta como executarLocal (antes: negada em QUALQUER modo).
+      await repos.agentes.definirModoAprovacao(agenteId, "automatico");
+      const auto = await chamarFerramenta(deps, { turnoId: plano.turnoId, agenteId, nome: "github__pr_revisar", argumentos: aprovar, plano });
+      expect(auto.data).toEqual({ executarLocal: { capacidade: "pr_revisar", argumentos: aprovar } });
+      expect(chamadas).toEqual([]);
+      // O GitHub é app de fora: chamá-lo marca o turno, também quando roda no gh do Mac.
+      expect(await repos.turnos.contaminado(plano.turnoId)).toBe(true);
 
       const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "veio de fora", entradaConfianca: "nao_confiavel", modelo: "m" });
-      const reduzido = await planoDoTurno(deps, t?.id ?? "", true);
-      const doGithub = reduzido.catalogo.ferramentas.filter((f) => f.conectorId === conectorId);
-      expect(doGithub.map((f) => f.nome).sort()).toEqual(CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => `github__${c.nome}`).sort());
+      const naoConfiavel = await planoDoTurno(deps, t?.id ?? "", true);
+      const doGithub = naoConfiavel.catalogo.ferramentas.filter((f) => f.conectorId === conectorId);
+      expect(doGithub.map((f) => f.nome).sort()).toEqual(CAPACIDADES_GITHUB.map((c) => `github__${c.nome}`).sort());
       expect(doGithub.every((f) => f.execucao === "maquina")).toBe(true);
+      // No automático, o conteúdo de fora não para a escrita: comentar vai para a máquina.
+      const comentar = { repositorio: "acme/nod", numero: 466, texto: "ok" };
+      expect((await chamarFerramenta(deps, { turnoId: naoConfiavel.turnoId, agenteId, nome: "github__pr_comentar", argumentos: comentar, plano: naoConfiavel })).data).toEqual({ executarLocal: { capacidade: "pr_comentar", argumentos: comentar } });
     });
   });
 
@@ -406,8 +423,14 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       const { deps, repos } = depsGithub(trx, MARLON, true);
       await githubComAcesso(deps, repos, conversaId, agenteId);
       const turnoId = await turnoDaConversa(repos, conversaId, agenteId);
-      const plano = { ...(await planoDoTurno(deps, turnoId, true)), semprePermitir: ["github__pr_comentar"] };
-      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 1, texto: "oi" } } }] });
+      const plano = await planoDoTurno(deps, turnoId, true);
+      const comentar = () => pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 1, texto: "oi" } } }] });
+      // ADR-062: a regra vale pela linha ativa AGORA — o clique no primeiro card já dispensa o segundo, no mesmo turno.
+      const primeiro = await comentar();
+      const primeiroId = primeiro.data.estado === "pendente" ? primeiro.data.decisao_id : "";
+      const [origem] = await repos.itensAprovacao.listar(primeiroId);
+      expect((await permitirSempre(deps, { decisaoId: primeiroId, itemIds: [origem?.id ?? ""] })).data.criadas).toHaveLength(1);
+      const pedido = await comentar();
       expect(pedido.data).toMatchObject({ estado: "pendente" });
       const decisaoId = pedido.data.estado === "pendente" ? pedido.data.decisao_id : "";
       expect(await repos.decisoes.buscar(decisaoId)).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra" } });

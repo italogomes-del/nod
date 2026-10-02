@@ -42,7 +42,7 @@ describe("proxy com o artefato do nod (ADR-051)", () => {
     tokens.guardarPlano(planoDeTeste({
       turnoId, agenteId, conversaId: conversa?.id ?? "", expiraEm: agora() + 600_000, tokenDeTurno: token,
       // O orçamento que montarPlano dá a todo turno real (o planoDeTeste fixa 8 000, de antes de 2026-09-28).
-      politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS, efeitoExternoSoPorAprovacao: false },
+      politicaExecucao: { prazoMs: 60_000, orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS },
       catalogo: { ferramentas: [nod("publicar_artefato"), nod("ler_artefato")], servidores: [] },
     }));
     proxy = spawnProxy({ NOD_URL: srv.url, NOD_TOKEN_TURNO: token });

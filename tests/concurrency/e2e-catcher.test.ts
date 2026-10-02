@@ -408,7 +408,7 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect((await chamar("POST", `salas/${salaId}/parar`)).status).toBe(200);
   });
 
-  it("bot-a-bot (ADR-058): pedir_a_bot abre no alvo um turno 'delegacao' confiável; a resposta volta como peer_ask e o remetente continua no modo dele, sem novo salto", { timeout: JORNADA_MS }, async () => {
+  it("bot-a-bot (ADR-058/062): pedir_a_bot abre no alvo um turno 'delegacao' confiável; a resposta volta como peer_ask e o remetente continua no modo dele, ainda com o salto abaixo do limite", { timeout: JORNADA_MS }, async () => {
     const desde = frames.length;
     const t = await rodar(vera.conversaId, 'Pergunte ao Tuca o status do PR 42. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"qual o status do PR 42? [[texto: PR 42 aprovado ontem]]"}]] [[texto: Perguntei ao Tuca.]]');
     expect(t.estado).toBe("concluido");
@@ -425,15 +425,15 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
     const doAlvo = dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === tarefa.id)?.dados.ferramentas as string[];
     expect(doAlvo).toContain("mcp__nod__pedir_acesso");
-    expect(doAlvo).not.toContain("mcp__nod__pedir_a_bot");
+    // ADR-063: quem cumpre o pedido (profundidade 1) também pede a outro colega, até o limite da corrente.
+    expect(doAlvo).toContain("mcp__nod__pedir_a_bot");
     const continuacao = await srv.esperar(async () => {
       const d = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
       return d.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === resposta.turnoId) ?? null;
     }, { nome: "plano da continuação", timeoutMs: 15_000 });
     const ferramentas = continuacao.dados.ferramentas as string[];
-    // A continuação é a retomada do turno da Vera: o kit da conversa, menos o salto.
-    expect(ferramentas).toEqual(expect.arrayContaining(["mcp__nod__lembrar", "mcp__nod__pedir_aprovacao"]));
-    expect(ferramentas).not.toContain("mcp__nod__pedir_a_bot");
+    // A continuação é a retomada do turno da Vera: o kit da conversa, com o salto (profundidade 1, abaixo do limite).
+    expect(ferramentas).toEqual(expect.arrayContaining(["mcp__nod__lembrar", "mcp__nod__pedir_aprovacao", "mcp__nod__pedir_a_bot"]));
     expect(await turno(resposta.turnoId ?? "")).toMatchObject({ origem: "retomada", profundidade: 1 });
     expect(frames.slice(desde).filter((f) => f.tipo === "turno.iniciado").length).toBeGreaterThanOrEqual(2);
     await esperarTurno(resposta.turnoId ?? "");

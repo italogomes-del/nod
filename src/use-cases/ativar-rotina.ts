@@ -51,6 +51,8 @@ export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean
     politicaSemDado: p.politicaSemDado,
     proximaExecucao,
     acessos: p.acessos ?? null,
+    // definido em 2026-10-01 (item 7 da ADR-066): proposta anterior à 0045 não tem o campo e nasce false.
+    soComPendencia: p.soComPendencia === true,
   });
   if (!rotina) throw new ErroDeDominio("estado_invalido", { cause: "rotina não criada" });
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);

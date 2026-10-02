@@ -5,7 +5,7 @@ import { EXECUCOES_GUARDADAS } from "../../../src/shared/constantes.ts";
 import { concederLote } from "../../../src/use-cases/conceder.ts";
 import { confirmarProposta } from "../../../src/use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../src/use-cases/decidir-acesso.ts";
-import { confiancaDaFonte, dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
+import { dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { executarRotinaAgora } from "../../../src/use-cases/executar-rotina-agora.ts";
 import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
@@ -105,15 +105,23 @@ describe("dispararRotina", () => {
     expect(new Date(r.data.proximaExecucao).toISOString()).toBe("2026-09-21T11:00:00.000Z");
   });
 
-  it("fonte que cita conector habilitado que TOCA dado pessoal → entrada nao_confiavel; conector nao-toca → confiavel", async () => {
+  // revisto em 2026-09-30 (ADR-062): o critério era a curadoria de conteúdo de fora, não a declaração de dado pessoal.
+  // revisto em 2026-10-01 (ADR-066): a entrada da rotina é a instrução que a pessoa confirmou — sempre confiável. A marca
+  // de conteúdo de fora vem do que o bot LÊ (chamar-ferramenta.ts contamina o turno), não do app que a fonte cita.
+  it("ADR-066: a entrada da rotina nasce confiável mesmo quando a fonte cita app de conteúdo de fora (sem curadoria, GitHub) — a confiança não sai mais do nome do app", async () => {
     const d = depsMemoria({ agora: () => AGORA });
-    const toca = await d.deps.repos.conectores.criar({ nome: "Alunos", slug: "alunos", transporte: "stdio", comando: "node", declaracao: "toca" });
-    await d.deps.repos.conectores.registrarSonda(toca?.id ?? "", { ok: true, catalogo: [], agora: AGORA });
-    const naoToca = await d.deps.repos.conectores.criar({ nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
-    await d.deps.repos.conectores.registrarSonda(naoToca?.id ?? "", { ok: true, catalogo: [], agora: AGORA });
-    expect(await confiancaDaFonte(d.deps, "lista de Alunos do conector alunos")).toBe("nao_confiavel");
-    expect(await confiancaDaFonte(d.deps, "PRs abertos no GitHub")).toBe("confiavel");
-    expect(await confiancaDaFonte(d.deps, "planilha interna")).toBe("confiavel");
+    for (const [nome, slug, declaracao] of [["Alunos", "alunos", "toca"], ["GitHub", "github", "nao-toca"], ["ClickUp", "clickup", "toca"], ["Slack", "slack", "toca"]] as const) {
+      const c = await d.deps.repos.conectores.criar({ nome, slug, transporte: "stdio", comando: "node", declaracao });
+      await d.deps.repos.conectores.registrarSonda(c?.id ?? "", { ok: true, catalogo: [], agora: AGORA });
+    }
+    for (const fonte of ["lista de Alunos do conector alunos", "PRs abertos no GitHub", "tasks do ClickUp e mensagens no Slack", "planilha interna"]) {
+      const rotina = await rotinaAtiva(d, { fonte });
+      const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+      if (!("turno" in r.data)) throw new Error(`deveria ter disparado: ${fonte}`);
+      expect({ fonte, confianca: r.data.turno.entradaConfianca }).toEqual({ fonte, confianca: "confiavel" });
+      // Nenhum turno nasce marcado: só a leitura de um app de fora marca (turnos.contaminar).
+      expect(await d.deps.repos.turnos.contaminado(r.data.turno.id)).toBe(false);
+    }
   });
 
   it("registrarDesfechoRotina: executou / falhou / passou_em_branco são distintos, escrevem mensagem rotina_execucao; UMA linha por janela", async () => {
@@ -195,10 +203,10 @@ describe("pré-voo da rotina (emenda da ADR-044)", () => {
   const SEXTA = Date.parse("2026-09-18T08:00:00-03:00");
   const SEGUNDA = Date.parse("2026-09-21T08:00:00-03:00");
 
-  async function gmail(d: ReturnType<typeof depsMemoria>, habilitado = true) {
+  async function gmail(d: ReturnType<typeof depsMemoria>, habilitado = true, extra: CapacidadeConector[] = []) {
     const c = await d.deps.repos.conectores.criar({ nome: "Gmail (Composio)", slug: "gmail", transporte: "http", url: "https://example.com/mcp", declaracao: "nao-toca" });
     if (!c) throw new Error("conector");
-    await d.deps.repos.conectores.registrarSonda(c.id, { ok: true, agora: AGORA, catalogo: [cap("GMAIL_FETCH_EMAILS", true), cap("GMAIL_LIST_LABELS", true), cap("GMAIL_SEND_EMAIL", false)] });
+    await d.deps.repos.conectores.registrarSonda(c.id, { ok: true, agora: AGORA, catalogo: [cap("GMAIL_FETCH_EMAILS", true), cap("GMAIL_LIST_LABELS", true), cap("GMAIL_SEND_EMAIL", false), ...extra] });
     if (!habilitado) await d.deps.repos.conectores.habilitar(c.id, false);
     return c;
   }
@@ -343,6 +351,67 @@ describe("pré-voo da rotina (emenda da ADR-044)", () => {
     expect(sexta.events?.map((e) => e.kind)).toEqual(["rotina_bloqueada"]);
     agora = AGORA + 5 * 60_000; // fora do minuto das 08:00, que o agendador já reivindicou
     expect((await executarRotinaAgora(d.deps, { rotinaId: rotina.id, executor: "local" })).data.turnoId).toBeTruthy();
+  });
+
+  /**
+   * ADR-066: no automático e no total o pré-voo concede como o turno já concedia — antes era o único lugar em que
+   * o total ainda esperava um clique, e cada janela saía bloqueada até ele. Concede sem disparar de novo
+   * (`semDisparar`): o disparo segue no mesmo passo, e a janela tem UM turno.
+   */
+  it("ADR-066: no automático o pré-voo concede pelo modo e a janela roda — decisão fechada pela regra, sem card, UM turno, nada bloqueado", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const conector = await gmail(d);
+    const rotina = await rotinaAtiva(d, { fonte: "E-mails do Gmail" });
+    await d.deps.repos.agentes.definirModoAprovacao(rotina.agenteId, "automatico");
+    const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in r.data)) throw new Error("deveria ter disparado");
+    expect(d.banco.turnos.map((t) => t.id)).toEqual([r.data.turno.id]);
+    expect(d.banco.concessoes.map((x) => [x.conectorId, x.capacidade])).toEqual([[conector.id, "GMAIL_FETCH_EMAILS"], [conector.id, "GMAIL_LIST_LABELS"]]);
+    const decisao = d.banco.decisoes.find((x) => x.tipo === "acesso");
+    expect(decisao).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra", regra: "regra:modo_automatico", regraVersao: 2 } });
+    expect(d.banco.propostas.find((p) => p.id === decisao?.id)).toMatchObject({ estado: "confirmada", payload: { rotinaId: rotina.id } });
+    expect(d.banco.execucoes.filter((e) => e.desfecho === "bloqueada")).toHaveLength(0);
+    // A concessão vai direto ao outbox (o disparo só devolve os eventos do turno); o card nunca piscou na tela.
+    expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    expect(d.banco.events.map((e) => e.kind)).not.toContain("decisao_criada");
+    expect(d.banco.events.map((e) => e.kind)).toContain("decisao_decidida");
+    expect(d.banco.mensagens.find((m) => m.kind === "consentimento")?.autoria).toMatchObject({ decidido_por: "regra:modo_automatico" });
+    expect(d.banco.rotinas[0]?.proximaExecucao).toBe(SEXTA);
+  });
+
+  it("ADR-066: o apagar declarado para no automático (bloqueia como antes, com o card); o total concede e roda", async () => {
+    const declarada = (d: ReturnType<typeof depsMemoria>, agenteId: string, conversaId: string) =>
+      d.deps.repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "limpa a caixa", fonte: "a caixa de entrada", entregavel: "resumo", limitesAprovacao: "nada", politicaSemDado: "silêncio", proximaExecucao: JANELA, acessos: [{ conector: "gmail", capacidades: ["GMAIL_DELETE_MESSAGE"], nivel: "escrita", naoPedido: [] }] });
+    for (const [modo, roda] of [["automatico", false], ["total", true]] as const) {
+      const d = depsMemoria({ agora: () => AGORA });
+      await gmail(d, true, [cap("GMAIL_DELETE_MESSAGE", false)]);
+      const base = await rotinaAtiva(d);
+      await d.deps.repos.agentes.definirModoAprovacao(base.agenteId, modo);
+      const rotina = await declarada(d, base.agenteId, base.conversaId);
+      if (!rotina) throw new Error("rotina");
+      const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+      expect({ modo, roda: "turno" in r.data }).toEqual({ modo, roda });
+      if (roda) {
+        expect(d.banco.concessoes.map((x) => x.capacidade)).toEqual(["GMAIL_DELETE_MESSAGE"]);
+        expect(d.banco.decisoes[0]?.desfecho).toMatchObject({ tipo: "decidida_por_regra", regra: "regra:modo_total" });
+      } else {
+        expect(r.data).toMatchObject({ bloqueada: "sem_acesso", propostaId: d.banco.decisoes[0]?.id });
+        expect(d.banco.decisoes[0]?.estado).toBe("pendente");
+        expect(d.banco.concessoes).toHaveLength(0);
+      }
+    }
+  });
+
+  it("ADR-066: conectar o app (login) continua sendo da pessoa — no total o pré-voo sem conexão bloqueia com o card de conexão", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    await gmail(d, false);
+    const rotina = await rotinaAtiva(d, { fonte: "Gmail" });
+    await d.deps.repos.agentes.definirModoAprovacao(rotina.agenteId, "total");
+    const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    expect(r.data).toMatchObject({ bloqueada: "sem_conexao" });
+    expect(d.banco.decisoes).toHaveLength(0);
+    expect(d.banco.concessoes).toHaveLength(0);
+    expect(d.banco.turnos).toHaveLength(0);
   });
 
   it("app citado que a pessoa NÃO registrou não trava: 'regressão linear' roda sem o Linear", async () => {

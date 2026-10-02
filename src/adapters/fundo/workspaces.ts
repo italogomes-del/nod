@@ -116,11 +116,12 @@ export function criarWorkspaces(o: { raiz: string; dentro: Dentro; machineId: st
         return await exclusivo(e, plano.conversaId, async () => {
           const schema = FERRAMENTAS_WORKSPACE[nome as keyof typeof FERRAMENTAS_WORKSPACE];
           if (!schema || errosDoSchema(schema, args).length || plano.tenantId !== e.tenantId || plano.autoria.conta_de_execucao !== e.pessoaId || plano.machineId !== o.machineId || !plano.catalogo.ferramentas.some(f => f.nome === nome && f.origem === "workspace")) throw new ErroDeDominio("nao_permitido");
-          // Propor e trocar não são efeito externo: propor só grava linguagem, trocar fica dentro do já autorizado.
-          if (plano.politicaExecucao.efeitoExternoSoPorAprovacao && !["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta", "workspace_trocar_projeto"].includes(nome)) throw new ErroDeDominio("nao_permitido");
+          // revisto em 2026-10-01 (ADR-066): saiu a negação sob o gate da rotina — o workspace vale em todo modo, e a
+          // escrita dele segue as regras do próprio serviço, como na conversa.
+          // revisto em 2026-10-01 (ADR-067): sem o `prazoEm` do turno — a pasta vale enquanto o turno vive.
           const conferir = () => o.dentro(e, async d => {
             const t = await d.repos.turnos.buscar(plano.turnoId);
-            if (!t || t.agenteId !== plano.agenteId || t.conversaId !== plano.conversaId || t.ownerId !== e.pessoaId || t.pararSolicitadoEm || ["concluido", "interrompido"].includes(t.estado) || t.prazoEm <= d.agora() || plano.expiraEm <= d.agora() || await d.repos.agentes.execucaoBloqueada(t.id) || await d.repos.paradas.ativa(e.pessoaId, t.conversaId)) throw new ErroDeDominio("nao_permitido");
+            if (!t || t.agenteId !== plano.agenteId || t.conversaId !== plano.conversaId || t.ownerId !== e.pessoaId || t.pararSolicitadoEm || ["concluido", "interrompido"].includes(t.estado) || plano.expiraEm <= d.agora() || await d.repos.agentes.execucaoBloqueada(t.id) || await d.repos.paradas.ativa(e.pessoaId, t.conversaId)) throw new ErroDeDominio("nao_permitido");
           });
           await conferir();
           const i = { ...e, conversaId: plano.conversaId };

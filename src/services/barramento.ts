@@ -32,7 +32,8 @@ export type Retomada =
 export type Inscrito = (frame: FrameSse) => void;
 
 export interface Barramento {
-  publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse;
+  /** O frame publicado; null quando é um `turno.delta` guardado para sair junto com os próximos (`juntarDeltasMs`). */
+  publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse | null;
   /** Devolve a função que cancela a inscrição. */
   inscrever(pessoaId: string, fn: Inscrito): () => void;
   retomar(pessoaId: string, since: Since | null): Retomada;
@@ -40,12 +41,25 @@ export interface Barramento {
   inscritos(pessoaId: string): number;
 }
 
-type Fluxo = { streamId: string; seq: number; frames: FrameSse[]; inscritos: Set<Inscrito> };
+/** Os `turno.delta` de um turno à espera: os dados do primeiro e os textos na ordem em que chegaram. */
+type DeltaGuardado = { dados: Record<string, unknown>; textos: string[] };
+
+type Fluxo = { streamId: string; seq: number; frames: FrameSse[]; inscritos: Set<Inscrito>; deltas: Map<string, DeltaGuardado>; timer: unknown };
 
 export interface OpcoesBarramento {
   /** Default BUFFER_SSE_FRAMES (src/shared/constantes.ts). */
   bufferFrames?: number;
   gerarStreamId?: () => string;
+  /**
+   * Junta os `turno.delta` de um mesmo turno que chegam dentro desta janela num frame só, com o texto
+   * concatenado; 0 (o default) publica cada um na hora. Qualquer outro frame da pessoa descarrega antes os
+   * deltas dela, então a ordem que o navegador vê é a da publicação — inclusive o `turno.encerrado`, que
+   * chega pelo outbox. Produção usa JUNTAR_DELTAS_MS (src/shared/constantes.ts).
+   */
+  juntarDeltasMs?: number;
+  /** Relógio injetável para o teste (default setTimeout sem segurar o processo vivo). */
+  agendar?: (fn: () => void, ms: number) => unknown;
+  cancelar?: (timer: unknown) => void;
 }
 
 /** `${streamId}:${seq}` → Since; qualquer outra forma → null (o handler trata como primeira conexão). */
@@ -62,12 +76,15 @@ export function interpretarSince(valor: string | null | undefined): Since | null
 export function criarBarramento(opcoes: OpcoesBarramento = {}): Barramento {
   const max = opcoes.bufferFrames ?? BUFFER_SSE_FRAMES;
   const gerar = opcoes.gerarStreamId ?? randomUUID;
+  const juntarMs = opcoes.juntarDeltasMs ?? 0;
+  const agendar = opcoes.agendar ?? ((fn: () => void, ms: number) => setTimeout(fn, ms).unref());
+  const cancelar = opcoes.cancelar ?? ((timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>));
   const fluxos = new Map<string, Fluxo>();
 
   const fluxoDe = (pessoaId: string): Fluxo => {
     let f = fluxos.get(pessoaId);
     if (!f) {
-      f = { streamId: gerar(), seq: 0, frames: [], inscritos: new Set() };
+      f = { streamId: gerar(), seq: 0, frames: [], inscritos: new Set(), deltas: new Map(), timer: null };
       fluxos.set(pessoaId, f);
     }
     return f;
@@ -79,22 +96,50 @@ export function criarBarramento(opcoes: OpcoesBarramento = {}): Barramento {
     f.frames = [];
   };
 
+  const emitir = (pessoaId: string, f: Fluxo, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse => {
+    f.seq += 1;
+    const frame: FrameSse = { streamId: f.streamId, seq: f.seq, pessoaId, tipo, dados };
+    f.frames.push(frame);
+    if (f.frames.length > max) f.frames.splice(0, f.frames.length - max);
+    for (const fn of f.inscritos) {
+      try {
+        fn(frame);
+      } catch (e) {
+        // Um inscrito quebrado não derruba a publicação nem os outros inscritos.
+        log("aviso", "sse_inscrito_falhou", { pessoa_id: pessoaId, tipo, erro: e instanceof Error ? e.name : "desconhecido" });
+      }
+    }
+    return frame;
+  };
+
+  /** Solta os deltas guardados da pessoa, um frame por turno, na ordem em que os turnos começaram a escrever. */
+  const descarregar = (pessoaId: string, f: Fluxo): void => {
+    if (f.timer !== null) {
+      cancelar(f.timer);
+      f.timer = null;
+    }
+    if (f.deltas.size === 0) return;
+    const guardados = [...f.deltas.values()];
+    f.deltas.clear();
+    for (const g of guardados) emitir(pessoaId, f, "turno.delta", { ...g.dados, texto: g.textos.join("") });
+  };
+
   return {
     publicar(pessoaId, tipo, dados) {
       const f = fluxoDe(pessoaId);
-      f.seq += 1;
-      const frame: FrameSse = { streamId: f.streamId, seq: f.seq, pessoaId, tipo, dados };
-      f.frames.push(frame);
-      if (f.frames.length > max) f.frames.splice(0, f.frames.length - max);
-      for (const fn of f.inscritos) {
-        try {
-          fn(frame);
-        } catch (e) {
-          // Um inscrito quebrado não derruba a publicação nem os outros inscritos.
-          log("aviso", "sse_inscrito_falhou", { pessoa_id: pessoaId, tipo, erro: e instanceof Error ? e.name : "desconhecido" });
-        }
+      const turnoId = dados.turnoId;
+      if (juntarMs > 0 && tipo === "turno.delta" && typeof turnoId === "string" && typeof dados.texto === "string") {
+        const guardado = f.deltas.get(turnoId);
+        if (guardado) guardado.textos.push(dados.texto);
+        else f.deltas.set(turnoId, { dados, textos: [dados.texto] });
+        f.timer ??= agendar(() => {
+          f.timer = null;
+          descarregar(pessoaId, f);
+        }, juntarMs);
+        return null;
       }
-      return frame;
+      descarregar(pessoaId, f);
+      return emitir(pessoaId, f, tipo, dados);
     },
 
     inscrever(pessoaId, fn) {

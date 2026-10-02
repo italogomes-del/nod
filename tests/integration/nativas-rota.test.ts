@@ -16,7 +16,10 @@ const CATALOGO = [
 
 /**
  * ADR-052 pela rota interna REAL: o hook do nod confirma cada nativa — só a que está no plano do turno; a trilha
- * registra sempre; WebFetch/WebSearch marcam o turno, e dali em diante escrita em conector só por item aprovado.
+ * registra sempre; WebFetch/WebSearch marcam o turno.
+ * revisto em 2026-10-01 (ADR-066): a marca não vira mais "escrita só por item aprovado" — ela só tira o "Sempre
+ * permitir" do manual; o automático e o total seguem. Chamar um app de fora (fora da curadoria) também marca. E a
+ * gravação fora de ~/nod/<bot> (o hook manda `arquivo`) passa pela mesma decisão do comando do terminal.
  */
 describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-052)", () => {
   const agora = () => Date.now();
@@ -55,7 +58,10 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     }));
     const interno = (metodo: string, caminho: string, corpo?: unknown) =>
       fetch(`${srv.url}/api/interno/${caminho}`, { method: metodo, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
-    return { repos, turnoId, slug, interno, agenteId };
+    const enviar = async () => (await (await interno("POST", `ferramentas/${slug}__enviar`, { argumentos: {} })).json()) as { ok: boolean; negacao?: { motivo: string } };
+    /** O "Sempre permitir" que a pessoa clicou em enviar (ADR-042). */
+    const semprePermitirEnviar = () => repos.permissoesPermanentes.criar({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", itemOrigemId: randomUUID(), mensagemId: randomUUID(), regraVersao: 1 });
+    return { repos, turnoId, slug, interno, agenteId, enviar, semprePermitirEnviar };
   }
 
   it("só a nativa que está no plano é confirmada, e cada uma deixa linha na trilha", async () => {
@@ -67,15 +73,26 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     expect((await semKit.interno("POST", "nativas", { ferramenta: "Write" })).status).toBe(403);
   });
 
-  it("WebFetch marca o turno: escrita em conector que passava vira negação do gate", async () => {
+  it("WebFetch marca o turno; ADR-066: a marca só derruba o 'Sempre permitir' do manual — no automático a escrita em conector segue", async () => {
     const t = await turno(NATIVAS_DO_TERMINAL);
-    const enviar = async () => (await (await t.interno("POST", `ferramentas/${t.slug}__enviar`, { argumentos: {} })).json()) as { ok: boolean; negacao?: { motivo: string } };
-    expect((await enviar()).ok).toBe(true);
+    await t.semprePermitirEnviar();
     expect(await t.repos.turnos.contaminado(t.turnoId)).toBe(false);
     // O hook manda contamina:false de propósito: quem decide é o servidor, pela ferramenta.
     expect((await t.interno("POST", "nativas", { ferramenta: "WebFetch", contamina: false })).status).toBe(200);
     expect(await t.repos.turnos.contaminado(t.turnoId)).toBe(true);
-    expect(await enviar()).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+    // Manual: depois da web a regra da pessoa cai (ADR-042 claim 6) e a chamada direta recebe "peça aprovação".
+    expect(await t.enviar()).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
+    // Automático: conteúdo de fora não para mais (antes desta ADR, a web negava a escrita direta em todo modo).
+    await t.repos.agentes.definirModoAprovacao(t.agenteId, "automatico");
+    expect((await t.enviar()).ok).toBe(true);
+  });
+
+  it("ADR-066: chamar um app de fora (e-mail, fora da curadoria) também marca o turno — o 'Sempre permitir' do manual vale até ali", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    await t.semprePermitirEnviar();
+    expect((await t.enviar()).ok).toBe(true);
+    expect(await t.repos.turnos.contaminado(t.turnoId)).toBe(true);
+    expect(await t.enviar()).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
   });
 
   it("ADR-059: o comando que o modo aprovou leva a regra do modo na trilha (o gatilho da ADR-055 não dispara à toa)", async () => {
@@ -85,7 +102,24 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     expect(await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "git status" })).json()).toEqual({ ok: true });
     const trilha = await t.repos.trilha.doTurno(t.turnoId);
     expect(trilha.map((l) => [l.ferramenta, l.regra])).toEqual([["nativa__Bash", "regra:modo_automatico"], ["nativa__Bash", "regra:chamar_ferramenta"]]);
+    // ADR-066: o conjunto que o automático deixa passar mudou (conteúdo de fora não o para mais) — a versão subiu para 2.
+    expect(trilha[0]?.regraVersao).toBe(2);
     const arriscado = await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "rm -rf dist" })).json() as { aguardar?: string };
     expect(typeof arriscado.aguardar).toBe("string");
+  });
+
+  it("ADR-066: Write/Edit/NotebookEdit com `arquivo` (fora de ~/nod/<bot>) passam pela decisão do terminal; sem `arquivo` (dentro da pasta), só a trilha", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    // Dentro da pasta do bot o hook não manda `arquivo`: a rota confirma e grava a trilha, como antes.
+    expect(await (await t.interno("POST", "nativas", { ferramenta: "Write" })).json()).toEqual({ ok: true });
+    // Fora dela, no manual: card "Gravar <arquivo>", e o hook espera a decisão; nada vai à trilha antes de rodar.
+    const fora = (await (await t.interno("POST", "nativas", { ferramenta: "Edit", arquivo: "/Users/m/code/app/src/filtros.tsx" })).json()) as { aguardar?: string };
+    expect(typeof fora.aguardar).toBe("string");
+    expect(await t.repos.itensAprovacao.listar(fora.aguardar ?? "")).toMatchObject([{ textoOriginal: "Gravar /Users/m/code/app/src/filtros.tsx", destino: { conector: "terminal", argumentos: { arquivo: "/Users/m/code/app/src/filtros.tsx" } } }]);
+    // No automático, grava sem card e a trilha leva a regra do modo.
+    await t.repos.agentes.definirModoAprovacao(t.agenteId, "automatico");
+    expect(await (await t.interno("POST", "nativas", { ferramenta: "NotebookEdit", arquivo: "/Users/m/notas/analise.ipynb" })).json()).toEqual({ ok: true });
+    const trilha = await t.repos.trilha.doTurno(t.turnoId);
+    expect(trilha.map((l) => [l.ferramenta, l.regra])).toEqual([["nativa__Write", "regra:chamar_ferramenta"], ["nativa__NotebookEdit", "regra:modo_automatico"]]);
   });
 });

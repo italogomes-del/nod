@@ -24,7 +24,7 @@ export function planoHarness(parcial: Partial<PlanoTurno["entrada"]> = {}): Plan
     promptSistema: "Você é a Vera. Responda em português.",
     entrada: { texto: "oi", sessaoCli: null, modelo: "gpt-5.6-sol", ...parcial },
     semprePermitir: [],
-    politicaExecucao: { prazoMs: 3_600_000, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false },
+    politicaExecucao: { prazoMs: 3_600_000, orcamentoResultadoChars: 8000 },
     tokenDeTurno: "tok",
     expiraEm: 1,
   };

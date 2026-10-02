@@ -41,12 +41,7 @@ export async function confirmacaoPeloModo(deps: Deps, ctx: { agenteId: string; t
   const agente = await deps.repos.agentes.buscar(ctx.agenteId);
   const modo = agente?.modoAprovacao;
   if (!modo || modo === "manual") return null;
-  const conteudoDeFora = ctx.plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(ctx.turnoId));
-  const d: DecisaoDoModo | null = decidirPeloModo(modo, {
-    arriscada: o.arriscada && !conversaComAPessoa(ctx.plano.modoTurno),
-    credencial: false,
-    conteudoDeFora,
-    travaHerdada: ctx.plano.politicaExecucao.travaHerdada === true,
-  });
+  // revisto em 2026-10-01 (ADR-066): conteúdo de fora e a trava herdada não param mais o modo.
+  const d: DecisaoDoModo | null = decidirPeloModo(modo, { arriscada: o.arriscada && !conversaComAPessoa(ctx.plano.modoTurno), credencial: false });
   return d?.automatico ? { regra: d.regra, regraVersao: d.versao } : null;
 }

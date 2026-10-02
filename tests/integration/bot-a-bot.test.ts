@@ -14,8 +14,8 @@ const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const AGORA = Date.parse("2026-09-16T15:00:00Z");
 
-describeIntegracao("bot-a-bot (ADR-058; E12.4, ADR-025): pedir_a_bot, continuação em profundidade 1, outro dono só com procuração", () => {
-  it("mesmo dono: tarefa_id = turno 'delegacao' confiável no alvo; ao assentar, peer_ask + retomada de quem pediu, sem novo salto; contrato services.sala.pedir", async () => {
+describeIntegracao("bot-a-bot (ADR-058/062; E12.4, ADR-025): pedir_a_bot, continuação um passe mais funda, outro dono só com procuração", () => {
+  it("mesmo dono: tarefa_id = turno 'delegacao' confiável no alvo; ao assentar, peer_ask + retomada de quem pediu, que ainda pede abaixo do limite; contrato services.sala.pedir", async () => {
     await withRollback(MARLON, async (trx) => {
       const vera = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const tuca = await agenteComConversa(trx, MARLON, { nome: "Tuca" });
@@ -38,9 +38,11 @@ describeIntegracao("bot-a-bot (ADR-058; E12.4, ADR-025): pedir_a_bot, continuaç
       expect(entrega.data.mensagem).toMatchObject({ conversaId: vera.conversaId, kind: "peer_ask", payload: { kind: "peer_ask", agenteId: tuca.agenteId, nome: "Tuca", tarefaId: r.data.tarefa_id, delegada: true } });
       expect(entrega.data.continuacao).toMatchObject({ conversaId: vera.conversaId, agenteId: vera.agenteId, origem: "retomada", retomaTurnoId: turnoVera?.id, profundidade: 1, entradaConfianca: "confiavel" });
       const agente = await repos.agentes.buscar(vera.agenteId);
-      const plano = montarPlano({ turno: entrega.data.continuacao, agente: agente!, memorias: [], concessoes: [], conectores: [], modo: "conversa", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "x", em: AGORA }, executor: "catcher", sessaoCli: null, pessoaNome: "Marlon", agora: AGORA });
+      // O pedido "e o PR 43?" ainda não voltou: a continuação sabe que falta o Tuca e não repete o pedido.
+      expect(entrega.data.continuacao.entradaTexto).toContain("Ainda faltam as respostas de Tuca");
+      const plano = montarPlano({ turno: entrega.data.continuacao, agente: agente!, memorias: [], concessoes: [], conectores: [], modo: "conversa", confianca: "confiavel", profundidade: entrega.data.continuacao.profundidade, inventario: { estado: "pronto", versao: "x", em: AGORA }, executor: "catcher", sessaoCli: null, pessoaNome: "Marlon", agora: AGORA });
       const nomes = plano.catalogo.ferramentas.map((f) => f.nome);
-      expect(nomes).not.toContain("pedir_a_bot");
+      expect(nomes).toContain("pedir_a_bot");
       expect(nomes).toEqual(expect.arrayContaining(["lembrar", "pedir_aprovacao", "pedir_acesso"]));
       expect(plano.profundidade).toBe(1);
       // a continuação não é tarefa: entregar sobre ela é ignorado

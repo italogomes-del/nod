@@ -78,7 +78,8 @@ export interface ServicesNod<Trx> {
     /** pedir_a_bot (ADR-058) para quem só tem o turnoId. */
     pedir(trx: Trx, p: { turnoId: string; agente: string; pedido: string; contexto?: string }): Promise<{ tarefaId: string }>;
   };
-  barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse };
+  /** null = um `turno.delta` guardado para sair junto com os próximos (src/services/barramento.ts, juntarDeltasMs). */
+  barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse | null };
 }
 
 /**
@@ -122,6 +123,9 @@ export interface UseCasesNod<Deps> {
   verColegas: CasoNod<Deps, "ver_colegas">;
   publicarArtefato: CasoNod<Deps, "publicar_artefato">;
   lerArtefato: CasoNod<Deps, "ler_artefato">;
+  anotarPendencia: CasoNod<Deps, "anotar_pendencia">;
+  concluirPendencia: CasoNod<Deps, "concluir_pendencia">;
+  descartarPendencia: CasoNod<Deps, "descartar_pendencia">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -144,4 +148,7 @@ export const USE_CASE_POR_FERRAMENTA = {
   ver_colegas: "verColegas",
   publicar_artefato: "publicarArtefato",
   ler_artefato: "lerArtefato",
+  anotar_pendencia: "anotarPendencia",
+  concluir_pendencia: "concluirPendencia",
+  descartar_pendencia: "descartarPendencia",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

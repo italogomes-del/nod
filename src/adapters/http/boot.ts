@@ -183,6 +183,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       // Só no compartilhado: no modo local o servidor É o nod no Mac — reiniciar é "nod fechado".
       ...(app.compartilhado ? { inicioDoProcesso, ultimoContato: (id: string) => app.ultimoContatoDaMaquina(id) } : {}),
     },
+    // ADR-067: o token sem relógio some junto com o turno que o lease encerrou.
+    aoInterromper: (ids) => { for (const id of ids) app.services.tokenTurno.revogar(id); },
   });
   const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
   const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas });

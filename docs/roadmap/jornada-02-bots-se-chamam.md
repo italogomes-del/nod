@@ -98,6 +98,11 @@ Marola [continuação, COM direito a re-perguntar] decide: tento o Review?
 resposta; dois saltos deixam um agente delegar para um especialista que ele conhece melhor, mantendo
 o humano a no máximo dois passos do fundo. Mais que isso afunda a árvore sem ganho claro.
 
+> **Revisto em 2026-09-30 ([ADR-063](../adr/adr-063-pedido-entre-bots-ate-tres-passes.md)):** virou código com
+> outra conta. A profundidade vai até 3, e cada passe soma 1, inclusive a resposta que volta ao originador. Não há
+> orçamento por fio nem guarda de anel: o laço fica limitado pela profundidade. Entre donos diferentes continua um
+> salto só, como abaixo.
+
 Implicações (a resolver quando virar código):
 
 - `src/domain/montagem-ferramentas.ts`: o corte das ferramentas de salto passa de `profundidade >= 1`
