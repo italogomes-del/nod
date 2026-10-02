@@ -8,7 +8,7 @@ import { planoDeTeste } from "../../helpers/l5.ts";
  * 0032, medido em 2026-09-28: aprovada em segundos, cada ação no computador da Ada ainda virava um turno
  * novo. Agora o proxy espera no PRÓPRIO turno, em fatias, e devolve o resultado da ação junto da decisão.
  */
-const NAVEGAR: FerramentaPlano = { nome: "computador_navegar", nomeMcp: "mcp__nod__computador_navegar", origem: "computador", conectorId: null, readOnlyHint: false, tocaAprendiz: true, schema: { type: "object" } };
+const NAVEGAR: FerramentaPlano = { nome: "computador_navegar", nomeMcp: "mcp__nod__computador_navegar", origem: "computador", conectorId: null, readOnlyHint: false, tocaDadoPessoal: true, schema: { type: "object" } };
 
 function montar(respostas: (RespostaAguardar | { transporte: "falha_tecnica"; status: number })[], fatias?: number) {
   const plano = planoDeTeste({ expiraEm: 10_000 });

@@ -105,7 +105,7 @@ describe("dispararRotina", () => {
     expect(new Date(r.data.proximaExecucao).toISOString()).toBe("2026-09-21T11:00:00.000Z");
   });
 
-  it("fonte que cita conector habilitado que TOCA dado de aprendiz → entrada nao_confiavel; conector nao-toca → confiavel", async () => {
+  it("fonte que cita conector habilitado que TOCA dado pessoal → entrada nao_confiavel; conector nao-toca → confiavel", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const toca = await d.deps.repos.conectores.criar({ nome: "Alunos", slug: "alunos", transporte: "stdio", comando: "node", declaracao: "toca" });
     await d.deps.repos.conectores.registrarSonda(toca?.id ?? "", { ok: true, catalogo: [], agora: AGORA });

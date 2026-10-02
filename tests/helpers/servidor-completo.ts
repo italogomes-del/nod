@@ -4,7 +4,7 @@ import { cunharCookie } from "../../src/adapters/http/sessao.ts";
 import { criarDb } from "../../src/db/client.ts";
 import type { Db, Escopo } from "../../src/shared/types.ts";
 import { urlDonoDeTeste } from "./db-dono.ts";
-import { TENANT_LEAPY } from "./ids.ts";
+import { TENANT_PADRAO } from "./ids.ts";
 
 /** definido em 2026-09-16: segredo e chave FIXOS do servidor de teste — nunca os do .env (a suíte não lê credencial). */
 export const SEGREDO_DE_TESTE = "segredo-de-teste";
@@ -52,10 +52,10 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
   const db = criarDb(urlTeste, { max: 6 });
   const dbDono = criarDb(urlDonoDeTeste(), { max: 1 });
   const pessoaId = randomUUID();
-  const escopo: Escopo = { tenantId: TENANT_LEAPY, pessoaId };
-  // O CI nunca roda seed (Leapy §6): o tenant de identidade nasce aqui como nod_dono (idempotente) e fica — é catálogo, não dado.
-  await dbDono`insert into tenants (id, nome) values (${TENANT_LEAPY}, 'Leapy') on conflict do nothing`;
-  await dbDono`insert into pessoas (tenant_id, id, nome, iniciais) values (${TENANT_LEAPY}, ${pessoaId}, ${o.nomePessoa ?? "Pessoa E2E"}, 'PE') on conflict do nothing`;
+  const escopo: Escopo = { tenantId: TENANT_PADRAO, pessoaId };
+  // O CI nunca roda seed (Práticas §6): o tenant de identidade nasce aqui como nod_dono (idempotente) e fica — é catálogo, não dado.
+  await dbDono`insert into tenants (id, nome) values (${TENANT_PADRAO}, 'Nod') on conflict do nothing`;
+  await dbDono`insert into pessoas (tenant_id, id, nome, iniciais) values (${TENANT_PADRAO}, ${pessoaId}, ${o.nomePessoa ?? "Pessoa E2E"}, 'PE') on conflict do nothing`;
   const visiveis = [escopo, ...(o.pessoasExtras ?? [])];
 
   const env = {

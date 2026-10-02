@@ -161,7 +161,7 @@ export type EventoStream =
     }
   | { tipo: "rate_limit"; status: string; utilizacaoCincoHoras: number | null; utilizacaoSeteDias: number | null }
   | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido"; tipoBruto: string | null }
-  /** Passo do driver catcher (Leapy §11): `subtipo` snake_case (CHECK catcher_registros_tipo); o servidor persiste em catcher_registros. */
+  /** Passo do driver catcher (Práticas §11): `subtipo` snake_case (CHECK catcher_registros_tipo); o servidor persiste em catcher_registros. */
   | { tipo: "catcher"; subtipo: string; dados: Record<string, unknown> };
 
 /** Resultado de Parar (E5.4), sempre renderizado — inclusive quando nada rodava. */

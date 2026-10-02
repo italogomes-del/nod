@@ -11,8 +11,8 @@ import { lerCookies } from "./util.ts";
  * Sessão por cookie assinado (HMAC) `nod_sessao` = base64url(JSON{tenantId, pessoaId}) "." HMAC.
  * A sessão vem do SERVIDOR, nunca do CLI (ADR-019). Dois modos de entrar, escolhidos por NOD_LOGIN
  * (ADR-030) — nunca por omissão:
- *  - `google`: OAuth do Google Workspace restrito a leapy.com.br (sessao-google.ts). Pode escutar
- *    fora de 127.0.0.1, e exige segredo de sessão forte.
+ *  - `google`: OAuth do Google, só para e-mails do cadastro e, com NOD_GOOGLE_DOMINIO, só desse
+ *    domínio (sessao-google.ts). Pode escutar fora de 127.0.0.1, e exige segredo de sessão forte.
  *  - `stub`: login de DESENVOLVIMENTO, lista as pessoas do cadastro e entra como uma delas sem prova
  *    nenhuma. Por isso só existe em loopback: `exigirConfiguracaoSegura` recusa subir de outro jeito.
  * Os testes não usam nenhum dos dois: cunham o cookie direto com `cunharCookie`.

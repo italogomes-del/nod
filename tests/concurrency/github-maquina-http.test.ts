@@ -12,7 +12,7 @@ import type { Deps } from "../../src/use-cases/tipos.ts";
 import { autoriaPessoa } from "../helpers/fabricas.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
 
 /**
@@ -81,13 +81,13 @@ describeIntegracao("GitHub na máquina pela ponte HTTP (modo compartilhado)", ()
   it("item aprovado que roda no gh: só o Mac com gh o puxa, só quem puxou relata, e o relato fecha a decisão", async () => {
     const itemId = await dentro(async (d) => {
       const decisao = await d.repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId: null, prazoDecisaoEm: Date.now() + 3_600_000, frase: "Comentar no PR 466" });
-      const [item] = await d.repos.itensAprovacao.criarLote(decisao!.id, [{ idx: 0, texto: "Faltou teste", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 466, texto: "Faltou teste" }, execucao: "maquina" }, origemSensivel: false }]);
+      const [item] = await d.repos.itensAprovacao.criarLote(decisao!.id, [{ idx: 0, texto: "Faltou teste", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 466, texto: "Faltou teste" }, execucao: "maquina" }, origemSensivel: false }]);
       await d.repos.decisoes.decidir(decisao!.id, { por: srv.pessoa.pessoaId, agora: Date.now() });
       return item!.id;
     });
     expect(await (await pedir("itens-locais", {}, semGh)).json()).toEqual({ itens: [] });
     const puxados = await (await pedir("itens-locais", {}, comGh)).json() as { itens: { itemId: string; capacidade: string; argumentos: Record<string, unknown> }[] };
-    expect(puxados.itens).toEqual([{ itemId, capacidade: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 466, texto: "Faltou teste" } }]);
+    expect(puxados.itens).toEqual([{ itemId, capacidade: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 466, texto: "Faltou teste" } }]);
     // Reservado para quem puxou: o outro Mac nem vê, nem relata. Nem o próprio Mac recebe de novo
     // enquanto a reserva vive (revisão 2026-09-25: comentar duas vezes no PR).
     expect(await (await pedir("itens-locais", {}, comGh)).json()).toEqual({ itens: [] });
@@ -121,7 +121,7 @@ describeIntegracao("GitHub pelo gh no modo LOCAL: só a dona da máquina (NOD_DO
 
   it("o gh deste Mac serve à pessoa nomeada; qualquer outra do cadastro não ganha o login dela; sem nome, ninguém", async () => {
     const pronto = (s: ServidorCompleto, escopo: { tenantId: string; pessoaId: string }) => s.app.dentro(escopo, (d) => d.services.github?.prontoSemConfiguracao() ?? Promise.resolve(null));
-    const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+    const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
     srv = await servidorCompleto({ env: { NOD_EXECUTOR: "catcher", PATH: `${dir}:/usr/bin:/bin`, NOD_DONO_DA_MAQUINA: PESSOA_MARLON } });
     expect(await pronto(srv, MARLON)).toBe("gh");
     expect(await pronto(srv, srv.pessoa)).toBeNull();

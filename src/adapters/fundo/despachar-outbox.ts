@@ -10,7 +10,7 @@ import type { Conn, Db, Escopo, Relogio } from "../../shared/types.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /**
- * Despachante do outbox (ADR-010 refinado, Leapy §7): laço de fundo que, POR PESSOA e numa
+ * Despachante do outbox (ADR-010 refinado, Práticas §7): laço de fundo que, POR PESSOA e numa
  * transação real escopada (paraCadaPessoa), lê os itens pendentes de `events_outbox`, publica cada
  * um como frame no barramento da pessoa e marca entregue. Mora em src/adapters/fundo porque abre
  * transação (EMENDA 3); o barramento (src/services) não conhece banco.

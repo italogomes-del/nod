@@ -12,12 +12,12 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import { criarBarramento } from "../../src/services/barramento.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const DIA = 24 * 60 * 60 * 1000;
 
 /** ComDeps sobre o trx condenado do withRollback: a rota roda o caso de uso na MESMA tx do teste. */

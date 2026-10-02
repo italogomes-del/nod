@@ -9,7 +9,7 @@ import type { Rota } from "../roteador.ts";
 /**
  * Como a rota chega ao caso de uso: a composição (compor.ts, L9) abre `abrirTxEscopada(db, escopo)`,
  * monta as Deps sobre a transação e roda `fn` dentro dela — os events devolvidos pelo caso de uso
- * são gravados via repos.events.gravarComOutbox na MESMA tx (Leapy §1). O teste entrega uma
+ * são gravados via repos.events.gravarComOutbox na MESMA tx (Práticas §1). O teste entrega uma
  * ComDeps sobre o trx do withRollback. Recebe só a fatia que estas rotas usam (DepsSuaVez), então
  * uma ComDeps de Deps completas serve.
  */

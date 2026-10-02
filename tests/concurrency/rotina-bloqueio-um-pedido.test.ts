@@ -10,7 +10,7 @@ import { dispararRotina, type SaidaDisparo } from "../../src/use-cases/disparar-
 import { db } from "../helpers/db.ts";
 import { dbDono } from "../helpers/db-dono.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
 
@@ -21,7 +21,7 @@ import { limparPessoaE2E } from "./limpeza-e2e.ts";
  * o índice único propostas_acesso_de_rotina_aberta (0026). Linhas commitadas; limpeza por dona.
  */
 // Pessoa PRÓPRIA deste arquivo (uuid aleatório, sem linha em pessoas): nunca disputa com outro arquivo.
-const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const TZ = "America/Sao_Paulo";
 const H = 3_600_000;
 const JANELA = Date.parse("2026-09-24T08:00:00-03:00");

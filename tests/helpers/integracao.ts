@@ -1,7 +1,7 @@
 import { describe } from "vitest";
 
 /**
- * Auto-skip para quem está sem Docker; ERRO sob CI (Leapy §6): um CI verde e vazio não é
+ * Auto-skip para quem está sem Docker; ERRO sob CI (Práticas §6): um CI verde e vazio não é
  * ausência de prova, é prova falsa — os invariantes pulados seriam RLS e trilha LGPD.
  * `CI=1 npx vitest run --project integration` sem DATABASE_URL_TEST falha com a mensagem abaixo.
  */

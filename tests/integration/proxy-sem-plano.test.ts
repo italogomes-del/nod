@@ -3,7 +3,7 @@ import { rotasInternas } from "../../src/adapters/http/rotas/interno.ts";
 import { CODIGO } from "../../src/adapters/mcp-proxy/jsonrpc.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { dentroEmMemoria, inicializarProxy, planoDeTeste, spawnProxy, type ProxyReal } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
@@ -13,7 +13,7 @@ import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-te
  * {code:-32001, data: Negacao{classe:'plano_ausente'}} — nunca lista de cache, nunca silêncio.
  * Sem banco: o plano vive junto do token no servidor de teste.
  */
-const identidade = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, agenteId: "a1" };
+const identidade = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON, agenteId: "a1" };
 
 async function chamadaNegada(proxy: ProxyReal): Promise<Negacao> {
   const r = await proxy.pedir("tools/call", { name: "lembrar", arguments: { tipo: "fato", texto: "x" } });

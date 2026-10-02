@@ -5,13 +5,13 @@ import { habilitarConector } from "../../src/use-cases/habilitar-conector.ts";
 import { registrarConector } from "../../src/use-cases/registrar-conector.ts";
 import { sondarConector } from "../../src/use-cases/sondar-conector.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { CAMINHO_MCP_SOMAR, depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const CHAVE = chaveDe("chave-de-teste-da-l5");
 const cifra = (t: string) => cifrar(t, CHAVE);
 
@@ -47,8 +47,8 @@ describeIntegracao("conectores: registro, sonda, habilitação (ADR-013, core-fe
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobre(criarRepos(trx, MARLON), MARLON, { trx });
       const base = { nome: "X", slug: "x", cifrar: cifra };
-      await expect(registrarConector(deps, { ...base, transporte: "http", url: "http://127.0.0.1:1/mcp", declaracao: "toca" })).rejects.toMatchObject({ codigo: "http_toca_aprendiz" });
-      await expect(registrarConector(deps, { ...base, transporte: "http", url: "http://127.0.0.1:1/mcp" })).rejects.toMatchObject({ codigo: "http_toca_aprendiz" });
+      await expect(registrarConector(deps, { ...base, transporte: "http", url: "http://127.0.0.1:1/mcp", declaracao: "toca" })).rejects.toMatchObject({ codigo: "http_toca_dado_pessoal" });
+      await expect(registrarConector(deps, { ...base, transporte: "http", url: "http://127.0.0.1:1/mcp" })).rejects.toMatchObject({ codigo: "http_toca_dado_pessoal" });
       await expect(registrarConector(deps, { ...base, transporte: "stdio", comando: "node", env: { TOKEN: true } })).rejects.toMatchObject({ codigo: "env_placeholder_chave_nova" });
       await expect(registrarConector(deps, { ...base, slug: "Maiúsculo", transporte: "stdio", comando: "node" })).rejects.toMatchObject({ codigo: "entrada_invalida" });
       await expect(registrarConector(deps, { ...base, transporte: "stdio" })).rejects.toMatchObject({ codigo: "entrada_invalida" });

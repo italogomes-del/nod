@@ -5,7 +5,7 @@ import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoSemNovida
 import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
+import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { conectoresCitados } from "../domain/rotina-acessos.ts";
@@ -55,13 +55,13 @@ export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): s
 
 /**
  * A fonte da rotina é prosa; o que decide confiança é dado TIPADO: se a fonte cita (por slug ou
- * nome) um conector habilitado que toca dado de aprendiz, a entrada nasce nao_confiavel e o plano
+ * nome) um conector habilitado que toca dado pessoal, a entrada nasce nao_confiavel e o plano
  * reduz o catálogo (ADR-026). Não é interpretação de intenção: é casar nomes de conectores.
  */
 export async function confiancaDaFonte(deps: Pick<Deps, "repos">, fonte: string): Promise<Confianca> {
   // definido em 2026-09-24 (emenda da ADR-044): o casamento mora em conectoresCitados, o mesmo do pré-voo.
   for (const c of conectoresCitados(fonte, await deps.repos.conectores.listarHabilitados())) {
-    if (conectorTocaAprendiz(c)) return "nao_confiavel";
+    if (conectorTocaDadoPessoal(c)) return "nao_confiavel";
   }
   return "confiavel";
 }

@@ -42,8 +42,8 @@ export function planoDeTeste(sobrescrita: Partial<PlanoTurno> = {}): PlanoTurno 
     profundidade: 0,
     catalogo: {
       ferramentas: [
-        { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD.lembrar },
-        { nome: "exemplo__somar", nomeMcp: "mcp__nod__exemplo__somar", origem: "conector", conectorId: "k1", readOnlyHint: true, tocaAprendiz: false, schema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },
+        { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.lembrar },
+        { nome: "exemplo__somar", nomeMcp: "mcp__nod__exemplo__somar", origem: "conector", conectorId: "k1", readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },
       ],
       servidores: [{ conectorId: "k1", nome: "exemplo", trust: "untrusted", transporte: "stdio" }],
     },

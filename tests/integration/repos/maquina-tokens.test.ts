@@ -4,7 +4,7 @@ import { vincularEscopo } from "../../../src/db/tx.ts";
 import { maquinaTokensRepo } from "../../../src/repositories/maquina-tokens.repo.ts";
 import { cunharChaveMaquina } from "../../../src/services/token-maquina.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
-import { TENANT_LEAPY } from "../../helpers/ids.ts";
+import { TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
@@ -15,8 +15,8 @@ import { withRollback } from "../../helpers/with-rollback.ts";
  */
 describeIntegracao("maquina_tokens: só a dona vê, acha e revoga (ADR-031)", () => {
   it("cria sem a chave crua; outra pessoa não lista, não acha pelo hash e não revoga; revogada deixa de ser viva", async () => {
-    const dona = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
-    const outra = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+    const dona = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
+    const outra = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
     await withRollback(dona, async (trx) => {
       const agora = Date.now();
       const cunhada = cunharChaveMaquina(dona);
@@ -48,7 +48,7 @@ describeIntegracao("maquina_tokens: só a dona vê, acha e revoga (ADR-031)", ()
   });
 
   it("chave com expira_em no passado não é viva; com expira_em no futuro é", async () => {
-    const dona = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+    const dona = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
     await withRollback(dona, async (trx) => {
       const agora = Date.now();
       const repo = maquinaTokensRepo(trx, dona);
@@ -63,7 +63,7 @@ describeIntegracao("maquina_tokens: só a dona vê, acha e revoga (ADR-031)", ()
   });
 
   it("hash único por tenant e com 32 bytes; nome vazio recusado pelo banco", async () => {
-    const dona = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+    const dona = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
     await withRollback(dona, async (trx) => {
       const repo = maquinaTokensRepo(trx, dona);
       const c = cunharChaveMaquina(dona);

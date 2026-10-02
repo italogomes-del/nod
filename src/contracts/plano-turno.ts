@@ -21,7 +21,7 @@ export type FerramentaPlano = {
   conectorId: string | null;
   /** Capturado na DESCOBERTA (sonda), nunca em tempo de chamada (ADR-013). */
   readOnlyHint: boolean;
-  tocaAprendiz: boolean;
+  tocaDadoPessoal: boolean;
   schema: JsonSchema;
   /**
    * definido em 2026-09-24 (ADR-048): "maquina" = a ferramenta roda NA MÁQUINA do turno (o gh logado

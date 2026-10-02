@@ -12,7 +12,7 @@ export const FERRAMENTA_LER_MAIS: FerramentaPlano = {
   origem: "proxy",
   conectorId: null,
   readOnlyHint: true,
-  tocaAprendiz: false,
+  tocaDadoPessoal: false,
   schema: {
     type: "object",
     description: "Lê a próxima parte de uma resposta de ferramenta que o nod cortou por tamanho NESTE turno. Use o ref da marca [nod: …] que veio no fim da resposta cortada; chame de novo até a marca dizer que é a última parte.",

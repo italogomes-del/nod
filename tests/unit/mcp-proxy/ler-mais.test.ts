@@ -11,7 +11,7 @@ import { planoDeTeste } from "../../helpers/l5.ts";
  * pedaço que coube em 8.000 caracteres. Agora a resposta grande chega em partes de itens inteiros, e
  * `ler_mais` — atendida pelo proxy, sem ir ao servidor — entrega o resto com a mesma moldura.
  */
-const TASKS: FerramentaPlano = { nome: "clickup__CLICKUP_GET_FILTERED_TEAM_TASKS", nomeMcp: "mcp__nod__clickup__CLICKUP_GET_FILTERED_TEAM_TASKS", origem: "conector", conectorId: "c1", readOnlyHint: true, tocaAprendiz: true, schema: { type: "object" } };
+const TASKS: FerramentaPlano = { nome: "clickup__CLICKUP_GET_FILTERED_TEAM_TASKS", nomeMcp: "mcp__nod__clickup__CLICKUP_GET_FILTERED_TEAM_TASKS", origem: "conector", conectorId: "c1", readOnlyHint: true, tocaDadoPessoal: true, schema: { type: "object" } };
 
 function pagina(n: number): string {
   const tasks = Array.from({ length: n }, (_, i) => ({ id: `t${i}`, name: `Task ${i} ${"x".repeat(1_500)}` }));

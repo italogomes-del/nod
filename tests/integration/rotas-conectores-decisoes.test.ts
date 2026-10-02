@@ -6,11 +6,11 @@ import { rotasInternas } from "../../src/adapters/http/rotas/interno.ts";
 import { rotasTrilha } from "../../src/adapters/http/rotas/trilha.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { CAMINHO_MCP_SOMAR, dentroEmMemoria, planoDeTeste, servicosDeTeste } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const CATALOGO = [
   { nome: "somar", descricao: "soma", schema: { type: "object" as const }, readOnlyHint: true },
   { nome: "gravar", descricao: "grava", schema: { type: "object" as const }, readOnlyHint: false },
@@ -45,7 +45,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     );
     sessao = await srv.entrar("marlon");
     const repos = memoria.repos(MARLON);
-    memoria.banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
+    memoria.banco.pessoas.push({ tenantId: TENANT_PADRAO, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
     const agente = await repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
     agenteId = agente?.id ?? "";
     conversaId = (await repos.conversas.criar({ tipo: "propria", agenteId }))?.id ?? "";
@@ -63,7 +63,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
 
     const http = await srv.chamar(sessao, "POST", "conectores", { nome: "X", slug: "x", transporte: "http", url: "http://127.0.0.1:1/mcp", declaracao: "toca" });
     expect(http.status).toBe(400);
-    expect(((await http.json()) as { codigo: string }).codigo).toBe("http_toca_aprendiz");
+    expect(((await http.json()) as { codigo: string }).codigo).toBe("http_toca_dado_pessoal");
     const placeholder = await srv.chamar(sessao, "POST", "conectores", { nome: "Y", slug: "y", transporte: "stdio", comando: "node", env: { A: true } });
     expect(placeholder.status).toBe(400);
     expect(((await placeholder.json()) as { codigo: string }).codigo).toBe("env_placeholder_chave_nova");
@@ -126,9 +126,9 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
       tokenDeTurno: token,
       catalogo: {
         ferramentas: [
-          { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD.lembrar },
-          { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD.pedir_aprovacao },
-          { nome: "somar__somar", nomeMcp: "mcp__nod__somar__somar", origem: "conector", conectorId, readOnlyHint: true, tocaAprendiz: false, schema: { type: "object" } },
+          { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.lembrar },
+          { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.pedir_aprovacao },
+          { nome: "somar__somar", nomeMcp: "mcp__nod__somar__somar", origem: "conector", conectorId, readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object" } },
         ],
         servidores: [{ conectorId, nome: "somar", trust: "untrusted", transporte: "stdio" }],
       },

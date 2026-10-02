@@ -9,7 +9,7 @@ import { criarClienteNod, type ClienteNod } from "../cliente-nod.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
 
 /**
- * Driver catcher (Leapy §11, EMENDA 25): mesmo SPI do claude-cli, locality 'ambos', sem CLI e sem
+ * Driver catcher (Práticas §11, EMENDA 25): mesmo SPI do claude-cli, locality 'ambos', sem CLI e sem
  * custo. É o default de dev/CI (NOD_EXECUTOR=catcher). Marcadores no prompt disparam tool_use pelo
  * MESMO cliente-nod do proxy (in-process, sem processo filho) — o que o executor teria chamado passa
  * pela mesma rota interna que o CLI real usaria. Cada passo vira um registro (`aoRegistrar`, tipo

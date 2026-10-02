@@ -8,7 +8,7 @@ export type PropostaItem = {
 };
 
 /** definido em 2026-09-16: a justificativa é texto fixo do sistema, nunca do modelo (E4.2). */
-export const JUSTIFICATIVA_SENSIVEL = "Nasceu desmarcado: o dado veio de origem que toca dado de aprendiz. Marque você mesmo se quiser executar.";
+export const JUSTIFICATIVA_SENSIVEL = "Nasceu desmarcado: o dado veio de origem que toca dado pessoal. Marque você mesmo se quiser executar.";
 
 /**
  * Monta itens tipados (E4.1/E4.2). Origem sensível nasce desmarcada COM justificativa; o resto

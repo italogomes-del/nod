@@ -7,11 +7,11 @@ import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { db } from "../helpers/db.ts";
 import { withRollbackDono } from "../helpers/db-dono.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const NOSSAS = new Set([PESSOA_MARLON, PESSOA_ANA]);
 
 /**
@@ -19,19 +19,19 @@ const NOSSAS = new Set([PESSOA_MARLON, PESSOA_ANA]);
  * nascem aqui como nod_dono, sob rollback — nunca do seed, nunca como nod_app.
  */
 async function duasPessoas(trxDono: Tx): Promise<void> {
-  await trxDono`insert into tenants (id, nome) values (${TENANT_LEAPY}, 'Leapy') on conflict do nothing`;
+  await trxDono`insert into tenants (id, nome) values (${TENANT_PADRAO}, 'Nod') on conflict do nothing`;
   await trxDono`insert into pessoas (tenant_id, id, nome, iniciais) values
-    (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'Marlon', 'MW'), (${TENANT_LEAPY}, ${PESSOA_ANA}, 'Ana', 'AN')
+    (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'Marlon', 'MW'), (${TENANT_PADRAO}, ${PESSOA_ANA}, 'Ana', 'AN')
     on conflict do nothing`;
 }
 
 describeIntegracao("escopos de fundo (paraCadaPessoa)", () => {
   it("nod_app não insere em pessoas nem em tenants: catálogo de identidade é só leitura para a aplicação", async () => {
     await withRollback(MARLON, async (trx) => {
-      await expectRejected(trx, () => trx`insert into tenants (id, nome) values (${TENANT_LEAPY}, 'Leapy')`, "42501");
+      await expectRejected(trx, () => trx`insert into tenants (id, nome) values (${TENANT_PADRAO}, 'Nod')`, "42501");
       await expectRejected(
         trx,
-        () => trx`insert into pessoas (tenant_id, id, nome, iniciais) values (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'Marlon', 'MW')`,
+        () => trx`insert into pessoas (tenant_id, id, nome, iniciais) values (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'Marlon', 'MW')`,
         "42501",
       );
       // Ler continua permitido (é o que o laço de fundo faz).
@@ -44,7 +44,7 @@ describeIntegracao("escopos de fundo (paraCadaPessoa)", () => {
       await duasPessoas(trxDono);
       const nossas = (await listarTodas(trxDono)).filter((p) => NOSSAS.has(p.id));
       expect(nossas.map((p) => p.id).sort()).toEqual([PESSOA_MARLON, PESSOA_ANA].sort());
-      for (const p of nossas) expect(p.tenantId).toBe(TENANT_LEAPY);
+      for (const p of nossas) expect(p.tenantId).toBe(TENANT_PADRAO);
     });
   });
 
@@ -67,7 +67,7 @@ describeIntegracao("escopos de fundo (paraCadaPessoa)", () => {
       const ids = visitados.map((v) => v.escopo.pessoaId).sort();
       expect(ids).toEqual([PESSOA_MARLON, PESSOA_ANA].sort());
       for (const v of visitados) {
-        expect(v.escopo.tenantId).toBe(TENANT_LEAPY);
+        expect(v.escopo.tenantId).toBe(TENANT_PADRAO);
         expect(v.noBanco).toBe(v.escopo.pessoaId);
       }
       // Cada tx morreu com o seu escopo: depois do laço nenhuma conexão do pool carrega pessoa
@@ -100,7 +100,7 @@ describeIntegracao("escopos de fundo (paraCadaPessoa)", () => {
   });
 
   it("abrirTxEscopada com pessoaId '' lança escopo_vazio antes de tocar o banco", () => {
-    expect(() => abrirTxEscopada(db, { tenantId: TENANT_LEAPY, pessoaId: "" })).toThrow(ErroDeDominio);
+    expect(() => abrirTxEscopada(db, { tenantId: TENANT_PADRAO, pessoaId: "" })).toThrow(ErroDeDominio);
     try {
       abrirTxEscopada(db, { tenantId: "", pessoaId: PESSOA_MARLON });
     } catch (e) {

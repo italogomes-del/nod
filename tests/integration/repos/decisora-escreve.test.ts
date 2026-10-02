@@ -4,14 +4,14 @@ import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa } from "../../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const DIA = 24 * 60 * 60 * 1000;
-const destino = (i: number) => ({ conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: `p${i}@leapy.com.br` } });
+const destino = (i: number) => ({ conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: `p${i}@acme.com.br` } });
 
 /**
  * 0003: a perna extra da EMENDA 1 passa a ESCREVER pela policy nod_decisora (PERMISSIVE, só FOR
@@ -29,7 +29,7 @@ describeIntegracao("decisora designada escreve (0003, policy nod_decisora)", () 
       const soMarlon = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, prazoDecisaoEm: agora + DIA, frase: "só de marlon" });
       const itens = await repos.itensAprovacao.criarLote(paraAna?.id ?? "", [
         { idx: 0, texto: "e-mail para bia", destino: destino(0), origemSensivel: false },
-        { idx: 1, texto: "e-mail para caio", destino: destino(1), origemSensivel: true, justificativa: "veio de conector que toca aprendiz" },
+        { idx: 1, texto: "e-mail para caio", destino: destino(1), origemSensivel: true, justificativa: "veio de conector que toca dado pessoal" },
       ]);
       const itemDeMarlon = (await repos.itensAprovacao.criarLote(soMarlon?.id ?? "", [{ idx: 0, texto: "x", destino: destino(2), origemSensivel: false }]))[0];
 
@@ -81,7 +81,7 @@ describeIntegracao("decisora designada escreve (0003, policy nod_decisora)", () 
       await expectRejected(
         trx,
         () => trx`insert into decisoes (tenant_id, owner_id, decisor_id, agente_id, conversa_id, tipo, prazo_decisao_em, frase)
-          values (${TENANT_LEAPY}, ${PESSOA_MARLON}, ${PESSOA_ANA}, ${agenteId}, ${conversaId}, 'pergunta', now(), 'ana fingindo marlon')`,
+          values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${PESSOA_ANA}, ${agenteId}, ${conversaId}, 'pergunta', now(), 'ana fingindo marlon')`,
         "42501",
       );
       // UPDATE que tenta virar dona ou trocar a decisora: trigger P0001 (nunca chega a passar pelo WITH CHECK).

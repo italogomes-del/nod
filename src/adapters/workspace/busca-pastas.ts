@@ -8,7 +8,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
  * A varredura lê SÓ nomes de diretório, nunca conteúdo de arquivo, e nunca sai da pasta pessoal.
  *
  * definido em 2026-09-25 (card de pasta simplificado): `onde` é a pasta-mãe relativa à base ("" quando
- * mora direto nela), para o card mostrar "code › leapy" e não o caminho absoluto; `modificadoEm` é o uso
+ * mora direto nela), para o card mostrar "code › acme" e não o caminho absoluto; `modificadoEm` é o uso
  * mais recente que um stat enxerga, para ordenar homônimas e dizer "mudou hoje". Só metadado: nenhum
  * conteúdo de arquivo é lido.
  */

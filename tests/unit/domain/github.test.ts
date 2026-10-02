@@ -22,7 +22,7 @@ describe("escolha do jeito de conectar o GitHub, por turno (ADR-048)", () => {
   });
 
   it("marca para a máquina só as ferramentas do conector github indicado", () => {
-    const f = (nome: string, conectorId: string | null, origem: "nod" | "conector" = "conector") => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem, conectorId, readOnlyHint: true, tocaAprendiz: true, schema: {} });
+    const f = (nome: string, conectorId: string | null, origem: "nod" | "conector" = "conector") => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem, conectorId, readOnlyHint: true, tocaDadoPessoal: true, schema: {} });
     const marcadas = marcarExecucaoNaMaquina([f("github__pr_ver", "g1"), f("gmail__GMAIL_FETCH", "m1"), f("lembrar", null, "nod")], "g1");
     expect(marcadas.map((x) => x.execucao ?? null)).toEqual(["maquina", null, null]);
     expect(marcarExecucaoNaMaquina([f("github__pr_ver", "g1")], null)[0]?.execucao).toBeUndefined();
@@ -49,7 +49,7 @@ describe("escolha do jeito de conectar o GitHub, por turno (ADR-048)", () => {
 
 describe("argumentos do conector github", () => {
   it("aceita dono/nome e tira o .git", () => {
-    expect(validarRepositorio("leapy/nod")).toEqual({ dono: "leapy", repo: "nod" });
+    expect(validarRepositorio("acme/nod")).toEqual({ dono: "acme", repo: "nod" });
     expect(validarRepositorio("marlonwlv/nod.git")).toEqual({ dono: "marlonwlv", repo: "nod" });
   });
 
@@ -58,21 +58,21 @@ describe("argumentos do conector github", () => {
   });
 
   it("número só inteiro positivo; string, fração e negativo caem", () => {
-    for (const n of ["466", 1.5, -1, 0, Number.NaN, 1e12]) expect(() => validarArgsGithub("pr_ver", { repositorio: "leapy/nod", numero: n })).toThrow(ArgumentoGithubInvalido);
-    expect(validarArgsGithub("pr_ver", { repositorio: "leapy/nod", numero: 466 })).toEqual({ capacidade: "pr_ver", alvo: { dono: "leapy", repo: "nod" }, numero: 466 });
+    for (const n of ["466", 1.5, -1, 0, Number.NaN, 1e12]) expect(() => validarArgsGithub("pr_ver", { repositorio: "acme/nod", numero: n })).toThrow(ArgumentoGithubInvalido);
+    expect(validarArgsGithub("pr_ver", { repositorio: "acme/nod", numero: 466 })).toEqual({ capacidade: "pr_ver", alvo: { dono: "acme", repo: "nod" }, numero: 466 });
   });
 
   it("arquivo_ler recusa .. no caminho e ref que parece opção", () => {
-    expect(validarArgsGithub("arquivo_ler", { repositorio: "leapy/nod", caminho: "/src/index.ts", ref: "feat/x" })).toMatchObject({ caminho: "src/index.ts", ref: "feat/x" });
-    expect(() => validarArgsGithub("arquivo_ler", { repositorio: "leapy/nod", caminho: "../../etc/passwd" })).toThrow(ArgumentoGithubInvalido);
-    expect(() => validarArgsGithub("arquivo_ler", { repositorio: "leapy/nod", caminho: "a", ref: "--output=x" })).toThrow(ArgumentoGithubInvalido);
-    expect(() => validarArgsGithub("arquivo_ler", { repositorio: "leapy/nod", caminho: "a", ref: "main..dev" })).toThrow(ArgumentoGithubInvalido);
+    expect(validarArgsGithub("arquivo_ler", { repositorio: "acme/nod", caminho: "/src/index.ts", ref: "feat/x" })).toMatchObject({ caminho: "src/index.ts", ref: "feat/x" });
+    expect(() => validarArgsGithub("arquivo_ler", { repositorio: "acme/nod", caminho: "../../etc/passwd" })).toThrow(ArgumentoGithubInvalido);
+    expect(() => validarArgsGithub("arquivo_ler", { repositorio: "acme/nod", caminho: "a", ref: "--output=x" })).toThrow(ArgumentoGithubInvalido);
+    expect(() => validarArgsGithub("arquivo_ler", { repositorio: "acme/nod", caminho: "a", ref: "main..dev" })).toThrow(ArgumentoGithubInvalido);
   });
 
   it("pr_revisar: approve aceita sem texto; comment e request_changes exigem; evento fora da lista cai", () => {
-    expect(validarArgsGithub("pr_revisar", { repositorio: "leapy/nod", numero: 1, evento: "approve" })).toMatchObject({ evento: "approve", texto: null });
-    expect(() => validarArgsGithub("pr_revisar", { repositorio: "leapy/nod", numero: 1, evento: "comment" })).toThrow(ArgumentoGithubInvalido);
-    expect(() => validarArgsGithub("pr_revisar", { repositorio: "leapy/nod", numero: 1, evento: "merge", texto: "x" })).toThrow(ArgumentoGithubInvalido);
+    expect(validarArgsGithub("pr_revisar", { repositorio: "acme/nod", numero: 1, evento: "approve" })).toMatchObject({ evento: "approve", texto: null });
+    expect(() => validarArgsGithub("pr_revisar", { repositorio: "acme/nod", numero: 1, evento: "comment" })).toThrow(ArgumentoGithubInvalido);
+    expect(() => validarArgsGithub("pr_revisar", { repositorio: "acme/nod", numero: 1, evento: "merge", texto: "x" })).toThrow(ArgumentoGithubInvalido);
   });
 
   it("os nomes são estáveis e só as duas escritas não são readOnly", () => {

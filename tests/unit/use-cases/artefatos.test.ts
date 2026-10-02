@@ -9,7 +9,7 @@ import { depsFalsos } from "./deps-l5.ts";
 
 const AGORA = 1_758_000_000_000;
 const HTML = '<ul><li><label><input type="checkbox" data-id="a"> Responder o Jonas</label></li></ul><script>/* window.nod.salvar */</script>';
-const nod = (nome: keyof typeof FERRAMENTAS_NOD): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] });
+const nod = (nome: keyof typeof FERRAMENTAS_NOD): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] });
 
 /** Dois agentes da mesma pessoa, a conversa da Ada e um turno dela em curso (o plano leva a confiança da entrada). */
 async function cenario(confianca: "confiavel" | "nao_confiavel" = "confiavel") {

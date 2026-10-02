@@ -4,7 +4,7 @@ import { executarComContexto } from "../obs/contexto.ts";
 import type { Db, Escopo, Transacao, Tx } from "../shared/types.ts";
 
 /**
- * DUAS funções, não uma (Leapy §1 + ADR-003 revisado): withRollback e a fábrica de transação
+ * DUAS funções, não uma (Práticas §1 + ADR-003 revisado): withRollback e a fábrica de transação
  * brigam pela propriedade do BEGIN. Produção chama abrirTxEscopada; teste abre o envelope do
  * withRollback e chama vincularEscopo no trx que já existe. Os dois set_config são LOCAIS
  * (terceiro argumento true = SET LOCAL): morrem com a transação e não vazam para a próxima

@@ -17,8 +17,8 @@ export function claimsBoas(agora: number, extra: Record<string, unknown> = {}): 
     iss: "https://accounts.google.com",
     aud: CLIENT_ID,
     exp: Math.floor(agora / 1000) + 3600,
-    hd: "leapy.com.br",
-    email: "marlon.wanderllich@leapy.com.br",
+    hd: "acme.com.br",
+    email: "marlon.wanderllich@acme.com.br",
     email_verified: true,
     ...extra,
   };

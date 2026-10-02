@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 describeIntegracao("trilhaRepo: registrar sem texto livre e filtrar por dia/agente/conector (E8.4)", () => {
   it("filtra por dia no fuso pedido, por agente e por conector; texto livre cai no CHECK", async () => {

@@ -3,7 +3,7 @@ import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { catalogoReduzido, propagarConfianca } from "../../../src/domain/confianca.ts";
 
 const f = (nome: string, origem: "nod" | "conector", readOnlyHint: boolean): FerramentaPlano => ({
-  nome, nomeMcp: `mcp__nod__${nome}`, origem, conectorId: origem === "conector" ? "k" : null, readOnlyHint, tocaAprendiz: false, schema: { type: "object" },
+  nome, nomeMcp: `mcp__nod__${nome}`, origem, conectorId: origem === "conector" ? "k" : null, readOnlyHint, tocaDadoPessoal: false, schema: { type: "object" },
 });
 
 describe("confianca", () => {

@@ -24,7 +24,7 @@ const UUID_NULO = "00000000-0000-4000-8000-000000000000";
 const NOME_PESSOA = `E2E ${randomUUID().slice(0, 8)}`;
 
 /**
- * E2E de fumaça (EMENDA 30, Leapy §6): UM `it` por jornada — "a lista é o ls" — sobre o servidor
+ * E2E de fumaça (EMENDA 30, Práticas §6): UM `it` por jornada — "a lista é o ls" — sobre o servidor
  * COMPLETO (compor.ts + boot.ts) com NOD_EXECUTOR=catcher: zero custo, roda no CI. As respostas do
  * "modelo" são o roteiro do catcher (tests/helpers/catcher-roteiro.ts: marcadores [[tool: …]] /
  * [[texto: …]] no prompt), e cada ferramenta chamada passa pela MESMA rota interna que o CLI real
@@ -444,7 +444,7 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     criados.agentes.push(criadoTaga.agente.id);
     criados.conversas.push(criadoTaga.conversa.id);
     const taga = { agenteId: criadoTaga.agente.id, conversaId: criadoTaga.conversa.id };
-    const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/leapy/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
+    const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/acme/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
     const t = await rodar(taga.conversaId, pedido);
     expect(t.estado).toBe("concluido");
     const resultado = await esperarOu(tuca.conversaId, () =>

@@ -16,13 +16,13 @@ import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 import type { Tx } from "../../src/shared/types.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const AGORA = Date.parse("2026-09-29T20:30:00Z");
 const PEDIDO = "Taga, pede ao Dev 1 para me ajudar a revisar o PR #466";
 const PRONTO = { estado: "pronto" as const, versao: "t", em: 0 };
@@ -39,7 +39,7 @@ async function cenario(trx: Tx) {
 }
 
 function pedir(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1") {
-  return pedirABot(deps, { ...p, agente, pedido: "revisar o PR 466", contexto: "https://github.com/leapy/app/pull/466" });
+  return pedirABot(deps, { ...p, agente, pedido: "revisar o PR 466", contexto: "https://github.com/acme/app/pull/466" });
 }
 
 /** GitHub com leitura e escrita, concedido ao Dev 1 inteiro. */
@@ -73,11 +73,11 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const r = await pedir(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
       const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
       expect(tarefa).toMatchObject({ agenteId: dev1.agenteId, conversaId: dev1.conversaId, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON, estado: "pendente" });
-      expect(tarefa?.entradaTexto).toContain("Pedido de Taga:\n<pedido_do_colega>\nPedido: revisar o PR 466\nContexto: https://github.com/leapy/app/pull/466\n</pedido_do_colega>");
+      expect(tarefa?.entradaTexto).toContain("Pedido de Taga:\n<pedido_do_colega>\nPedido: revisar o PR 466\nContexto: https://github.com/acme/app/pull/466\n</pedido_do_colega>");
       expect(tarefa?.entradaTexto).toContain(`<pedido_da_pessoa>\n${PEDIDO}\n</pedido_da_pessoa>`);
 
       const [pedido] = (await repos.mensagens.listarDaConversa(dev1.conversaId)).filter((m) => m.payload?.kind === "peer_pedido");
-      expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/leapy/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id } });
+      expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/acme/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id } });
       expect(pedido?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: taga.agenteId, sob_procuracao_de: PESSOA_MARLON, conta_de_execucao: PESSOA_MARLON });
       expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(2);
 

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { claimsDoIdToken, cunharState, STATE_VALIDADE_MS, stateValido, validarClaims } from "../../../src/adapters/http/sessao-google.ts";
+import { claimsDoIdToken, cunharState, googleEhAutoridade, STATE_VALIDADE_MS, stateValido, validarClaims } from "../../../src/adapters/http/sessao-google.ts";
 import { exigirConfiguracaoSegura, opcoesSessaoDoEnv } from "../../../src/adapters/http/sessao.ts";
 import { CLIENT_ID, claimsBoas, idTokenFalso } from "../../helpers/google-falso.ts";
 
 const SEGREDO = "s".repeat(40);
 const AGORA = 1_800_000_000_000;
-const P = { clientId: CLIENT_ID, dominio: "leapy.com.br", agora: AGORA };
+const P = { clientId: CLIENT_ID, dominio: "acme.com.br", agora: AGORA };
 
 describe("state anti-CSRF do login Google (E1.2)", () => {
   it("o mesmo state na URL e no cookie, dentro da validade, casa", () => {
@@ -29,9 +29,9 @@ describe("state anti-CSRF do login Google (E1.2)", () => {
 
 describe("claims do id_token (E1.2, ADR-030)", () => {
   it("caminho feliz devolve o e-mail em minúsculas — com a assinatura do token sendo LIXO", () => {
-    const claims = claimsDoIdToken(idTokenFalso(claimsBoas(AGORA, { email: "Marlon.Wanderllich@leapy.com.br" })));
+    const claims = claimsDoIdToken(idTokenFalso(claimsBoas(AGORA, { email: "Marlon.Wanderllich@acme.com.br" })));
     expect(claims).not.toBeNull();
-    expect(validarClaims(claims ?? {}, P)).toEqual({ ok: true, email: "marlon.wanderllich@leapy.com.br" });
+    expect(validarClaims(claims ?? {}, P)).toEqual({ ok: true, email: "marlon.wanderllich@acme.com.br" });
   });
 
   it.each([
@@ -52,6 +52,35 @@ describe("claims do id_token (E1.2, ADR-030)", () => {
     expect(claimsDoIdToken("so-um-pedaco")).toBeNull();
     expect(claimsDoIdToken("a.bm8tanNvbg.c")).toBeNull();
     expect(claimsDoIdToken(`a.${Buffer.from("[1]").toString("base64url")}.c`)).toBeNull();
+  });
+});
+
+describe("claims sem NOD_GOOGLE_DOMINIO: a allowlist decide, o Google precisa responder pelo e-mail", () => {
+  const SEM = { clientId: CLIENT_ID, agora: AGORA };
+
+  it.each([
+    ["Workspace de qualquer domínio", { hd: "outra.com.br", email: "Ana@Outra.com.br" }, "ana@outra.com.br"],
+    ["Gmail pessoal (sem hd)", { hd: undefined, email: "alguem@gmail.com" }, "alguem@gmail.com"],
+  ])("aceita: %s", (_nome, extra, email) => {
+    expect(validarClaims(claimsBoas(AGORA, extra), SEM)).toEqual({ ok: true, email });
+  });
+
+  it.each([
+    ["conta Google com e-mail de outro provedor (sem hd)", { hd: undefined, email: "x@outlook.com" }],
+    ["hd que não é o domínio do e-mail", { hd: "outra.com.br", email: "x@terceira.com.br" }],
+  ])("recusa: %s", (_nome, extra) => {
+    expect(validarClaims(claimsBoas(AGORA, extra), SEM)).toEqual({ ok: false, motivo: "dominio" });
+  });
+
+  it("e-mail não verificado continua recusado", () => {
+    expect(validarClaims(claimsBoas(AGORA, { email_verified: false }), SEM)).toEqual({ ok: false, motivo: "email_nao_verificado" });
+  });
+
+  it("googleEhAutoridade: Gmail ou e-mail do próprio hd", () => {
+    expect(googleEhAutoridade("a@gmail.com", undefined)).toBe(true);
+    expect(googleEhAutoridade("a@acme.com.br", "ACME.com.br")).toBe(true);
+    expect(googleEhAutoridade("a@acme.com.br", "")).toBe(false);
+    expect(googleEhAutoridade("a@acme.com.br", undefined)).toBe(false);
   });
 });
 

@@ -7,7 +7,7 @@ import { LIMITES_AVISO, type AlvoAviso, type AvisoDesktop, type PreferenciasDesk
  * (tests/unit/desktop/avisos-mac.test.ts).
  */
 
-/** A origem de uma URL ("https://nod.leapy.com.br"); URL inválida ou opaca → null. */
+/** A origem de uma URL ("https://nod.acme.com.br"); URL inválida ou opaca → null. */
 export function origemDe(url: string | null | undefined): string | null {
   if (!url) return null;
   try {

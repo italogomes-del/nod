@@ -125,7 +125,7 @@ export const CODIGOS_ERRO = [
   "fuso_invalido",
   "cron_sem_futuro",
   "sala_tamanho",
-  "http_toca_aprendiz",
+  "http_toca_dado_pessoal",
   "env_placeholder_chave_nova",
   "dono_imutavel",
   "texto_vazio",

@@ -7,10 +7,10 @@ import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps, Services, UseCasesNod } from "../../../src/use-cases/tipos.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "../../helpers/repos-memoria.ts";
 
-export const MARLON: Escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+export const MARLON: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 export type ChamadaConector = { conectorId: string; tool: string; args: Record<string, unknown> };
 
@@ -24,7 +24,7 @@ export type OpcoesDepsFalsos = {
 };
 
 /**
- * `Deps` para tests/unit/use-cases (Leapy §1): repos em memória, services falsos que REGISTRAM as
+ * `Deps` para tests/unit/use-cases (Práticas §1): repos em memória, services falsos que REGISTRAM as
  * chamadas ao conector (para "exatamente N chamadas"), os três casos nod da L5 de verdade e stubs
  * para os das outras lanes.
  */

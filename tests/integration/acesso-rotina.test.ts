@@ -14,11 +14,11 @@ import { fecharComResposta, retomarComResposta } from "../../src/use-cases/respo
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const TZ = "America/Sao_Paulo";
 const JANELA = Date.parse("2026-09-24T08:00:00-03:00");
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome.toLowerCase(), schema: { type: "object" }, readOnlyHint });
@@ -133,7 +133,7 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Nina" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Cuida da turma" });
-      // Fonte que toca dado de aprendiz: a rotina nasce nao_confiavel (confiancaDaFonte, ADR-026).
+      // Fonte que toca dado pessoal: a rotina nasce nao_confiavel (confiancaDaFonte, ADR-026).
       const diario = await conectorPronto(repos, { slug: "diario", nome: "Diário de classe", catalogo: [cap("LER_NOTAS", true), cap("LANCAR_NOTA", false)], toca: true });
       await concederLote(deps, { agenteId, conectorId: diario.id, capacidades: ["LER_NOTAS", "LANCAR_NOTA"], autorTipo: "pessoa" });
       await repos.conversas.atualizarSessaoCli(conversaId, randomUUID(), "catcher");

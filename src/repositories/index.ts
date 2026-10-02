@@ -36,7 +36,7 @@ import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
 import { leiturasRepo } from "./leituras.repo.ts";
 
-/** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Leapy §1). */
+/** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Práticas §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
   return {
     computadores: computadoresRepo(conn, escopo),

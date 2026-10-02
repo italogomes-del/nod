@@ -4,12 +4,12 @@ import type { IdHarness } from "../../src/contracts/harness.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { agenteComConversa, autoriaAgente, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const pronto = { estado: "pronto", versao: "teste", em: Date.now() } as const;
 const MODELO: Record<"claude-cli" | "codex-cli", string> = { "claude-cli": "sonnet", "codex-cli": "gpt-6-astra" };
 

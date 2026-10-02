@@ -5,11 +5,11 @@ import { pausarRotina } from "../../src/use-cases/pausar-rotina.ts";
 import { listarExecucoes, listarRotinas } from "../../src/use-cases/listar-rotinas.ts";
 import { contexto, depsSobre, rotinaValida } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const TZ = "America/Sao_Paulo";
 // quarta 16/09/2026 12:00 em São Paulo; o processo roda com TZ=UTC (abaixo) e o resultado não muda.
 const AGORA = Date.parse("2026-09-16T12:00:00-03:00");

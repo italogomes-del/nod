@@ -38,7 +38,7 @@ describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
   it("ADR-055: arquivo em qualquer lugar do Mac, como a pessoa no Claude Code", () => {
     for (const [f, entrada] of [
       ["Write", { file_path: "/Users/marlon/nod/Ada/checklist.html" }],
-      ["Edit", { file_path: "/Users/marlon/Inhouse/leapy/src/app.ts" }],
+      ["Edit", { file_path: "/Users/marlon/Inhouse/acme/src/app.ts" }],
       ["Read", { file_path: "/Users/marlon/.zshrc" }],
       ["Grep", { path: "/etc" }],
       ["NotebookEdit", { notebook_path: "/tmp/x.ipynb" }],
@@ -57,7 +57,7 @@ describe("kit do terminal (ADR-052, revisto pela ADR-055)", () => {
   });
 
   it("Bash vai ao servidor com o comando; web contamina o turno; o que não é do kit é negado", () => {
-    expect(decidir("Bash", { command: "gh pr list -R leapy-edtech/leapy" })).toMatchObject({ permitir: true, contamina: false, comando: "gh pr list -R leapy-edtech/leapy" });
+    expect(decidir("Bash", { command: "gh pr list -R acme-edtech/acme" })).toMatchObject({ permitir: true, contamina: false, comando: "gh pr list -R acme-edtech/acme" });
     expect(decidir("Bash", { command: "  " }).permitir).toBe(false);
     expect(decidir("Bash", {}).permitir).toBe(false);
     expect(decidir("WebFetch", { url: "https://example.com" })).toMatchObject({ permitir: true, contamina: true });

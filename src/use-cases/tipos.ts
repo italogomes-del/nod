@@ -7,7 +7,7 @@ import type { Escopo, Relogio, Transacao, Tx } from "../shared/types.ts";
 export type Services = ServicesNod<Tx>;
 
 /**
- * Dependências de todo caso de uso (Leapy §1): repos, services, tx como FÁBRICA, escopo e relógio.
+ * Dependências de todo caso de uso (Práticas §1): repos, services, tx como FÁBRICA, escopo e relógio.
  * `useCases` são as implementações das nove ferramentas nod, para chamar-ferramenta.ts despachar
  * por tabela (EMENDA 5). A rota/serviço grava `events` via repos.events.gravarComOutbox na MESMA tx.
  */

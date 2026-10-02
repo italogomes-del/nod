@@ -115,13 +115,13 @@ describe("decisões no chat", () => {
   });
 
   it("card só com item sensível mostra o botão DESABILITADO com o motivo, nunca ausente", () => {
-    const sens = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Rel", textoFinal: "Rel", destino: { conector: "slack", ferramenta: "send_message", argumentos: {} }, selecionado: false, origemSensivel: true, justificativa: "dado de aprendiz", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
+    const sens = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Rel", textoFinal: "Rel", destino: { conector: "slack", ferramenta: "send_message", argumentos: {} }, selecionado: false, origemSensivel: true, justificativa: "dado pessoal", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
     const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [sens] }] } };
     const html = renderTimeline(conversa, e);
     // ADR-029: a pessoa lê por que não pode, em vez de procurar um botão que sumiu.
     expect(html).toContain('data-act="decidir-aprovacao-sempre"');
     expect(html).toContain("disabled");
-    expect(html).toContain("Dado de aprendiz sempre passa por você");
+    expect(html).toContain("Dado pessoal sempre passa por você");
   });
 
   it("mudança e exclusão de rotina no chat decidem pela decisão, não por propostas/:id/confirmar", () => {

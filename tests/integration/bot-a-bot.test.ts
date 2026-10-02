@@ -6,12 +6,12 @@ import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { contexto, depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const AGORA = Date.parse("2026-09-16T15:00:00Z");
 
 describeIntegracao("bot-a-bot (ADR-058; E12.4, ADR-025): pedir_a_bot, continuação em profundidade 1, outro dono só com procuração", () => {

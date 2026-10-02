@@ -7,7 +7,7 @@ import type { CasoNod } from "../contracts/servicos.ts";
 import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
 import { acaoArriscadaNoApp, decidirLote, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
-import { conectorTocaAprendiz } from "../domain/dado-pessoal.ts";
+import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens } from "./decidir.ts";
@@ -29,7 +29,7 @@ import type { Deps } from "./tipos.ts";
  */
 /**
  * definido em 2026-09-21: a classificação por origem (ADR-002) fica DESLIGADA — decisão do Marlon,
- * de que o nod não está sendo construído para tratar dado de aprendiz. Nenhum item novo nasce
+ * de que o nod não está sendo construído para tratar dado pessoal sensível. Nenhum item novo nasce
  * sensível, então o CHECK item_sensivel_marcado_exige_pessoa vira vacuamente verdadeiro.
  *
  * NEUTRALIZADA, não removida, e isso é deliberado. Remover custaria ~78 arquivos e migração nova,
@@ -84,7 +84,7 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     if (CLASSIFICAR_ORIGEM_SENSIVEL && item.origem_conector) {
       const origem = await deps.repos.conectores.buscarPorSlug(item.origem_conector);
       // Origem desconhecida = fail-closed: trata como sensível (ADR-002: não declarou = toca).
-      origemSensivel = origem ? conectorTocaAprendiz(origem) : true;
+      origemSensivel = origem ? conectorTocaDadoPessoal(origem) : true;
     }
     // ADR-048: carimbado na criação pelo plano JÁ PUXADO — a ferramenta que roda no gh do Mac deste
     // turno roda lá também quando aprovada; o agente não escolhe onde.

@@ -6,7 +6,7 @@ import { travaDoPedido } from "../../../src/use-cases/apoio-l7.ts";
 import { entregarRespostaPeer } from "../../../src/use-cases/entregar-resposta-peer.ts";
 import { pedirABot } from "../../../src/use-cases/pedir-a-bot.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
-import { PESSOA_ANA, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, TENANT_PADRAO } from "../../helpers/ids.ts";
 
 /**
  * pedir_a_bot (definido em 2026-09-29, ADR-058): UM jeito de um bot pedir a outro — pergunta ou tarefa —, e
@@ -76,7 +76,7 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
   it("outro dono: sem procuração, nao_permitido; procuração antiga (perguntar_a_bot) ou nova (pedir_a_bot) vale", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const vera = await bot(d, "Vera");
-    const comoAna = d.comEscopo({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA });
+    const comoAna = d.comEscopo({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA });
     const tuca = await bot(d, "Tuca", comoAna);
     const t = await turno(d, vera.id, vera.conversaId);
     await expect(pedir(d, vera, t.id, "Tuca", "oi")).rejects.toMatchObject({ codigo: "nao_permitido" });

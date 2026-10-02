@@ -13,7 +13,7 @@ import {
 const schema = { type: "object" as const, properties: {}, required: [], additionalProperties: false };
 
 function ferramenta(nome: string, extra: Partial<FerramentaPlano> = {}): FerramentaPlano {
-  return { nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: "c1", readOnlyHint: false, tocaAprendiz: false, schema, ...extra };
+  return { nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: "c1", readOnlyHint: false, tocaDadoPessoal: false, schema, ...extra };
 }
 
 function plano(extra: Partial<EntradaAprovacao["plano"] & object> = {}): NonNullable<EntradaAprovacao["plano"]> {

@@ -1,4 +1,4 @@
-# Ambiente local do nod. UM serviço só: Postgres 16 (desvio do §5 da Leapy registrado no AGENTS.md —
+# Ambiente local do nod. UM serviço só: Postgres 16 (desvio do §5 das práticas herdadas registrado no AGENTS.md —
 # o catcher é driver in-process, não serviço). Porta 5434 porque 5432 é de outro projeto nesta máquina.
 services:
   postgres:
@@ -13,7 +13,7 @@ services:
     volumes:
       - nod_pgdata:/var/lib/postgresql/data
       # Cria DOIS roles (nod_dono migra; nod_app é NOBYPASSRLS) e DOIS bancos (nod, nod_test)
-      # ANTES da primeira tabela — senão a RLS nasce não exercitada (Leapy §5).
+      # ANTES da primeira tabela — senão a RLS nasce não exercitada (Práticas §5).
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nod_dono -d nod"]

@@ -4,10 +4,10 @@ import { lerCookieSessao } from "../../src/adapters/http/sessao.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { COOKIE_STATE, DESTINO_RECUSA } from "../../src/adapters/http/sessao-google.ts";
 import { CLIENT_ID, claimsBoas, googleFalso, respostaComIdToken } from "../helpers/google-falso.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 
 const SEGREDO = "segredo-de-teste-do-login-google-com-40-chars";
-const EMAIL_CADASTRADO = "marlon.wanderllich@leapy.com.br";
+const EMAIL_CADASTRADO = "marlon.wanderllich@acme.com.br";
 
 /**
  * Login Google de ponta a ponta sobre o servidor real em porta 0 (E1.2, ADR-030), com o Google
@@ -19,7 +19,7 @@ describe("login Google: servidor real, Google falso", () => {
   let close: () => Promise<void>;
   let resposta: () => Response | Promise<Response> = () => respostaComIdToken(claimsBoas(Date.now()));
   const google = googleFalso(() => resposta());
-  const pessoaPorEmail = async (email: string): Promise<Escopo | null> => (email === EMAIL_CADASTRADO ? { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON } : null);
+  const pessoaPorEmail = async (email: string): Promise<Escopo | null> => (email === EMAIL_CADASTRADO ? { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON } : null);
 
   beforeAll(async () => {
     const srv = await listen(0, "127.0.0.1", {
@@ -30,6 +30,7 @@ describe("login Google: servidor real, Google falso", () => {
           clientId: CLIENT_ID,
           clientSecret: "segredo-do-cliente-oauth",
           redirectUri: "http://127.0.0.1:5274/api/sessao/google/callback",
+          dominio: "acme.com.br",
           fetchImpl: google.fetchImpl,
           pessoaPorEmail,
         },
@@ -60,7 +61,7 @@ describe("login Google: servidor real, Google falso", () => {
     const { location, state, setCookie } = await iniciar();
     expect(location.origin + location.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(location.searchParams.get("client_id")).toBe(CLIENT_ID);
-    expect(location.searchParams.get("hd")).toBe("leapy.com.br");
+    expect(location.searchParams.get("hd")).toBe("acme.com.br");
     expect(location.searchParams.get("scope")).toBe("openid email");
     expect(location.searchParams.get("response_type")).toBe("code");
     expect(state.length).toBeGreaterThan(20);
@@ -71,7 +72,7 @@ describe("login Google: servidor real, Google falso", () => {
     expect(setCookie).not.toContain("Secure");
   });
 
-  it("conta Leapy cadastrada: volta logada, com cookie de sessão válido, e o nod mandou o code e o client_secret ao Google", async () => {
+  it("conta cadastrada: volta logada, com cookie de sessão válido, e o nod mandou o code e o client_secret ao Google", async () => {
     resposta = () => respostaComIdToken(claimsBoas(Date.now()));
     const { state, cookie } = await iniciar();
     const r = await voltar(`code=codigo-do-google&state=${encodeURIComponent(state)}`, cookie);
@@ -81,7 +82,7 @@ describe("login Google: servidor real, Google falso", () => {
     const sessao = cookies.find((c) => c.startsWith("nod_sessao="));
     expect(sessao).toContain("SameSite=Strict");
     expect(cookies.some((c) => c.startsWith("nod_oauth=;") && c.includes("Max-Age=0"))).toBe(true);
-    expect(lerCookieSessao(sessao?.split(";")[0]?.slice("nod_sessao=".length), SEGREDO)).toEqual({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON });
+    expect(lerCookieSessao(sessao?.split(";")[0]?.slice("nod_sessao=".length), SEGREDO)).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON });
 
     const ultima = google.chamadas.at(-1);
     expect(ultima?.url).toBe("https://oauth2.googleapis.com/token");
@@ -90,16 +91,16 @@ describe("login Google: servidor real, Google falso", () => {
     expect(ultima?.corpo.get("grant_type")).toBe("authorization_code");
 
     const eu = await fetch(`${base}/api/sessao`, { headers: { cookie: sessao?.split(";")[0] ?? "" } });
-    expect(await eu.json()).toEqual({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON });
+    expect(await eu.json()).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON });
   });
 
-  it("TODA recusa é a mesma resposta, byte a byte, e nenhuma cria sessão (não diz quem trabalha na Leapy)", async () => {
+  it("TODA recusa é a mesma resposta, byte a byte, e nenhuma cria sessão (não diz quem tem acesso)", async () => {
     const agora = Date.now();
     const casos: { nome: string; resposta: () => Response | Promise<Response>; query?: (s: string) => string; semCookie?: boolean; outroState?: boolean }[] = [
       { nome: "outro domínio", resposta: () => respostaComIdToken(claimsBoas(agora, { hd: "outra.com.br", email: "x@outra.com.br" })) },
       { nome: "Gmail pessoal (sem hd)", resposta: () => respostaComIdToken(claimsBoas(agora, { hd: undefined, email: "x@gmail.com" })) },
       { nome: "e-mail não verificado", resposta: () => respostaComIdToken(claimsBoas(agora, { email_verified: false })) },
-      { nome: "Leapy sem cadastro no nod", resposta: () => respostaComIdToken(claimsBoas(agora, { email: "ninguem@leapy.com.br" })) },
+      { nome: "conta do domínio sem cadastro no nod", resposta: () => respostaComIdToken(claimsBoas(agora, { email: "ninguem@acme.com.br" })) },
       { nome: "Google fora do ar (503)", resposta: () => new Response("<html>erro interno do google com detalhe</html>", { status: 503 }) },
       { nome: "Google inalcançável", resposta: () => Promise.reject(new Error("ECONNRESET detalhe")) },
       { nome: "Google sem id_token", resposta: () => new Response("{}", { status: 200 }) },
@@ -135,7 +136,7 @@ describe("login Google: servidor real, Google falso", () => {
   it("a recusa vai para o log com o motivo, SEM o e-mail e sem o corpo de erro do Google", async () => {
     const saida = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
-      resposta = () => respostaComIdToken(claimsBoas(Date.now(), { email: "segredo.pessoal@leapy.com.br" }));
+      resposta = () => respostaComIdToken(claimsBoas(Date.now(), { email: "segredo.pessoal@acme.com.br" }));
       let a = await iniciar();
       await voltar(`code=x&state=${encodeURIComponent(a.state)}`, a.cookie);
       resposta = () => new Response("detalhe-interno-do-google", { status: 500 });
@@ -164,7 +165,7 @@ describe("login Google atrás de HTTPS", () => {
       segredoSessao: SEGREDO,
       sessao: {
         modo: "google",
-        google: { clientId: CLIENT_ID, clientSecret: "x", redirectUri: "https://nod.leapy.com.br/api/sessao/google/callback", fetchImpl: async () => respostaComIdToken(claimsBoas(Date.now())), pessoaPorEmail: async () => ({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }) },
+        google: { clientId: CLIENT_ID, clientSecret: "x", redirectUri: "https://nod.acme.com.br/api/sessao/google/callback", fetchImpl: async () => respostaComIdToken(claimsBoas(Date.now())), pessoaPorEmail: async () => ({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON }) },
       },
     });
     try {

@@ -6,11 +6,11 @@ import type { Transacao } from "../../src/shared/types.ts";
 import { registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const TZ = "America/Sao_Paulo";
 const JANELA = Date.parse("2026-09-17T08:00:00-03:00");
 

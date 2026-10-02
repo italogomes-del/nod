@@ -36,7 +36,7 @@ import type { comandosRepo } from "./comandos.repo.ts";
 import type { leiturasRepo } from "./leituras.repo.ts";
 
 /**
- * Regras de repositório (Leapy §1, ADR-018 refinado): factory `xRepo(conn: Conn, escopo: Escopo)`
+ * Regras de repositório (Práticas §1, ADR-018 refinado): factory `xRepo(conn: Conn, escopo: Escopo)`
  * aceita Db | Tx na primeira linha; WHERE tenant_id explícito mesmo sob RLS (segunda camada);
  * devolve T | null ou T[] — sem `throw NotFound`. Erros do banco (CHECK, UNIQUE, trigger, policy)
  * sobem como estão: quem os traduz é a borda. Única exceção deliberada: paradasRepo.ativa devolve

@@ -10,13 +10,13 @@ import { interromperPorMaquina } from "../../src/use-cases/interromper-por-maqui
 import { listarSuaVez, type DepsSuaVez } from "../../src/use-cases/listar-sua-vez.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 import type { Tx } from "../../src/shared/types.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const H = 3_600_000;
 const T0 = Date.parse("2026-09-24T00:50:00-03:00");
 

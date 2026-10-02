@@ -6,13 +6,13 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import { registrarRelato } from "../../src/use-cases/registrar-relato.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 
-const escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 /** Deps mínimo: o caso de uso só usa repos, escopo e o relógio (é puro quanto ao resto). */
 function deps(trx: Tx, e: Escopo, agora: number): Deps {
@@ -138,8 +138,8 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
 
   /**
    * O relato é insumo de ROADMAP: quem investiga precisa ver o que as outras pessoas relataram,
-   * senão a triagem lista só os próprios. A PROSA continua privada — é ela que carrega dado de
-   * aprendiz e conteúdo de conector (ADR-002/026).
+   * senão a triagem lista só os próprios. A PROSA continua privada — é ela que carrega dado
+   * pessoal e conteúdo de conector (ADR-002/026).
    */
   it("o time lê o registro do relato, mas a prosa é só de quem escreveu", async () => {
     await withRollback(escopo, async (trx) => {
@@ -153,7 +153,7 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
         mensagemId: m!.id, categoria: "resposta_errada", alcance: "mensagem", texto: "segredo",
       });
 
-      const ana = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+      const ana = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
       await vincularEscopo(trx, ana);
       const reposAna = criarRepos(trx, ana);
       // Registro: visível para a equipe, senão ninguém faz triagem.

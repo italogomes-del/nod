@@ -9,7 +9,7 @@ import { planoDeTeste } from "../../helpers/l5.ts";
  * dela, relata o código à trilha e entrega o conteúdo moldurado como não confiável. Se o plano puxado
  * não marcar a ferramenta para a máquina, nada roda — o servidor sozinho não basta.
  */
-const PR_VER: FerramentaPlano = { nome: "github__pr_ver", nomeMcp: "mcp__nod__github__pr_ver", origem: "conector", conectorId: "g1", readOnlyHint: true, tocaAprendiz: true, schema: { type: "object" } };
+const PR_VER: FerramentaPlano = { nome: "github__pr_ver", nomeMcp: "mcp__nod__github__pr_ver", origem: "conector", conectorId: "g1", readOnlyHint: true, tocaDadoPessoal: true, schema: { type: "object" } };
 
 function montar(ferramenta: FerramentaPlano) {
   const plano = planoDeTeste({ expiraEm: 10_000 });
@@ -19,7 +19,7 @@ function montar(ferramenta: FerramentaPlano) {
   const executadas: { capacidade: string; argumentos: unknown }[] = [];
   const cliente: ClienteNod = {
     plano: async () => ({ ok: true, plano }),
-    ferramenta: async () => ({ executarLocal: { capacidade: "pr_ver", argumentos: { repositorio: "leapy/nod", numero: 466 } } }),
+    ferramenta: async () => ({ executarLocal: { capacidade: "pr_ver", argumentos: { repositorio: "acme/nod", numero: 466 } } }),
     aguardar: async () => ({ estado: "pendente" }),
     negacao: async (n) => { negacoes.push(n.motivo); },
     execucaoLocal: async (nome, codigo) => { relatos.push([nome, codigo]); },
@@ -38,14 +38,14 @@ function montar(ferramenta: FerramentaPlano) {
 
 async function chamar(proxy: ReturnType<typeof criarProxy>) {
   await proxy.tratarLinha(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }));
-  return JSON.parse((await proxy.tratarLinha(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "github__pr_ver", arguments: { repositorio: "leapy/nod", numero: 466 } } })))!) as { result: { content: { text: string }[]; isError?: boolean } };
+  return JSON.parse((await proxy.tratarLinha(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "github__pr_ver", arguments: { repositorio: "acme/nod", numero: 466 } } })))!) as { result: { content: { text: string }[]; isError?: boolean } };
 }
 
 describe("proxy: ferramenta que roda na máquina (ADR-048)", () => {
   it("executa pelo gh desta máquina, relata o código e entrega moldurado como não confiável", async () => {
     const { proxy, relatos, executadas } = montar({ ...PR_VER, execucao: "maquina" });
     const r = await chamar(proxy);
-    expect(executadas).toEqual([{ capacidade: "pr_ver", argumentos: { repositorio: "leapy/nod", numero: 466 } }]);
+    expect(executadas).toEqual([{ capacidade: "pr_ver", argumentos: { repositorio: "acme/nod", numero: 466 } }]);
     expect(relatos).toEqual([["github__pr_ver", "ok"]]);
     expect(r.result.isError).toBeUndefined();
     expect(r.result.content[0]?.text).toContain("PR 466");

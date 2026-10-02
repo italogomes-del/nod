@@ -13,7 +13,7 @@ import type { Profundidade, Turno } from "../contracts/turno.ts";
 import { ORCAMENTO_RESULTADO_CHARS } from "../shared/constantes.ts";
 import { nuncaPermanente } from "./aprovacao-permanente.ts";
 import { catalogoReduzido, REGRA_REDUCAO_POR_CONFIANCA } from "./confianca.ts";
-import { conectorTocaAprendiz } from "./dado-pessoal.ts";
+import { conectorTocaDadoPessoal } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
@@ -74,7 +74,7 @@ export const PLANO_VALIDADE_MS = 3_600_000;
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
 
 function ferramentaNod(nome: NomeFerramentaNod): FerramentaPlano {
-  const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] };
+  const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] };
   // definido em 2026-09-28 (ADR-051): ler_artefato só lê, e o resultado dela tem orçamento próprio no
   // proxy — o do turno (8 000) cortaria o HTML que a ferramenta promete devolver.
   return nome === "ler_artefato" ? { ...base, readOnlyHint: true } : base;
@@ -93,7 +93,7 @@ function ferramentasDeConectores(conectores: readonly Conector[], concessoes: re
     servidores.push({ conectorId: c.id, nome: c.slug, trust: "untrusted", transporte: c.transporte });
     for (const cap of caps) {
       const nome = `${c.slug}__${cap.nome}`;
-      ferramentas.push({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.id, readOnlyHint: cap.readOnlyHint, tocaAprendiz: conectorTocaAprendiz(c), schema: cap.schema });
+      ferramentas.push({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.id, readOnlyHint: cap.readOnlyHint, tocaDadoPessoal: conectorTocaDadoPessoal(c), schema: cap.schema });
     }
   }
   return { ferramentas, servidores };
@@ -150,8 +150,8 @@ export type EntradaPlano = {
  * quando a localidade recusa (inventário não 'pronto'). tokenDeTurno e machineId são do servidor.
  */
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
-  const tocaAprendiz = entrada.conectores.some((c) => c.habilitado && conectorTocaAprendiz(c));
-  const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaAprendiz, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
+  const tocaDadoPessoal = entrada.conectores.some((c) => c.habilitado && conectorTocaDadoPessoal(c));
+  const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaDadoPessoal, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
 
   // revisto em 2026-09-29 (ADR-058): profundidade 1 não é mais "peer". Ela corta o salto (montarFerramentas
@@ -163,7 +163,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.
   const temComputador = entrada.computador === true && modo !== "peer" && modo !== "delegacao";
-  const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
+  const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaDadoPessoal: true, schema })) : [];
   /**
    * definido em 2026-09-18: sem projeto autorizado o agente só enxerga consultar e propor. Ver um
    * martelo que ainda não pode usar era o que o levava a tentar, falhar e virar tutorial de menu.
@@ -172,7 +172,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const workspace: FerramentaPlano[] = entrada.workspace && (modo === "conversa" || modo === "criacao")
     ? Object.entries(FERRAMENTAS_WORKSPACE)
       .filter(([nome]) => entrada.workspaceVinculado || SEM_PROJETO.includes(nome))
-      .map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta"].includes(nome), tocaAprendiz: true, schema }))
+      .map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta"].includes(nome), tocaDadoPessoal: true, schema }))
     : [];
   let ferramentas = montarFerramentas({ catalogo: [...nod, ...deConectores, ...computador, ...workspace], allowlistAgente: null, alcanceCanal: null, profundidade: entrada.profundidade });
   let decididoPor: `regra:${string}` = REGRA_MONTAGEM;

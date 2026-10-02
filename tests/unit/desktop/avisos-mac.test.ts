@@ -6,19 +6,19 @@ import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } 
  * remota, então remetente e argumentos são conferidos antes de tocar o macOS.
  */
 describe("remetente da janela web", () => {
-  const servidor = "https://nod.leapy.com.br";
+  const servidor = "https://nod.acme.com.br";
 
   it("só o frame de topo na origem do servidor configurado", () => {
-    expect(remetenteWebValido({ frameUrl: "https://nod.leapy.com.br/conversa/1", frameDeTopo: true, servidor })).toBe(true);
-    expect(remetenteWebValido({ frameUrl: "https://nod.leapy.com.br/", frameDeTopo: false, servidor })).toBe(false);
-    expect(remetenteWebValido({ frameUrl: "https://nod.leapy.com.br.evil.com/", frameDeTopo: true, servidor })).toBe(false);
-    expect(remetenteWebValido({ frameUrl: "http://nod.leapy.com.br/", frameDeTopo: true, servidor })).toBe(false);
+    expect(remetenteWebValido({ frameUrl: "https://nod.acme.com.br/conversa/1", frameDeTopo: true, servidor })).toBe(true);
+    expect(remetenteWebValido({ frameUrl: "https://nod.acme.com.br/", frameDeTopo: false, servidor })).toBe(false);
+    expect(remetenteWebValido({ frameUrl: "https://nod.acme.com.br.evil.com/", frameDeTopo: true, servidor })).toBe(false);
+    expect(remetenteWebValido({ frameUrl: "http://nod.acme.com.br/", frameDeTopo: true, servidor })).toBe(false);
     expect(remetenteWebValido({ frameUrl: "file:///Applications/nod.app/setup.html", frameDeTopo: true, servidor })).toBe(false);
     expect(remetenteWebValido({ frameUrl: "data:text/html,oi", frameDeTopo: true, servidor })).toBe(false);
   });
 
   it("sem servidor configurado, ninguém", () => {
-    expect(remetenteWebValido({ frameUrl: "https://nod.leapy.com.br/", frameDeTopo: true, servidor: undefined })).toBe(false);
+    expect(remetenteWebValido({ frameUrl: "https://nod.acme.com.br/", frameDeTopo: true, servidor: undefined })).toBe(false);
     expect(origemDe("não é url")).toBeNull();
     expect(origemDe("data:text/html,oi")).toBeNull();
   });

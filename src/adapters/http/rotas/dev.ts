@@ -5,7 +5,7 @@ import type { ComDeps } from "./sua-vez.ts";
 export const REGISTROS_CATCHER = 100;
 
 /**
- * GET dev/catcher (Leapy §11, EMENDA 25): o que o proxy decidiu e o que o executor teria chamado,
+ * GET dev/catcher (Práticas §11, EMENDA 25): o que o proxy decidiu e o que o executor teria chamado,
  * por turno, visível à equipe (visibility 'equipe' na 0002). Diz qual executor está configurado
  * para a pessoa saber se está olhando o catcher ou o CLI real — estado escrito, não ícone (ADR-029).
  */

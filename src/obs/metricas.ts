@@ -2,7 +2,7 @@
  * As SEIS métricas do ADR-017 (revisado + refinamento de 2026-09-16), cada uma ligada a uma
  * promessa de produto — nenhuma de infraestrutura (checkout do pool, distância de partição e taxa
  * de resumed:false ficaram de fora por decisão). O rótulo é um UNION FECHADO: nenhuma string
- * livre entra, e nunca id/email de aprendiz (tenant_id e pessoa_id identificam colaboradoras).
+ * livre entra, e nunca id/email de terceiros (tenant_id e pessoa_id identificam quem usa o nod).
  * `tenant_id` já está declarado no tipo, como o ADR exige.
  *
  * Fora do domínio (ADR-018): quem observa é a borda. Sem dependência externa: `/metrics` é texto

@@ -2,7 +2,7 @@ import { semear } from "../src/db/seed/index.ts";
 import { log } from "../src/obs/log.ts";
 
 // `npm run db:seed`: identidade como nod_dono, exemplos como nod_app. Idempotente: a segunda
-// passagem registra seed_sem_mudancas. O CI nunca chama (Leapy §6).
+// passagem registra seed_sem_mudancas. O CI nunca chama (Práticas §6).
 try {
   process.loadEnvFile(".env");
 } catch {

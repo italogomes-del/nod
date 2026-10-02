@@ -403,7 +403,7 @@ CREATE INDEX rotina_execucoes_por_rotina ON rotina_execucoes (tenant_id, rotina_
 -- ---------------------------------------------------------------------------------------------
 -- Conectores = servidores MCP registrados pela pessoa (ADR-013 revisado). Nascem desabilitados;
 -- env fica CIFRADO no servidor (env_cifrado) e só as CHAVES ficam legíveis (placeholder `true`).
--- http só para quem NÃO toca dado de aprendiz — e 'nao-declarou' é toca (ADR-002, default fechado).
+-- http só para quem NÃO toca dado pessoal — e 'nao-declarou' é toca (ADR-002, default fechado).
 CREATE TABLE conectores (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nome text NOT NULL,
@@ -502,7 +502,7 @@ ALTER TABLE paradas ADD PRIMARY KEY (tenant_id, id);
 ALTER TABLE paradas ADD FOREIGN KEY (tenant_id, conversa_id) REFERENCES conversas (tenant_id, id);
 CREATE INDEX paradas_ativas ON paradas (tenant_id, pessoa_id) WHERE encerrada_em IS NULL;
 
--- Catcher (Leapy §11): o que o proxy decidiu e o que o executor teria chamado, inspecionável em
+-- Catcher (Práticas §11): o que o proxy decidiu e o que o executor teria chamado, inspecionável em
 -- dev por toda a equipe (visibility DEFAULT 'equipe').
 CREATE TABLE catcher_registros (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

@@ -1,7 +1,7 @@
 import { contextoAtual } from "./contexto.ts";
 
 /**
- * Wrapper ÚNICO de log (Leapy §10): uma linha JSON por evento com ts, tenant_id, pessoa_id e
+ * Wrapper ÚNICO de log (Práticas §10): uma linha JSON por evento com ts, tenant_id, pessoa_id e
  * correlation_id do contexto. Fora do domínio (ADR-018). A borda loga; o domínio devolve o que
  * aconteceu. Nunca ecoa o campo `texto` — é o canal por onde dado pessoal vazaria (ADR-002/004).
  */

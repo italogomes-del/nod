@@ -20,7 +20,7 @@ function autorDe(m: Mensagem): string {
  * diagnóstico que a ponte gravou quando a execução não concluiu.
  *
  * A prosa (texto da pessoa + trecho da conversa) vai para `relato_prosa`, apagável por nod_poda: o
- * trecho pode carregar dado de aprendiz (ADR-002) e conteúdo não confiável (ADR-026), e precisa sair
+ * trecho pode carregar dado pessoal (ADR-002) e conteúdo não confiável (ADR-026), e precisa sair
  * inteiro num pedido de exclusão sem levar o registro junto.
  */
 export const registrarRelato: CasoDeUso<EntradaRelato, SaidaRegistrarRelato> = async (deps, input) => {

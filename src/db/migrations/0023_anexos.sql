@@ -3,7 +3,7 @@
 -- preso à mensagem no envio. Os bytes ficam aqui, não no disco da máquina: o servidor é a fonte
 -- da verdade da conversa e o driver baixa pela rota interna com o token do turno.
 --
--- É conteúdo da pessoa (pode ter dado de aprendiz, ADR-002): apagável por nod_poda como a prosa.
+-- É conteúdo da pessoa (pode ter dado pessoal, ADR-002): apagável por nod_poda como a prosa.
 CREATE TABLE anexos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   conversa_id uuid NOT NULL,

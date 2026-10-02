@@ -5,7 +5,7 @@ const agora = 1;
 const destino = { conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: "ana" } };
 
 describe("montarItens", () => {
-  it("item que toca dado de aprendiz nasce desmarcado COM justificativa — caso adversarial", () => {
+  it("item que toca dado pessoal nasce desmarcado COM justificativa — caso adversarial", () => {
     const itens = montarItens({
       tenantId: "t",
       decisaoId: "d1",

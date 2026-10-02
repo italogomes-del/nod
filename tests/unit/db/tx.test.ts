@@ -55,8 +55,8 @@ describe("tx: escopo obrigatório", () => {
   });
 
   it("ErroDeDominio guarda o detalhe em cause, nunca na mensagem", () => {
-    const e = new ErroDeDominio("nao_encontrado", { cause: "agente 123 de marlon@leapy" });
+    const e = new ErroDeDominio("nao_encontrado", { cause: "agente 123 de marlon@acme" });
     expect(e.message).toBe("nao_encontrado");
-    expect(e.cause).toBe("agente 123 de marlon@leapy");
+    expect(e.cause).toBe("agente 123 de marlon@acme");
   });
 });

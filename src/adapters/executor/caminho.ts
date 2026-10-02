@@ -55,7 +55,7 @@ export function caminhoAumentado(pathAtual: string | undefined, home: string, pa
 }
 
 /**
- * Captura o PATH exportado pelo shell de login (.zprofile/.zshrc), como o app da Leapy faz em
+ * Captura o PATH exportado pelo shell de login (.zprofile/.zshrc), como apps de desktop fazem em
  * background (ADR-014). Melhor esforço: qualquer falha ou demora devolve null e o chamador segue
  * só com os diretórios extras. definido em 2026-09-16: 3 s de teto — um shell com nvm/mise carrega em menos.
  */

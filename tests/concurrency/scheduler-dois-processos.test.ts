@@ -6,7 +6,7 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { db } from "../helpers/db.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
@@ -16,7 +16,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  * outro recebe false sem erro visível. Linhas commitadas; limpeza própria por id.
  */
 // Pessoa PRÓPRIA deste arquivo (uuid aleatório, sem linha em pessoas — não há FK): nunca disputa com outro arquivo.
-const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const TZ = "America/Sao_Paulo";
 const JANELA = Date.parse("2026-09-17T08:00:00-03:00");
 const criados = { agentes: [] as string[], conversas: [] as string[], rotinas: [] as string[] };

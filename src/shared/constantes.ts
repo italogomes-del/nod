@@ -52,9 +52,9 @@ export const ORCAMENTO_RESULTADO_CHARS = 75_000;
 export const MAX_MCP_OUTPUT_TOKENS_FILHO = ORCAMENTO_RESULTADO_CHARS * 2;
 /** Anotação por ferramenta no tools/list (`_meta.anthropic/maxResultSizeChars`): texto até isto fica inline. */
 export const MAX_RESULTADO_INLINE_CHARS = ORCAMENTO_RESULTADO_CHARS + 5_000;
-/** Abandono do outbox exige AMBAS. definido em 2026-09-16: 5 tentativas cobre um despachante a cada 250ms com falha transitória (Leapy §7). */
+/** Abandono do outbox exige AMBAS. definido em 2026-09-16: 5 tentativas cobre um despachante a cada 250ms com falha transitória (Práticas §7). */
 export const OUTBOX_TETO_TENTATIVAS = 5;
-/** definido em 2026-09-16: 30 min — só o teto esvaziaria a fila numa queda curta do consumidor (Leapy §7). */
+/** definido em 2026-09-16: 30 min — só o teto esvaziaria a fila numa queda curta do consumidor (Práticas §7). */
 export const OUTBOX_IDADE_MIN_MS = 1_800_000;
 /** definido em 2026-09-16: limite do Grok Bot (docs/grokbot-comparison.md). */
 export const ROTINAS_POR_AGENTE = 50;

@@ -11,12 +11,12 @@ import { REGRA_GEMEA_RESOLVIDA } from "../../src/use-cases/fechar-gemeas.ts";
 import { listarSuaVez, type DepsSuaVez } from "../../src/use-cases/listar-sua-vez.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON: Escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const DIA = 86_400_000;
 const FRASE_QUEDA = "Turno interrompido: seu Mac parou de responder (repouso, sem rede ou nod fechado).";
 

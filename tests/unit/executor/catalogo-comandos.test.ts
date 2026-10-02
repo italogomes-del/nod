@@ -14,11 +14,11 @@ describe("catálogo do / lido no Mac", () => {
     const raiz = mkdtempSync(join(tmpdir(), "nod-catalogo-"));
     const home = join(raiz, "home");
     const plugin = join(raiz, "plugins", "posthog", "1.1.64");
-    const projeto = join(raiz, "code", "leapy");
+    const projeto = join(raiz, "code", "acme");
     arquivo(join(home, ".claude", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Pre-landing PR review. (gstack)\n---\n");
     arquivo(join(home, ".claude", "commands", "hm-deploy.md"), "---\ndescription: Deploy do projeto.\nargument-hint: <ambiente>\n---\n");
     arquivo(join(plugin, "skills", "auditing-endpoints", "SKILL.md"), "---\nname: auditing-endpoints\ndescription: Audita endpoints.\n---\n");
-    arquivo(join(projeto, ".claude", "skills", "migrar", "SKILL.md"), "---\nname: migrar\ndescription: Roda as migrações do leapy.\n---\n");
+    arquivo(join(projeto, ".claude", "skills", "migrar", "SKILL.md"), "---\nname: migrar\ndescription: Roda as migrações do acme.\n---\n");
     const c = await lerCatalogoDoMac(
       {
         tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "sonnet", versaoCli: "2.1.284", apiKeySource: "none",
@@ -32,7 +32,7 @@ describe("catálogo do / lido no Mac", () => {
     expect(c.comandos).toEqual([
       { nome: "review", descricao: "Pre-landing PR review.", origem: "gstack" },
       { nome: "posthog:auditing-endpoints", descricao: "Audita endpoints.", origem: "posthog" },
-      { nome: "migrar", descricao: "Roda as migrações do leapy.", origem: "leapy" },
+      { nome: "migrar", descricao: "Roda as migrações do acme.", origem: "acme" },
       { nome: "code-review", descricao: "Revisa um pull request ou as mudanças do branch", origem: "Claude Code" },
       { nome: "hm-deploy", descricao: "Deploy do projeto.", origem: "suas", argumento: "<ambiente>" },
     ]);

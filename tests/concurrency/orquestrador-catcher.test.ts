@@ -18,7 +18,7 @@ import { retomarTurno } from "../../src/use-cases/retomar-turno.ts";
 import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { driverFalso } from "../helpers/driver-falso.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
@@ -26,7 +26,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  * abrirTxEscopada) e commita — não cabe no withRollback. Linhas commitadas, apagadas por id/pessoa no
  * afterEach. Pessoa PRÓPRIA deste arquivo (uuid aleatório, sem linha em pessoas): a fila é por pessoa.
  */
-const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const listarPessoas = async () => [{ tenantId: PESSOA.tenantId, id: PESSOA.pessoaId }];
 const PRONTO = { estado: "pronto" as const, versao: "catcher", em: Date.now() };
 const criados = { agentes: [] as string[], conversas: [] as string[] };

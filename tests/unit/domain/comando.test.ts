@@ -6,14 +6,14 @@ const tipo = (c: string) => classificarComando(c).tipo;
 describe("classificarComando (ADR-055): o que só lê roda direto, o resto pede", () => {
   it("revisar um PR é leitura do começo ao fim", () => {
     for (const c of [
-      "gh pr list -R leapy-edtech/leapy",
-      "gh pr view 466 -R leapy-edtech/leapy --json title,body",
-      "gh pr diff 466 -R leapy-edtech/leapy",
+      "gh pr list -R acme-edtech/acme",
+      "gh pr view 466 -R acme-edtech/acme --json title,body",
+      "gh pr diff 466 -R acme-edtech/acme",
       "gh pr checks 466",
-      "gh api repos/leapy-edtech/leapy/pulls?state=open",
+      "gh api repos/acme-edtech/acme/pulls?state=open",
       "gh auth status",
-      "cd ~/Inhouse/leapy && git fetch origin && git log --oneline -20",
-      "git -C ~/Inhouse/leapy diff main...origin/feat/x --stat",
+      "cd ~/Inhouse/acme && git fetch origin && git log --oneline -20",
+      "git -C ~/Inhouse/acme diff main...origin/feat/x --stat",
       "git status --short | head -20",
       "git branch -a",
       "git branch --list 'feat/*'",

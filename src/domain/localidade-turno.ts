@@ -16,7 +16,7 @@ export type Localidade =
  */
 export function resolverLocalidade(entrada: {
   origem: OrigemTurno;
-  tocaAprendiz: boolean;
+  tocaDadoPessoal: boolean;
   motorExigido: string;
   inventario: Inventario;
 }): Localidade {

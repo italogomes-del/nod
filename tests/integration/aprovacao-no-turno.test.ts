@@ -6,12 +6,12 @@ import { decidir } from "../../src/use-cases/decidir.ts";
 import { computadorLiberadoNaTarefa, liberarNaTarefa } from "../../src/use-cases/liberar-na-tarefa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const SINAIS = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true };
 const RESULTADO = { desfecho: "sucesso" as const, texto: "feito", sessaoCli: null, sinais: SINAIS, custoUsd: 0.01, tokens: { entrada: 1, saida: 1, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
 type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];

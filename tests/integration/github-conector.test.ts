@@ -25,13 +25,13 @@ import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const CHAVE = chaveDe("teste-github-local");
 const LEITURA = CAPACIDADES_GITHUB.filter((c) => c.readOnlyHint).map((c) => c.nome);
 const TODAS = CAPACIDADES_GITHUB.map((c) => c.nome);
@@ -123,12 +123,12 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       expect(doGithub.every((f) => f.execucao === "maquina")).toBe(true);
       expect(plano.catalogo.ferramentas.filter((f) => f.origem === "nod").every((f) => f.execucao === undefined)).toBe(true);
 
-      const args = { repositorio: "leapy/nod", numero: 466 };
+      const args = { repositorio: "acme/nod", numero: 466 };
       const r = await chamarFerramenta(deps, { turnoId, agenteId, nome: "github__pr_ver", argumentos: args, plano });
       expect(r.data).toEqual({ executarLocal: { capacidade: "pr_ver", argumentos: args } });
       expect(chamadas).toEqual([]);
       // Portões valem igual: schema errado é negado ANTES de qualquer coisa sair para a máquina.
-      expect((await chamarFerramenta(deps, { turnoId, agenteId, nome: "github__pr_ver", argumentos: { repositorio: "leapy/nod" }, plano })).data).toMatchObject({ ok: false, negacao: { motivo: "args_invalidos" } });
+      expect((await chamarFerramenta(deps, { turnoId, agenteId, nome: "github__pr_ver", argumentos: { repositorio: "acme/nod" }, plano })).data).toMatchObject({ ok: false, negacao: { motivo: "args_invalidos" } });
       // A trilha tem a chamada e, relatado pela máquina, o desfecho; ferramenta não marcada não ganha linha.
       expect(await registrarExecucaoLocal(deps, { turnoId, agenteId, plano, nome: "github__pr_ver", codigo: "sem_login" })).toBe(true);
       expect(await registrarExecucaoLocal(deps, { turnoId, agenteId, plano, nome: "lembrar", codigo: "ok" })).toBe(false);
@@ -157,7 +157,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
 
       const plano = await planoDoTurno(deps, await turnoDaConversa(repos, conversaId, agenteId), true);
       expect(plano.catalogo.ferramentas.find((f) => f.nome === "github__pr_revisar")?.execucao).toBe("maquina");
-      const r = await chamarFerramenta(deps, { turnoId: plano.turnoId, agenteId, nome: "github__pr_revisar", argumentos: { repositorio: "leapy/nod", numero: 466, evento: "approve" }, plano });
+      const r = await chamarFerramenta(deps, { turnoId: plano.turnoId, agenteId, nome: "github__pr_revisar", argumentos: { repositorio: "acme/nod", numero: 466, evento: "approve" }, plano });
       expect(r.data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
       expect(r.data).not.toHaveProperty("executarLocal");
       expect(chamadas).toEqual([]);
@@ -297,7 +297,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       const { deps, repos } = depsGithub(trx, MARLON, false, { carregarDaTx: true });
       const dentro: DentroDeTx = (escopo, fn) => fn({ ...deps, escopo, repos: depsSobre(trx, escopo).repos });
       await repos.composio.salvarChave(cifrar("ak_segredo", CHAVE));
-      const userId = `nod:${TENANT_LEAPY}:${PESSOA_MARLON}`;
+      const userId = `nod:${TENANT_PADRAO}:${PESSOA_MARLON}`;
       const fakeFetch: typeof fetch = async (url) => {
         const u = String(url);
         if (u.endsWith("/tool_router/session")) return Response.json({ session_id: "trs_gh", mcp: { url: "https://backend.composio.dev/tool_router/v3/trs_gh/mcp" } });
@@ -346,7 +346,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       await githubComAcesso(deps, repos, conversaId, agenteId);
       const turnoId = await turnoDaConversa(repos, conversaId, agenteId);
       const plano = await planoDoTurno(deps, turnoId, true);
-      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar no PR 466", itens: [{ texto: "Faltou teste", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 466, texto: "Faltou teste" } } }] });
+      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar no PR 466", itens: [{ texto: "Faltou teste", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 466, texto: "Faltou teste" } } }] });
       expect(pedido.data).toMatchObject({ estado: "pendente" });
       const decisaoId = pedido.data.estado === "pendente" ? pedido.data.decisao_id : "";
       expect((await repos.itensAprovacao.listar(decisaoId))[0]?.destino.execucao).toBe("maquina");
@@ -363,7 +363,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
 
       // O Mac puxa: recebe capacidade e argumentos com o texto final; executa e relata.
       const itens = await itensParaAMaquina(deps);
-      expect(itens).toEqual([{ itemId: expect.any(String), capacidade: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 466, texto: "Faltou teste" } }]);
+      expect(itens).toEqual([{ itemId: expect.any(String), capacidade: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 466, texto: "Faltou teste" } }]);
       const fechou = await concluirItemNaMaquina(deps, { itemId: itens[0]?.itemId ?? "", desfecho: "executado" });
       expect(fechou.events.some((e) => e.kind === "turno_criado")).toBe(true);
       expect(await itensParaAMaquina(deps)).toEqual([]);
@@ -385,7 +385,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       await githubComAcesso(deps, base.repos, conversaId, agenteId);
       const turnoId = await turnoDaConversa(base.repos, conversaId, agenteId);
       const plano = await planoDoTurno(deps, turnoId, true);
-      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 1, texto: "oi" } } }] });
+      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 1, texto: "oi" } } }] });
       const decisaoId = pedido.data.estado === "pendente" ? pedido.data.decisao_id : "";
       const fase1 = await marcarEDecidir(deps, { decisaoId });
       await assentarAprovacao(deps, { decisaoId, desfechos: await executarItens(deps.services, fase1.data.aExecutar) });
@@ -407,7 +407,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       await githubComAcesso(deps, repos, conversaId, agenteId);
       const turnoId = await turnoDaConversa(repos, conversaId, agenteId);
       const plano = { ...(await planoDoTurno(deps, turnoId, true)), semprePermitir: ["github__pr_comentar"] };
-      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 1, texto: "oi" } } }] });
+      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 1, texto: "oi" } } }] });
       expect(pedido.data).toMatchObject({ estado: "pendente" });
       const decisaoId = pedido.data.estado === "pendente" ? pedido.data.decisao_id : "";
       expect(await repos.decisoes.buscar(decisaoId)).toMatchObject({ estado: "decidida", desfecho: { tipo: "decidida_por_regra" } });
@@ -426,7 +426,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       await githubComAcesso(deps, repos, conversaId, agenteId);
       const turnoId = await turnoDaConversa(repos, conversaId, agenteId);
       const plano = await planoDoTurno(deps, turnoId, true);
-      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "leapy/nod", numero: 1, texto: "oi" } } }] });
+      const pedido = await pedirAprovacao(deps, { turnoId, agenteId, conversaId, plano, resumo: "Comentar", itens: [{ texto: "oi", destino: { conector: "github", ferramenta: "pr_comentar", argumentos: { repositorio: "acme/nod", numero: 1, texto: "oi" } } }] });
       const decisaoId = pedido.data.estado === "pendente" ? pedido.data.decisao_id : "";
       const fase1 = await marcarEDecidir(deps, { decisaoId });
       const desfechos = await executarItens(deps.services, fase1.data.aExecutar);
@@ -466,7 +466,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
         expect(await repos.githubApp.config()).toBeNull();
         status = 201;
         expect((await srv.chamar(sessao, "POST", "marketplace/github/app", { appId: "123", instalacaoId: "987", chavePrivada: pem })).status).toBe(200);
-        expect(trocas).toEqual([TENANT_LEAPY]);
+        expect(trocas).toEqual([TENANT_PADRAO]);
         expect(await (await srv.chamar(sessao, "GET", "marketplace/github/app")).json()).toEqual({ configurado: true, appId: "123", instalacaoId: "987", podeTrocar: true });
         const guardada = await repos.githubApp.config();
         expect(guardada?.chavePrivadaCifrada).not.toContain("PRIVATE KEY");

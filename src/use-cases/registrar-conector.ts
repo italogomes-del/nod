@@ -12,7 +12,7 @@ export type EntradaRegistrarConector = {
   url?: string | null;
   /** `true` = placeholder "mantido" (write-only). Recusado para chave NOVA — e no registro toda chave é nova. */
   env?: Record<string, string | true>;
-  /** Não declarou = TOCA dado de aprendiz (ADR-002, default fechado). */
+  /** Não declarou = TOCA dado pessoal (ADR-002, default fechado). */
   declaracao?: SensibilidadeDeclarada;
   /** Cifra o JSON do env com a chave do servidor (src/db/cifra.ts); injetada pela rota para o caso de uso não conhecer a chave. */
   cifrar: (texto: string) => string;
@@ -30,8 +30,8 @@ export function conectorPublico(c: ConectorGuardado): Conector {
 
 /**
  * Registro de conector (ADR-013 conector-privado): nasce DESABILITADO (só a sonda habilita), env
- * cifrado no servidor (core-features §credencial), http com dado de aprendiz recusado
- * (`http_toca_aprendiz`: toca OU não declarou, porque não declarou = toca) e placeholder `true` em
+ * cifrado no servidor (core-features §credencial), http com dado pessoal recusado
+ * (`http_toca_dado_pessoal`: toca OU não declarou, porque não declarou = toca) e placeholder `true` em
  * chave nova recusado (`env_placeholder_chave_nova`). Os CHECKs do banco repetem a regra.
  */
 export const registrarConector: CasoDeUso<EntradaRegistrarConector, Conector> = async (deps, input) => {
@@ -42,7 +42,7 @@ export const registrarConector: CasoDeUso<EntradaRegistrarConector, Conector> = 
   if (!DECLARACOES.includes(declaracao)) throw new ErroDeDominio("entrada_invalida", { cause: "declaracao" });
   if (input.transporte === "stdio" && (typeof input.comando !== "string" || input.comando.trim() === "")) throw new ErroDeDominio("entrada_invalida", { cause: "stdio exige comando" });
   if (input.transporte === "http" && (typeof input.url !== "string" || !/^https?:\/\//.test(input.url))) throw new ErroDeDominio("entrada_invalida", { cause: "http exige url" });
-  if (input.transporte === "http" && declaracao !== "nao-toca" && !input.url?.startsWith("https://")) throw new ErroDeDominio("http_toca_aprendiz");
+  if (input.transporte === "http" && declaracao !== "nao-toca" && !input.url?.startsWith("https://")) throw new ErroDeDominio("http_toca_dado_pessoal");
   // definido em 2026-09-24 (ADR-048): `nod:` é a marca do conector nativo (mais ambiente e o servidor
   // stdio do próprio nod); quem registra à mão não a usa, nem para ganhar a lista de ambiente dele.
   if (input.transporte === "stdio" && input.comando?.trim().startsWith("nod:")) throw new ErroDeDominio("entrada_invalida", { cause: "comando reservado" });

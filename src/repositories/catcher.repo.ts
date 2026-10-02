@@ -20,7 +20,7 @@ interface Linha {
 const paraRegistro = (l: Linha): RegistroCatcher => ({ id: l.id, turnoId: l.turno_id, tipo: l.tipo, dados: l.dados, em: ms(l.em) });
 
 /**
- * Catcher (Leapy §11): o que o proxy decidiu e o que o executor teria chamado, por turno,
+ * Catcher (Práticas §11): o que o proxy decidiu e o que o executor teria chamado, por turno,
  * visível a toda a equipe em dev (visibility DEFAULT 'equipe' na 0002). `tipo` é snake_case (CHECK).
  */
 export function catcherRepo(conn: Conn, escopo: Escopo) {

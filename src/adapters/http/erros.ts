@@ -23,7 +23,7 @@ const TABELA: Record<CodigoErro, { status: number; mensagem: string }> = {
   fuso_invalido: { status: 400, mensagem: "fuso inválido: use um nome IANA, nunca offset" },
   cron_sem_futuro: { status: 400, mensagem: "a expressão cron não tem próxima execução" },
   sala_tamanho: { status: 400, mensagem: "sala tem de 2 a 6 bots" },
-  http_toca_aprendiz: { status: 400, mensagem: "Use HTTPS para conectar um serviço que acessa dados pessoais" },
+  http_toca_dado_pessoal: { status: 400, mensagem: "Use HTTPS para conectar um serviço que acessa dados pessoais" },
   env_placeholder_chave_nova: { status: 400, mensagem: "placeholder de env só vale para chave já existente" },
   dono_imutavel: { status: 403, mensagem: "o dono do agente não muda" },
   texto_vazio: { status: 400, mensagem: "texto vazio" },

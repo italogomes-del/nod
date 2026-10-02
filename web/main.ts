@@ -583,16 +583,16 @@ function abrirModoAprovacao(el: HTMLElement): void {
 
 /**
  * Entrada (ADR-030). A recusa do Google é UMA mensagem para todos os motivos — o servidor não diz se
- * foi domínio, cadastro ou verificação, e a tela também não, para não contar quem trabalha na Leapy.
+ * foi domínio, cadastro ou verificação, e a tela também não, para não contar a quem está de fora quem tem acesso.
  */
 function renderEntrada(): string {
   const m = entrada.modo;
   const recusa = entrada.recusado
-    ? `<p class="erro" role="alert">Não foi possível entrar com essa conta. Use a sua conta Google da Leapy (@leapy.com.br). Se ela já é da Leapy, peça para ser cadastrada no nod.</p>`
+    ? `<p class="erro" role="alert">Não foi possível entrar com essa conta. Se ela ainda não tem acesso ao nod, peça para ser cadastrada.</p>`
     : "";
   if (!m) return `<section class="tela entrar"><h1>nod</h1><p class="mudo">carregando…</p></section>`;
   if (m.modo === "google") {
-    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google da Leapy.</p>${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a></section>`;
+    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google.</p>${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a></section>`;
   }
   const pessoas = m.pessoas.length
     ? m.pessoas.map((p, i) => botao("entrar", `Entrar como ${esc(p.nome)}`, { classe: i === 0 ? "pri" : undefined, dados: { pessoa: p.id } })).join(" ")

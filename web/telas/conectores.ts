@@ -63,7 +63,7 @@ export function renderConectores(estado: Estado): string {
         .flatMap((a) => (estado.concessoes[a.id] ?? []).filter((g) => g.conectorId === c.id).map((g) => `<li>${avatarAgente(a, "sm")} ${esc(a.nome)} · <code>${esc(g.capacidade)}</code> ${botao("revogar", "revogar", { classe: "sm", id: g.id, dados: { agente: a.id } })}</li>`))
         .join("");
       return `<li class="conector" data-conector="${esc(c.id)}">
-        <div class="cn-cab"><b>${esc(c.nome)}</b> <code>${esc(c.slug)}</code> <span class="tag">${esc(c.transporte)}</span> <span class="tag ${c.habilitado ? "tag-ok" : "tag-cinza"}">${c.habilitado ? "habilitado" : "desabilitado"}</span> <span class="tag ${c.declaracao === "nao-toca" ? "tag-cinza" : "tag-ambar"}">${esc(c.declaracao === "nao-toca" ? "não toca dado de aprendiz" : c.declaracao === "toca" ? "toca dado de aprendiz" : "não declarou = toca")}</span>${c.sondadoEm ? `<span class="mudo">sondado ${hora(c.sondadoEm)}</span>` : ""}</div>
+        <div class="cn-cab"><b>${esc(c.nome)}</b> <code>${esc(c.slug)}</code> <span class="tag">${esc(c.transporte)}</span> <span class="tag ${c.habilitado ? "tag-ok" : "tag-cinza"}">${c.habilitado ? "habilitado" : "desabilitado"}</span> <span class="tag ${c.declaracao === "nao-toca" ? "tag-cinza" : "tag-ambar"}">${esc(c.declaracao === "nao-toca" ? "não toca dado pessoal" : c.declaracao === "toca" ? "toca dado pessoal" : "não declarou = toca")}</span>${c.sondadoEm ? `<span class="mudo">sondado ${hora(c.sondadoEm)}</span>` : ""}</div>
         <div class="mudo">${nativo(c) ? "conector do próprio nod · o jeito de conectar é escolhido sozinho (gh desta máquina, token, Composio)" : esc(c.transporte === "stdio" ? `${c.comando ?? ""} ${c.args.join(" ")}` : (c.url ?? ""))} · env: ${esc(Object.keys(c.env).join(", ") || "—")} (valores só no servidor)</div>
         ${falha}
         ${catalogo}
@@ -91,7 +91,7 @@ export function renderConectores(estado: Estado): string {
         <label>Args (um por linha) <textarea name="args" rows="2" placeholder="scripts/mcp-exemplo.mjs"></textarea></label>
         <label>URL (http) <input name="url" placeholder="http://127.0.0.1:1234/mcp" /></label>
         <label>Credenciais (JSON: env no stdio, headers no HTTP; cifradas) <textarea name="env" rows="2" placeholder='{"TOKEN":"…"}'></textarea></label>
-        <label>Declaração <select name="declaracao"><option value="nao-toca">não toca dado de aprendiz</option><option value="toca">toca dado de aprendiz</option><option value="nao-declarou">não declaro (= toca)</option></select></label>
+        <label>Declaração <select name="declaracao"><option value="nao-toca">não toca dado pessoal</option><option value="toca">toca dado pessoal</option><option value="nao-declarou">não declaro (= toca)</option></select></label>
         <button class="bt pri" type="submit" data-act="registrar-conector">Registrar (nasce desabilitado)</button>
       </form>
     </details>

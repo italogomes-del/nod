@@ -14,7 +14,7 @@ ALTER TABLE composio_configuracoes FORCE ROW LEVEL SECURITY;
 ALTER TABLE composio_configuracoes ADD CONSTRAINT composio_configuracoes_visibility_check CHECK (visibility = 'equipe');
 
 -- A 0004 dá UPDATE só para a dona ('equipe' abre LEITURA). Sem esta policy, quem cadastrou a chave
--- é a única que a troca — e ao sair da Leapy a troca passaria a exigir nod_dono (ADR-041 §2).
+-- é a única que a troca — e se ela sair do nod a troca passaria a exigir nod_dono (ADR-041 §2).
 -- Mesma forma da nod_decisora (0003): PERMISSIVE, só FOR UPDATE, USING e WITH CHECK pela MESMA
 -- perna (o tenant da sessão), com a RESTRICTIVE nod_tenant continuando conjuntiva. INSERT segue da
 -- dona — o UNIQUE (tenant_id) já garante uma linha por tenant — e DELETE também, para que apagar a

@@ -9,11 +9,11 @@ it("Claude e Codex recebem todas as capacidades de programação do mesmo plano"
   const plano = planoHarness();
   plano.catalogo.ferramentas = Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({
     nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null,
-    readOnlyHint: false, tocaAprendiz: true, schema,
+    readOnlyHint: false, tocaDadoPessoal: true, schema,
   }));
   plano.catalogo.ferramentas.push(...Object.entries(FERRAMENTAS_WORKSPACE).map(([nome, schema]) => ({
     nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "workspace" as const, conectorId: null,
-    readOnlyHint: false, tocaAprendiz: true, schema,
+    readOnlyHint: false, tocaDadoPessoal: true, schema,
   })));
   const claude = montarArgs({ plano, mcpJson: "/tmp/mcp.json" }).args;
   const permitidas = claude[claude.indexOf("--allowedTools") + 1]!.split(",");

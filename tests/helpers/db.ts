@@ -8,7 +8,7 @@ import type { Db } from "../../src/shared/types.ts";
  * (tests/conformidade/rls.test.ts assere rolbypassrls = false).
  *
  * max: 4 — não aperte: transações concorrentes enfileiradas deixam os testes de concorrência
- * verdes provando nada (Leapy §13).
+ * verdes provando nada (Práticas §13).
  *
  * LINHA DE BASE — medido em 2026-09-16: `/usr/bin/time -p npm run test:integration` = 2,44 s de
  * parede (user 6,13 s, sys 1,61 s), 27 testes em 8 arquivos, vitest "Duration 1.38s", Postgres 16

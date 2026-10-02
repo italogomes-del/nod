@@ -3,12 +3,12 @@ import { expect, it } from "vitest";
 import { REGRA_APROVACAO_PERMANENTE, VERSAO_APROVACAO_PERMANENTE } from "../../src/domain/aprovacao-permanente.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const PRAZO = 24 * 60 * 60 * 1000;
 
 describeIntegracao("aprovação resolvida por regra (ADR-042)", () => {

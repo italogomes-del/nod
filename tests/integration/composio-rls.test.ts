@@ -1,13 +1,13 @@
 import { expect, it } from "vitest";
 import { criarRepos } from "../../src/repositories/index.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 
-const marlon = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ana = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const marlon = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ana = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 
 /**
  * revisto em 2026-09-21 (ADR-041): até aqui este arquivo provava o oposto — "credenciais Composio

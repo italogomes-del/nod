@@ -1,4 +1,4 @@
-// Fronteiras de camada por glob de DIRETÓRIO (herdado da Leapy, docs/inherited-from-leapy.md §3).
+// Fronteiras de camada por glob de DIRETÓRIO (herdado, docs/praticas-herdadas.md §3).
 // O tsconfig.domain.json guarda a PUREZA (sem Node, sem DOM); este arquivo guarda a DIREÇÃO
 // entre camadas. Cada mensagem ensina o caminho certo, não só proíbe.
 // Mover um diretório sem atualizar este arquivo desliga a fronteira em silêncio (risco aceito, ADR-018).
@@ -57,7 +57,7 @@ export default tseslint.config(
   fronteira(
     ["src/repositories/**/*.ts"],
     ["**/use-cases/**", "**/adapters/**", "**/services/**"],
-    "repositório só conhece Conn e escopo: quem orquestra é o caso de uso (Leapy §1).",
+    "repositório só conhece Conn e escopo: quem orquestra é o caso de uso (Práticas §1).",
   ),
   fronteira(
     ["src/services/**/*.ts"],
@@ -124,11 +124,11 @@ export default tseslint.config(
         "error",
         {
           selector: "TemplateElement[value.raw=/\\b(DELETE\\s+FROM|TRUNCATE)\\b/i]",
-          message: "teste de integração usa withRollback, nunca limpa tabela; só tests/concurrency tem limpeza própria (Leapy §O que não trazer).",
+          message: "teste de integração usa withRollback, nunca limpa tabela; só tests/concurrency tem limpeza própria (Práticas §O que não trazer).",
         },
         {
           selector: "Literal[value=/\\b(DELETE\\s+FROM|TRUNCATE)\\b/i]",
-          message: "teste de integração usa withRollback, nunca limpa tabela; só tests/concurrency tem limpeza própria (Leapy §O que não trazer).",
+          message: "teste de integração usa withRollback, nunca limpa tabela; só tests/concurrency tem limpeza própria (Práticas §O que não trazer).",
         },
       ],
     },

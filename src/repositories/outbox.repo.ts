@@ -48,7 +48,7 @@ export function outboxRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * Abandona só com as DUAS condições (Leapy §7): tentativas >= teto E criado_em < agora - idadeMin.
+     * Abandona só com as DUAS condições (Práticas §7): tentativas >= teto E criado_em < agora - idadeMin.
      * Só o teto esvaziaria a fila numa queda curta; só a idade nunca abandonaria a linha envenenada.
      * Devolve quantas linhas abandonou; elas ficam na tabela para serem contadas (métrica outbox_abandonados).
      */

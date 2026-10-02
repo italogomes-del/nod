@@ -4,11 +4,11 @@ import { criarRepos } from "../../../src/repositories/index.ts";
 import { LEASE_MS } from "../../../src/shared/constantes.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa } from "../../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const MAQUINA = randomUUID();
 const base = (conversaId: string, agenteId: string, extra: Partial<Parameters<ReturnType<typeof criarRepos>["turnos"]["enfileirar"]>[0]> = {}) => ({
   conversaId,

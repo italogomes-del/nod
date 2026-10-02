@@ -5,7 +5,7 @@ import { comporApp, type App } from "../../src/adapters/http/compor.ts";
 import type { ChaveEmitidaDto, ChaveMaquinaDto } from "../../src/contracts/api.ts";
 import { abrirTxEscopada } from "../../src/db/tx.ts";
 import { db } from "../helpers/db.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { cunharCookie } from "../../src/adapters/http/sessao.ts";
@@ -20,8 +20,8 @@ describeIntegracao("chaves de máquina: emitir, listar, validar, revogar (HTTP r
   let app: App;
   let srv: ServidorDeTeste;
   const SEGREDO = "segredo-de-teste";
-  const dona = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
-  const outra = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+  const dona = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
+  const outra = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
   const sessao = (e: typeof dona) => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO)}`, tenantId: e.tenantId });
   const criadas: { escopo: typeof dona; id: string }[] = [];
 
@@ -104,6 +104,6 @@ describeIntegracao("chaves de máquina: emitir, listar, validar, revogar (HTTP r
     const r = await srv.chamar(sessao(dona), "POST", "maquinas/chaves", { nome: "   " });
     expect(r.status).toBe(400);
     expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
-    expect((await fetch(`${srv.url}/api/t/${TENANT_LEAPY}/maquinas/chaves`)).status).toBe(401);
+    expect((await fetch(`${srv.url}/api/t/${TENANT_PADRAO}/maquinas/chaves`)).status).toBe(401);
   });
 });

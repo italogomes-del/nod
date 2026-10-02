@@ -4,7 +4,7 @@ import { comporApp, type App } from "../../src/adapters/http/compor.ts";
 import { ROTAS } from "../../src/contracts/api.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { db } from "../helpers/db.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { planoDeTeste } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
@@ -42,7 +42,7 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
   });
 
   it("sessão ausente → 401; tenant da URL ≠ sessão → 404; sessão válida chega ao handler composto", async () => {
-    expect((await fetch(`${srv.url}/api/t/${TENANT_LEAPY}/frota`)).status).toBe(401);
+    expect((await fetch(`${srv.url}/api/t/${TENANT_PADRAO}/frota`)).status).toBe(401);
     expect((await fetch(`${srv.url}/api/t/${UUID}/frota`, { headers: { cookie: marlon.cookie } })).status).toBe(404);
     const frota = await srv.chamar(marlon, "GET", "frota");
     expect(frota.status).toBe(200);
@@ -80,16 +80,16 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
   it("rota interna: a identidade vem do TOKEN; `remetente` no corpo é ignorado (ADR-024)", async () => {
     const turnoId = randomUUID();
     const agenteId = randomUUID();
-    const token = app.tokens.cunhar(turnoId, { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, agenteId });
+    const token = app.tokens.cunhar(turnoId, { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON, agenteId });
     app.tokens.guardarPlano(
       planoDeTeste({
-        tenantId: TENANT_LEAPY,
+        tenantId: TENANT_PADRAO,
         turnoId,
         agenteId,
         conversaId: UUID,
         tokenDeTurno: token,
         expiraEm: Date.now() + 60_000,
-        catalogo: { ferramentas: [{ nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD.lembrar }], servidores: [] },
+        catalogo: { ferramentas: [{ nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.lembrar }], servidores: [] },
       }),
     );
     // O agente do token não existe no banco: o caso de uso responde nao_encontrado (404) — e não 500, nem

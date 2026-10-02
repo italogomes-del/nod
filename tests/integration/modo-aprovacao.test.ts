@@ -7,7 +7,7 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
 import { mudarModoAprovacao } from "../../src/use-cases/mudar-modo-aprovacao.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -17,13 +17,13 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * é decidido com o modo ATUAL do agente — automático roda o que muda algo e para no arriscado, na credencial e
  * depois da web; total só para na credencial.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];
 
 function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }): PlanoTurno {
   return {
-    tenantId: TENANT_LEAPY, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
+    tenantId: TENANT_PADRAO, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada: "confiavel", profundidade: 0,
     catalogo: { ferramentas: [], servidores: [] }, promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" },
     politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false }, semprePermitir: [], tokenDeTurno: "tok",

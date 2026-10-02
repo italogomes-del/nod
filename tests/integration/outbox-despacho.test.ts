@@ -12,11 +12,11 @@ import type { Tx } from "../../src/shared/types.ts";
 import { db } from "../helpers/db.ts";
 import { withRollbackDono } from "../helpers/db-dono.ts";
 import { agenteComConversa, autoriaAgente } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const AGORA = Date.UTC(2026, 8, 16, 12, 0, 0);
 
 function coletor(barramento: Barramento, pessoaId: string): FrameSse[] {
@@ -34,7 +34,7 @@ async function eventoDeMensagem(trx: Tx): Promise<{ eventoId: string; conversaId
 }
 
 /**
- * ADR-010 refinado / Leapy §7: o evento gravado na tx do domínio sai como frame da PESSOA de destino;
+ * ADR-010 refinado / Práticas §7: o evento gravado na tx do domínio sai como frame da PESSOA de destino;
  * falha ao publicar incrementa; cancelado (Parar) não sai; abandono só com as DUAS condições, contado
  * na métrica. A unidade exercitada é despacharPessoa sobre o trx do withRollback — o laço
  * (iniciarDespachanteOutbox) abre a própria tx por pessoa e é provado à parte, sem linhas.
@@ -115,8 +115,8 @@ describeIntegracao("outbox → barramento (despachante)", () => {
       const quebrado: Barramento = { ...barramento, publicar: () => { throw new Error("fora"); } };
       const r = await despacharPessoa(trx, MARLON, quebrado, { metricas, agora: () => AGORA });
       expect(r).toMatchObject({ abandonadosAgora: 1 });
-      expect(metricas.ler({ metrica: "outbox_abandonados", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_MARLON })).toBe(1);
-      expect(metricas.renderizarPrometheus()).toContain(`nod_outbox_abandonados{pessoa_id="${PESSOA_MARLON}",tenant_id="${TENANT_LEAPY}"} 1`);
+      expect(metricas.ler({ metrica: "outbox_abandonados", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(1);
+      expect(metricas.renderizarPrometheus()).toContain(`nod_outbox_abandonados{pessoa_id="${PESSOA_MARLON}",tenant_id="${TENANT_PADRAO}"} 1`);
       const repos = criarRepos(trx, MARLON);
       expect((await repos.outbox.pendentes()).map((p) => p.id).sort()).toEqual([soTeto, soIdade].sort());
       expect(await trx`select count(*)::int as n from events_outbox where id = ${ambas} and abandonado_em is not null`).toEqual([{ n: 1 }]);
@@ -130,9 +130,9 @@ describeIntegracao("outbox → barramento (despachante)", () => {
 
   it("o laço abre uma tx REAL por pessoa (paraCadaPessoa sobre o pool), roda passadas e para limpo", async () => {
     await withRollbackDono(async (trxDono) => {
-      await trxDono`insert into tenants (id, nome) values (${TENANT_LEAPY}, 'Leapy') on conflict do nothing`;
+      await trxDono`insert into tenants (id, nome) values (${TENANT_PADRAO}, 'Nod') on conflict do nothing`;
       await trxDono`insert into pessoas (tenant_id, id, nome, iniciais) values
-        (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'Marlon', 'MW'), (${TENANT_LEAPY}, ${PESSOA_ANA}, 'Ana', 'AN') on conflict do nothing`;
+        (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'Marlon', 'MW'), (${TENANT_PADRAO}, ${PESSOA_ANA}, 'Ana', 'AN') on conflict do nothing`;
       const nossas = new Set([PESSOA_MARLON, PESSOA_ANA]);
       const metricas = criarMetricas();
       const falhas: string[] = [];
@@ -147,10 +147,10 @@ describeIntegracao("outbox → barramento (despachante)", () => {
       await laco.parar();
       expect(falhas).toEqual([]);
       // A primeira passada coleta os gauges por pessoa (sem linhas commitadas: 0) e o custo por tenant (0 por construção).
-      expect(metricas.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_MARLON })).toBe(0);
-      expect(metricas.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_ANA })).toBe(0);
-      expect(metricas.ler({ metrica: "custo_servidor_mes", tenant_id: TENANT_LEAPY })).toBe(0);
-      expect(metricas.ler({ metrica: "outbox_abandonados", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_MARLON })).toBeDefined();
+      expect(metricas.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(0);
+      expect(metricas.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_ANA })).toBe(0);
+      expect(metricas.ler({ metrica: "custo_servidor_mes", tenant_id: TENANT_PADRAO })).toBe(0);
+      expect(metricas.ler({ metrica: "outbox_abandonados", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBeDefined();
       // Depois de parar nenhuma conexão do pool carrega pessoa (a tx por pessoa morreu com o escopo).
       const [fora] = await db<{ p: string | null }[]>`select current_setting('nod.pessoa_id', true) as p`;
       expect(fora?.p ?? "").toBe("");

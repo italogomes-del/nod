@@ -5,12 +5,12 @@ import type { FerramentaPlano } from "../../src/contracts/plano-turno.ts";
 import { chamarFerramenta } from "../../src/use-cases/chamar-ferramenta.ts";
 import { REGRA_PARADA_ALCADA } from "../../src/use-cases/registrar-negacao.ts";
 import { agenteComConversa, autoriaAgente } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, planoDeTeste, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const hoje = () => new Date().toISOString().slice(0, 10);
 
 /**
@@ -30,8 +30,8 @@ describeIntegracao("trilha de negações com filtro dia/agente/conector", () => 
       const turnoA = await repos.turnos.enfileirar({ conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const turnoB = await repos.turnos.enfileirar({ conversaId: b.conversaId, agenteId: b.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const deps = depsSobre(repos, MARLON, { services: servicosDeTeste(), trx });
-      const enviar: FerramentaPlano = { nome: "exemplo__enviar", nomeMcp: "mcp__nod__exemplo__enviar", origem: "conector", conectorId, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } };
-      const lembrar: FerramentaPlano = { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD.lembrar };
+      const enviar: FerramentaPlano = { nome: "exemplo__enviar", nomeMcp: "mcp__nod__exemplo__enviar", origem: "conector", conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } };
+      const lembrar: FerramentaPlano = { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.lembrar };
       const maquina = randomUUID();
       const planoDe = (turnoId: string, agenteId: string, conversaId: string) =>
         planoDeTeste({

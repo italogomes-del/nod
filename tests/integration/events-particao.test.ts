@@ -3,11 +3,11 @@ import { expect, it } from "vitest";
 import type { Autoria } from "../../src/contracts/evento.ts";
 import { eventsRepo } from "../../src/repositories/events.repo.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 // Tipada pelo contrato: locality_reason é MotivoLocalidade (coluna enum desde a 0003).
 const autoria: Autoria = {

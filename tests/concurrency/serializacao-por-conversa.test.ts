@@ -4,7 +4,7 @@ import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { db } from "../helpers/db.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
@@ -15,7 +15,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  */
 // Pessoa PRÓPRIA deste arquivo (uuid aleatório, sem linha em pessoas — não há FK): a fila de turnos é
 // por pessoa, então dois arquivos de concurrency nunca disputam as mesmas linhas, rode o vitest como rodar.
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const criados = { agentes: [] as string[], conversas: [] as string[], turnos: [] as string[] };
 
 async function escopado<T>(fn: (trx: Tx) => Promise<T>): Promise<T> {

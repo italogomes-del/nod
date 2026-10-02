@@ -12,7 +12,7 @@ import { verColegas } from "../../src/use-cases/ver-colegas.ts";
 import { FERRAMENTAS_NOD_POR_MODO } from "../../src/domain/plano-turno.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
@@ -22,7 +22,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * cinco vezes. Aqui ela vê as colegas pelo nod, propõe o perfil com as rotinas num card só, e pausa as
  * rotinas delas quando a pessoa pede.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const AGORA = Date.parse("2026-09-28T10:48:00-03:00");
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome.toLowerCase(), schema: { type: "object" }, readOnlyHint });
 const RESUMO_DA_MANHA = { cron: "0 8 * * 1-5", fuso_iana: "America/Sao_Paulo", instrucao: "Resumo da manhã: e-mails novos e ToDos do dia", fonte: "Gmail e ClickUp do Marlon", entregavel: "mensagem nesta conversa", limites_aprovacao: "sem ações externas", politica_sem_dado: "dizer que não há novidade" };
@@ -30,7 +30,7 @@ const EMAILS_A_TARDE = { ...RESUMO_DA_MANHA, cron: "0 13,18 * * 1-5", instrucao:
 
 function plano(confiancaEntrada: PlanoTurno["confiancaEntrada"]): PlanoTurno {
   return {
-    tenantId: TENANT_LEAPY, turnoId: "t", conversaId: "c", agenteId: "a", localidade: "local", machineId: "m", executor: "catcher", superficie: "maquina_da_pessoa",
+    tenantId: TENANT_PADRAO, turnoId: "t", conversaId: "c", agenteId: "a", localidade: "local", machineId: "m", executor: "catcher", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada, profundidade: 0, catalogo: { ferramentas: [], servidores: [] },
     promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" }, politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000, efeitoExternoSoPorAprovacao: false }, semprePermitir: [], tokenDeTurno: "tok", expiraEm: AGORA + 60_000,
   };

@@ -2,7 +2,7 @@ import type { Conn } from "../../src/shared/types.ts";
 
 /**
  * O gate de RLS lê o CATÁLOGO (pg_class, pg_policies, pg_inherits), nunca arquivos de migração
- * (Leapy §4). Toda tabela ou cumpre a regra ou está em EXCECOES com motivo ESCRITO.
+ * (Práticas §4). Toda tabela ou cumpre a regra ou está em EXCECOES com motivo ESCRITO.
  * Vive fora do *.test.ts para o teste NEGATIVO (rls-negativo) poder chamá-lo na mesma transação
  * em que cria uma tabela desguardada.
  *
@@ -14,8 +14,8 @@ import type { Conn } from "../../src/shared/types.ts";
  */
 export const EXCECOES: Record<string, string> = {
   schema_migrations: "controle do runner de migração; só nod_dono toca; sem tenant_id",
-  tenants: "catálogo de identidade sem dado de aprendiz; lido para enumerar donos dos laços de fundo",
-  pessoas: "catálogo de identidade sem dado de aprendiz; lido para enumerar donos dos laços de fundo",
+  tenants: "catálogo de identidade sem dado pessoal; lido para enumerar donos dos laços de fundo",
+  pessoas: "catálogo de identidade sem dado pessoal; lido para enumerar donos dos laços de fundo",
 };
 
 /**
