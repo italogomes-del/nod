@@ -12,7 +12,7 @@ Só o critério de agrupamento. A policy de duas pernas deixa de ser sobre tenan
 
 ## Por quê
 
-Este ADR já se chamava 'lê por PESSOA' — estava certo por antecipação e a premissa nova só tirou o ruído de tenant que o cercava. Uma frente escreveu um ADR NOVO inteiro, com quatro alternativas rejeitadas, para chegar onde este ADR já estava. Era uma emenda de um parágrafo. E a alternativa 'consultar com role privilegiado e filtrar na aplicação' fica MAIS perigosa agora: a fila é a única tela onde o trabalho de 19 pessoas legitimamente se mistura, é a tela de abertura, e é onde um bug de filtro expõe conversa privada de colega.
+Este ADR já se chamava 'lê por PESSOA' — estava certo por antecipação e a premissa nova só tirou o ruído de tenant que o cercava. Uma frente escreveu um ADR NOVO inteiro, com quatro alternativas rejeitadas, para chegar onde este ADR já estava. Era uma emenda de um parágrafo. E a alternativa 'consultar com role privilegiado e filtrar na aplicação' fica MAIS perigosa agora: a fila é a única tela onde o trabalho do time inteiro legitimamente se mistura, é a tela de abertura, e é onde um bug de filtro expõe conversa privada de colega.
 
 ## Refinamento (2026-09-16, 0003 e 0004 — a decisora decide, não apaga)
 

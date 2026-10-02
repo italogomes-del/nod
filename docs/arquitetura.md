@@ -1,6 +1,6 @@
 # Arquitetura do nod
 
-Ferramenta interna da Leapy. Um servidor Node (Postgres com RLS em duas camadas) emite
+Um servidor Node (Postgres com RLS em duas camadas) emite
 **planos de turno**; o app local **puxa** o trabalho e roda o CLI do fornecedor atrás de um
 **proxy MCP**, que é o ponto de decisão do produto. Fonte: `AGENTS.md`, `docs/adr/`,
 `src/adapters/http/compor.ts` e `boot.ts`.

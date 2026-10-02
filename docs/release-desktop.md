@@ -17,7 +17,7 @@ Medido em 2026-09-17, nesta candidata: `npm ci`, `npm run check` (684 testes: 37
 ## Preparar o servidor
 
 1. Disponibilize Postgres com os roles e todas as migrações 0001–0012 desta versão. Migre como `nod_dono`; execute a aplicação como `nod_app`.
-2. Cadastre os colaboradores na allowlist de pessoas, incluindo seus emails. O login Google não cria pessoas automaticamente.
+2. Cadastre as pessoas na allowlist, incluindo seus emails (`NOD_SEED_EMAIL` para o dono no seed). O login Google não cria pessoas automaticamente.
 3. Configure um domínio HTTPS e o cliente OAuth Google, com callback `https://SEU-DOMINIO/api/sessao/google/callback`.
 4. Gere segredos próprios para sessão e cifra, conforme `.env.example`. Configure `DATABASE_URL`, `DATABASE_URL_DONO`, `NOD_LOGIN=google`, `NOD_GOOGLE_CLIENT_ID`, `NOD_GOOGLE_CLIENT_SECRET`, `NOD_GOOGLE_REDIRECT_URI`, `NOD_SESSAO_SEGREDO` e `NOD_CREDENTIAL_KEY`.
 5. Use `NOD_MODO=compartilhado`. Na imagem Docker este é o padrão; o Dockerfile já compila e serve a web. Fora de Docker: `npm run build`, `NOD_STATIC_DIR=dist/web`. Defina `NOD_HOST=0.0.0.0` dentro do container e encaminhe 8888 pelo proxy HTTPS.
@@ -64,7 +64,7 @@ Configure estes secrets do GitHub, sem colocá-los no repositório:
 
 `npm run desktop:mac` exige as variáveis equivalentes `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` e assinatura válida. Não publica automaticamente. Confirme instalação, conexão ao servidor e um turno real em um Mac Intel e outro com chip M antes de publicar o rascunho. A assinatura/notarização e esse aceite não foram realizados neste ambiente.
 
-A página da release fornece os dois DMGs e SHA-256. Os colaboradores precisam ter acesso ao repositório se ele for privado. Não há atualização automática: o servidor anuncia a versão mínima e o app exige uma atualização quando necessário.
+A página da release fornece os dois DMGs e SHA-256. Quem instala precisa ter acesso ao repositório se ele for privado. Não há atualização automática: o servidor anuncia a versão mínima e o app exige uma atualização quando necessário.
 
 ## Contratos e limites desta etapa
 

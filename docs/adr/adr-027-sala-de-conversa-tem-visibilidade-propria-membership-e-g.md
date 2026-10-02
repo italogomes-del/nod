@@ -18,7 +18,7 @@ Produz sala onde o dono de um bot membro não pode ler o que o próprio bot diss
 
 ### Sala nasce pública para o workspace
 
-Inverte o ADR-003 num objeto que vai carregar conversa sobre aprendiz. Default privado não é negociável.
+Inverte o ADR-003 num objeto que vai carregar conversa sobre clientes. Default privado não é negociável.
 
 ## Evidência
 

@@ -10,7 +10,7 @@ para o "porquê" de cada jornada.
 
 Print de um app de chat no estilo do OpenMausBot / Grok Bot, com **bots como contatos** na barra
 lateral, agrupados por time (Produto & Engenharia, QA, Dev 1–7, Organização, ClickUp, Marketplace).
-Rotinas na coluna da direita ("Dev Prod idle check", "Resumo semanal Leapy — toda segunda").
+Rotinas na coluna da direita ("Dev Prod idle check", "Resumo semanal Acme — toda segunda").
 
 O que a conversa mostra (o cenário que o dono diz ter vivido "o tempo todo"):
 
@@ -18,7 +18,7 @@ O que a conversa mostra (o cenário que o dono diz ter vivido "o tempo todo"):
 - **O Marola, para responder, NÃO responde sozinho — ele aciona dois bots:** *Ressaca* e *Review*
   (aparecem `→ Ressaca`, `→ Review` e @menções ao longo do fio).
 - **Ressaca responde** confirmando o merge do #399 (~14:35 UTC), aponta um **Workflow**
-  (`leapy-releases`) que falhou nas migrations 0124→0126 e num script de reclassificação, e
+  (`acme-releases`) que falhou nas migrations 0124→0126 e num script de reclassificação, e
   **pergunta de volta** se deve rodar o release de novo.
 - **Review responde** sobre outro PR (#409): squash merge, approve bloqueada, etc.
 - O Marola sintetiza e devolve à pessoa.

@@ -11,12 +11,12 @@ Primeira tentativa. Cinco telas: conversa, pendências, contexto, rotina, regist
 
 **Por que caiu:** tratava o agente como interlocutor individual e não modelava nada do que acontece de verdade — nem agentes conversando entre si, nem canais com pessoas. O print da operação real mostrou *"5 mensagens com 3 Bots"* e *"Enviou mensagem para Taga"*: existia uma organização de agentes que o desenho ignorava.
 
-**O que sobreviveu:** aprovação como lista tipada com checkbox, item de aprendiz desmarcado por padrão, silêncio como estado renderizado.
+**O que sobreviveu:** aprovação como lista tipada com checkbox, item com dado pessoal desmarcado por padrão, silêncio como estado renderizado.
 
 ## v2 — Lista única
 [`v2-single-list.html`](v2-single-list.html)
 
-A tese era abandonar o interlocutor como unidade: uma lista só, onde `#geral` com 19 pessoas e uma cadeia `Taga → Marola → Dev 3` são a mesma coisa.
+A tese era abandonar o interlocutor como unidade: uma lista só, onde `#geral` com o time inteiro e uma cadeia `Taga → Marola → Dev 3` são a mesma coisa.
 
 **Por que caiu:** elegante no papel, ilegível no uso. Com 8 canais, 20+ DMs e 12 agentes, misturar tudo numa lista não é fusão — é sumiço.
 

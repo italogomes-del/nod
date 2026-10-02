@@ -28,7 +28,7 @@ Os mockups aprovados estão nas páginas "Links nas mensagens" e "Tabelas nas me
    - Sem https, o globo dá lugar a um cadeado aberto. `localhost` ganha o ícone de computador.
 3. **`[nome](link)` fica na frase.**
    - Link de app ganha o ícone do app antes do nome. Link de site comum mostra o domínio ao lado.
-   - **Nome que parece endereço** (`github.com/leapy`, `https://…`) não vale, porque quem lê acredita nele. Nesse caso aparece o chip do destino real.
+   - **Nome que parece endereço** (`github.com/acme`, `https://…`) não vale, porque quem lê acredita nele. Nesse caso aparece o chip do destino real.
 4. **Passar o mouse, ou focar com o teclado, mostra o endereço inteiro.** A dica traz o host, o caminho com o que vem depois do `?`, o aviso "sem https" quando for o caso e "Abre no navegador". A dica é um elemento fixo na janela, para não ser cortada dentro de uma tabela que rola.
 5. **O clique abre fora.**
    - No navegador: `target="_blank"` e `rel="noopener noreferrer nofollow"`, então o site não fica sabendo de onde veio.

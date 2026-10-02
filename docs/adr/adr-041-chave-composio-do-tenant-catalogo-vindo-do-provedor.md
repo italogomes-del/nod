@@ -41,7 +41,7 @@ divergiram nos dois sentidos em quatro dias.
 
 A chave deixa de ser de uma pessoa e passa a abrir todas as integrações do tenant. Hoje ela viaja
 cifrada para o `env` do conector MCP (`rotas/marketplace.ts:39-42`): o estrago de um vazamento sai
-de uma pessoa para a Leapy inteira. Aceitamos porque o nod é ferramenta interna de um time pequeno
+de uma pessoa para a organização inteira. Aceitamos porque o nod é ferramenta interna de um time pequeno
 com **uma** conta Composio, e porque a alternativa — cada pessoa colando a própria chave — é
 exatamente o que o pedido de 2026-09-21 recusou.
 

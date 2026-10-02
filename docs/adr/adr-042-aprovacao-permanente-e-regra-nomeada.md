@@ -112,7 +112,7 @@ registrado, habilitado e concedido por uma pessoa; e um conector que mentisse
 `readOnlyHint: true` **já hoje** sobreviveria ao `catalogoReduzido` de um turno não confiável.
 A exposição não é nova — o que é novo é ela ficar alcançável sem clique.
 
-O caso a vigiar é catálogo de terceiros em lote (Composio, marketplace), que ninguém da Leapy
+O caso a vigiar é catálogo de terceiros em lote (Composio, marketplace), que ninguém do time
 escreveu. `probe.ts:66` lê `annotations?.readOnlyHint === true`: ausente ou malformado vira
 `false`, então a falha é para o lado de perguntar.
 
@@ -128,7 +128,7 @@ Reabrir (desligar `regra:aprovacao_permanente` e voltar tudo a pendência) se, m
   deixou de ser "agentes preparam, pessoa decide" e virou automação, que é outro produto e
   precisa de outro ADR.
 - **`pendencia_mais_velha_s` (ADR-017 #1) sem cair em dois meses** com adoção de ao menos 6
-  das 19 pessoas com uma regra ativa. A feature existe para reduzir carga de decisão; se a
+  pessoas com uma regra ativa. A feature existe para reduzir carga de decisão; se a
   carga não cai, ela só transferiu risco.
 
 Reabrir SÓ o escopo (aceitar regra por destino além de por ferramenta) se ao menos 3 pessoas

@@ -14,7 +14,7 @@ O ADR-014 invertido diz que o trabalho do dia roda LOCAL com a assinatura da pes
 
 ### Um único campo de autoria, como hoje
 
-O ADR-004 congela a trilha por trigger. Um campo único registra uma mentira em toda delegação cruzada e a torna permanente. Numa empresa de RH que audita quem tocou dado de aprendiz, evidência que parece forte e não é vale menos que nenhuma evidência.
+O ADR-004 congela a trilha por trigger. Um campo único registra uma mentira em toda delegação cruzada e a torna permanente. Num time que audita quem tocou dado pessoal sensível, evidência que parece forte e não é vale menos que nenhuma evidência.
 
 ### Aprovação no momento da delegação, em vez de procuração prévia
 

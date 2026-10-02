@@ -12,7 +12,7 @@ A chave do buffer: de tenant para pessoa. O contrato de resume é fixado; o dime
 
 ## Por quê
 
-Este é um vazamento REAL no dia 1 do uso interno, não uma questão de SaaS, e duas frentes passaram por ele — uma levantou como 'risco que não estava na pergunta', a outra revisou o ADR-016 e disse 'manter o buffer por tenant exatamente como está', ou seja, manteve o bug. Com um tenant só, buffer por tenant É buffer global, e o frame do seu turno privado entra no replay da Patrícia. O próprio ADR-016 chama o buffer global de 'o buraco mais grave do desenho copiado' e explica: o SSE é o único lugar onde o dado atravessa para fora do servidor, a RLS já ficou para trás, e o buffer retém isso em RAM sem aparecer em nenhum inventário e sem ser apagável por pedido de exclusão.
+Este é um vazamento REAL no dia 1 do uso interno, não uma questão de SaaS, e duas frentes passaram por ele — uma levantou como 'risco que não estava na pergunta', a outra revisou o ADR-016 e disse 'manter o buffer por tenant exatamente como está', ou seja, manteve o bug. Com um tenant só, buffer por tenant É buffer global, e o frame do seu turno privado entra no replay da colega. O próprio ADR-016 chama o buffer global de 'o buraco mais grave do desenho copiado' e explica: o SSE é o único lugar onde o dado atravessa para fora do servidor, a RLS já ficou para trás, e o buffer retém isso em RAM sem aparecer em nenhum inventário e sem ser apagável por pedido de exclusão.
 
 
 ## Refinamento (2026-09-16, L9 — o frame diz o que mudou, a web reidrata)

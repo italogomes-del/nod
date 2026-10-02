@@ -15,7 +15,7 @@ Duas pastas, um tsconfig, três regras de fronteira.
 A pergunta 'o pacote único sobrevive?' tem resposta verificada no repo de referência e é sim: o openmausbot TEM pnpm-workspace.yaml, lista só três packages, e electron/ não é um deles — é pasta do pacote raiz. O repo que tinha a ferramenta escolheu não usá-la para o app desktop. A regra 'desktop/ nunca importa db/' é a peça mais valiosa e a mais barata: transforma a sua decisão (o app não embute o servidor) de intenção em invariante do compilador. Sem ela a erosão tem nome no openmausbot: electron/main.mjs tem 2.647 linhas e uma bifurcação de boot onde, dependendo do modo, sobe um servidor embutido ou aponta para um remoto. Foi assim que um cliente fino virou dois harnesses para versionar e auditar.
 
 
-## Refinamentos (2026-09-16, fundação da Leapy)
+## Refinamentos (2026-09-16, fundação)
 
 - **Guarda composta.** O `tsconfig.domain.json` (sem `@types/node`, sem lib DOM) prova a PUREZA de `src/domain/` — `scripts/prove-domain-fence.sh` é o teste negativo (node:fs não compila). Nenhum tsconfig diz "use-cases não importa repositories": a DIREÇÃO entre camadas é do `eslint.config.mjs`, por glob de diretório, com mensagem que ensina o caminho — e `tests/conformidade/fronteiras.test.ts` prova cada bloco programaticamente. A pureza é propriedade do DIRETÓRIO `src/domain/`, não do pacote.
 - **Quatro peças impraticáveis de retroagir** entraram no primeiro commit: factories de repositório tipadas `Conn = Db | Tx` (zero `as unknown as`), `no-console: error` sem allow (único disable em `src/obs/log.ts`), proibição de `DELETE FROM`/`TRUNCATE` em teste fora de `tests/concurrency`, runtime pinado em `.mise.toml`.

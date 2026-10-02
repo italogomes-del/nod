@@ -36,7 +36,7 @@ shell/arquivo sob aprovação — a metade de maior valor e menor risco topológ
 
 - **Objetivo:** substituir o stub de cookie de dev por login de verdade, para que opt-ins e autoria
   sejam reais.
-- **Escopo:** login Google Workspace restrito a `leapy.com.br`; emissão do **token de máquina**
+- **Escopo:** login Google Workspace restrito ao domínio da organização; emissão do **token de máquina**
   guardado no Keychain (servidor guarda só o SHA-256); liberar `NOD_HOST` fora de 127.0.0.1.
 - **ADRs:** completa o que ADR-019/ADR-021 já assumiam (hoje é stub). Não é reversão.
 - **Depende de:** nada.

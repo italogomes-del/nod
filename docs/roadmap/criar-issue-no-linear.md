@@ -11,7 +11,7 @@ esteira automática. Direto, em checklist. Vale para humano e para agente com a 
 
 - [ ] Confirme que a pasta da jornada tem `office-hours.md`.
 - [ ] Procure no projeto **Nod** uma task com o mesmo **ID no título** — se existe, pare (não duplique).
-- [ ] Crie no time **Leapy**, projeto **Nod**, status **Todo**, responsável = a pessoa dona (humano).
+- [ ] Crie no time de chave **LEA**, projeto **Nod**, status **Todo**, responsável = a pessoa dona (humano).
 - [ ] Título: `<ID> — <título da issue>` (sem `[US]`/`[Issue]`).
 - [ ] Labels: exatamente **uma** `jornada-NN` + exatamente **uma** de `trilha` (tabela §3).
 - [ ] Descrição: cópia fiel do bloco da issue, no modelo do §4.
@@ -24,7 +24,7 @@ Crie as tasks **na ordem de dependência** do `issues.md` (a bloqueadora antes d
 
 | Campo | Valor |
 |---|---|
-| Time | **Leapy** (chave LEA) |
+| Time | o time de chave **LEA** (o id `bf0f4cc5-b554-47bc-a70a-03f3847d4c58`) |
 | Projeto | **Nod** |
 | Status | **Todo** — SEMPRE. As automações disparam na *mudança* de status; nunca crie direto em Descoberta/Planejamento/Pronto para Dev/Verificação. |
 | Título | `<ID> — <título da issue>`, igual ao cabeçalho do `issues.md`, sem `[US]`/`[Issue]`. O ID liga a task à issue; o agente da Descoberta procura por ele. |
@@ -68,18 +68,18 @@ Copie o bloco da issue nesta ordem (omita seções que não existem na issue):
 
 ## 5. Exemplo completo — E1.2 (pronta para criar)
 
-- **Título:** `E1.2 — Entrar no nod com minha conta Google da Leapy`
+- **Título:** `E1.2 — Entrar no nod com minha conta Google`
 - **Labels:** `jornada-01`, `produto` (é `[US]`)
 - **Status:** Todo · **Responsável:** dono humano da task
 - **Relação:** *blocked by* `LEA-…` (a task da E1.1)
 - **Descrição:**
 
 ```markdown
-> Como colaborador da Leapy, quero entrar no nod pelo navegador com minha conta Google Workspace
-> (@leapy.com.br), para que minha sessão e minha autoria sejam realmente minhas — não o stub marlon/ana.
+> Como pessoa do time, quero entrar no nod pelo navegador com minha conta Google Workspace
+> (@acme.com.br), para que minha sessão e minha autoria sejam realmente minhas — não o stub marlon/ana.
 
 **Contexto/porquê:** substitui POST /api/sessao/entrar {pessoa} pelo OAuth Google. O callback valida
-hd=leapy.com.br + e-mail verificado, mapeia e-mail → pessoa (E1.1) e cunha o mesmo cookie assinado
+hd=acme.com.br + e-mail verificado, mapeia e-mail → pessoa (E1.1) e cunha o mesmo cookie assinado
 {tenantId, pessoaId} que já existe (cunharCookie).
 
 **Costuras:** src/adapters/http/sessao.ts (novo handler OAuth + callback), roteador.ts (rota pública),
@@ -89,12 +89,12 @@ reusa cunharCookie/lerCookieSessao.
 Não emite token de máquina (E1.3), não abre NOD_HOST (E1.5). O stub marlon/ana coexiste atrás de flag
 até E1.6.
 
-**Aceite = o teste:** tests/integration — callback simulado com e-mail Leapy mapeado cunha cookie
+**Aceite = o teste:** tests/integration — callback simulado com e-mail do domínio mapeado cunha cookie
 válido; e-mail de outro hd → 403; e-mail sem pessoa → 403.
 
 **Depende de:** E1.1.
 
-**Fonte:** docs/roadmap/jornada-01/issues.md#e12--us-entrar-no-nod-com-minha-conta-google-da-leapy
+**Fonte:** docs/roadmap/jornada-01/issues.md#e12--us-entrar-no-nod-com-minha-conta-google
 ```
 
 ## 6. Criando via agente (ferramenta do Linear)
@@ -102,10 +102,10 @@ válido; e-mail de outro hd → 403; e-mail sem pessoa → 403.
 Chamada de criar issue:
 
 ```
-team:        "Leapy"
+team:        "bf0f4cc5-b554-47bc-a70a-03f3847d4c58"   # o time de chave LEA, pelo id
 project:     "Nod"
 state:       "Todo"
-title:       "E1.2 — Entrar no nod com minha conta Google da Leapy"
+title:       "E1.2 — Entrar no nod com minha conta Google"
 description: <o markdown do §4/§5>
 labels:      ["produto", "jornada-01"]      # uma trilha + uma jornada
 assignee:    <a pessoa dona da task>

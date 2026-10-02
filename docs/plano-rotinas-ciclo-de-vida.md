@@ -160,7 +160,7 @@ não como tipo. Três amarras:
 3. Igualdade de conjuntos (:28) — nenhum caso a mais, nenhum a menos.
 - **concurrency/e2e** — jornada: cria → lista → pausa → atualiza → exclui, com `servidor-completo`
   e catcher (custo zero). Excluir durante execução em voo: o turno em curso pode terminar
-  (mesmo limite declarado em ADR-034). `inherited-from-leapy.md` §"O limite do withRollback":
+  (mesmo limite declarado em ADR-034). `praticas-herdadas.md` §"O limite do withRollback":
   invariante de reivindicação de janela (ADR-011, `rotina_janelas`) **só se prova com duas conexões
   reais** — corrida de "excluir enquanto o scheduler reivindica" mora aqui, nunca num envelope de
   rollback.

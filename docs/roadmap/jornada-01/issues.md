@@ -77,14 +77,14 @@ Não é User Story — o entregável é decisão registrada (ADR), não código.
 - **Aceite:** 1-2 ADRs novos (ou emendas) com gatilho de reversão, respondendo (a) e (b).
 - **Depende de:** nada.
 
-### E1.1 — [Issue] Semear e-mail `@leapy.com.br` na identidade (`pessoas.email`)
+### E1.1 — [Issue] Semear e-mail na identidade (`pessoas.email`)
 
 Linear: LEA-8
 
 Enabler de dados/DB — sem valor de usuário isolado.
 
 - **Contexto/porquê:** pré-requisito do mapeamento de E1.2. Adiciona coluna `email` em `pessoas`,
-  migração como `nod_dono`, e semeia os e-mails reais das pessoas Leapy (idempotente, como o resto do
+  migração como `nod_dono`, e semeia os e-mails reais das pessoas do time (idempotente, como o resto do
   seed).
 - **Costuras:** nova migração em `src/db/`; `src/db/seed/index.ts`
   (`insert into pessoas … on conflict`); `tests/conformidade/rls.test.ts` (o gate confere que não
@@ -94,23 +94,23 @@ Enabler de dados/DB — sem valor de usuário isolado.
   `npm run check` (inclui conformidade) verde.
 - **Depende de:** E1.0 (decisão do modelo de mapeamento).
 
-### E1.2 — [US] Entrar no nod com minha conta Google da Leapy
+### E1.2 — [US] Entrar no nod com minha conta Google
 
 Linear: LEA-9
 
-> Como colaborador da Leapy, quero entrar no nod pelo navegador com minha conta Google Workspace
-> (`@leapy.com.br`), para que minha sessão e minha autoria sejam realmente minhas — não o stub
+> Como pessoa do time, quero entrar no nod pelo navegador com minha conta Google Workspace
+> (`@acme.com.br`), para que minha sessão e minha autoria sejam realmente minhas — não o stub
 > `marlon/ana`.
 
 - **Contexto/porquê:** substitui `POST /api/sessao/entrar {pessoa}` pelo OAuth Google. O callback
-  valida `hd=leapy.com.br` + e-mail verificado, mapeia e-mail → `pessoa` (E1.1) e cunha **o mesmo
+  valida `hd=acme.com.br` + e-mail verificado, mapeia e-mail → `pessoa` (E1.1) e cunha **o mesmo
   cookie assinado** `{tenantId, pessoaId}` que já existe (`cunharCookie`).
 - **Costuras:** `src/adapters/http/sessao.ts` (novo handler OAuth + callback), `roteador.ts` (rota
   pública), reusa `cunharCookie`/`lerCookieSessao`.
 - **Escopo/fora:** e-mail de outro domínio ou não-mapeado → 403 (recusa, não provisiona). **Não**
   emite token de máquina (E1.3), **não** abre `NOD_HOST` (E1.5). O stub `marlon/ana` **coexiste atrás
   de flag** até E1.6 (mantém `main` verde e fail-closed).
-- **Aceite:** `tests/integration` — callback simulado com e-mail Leapy mapeado cunha cookie válido;
+- **Aceite:** `tests/integration` — callback simulado com e-mail do domínio mapeado cunha cookie válido;
   e-mail de outro `hd` → 403; e-mail sem `pessoa` → 403.
 - **Depende de:** E1.1.
 
@@ -207,7 +207,7 @@ flowchart LR
 Não é User Story — o entregável é decisão registrada (ADR), não código.
 
 - **Contexto/porquê:** hoje o catálogo do plano só distingue `origem` (`nod`/`conector`),
-  `readOnlyHint` e `tocaAprendiz` (`src/contracts/plano-turno.ts:11`); o `trust` é do **servidor**
+  `readOnlyHint` e `tocaDadoPessoal` (`src/contracts/plano-turno.ts:11`); o `trust` é do **servidor**
   inteiro (`full`/`untrusted`, ADR-026), não da ferramenta. Falta o vocabulário para "alto poder":
   que valores tem o **tier de confiança** por ferramenta? qual o enum de **capacidade** (efeito
   externo, leitura, escrita, shell, desktop)? o **orçamento por ação** é custo, chars de argumento,
@@ -351,7 +351,7 @@ Enabler de política.
 
 ### E3.4 — [US] O bot clona um repo, roda a suíte e me traz os testes vermelhos
 
-> Como colaborador, quero dar "clone `leapy/api`, rode os testes e me diga o que quebrou" e ver o bot
+> Como colaborador, quero dar "clone `acme/api`, rode os testes e me diga o que quebrou" e ver o bot
 > executar ponta-a-ponta, para provar o operador local sob as garantias do nod.
 
 - **Contexto/porquê:** é o **"Pronto quando"** do épico. Prova a cadeia inteira (só-leitura direto +

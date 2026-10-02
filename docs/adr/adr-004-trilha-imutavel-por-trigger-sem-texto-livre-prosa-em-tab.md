@@ -12,7 +12,7 @@ Só o acréscimo de owner_id, que vem do ADR-003.
 
 ## Por quê
 
-O rigor nunca veio do número de clientes. Veio de dois fatos que não mudaram: dados de aprendiz continuam em jogo, e o CHECK é o que impede que prosa entre na trilha. Se prosa entrar durante o uso interno, no dia do SaaS o passivo vai junto e não sai — numa trilha imutável 'limpar' não é DELETE. Uso interno gera MAIS texto informal e MENOS revisão, não menos. Custo de manter: uma linha.
+O rigor nunca veio do número de clientes. Veio de dois fatos que não mudaram: dados pessoais sensíveis continuam em jogo, e o CHECK é o que impede que prosa entre na trilha. Se prosa entrar durante o uso interno, no dia do SaaS o passivo vai junto e não sai — numa trilha imutável 'limpar' não é DELETE. Uso interno gera MAIS texto informal e MENOS revisão, não menos. Custo de manter: uma linha.
 
 
 ## Refinamentos (2026-09-16)
@@ -24,4 +24,4 @@ O rigor nunca veio do número de clientes. Veio de dois fatos que não mudaram: 
 
 ## Gatilho de reversão
 
-Reabrir se o jurídico exigir retenção de prosa junto ao registro (aí a tabela irmã apagável não serve) ou se um pedido de exclusão LGPD precisar tocar uma coluna tipada da trilha — hoje a premissa é que enum/uuid/timestamp/numérico não identificam o aprendiz.
+Reabrir se o jurídico exigir retenção de prosa junto ao registro (aí a tabela irmã apagável não serve) ou se um pedido de exclusão LGPD precisar tocar uma coluna tipada da trilha — hoje a premissa é que enum/uuid/timestamp/numérico não identificam o titular.

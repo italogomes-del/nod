@@ -12,5 +12,5 @@ Fixar AGORA só o que é caro em base populada: a configuração de busca própr
 
 ## Por quê
 
-Este é o ADR onde a pergunta 'o que pode simplesmente ESPERAR?' dá a resposta mais clara, e nenhuma das quatro frentes a fez. Três coisas se separam. A CONFIGURAÇÃO é cara e recorrente — trocar depois é DROP COLUMN + ADD COLUMN gerada + CREATE INDEX com a tabela em ACCESS EXCLUSIVE, e o Buzz nem tentou em base populada. Fica. A ALLOWLIST protege por omissão e o Buzz provou o custo de aprender errado (0001 nasceu com denylist, 0005 fez DROP+ADD, 0008 inverteu). Fica. O ÍNDICE e o REBUILD são caros só depois de haver volume — e 19 pessoas que ainda não geraram um único documento podem viver com ILIKE por seis meses.
+Este é o ADR onde a pergunta 'o que pode simplesmente ESPERAR?' dá a resposta mais clara, e nenhuma das quatro frentes a fez. Três coisas se separam. A CONFIGURAÇÃO é cara e recorrente — trocar depois é DROP COLUMN + ADD COLUMN gerada + CREATE INDEX com a tabela em ACCESS EXCLUSIVE, e o Buzz nem tentou em base populada. Fica. A ALLOWLIST protege por omissão e o Buzz provou o custo de aprender errado (0001 nasceu com denylist, 0005 fez DROP+ADD, 0008 inverteu). Fica. O ÍNDICE e o REBUILD são caros só depois de haver volume — e um time pequeno que ainda não gerou um único documento pode viver com ILIKE por seis meses.
 
