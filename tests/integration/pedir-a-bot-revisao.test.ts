@@ -16,11 +16,11 @@ import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const AGORA = Date.parse("2026-09-24T15:00:00Z");
 const PRONTO = { estado: "pronto" as const, versao: "t", em: 0 };
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome, schema: { type: "object" }, readOnlyHint });

@@ -120,7 +120,7 @@ export function idsGemeas(estado: Estado): ReadonlySet<string> {
   return new Set((estado.suaVez?.itens ?? []).flatMap((i) => i.gemeas));
 }
 
-const JUSTIFICATIVA_PADRAO = "Veio de um lugar que guarda dado de aprendiz. Deixei desmarcado — só você pode marcar.";
+const JUSTIFICATIVA_PADRAO = "Veio de um lugar que guarda dado pessoal. Deixei desmarcado — só você pode marcar.";
 
 /**
  * definido em 2026-09-24 (ADR-044): um clique concede E continua, e o botão diz isso. Pedido que veio
@@ -212,7 +212,7 @@ function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
         ? "Comando no seu Mac é aprovado um a um. Para não repetir nesta tarefa, use \"Pode fazer e o resto desta tarefa\"."
       : item.itensAprovacao.some((i) => nunca.has(i.id))
         ? "Aprovar ou fazer merge de PR sempre passa por você — não dá para permitir de uma vez."
-        : "Dado de aprendiz sempre passa por você — não dá para permitir de uma vez.";
+        : "Dado pessoal sempre passa por você — não dá para permitir de uma vez.";
     return botao("decidir-aprovacao-sempre", "Sempre permitir", { id: item.decisao.id, desabilitado: true, titulo: motivo });
   }
   const comNome = nomes.map((n) => {

@@ -3,12 +3,12 @@ import { decidir } from "../../src/use-cases/decidir.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste, type ChamadaConector } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const destino = (texto: string) => ({ conector: "email", ferramenta: "enviar", argumentos: { texto } });
 
 /**

@@ -85,7 +85,7 @@ describeIntegracao("gate: enums de motivo (motivos.ts) == pg_enum", () => {
       order by table_name, column_name`;
     // Tabelas da 0002 + trilha (CHECK na 0001) + events (locality_reason virou motivo_localidade na
     // 0003; as partições herdam o tipo do pai). inventario_motores.motivo fica de fora de propósito:
-    // é a prosa que a sonda do CLI reporta ("binário não encontrado"), sem dado de aprendiz e sem
+    // é a prosa que a sonda do CLI reporta ("binário não encontrado"), sem dado pessoal e sem
     // enum possível (ADR-019).
     expect(linhas.map((l) => `${l.table_name}.${l.column_name}`)).toContain("events.locality_reason");
     expect(linhas.find((l) => l.table_name === "events")?.udt_name).toBe("motivo_localidade");

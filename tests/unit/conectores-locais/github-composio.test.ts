@@ -37,7 +37,7 @@ describe("conector github pelo Composio (ADR-048)", () => {
     const s = criarServidorGithub(criarBackendComposio({ url: "https://backend.composio.dev/tool_router/v3/trs/mcp", chave: "ak_x", fetchImpl: f }));
     const lista = (await chamar(s, "tools/list")).tools as { name: string }[];
     expect(lista.map((t) => t.name)).toEqual(["pr_ver", "pr_arquivos", "pr_comentarios", "arquivo_ler", "issue_ver", "pr_comentar", "pr_revisar"]);
-    const r = await chamar(s, "tools/call", { name: "pr_diff", arguments: { repositorio: "leapy/nod", numero: 7 } });
+    const r = await chamar(s, "tools/call", { name: "pr_diff", arguments: { repositorio: "acme/nod", numero: 7 } });
     expect(r).toMatchObject({ isError: true });
     expect(JSON.stringify(r)).toContain("indisponível neste jeito de conectar");
     expect(chamadas).toHaveLength(0);
@@ -46,14 +46,14 @@ describe("conector github pelo Composio (ADR-048)", () => {
   it("os argumentos estáveis viram os parâmetros do Composio; comentários juntam conversa e linhas", async () => {
     const { f, chamadas } = composioFalso((nome) => ({ texto: `{"data":"${nome}","successful":true}` }));
     const s = criarServidorGithub(criarBackendComposio({ url: "https://backend.composio.dev/tool_router/v3/trs/mcp", chave: "ak_x", fetchImpl: f }));
-    await chamar(s, "tools/call", { name: "pr_comentarios", arguments: { repositorio: "leapy/nod", numero: 466 } });
-    await chamar(s, "tools/call", { name: "pr_revisar", arguments: { repositorio: "leapy/nod", numero: 466, evento: "request_changes", texto: "falta teste" } });
-    await chamar(s, "tools/call", { name: "arquivo_ler", arguments: { repositorio: "leapy/nod", caminho: "src/x.ts", ref: "main" } });
+    await chamar(s, "tools/call", { name: "pr_comentarios", arguments: { repositorio: "acme/nod", numero: 466 } });
+    await chamar(s, "tools/call", { name: "pr_revisar", arguments: { repositorio: "acme/nod", numero: 466, evento: "request_changes", texto: "falta teste" } });
+    await chamar(s, "tools/call", { name: "arquivo_ler", arguments: { repositorio: "acme/nod", caminho: "src/x.ts", ref: "main" } });
     expect(chamadas.map((c) => [c.nome, c.args])).toEqual([
-      ["GITHUB_LIST_ISSUE_COMMENTS", { owner: "leapy", repo: "nod", issue_number: 466, per_page: 100 }],
-      ["GITHUB_LIST_REVIEW_COMMENTS_ON_A_PULL_REQUEST", { owner: "leapy", repo: "nod", pull_number: 466, per_page: 100 }],
-      ["GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST", { owner: "leapy", repo: "nod", pull_number: 466, event: "REQUEST_CHANGES", body: "falta teste" }],
-      ["GITHUB_GET_REPOSITORY_CONTENT", { owner: "leapy", repo: "nod", path: "src/x.ts", ref: "main" }],
+      ["GITHUB_LIST_ISSUE_COMMENTS", { owner: "acme", repo: "nod", issue_number: 466, per_page: 100 }],
+      ["GITHUB_LIST_REVIEW_COMMENTS_ON_A_PULL_REQUEST", { owner: "acme", repo: "nod", pull_number: 466, per_page: 100 }],
+      ["GITHUB_CREATE_A_REVIEW_FOR_A_PULL_REQUEST", { owner: "acme", repo: "nod", pull_number: 466, event: "REQUEST_CHANGES", body: "falta teste" }],
+      ["GITHUB_GET_REPOSITORY_CONTENT", { owner: "acme", repo: "nod", path: "src/x.ts", ref: "main" }],
     ]);
     expect(chamadas.every((c) => c.chave === "ak_x")).toBe(true);
   });
@@ -61,7 +61,7 @@ describe("conector github pelo Composio (ADR-048)", () => {
   it("erro do provedor vira a frase do código, sem ecoar o texto dele", async () => {
     const { f } = composioFalso(() => ({ texto: '{"successful":false,"error":"404 Not Found: segredo interno"}' }));
     const s = criarServidorGithub(criarBackendComposio({ url: "https://backend.composio.dev/tool_router/v3/trs/mcp", chave: "ak_x", fetchImpl: f }));
-    const r = JSON.stringify(await chamar(s, "tools/call", { name: "pr_ver", arguments: { repositorio: "leapy/nod", numero: 1 } }));
+    const r = JSON.stringify(await chamar(s, "tools/call", { name: "pr_ver", arguments: { repositorio: "acme/nod", numero: 1 } }));
     expect(r).toContain("não encontrado");
     expect(r).not.toContain("segredo interno");
   });

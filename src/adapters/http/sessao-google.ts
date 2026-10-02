@@ -6,7 +6,7 @@ import { assinar, cabecalhoCookieSessao, iguaisEmTempoConstante, lerAssinado } f
 import { lerCookies } from "./util.ts";
 
 /**
- * Login Google Workspace (ADR-021, ADR-030): OAuth 2.0 Authorization Code, SEM biblioteca (o nod tem
+ * Login Google (ADR-021, ADR-030): OAuth 2.0 Authorization Code, SEM biblioteca (o nod tem
  * uma dependência de produção e trata a lista como superfície controlada).
  *
  *   GET /api/sessao/google
@@ -15,18 +15,19 @@ import { lerCookies } from "./util.ts";
  *     ├─ state com HMAC válido, idade ≤ 600 s e IGUAL ao cookie?      não → recusa
  *     ├─ POST oauth2.googleapis.com/token (fetch injetável, 5 s)      falhou → recusa
  *     ├─ claims do id_token: iss, aud, exp                           ruim → recusa
- *     ├─ hd = leapy.com.br (hd AUSENTE = conta pessoal Gmail)        não → recusa
  *     ├─ email_verified = true                                       não → recusa
+ *     ├─ Google responde pelo e-mail (ver googleEhAutoridade); com    não → recusa
+ *     │  NOD_GOOGLE_DOMINIO, hd e e-mail precisam ser desse domínio
  *     ├─ e-mail casa uma pessoa (cfg.pessoaPorEmail; o boot liga em   não → recusa
  *     │  buscarPorEmail, SEM escopo)
  *     └─ 302 /  + Set-Cookie nod_sessao (Strict; Secure se o redirect for https)
  *
  * TODA recusa é a MESMA resposta, byte a byte: 302 para /?entrar=recusado. Dizer "domínio errado"
- * num caso e "não cadastrado" no outro contaria a quem está de fora quem trabalha na Leapy. O motivo
+ * num caso e "não cadastrado" no outro contaria a quem está de fora quem tem acesso ao nod. O motivo
  * real vai só para o log (`login_recusado`), sem o e-mail.
  *
- * A ALLOWLIST (e-mail em `pessoas`) é a fronteira de segurança; `hd` é defesa em profundidade. Não
- * "simplificar" confiando no `hd` e tirando a busca da pessoa.
+ * A ALLOWLIST (e-mail em `pessoas`) é a fronteira de segurança; o domínio, quando configurado, é
+ * defesa em profundidade. Não "simplificar" confiando no `hd` e tirando a busca da pessoa.
  *
  * Por que NÃO verificamos a assinatura RS256 do id_token: ele chega DIRETO do endpoint de token do
  * Google, numa chamada que o nosso servidor faz sobre TLS autenticada com o nosso client_secret — o
@@ -38,7 +39,7 @@ export type ConfigGoogle = {
   clientSecret: string;
   /** URL pública do callback, exatamente como cadastrada no Google Cloud Console. */
   redirectUri: string;
-  /** Domínio Workspace exigido na claim `hd`. Default "leapy.com.br". */
+  /** Domínio Workspace exigido na claim `hd` (NOD_GOOGLE_DOMINIO). Ausente = qualquer conta da allowlist. */
   dominio?: string;
   /** E-mail → pessoa do cadastro, sem escopo (buscarPorEmail). null = recusa. */
   pessoaPorEmail(email: string): Promise<Escopo | null>;
@@ -54,7 +55,6 @@ export const COOKIE_STATE = "nod_oauth";
 export const STATE_VALIDADE_MS = 600_000;
 /** definido em 2026-09-16: mesmo teto de 5 s do cliente HTTP do nod (cliente-nod.ts). */
 const TIMEOUT_TOKEN_MS = 5_000;
-export const DOMINIO_PADRAO = "leapy.com.br";
 const EMISSORES = new Set(["accounts.google.com", "https://accounts.google.com"]);
 export const DESTINO_RECUSA = "/?entrar=recusado";
 
@@ -98,23 +98,37 @@ export function claimsDoIdToken(idToken: unknown): Record<string, unknown> | nul
   }
 }
 
-export function validarClaims(claims: Record<string, unknown>, p: { clientId: string; dominio: string; agora: number }): { ok: true; email: string } | { ok: false; motivo: MotivoRecusa } {
+/**
+ * O Google só responde pela posse do e-mail quando ele é Gmail ou do próprio domínio Workspace (`hd`).
+ * Conta Google criada com e-mail de outro provedor pode ter `email_verified` verdadeiro e mesmo assim
+ * o endereço ter mudado de dono depois — essa conta não entra pela allowlist de e-mail.
+ */
+export function googleEhAutoridade(email: string, hd: unknown): boolean {
+  if (email.endsWith("@gmail.com")) return true;
+  return typeof hd === "string" && hd !== "" && email.endsWith(`@${hd.toLowerCase()}`);
+}
+
+export function validarClaims(claims: Record<string, unknown>, p: { clientId: string; dominio?: string; agora: number }): { ok: true; email: string } | { ok: false; motivo: MotivoRecusa } {
   if (typeof claims.iss !== "string" || !EMISSORES.has(claims.iss)) return { ok: false, motivo: "emissor" };
   const aud = claims.aud;
   if (!(aud === p.clientId || (Array.isArray(aud) && aud.includes(p.clientId)))) return { ok: false, motivo: "audiencia" };
   if (typeof claims.exp !== "number" || claims.exp * 1000 <= p.agora) return { ok: false, motivo: "expirado" };
-  // `hd` AUSENTE é conta pessoal (Gmail): recusa igual a domínio errado.
-  if (typeof claims.hd !== "string" || claims.hd.toLowerCase() !== p.dominio) return { ok: false, motivo: "dominio" };
+  if (p.dominio) {
+    // `hd` AUSENTE é conta pessoal (Gmail): recusa igual a domínio errado.
+    if (typeof claims.hd !== "string" || claims.hd.toLowerCase() !== p.dominio) return { ok: false, motivo: "dominio" };
+  }
   if (claims.email_verified !== true) return { ok: false, motivo: "email_nao_verificado" };
-  if (typeof claims.email !== "string" || !claims.email.toLowerCase().endsWith(`@${p.dominio}`)) return { ok: false, motivo: "dominio" };
-  return { ok: true, email: claims.email.toLowerCase() };
+  if (typeof claims.email !== "string") return { ok: false, motivo: "dominio" };
+  const email = claims.email.toLowerCase();
+  if (p.dominio ? !email.endsWith(`@${p.dominio}`) : !googleEhAutoridade(email, claims.hd)) return { ok: false, motivo: "dominio" };
+  return { ok: true, email };
 }
 
 // ---------------------------------------------------------------------------------------------
 
 export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
   const agora = cfg.agora ?? (() => Date.now());
-  const dominio = (cfg.dominio ?? DOMINIO_PADRAO).toLowerCase();
+  const dominio = cfg.dominio?.toLowerCase() || undefined;
   const seguro = cfg.redirectUri.startsWith("https://");
   const atributosState = `HttpOnly; SameSite=Lax; Path=/api/sessao/google${seguro ? "; Secure" : ""}`;
   // SameSite=Lax (e NÃO Strict) de propósito: a volta do Google é navegação top-level vinda de outro
@@ -135,7 +149,7 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
         url.searchParams.set("response_type", "code");
         url.searchParams.set("scope", "openid email");
         // `hd` na URL só pré-filtra a tela do Google; a validação de verdade é a claim, no callback.
-        url.searchParams.set("hd", dominio);
+        if (dominio) url.searchParams.set("hd", dominio);
         url.searchParams.set("prompt", "select_account");
         url.searchParams.set("state", state);
         ctx.res.writeHead(302, {

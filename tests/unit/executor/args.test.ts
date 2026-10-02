@@ -20,8 +20,8 @@ function planoDeTeste(parcial: Partial<PlanoTurno["entrada"]> = {}): PlanoTurno 
     profundidade: 0,
     catalogo: {
       ferramentas: [
-        { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } },
-        { nome: "ex__somar", nomeMcp: "mcp__nod__ex__somar", origem: "conector", conectorId: "k", readOnlyHint: true, tocaAprendiz: false, schema: { type: "object" } },
+        { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } },
+        { nome: "ex__somar", nomeMcp: "mcp__nod__ex__somar", origem: "conector", conectorId: "k", readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object" } },
       ],
       servidores: [],
     },

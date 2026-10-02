@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
@@ -10,7 +10,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * (expectRejected). Para nod_app a recusa vem antes, pelo REVOKE (42501); o trigger é a segunda
  * camada, que vale inclusive para o dono.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 async function inserirLinha(trx: Parameters<Parameters<typeof withRollback>[1]>[0]): Promise<string> {
   const id = randomUUID();

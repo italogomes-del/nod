@@ -3,7 +3,7 @@ import { tokenizar } from "./comando.ts";
 /**
  * Cada task numa worktree do próprio bot (definido em 2026-10-01, ADR-065). O terminal do bot é o do Mac da pessoa
  * (ADR-055), e os clones dela são um só por repositório: em 30/09 o Dev 4 já tinha o terminal e ia implementar no
- * `~/code/leapy/main-repos/leapy`, o mesmo clone em que o Marlon e os outros três Devs trabalham. O primeiro
+ * `~/code/acme/main-repos/acme`, o mesmo clone em que o Marlon e os outros três Devs trabalham. O primeiro
  * `git switch` de um Dev trocaria a branch do outro no meio do trabalho. Por isso o git que MEXE na pasta de
  * trabalho (troca de branch, grava commit, descarta, aplica) só roda dentro de ~/nod/<bot>. O que só lê, o fetch, o
  * push e o `worktree add` no clone da pessoa continuam livres: é por eles que a worktree nasce.

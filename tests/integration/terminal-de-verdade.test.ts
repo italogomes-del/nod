@@ -6,7 +6,7 @@ import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
 import { decidir, entradaDaAprovacao, marcarEDecidir } from "../../src/use-cases/decidir.ts";
 import { liberarNaTarefa, terminalLiberadoNaTarefa } from "../../src/use-cases/liberar-na-tarefa.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -18,12 +18,12 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * revisto em 2026-10-01 (ADR-066): não há mais gate de rotina; o que segura "o resto desta tarefa" e a leitura livre
  * é a marca de conteúdo de fora, e ela só pesa no manual (os outros modos: modo-aprovacao.test.ts).
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];
 
 function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }, extra: Partial<PlanoTurno> = {}): PlanoTurno {
   return {
-    tenantId: TENANT_LEAPY, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
+    tenantId: TENANT_PADRAO, ...p, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada: "confiavel", profundidade: 0,
     catalogo: { ferramentas: [], servidores: [] }, promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" },
     politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 }, semprePermitir: [], tokenDeTurno: "tok",
@@ -50,7 +50,7 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
   it("o que só lê roda sem card; o que muda algo abre UM card com o comando inteiro", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
-      const leitura = await c.autorizar("gh pr list -R leapy-edtech/leapy");
+      const leitura = await c.autorizar("gh pr list -R acme-edtech/acme");
       expect(leitura.data).toEqual({ permitir: true, porque: "leitura" });
       expect(leitura.events ?? []).toEqual([]);
       const r = await c.autorizar("git push origin feat/x");
@@ -129,7 +129,7 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
       const c = await cenario(trx);
       const r = await c.autorizar("git push");
       if (!("aguardar" in r.data)) throw new Error("esperava card");
-      const outra = depsSobre(c.repos, { tenantId: TENANT_LEAPY, pessoaId: randomUUID() }, { services: servicosDeTeste({}), trx });
+      const outra = depsSobre(c.repos, { tenantId: TENANT_PADRAO, pessoaId: randomUUID() }, { services: servicosDeTeste({}), trx });
       await expect(marcarEDecidir(outra, { decisaoId: r.data.aguardar })).rejects.toBeTruthy();
     });
   });

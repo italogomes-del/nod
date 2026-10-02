@@ -1,11 +1,11 @@
 import { expect, it } from "vitest";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 describeIntegracao("conectoresRepo: nasce desabilitado, env cifrado só com chaves visíveis, http só para quem não toca", () => {
   it("http + toca e http + nao-declarou (= toca, ADR-002) são recusados pelo CHECK; stdio + toca passa", async () => {

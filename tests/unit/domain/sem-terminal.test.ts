@@ -4,7 +4,7 @@ import { falaDeCapacidadeDoTurno } from "../../../src/domain/memoria-de-capacida
 import { motivoSemTerminal, NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
 import { montarPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
 
-const ferramenta = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: {} });
+const ferramenta = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: {} });
 
 describe("o turno sem terminal diz por quê (ADR-065)", () => {
   it("o motivo sai da mesma regra das nativas: com o harness do terminal (ADR-066), só o peer legado fica sem", () => {
@@ -50,7 +50,7 @@ describe("capacidade do turno não vira memória (ADR-065)", () => {
   it("recusa o que diz que falta terminal, pasta, skills, computador ou colega neste turno — as frases reais de 30/09", () => {
     for (const texto of [
       "Dev 3/Dev 4 não têm terminal nem permissão de push no GitHub",
-      "Os Devs estão sem terminal nem pasta do leapy-rh",
+      "Os Devs estão sem terminal nem pasta do acme-rh",
       "Neste turno não consigo delegar",
       "workspace_propor_pasta não existe no meu catálogo",
       "Não tenho Read, Edit, Write, Glob, Grep nem Bash",
@@ -62,7 +62,7 @@ describe("capacidade do turno não vira memória (ADR-065)", () => {
     for (const texto of [
       "Não tenho acesso ao Supabase de produção",
       "Regra do Marlon: git merge origin/main na branch do PR e push normal, sem reescrever histórico nem --force",
-      "O repo leapy-rh só está ativo para liderança e aprendizes",
+      "O repo acme-rh só está ativo para liderança e clientes",
       "Rodo os testes no terminal antes de abrir o PR",
       "Em toda mensagem no Slack, marcar a pessoa com <@ID>",
     ]) expect(falaDeCapacidadeDoTurno(texto), texto).toBe(false);

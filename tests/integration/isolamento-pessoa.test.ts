@@ -2,17 +2,17 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
  * A prova do ADR-003 revisado: tabela descartável escopada por nod_escopar_tabela, linhas de A e B
  * no MESMO tenant, e o SELECT sem WHERE devolve só o que a policy deixa. CI não roda seed, então
- * o teste cria A e B — é a única prova que vale (Leapy §6).
+ * o teste cria A e B — é a única prova que vale (Práticas §6).
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 
 describeIntegracao("isolamento por pessoa (nod_escopar_tabela)", () => {
   it("SELECT sem WHERE como A → só A + 'equipe'; outro tenant → zero; INSERT com owner B como A → WITH CHECK", async () => {
@@ -37,9 +37,9 @@ describeIntegracao("isolamento por pessoa (nod_escopar_tabela)", () => {
       const comoMarlon = await trx`select rotulo from descartavel order by rotulo`;
       expect(comoMarlon.map((r) => r.rotulo)).toEqual(["de marlon para a equipe", "privado de marlon"]);
 
-      // tenant_id veio do DEFAULT da função (constante Leapy), sem ninguém informar.
+      // tenant_id veio do DEFAULT da função (TENANT_PADRAO), sem ninguém informar.
       const tenants = await trx`select distinct tenant_id from descartavel`;
-      expect(tenants).toEqual([{ tenant_id: TENANT_LEAPY }]);
+      expect(tenants).toEqual([{ tenant_id: TENANT_PADRAO }]);
 
       await vincularEscopo(trx, { tenantId: randomUUID(), pessoaId: PESSOA_MARLON });
       expect(await trx`select rotulo from descartavel`).toHaveLength(0);

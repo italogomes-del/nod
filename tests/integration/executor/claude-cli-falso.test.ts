@@ -63,7 +63,7 @@ function planoDeTeste(dir: string, parcial: Partial<PlanoTurno["entrada"]> = {})
     confiancaEntrada: "confiavel",
     profundidade: 0,
     catalogo: {
-      ferramentas: [{ nome: "somar", nomeMcp: "mcp__nod__somar", origem: "conector", conectorId: "k", readOnlyHint: true, tocaAprendiz: false, schema: { type: "object" } }],
+      ferramentas: [{ nome: "somar", nomeMcp: "mcp__nod__somar", origem: "conector", conectorId: "k", readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object" } }],
       servidores: [],
     },
     promptSistema: "Você é a sonda do nod.",

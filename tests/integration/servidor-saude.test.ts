@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { listen } from "../../src/adapters/http/server.ts";
 import type { Rota } from "../../src/adapters/http/roteador.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 
 /** Servidor real em porta 0, sem banco: saúde, sessão stub, escopo da URL e rotas internas. */
 const rotasDeTeste: Rota[] = [
@@ -21,9 +21,9 @@ describe("servidor: saúde, sessão e roteador", () => {
     const srv = await listen(0, "127.0.0.1", {
       rotas: rotasDeTeste,
       segredoSessao: "segredo-de-teste",
-      sessao: { modo: "stub", pessoas: async () => [{ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon" }] },
+      sessao: { modo: "stub", pessoas: async () => [{ tenantId: TENANT_PADRAO, id: PESSOA_MARLON, nome: "Marlon" }] },
       autorizarTokenTurno: (token) =>
-        token === "token-bom" ? { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, turnoId: "t1", agenteId: "a1" } : null,
+        token === "token-bom" ? { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON, turnoId: "t1", agenteId: "a1" } : null,
     });
     base = `http://127.0.0.1:${srv.port}`;
     close = srv.close;
@@ -37,7 +37,7 @@ describe("servidor: saúde, sessão e roteador", () => {
   });
 
   it("sessão ausente → 401; tenant da URL ≠ sessão → 404; casando → o handler recebe o escopo", async () => {
-    expect((await fetch(`${base}/api/t/${TENANT_LEAPY}/eco`)).status).toBe(401);
+    expect((await fetch(`${base}/api/t/${TENANT_PADRAO}/eco`)).status).toBe(401);
 
     // Login de desenvolvimento (NOD_LOGIN=stub, ADR-030): a tela lista as pessoas do cadastro e entra por id.
     const modo = await fetch(`${base}/api/sessao/modo`);
@@ -53,20 +53,20 @@ describe("servidor: saúde, sessão e roteador", () => {
     const jar = { cookie: cookie.split(";")[0] ?? "" };
 
     expect((await fetch(`${base}/api/t/00000000-0000-4000-8000-000000000000/eco`, { headers: jar })).status).toBe(404);
-    const ok = await fetch(`${base}/api/t/${TENANT_LEAPY}/eco`, { headers: jar });
-    expect(await ok.json()).toEqual({ escopo: { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON } });
+    const ok = await fetch(`${base}/api/t/${TENANT_PADRAO}/eco`, { headers: jar });
+    expect(await ok.json()).toEqual({ escopo: { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON } });
     const sessao = await fetch(`${base}/api/sessao`, { headers: jar });
-    expect(await sessao.json()).toEqual({ tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON });
+    expect(await sessao.json()).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON });
 
-    const params = await fetch(`${base}/api/t/${TENANT_LEAPY}/nomes/abc%20d`, { headers: jar });
+    const params = await fetch(`${base}/api/t/${TENANT_PADRAO}/nomes/abc%20d`, { headers: jar });
     expect(await params.json()).toEqual({ nome: "abc d" });
     // EMENDA-L9 §2: grupo `id` fora do formato uuid é rota inexistente (404), nunca 22P02 → 500.
-    expect((await fetch(`${base}/api/t/${TENANT_LEAPY}/agentes/abc%20d`, { headers: jar })).status).toBe(404);
-    const uuid = await fetch(`${base}/api/t/${TENANT_LEAPY}/agentes/00000000-0000-4000-8000-000000000000`, { headers: jar });
+    expect((await fetch(`${base}/api/t/${TENANT_PADRAO}/agentes/abc%20d`, { headers: jar })).status).toBe(404);
+    const uuid = await fetch(`${base}/api/t/${TENANT_PADRAO}/agentes/00000000-0000-4000-8000-000000000000`, { headers: jar });
     expect(await uuid.json()).toEqual({ id: "00000000-0000-4000-8000-000000000000" });
 
     const cookieForjado = { cookie: `${jar.cookie.slice(0, -4)}xxxx` };
-    expect((await fetch(`${base}/api/t/${TENANT_LEAPY}/eco`, { headers: cookieForjado })).status).toBe(401);
+    expect((await fetch(`${base}/api/t/${TENANT_PADRAO}/eco`, { headers: cookieForjado })).status).toBe(401);
   });
 
   it("pessoa fora do cadastro (ou o nome antigo 'marlon') ao entrar → 400 entrada_invalida sem detalhe", async () => {
@@ -102,7 +102,7 @@ describe("servidor: saúde, sessão e roteador", () => {
     expect((await fetch(`${base}/api/interno/plano`)).status).toBe(401);
     expect((await fetch(`${base}/api/interno/plano`, { headers: { authorization: "Bearer token-ruim" } })).status).toBe(401);
     const r = await fetch(`${base}/api/interno/plano`, { headers: { authorization: "Bearer token-bom" } });
-    expect(await r.json()).toEqual({ turnoId: "t1", escopo: { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON } });
+    expect(await r.json()).toEqual({ turnoId: "t1", escopo: { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON } });
   });
 
   it("rota desconhecida → 404 JSON", async () => {

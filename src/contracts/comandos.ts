@@ -12,7 +12,7 @@ export type ComandoDoMac = {
   nome: string;
   /** A primeira linha do `description` do frontmatter; vazia quando o comando não tem arquivo (embutido). */
   descricao: string;
-  /** De onde vem, como a pessoa reconhece: "gstack", "posthog", "leapy", "Claude Code", "suas". */
+  /** De onde vem, como a pessoa reconhece: "gstack", "posthog", "acme", "Claude Code", "suas". */
   origem: string;
   /** O `argument-hint` do frontmatter, quando houver. */
   argumento?: string;

@@ -17,15 +17,15 @@ const DIA = 86_400_000;
 const HOME = "/Users/marlon";
 
 const candidatas: PayloadPropostaPasta["candidatas"] = [
-  { caminho: `${HOME}/code/leapy/main-repos/leapy`, nome: "leapy", git: true, onde: "code/leapy/main-repos", modificadoEm: AGORA - 10 * 60_000 },
-  { caminho: `${HOME}/Inhouse/leapy`, nome: "leapy", git: true, onde: "Inhouse", modificadoEm: AGORA - 2 * DIA },
-  { caminho: `${HOME}/conductor/workspaces/leapy`, nome: "leapy", git: true, onde: "conductor/workspaces", modificadoEm: AGORA - 21 * DIA },
-  { caminho: `${HOME}/code/leapy`, nome: "leapy", git: false, onde: "code", modificadoEm: AGORA - 40 * DIA },
-  { caminho: `${HOME}/conductor/archived-contexts/leapy`, nome: "leapy", git: true, onde: "conductor/archived-contexts", modificadoEm: AGORA - 130 * DIA },
+  { caminho: `${HOME}/code/acme/main-repos/acme`, nome: "acme", git: true, onde: "code/acme/main-repos", modificadoEm: AGORA - 10 * 60_000 },
+  { caminho: `${HOME}/Inhouse/acme`, nome: "acme", git: true, onde: "Inhouse", modificadoEm: AGORA - 2 * DIA },
+  { caminho: `${HOME}/conductor/workspaces/acme`, nome: "acme", git: true, onde: "conductor/workspaces", modificadoEm: AGORA - 21 * DIA },
+  { caminho: `${HOME}/code/acme`, nome: "acme", git: false, onde: "code", modificadoEm: AGORA - 40 * DIA },
+  { caminho: `${HOME}/conductor/archived-contexts/acme`, nome: "acme", git: true, onde: "conductor/archived-contexts", modificadoEm: AGORA - 130 * DIA },
 ];
 
 function proposta(c: PayloadPropostaPasta["candidatas"], id = "pp"): Proposta {
-  return { tenantId: "t", id, conversaId: "c", agenteId: "a", kind: "pasta", estado: "pendente", criadoEm: AGORA, payload: { kind: "pasta", turnoId: "t1", candidatas: c, motivo: "Para montar a árvore de arquivos do PR #466", buscaTermo: "leapy" } } as Proposta;
+  return { tenantId: "t", id, conversaId: "c", agenteId: "a", kind: "pasta", estado: "pendente", criadoEm: AGORA, payload: { kind: "pasta", turnoId: "t1", candidatas: c, motivo: "Para montar a árvore de arquivos do PR #466", buscaTermo: "acme" } } as Proposta;
 }
 function conversa(p: Proposta[], mensagens: Mensagem[] = []): ConversaEstado {
   return { conversa: { tenantId: "t", id: "c", ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "a", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens, propostas: p, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
@@ -36,12 +36,12 @@ const quantas = (html: string, trecho: string) => html.split(trecho).length - 1;
 describe("card de pasta", () => {
   it("sugere uma pasta só, pelo nome e pelo local, com um botão de permitir", () => {
     const html = renderTimeline(conversa([proposta(candidatas)]), estado);
-    expect(html).toContain("Abrir o projeto leapy?");
+    expect(html).toContain("Abrir o projeto acme?");
     expect(html).toContain("Para montar a árvore de arquivos do PR #466");
-    expect(html).toContain("code › leapy › main-repos");
+    expect(html).toContain("code › acme › main-repos");
     expect(html).toContain("mudou hoje");
     expect(quantas(html, 'data-act="permitir-pasta"')).toBe(1);
-    expect(html).toContain(`data-pasta="${HOME}/code/leapy/main-repos/leapy"`);
+    expect(html).toContain(`data-pasta="${HOME}/code/acme/main-repos/acme"`);
     expect(html).toContain('data-act="lista-de-pasta"');
     expect(html).toContain("Dev 1 só mexe nas pastas que você abrir.");
     // Nenhuma das outras aparece antes de a pessoa dizer que não é essa.
@@ -52,12 +52,12 @@ describe("card de pasta", () => {
   it("\"Não é essa\" abre as mais prováveis, com a sugerida marcada, e o resto sob demanda", () => {
     const curta = reduzir(estado, { tipo: "lista-de-pasta", propostaId: "pp", lista: "curta" });
     const html = renderTimeline(conversa([proposta(candidatas)]), curta);
-    expect(html).toContain("Qual é o leapy certo?");
+    expect(html).toContain("Qual é o acme certo?");
     expect(html).toContain("Achei 5 pastas com esse nome.");
     expect(quantas(html, 'type="radio"')).toBe(3);
     expect(quantas(html, " checked")).toBe(1);
     // A recusada continua na lista, mas a marcada é a próxima: "Não é essa" não volta para ela.
-    expect(html).toContain(`value="${HOME}/Inhouse/leapy" data-pasta-de="pp" checked`);
+    expect(html).toContain(`value="${HOME}/Inhouse/acme" data-pasta-de="pp" checked`);
     expect(html).toContain("Marquei a próxima mais provável.");
     expect(html).toContain('aria-expanded="false">Mostrar mais 2');
     expect(html).toContain('aria-labelledby="cp-titulo-pp"');
@@ -74,14 +74,14 @@ describe("card de pasta", () => {
 
   it("com uma candidata só, \"Não é essa\" já abre a escolha no computador", () => {
     const html = renderTimeline(conversa([proposta(candidatas.slice(0, 1))]), estado);
-    expect(html).toContain("Abrir o projeto leapy?");
+    expect(html).toContain("Abrir o projeto acme?");
     expect(html).not.toContain('data-act="lista-de-pasta"');
     expect(html).toContain('data-act="abrir-workspace"');
   });
 
   it("sem candidata, diz que não achou e oferece escolher a pasta", () => {
     const html = renderTimeline(conversa([proposta([])]), estado);
-    expect(html).toContain("Não achei o leapy no seu computador");
+    expect(html).toContain("Não achei o acme no seu computador");
     expect(html).toContain("Escolher pasta…");
     expect(html).not.toContain('data-act="permitir-pasta"');
   });
@@ -95,8 +95,8 @@ describe("card de pasta", () => {
 
   it("lista curta com duas pastas de nomes diferentes, sem Git e sem data", () => {
     const duas: PayloadPropostaPasta["candidatas"] = [
-      { caminho: `${HOME}/code/leapy`, nome: "leapy", git: false, onde: "code", modificadoEm: null },
-      { caminho: `${HOME}/code/leapy-web`, nome: "leapy-web", git: false, onde: "code", modificadoEm: null },
+      { caminho: `${HOME}/code/acme`, nome: "acme", git: false, onde: "code", modificadoEm: null },
+      { caminho: `${HOME}/code/acme-web`, nome: "acme-web", git: false, onde: "code", modificadoEm: null },
     ];
     const html = renderTimeline(conversa([proposta(duas)]), reduzir(estado, { tipo: "lista-de-pasta", propostaId: "pp", lista: "curta" }));
     expect(quantas(html, 'type="radio"')).toBe(2);
@@ -123,12 +123,12 @@ describe("card de pasta", () => {
 
 describe("registro da pasta aberta", () => {
   const autoria = { autor_tipo: "pessoa", autor_id: "p", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 } as const;
-  const registro: Mensagem = { tenantId: "t", id: "m1", conversaId: "c", turnoId: null, autoria, kind: "sistema", texto: "Pasta do projeto aberta para o agente.", payload: { kind: "pasta_aberta", propostaId: "pp", agenteId: "a", pasta: `${HOME}/code/leapy/main-repos/leapy`, nome: "leapy", onde: "code/leapy/main-repos" }, confianca: "confiavel", parcial: false, criadoEm: AGORA };
+  const registro: Mensagem = { tenantId: "t", id: "m1", conversaId: "c", turnoId: null, autoria, kind: "sistema", texto: "Pasta do projeto aberta para o agente.", payload: { kind: "pasta_aberta", propostaId: "pp", agenteId: "a", pasta: `${HOME}/code/acme/main-repos/acme`, nome: "acme", onde: "code/acme/main-repos" }, confianca: "confiavel", parcial: false, criadoEm: AGORA };
 
   it("fica na conversa como uma linha, com o local e o Trocar para quem é dona", () => {
     const html = renderMensagem(registro, estado);
-    expect(html).toContain("<b>leapy</b> aberta para Dev 1");
-    expect(html).toContain("code › leapy › main-repos");
+    expect(html).toContain("<b>acme</b> aberta para Dev 1");
+    expect(html).toContain("code › acme › main-repos");
     expect(html).toContain('data-act="abrir-workspace"');
     expect(html).not.toContain("msg-sistema");
   });
@@ -137,7 +137,7 @@ describe("registro da pasta aberta", () => {
     const aviso = (id: string): Mensagem => ({ ...registro, id, texto: `aviso ${id}`, payload: null });
     const html = renderTimeline(conversa([], [aviso("a1"), aviso("a2"), registro, aviso("a3")]), estado);
     expect(html).not.toContain("avisos do sistema");
-    expect(html).toContain("<b>leapy</b> aberta para Dev 1");
+    expect(html).toContain("<b>acme</b> aberta para Dev 1");
   });
 
   it("quem não é dona do bot não vê o Trocar", () => {
@@ -154,8 +154,8 @@ describe("registro da pasta aberta", () => {
 
 describe("textos de apoio", () => {
   it("o local legível tira a pasta pessoal e o próprio nome", () => {
-    expect(ondeLegivel({ caminho: `${HOME}/code/leapy/main-repos/leapy` })).toBe("code › leapy › main-repos");
-    expect(ondeLegivel({ caminho: `${HOME}/leapy` })).toBe("pasta pessoal");
+    expect(ondeLegivel({ caminho: `${HOME}/code/acme/main-repos/acme` })).toBe("code › acme › main-repos");
+    expect(ondeLegivel({ caminho: `${HOME}/acme` })).toBe("pasta pessoal");
     expect(ondeLegivel({ caminho: "/x", onde: "" })).toBe("pasta pessoal");
   });
 

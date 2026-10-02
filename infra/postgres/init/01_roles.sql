@@ -1,4 +1,4 @@
--- Roles e bancos do nod (ADR-003, Leapy §5). Roda como superusuário no primeiro boot do container
+-- Roles e bancos do nod (ADR-003, Práticas §5). Roda como superusuário no primeiro boot do container
 -- e, no CI, via psql contra o service container. Idempotente.
 --
 -- nod_dono: dono dos bancos; só a migração conecta com ele.

@@ -33,11 +33,11 @@ beforeAll(async () => {
     if (modo === "404") { res.writeHead(404).end("{}"); return; }
     if (modo === "301") { res.writeHead(301, { location: "https://api.github.com/repositories/1/pulls/7" }).end(); return; }
     const u = req.url ?? "";
-    if (u === "/repos/leapy/nod/pulls/7" && req.headers.accept === "application/vnd.github.diff") { res.end("diff --git a/x b/x\n+oi\n"); return; }
-    if (u === "/repos/leapy/nod/pulls/7") { res.end(JSON.stringify({ number: 7, title: "PR", state: "open", user: { login: "bruno" }, head: { ref: "f", sha: "abcdef1" }, base: { ref: "main" } })); return; }
-    if (u === "/repos/leapy/nod/commits/abcdef1/check-runs?per_page=100") { res.end(JSON.stringify({ check_runs: [{ name: "ci", status: "completed", conclusion: "success", html_url: "h" }] })); return; }
-    if (u === "/repos/leapy/nod/pulls/7/reviews" && req.method === "POST") { res.end(JSON.stringify({ state: "APPROVED", user: { login: "marlon" }, html_url: "r" })); return; }
-    if (u.startsWith("/repos/leapy/nod/contents/src/a%20b.ts?ref=feat%2Fx")) { res.end("conteúdo"); return; }
+    if (u === "/repos/acme/nod/pulls/7" && req.headers.accept === "application/vnd.github.diff") { res.end("diff --git a/x b/x\n+oi\n"); return; }
+    if (u === "/repos/acme/nod/pulls/7") { res.end(JSON.stringify({ number: 7, title: "PR", state: "open", user: { login: "bruno" }, head: { ref: "f", sha: "abcdef1" }, base: { ref: "main" } })); return; }
+    if (u === "/repos/acme/nod/commits/abcdef1/check-runs?per_page=100") { res.end(JSON.stringify({ check_runs: [{ name: "ci", status: "completed", conclusion: "success", html_url: "h" }] })); return; }
+    if (u === "/repos/acme/nod/pulls/7/reviews" && req.method === "POST") { res.end(JSON.stringify({ state: "APPROVED", user: { login: "marlon" }, html_url: "r" })); return; }
+    if (u.startsWith("/repos/acme/nod/contents/src/a%20b.ts?ref=feat%2Fx")) { res.end("conteúdo"); return; }
     res.writeHead(404).end("{}");
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
@@ -64,29 +64,29 @@ describe("backend REST do conector github (ADR-048)", PROCESSO, () => {
   it("token no cabeçalho, nunca na URL; checks seguem o head do PR; revisão manda o evento em maiúsculas", async () => {
     modo = "ok";
     pedidos.length = 0;
-    expect(JSON.parse((await chamar("pr_checks", { repositorio: "leapy/nod", numero: 7 })).texto)).toEqual({ head_sha: "abcdef1", checks: [{ nome: "ci", estado: "completed", conclusao: "success", url: "h" }] });
-    expect(pedidos.map((p) => p.url)).toEqual(["/repos/leapy/nod/pulls/7", "/repos/leapy/nod/commits/abcdef1/check-runs?per_page=100"]);
+    expect(JSON.parse((await chamar("pr_checks", { repositorio: "acme/nod", numero: 7 })).texto)).toEqual({ head_sha: "abcdef1", checks: [{ nome: "ci", estado: "completed", conclusao: "success", url: "h" }] });
+    expect(pedidos.map((p) => p.url)).toEqual(["/repos/acme/nod/pulls/7", "/repos/acme/nod/commits/abcdef1/check-runs?per_page=100"]);
     expect(pedidos.every((p) => p.auth === "Bearer ghp_segredo" && !p.url.includes("ghp_"))).toBe(true);
-    expect(JSON.parse((await chamar("pr_revisar", { repositorio: "leapy/nod", numero: 7, evento: "approve" })).texto)).toEqual({ ok: true, estado: "APPROVED", autor: "marlon", url: "r" });
+    expect(JSON.parse((await chamar("pr_revisar", { repositorio: "acme/nod", numero: 7, evento: "approve" })).texto)).toEqual({ ok: true, estado: "APPROVED", autor: "marlon", url: "r" });
     expect(JSON.parse(pedidos.at(-1)?.corpo ?? "")).toEqual({ event: "APPROVE" });
-    expect((await chamar("pr_diff", { repositorio: "leapy/nod", numero: 7 })).texto).toContain("+oi");
-    expect((await chamar("arquivo_ler", { repositorio: "leapy/nod", caminho: "src/a b.ts", ref: "feat/x" })).texto).toBe("conteúdo");
+    expect((await chamar("pr_diff", { repositorio: "acme/nod", numero: 7 })).texto).toContain("+oi");
+    expect((await chamar("arquivo_ler", { repositorio: "acme/nod", caminho: "src/a b.ts", ref: "feat/x" })).texto).toBe("conteúdo");
   });
 
   it("cada status vira a frase do que fazer, e a do token é diferente da do App", async () => {
     modo = "401";
-    expect(await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 })).toEqual({ isError: true, texto: expect.stringContaining("recusou o token pessoal") });
-    expect(await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 }, "app")).toEqual({ isError: true, texto: expect.stringContaining("GitHub App da organização") });
+    expect(await chamar("pr_ver", { repositorio: "acme/nod", numero: 7 })).toEqual({ isError: true, texto: expect.stringContaining("recusou o token pessoal") });
+    expect(await chamar("pr_ver", { repositorio: "acme/nod", numero: 7 }, "app")).toEqual({ isError: true, texto: expect.stringContaining("GitHub App da organização") });
     modo = "403";
-    expect((await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 })).texto).toContain("Sem permissão neste repositório");
+    expect((await chamar("pr_ver", { repositorio: "acme/nod", numero: 7 })).texto).toContain("Sem permissão neste repositório");
     modo = "cota";
-    expect((await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 })).texto).toContain("rate limit");
+    expect((await chamar("pr_ver", { repositorio: "acme/nod", numero: 7 })).texto).toContain("rate limit");
     modo = "404";
-    expect((await chamar("issue_ver", { repositorio: "leapy/nod", numero: 9 })).texto).toContain("não encontrado");
+    expect((await chamar("issue_ver", { repositorio: "acme/nod", numero: 9 })).texto).toContain("não encontrado");
     // Repositório renomeado: não segue o redirect (o token não vai a outra URL) e diz o que houve.
     modo = "301";
     pedidos.length = 0;
-    expect((await chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 })).texto).toContain("renomeado ou transferido");
+    expect((await chamar("pr_ver", { repositorio: "acme/nod", numero: 7 })).texto).toContain("renomeado ou transferido");
     expect(pedidos).toHaveLength(1);
   });
 
@@ -97,7 +97,7 @@ describe("backend REST do conector github (ADR-048)", PROCESSO, () => {
     expect(r.cfg.jeito).toBe("token");
     const cliente = criarClienteMcp({ nome: "github", transporte: "stdio", comando: r.cfg.comando, args: r.cfg.args, env: r.cfg.env, timeoutMs: 10_000 });
     try {
-      const pr = await cliente.chamar("pr_ver", { repositorio: "leapy/nod", numero: 7 });
+      const pr = await cliente.chamar("pr_ver", { repositorio: "acme/nod", numero: 7 });
       expect(JSON.parse(pr.conteudo)).toMatchObject({ numero: 7, autor: "bruno", head_sha: "abcdef1" });
     } finally {
       await cliente.fechar();

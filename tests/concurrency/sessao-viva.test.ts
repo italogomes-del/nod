@@ -12,7 +12,7 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
 import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
@@ -20,7 +20,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  * pool-lacos.test.ts). O driver imita a sessão viva do Claude Code: fala no meio do turno, fica ocioso, recebe a
  * mensagem que a pessoa mandou com ele trabalhando e responde — tudo num turno só.
  */
-const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const listarPessoas = async () => [{ tenantId: PESSOA.tenantId, id: PESSOA.pessoaId }];
 const PRONTO = { estado: "pronto" as const, versao: "catcher", em: Date.now() };
 const criados = { agentes: [] as string[], conversas: [] as string[] };

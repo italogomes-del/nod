@@ -31,7 +31,7 @@ export type NomeCapacidadeGithub = "pr_ver" | "pr_diff" | "pr_arquivos" | "pr_co
 
 export type EventoRevisao = "comment" | "approve" | "request_changes";
 
-const REPOSITORIO: JsonSchema = { type: "string", description: "Repositório no formato dono/nome, ex.: leapy/nod.", minLength: 3 };
+const REPOSITORIO: JsonSchema = { type: "string", description: "Repositório no formato dono/nome, ex.: acme/nod.", minLength: 3 };
 const NUMERO: JsonSchema = { type: "integer", description: "Número do pull request (ou da issue)." };
 
 /** O que a sonda lê do servidor stdio nativo: nome, descrição, schema e readOnlyHint (ADR-013). */

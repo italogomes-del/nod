@@ -5,7 +5,7 @@ import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
 import { mudarModoAprovacao } from "../../src/use-cases/mudar-modo-aprovacao.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -15,9 +15,9 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * seguia. Antes, no manual, o bot gravava em qualquer arquivo do Mac sem card — o Dev 2 editaria o clone do Marlon
  * sem ele saber. Dentro da pasta do bot o hook nem pergunta ao servidor (git-na-pasta-do-bot.test.ts).
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];
-const ARQUIVO = "/Users/m/code/leapy/main-repos/leapy/apps/web/filtros.tsx";
+const ARQUIVO = "/Users/m/code/acme/main-repos/acme/apps/web/filtros.tsx";
 
 async function cenario(trx: Trx, modo: ModoAprovacao, origem: "conversa" | "delegacao" = "conversa") {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
@@ -26,7 +26,7 @@ async function cenario(trx: Trx, modo: ModoAprovacao, origem: "conversa" | "dele
   const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "delegacao" ? 1 : 0, entradaTexto: "corrige o filtro", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano: PlanoTurno = {
-    tenantId: TENANT_LEAPY, turnoId: turno.id, agenteId, conversaId, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
+    tenantId: TENANT_PADRAO, turnoId: turno.id, agenteId, conversaId, localidade: "local", machineId: "m", executor: "local", superficie: "maquina_da_pessoa",
     decididoPor: "regra:montagem-ferramentas", autoria: autoriaPessoa(PESSOA_MARLON), confiancaEntrada: "confiavel", profundidade: 0,
     catalogo: { ferramentas: [], servidores: [] }, promptSistema: "", entrada: { texto: "", sessaoCli: null, modelo: "m" },
     politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 8000 }, semprePermitir: [], tokenDeTurno: "tok",

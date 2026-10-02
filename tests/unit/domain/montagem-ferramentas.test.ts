@@ -8,7 +8,7 @@ const f = (nome: string, origem: "nod" | "conector" = "conector"): FerramentaPla
   origem,
   conectorId: origem === "conector" ? "k" : null,
   readOnlyHint: false,
-  tocaAprendiz: false,
+  tocaDadoPessoal: false,
   schema: { type: "object" },
 });
 

@@ -25,6 +25,6 @@ export function classificarOrigem(procedencia: Procedencia, _agora: number): Cla
 }
 
 /** Atalho sobre o registro do conector: só `declaracao` decide (ADR-002). */
-export function conectorTocaAprendiz(conector: Pick<Conector, "declaracao">): boolean {
+export function conectorTocaDadoPessoal(conector: Pick<Conector, "declaracao">): boolean {
   return conector.declaracao !== "nao-toca";
 }

@@ -6,7 +6,7 @@ import type { Tx } from "../../src/shared/types.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { db } from "../helpers/db.ts";
 import { autoriaPessoa } from "../helpers/fabricas.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 
@@ -16,7 +16,7 @@ import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
  * REVOGA e commita; a primeira emite o plano depois → a ferramenta não está no catálogo.
  * Sem rollback: linhas commitadas e apagadas por id no afterEach (exceção documentada ao DELETE).
  */
-const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const criados = { agentes: [] as string[], conversas: [] as string[], turnos: [] as string[], conectores: [] as string[], mensagens: [] as string[], concessoes: [] as string[] };
 
 async function escopado<T>(fn: (trx: Tx) => Promise<T>): Promise<T> {

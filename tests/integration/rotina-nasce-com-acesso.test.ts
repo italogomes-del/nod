@@ -14,7 +14,7 @@ import { atualizarRotinaPeloAgente } from "../../src/use-cases/rotinas-do-agente
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
@@ -23,7 +23,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * nasceu em 18/09 com fonte "Gmail do Marlon" e nada pediu o acesso — falhou desde a primeira execução.
  * Agora ela DECLARA o que lê, a pessoa vê no card e confirmar concede, na mesma transação da ativação.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const AGORA = Date.parse("2026-09-24T10:00:00-03:00");
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome.toLowerCase(), schema: { type: "object" }, readOnlyHint });
 const GMAIL = [cap("GMAIL_FETCH_EMAILS", true), cap("GMAIL_LIST_LABELS", true), cap("GMAIL_SEND_EMAIL", false)];

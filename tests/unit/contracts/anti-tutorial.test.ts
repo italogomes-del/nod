@@ -62,7 +62,7 @@ it("as instruções devolvidas pelo gateway mandam agir, não delegar", async ()
 });
 
 it("o prompt de sistema orienta descobrir a pasta em vez de pedir menu", () => {
-  const ferramentas: FerramentaPlano[] = Object.keys(FERRAMENTAS_WORKSPACE).map((nome) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: false, tocaAprendiz: true, schema: { type: "object" } }));
+  const ferramentas: FerramentaPlano[] = Object.keys(FERRAMENTAS_WORKSPACE).map((nome) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: false, tocaDadoPessoal: true, schema: { type: "object" } }));
   const agente = { nome: "Dev Sr", titulo: "", descricao: "" } as Agente;
   const prompt = montarPromptSistema({ agente, pessoaNome: "Marlon", ferramentas, modo: "conversa", memorias: [] });
   verificar(prompt, "prompt de sistema");

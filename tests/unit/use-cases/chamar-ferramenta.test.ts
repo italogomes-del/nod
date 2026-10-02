@@ -8,7 +8,7 @@ import { depsFalsos, type OpcoesDepsFalsos } from "./deps-l5.ts";
 
 const AGORA = 1_758_000_000_000;
 
-const nod = (nome: keyof typeof FERRAMENTAS_NOD): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] });
+const nod = (nome: keyof typeof FERRAMENTAS_NOD): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] });
 
 async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno> = {}) {
   const { deps, banco, chamadas } = depsFalsos({ agora: AGORA, ...opcoes });
@@ -41,8 +41,8 @@ async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno>
         nod("lembrar"),
         nod("pedir_aprovacao"),
         nod("pedir_a_pessoa"),
-        { nome: "exemplo__somar", nomeMcp: "mcp__nod__exemplo__somar", origem: "conector", conectorId, readOnlyHint: true, tocaAprendiz: false, schema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },
-        { nome: "exemplo__enviar", nomeMcp: "mcp__nod__exemplo__enviar", origem: "conector", conectorId, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object", properties: { para: { type: "string" } }, required: ["para"] } },
+        { nome: "exemplo__somar", nomeMcp: "mcp__nod__exemplo__somar", origem: "conector", conectorId, readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },
+        { nome: "exemplo__enviar", nomeMcp: "mcp__nod__exemplo__enviar", origem: "conector", conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object", properties: { para: { type: "string" } }, required: ["para"] } },
       ],
       servidores: [{ conectorId, nome: "exemplo", trust: "untrusted", transporte: "stdio" }],
     },
@@ -188,7 +188,7 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
       await c.deps.repos.conectores.registrarSonda(c.conectorId, { ok: true, agora: AGORA, catalogo: [...catalogo, { nome: capacidade, descricao: capacidade, schema: { type: "object" }, readOnlyHint: false }] });
       await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade, mensagemId: c.consentimentoId });
       const nome = `exemplo__${capacidade}`;
-      const plano: PlanoTurno = { ...c.plano, modoTurno, catalogo: { ...c.plano.catalogo, ferramentas: [...c.plano.catalogo.ferramentas, { nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.conectorId, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } }] } };
+      const plano: PlanoTurno = { ...c.plano, modoTurno, catalogo: { ...c.plano.catalogo, ferramentas: [...c.plano.catalogo.ferramentas, { nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } }] } };
       return { ...c, agir: () => c.chamar(nome, {}, plano) };
     };
     const manual = await montar("pr_merge", "conversa");

@@ -8,10 +8,10 @@ const dois = (n: number) => String(n).padStart(2, "0");
 describe("o que vira link", () => {
   it("só http e https, e nunca com usuário e senha no endereço", () => {
     expect(lerLink("https://zoom.us/pricing")?.hostname).toBe("zoom.us");
-    expect(lerLink("http://intranet.leapy.local/presencas")).not.toBeNull();
+    expect(lerLink("http://intranet.acme.local/presencas")).not.toBeNull();
     expect(lerLink("javascript:alert(1)")).toBeNull();
     expect(lerLink("file:///Users/marlon/nod/Ada/checklist.html")).toBeNull();
-    expect(lerLink("mailto:ada@leapy.com.br")).toBeNull();
+    expect(lerLink("mailto:ada@acme.com.br")).toBeNull();
     expect(lerLink("https://github.com@github-login.co/entrar")).toBeNull();
     expect(lerLink("isso não é endereço")).toBeNull();
   });
@@ -27,24 +27,24 @@ describe("o nome curto de cada link", () => {
   it("Slack: a hora sai do próprio link; de outro dia, a data", () => {
     const ts = 1790624332;
     const d = new Date(ts * 1000);
-    const url = `https://leapy-workspace.slack.com/archives/D068V6P6R5X/p${ts}178009`;
+    const url = `https://acme-workspace.slack.com/archives/D068V6P6R5X/p${ts}178009`;
     expect(nome(url, new Date((ts + 60) * 1000))).toEqual({ icone: "slack", rotulo: `Slack · mensagem das ${dois(d.getHours())}:${dois(d.getMinutes())}`, app: true });
     expect(nome(url, new Date((ts + 3 * 86400) * 1000)).rotulo).toBe(`Slack · mensagem de ${dois(d.getDate())}/${dois(d.getMonth() + 1)}`);
-    expect(nome("https://leapy-workspace.slack.com/archives/C04ABCD1234").rotulo).toBe("Slack · canal");
-    expect(nome("https://leapy-workspace.slack.com/archives/D068V6P6R5X").rotulo).toBe("Slack · conversa");
+    expect(nome("https://acme-workspace.slack.com/archives/C04ABCD1234").rotulo).toBe("Slack · canal");
+    expect(nome("https://acme-workspace.slack.com/archives/D068V6P6R5X").rotulo).toBe("Slack · conversa");
   });
 
   it("ClickUp, GitHub, Google, Linear pelo que o endereço diz", () => {
     expect(nome("https://app.clickup.com/t/86b4x2qd")).toEqual({ icone: "clickup", rotulo: "ClickUp · tarefa 86b4x2qd", app: true });
     expect(nome("https://app.clickup.com/t/9011234567/ABC-123").rotulo).toBe("ClickUp · tarefa ABC-123");
-    expect(nome("https://github.com/leapy/backoffice/pull/466").rotulo).toBe("backoffice #466");
-    expect(nome("https://github.com/leapy/backoffice/issues/470").rotulo).toBe("backoffice #470");
+    expect(nome("https://github.com/acme/backoffice/pull/466").rotulo).toBe("backoffice #466");
+    expect(nome("https://github.com/acme/backoffice/issues/470").rotulo).toBe("backoffice #470");
     expect(nome("https://github.com/marlonwlv/nod/commit/23b25df0a1b2c3").rotulo).toBe("nod · 23b25df");
-    expect(nome("https://github.com/leapy-edtech/leapy").rotulo).toBe("leapy-edtech/leapy");
+    expect(nome("https://github.com/acme-edtech/acme").rotulo).toBe("acme-edtech/acme");
     expect(nome("https://docs.google.com/document/d/1Xk9pQ/edit")).toEqual({ icone: "google", rotulo: "Google Docs · documento", app: true });
-    expect(nome("https://linear.app/leapy/issue/nod-123/links-clicaveis").rotulo).toBe("NOD-123");
+    expect(nome("https://linear.app/acme/issue/nod-123/links-clicaveis").rotulo).toBe("NOD-123");
     expect(nome("https://app.notion.com/p/Presencas-1a2b3c").rotulo).toBe("Notion · página");
-    expect(nome("https://www.notion.so/leapy/Presencas-1a2b3c").rotulo).toBe("Notion · página");
+    expect(nome("https://www.notion.so/acme/Presencas-1a2b3c").rotulo).toBe("Notion · página");
     expect(nome("https://notion.com.golpe.site/p/x").icone).toBe("web");
   });
 
@@ -62,8 +62,8 @@ describe("o nome curto de cada link", () => {
   });
 
   it("sem https: cadeado aberto; endereço do Mac: computador", () => {
-    expect(nome("http://intranet.leapy.local/presencas")).toEqual({ icone: "inseguro", rotulo: "intranet.leapy.local/presencas", app: false });
-    expect(nome("http://leapy.slack.com/archives/C1").icone).toBe("inseguro");
+    expect(nome("http://intranet.acme.local/presencas")).toEqual({ icone: "inseguro", rotulo: "intranet.acme.local/presencas", app: false });
+    expect(nome("http://acme.slack.com/archives/C1").icone).toBe("inseguro");
     expect(nome("http://localhost:5274")).toEqual({ icone: "local", rotulo: "localhost:5274", app: false });
   });
 
@@ -75,7 +75,7 @@ describe("o nome curto de cada link", () => {
 
 describe("link com nome", () => {
   it("app: ícone e o nome na frase; site comum: o domínio ao lado", () => {
-    const slack = linkComNome("resposta dela", lerLink("https://leapy-workspace.slack.com/archives/D068V6P6R5X/p1790624332178009")!);
+    const slack = linkComNome("resposta dela", lerLink("https://acme-workspace.slack.com/archives/D068V6P6R5X/p1790624332178009")!);
     expect(slack).toContain('class="lk"');
     expect(slack).toContain("lk-ic-slack");
     expect(slack).toContain(">resposta dela</a>");
@@ -85,10 +85,10 @@ describe("link com nome", () => {
   });
 
   it("nome que parece endereço dá lugar ao destino real", () => {
-    const html = linkComNome("github.com/leapy/backoffice", lerLink("https://github-login.co/entrar")!);
+    const html = linkComNome("github.com/acme/backoffice", lerLink("https://github-login.co/entrar")!);
     expect(html).toContain('class="lk-chip"');
     expect(html).toContain("github-login.co/entrar");
-    expect(html).not.toContain("github.com/leapy/backoffice");
+    expect(html).not.toContain("github.com/acme/backoffice");
     expect(linkComNome("https://github.com", lerLink("https://outro.site/")!)).not.toContain("github.com");
   });
 

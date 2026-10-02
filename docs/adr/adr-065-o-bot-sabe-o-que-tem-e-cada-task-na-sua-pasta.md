@@ -24,7 +24,7 @@ Medido no banco diário entre 28 e 30/09:
   - Uma varredura no banco desde 21/09 achou cerca de 10 turnos (Chico, Clarice, Milton, Dev 1, Dev 3) que tratam um
     corte por desenho como "a ferramenta caiu".
 - **Os clones da pessoa são um só por repositório.** Com o terminal na conversa, o Dev 4 ia implementar em
-  `~/code/leapy/main-repos/leapy`, o mesmo clone em que o Marlon e os outros Devs trabalham. O terminal do bot é o do
+  `~/code/acme/main-repos/acme`, o mesmo clone em que o Marlon e os outros Devs trabalham. O terminal do bot é o do
   Mac da pessoa (ADR-055). O primeiro `git switch` de um Dev trocaria a branch do outro no meio do trabalho.
 
 ## Decisão

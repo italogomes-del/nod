@@ -11,7 +11,7 @@ CREATE TYPE autor_tipo AS ENUM ('pessoa', 'agente');
 
 -- ---------------------------------------------------------------------------------------------
 -- Identidade: SEM RLS por pessoa (exceção nomeada no gate tests/conformidade/rls.test.ts).
--- Motivo: catálogo de identidade sem dado de aprendiz; lido para enumerar donos dos laços de fundo.
+-- Motivo: catálogo de identidade sem dado pessoal; lido para enumerar donos dos laços de fundo.
 -- nod_app SÓ LÊ (GRANT SELECT): quem escreve identidade é o seed, como nod_dono. Testes que
 -- precisam de pessoas as criam como nod_dono sob rollback (tests/helpers/db-dono.ts).
 CREATE TABLE tenants (
@@ -45,7 +45,7 @@ AS $$
 DECLARE
   extra text := COALESCE(perna_extra, 'false');
 BEGIN
-  -- DEFAULT do tenant = idDeterministico('tenant:leapy') (src/db/seed/id-deterministico.ts).
+  -- DEFAULT do tenant = TENANT_PADRAO (src/db/seed/index.ts).
   EXECUTE format('ALTER TABLE %s ADD COLUMN IF NOT EXISTS tenant_id uuid NOT NULL DEFAULT %L',
                  tbl, '172e1fdf-428d-48cb-b052-3bd7d2573e18');
   EXECUTE format('ALTER TABLE %s ADD COLUMN IF NOT EXISTS owner_id uuid NOT NULL', tbl);
@@ -177,7 +177,7 @@ CREATE TABLE events_2027_07 PARTITION OF events FOR VALUES FROM ('2027-07-01') T
 CREATE TABLE events_2027_08 PARTITION OF events FOR VALUES FROM ('2027-08-01') TO ('2027-09-01');
 
 -- ---------------------------------------------------------------------------------------------
--- Outbox transacional (ADR-010 refinado, Leapy §7): gravado na MESMA transação do evento.
+-- Outbox transacional (ADR-010 refinado, Práticas §7): gravado na MESMA transação do evento.
 -- owner_id = pessoa_destino_id: o frame é da pessoa que vai recebê-lo (ADR-016, buffer por pessoa).
 -- Abandono exige DUAS condições (tentativas >= teto E idade >= mínima); abandonado é CONTADO, não apagado.
 CREATE TABLE events_outbox (

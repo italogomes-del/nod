@@ -11,7 +11,7 @@ import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { db } from "../helpers/db.ts";
 import { dbDono } from "../helpers/db-dono.ts";
 import { depsSobreTrx, executar } from "../helpers/deps-l6.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
 
@@ -37,7 +37,7 @@ async function escopado<T>(escopo: Escopo, fn: (trx: Tx) => Promise<T>): Promise
 
 /** Uma pessoa nova com uma rotina cujo turno está RODANDO numa máquina desde T0 (lease até T0 + LEASE_MS). */
 async function rotinaRodando(): Promise<{ escopo: Escopo; rotinaId: string; turnoId: string; maquina: string }> {
-  const escopo = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+  const escopo = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
   criadas.push(escopo);
   const maquina = randomUUID();
   return escopado(escopo, async (trx) => {

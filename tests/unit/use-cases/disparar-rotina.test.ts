@@ -105,7 +105,7 @@ describe("dispararRotina", () => {
     expect(new Date(r.data.proximaExecucao).toISOString()).toBe("2026-09-21T11:00:00.000Z");
   });
 
-  // revisto em 2026-09-30 (ADR-062): o critério era a curadoria de conteúdo de fora, não a declaração de dado de aprendiz.
+  // revisto em 2026-09-30 (ADR-062): o critério era a curadoria de conteúdo de fora, não a declaração de dado pessoal.
   // revisto em 2026-10-01 (ADR-066): a entrada da rotina é a instrução que a pessoa confirmou — sempre confiável. A marca
   // de conteúdo de fora vem do que o bot LÊ (chamar-ferramenta.ts contamina o turno), não do app que a fonte cita.
   it("ADR-066: a entrada da rotina nasce confiável mesmo quando a fonte cita app de conteúdo de fora (sem curadoria, GitHub) — a confiança não sai mais do nome do app", async () => {

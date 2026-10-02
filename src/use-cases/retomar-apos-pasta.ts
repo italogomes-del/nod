@@ -17,7 +17,7 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
   // definido em 2026-09-25 (card de pasta simplificado): o card some ao permitir; o registro fica na
-  // conversa como "leapy aberta para o Dev 1", desenhada do payload. O texto é fixo: ele vai ao histórico
+  // conversa como "acme aberta para o Dev 1", desenhada do payload. O texto é fixo: ele vai ao histórico
   // do plano como fala da pessoa (emitir-plano-turno.ts), e nome de pasta vem do disco, não dela.
   const escolhida = p.candidatas.find((c) => c.caminho === pasta);
   const nome = escolhida?.nome ?? pasta.split(/[\\/]/).filter(Boolean).pop() ?? pasta;

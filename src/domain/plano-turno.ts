@@ -13,7 +13,7 @@ import type { FerramentaPlano, ModoTurno, PlanoTurno, ServidorPlano } from "../c
 import type { Profundidade, Turno } from "../contracts/turno.ts";
 import { ORCAMENTO_RESULTADO_CHARS } from "../shared/constantes.ts";
 import { nuncaPermanente } from "./aprovacao-permanente.ts";
-import { conectorTocaAprendiz } from "./dado-pessoal.ts";
+import { conectorTocaDadoPessoal } from "./dado-pessoal.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
@@ -92,7 +92,7 @@ export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
 
 function ferramentaNod(nome: NomeFerramentaNod): FerramentaPlano {
-  const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] };
+  const base: FerramentaPlano = { nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] };
   // definido em 2026-09-28 (ADR-051): ler_artefato só lê, e o resultado dela tem orçamento próprio no
   // proxy — o do turno (8 000) cortaria o HTML que a ferramenta promete devolver.
   return nome === "ler_artefato" ? { ...base, readOnlyHint: true } : base;
@@ -112,7 +112,7 @@ function ferramentasDeConectores(conectores: readonly Conector[], concessoes: re
     for (const cap of caps) {
       const nome = `${c.slug}__${cap.nome}`;
       // ADR-068: o campo de arquivo do app (`s3key`) diz ao bot que aceita o caminho do Mac.
-      ferramentas.push({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.id, readOnlyHint: cap.readOnlyHint, tocaAprendiz: conectorTocaAprendiz(c), schema: comArquivoDoMac(cap.schema) });
+      ferramentas.push({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "conector", conectorId: c.id, readOnlyHint: cap.readOnlyHint, tocaDadoPessoal: conectorTocaDadoPessoal(c), schema: comArquivoDoMac(cap.schema) });
     }
   }
   return { ferramentas, servidores };
@@ -169,8 +169,8 @@ export type EntradaPlano = {
  * quando a localidade recusa (inventário não 'pronto'). tokenDeTurno e machineId são do servidor.
  */
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
-  const tocaAprendiz = entrada.conectores.some((c) => c.habilitado && conectorTocaAprendiz(c));
-  const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaAprendiz, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
+  const tocaDadoPessoal = entrada.conectores.some((c) => c.habilitado && conectorTocaDadoPessoal(c));
+  const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaDadoPessoal, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
 
   // revisto em 2026-09-29 (ADR-058): profundidade não é mais "peer". No limite (ADR-063: três passes) ela corta o
@@ -184,7 +184,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // revisto em 2026-10-01 (ADR-066): a delegação também — era escopo da v1, sem argumento de risco, e a rotina, sem
   // ninguém olhando, já tinha. Só o peer legado fica sem.
   const temComputador = entrada.computador === true && modo !== "peer";
-  const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaAprendiz: true, schema })) : [];
+  const computador: FerramentaPlano[] = temComputador && !entrada.computadorFora ? Object.entries(FERRAMENTAS_COMPUTADOR).map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "computador", conectorId: null, readOnlyHint: ["computador_observar", "computador_arquivos", "computador_ler_arquivo", "computador_ler_texto"].includes(nome), tocaDadoPessoal: true, schema })) : [];
   /**
    * definido em 2026-09-18: sem projeto autorizado o agente só enxerga consultar e propor. Ver um
    * martelo que ainda não pode usar era o que o levava a tentar, falhar e virar tutorial de menu.
@@ -195,7 +195,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   const workspace: FerramentaPlano[] = entrada.workspace && modo !== "peer"
     ? Object.entries(FERRAMENTAS_WORKSPACE)
       .filter(([nome]) => entrada.workspaceVinculado || SEM_PROJETO.includes(nome))
-      .map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta"].includes(nome), tocaAprendiz: true, schema }))
+      .map(([nome, schema]) => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "workspace", conectorId: null, readOnlyHint: ["workspace_consultar", "workspace_arquivos", "workspace_ler_texto", "workspace_propor_pasta"].includes(nome), tocaDadoPessoal: true, schema }))
     : [];
   // revisto em 2026-10-01 (ADR-066): o catálogo não encolhe mais por confiança. Em 30/09 a Clarice não mandava Slack nem
   // punha label no Gmail na rotina (0 de 269 turnos, contra 67 de 67 na conversa) e o Chico não movia task no ClickUp

@@ -4,7 +4,7 @@
 
 > Um lugar onde agentes preparam decisões e uma pessoa decide — com registro de quem decidiu, por quê, e se havia alguém olhando.
 
-**Ferramenta interna da Leapy.** Cada colaborador usa o Claude Code que já está credenciado na própria máquina; o nod pilota, nunca vê a credencial. Este README descreve a versão de 2026-09-17, como rodar e testar; medições históricas mantêm suas datas.
+Cada pessoa usa o Claude Code que já está credenciado na própria máquina; o nod pilota, nunca vê a credencial. Este README descreve a versão de 2026-09-17, como rodar e testar; medições históricas mantêm suas datas.
 
 ## Download do app para macOS
 
@@ -62,7 +62,7 @@ O [roteiro UAT da segunda rodada](docs/uat-rodada-2.md) contém 19 casos por ép
 
 ## O que existe
 
-Um pacote TypeScript (ADR-018) no esqueleto herdado da Leapy (`docs/inherited-from-leapy.md`): `src/{domain,contracts,shared,db,repositories,services,use-cases,adapters/{http,fundo,executor,mcp-proxy},obs}`, `web/`, `tests/`. Provado por teste contra o Postgres real:
+Um pacote TypeScript (ADR-018) no esqueleto das práticas herdadas (`docs/praticas-herdadas.md`): `src/{domain,contracts,shared,db,repositories,services,use-cases,adapters/{http,fundo,executor,mcp-proxy},obs}`, `web/`, `tests/`. Provado por teste contra o Postgres real:
 
 - **Fundação (L1):** migrações SQL puras (0001–0004) com RLS por PESSOA em toda tabela — desde a 0004, quatro policies PERMISSIVE por comando (`nod_pessoa_select` abre dono/'equipe'/perna extra; `insert`/`update`/`delete` só a dona) + a RESTRICTIVE do tenant; trilha imutável por trigger + CHECK; `events` particionada por mês sem catch-all; outbox transacional; gates de conformidade lendo o catálogo; log JSON único; CI em três jobs.
 - **Contratos e domínio (L2):** nove ferramentas nod (`lembrar`, `atualizar_perfil`, `pedir_acesso`, `criar_rotina`, `pedir_aprovacao`, `pedir_a_pessoa`, `passar`, `encaminhar`, `perguntar_a_bot`), plano de turno (ADR-024), classificação de falha por estado de protocolo (ADR-009), orçamento de canal, rodada de sala, tudo puro em `src/domain`.
@@ -82,7 +82,7 @@ Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (conf
 - **Escala com múltiplas réplicas de servidor**: a ponte HTTP existe em `NOD_MODO=compartilhado`, mas tokens de turno e conexões continuam em memória; use uma instância.
 - **Mobile / PWA / updater automático** — o desktop Electron verifica versão mínima, sem atualização automática. Windows ainda não foi validado.
 - **Computador por bot, driver remoto, browser** (ADR-028); **skills por demonstração**; skills por instrução (nomeadas, `/`) também ficaram fora desta rodada (EMENDA 24).
-- **OAuth real / credencial de colaborador com health-check** (ADR-015 revisado): conector é MCP registrado com env cifrado só no servidor. **Procuração entre donos** tem tabela e regra fail-closed, sem rota nem UI.
+- **OAuth real / credencial de pessoa com health-check** (ADR-015 revisado): conector é MCP registrado com env cifrado só no servidor. **Procuração entre donos** tem tabela e regra fail-closed, sem rota nem UI.
 - **Tarefa delegada fora da conversa** (ADR-047): `delegar_tarefa` leva a mensagem da pessoa ao colega, mas só a partir de turno aberto por fala dela. Rotina não delega (consulta por `perguntar_a_bot`); turno de sala criado por `postar-na-sala` é recusado; anexos não vão junto; computador e pasta ficam fora do turno delegado.
 - **Cadastro autônomo**: o login Google usa allowlist previamente cadastrada (ADR-030). Para desenvolvimento local, `NOD_LOGIN=stub` usa cookie assinado e recusa `NOD_HOST` fora de 127.0.0.1.
 - **Execução de rotina "em curso"**: `DesfechoRotina` não tem `pendente` — `rotina_execucoes` só ganha linha ao assentar; o "em curso" é a janela com `turno_id` (EMENDA-L9 §5, registrado).
@@ -105,7 +105,7 @@ Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (conf
 
 - [AGENTS.md](AGENTS.md): comandos, as regras que o código trava, desvios.
 - [docs/adr/](docs/adr/): 32 decisões com gatilho de reversão; refinamentos datados (0003, 0004) em ADR-003 e ADR-007.
-- [docs/product-spec.html](docs/product-spec.html), [docs/core-features.md](docs/core-features.md), [docs/internal-first.md](docs/internal-first.md), [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md), [docs/spikes/serializacao-do-turno.md](docs/spikes/serializacao-do-turno.md).
+- [docs/product-spec.html](docs/product-spec.html), [docs/core-features.md](docs/core-features.md), [docs/internal-first.md](docs/internal-first.md), [docs/praticas-herdadas.md](docs/praticas-herdadas.md), [docs/spikes/serializacao-do-turno.md](docs/spikes/serializacao-do-turno.md).
 - Protótipos: [`prototypes/fleet-is-home.html`](prototypes/fleet-is-home.html) (referência histórica), [`prototypes/private-agents-minimal.html`](prototypes/private-agents-minimal.html).
 
 Gestão completa de agentes: menu na lista e no chat, organização em seções, leitura, perfil/avatar,

@@ -6,13 +6,13 @@ import type { Escopo } from "../../../src/shared/types.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { dispensarDecisao, podeDispensar } from "../../../src/use-cases/dispensar-decisao.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
-import { PESSOA_ANA, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, TENANT_PADRAO } from "../../helpers/ids.ts";
 
 const TZ = "America/Sao_Paulo";
 const JANELA = Date.parse("2026-09-24T08:00:00-03:00");
 const AGORA = JANELA + 60_000;
 const DIA = 86_400_000;
-const ANA: Escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const ANA: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 
 /** Uma rotina disparada na janela das 8h cujo turno terminou pedindo um dado (a Nina sem Gmail, #46). */
 async function rotinaQuePediu(d: ReturnType<typeof depsMemoria>, extra: { decisorId?: string } = {}) {

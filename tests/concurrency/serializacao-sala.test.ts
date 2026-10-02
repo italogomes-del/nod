@@ -7,7 +7,7 @@ import { criarSala } from "../../src/use-cases/criar-sala.ts";
 import { postarNaSala } from "../../src/use-cases/postar-na-sala.ts";
 import { db } from "../helpers/db.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
-import { TENANT_LEAPY } from "../helpers/ids.ts";
+import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
@@ -15,7 +15,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  * mesmo com duas máquinas reivindicando AO MESMO TEMPO (reivindicação da L3: advisory lock por
  * pessoa + NOT EXISTS por conversa). Linhas commitadas; limpeza própria por id.
  */
-const PESSOA = { tenantId: TENANT_LEAPY, pessoaId: randomUUID() };
+const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
 const criados = { agentes: [] as string[], conversas: [] as string[], salas: [] as string[] };
 
 async function escopado<T>(fn: (trx: Tx) => Promise<T>): Promise<T> {

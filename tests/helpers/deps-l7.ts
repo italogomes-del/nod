@@ -13,7 +13,7 @@ import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { verColegas } from "../../src/use-cases/ver-colegas.ts";
 import { servicoSala } from "../../src/use-cases/servico-sala.ts";
 import type { Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 
 /**
@@ -93,9 +93,9 @@ export function useCasesFalsos(): UseCasesNod {
 
 export type OpcoesDeps = { escopo?: Escopo; agora?: () => number; interromper?: (turnoId: string) => Promise<boolean> };
 
-/** Deps sobre os repos EM MEMÓRIA (tests/unit): tx = `(fn) => fn({} as never)` (Leapy §1). */
+/** Deps sobre os repos EM MEMÓRIA (tests/unit): tx = `(fn) => fn({} as never)` (Práticas §1). */
 export function depsMemoria(opcoes: OpcoesDeps = {}): { deps: Deps; banco: BancoMemoria; chamadas: Chamadas; comEscopo(escopo: Escopo): Deps } {
-  const escopo = opcoes.escopo ?? { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+  const escopo = opcoes.escopo ?? { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
   const { banco, repos } = criarBancoMemoria();
   const agora = opcoes.agora ?? (() => Date.now());
   const chamadas: Chamadas = { interrompidos: [], conectores: [], frames: [] };

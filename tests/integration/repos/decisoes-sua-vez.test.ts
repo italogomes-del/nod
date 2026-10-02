@@ -3,12 +3,12 @@ import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa } from "../../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const DIA = 24 * 60 * 60 * 1000;
 
 describeIntegracao("decisoesRepo: Sua vez por pessoa sob RLS de duas pernas (ADR-007, EMENDA 1)", () => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 /**
- * ÚNICA função de id determinístico (Leapy §12): sha256('nod:' + chave) formatado como UUID v4
+ * ÚNICA função de id determinístico (Práticas §12): sha256('nod:' + chave) formatado como UUID v4
  * (nibbles de versão e variante preservados). O seed faz upsert contra esse id, então rodar
  * duas vezes produz o mesmo estado; os testes de isolamento usam ids fixos sem depender do seed.
  */

@@ -33,7 +33,7 @@ const leitura = { conector: "email", ferramenta: "buscar", argumentos: {} };
 function planoCom(nomes: string[], o: { readOnly?: string[]; semprePermitir?: string[]; confianca?: "confiavel" | "nao_confiavel"; modoTurno?: ModoTurno } = {}): PlanoTurno {
   return {
     catalogo: {
-      ferramentas: nomes.map((nome) => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "conector" as const, conectorId: "c", readOnlyHint: (o.readOnly ?? []).includes(nome), tocaAprendiz: false, schema: { type: "object" as const } })),
+      ferramentas: nomes.map((nome) => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "conector" as const, conectorId: "c", readOnlyHint: (o.readOnly ?? []).includes(nome), tocaDadoPessoal: false, schema: { type: "object" as const } })),
       servidores: [],
     },
     politicaExecucao: { prazoMs: 1, orcamentoResultadoChars: 1 },

@@ -11,7 +11,7 @@ import { listarSuaVez } from "../../src/use-cases/listar-sua-vez.ts";
 import { pausarRotina } from "../../src/use-cases/pausar-rotina.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
@@ -21,7 +21,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * card. Agora a janela para ANTES do turno, com UM card; permitir roda na hora; ninguém liberar em 24 h
  * pausa a rotina com uma linha que diz por quê.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const TZ = "America/Sao_Paulo";
 const H = 3_600_000;
 const JANELA = Date.parse("2026-09-24T08:00:00-03:00");

@@ -16,7 +16,7 @@ quer autonomia total) e que olhasse também o Chico e a Clarice.
 A perícia leu o banco do dia a dia (só leitura) e o código. O que se mediu:
 
 - **Toda rotina nascia não confiável: 440 de 440 turnos de rotina do Marlon.** `confiancaDaFonte` marcava a rotina
-  quando a fonte citava um conector com declaração `toca` ("toca dado de aprendiz"), e todo app do marketplace nasce
+  quando a fonte citava um conector com declaração `toca` ("toca dado pessoal"), e todo app do marketplace nasce
   declarado assim. Turno não confiável tem catálogo reduzido e `semprePermitir = []`: o automático e as regras nunca
   valiam numa rotina. No automático, só 3 de 25 itens de app (12%) saíram sozinhos.
 - **O card do print tinha regra ativa desde 09:14:38.** Parou por `regra_suspensa_conteudo_nao_confiavel`, 34 s
@@ -105,7 +105,7 @@ Cinco testes antigos assumiam o comportamento de antes e foram ajustados, com a 
 ## Alternativas descartadas
 
 - **O modelo dizer se um conteúdo é de fora.** O texto a classificar é o mesmo que tentaria mandar no bot.
-- **Continuar pela declaração `toca`.** Ela responde outra pergunta (dado de aprendiz), e o marketplace declara todo
+- **Continuar pela declaração `toca`.** Ela responde outra pergunta (dado pessoal), e o marketplace declara todo
   app assim; foi isso que zerou o automático nas rotinas.
 - **Marcar o turno a cada leitura de conector.** Pararia o dia inteiro: ler ClickUp e Slack é o trabalho do Marlon.
 - **Manter as regras congeladas no plano (ADR-013).** A ADR-013 pede que o servidor decida, não que ele decida com um

@@ -152,7 +152,7 @@ export function chipDoLink(url: URL, agora?: Date): string {
   return `<a class="lk-chip" href="${esc(url.href)}" ${ATRIBUTOS}>${iconeDoLink(nome.icone)}<span class="lk-rotulo">${esc(nome.rotulo)}</span></a>`;
 }
 
-/** Nome que parece endereço ("github.com/leapy", "https://…"): quem lê acredita no nome, então ele não vale. */
+/** Nome que parece endereço ("github.com/acme", "https://…"): quem lê acredita no nome, então ele não vale. */
 const PARECE_ENDERECO = /^(https?:\/\/)?([\p{L}\p{N}-]+\.)+[\p{L}]{2,}(:\d+)?([/?#]\S*)?$/iu;
 
 /** [nome](link): o nome fica na frase, com o ícone do app ou o domínio ao lado; o destino, na dica. */

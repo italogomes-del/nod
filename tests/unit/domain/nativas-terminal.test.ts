@@ -46,7 +46,7 @@ describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
   it("ADR-055: arquivo em qualquer lugar do Mac, como a pessoa no Claude Code", () => {
     for (const [f, entrada] of [
       ["Write", { file_path: "/Users/marlon/nod/Ada/checklist.html" }],
-      ["Edit", { file_path: "/Users/marlon/Inhouse/leapy/src/app.ts" }],
+      ["Edit", { file_path: "/Users/marlon/Inhouse/acme/src/app.ts" }],
       ["Read", { file_path: "/Users/marlon/.zshrc" }],
       ["Grep", { path: "/etc" }],
       ["NotebookEdit", { notebook_path: "/tmp/x.ipynb" }],
@@ -65,7 +65,7 @@ describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
   });
 
   it("Bash vai ao servidor com o comando; web contamina o turno; o que não é do kit é negado", () => {
-    expect(decidir("Bash", { command: "gh pr list -R leapy-edtech/leapy" })).toMatchObject({ permitir: true, contamina: false, comando: "gh pr list -R leapy-edtech/leapy" });
+    expect(decidir("Bash", { command: "gh pr list -R acme-edtech/acme" })).toMatchObject({ permitir: true, contamina: false, comando: "gh pr list -R acme-edtech/acme" });
     expect(decidir("Bash", { command: "  " }).permitir).toBe(false);
     expect(decidir("Bash", {}).permitir).toBe(false);
     expect(decidir("WebFetch", { url: "https://example.com" })).toMatchObject({ permitir: true, contamina: true });
@@ -77,10 +77,10 @@ describe("kit do terminal (ADR-052, revisto pelas ADR-055 e ADR-066)", () => {
 
   it("ADR-067: Monitor roda um comando como o Bash — vai ao servidor com ele e passa pela cerca do git; TaskStop só para o que o bot pôs em segundo plano", () => {
     expect(NATIVAS_DO_TERMINAL).toEqual(expect.arrayContaining(["Monitor", "TaskStop"]));
-    const ciVerde = "until gh pr checks 505 -R leapy-edtech/leapy | grep -qv pending; do sleep 30; done";
+    const ciVerde = "until gh pr checks 505 -R acme-edtech/acme | grep -qv pending; do sleep 30; done";
     expect(decidir("Monitor", { command: ciVerde, description: "CI do #505" })).toMatchObject({ permitir: true, contamina: false, comando: ciVerde });
     expect(decidir("Monitor", { command: " " }).permitir).toBe(false);
-    const pasta = { cwd: "/Users/m/code/leapy", pastaDoBot: "/Users/m/nod/Dev 4", home: "/Users/m" };
+    const pasta = { cwd: "/Users/m/code/acme", pastaDoBot: "/Users/m/nod/Dev 4", home: "/Users/m" };
     expect(decidirNativa({ ferramenta: "Monitor", entrada: { command: "git checkout main && npm test" }, pasta })).toMatchObject({ permitir: false });
     expect(decidirNativa({ ferramenta: "Bash", entrada: { command: "git checkout main && npm test" }, pasta })).toMatchObject({ permitir: false });
     expect(decidir("TaskStop", { task_id: "b1" })).toMatchObject({ permitir: true, contamina: false });

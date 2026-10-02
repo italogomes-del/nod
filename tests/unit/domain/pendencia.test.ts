@@ -83,7 +83,7 @@ describe("a lista do prompt", () => {
 
 describe("o prompt com e sem pendências", () => {
   const agente = { nome: "Chico", titulo: "Tech Lead", descricao: "" };
-  const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } });
+  const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } });
   const REGRA = "Pendências: vai deixar algo para depois? Anote com anotar_pendencia (o quê e para quem, e a_partir_de se tiver hora). Promessa sem pendência anotada se perde.";
 
   it("a regra entra onde anotar_pendencia está no catálogo, literal; sem ela, não", () => {

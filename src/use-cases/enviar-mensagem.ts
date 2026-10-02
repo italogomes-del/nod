@@ -63,7 +63,7 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const mensagem: Mensagem = anexos.length > 0 ? { ...criada, anexos } : criada;
 
   const inventario = input.inventario ?? (await deps.repos.inventario.buscar(motorDe(executor))) ?? inventarioAusente(agora);
-  const localidade = resolverLocalidade({ origem, tocaAprendiz: false, motorExigido: agente.modelo, inventario });
+  const localidade = resolverLocalidade({ origem, tocaDadoPessoal: false, motorExigido: agente.modelo, inventario });
   const recusado = "recusado" in localidade;
 
   const turno = await deps.repos.turnos.enfileirar({

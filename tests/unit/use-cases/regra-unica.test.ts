@@ -38,8 +38,8 @@ async function cenario(o: { modo: ModoAprovacao; slug?: string; modoTurno?: Plan
     turnoId, agenteId, conversaId: conversa?.id ?? "", expiraEm: AGORA + 60_000, modoTurno: o.modoTurno ?? "delegacao",
     catalogo: {
       ferramentas: [
-        { nome: `${slug}__ler`, nomeMcp: `mcp__nod__${slug}__ler`, origem: "conector", conectorId, readOnlyHint: true, tocaAprendiz: false, schema: { type: "object", properties: {} } },
-        { nome: `${slug}__enviar`, nomeMcp: `mcp__nod__${slug}__enviar`, origem: "conector", conectorId, readOnlyHint: false, tocaAprendiz: false, schema: ESQUEMA },
+        { nome: `${slug}__ler`, nomeMcp: `mcp__nod__${slug}__ler`, origem: "conector", conectorId, readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object", properties: {} } },
+        { nome: `${slug}__enviar`, nomeMcp: `mcp__nod__${slug}__enviar`, origem: "conector", conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: ESQUEMA },
       ],
       servidores: [{ conectorId, nome: slug, trust: "untrusted", transporte: "stdio" }],
     },

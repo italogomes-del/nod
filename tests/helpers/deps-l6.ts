@@ -12,7 +12,7 @@ import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../sr
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
 import { lembrar } from "../../src/use-cases/lembrar.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
 
 /**
@@ -21,8 +21,8 @@ import { criarBancoMemoria, type BancoMemoria } from "./repos-memoria.ts";
  * sobre os repos da transação — a mesma regra que a L5 compõe —, `rotinas.ativar` é um espião injetável,
  * e o que não é desta lane lança "não implementado" em vez de fingir sucesso.
  */
-export const MARLON: Escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-export const ANA: Escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+export const MARLON: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+export const ANA: Escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 
 export type OpcoesServicos = {
   interruptor?: InterruptorNod;

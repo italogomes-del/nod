@@ -24,7 +24,7 @@ describe("log JSON único", () => {
   });
 
   it("nunca ecoa o campo texto (canal de vazamento, ADR-002/004)", () => {
-    const linha = log("erro", "mensagem_falhou", { texto: "cpf do aprendiz 123", conversa_id: "c" });
+    const linha = log("erro", "mensagem_falhou", { texto: "cpf do cliente 123", conversa_id: "c" });
     expect(linha).not.toContain("cpf");
     expect(JSON.parse(linha)).not.toHaveProperty("texto");
     expect(JSON.parse(linha).conversa_id).toBe("c");

@@ -5,7 +5,7 @@ import { decidirAcesso } from "../../src/use-cases/decidir-acesso.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
@@ -14,7 +14,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * mesma transação do Verificar, cards de permitir do nível pedido (a consulta usa `payload ? 'conectar'`);
  * Permitir com um grupo desmarcado concede só o resto.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const AGORA = Date.parse("2026-09-25T10:00:00-03:00");
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome.toLowerCase(), schema: { type: "object" }, readOnlyHint });
 const CLICKUP = [cap("CLICKUP_GET_TASKS", true), cap("CLICKUP_CREATE_TASK", false), cap("CLICKUP_UPDATE_TASK", false), cap("CLICKUP_DELETE_TASK", false)];

@@ -27,7 +27,7 @@ const CADEADO = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" str
 const CHECK = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
 
 /**
- * "code › leapy › main-repos": a pasta-mãe, relativa à pasta pessoal. Propostas gravadas antes de
+ * "code › acme › main-repos": a pasta-mãe, relativa à pasta pessoal. Propostas gravadas antes de
  * 2026-09-25 não têm `onde`: tira o prefixo da pasta pessoal do próprio caminho.
  */
 export function ondeLegivel(c: { caminho: string; onde?: string }): string {
@@ -88,7 +88,7 @@ export function renderCardPasta(p: Proposta, c: PayloadPropostaPasta, estado: Es
   }, corpo, agente, `${botao("permitir-pasta", "Usar esta pasta", { classe: "pri", id: p.id })}${recusar}`);
 }
 
-/** O registro que fica depois de permitir: "leapy aberta para Dev 1 · code › leapy · Trocar". */
+/** O registro que fica depois de permitir: "acme aberta para Dev 1 · code › acme · Trocar". */
 export function renderPastaAberta(p: PastaAberta, estado: Estado, agente: Agente | undefined): string {
   const dono = agente !== undefined && agente.ownerId === estado.sessao?.pessoaId;
   const onde = ondeLegivel({ caminho: p.pasta, ...(p.onde !== undefined ? { onde: p.onde } : {}) });

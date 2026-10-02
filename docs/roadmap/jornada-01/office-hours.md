@@ -16,14 +16,14 @@ Equivale às capacidades do OMB descritas nos Pontos 1 e 2, **menos Companion**.
 
 ## Persona & pré-condições
 
-- **Persona:** Marlon, colaborador da Leapy, quer que um bot execute uma tarefa real de ponta a ponta
+- **Persona:** Marlon, dono do produto, quer que um bot execute uma tarefa real de ponta a ponta
   (ex.: "clone o repo X, rode os testes, e me diga o que quebrou") sem ele digitar cada comando.
 - **Pré-condições:** sessão real (não o stub de cookie de hoje); um agente criado; e, para controle
   local, um **opt-in explícito** da pessoa naquela máquina.
 
 ## A jornada, passo a passo (perspectiva do usuário)
 
-1. **Você dá uma tarefa que exige mãos.** No chat com o bot: *"Suba um ambiente, clone `leapy/api`,
+1. **Você dá uma tarefa que exige mãos.** No chat com o bot: *"Suba um ambiente, clone `acme/api`,
    rode a suíte e me traga os testes vermelhos."*
 2. **Você escolhe ONDE ele ganha mãos.** Um seletor no turno:
    - **Nesta máquina** (macOS, ou Ubuntu Xorg) — exige o opt-in explícito daquela máquina; ou
@@ -104,4 +104,4 @@ definitivo quando esta jornada for construída.
 - Preview da tela ao vivo: por onde trafega o vídeo sem reabrir a discussão de "algo alcança a
   máquina"? (No modelo VPS a máquina remota é do provedor de nuvem, não a sua — resolver isto no
   design.)
-- Sessão real (Google Workspace restrito a leapy.com.br) é pré-requisito e hoje é só um stub.
+- Sessão real (Google Workspace restrito ao domínio da organização) é pré-requisito e hoje é só um stub.

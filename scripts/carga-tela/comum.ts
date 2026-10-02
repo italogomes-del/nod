@@ -54,9 +54,9 @@ export async function botsDeCarga(s: Sessao): Promise<Bot[]> {
 
 /** Resposta de bot com o markdown que a web formata: parágrafos, tabela de 12 linhas, lista, código e links. */
 export function respostaRica(i: number): string {
-  const linhas = Array.from({ length: 12 }, (_, k) => `| PR #${1000 + i * 12 + k} | ${k % 3 === 0 ? "**aprovado**" : k % 3 === 1 ? "em revisão" : "`bloqueado`"} | ${(k * 7.3 + i).toFixed(1)} h | https://github.com/leapy/app/pull/${1000 + i * 12 + k} |`);
+  const linhas = Array.from({ length: 12 }, (_, k) => `| PR #${1000 + i * 12 + k} | ${k % 3 === 0 ? "**aprovado**" : k % 3 === 1 ? "em revisão" : "`bloqueado`"} | ${(k * 7.3 + i).toFixed(1)} h | https://github.com/acme/app/pull/${1000 + i * 12 + k} |`);
   return [
-    `Resumo da rodada ${i}: olhei os **${12 + (i % 7)} pull requests** abertos e cruzei com o [quadro do Linear](https://linear.app/leapy/view/abc${i}) e com o canal *#eng-releases*. O ponto de atenção é o \`deploy-${i}\` que ficou parado desde ontem.`,
+    `Resumo da rodada ${i}: olhei os **${12 + (i % 7)} pull requests** abertos e cruzei com o [quadro do Linear](https://linear.app/acme/view/abc${i}) e com o canal *#eng-releases*. O ponto de atenção é o \`deploy-${i}\` que ficou parado desde ontem.`,
     "",
     "| PR | Estado | Tempo | Link |",
     "|---|---|---:|---|",
@@ -66,7 +66,7 @@ export function respostaRica(i: number): string {
     "- revisar o `middleware` de autenticação e a política de cache",
     "- confirmar com a equipe de dados se o *backfill* terminou",
     "- abrir o incidente se o p95 passar de **800 ms** de novo",
-    "- atualizar a documentação em https://docs.leapy.com.br/runbooks/deploy",
+    "- atualizar a documentação em https://docs.acme.com.br/runbooks/deploy",
     "",
     "```ts",
     `export async function verificar${i}(ids: string[]): Promise<number> {`,

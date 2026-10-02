@@ -6,11 +6,11 @@ import { TAG } from "../../src/adapters/mcp-proxy/moldura.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { criarConectoresVivos } from "../../src/services/conectores-vivos.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { CAMINHO_MCP_SOMAR, dentroEmMemoria, inicializarProxy, planoDeTeste, servicosDeTeste, spawnProxy, type ProxyReal } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ESQUEMA_SOMAR = { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } as const;
 
 type ConteudoTexto = { content: { type: string; text: string }[]; isError?: boolean };

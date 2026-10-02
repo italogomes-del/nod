@@ -3,12 +3,12 @@ import { expect, it } from "vitest";
 import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { agenteComConversa, autoriaAgente, autoriaPessoa } from "../../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 
 describeIntegracao("salasRepo: membership é grant de leitura ao dono do bot (ADR-027)", () => {
   it("Ana lê a sala (e a conversa e as mensagens) onde Tuca é membro e não lê a outra — SELECT sem WHERE sob a policy", async () => {

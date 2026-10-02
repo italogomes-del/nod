@@ -135,7 +135,7 @@ describe("pedir_a_bot está em todo modo em que o bot trabalha para a pessoa", (
   });
 
   it("a linha de colaboração explica um jeito só: pergunta ou trabalho, com os acessos do colega", () => {
-    const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } });
+    const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } });
     const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_a_bot")], pessoaNome: "Marlon", modo: "rotina" });
     expect(p).toContain("chame pedir_a_bot com o pedido autocontido");
     expect(p).toContain("Ele resolve com os acessos e ferramentas dele.");
@@ -146,8 +146,8 @@ describe("pedir_a_bot está em todo modo em que o bot trabalha para a pessoa", (
 
 describe("entrada do pedido: montada pelo servidor", () => {
   it("a mensagem da pessoa que originou o pedido, quando houver, vem literal num bloco; o pedido do colega fecha a entrada", () => {
-    const e = entradaDoPedido({ pessoaNome: "Marlon", remetenteNome: "Clarice", pedidos: ["Clarice, pede ao Chico para ver o PR 415"], pedido: "Explique a busca por nome", contexto: "https://github.com/leapy/app/pull/415" });
-    expect(e).toContain("Pedido de Clarice:\n<pedido_do_colega>\nPedido: Explique a busca por nome\nContexto: https://github.com/leapy/app/pull/415\n</pedido_do_colega>");
+    const e = entradaDoPedido({ pessoaNome: "Marlon", remetenteNome: "Clarice", pedidos: ["Clarice, pede ao Chico para ver o PR 415"], pedido: "Explique a busca por nome", contexto: "https://github.com/acme/app/pull/415" });
+    expect(e).toContain("Pedido de Clarice:\n<pedido_do_colega>\nPedido: Explique a busca por nome\nContexto: https://github.com/acme/app/pull/415\n</pedido_do_colega>");
     expect(e).toContain("Mensagem de Marlon que originou o pedido, literal:\n<pedido_da_pessoa>\nClarice, pede ao Chico para ver o PR 415\n</pedido_da_pessoa>");
     // O pedido do colega fecha a entrada: é o que fazer.
     expect(e.indexOf("<pedido_da_pessoa>")).toBeLessThan(e.indexOf("<pedido_do_colega>"));

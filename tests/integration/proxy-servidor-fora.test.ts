@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { rotasInternas } from "../../src/adapters/http/rotas/interno.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { dentroEmMemoria, inicializarProxy, planoDeTeste, spawnProxy, type ProxyReal } from "../helpers/l5.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
@@ -23,7 +23,7 @@ describe("proxy com o servidor fora do ar", () => {
     const tokens = criarTokenTurno({ agora });
     const { dentro } = dentroEmMemoria({ agora });
     const srv = await servidorDeTeste(rotasInternas({ dentro, tokens, agora }), { autorizarTokenTurno: tokens.autorizar });
-    const token = tokens.cunhar("t1", { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, agenteId: "a1" });
+    const token = tokens.cunhar("t1", { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON, agenteId: "a1" });
     tokens.guardarPlano(planoDeTeste({ turnoId: "t1", expiraEm: agora() + 60_000 }));
 
     proxy = spawnProxy({ NOD_URL: srv.url, NOD_TOKEN_TURNO: token });

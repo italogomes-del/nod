@@ -8,7 +8,7 @@ Inalterado. events particionada para fluxo append-only; tabelas de domínio para
 
 ## O que mudou
 
-Nada de estrutura. A tabela de credenciais muda de conteúdo (só a chave da Leapy) por causa do ADR-015, não de forma.
+Nada de estrutura. A tabela de credenciais muda de conteúdo (só a chave da organização) por causa do ADR-015, não de forma.
 
 ## Por quê
 

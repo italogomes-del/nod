@@ -1,7 +1,7 @@
 import type { DepsRoteador, Rota } from "../../src/adapters/http/roteador.ts";
 import { listen } from "../../src/adapters/http/server.ts";
 import { cunharCookie } from "../../src/adapters/http/sessao.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 
 export type DepsServidorDeTeste = {
   autorizarTokenTurno?: DepsRoteador["autorizarTokenTurno"];
@@ -40,7 +40,7 @@ export async function servidorDeTeste(rotas: Rota[], deps: DepsServidorDeTeste =
     url,
     close: srv.close,
     async entrar(pessoa) {
-      const escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOAS[pessoa] };
+      const escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOAS[pessoa] };
       return { cookie: `nod_sessao=${cunharCookie(escopo, segredo)}`, ...escopo };
     },
     chamar(sessao, metodo, caminho, corpo) {

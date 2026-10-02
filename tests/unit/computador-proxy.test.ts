@@ -4,7 +4,7 @@ import type { ClienteNod } from "../../src/adapters/executor/cliente-nod.ts";
 import { planoHarness } from "../helpers/plano-harness.ts";
 it("proxy encaminha imagem e áudio nativos sem truncar base64 e delimita o texto da página",async()=>{
   const plano=planoHarness();plano.expiraEm=1000;
-  plano.catalogo.ferramentas=[{nome:"computador_observar",nomeMcp:"mcp__nod__computador_observar",origem:"computador",conectorId:null,readOnlyHint:true,tocaAprendiz:true,schema:{type:"object"}}];
+  plano.catalogo.ferramentas=[{nome:"computador_observar",nomeMcp:"mcp__nod__computador_observar",origem:"computador",conectorId:null,readOnlyHint:true,tocaDadoPessoal:true,schema:{type:"object"}}];
   const imagem="a".repeat(30000);const audio="b".repeat(30000);
   const cliente:ClienteNod={plano:async()=>({ok:true,plano}),ferramenta:async()=>({ok:true,conteudo:"Texto do site",confianca:"nao_confiavel",imagem:{mimeType:"image/png",data:imagem},audio:{mimeType:"audio/wav",data:audio}}),aguardar:async()=>({estado:"pendente"}),negacao:async()=>{},chamarFerramenta:async()=>({conteudo:"",isError:false})};
   const proxy=criarProxy({cliente,agora:()=>1});

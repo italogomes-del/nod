@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { db } from "../helpers/db.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
@@ -13,8 +13,8 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  * ROLLBACK pelo símbolo). Se o pool enfileirasse as duas (max apertado), este teste ficaria
  * verde provando nada — por isso tests/helpers/db.ts avisa para não apertar o `max`.
  */
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const FIM: unique symbol = Symbol("fim");
 
 function sinal(): { pronto: Promise<void>; avisar: () => void } {

@@ -11,11 +11,11 @@ import { executarRotinaAgora } from "../../src/use-cases/executar-rotina-agora.t
 import { atualizarRotinaPeloAgente, listarRotinasDoAgente } from "../../src/use-cases/rotinas-do-agente.ts";
 import { contexto, depsSobre, rotinaValida } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const TZ = "America/Sao_Paulo";
 // quinta 01/10/2026 09:00 em São Paulo; a rotina do Dev roda de 20 em 20 minutos.
 const JANELA = Date.parse("2026-10-01T09:00:00-03:00");

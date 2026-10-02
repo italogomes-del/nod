@@ -2,7 +2,7 @@ import { vincularEscopo } from "../../src/db/tx.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import { db } from "./db.ts";
 
-/** Symbol PRIVADO, não Error: rollback intencional nunca se confunde com falha real (Leapy §2). */
+/** Symbol PRIVADO, não Error: rollback intencional nunca se confunde com falha real (Práticas §2). */
 const ROLLBACK: unique symbol = Symbol("rollback");
 
 /**

@@ -4,11 +4,11 @@ import { rotasInternas } from "../../src/adapters/http/rotas/interno.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { dentroEmMemoria, planoDeTeste, servicosDeTeste } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const CATALOGO = [
   { nome: "ler", descricao: "lê", schema: { type: "object" as const }, readOnlyHint: true },
   { nome: "enviar", descricao: "envia", schema: { type: "object" as const }, readOnlyHint: false },
@@ -50,8 +50,8 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
       turnoId, agenteId, conversaId, expiraEm: agora() + 60_000, tokenDeTurno: token, nativas,
       catalogo: {
         ferramentas: [
-          { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: FERRAMENTAS_NOD.pedir_aprovacao },
-          { nome: `${slug}__enviar`, nomeMcp: `mcp__nod__${slug}__enviar`, origem: "conector", conectorId: email?.id ?? "", readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } },
+          { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.pedir_aprovacao },
+          { nome: `${slug}__enviar`, nomeMcp: `mcp__nod__${slug}__enviar`, origem: "conector", conectorId: email?.id ?? "", readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } },
         ],
         servidores: [{ conectorId: email?.id ?? "", nome: slug, trust: "untrusted", transporte: "stdio" }],
       },

@@ -24,14 +24,14 @@
       --font:"Inter",system-ui,-apple-system,sans-serif;
       --ctx-private-a:#e7f0ff;
       --ctx-private-b:#f9fbff;
-      --ctx-leapy-a:#efe5ff;
-      --ctx-leapy-b:#fbf9ff;
+      --ctx-acme-a:#efe5ff;
+      --ctx-acme-b:#fbf9ff;
       --ctx-gamefik-a:#ffe9d8;
       --ctx-gamefik-b:#fffaf6;
       --list-private-a:rgba(72,121,228,.22);
       --list-private-b:rgba(255,255,255,.74);
-      --list-leapy-a:rgba(133,88,216,.22);
-      --list-leapy-b:rgba(255,255,255,.74);
+      --list-acme-a:rgba(133,88,216,.22);
+      --list-acme-b:rgba(255,255,255,.74);
       --list-gamefik-a:rgba(241,133,57,.22);
       --list-gamefik-b:rgba(255,255,255,.74);
     }
@@ -146,11 +146,11 @@
       --list-grad-a:var(--list-private-a);
       --list-grad-b:var(--list-private-b);
     }
-    .sidebar[data-context="leapy"]{
-      --ctx-grad-a:var(--ctx-leapy-a);
-      --ctx-grad-b:var(--ctx-leapy-b);
-      --list-grad-a:var(--list-leapy-a);
-      --list-grad-b:var(--list-leapy-b);
+    .sidebar[data-context="acme"]{
+      --ctx-grad-a:var(--ctx-acme-a);
+      --ctx-grad-b:var(--ctx-acme-b);
+      --list-grad-a:var(--list-acme-a);
+      --list-grad-b:var(--list-acme-b);
     }
     .sidebar[data-context="gamefik"]{
       --ctx-grad-a:var(--ctx-gamefik-a);
@@ -162,8 +162,8 @@
     .sidebar[data-context="private"] #companySidebar{
       background:linear-gradient(180deg,rgba(91,137,230,.12),rgba(255,255,255,0) 38%);
     }
-    .sidebar[data-context="leapy"] #privateSidebar,
-    .sidebar[data-context="leapy"] #companySidebar{
+    .sidebar[data-context="acme"] #privateSidebar,
+    .sidebar[data-context="acme"] #companySidebar{
       background:linear-gradient(180deg,rgba(141,102,219,.12),rgba(255,255,255,0) 38%);
     }
     .sidebar[data-context="gamefik"] #privateSidebar,
@@ -499,7 +499,7 @@
       background:#eef4ff;
       color:#355da6;
     }
-    .main[data-context="leapy"] .head .tag{
+    .main[data-context="acme"] .head .tag{
       border-color:#e1d6ff;
       background:#f4efff;
       color:#5b3da3;
@@ -859,8 +859,8 @@
       <div id="companySidebar" hidden>
         <div class="company-head">
           <div class="ttl">
-            <span class="icon c-purple shape-square" id="companyBadge">LE</span>
-            <span id="companyTitle">Leapy</span>
+            <span class="icon c-purple shape-square" id="companyBadge">AC</span>
+            <span id="companyTitle">Acme</span>
           </div>
           <p class="sub">Canais e conversas da empresa</p>
           <button class="ctx-back" id="backToPrivate">← Voltar para Meus agentes</button>
@@ -875,7 +875,7 @@
 
         <div class="list" id="companySectionsMount"></div>
 
-        <div class="me"><span class="av">LE</span> Workspace da empresa</div>
+        <div class="me"><span class="av">AC</span> Workspace da empresa</div>
       </div>
     </aside>
 
@@ -930,9 +930,9 @@
 
       var companies = [
         {
-          id: "co-leapy",
-          name: "Leapy",
-          abbr: "LE",
+          id: "co-acme",
+          name: "Acme",
+          abbr: "AC",
           color: "c-purple",
           channels: [
             {
@@ -976,7 +976,7 @@
             },
             {
               id: "ch-ana",
-              label: "Ana Beatriz",
+              label: "Sofia",
               type: "dm",
               group: "Diretas",
               preview: "Obrigada, faz sentido",
@@ -1151,7 +1151,7 @@
             subtitle: "Pode escolher ou escrever do seu jeito.",
             options: [
               ["A","Tarefas do dia a dia","Lembretes, organizacao, follow-ups"],
-              ["B","Trabalho na Leapy","Produto, ClickUp, Slack, codigo..."],
+              ["B","Trabalho na Acme","Produto, ClickUp, Slack, codigo..."],
               ["C","Pesquisa e respostas","Pesquisas, comparacoes e drafts"],
               ["D","Ainda nao sei","Me ajuda a descobrir no caminho"]
             ]
@@ -1166,10 +1166,10 @@
 
       var state = {
         mode: "private",
-        currentCompanyId: "co-leapy",
+        currentCompanyId: "co-acme",
         currentBotId: "b-lgpd",
         currentChannelByCompany: {
-          "co-leapy": "ch-comite",
+          "co-acme": "ch-comite",
           "co-gamefik": "ch-roadmap"
         },
         dragBotId: null,
@@ -1237,7 +1237,7 @@
       function getContextThemeKey(){
         if(state.mode === "private"){ return "private"; }
         if(state.currentCompanyId === "co-gamefik"){ return "gamefik"; }
-        return "leapy";
+        return "acme";
       }
       function renderEntityIcon(color, shape, text){
         return '<span class="icon ' + color + " " + shape + '">' + text + "</span>";
@@ -1614,7 +1614,7 @@
             subtitle: "Pode escolher ou escrever do seu jeito.",
             options: [
               ["A","Tarefas do dia a dia","Lembretes, organizacao, follow-ups"],
-              ["B","Trabalho na Leapy","Produto, ClickUp, Slack, codigo..."],
+              ["B","Trabalho na Acme","Produto, ClickUp, Slack, codigo..."],
               ["C","Pesquisa e respostas","Pesquisas, comparacoes e drafts"],
               ["D","Ainda nao sei","Me ajuda a descobrir no caminho"]
             ]

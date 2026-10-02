@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../src/contracts/agente.ts";
 import { criarDb } from "../src/db/client.ts";
+import { PESSOA_MARLON } from "../src/db/seed/index.ts";
 import { abrirTxEscopada } from "../src/db/tx.ts";
 import { criarRepos } from "../src/repositories/index.ts";
 import { log } from "../src/obs/log.ts";
@@ -36,7 +37,7 @@ if (!/:(543[5-9]|54[4-9][0-9])\//.test(url)) {
 const db = criarDb(url, { max: 4 });
 const PRAZO = 24 * 60 * 60 * 1000;
 
-const [pessoa] = await db<{ id: string; tenant_id: string }[]>`select id, tenant_id from pessoas where email = 'marlon.wanderllich@leapy.com.br'`;
+const [pessoa] = await db<{ id: string; tenant_id: string }[]>`select id, tenant_id from pessoas where id = ${PESSOA_MARLON}`;
 if (!pessoa) {
   log("erro", "cenarios_sem_pessoa", { dica: "rode npm run db:seed no banco efêmero" });
   process.exit(1);
@@ -86,7 +87,7 @@ const criados = await emTransacao(async (trx) => {
         texto: i.texto,
         destino: { conector: i.conector, ferramenta: i.ferramenta, argumentos: i.argumentos },
         origemSensivel: i.sensivel ?? false,
-        ...(i.sensivel ? { justificativa: "Veio de um lugar que guarda dado de aprendiz. Deixei desmarcado — só você pode marcar." } : {}),
+        ...(i.sensivel ? { justificativa: "Veio de um lugar que guarda dado pessoal. Deixei desmarcado — só você pode marcar." } : {}),
       })),
     );
     return d.id;
@@ -136,7 +137,7 @@ const criados = await emTransacao(async (trx) => {
   // 4. Um item sensível SOZINHO: continua com lista e caixa, nunca cai no modo enxuto.
   const diego = await bot("Diego", "c-red");
   await fala(diego.conversaId, "O material do acompanhamento está pronto.");
-  await aprovacao(diego, "Posso enviar o relatório do aprendiz?", [
+  await aprovacao(diego, "Posso enviar o relatório do cliente?", [
     { texto: "Enviar o relatório de progresso da Marina", conector: "gmail", ferramenta: "send", argumentos: { to: "coordenacao@escola.br", subject: "Progresso" }, sensivel: true },
   ]);
 
@@ -153,7 +154,7 @@ const criados = await emTransacao(async (trx) => {
   await aprovacao(felipe, "Posso fazer estas 5 coisas?", [
     { texto: "Avisar a equipe sobre a retrospectiva", conector: "slack", ferramenta: "send_message", argumentos: { channel: "#time" } },
     { texto: "Arquivar as atas de agosto", conector: "drive", ferramenta: "move_file", argumentos: { fileId: "ata-08", parent: "/Arquivo" } },
-    { texto: "Mandar o resumo para a diretoria", conector: "gmail", ferramenta: "send", argumentos: { to: "diretoria@leapy.com.br" } },
+    { texto: "Mandar o resumo para a diretoria", conector: "gmail", ferramenta: "send", argumentos: { to: "diretoria@acme.com.br" } },
     { texto: "Compartilhar a pasta do trimestre", conector: "drive", ferramenta: "share", argumentos: { fileId: "q3", role: "reader" } },
     { texto: "Avisar que o relatório saiu", conector: "slack", ferramenta: "send_message", argumentos: { channel: "#geral" } },
   ]);

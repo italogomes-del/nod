@@ -73,5 +73,5 @@
     "vitest": "^3.2.7"
   },
   "main": "dist/desktop/main.mjs",
-  "author": "Leapy"
+  "author": "nod"
 }

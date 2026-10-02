@@ -111,26 +111,26 @@ it("pasta com marca de projeto ganha de pasta homônima vazia", async () => {
 
 it("diz onde a pasta mora em relação à base, sem o caminho absoluto", async () => {
   const raiz = await base();
-  await mkdir(join(raiz, "code", "leapy", "main-repos", "leapy"), { recursive: true });
-  await mkdir(join(raiz, "leapy"), { recursive: true });
-  const r = await buscarPastas("leapy", { ...tudoAutorizavel, base: raiz });
+  await mkdir(join(raiz, "code", "acme", "main-repos", "acme"), { recursive: true });
+  await mkdir(join(raiz, "acme"), { recursive: true });
+  const r = await buscarPastas("acme", { ...tudoAutorizavel, base: raiz });
   const onde = Object.fromEntries(r.candidatas.map(c => [c.caminho, c.onde]));
-  expect(onde[join(raiz, "code", "leapy", "main-repos", "leapy")]).toBe("code/leapy/main-repos");
-  expect(onde[join(raiz, "leapy")]).toBe("");
+  expect(onde[join(raiz, "code", "acme", "main-repos", "acme")]).toBe("code/acme/main-repos");
+  expect(onde[join(raiz, "acme")]).toBe("");
 });
 
 it("entre homônimas do mesmo tipo, a usada por último vem primeiro", async () => {
   const raiz = await base();
-  const velha = join(raiz, "Inhouse", "leapy");
-  const usada = join(raiz, "code", "leapy", "main-repos", "leapy");
+  const velha = join(raiz, "Inhouse", "acme");
+  const usada = join(raiz, "code", "acme", "main-repos", "acme");
   for (const p of [velha, usada]) await mkdir(join(p, ".git"), { recursive: true });
   const meses = new Date("2026-05-01T12:00:00Z");
   const hoje = new Date("2026-09-25T12:00:00Z");
   for (const p of [velha, join(velha, ".git")]) await utimes(p, meses, meses);
   await writeFile(join(usada, ".git", "index"), "");
   for (const p of [usada, join(usada, ".git"), join(usada, ".git", "index")]) await utimes(p, hoje, hoje);
-  const r = await buscarPastas("leapy", { ...tudoAutorizavel, base: raiz });
-  // A terceira é code/leapy, a pasta-mãe homônima sem Git: fica atrás das duas.
+  const r = await buscarPastas("acme", { ...tudoAutorizavel, base: raiz });
+  // A terceira é code/acme, a pasta-mãe homônima sem Git: fica atrás das duas.
   expect(r.candidatas.map(c => c.caminho).slice(0, 2)).toEqual([usada, velha]);
   expect(r.candidatas[0]!.modificadoEm).toBe(hoje.getTime());
 });

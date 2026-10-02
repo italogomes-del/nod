@@ -10,18 +10,18 @@ import { dispensarDecisao } from "../../src/use-cases/dispensar-decisao.ts";
 import { PRAZO_REABERTURA_MS, reabrirDecisao } from "../../src/use-cases/reabrir-decisao.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../../web/lib/relogio.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const H = 60 * 60 * 1000;
 const DIA = 24 * H;
 
 const deps = (trx: Tx, escopo: Escopo, agora: () => number): DepsSuaVez => ({ repos: criarRepos(trx, escopo), escopo, agora, tx: (fn) => fn(trx) });
-const destino = { conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: "bia@leapy.com.br" } };
+const destino = { conector: "exemplo", ferramenta: "enviar_email", argumentos: { para: "bia@acme.com.br" } };
 
 /**
  * "Sua vez" por PESSOA sob RLS de duas pernas (ADR-007, EMENDA 1) com a decisora como sujeito da

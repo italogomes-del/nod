@@ -8,7 +8,7 @@ import type { ConfigDriver, Driver, IdDriver, Instance, Registry } from "./spi.t
 /**
  * Registry (ADR-012): create() que falha vira sombra com motivo escrito, nunca derruba o servidor.
  * claude-cli só fica 'pronto' quando a SONDA diz pronto (ADR-019: gate pré-spawn); catcher é sempre
- * pronto. NOD_EXECUTOR escolhe o padrão; fora de produção o padrão é catcher (Leapy §11).
+ * pronto. NOD_EXECUTOR escolhe o padrão; fora de produção o padrão é catcher (Práticas §11).
  */
 export type EnvRegistry = Readonly<Record<string, string | undefined>>;
 

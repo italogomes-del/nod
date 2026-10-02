@@ -4,12 +4,12 @@ import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { emitirPlanoTurno, modoDoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 const CATALOGO = [
   { nome: "listar_contatos", descricao: "lista", schema: { type: "object" as const }, readOnlyHint: true },
@@ -69,7 +69,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       expect(r.data.expiraEm).toBeGreaterThan(agora());
 
       // Token: autoriza com a identidade do turno; o plano vive junto dele; revogar derruba os dois.
-      expect(tokens.autorizar(r.data.tokenDeTurno)).toEqual({ turnoId: turno?.id, tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, agenteId });
+      expect(tokens.autorizar(r.data.tokenDeTurno)).toEqual({ turnoId: turno?.id, tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON, agenteId });
       expect(tokens.planoDe(turno?.id ?? "")).toEqual(r.data);
       tokens.revogar(turno?.id ?? "");
       expect(tokens.autorizar(r.data.tokenDeTurno)).toBeNull();

@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { EXECUCOES_GUARDADAS } from "../../../src/shared/constantes.ts";
 import { agenteComConversa } from "../../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 describeIntegracao("rotinaJanelasRepo e rotinaExecucoesRepo: trava por instante e poda das 20", () => {
   it("a mesma janela só é reivindicada uma vez (segunda devolve false sem erro); vincularTurno e listar", async () => {

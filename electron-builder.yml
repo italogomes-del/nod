@@ -1,6 +1,6 @@
-appId: br.com.leapy.nod
+appId: app.nod.desktop
 productName: nod
-copyright: Copyright © 2026 Leapy
+copyright: Copyright © 2026 nod
 directories:
   output: release
   buildResources: desktop/resources

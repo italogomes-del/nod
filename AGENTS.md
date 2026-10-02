@@ -1,7 +1,7 @@
 # AGENTS.md — como trabalhar neste repositório
 
 Curto no dia 1; cresce quando um agente errar de verdade. As decisões moram em [docs/adr/](docs/adr/); as
-práticas herdadas, com evidência, em [docs/inherited-from-leapy.md](docs/inherited-from-leapy.md).
+práticas herdadas, com evidência, em [docs/praticas-herdadas.md](docs/praticas-herdadas.md).
 
 Para iniciar, atualizar ou separar o Nod diário de bancos descartáveis de feature, siga
 [docs/ambiente-local-persistente.md](docs/ambiente-local-persistente.md). O banco diário usa a porta
@@ -33,9 +33,9 @@ O hook é instalado pelo `prepare` do `npm ci`/`npm install`; confira com `ls .g
 ## Aviso: nvm/asdf ganham do mise
 
 Se o seu shell carrega nvm ou asdf, eles GANHAM do mise e você roda a suíte no Node errado, e o erro
-MENTE sobre onde está o bug. A origem deste aviso é a medição da Leapy, não nossa: no monorepo deles,
+MENTE sobre onde está o bug. A origem deste aviso é uma medição do projeto de referência, não nossa: no monorepo dele,
 19 falhas com o Node 18 do nvm contra 892 verdes com `mise exec` — e as 19 apontavam arquivos de
-feature que estavam corretos (docs/inherited-from-leapy.md §8). Se algo falhar sem sentido, confira
+feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem sentido, confira
 `node --version` = 24.19.0 ou envelope com `mise exec -- npm run check`.
 
 ## Regras que o código trava (não são sugestão)
@@ -115,14 +115,15 @@ e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx
 - **Cron com intervalos** (ADR-033): minuto/hora aceitam fixos, listas, `*` e passos como `*/5`.
   UTC também é persistível (0010); a janela continua canônica e deduplicada.
 
-- **Docker compose com um serviço só** (desvio do §5 da Leapy, EMENDA 25): o catcher do nod não é um
+- **Docker compose com um serviço só** (desvio do §5 das práticas herdadas, EMENDA 25): o catcher do nod não é um
   serviço como o Mailpit — é um driver in-process do executor (`NOD_EXECUTOR=catcher`), porque o que se
   captura é o que o proxy decidiu e o que o CLI teria chamado, e isso mora no processo do servidor.
 - **`src/contracts/` existe além de `src/shared/types.ts`** (EMENDA 26): contém SÓ tipos e `as const`,
   sem lógica; a web importa dali só com `import type`. Gatilho de revisão: um arquivo passando de
   200 linhas.
 - **Login por `NOD_LOGIN`, obrigatório** (ADR-030; o épico E1 dizia "o stub some" — revisto em
-  2026-09-16). `google` = OAuth Workspace restrito a leapy.com.br, pode escutar fora de 127.0.0.1 e
+  2026-09-16). `google` = OAuth Google só para e-mails do cadastro (o seed lê `NOD_SEED_EMAIL`; `NOD_GOOGLE_DOMINIO`
+  restringe a um domínio Workspace — emenda 2026-10-02), pode escutar fora de 127.0.0.1 e
   RECUSA segredo de sessão curto ou o de exemplo; `stub` = login de desenvolvimento que lista as pessoas
   do cadastro, só em 127.0.0.1. Sem `NOD_LOGIN` o servidor não sobe. Os testes nunca usam nenhum dos
   dois: cunham o cookie com `cunharCookie` (`servidorDeTeste.entrar`, `servidorCompleto.sessaoDe`).

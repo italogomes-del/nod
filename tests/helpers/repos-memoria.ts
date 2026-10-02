@@ -31,10 +31,10 @@ import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.r
 import type { Repos } from "../../src/repositories/tipos.ts";
 import { EXECUCOES_GUARDADAS, LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Escopo } from "../../src/shared/types.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "./ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "./ids.ts";
 
 /**
- * `Repos` em memória para tests/unit/use-cases (Leapy §1: a fábrica de tx vira `(fn) => fn({} as never)`
+ * `Repos` em memória para tests/unit/use-cases (Práticas §1: a fábrica de tx vira `(fn) => fn({} as never)`
  * e os repos são estes). Mesmas assinaturas de src/repositories/*.repo.ts (o compilador cobra:
  * `satisfies Repos`), mesma semântica de retorno (null/[]), SEM RLS: o isolamento por pessoa se prova
  * em tests/integration, não aqui. Escopo por tenant é respeitado onde o SQL filtra por tenant/owner.
@@ -153,10 +153,10 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     outbox: [],
     maquinaTokens: [],
   };
-  return { banco, repos: (escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }) => reposSobre(banco, escopo) };
+  return { banco, repos: (escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON }) => reposSobre(banco, escopo) };
 }
 
-/** Atalho: um banco novo e a visão da pessoa dada (default Marlon na Leapy). */
+/** Atalho: um banco novo e a visão da pessoa dada (default Marlon no tenant padrão). */
 export function reposMemoria(escopo?: Escopo): Repos {
   return criarBancoMemoria().repos(escopo);
 }

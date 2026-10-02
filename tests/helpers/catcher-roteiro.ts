@@ -1,7 +1,7 @@
 import type { EventoStream } from "../../src/contracts/turno.ts";
 
 /**
- * Roteiro do catcher (Leapy §11): marcadores no PROMPT viram a sequência de eventos que o driver
+ * Roteiro do catcher (Práticas §11): marcadores no PROMPT viram a sequência de eventos que o driver
  * falso/catcher emite, sem CLI e sem custo. Módulo puro (sem vitest): o driver catcher da L4 pode
  * importar por caminho. Um marcador por linha, qualquer lugar do prompt:
  *

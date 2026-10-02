@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { conceder, concederLote, quandoUtc } from "../../../src/use-cases/conceder.ts";
 import { revogar, revogarLote } from "../../../src/use-cases/revogar.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { depsFalsos } from "./deps-l5.ts";
 
 const AGORA = 1_758_000_000_000;
 
 async function cenario() {
   const { deps, banco } = depsFalsos({ agora: AGORA });
-  banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
+  banco.pessoas.push({ tenantId: TENANT_PADRAO, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const conector = await deps.repos.conectores.criar({ nome: "Exemplo", slug: "exemplo", transporte: "stdio", comando: "node", declaracao: "nao-toca" });

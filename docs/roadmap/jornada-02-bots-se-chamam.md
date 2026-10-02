@@ -173,7 +173,7 @@ O que falta no nod é tudo **experiência e configuração**, não motor:
 3. **Você vê o fio da delegação.** A UI mostra `Marola → Ressaca` e `Marola → Review`, com as falas de
    cada um marcadas como vindas de outro bot (não de você).
 4. **Os bots respondem — e podem perguntar de volta.** Ressaca confirma o merge e **pergunta** se deve
-   rodar o Workflow `leapy-releases` de novo; a pergunta escala a você (a garantia do nod).
+   rodar o Workflow `acme-releases` de novo; a pergunta escala a você (a garantia do nod).
 5. **O teto protege contra bots tagarelando.** Se a cadeia passar de 3 saltos sem você, o próximo vira
    passe `teto_canal` — a conversa volta para você em vez de girar entre bots.
 6. **O Marola sintetiza e devolve.** Uma resposta só, com o rastro de quem contribuiu.
@@ -226,7 +226,7 @@ caminho de volta é exatamente o que o orçamento de canal existe para impedir.
 3. A cadeia passa de 3 saltos sem fala humana → vira passe `teto_canal` e volta à pessoa.
 4. Cada bot tem uma seção de **instruções** ("faço / não faço / posso procurar X") e a lista de quem
    pode chamar é **explícita e auditável**.
-5. Existe ao menos uma **skill de workflow nomeada** que um bot invoca (o `leapy-releases` do print é o
+5. Existe ao menos uma **skill de workflow nomeada** que um bot invoca (o `acme-releases` do print é o
    exemplo-alvo).
 6. Toda delegação/resposta/passe está na **trilha** com autoria composta e cota atribuída (ADR-025).
 

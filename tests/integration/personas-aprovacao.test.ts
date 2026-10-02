@@ -22,7 +22,7 @@ import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste, useCasesDeTeste, type ChamadaConector } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -55,7 +55,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * slug único, porque `github` é o nativo que roda no Mac (ADR-048) — e ele continua sendo de fora. Concessão inicial = "Ler e alterar" do ClickUp (capacidadesDoNivel 'escrita', sem apagar) e o merge
  * do GitHub dado pelo nome; o Slack começa sem acesso.
  */
-const ESCOPO = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const ESCOPO = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const JANELA = Date.parse("2026-09-30T11:00:00Z");
 
 type NomePersona = "Rita" | "Marlon" | "Bruno";

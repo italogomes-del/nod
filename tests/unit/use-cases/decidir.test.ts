@@ -4,14 +4,14 @@ import { argumentosComTextoFinal, decidir } from "../../../src/use-cases/decidir
 import { JUSTIFICATIVA_SENSIVEL } from "../../../src/domain/aprovacao-item.ts";
 import { pedirAprovacao } from "../../../src/use-cases/pedir-aprovacao.ts";
 import type { Deps } from "../../../src/use-cases/tipos.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { depsFalsos, type OpcoesDepsFalsos } from "./deps-l5.ts";
 
 const destino = { conector: "email", ferramenta: "enviar", argumentos: { texto: "corpo" } };
 
 async function cenarioComDecisao(opcoes: OpcoesDepsFalsos = {}) {
   const { deps, banco, chamadas } = depsFalsos(opcoes);
-  banco.pessoas.push({ tenantId: TENANT_LEAPY, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
+  banco.pessoas.push({ tenantId: TENANT_PADRAO, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const email = await deps.repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });

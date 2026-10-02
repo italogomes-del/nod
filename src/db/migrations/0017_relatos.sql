@@ -3,7 +3,7 @@
 -- tipado em turnos/mensagens e é copiado para cá no instante do envio.
 --
 -- A forma copia a trilha do ADR-004: metadados tipados numa tabela, prosa em tabela irmã APAGÁVEL por
--- nod_poda. O trecho de conversa pode conter dado de aprendiz (ADR-002) e conteúdo de conector ou de
+-- nod_poda. O trecho de conversa pode conter dado pessoal (ADR-002) e conteúdo de conector ou de
 -- outro bot (ADR-026), então precisa sair inteiro num pedido de exclusão sem tocar no registro.
 CREATE TYPE categoria_relato AS ENUM (
   'resposta_errada', 'nao_fez_o_pedido', 'travou_ou_parou', 'lento', 'interface', 'outro'

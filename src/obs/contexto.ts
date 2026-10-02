@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-/** Nasce em abrirTxEscopada e todo log carrega (Leapy §10). */
+/** Nasce em abrirTxEscopada e todo log carrega (Práticas §10). */
 export interface Contexto {
   tenantId: string;
   pessoaId: string;

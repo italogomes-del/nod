@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { log } from "../obs/log.ts";
 
 /**
- * Runner de migrações em SQL puro (sem drizzle-kit push, Leapy §O que não trazer):
+ * Runner de migrações em SQL puro (sem drizzle-kit push, Práticas §O que não trazer):
  * ordem lexicográfica, pg_advisory_lock(7211) para dois processos não migrarem juntos,
  * schema_migrations (nome PK, aplicada_em), e só o conteúdo ANTES de `-- ROLLBACK:` é aplicado.
  * Conecta como nod_dono (urlDono); a aplicação nunca migra.
@@ -22,7 +22,7 @@ export function trechoAplicavel(conteudo: string): string {
 export async function migrar(urlDono: string, dir: string): Promise<{ aplicadas: string[] }> {
   // onnotice — definido em 2026-09-16: NOTICE não é erro ("relation schema_migrations already exists,
   // skipping" a cada rodada); o default do postgres.js imprime via console, fora do wrapper único de
-  // log (Leapy §10), e poluía a saída de `npm run check`. Erros continuam lançando normalmente.
+  // log (Práticas §10), e poluía a saída de `npm run check`. Erros continuam lançando normalmente.
   const sql = postgres(urlDono, { prepare: false, max: 1, onnotice: () => {} });
   const aplicadas: string[] = [];
   try {

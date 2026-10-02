@@ -90,7 +90,7 @@ certo, pergunta e retoma com a resposta — mesmo antes da UI bonita (E5). É a 
 
 ## E6 — Skills de workflow nomeadas
 
-- **Objetivo:** trazer de volta as skills `/` (o `leapy-releases` do print), cortadas na EMENDA 24.
+- **Objetivo:** trazer de volta as skills `/` (o `acme-releases` do print), cortadas na EMENDA 24.
 - **Escopo:** formato da skill; quem pode invocar; como compõem com o plano de turno (ADR-024) e a
   allowlist do agente.
 - **ADRs:** **REVERTE a EMENDA 24** — precisa de **ADR próprio** (pré-esboço no roadmap primeiro).

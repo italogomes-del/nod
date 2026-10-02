@@ -5,11 +5,11 @@ import type { Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts
 import type { Rota } from "../../../src/adapters/http/roteador.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../../helpers/servidor-de-teste.ts";
 
 /**
- * Driver catcher (Leapy §11) contra um servidor REAL em porta 0 com a rota interna de ferramenta:
+ * Driver catcher (Práticas §11) contra um servidor REAL em porta 0 com a rota interna de ferramenta:
  * o tool_use do roteiro passa pelo mesmo cliente-nod que o proxy usa, com Bearer do token de turno.
  * Sem banco: a rota é um stub que registra o que recebeu.
  */
@@ -17,7 +17,7 @@ const TOKEN = "token-do-turno-catcher";
 
 function planoDeTeste(texto: string, parcial: Partial<PlanoTurno> = {}): PlanoTurno {
   return {
-    tenantId: TENANT_LEAPY,
+    tenantId: TENANT_PADRAO,
     turnoId: "turno-catcher-1",
     conversaId: "c",
     agenteId: "a1",
@@ -31,8 +31,8 @@ function planoDeTeste(texto: string, parcial: Partial<PlanoTurno> = {}): PlanoTu
     profundidade: 0,
     catalogo: {
       ferramentas: [
-        { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } },
-        { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaAprendiz: false, schema: { type: "object" } },
+        { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } },
+        { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } },
       ],
       servidores: [],
     },
@@ -91,7 +91,7 @@ describe("driver catcher + cliente-nod contra rota interna real", { timeout: TIM
 
   beforeAll(async () => {
     srv = await servidorDeTeste(rotas, {
-      autorizarTokenTurno: (token) => (token === TOKEN ? { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON, turnoId: "turno-catcher-1", agenteId: "a1" } : null),
+      autorizarTokenTurno: (token) => (token === TOKEN ? { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON, turnoId: "turno-catcher-1", agenteId: "a1" } : null),
     });
   });
   afterAll(() => srv.close());
@@ -121,7 +121,7 @@ describe("driver catcher + cliente-nod contra rota interna real", { timeout: TIM
     expect(toolResult).toMatchObject({ isError: false, texto: "ok:lembrar" });
 
     expect(chamadas).toHaveLength(1);
-    expect(chamadas[0]).toMatchObject({ nome: "lembrar", corpo: { argumentos: { tipo: "fato", texto: "a Ana prefere manhã" } }, turnoId: "turno-catcher-1", agenteId: "a1", escopo: { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON }, origin: undefined });
+    expect(chamadas[0]).toMatchObject({ nome: "lembrar", corpo: { argumentos: { tipo: "fato", texto: "a Ana prefere manhã" } }, turnoId: "turno-catcher-1", agenteId: "a1", escopo: { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON }, origin: undefined });
 
     expect(registros.map((r) => r.tipo)).toEqual(["plano_recebido", "tool_use", "tool_result", "resultado"]);
     for (const r of registros) {

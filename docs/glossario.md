@@ -65,7 +65,7 @@ distribui tarefas e guarda os registros, mas **nunca vê a sua senha** e nunca f
 | **Postgres / banco** | O arquivo/gaveta onde tudo é guardado. |
 | **RLS** (segurança por linha) | A tranca da gaveta: cada pessoa só enxerga as próprias linhas. São duas camadas de tranca. |
 | **Escopo / transação escopada** | Toda operação no banco é carimbada com "de quem é" (empresa + pessoa). Não existe acesso anônimo. |
-| **Tenant** | A fronteira da empresa. Aqui é só a Leapy. |
+| **Tenant** | A fronteira da empresa. Hoje há um só, o tenant padrão. |
 | **Events / Outbox** | *Events* = o rio de "o que aconteceu". *Outbox* = a caixa de saída que garante que os avisos sejam entregues. |
 | **Barramento** | O sistema de som interno que anuncia as mudanças para quem estiver escutando. |
 | **SSE** | O "feed ao vivo" para o navegador: um letreiro que avisa "mudou algo, vem ver". |

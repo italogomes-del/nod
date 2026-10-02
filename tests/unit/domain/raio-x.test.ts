@@ -83,7 +83,7 @@ describe("montarExecucao", () => {
 });
 
 describe("partesDoPrompt: o prompt de sistema em seções", () => {
-  const f = (nome: string, origem: FerramentaPlano["origem"] = "nod"): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem, conectorId: origem === "conector" ? "c-gmail" : null, readOnlyHint: true, tocaAprendiz: false, schema: { type: "object" } });
+  const f = (nome: string, origem: FerramentaPlano["origem"] = "nod"): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem, conectorId: origem === "conector" ? "c-gmail" : null, readOnlyHint: true, tocaDadoPessoal: false, schema: { type: "object" } });
   const gmail: Conector = {
     tenantId: "t", id: "c-gmail", ownerId: "p", visibility: "privado", nome: "Gmail", slug: "gmail", transporte: "http",
     comando: null, args: [], url: "https://x", env: {}, declaracao: "toca", habilitado: true, sondadoEm: 1, ultimaFalha: null, criadoEm: 1,

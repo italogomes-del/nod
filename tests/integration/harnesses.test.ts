@@ -4,11 +4,11 @@ import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
-const escopo = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const pronto = { estado: "pronto", versao: "teste", em: Date.now() } as const;
 describeIntegracao("harness por agente", () => {
   it("persiste, duplica, congela preferência da tarefa e mantém histórico sem reutilizar sessão de outro harness", async () => {

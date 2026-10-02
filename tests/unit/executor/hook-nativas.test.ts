@@ -15,7 +15,7 @@ describe("hook do nod (ADR-052, revisto pela ADR-055)", () => {
   };
 
   it("arquivo em qualquer lugar do Mac passa e é confirmado no servidor", async () => {
-    const r = await decidirHook(evento("Write", { file_path: "/Users/m/Inhouse/leapy/src/x.ts" }), confirmar);
+    const r = await decidirHook(evento("Write", { file_path: "/Users/m/Inhouse/acme/src/x.ts" }), confirmar);
     expect(r.hookSpecificOutput.permissionDecision).toBe("allow");
     expect(pedidos.at(-1)).toEqual({ ferramenta: "Write", contamina: false });
   });

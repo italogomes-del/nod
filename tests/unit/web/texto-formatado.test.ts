@@ -23,7 +23,7 @@ describe("links no texto do bot", () => {
   });
 
   it("[nome](link) fica na frase; dentro de negrito também", () => {
-    expect(textoFormatado("Comece pelo [PR #481](https://github.com/leapy-edtech/leapy/pull/481).")).toContain('>PR #481</a>.');
+    expect(textoFormatado("Comece pelo [PR #481](https://github.com/acme-edtech/acme/pull/481).")).toContain('>PR #481</a>.');
     expect(textoFormatado("**veja https://zoom.us/pricing**")).toMatch(/^<strong>veja <a class="lk-chip"[^>]*>.*<\/a><\/strong>$/);
   });
 
@@ -63,10 +63,10 @@ describe("tabelas no texto do bot", () => {
   });
 
   it("negrito, código e link funcionam na célula; HTML não", () => {
-    const html = textoFormatado("| PR | Por quê | Link |\n|---|---|---|\n| **#417** | IDOR em `tenants` <b>x</b> | [abrir](https://github.com/leapy-edtech/leapy/pull/417) |");
+    const html = textoFormatado("| PR | Por quê | Link |\n|---|---|---|\n| **#417** | IDOR em `tenants` <b>x</b> | [abrir](https://github.com/acme-edtech/acme/pull/417) |");
     expect(html).toContain("<td class=\"curta\"><strong>#417</strong></td>");
     expect(html).toContain("<code>tenants</code> &lt;b&gt;x&lt;/b&gt;");
-    expect(html).toContain('href="https://github.com/leapy-edtech/leapy/pull/417"');
+    expect(html).toContain('href="https://github.com/acme-edtech/acme/pull/417"');
   });
 
   it("linha torta não quebra a tabela; \\| é barra dentro da célula", () => {

@@ -6,11 +6,11 @@ import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { ORCAMENTO_RESULTADO_CHARS } from "../../src/shared/constantes.ts";
 import { criarConectoresVivos } from "../../src/services/conectores-vivos.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { dentroEmMemoria, inicializarProxy, planoDeTeste, servicosDeTeste, spawnProxy, type ProxyReal } from "../helpers/l5.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 type ConteudoTexto = { content: { type: string; text: string }[]; isError?: boolean };
 
 /**
@@ -38,7 +38,7 @@ describe("proxy com o artefato do nod (ADR-051)", () => {
 
     srv = await servidorDeTeste(rotasInternas({ dentro: memoria.dentro, tokens, agora }), { autorizarTokenTurno: tokens.autorizar });
     const token = tokens.cunhar(turnoId, { ...MARLON, agenteId });
-    const nod = (nome: "publicar_artefato" | "ler_artefato") => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "nod" as const, conectorId: null, readOnlyHint: nome === "ler_artefato", tocaAprendiz: false, schema: FERRAMENTAS_NOD[nome] });
+    const nod = (nome: "publicar_artefato" | "ler_artefato") => ({ nome, nomeMcp: `mcp__nod__${nome}` as const, origem: "nod" as const, conectorId: null, readOnlyHint: nome === "ler_artefato", tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] });
     tokens.guardarPlano(planoDeTeste({
       turnoId, agenteId, conversaId: conversa?.id ?? "", expiraEm: agora() + 600_000, tokenDeTurno: token,
       // O orçamento que montarPlano dá a todo turno real (o planoDeTeste fixa 8 000, de antes de 2026-09-28).

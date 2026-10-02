@@ -1,5 +1,5 @@
-# Três jobs paralelos (Leapy §9): lint+typecheck sem banco, unit sem banco, integração com Postgres.
-# O job de integração MIGRA e NÃO roda seed (Leapy §6): cada teste cria as próprias linhas.
+# Três jobs paralelos (Práticas §9): lint+typecheck sem banco, unit sem banco, integração com Postgres.
+# O job de integração MIGRA e NÃO roda seed (Práticas §6): cada teste cria as próprias linhas.
 # CI=1 (padrão do GitHub) faz o skip de integração virar ERRO em tests/helpers/integracao.ts.
 # Actions pinadas por SHA imutável (verificados em 2026-09-16 na API do GitHub):
 #   actions/checkout v4.2.2  = 11bd71901bbe5b1630ceea73d27597364c9af683

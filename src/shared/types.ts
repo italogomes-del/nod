@@ -1,5 +1,5 @@
 // Tipos que DUAS camadas exigem hoje. Estreito de propósito: revisar quando passar de ~200 linhas
-// (Leapy §O que não trazer, src/types.ts de 350 linhas). Só tipos — nada de lógica.
+// (Práticas §O que não trazer, src/types.ts de 350 linhas). Só tipos — nada de lógica.
 import type postgres from "postgres";
 
 /** Pool do postgres.js (produção e helpers de teste). */
@@ -19,7 +19,7 @@ export interface Escopo {
 export type Relogio = () => number;
 
 /**
- * Transação como FÁBRICA (Leapy §1): em produção abre envelope real; no teste devolve o
+ * Transação como FÁBRICA (Práticas §1): em produção abre envelope real; no teste devolve o
  * envelope condenado do withRollback; no unitário `(fn) => fn(reposFalsos)`.
  */
 export type Transacao = <T>(fn: (trx: Tx) => Promise<T>) => Promise<T>;

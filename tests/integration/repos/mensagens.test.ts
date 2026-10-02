@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa, autoriaAgente, autoriaPessoa } from "../../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 
 describeIntegracao("mensagensRepo: autoria composta, payload tipado e confiança obrigatória", () => {
   it("grava com autoria composta e lê de volta em ordem; payload jsonb volta tipado", async () => {

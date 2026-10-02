@@ -3,13 +3,13 @@ import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { db } from "../helpers/db.ts";
 import { expectRejected } from "../helpers/expect-rejected.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
- * SPIKE (Leapy, commit 3): o único risco real do plano. Tabela DESCARTÁVEL (TEMP, morre no
- * rollback) com RLS + FORCE, provando o que a Leapy não pode provar por nós:
+ * SPIKE (commit 3): o único risco real do plano. Tabela DESCARTÁVEL (TEMP, morre no
+ * rollback) com RLS + FORCE, provando o que nenhuma referência externa pode provar por nós:
  *  (a) set_config LOCAL sobrevive dentro do envelope do withRollback e a policy filtra;
  *  (b) não vaza para a próxima transação do mesmo pool;
  *  (c) exceção de trigger sob SAVEPOINT devolve a transação utilizável;
@@ -18,8 +18,8 @@ import { withRollback } from "../helpers/with-rollback.ts";
  * Fica como regressão permanente.
  */
 
-const ESCOPO_MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ESCOPO_ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const ESCOPO_MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ESCOPO_ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const OUTRO_TENANT = randomUUID();
 
 const PERMISSIVE = `create policy p_pessoa on spike_rls as permissive for all to nod_app
@@ -42,14 +42,14 @@ describeIntegracao("spike: RLS + withRollback + SAVEPOINT", () => {
       // Sem nenhuma PERMISSIVE: até o INSERT do próprio escopo é recusado (42501).
       await expectRejected(
         trx,
-        () => trx`insert into spike_rls values (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'x')`,
+        () => trx`insert into spike_rls values (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'x')`,
         "42501",
       );
       const soRestritiva = await trx`select count(*)::int as n from spike_rls`;
       expect(soRestritiva[0]?.n).toBe(0);
 
       await trx.unsafe(PERMISSIVE);
-      await trx`insert into spike_rls values (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'x')`;
+      await trx`insert into spike_rls values (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'x')`;
       const comPermissiva = await trx`select count(*)::int as n from spike_rls`;
       expect(comPermissiva[0]?.n).toBe(1);
     });
@@ -62,17 +62,17 @@ describeIntegracao("spike: RLS + withRollback + SAVEPOINT", () => {
       await trx.unsafe(RESTRICTIVE);
 
       const vistos = await trx`select current_setting('nod.tenant_id') as t, current_setting('nod.pessoa_id') as p`;
-      expect(vistos[0]).toEqual({ t: TENANT_LEAPY, p: PESSOA_MARLON });
+      expect(vistos[0]).toEqual({ t: TENANT_PADRAO, p: PESSOA_MARLON });
 
-      await trx`insert into spike_rls values (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'de marlon')`;
+      await trx`insert into spike_rls values (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'de marlon')`;
       // INSERT com owner_id de outra pessoa é recusado pelo WITH CHECK.
       await expectRejected(
         trx,
-        () => trx`insert into spike_rls values (${TENANT_LEAPY}, ${PESSOA_ANA}, 'invasao')`,
+        () => trx`insert into spike_rls values (${TENANT_PADRAO}, ${PESSOA_ANA}, 'invasao')`,
         "42501",
       );
       await vincularEscopo(trx, ESCOPO_ANA);
-      await trx`insert into spike_rls values (${TENANT_LEAPY}, ${PESSOA_ANA}, 'de ana')`;
+      await trx`insert into spike_rls values (${TENANT_PADRAO}, ${PESSOA_ANA}, 'de ana')`;
       const comoAna = await trx`select valor from spike_rls`;
       expect(comoAna.map((r) => r.valor)).toEqual(["de ana"]);
 
@@ -114,7 +114,7 @@ describeIntegracao("spike: RLS + withRollback + SAVEPOINT", () => {
       await trx.unsafe(`create function pg_temp.spike_recusa() returns trigger language plpgsql as $$
         begin raise exception 'spike: linha imutável' using errcode = 'P0001'; end $$`);
       await trx.unsafe(`create trigger spike_no_update before update on spike_rls for each row execute function pg_temp.spike_recusa()`);
-      await trx`insert into spike_rls values (${TENANT_LEAPY}, ${PESSOA_MARLON}, 'original')`;
+      await trx`insert into spike_rls values (${TENANT_PADRAO}, ${PESSOA_MARLON}, 'original')`;
 
       const erro = await expectRejected(trx, () => trx`update spike_rls set valor = 'alterado'`, "P0001");
       expect(erro.message).toContain("imutável");

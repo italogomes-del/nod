@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { outboxRepo } from "../../src/repositories/outbox.repo.ts";
 import { OUTBOX_IDADE_MIN_MS, OUTBOX_TETO_TENTATIVAS } from "../../src/shared/constantes.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const AGORA = Date.UTC(2026, 8, 16, 12, 0, 0);
 
 async function pendente(trx: Parameters<Parameters<typeof withRollback>[1]>[0], tentativas: number, idadeMs: number): Promise<string> {

@@ -5,12 +5,12 @@ import { criarRotaMetricas, TIPO_PROMETHEUS } from "../../src/adapters/http/rota
 import { criarMetricas, type Rotulo } from "../../src/obs/metricas.ts";
 import { criarBarramento } from "../../src/services/barramento.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
-import { PESSOA_MARLON, TENANT_LEAPY } from "../helpers/ids.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const H = 60 * 60 * 1000;
 
 /**
@@ -24,20 +24,20 @@ describeIntegracao("métricas: coleta por pessoa e exposição em /metrics", () 
       const m = criarMetricas();
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       await coletarGauges(trx, MARLON, Date.now(), m);
-      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_MARLON })).toBe(0);
+      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(0);
 
       const velha = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, prazoDecisaoEm: Date.now() + 10 * H, frase: "velha" });
       await repos.decisoes.criar({ tipo: "pergunta", agenteId, conversaId, prazoDecisaoEm: Date.now() + 10 * H, frase: "nova" });
       const [linha] = await trx<{ criado_em: Date }[]>`select criado_em from decisoes where id = ${velha?.id ?? ""}`;
       const agora = (linha?.criado_em.getTime() ?? 0) + 6 * H;
       await coletarGauges(trx, MARLON, agora, m);
-      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_MARLON })).toBe(21_600);
-      expect(m.ler({ metrica: "custo_servidor_mes", tenant_id: TENANT_LEAPY })).toBe(0);
+      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBe(21_600);
+      expect(m.ler({ metrica: "custo_servidor_mes", tenant_id: TENANT_PADRAO })).toBe(0);
 
       // Decidida deixa de contar; vencida também (o que conta é o que ainda espera decisão).
       await repos.decisoes.decidir(velha?.id ?? "", { por: PESSOA_MARLON, agora });
       await coletarGauges(trx, MARLON, agora, m);
-      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_LEAPY, pessoa_id: PESSOA_MARLON })).toBeLessThan(21_600);
+      expect(m.ler({ metrica: "pendencia_mais_velha_s", tenant_id: TENANT_PADRAO, pessoa_id: PESSOA_MARLON })).toBeLessThan(21_600);
     });
   });
 
@@ -51,10 +51,10 @@ describeIntegracao("métricas: coleta por pessoa e exposição em /metrics", () 
       await repos.decisoes.marcarVista(vista?.id ?? "", agora + 100);
       for (const d of await repos.decisoes.vencerPendentes(agora + 2_000)) {
         const causa = d.desfecho?.tipo;
-        if (causa === "expirou_sem_ninguem_ver" || causa === "expirou_com_alguem_ciente") m.incrementar({ metrica: "expiracao", causa, tenant_id: TENANT_LEAPY });
+        if (causa === "expirou_sem_ninguem_ver" || causa === "expirou_com_alguem_ciente") m.incrementar({ metrica: "expiracao", causa, tenant_id: TENANT_PADRAO });
       }
-      expect(m.ler({ metrica: "expiracao", causa: "expirou_sem_ninguem_ver", tenant_id: TENANT_LEAPY })).toBe(1);
-      expect(m.ler({ metrica: "expiracao", causa: "expirou_com_alguem_ciente", tenant_id: TENANT_LEAPY })).toBe(1);
+      expect(m.ler({ metrica: "expiracao", causa: "expirou_sem_ninguem_ver", tenant_id: TENANT_PADRAO })).toBe(1);
+      expect(m.ler({ metrica: "expiracao", causa: "expirou_com_alguem_ciente", tenant_id: TENANT_PADRAO })).toBe(1);
     });
   });
 

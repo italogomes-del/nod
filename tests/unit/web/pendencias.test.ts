@@ -22,7 +22,7 @@ function pendencia(id: string, texto: string, extra: Partial<Pendencia> = {}): P
 const TRES = [
   pendencia("p1", "Cobrar do Dev 1 o parecer do PR #475", { aPartirDe: AS_16_20 }),
   pendencia("p2", "Ler as outras 13 tasks da Entregas Engenharia"),
-  pendencia("p3", "Pedir ao Dev 3 que confira a 86ajtj1xk no monorepo leapy", { profundidade: 3 }),
+  pendencia("p3", "Pedir ao Dev 3 que confira a 86ajtj1xk no monorepo acme", { profundidade: 3 }),
 ];
 
 function mensagem(id: string, texto: string): Mensagem {

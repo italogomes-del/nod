@@ -29,7 +29,7 @@ AS $$
 DECLARE
   extra text := COALESCE(perna_extra, 'false');
 BEGIN
-  -- DEFAULT do tenant = idDeterministico('tenant:leapy') (src/db/seed/id-deterministico.ts).
+  -- DEFAULT do tenant = TENANT_PADRAO (src/db/seed/index.ts).
   EXECUTE format('ALTER TABLE %s ADD COLUMN IF NOT EXISTS tenant_id uuid NOT NULL DEFAULT %L',
                  tbl, '172e1fdf-428d-48cb-b052-3bd7d2573e18');
   EXECUTE format('ALTER TABLE %s ADD COLUMN IF NOT EXISTS owner_id uuid NOT NULL', tbl);

@@ -4,12 +4,12 @@ import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa, autoriaPessoa } from "../../helpers/fabricas.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const DIA = 24 * 60 * 60 * 1000;
 
 /**
@@ -65,7 +65,7 @@ describeIntegracao("0004: perna extra e 'equipe' leem; UPDATE/DELETE só a dona 
       expect((await trx`delete from agentes where id = ${agenteId}`).count).toBe(0);
       await expectRejected(
         trx,
-        () => trx`insert into agentes (tenant_id, id, owner_id, visibility, nome, dono, forma, cor, modelo) values (${TENANT_LEAPY}, ${randomUUID()}, ${PESSOA_MARLON}, 'equipe', 'em nome da dona', 'empresa', 'shape-hex', 'c-purple', 'm')`,
+        () => trx`insert into agentes (tenant_id, id, owner_id, visibility, nome, dono, forma, cor, modelo) values (${TENANT_PADRAO}, ${randomUUID()}, ${PESSOA_MARLON}, 'equipe', 'em nome da dona', 'empresa', 'shape-hex', 'c-purple', 'm')`,
         "42501",
       );
 

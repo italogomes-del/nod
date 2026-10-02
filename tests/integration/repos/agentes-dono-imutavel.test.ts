@@ -4,12 +4,12 @@ import { AGENTES } from "../../../src/db/schema/agentes.ts";
 import { vincularEscopo } from "../../../src/db/tx.ts";
 import { criarRepos } from "../../../src/repositories/index.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
-import { PESSOA_ANA, PESSOA_MARLON, TENANT_LEAPY } from "../../helpers/ids.ts";
+import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
 import { withRollback } from "../../helpers/with-rollback.ts";
 
-const MARLON = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_MARLON };
-const ANA = { tenantId: TENANT_LEAPY, pessoaId: PESSOA_ANA };
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const MODELO = "claude-haiku-4-5-20251001";
 
 describeIntegracao("agentesRepo: dono imutável, perfil, frota e visibilidade", () => {
@@ -54,13 +54,13 @@ describeIntegracao("agentesRepo: dono imutável, perfil, frota e visibilidade", 
     await withRollback(MARLON, async (trx) => {
       const repos = criarRepos(trx, MARLON);
       const privado = await repos.agentes.criar({ nome: "Só meu", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: MODELO });
-      const daEmpresa = await repos.agentes.criar({ nome: "Da Leapy", dono: "empresa", forma: "shape-square", cor: "c-blue", modelo: MODELO });
+      const daEmpresa = await repos.agentes.criar({ nome: "Da Acme", dono: "empresa", forma: "shape-square", cor: "c-blue", modelo: MODELO });
       expect(daEmpresa?.visibility).toBe("equipe");
 
       await vincularEscopo(trx, ANA);
       const comoAna = criarRepos(trx, ANA);
       expect(await comoAna.agentes.buscar(privado?.id ?? "")).toBeNull();
-      expect(await comoAna.agentes.buscar(daEmpresa?.id ?? "")).toMatchObject({ nome: "Da Leapy" });
+      expect(await comoAna.agentes.buscar(daEmpresa?.id ?? "")).toMatchObject({ nome: "Da Acme" });
       // Ver não é editar: o WITH CHECK exige owner_id = pessoa da sessão.
       expect(await comoAna.agentes.atualizarPerfil(daEmpresa?.id ?? "", { nome: "Meu agora" })).toBeNull();
     });

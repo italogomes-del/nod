@@ -118,7 +118,7 @@ spike de decisão.
 ## Passo 4 — Publicar no Linear
 
 Com o `issues.md` pronto, cada issue vira uma task na esteira Linear → Cursor → gstack. Siga
-[docs/roadmap/criar-issue-no-linear.md](../../../docs/roadmap/criar-issue-no-linear.md): time Leapy /
+[docs/roadmap/criar-issue-no-linear.md](../../../docs/roadmap/criar-issue-no-linear.md): time de chave LEA /
 projeto Nod / status Todo, título `<ID> — <título>`, labels `jornada-NN` + `trilha`, `blocked by` por
 "Depende de", e anote o `Linear: LEA-…` de volta no `issues.md`. Só publique jornadas cuja pasta tenha
 `office-hours.md`.

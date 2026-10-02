@@ -85,7 +85,7 @@ com a chave do tenant está em "Medido".
 
 ## Medido
 
-Medido em 2026-09-29, com o servidor desta mudança na 5274 e a chave do tenant Leapy, por
+Medido em 2026-09-29, com o servidor desta mudança na 5274 e a chave do tenant padrão, por
 `GET /api/t/<tenant>/conectores` (login stub):
 
 - **104 apps na grade:** 12 no dia a dia e 92 em "Mais apps". O Notion, o Linear e o Google Sheets

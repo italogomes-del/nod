@@ -129,7 +129,7 @@ Os exemplos usam `gh` dentro do checkout do repositório e reutilizam `RELEASE_T
 
 Não há atualização automática no app da preview. Oriente o time a baixar e instalar a nova versão; só aumente a versão mínima exigida pelo servidor depois de disponibilizar e validar os clientes correspondentes.
 
-## Recuperação e aprendizado por versão
+## Recuperação e lições por versão
 
 Se o problema surgir após publicar, registre o defeito e a versão afetada; publique correção com **nova versão e nova tag**, sem substituir silenciosamente os DMGs antigos. Se necessário, retire a versão da indicação de download no README e recomende a anterior somente após confirmar compatibilidade com o servidor. Migração de banco não se desfaz reinstalando DMG: siga um plano de restauração testado ou migração corretiva, com backup e janela definidos antes do deploy.
 
@@ -148,4 +148,4 @@ Limitações e recuperação:
 O que falhou e o que melhorar na próxima versão:
 ```
 
-Aprendizados de 2026-09-17: a primeira preview saiu de um snapshot diferente da main, então o servidor deve usar sua tag; não havia certificado Apple nem servidor HTTPS configurado; ARM foi empacotado, mas não executado nativamente. O upload Intel retornou HTTP 500 e precisou ser repetido. A release permaneceu em rascunho até os dois DMGs estarem enviados e seus hashes conferidos. Esses limites explicam a classificação de preview, não são o padrão de uma release estável.
+Lições de 2026-09-17: a primeira preview saiu de um snapshot diferente da main, então o servidor deve usar sua tag; não havia certificado Apple nem servidor HTTPS configurado; ARM foi empacotado, mas não executado nativamente. O upload Intel retornou HTTP 500 e precisou ser repetido. A release permaneceu em rascunho até os dois DMGs estarem enviados e seus hashes conferidos. Esses limites explicam a classificação de preview, não são o padrão de uma release estável.
