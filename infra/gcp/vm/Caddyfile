@@ -1,0 +1,7 @@
+# HTTPS automático (Let's Encrypt) para o endereço do nod. Sem `encode`: o SSE e o long-poll da ponte
+# (até 35 s, ADR-021) passam direto; flush_interval -1 manda cada frame na hora.
+{$NOD_DOMINIO} {
+	reverse_proxy nod:8888 {
+		flush_interval -1
+	}
+}

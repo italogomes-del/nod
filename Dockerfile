@@ -11,6 +11,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY src ./src
+# definido em 2026-10-02: o deploy migra com a própria imagem (docker compose run nod node scripts/migrate.ts).
+COPY scripts/migrate.ts scripts/seed.ts ./scripts/
 COPY tests/helpers/catcher-roteiro.ts ./tests/helpers/catcher-roteiro.ts
 COPY --from=web /app/dist/web ./dist/web
 ENV NODE_ENV=production

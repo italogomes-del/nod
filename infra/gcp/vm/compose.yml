@@ -1,0 +1,39 @@
+# Produção na VM (docs/deploy-gcp.md): o nod e o Caddy na frente. Uma instância do nod só — tokens de
+# turno, conexões dos Macs e o barramento vivem em memória (ADR-017, ADR-021); deploy é recreate.
+services:
+  nod:
+    image: ${NOD_IMAGEM:?defina NOD_IMAGEM}
+    restart: unless-stopped
+    env_file: /opt/nod/nod.env
+    volumes:
+      - nod_home:/data/nod
+    logging:
+      driver: gcplogs
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8888/api/saude').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on: [nod]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      NOD_DOMINIO: ${NOD_DOMINIO:?defina NOD_DOMINIO}
+    volumes:
+      - /opt/nod/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: gcplogs
+
+volumes:
+  nod_home:
+  caddy_data:
+  caddy_config:
