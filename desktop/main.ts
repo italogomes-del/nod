@@ -16,6 +16,11 @@ import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDes
 import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
+import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
+
+/** ADR-069: o endereço do servidor vem no build (scripts/desktop/build.mjs, NOD_SERVIDOR_PADRAO); vazio = a pessoa informa. */
+declare const __NOD_SERVIDOR_PADRAO__: string;
+const SERVIDOR_PADRAO = typeof __NOD_SERVIDOR_PADRAO__ === "string" ? __NOD_SERVIDOR_PADRAO__ : "";
 
 type Config = { url: string; chave: string };
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -68,6 +73,8 @@ const mensagens: Record<string, string> = {
   atualize_app: "Atualize o nod para continuar. Peça ao time o DMG mais recente.",
   reconectar: "Reconectando ao servidor…",
   resposta_invalida: "Confira o endereço HTTPS do servidor do seu time.",
+  sem_resposta: "O navegador não confirmou a tempo. Clique em Entrar com Google de novo.",
+  recusado: "O nod não confirmou este Mac. Clique em Entrar com Google de novo.",
 };
 function caminhoConfig() { return join(app.getPath("userData"), "conexao.enc"); }
 
@@ -267,7 +274,23 @@ else {
       if (typeof ligado !== "boolean") throw new Error("entrada_invalida");
       return definirAvisos(ligado);
     });
-    ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? "", mensagem }; });
+    ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
+    // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).
+    ipcMain.handle("nod:parear", async (e, valor: unknown) => {
+      validarRemetente(e);
+      if (conectando) return { mensagem: "Conexão em andamento…" };
+      conectando = true;
+      try {
+        const url = urlServidor(valor, !app.isPackaged);
+        const chave = await parearPeloNavegador({ servidor: url, nome: hostname(), abrir: (u) => shell.openExternal(u) });
+        await conectar({ url, chave });
+      } catch (erro) {
+        if (erro instanceof FalhaPareamento) mensagem = mensagens[erro.codigo] ?? mensagens.servidor_fora!;
+        else if (erro instanceof FalhaPonte) mensagem = mensagens[erro.codigo]!;
+        else if (!mensagem || mensagem === "Conectado.") mensagem = "Não foi possível conectar. Confira o endereço e sua conta de IA.";
+      } finally { conectando = false; }
+      return { mensagem };
+    });
     ipcMain.handle("nod:login", async (e, valor: unknown) => {
       validarRemetente(e);
       try { await shell.openExternal(urlServidor(valor, !app.isPackaged)); return { mensagem: "No navegador, entre e gere uma chave em Chaves." }; }

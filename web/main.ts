@@ -15,6 +15,8 @@ import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type PedidoPareamento } from "./lib/parear-mac.ts";
+import { abrirPareamento } from "./telas/parear-mac.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
@@ -693,14 +695,24 @@ function abrirModoAprovacao(el: HTMLElement): void {
  * Entrada (ADR-030). A recusa do Google é UMA mensagem para todos os motivos — o servidor não diz se
  * foi domínio, cadastro ou verificação, e a tela também não, para não contar a quem está de fora quem tem acesso.
  */
+/** ADR-069: o pedido do app do Mac sobrevive à ida ao Google na sessionStorage desta aba. */
+function pedidoPendente(): PedidoPareamento | null {
+  try { return lerGuardado(window.sessionStorage.getItem(CHAVE_GUARDADA)); } catch { return null; }
+}
+function esquecerPedido(): void {
+  try { window.sessionStorage.removeItem(CHAVE_GUARDADA); } catch { /* sem storage, nada guardado */ }
+}
+
 function renderEntrada(): string {
   const m = entrada.modo;
+  const pedido = pedidoPendente();
+  const doMac = pedido ? `<p class="mudo">Depois de entrar, você confirma a conexão do Mac <b>${esc(pedido.nome)}</b>.</p>` : "";
   const recusa = entrada.recusado
     ? `<p class="erro" role="alert">Não foi possível entrar com essa conta. Se ela ainda não tem acesso ao nod, peça para ser cadastrada.</p>`
     : "";
   if (!m) return `<section class="tela entrar"><h1>nod</h1><p class="mudo">carregando…</p></section>`;
   if (m.modo === "google") {
-    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google.</p>${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a></section>`;
+    return `<section class="tela entrar"><h1>nod</h1><p>Entre com a sua conta Google.</p>${doMac}${recusa}<a class="bt pri" href="${esc(sessaoApi.urlGoogle)}">Entrar com Google</a></section>`;
   }
   const pessoas = m.pessoas.length
     ? m.pessoas.map((p, i) => botao("entrar", `Entrar como ${esc(p.nome)}`, { classe: i === 0 ? "pri" : undefined, dados: { pessoa: p.id } })).join(" ")
@@ -777,6 +789,8 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   });
   live.connect();
   dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "salas", "executor", "rotinas"] });
+  const pedido = pedidoPendente();
+  if (pedido) abrirPareamento(api, pedido, esquecerPedido);
 }
 
 async function boot(): Promise<void> {
@@ -791,6 +805,12 @@ async function boot(): Promise<void> {
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
+  const pedidoNaUrl = lerPedido(url.searchParams);
+  if (url.searchParams.has(PARAMETROS_DO_PEDIDO[0])) {
+    if (pedidoNaUrl) { try { window.sessionStorage.setItem(CHAVE_GUARDADA, JSON.stringify(pedidoNaUrl)); } catch { /* sem storage: o diálogo não abre e o app espera até o prazo */ } }
+    for (const k of PARAMETROS_DO_PEDIDO) url.searchParams.delete(k);
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
   if (url.searchParams.get("entrar") === "recusado") {
     entrada = { ...entrada, recusado: true };
     url.searchParams.delete("entrar");
