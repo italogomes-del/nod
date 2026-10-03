@@ -26,6 +26,8 @@ entra na VM pelo IAP; só o repositório `marlonwlv/nod`, na branch `main`, pode
 3. Copia `config.env`, `compose.yml`, `Caddyfile` e `deploy.sh` para `/opt/nod` na VM.
 4. `deploy.sh` monta `/opt/nod/nod.env` a partir do Secret Manager, roda as migrações como
    `nod_dono` com a imagem nova e recria o container do nod. Espera o healthcheck (`/api/saude`).
+   O env leva as duas URLs: `DATABASE_URL` (nod_app, das requisições) e `DATABASE_URL_DONO`, que o
+   boot usa só para criar as partições de `events` (ADR-006) e fecha em seguida.
 
 O deploy é recreate: o nod fica fora do ar alguns segundos. Os Macs reconectam sozinhos (o
 long-poll recomeça). Um deploy manual: Actions → deploy → Run workflow.
@@ -131,9 +133,9 @@ gcloud compute ssh nod-vm --zone=southamerica-east1-b --tunnel-through-iap --pro
 # Logs: Cloud Logging, ou na VM
 sudo docker compose -f /opt/nod/compose.yml logs -f nod
 # Seed (só com o banco sem pessoas): cria o dono com o e-mail do login Google
-sudo docker compose -f /opt/nod/compose.yml run --rm --no-deps -e NOD_SEED_EMAIL=voce@exemplo.com \
-  -e DATABASE_URL_DONO="postgres://nod_dono:$(sudo gcloud secrets versions access latest --secret=nod-pg-senha-dono --project=nod-producao)@10.183.96.3:5432/nod?sslmode=require" \
-  nod node scripts/seed.ts
+sudo bash -c 'cd /opt/nod && export NOD_DOMINIO=34-39-164-139.sslip.io \
+  NOD_IMAGEM="$(docker ps --filter label=com.docker.compose.service=nod --format "{{.Image}}")" &&
+  docker compose run --rm --no-deps -T -e NOD_SEED_EMAIL=voce@exemplo.com nod node scripts/seed.ts'
 # Restaurar o banco num ponto do tempo (cria outra instância; nunca sobrescreve a atual)
 gcloud sql instances clone nod-pg nod-pg-restaurada --point-in-time='2026-10-02T12:00:00Z' --project=nod-producao
 ```
