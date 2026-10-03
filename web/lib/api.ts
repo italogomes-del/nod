@@ -192,6 +192,8 @@ export function criarApi(escopo: Escopo) {
     chaves: () => get<{ chaves: ChaveMaquinaDto[] }>("maquinas/chaves"),
     emitirChave: (nome: string) => post<ChaveEmitidaDto>("maquinas/chaves", { nome }),
     revogarChave: (id: string) => del<{ ok: true }>(`maquinas/chaves/${id}`),
+    /** ADR-069: abre o pedido de pareamento do Mac que pediu; o código volta ao app pelo 127.0.0.1. */
+    parearMac: (nome: string, desafio: string) => post<{ codigo: string }>("maquinas/pareamentos", { nome, desafio }),
     // ADR-051 (definido em 2026-09-28): o card do artefato busca o HTML da SUA versão e o estado da pessoa.
     versaoArtefato: (id: string, versao: number) => get<ArtefatoDto>(`artefatos/${encodeURIComponent(id)}/versoes/${versao}`),
     salvarEstadoArtefato: (id: string, dados: unknown) => pedir<{ ok: true }>("PUT", `${base}/artefatos/${encodeURIComponent(id)}/estado`, { dados }),

@@ -34,6 +34,7 @@ import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
+import { criarPareamentoMaquina } from "../../services/pareamento-maquina.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { JUNTAR_DELTAS_MS } from "../../shared/constantes.ts";
 import { servicoRotinas } from "../../use-cases/ativar-rotina.ts";
@@ -589,7 +590,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
-    ...rotasMaquinas({ dentro }),
+    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio) }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),

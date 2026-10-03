@@ -31,10 +31,16 @@ Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM6
 
 ## Primeira abertura no Mac
 
-1. Baixe o DMG correspondente ao processador, abra e arraste **nod** para **Aplicativos**.
-2. Informe o endereço HTTPS do time e clique em **Entrar no navegador**.
-3. Entre com Google, abra **Chaves**, gere uma chave com o nome deste computador e cole no app.
-4. Clique em **Conectar e abrir o nod**. A verificação Claude usa um turno curto da assinatura, como a sonda existente no projeto.
+1. Entre na sua conta do Claude Code (`claude`) ou do Codex neste Mac.
+2. Baixe o DMG correspondente ao processador, abra e arraste **nod** para **Aplicativos**. Sem
+   assinatura Apple, a primeira abertura é bloqueada: em **Ajustes do Sistema → Privacidade e
+   Segurança**, clique em **Abrir mesmo assim**.
+3. No app, clique em **Entrar com Google**. O navegador abre: entre e clique em **Conectar este Mac**
+   (ADR-069). O app volta sozinho, encontra a conta do Claude Code ou do Codex sem gastar turno e abre o nod.
+
+O endereço do servidor vem no build (`NOD_SERVIDOR_PADRAO`). Para outro servidor, ou se o navegador
+não conseguir voltar ao app, use **Outro servidor ou chave manual**: gere uma chave em **Chaves**, no
+navegador, e cole no app.
 
 O endereço e a chave ficam cifrados em `Application Support/nod/conexao.enc`. A chave de cifra é protegida pelo Keychain; nada disso entra no pacote. Para reconfigurar ou verificar o Claude depois de instalar/autenticar, use **nod → Conexão / verificar Claude**. Reiniciar o app reconecta com a configuração salva e verifica o Claude novamente. Uma chave por computador; revogue em **Chaves** quando necessário.
 
