@@ -34,6 +34,9 @@ NOD_HOME=/data/nod
 NOD_FUSO_PADRAO=America/Sao_Paulo
 NOD_BANCO_AMBIENTE=persistente
 DATABASE_URL=postgres://nod_app:$(segredo nod-pg-senha-app)@$SQL_IP:5432/nod?sslmode=require
+# O boot cria as partições de events dos próximos 12 meses como dono (ADR-006) e fecha a conexão;
+# as requisições usam só nod_app.
+DATABASE_URL_DONO=postgres://nod_dono:$(segredo nod-pg-senha-dono)@$SQL_IP:5432/nod?sslmode=require
 NOD_SESSAO_SEGREDO=$(segredo nod-sessao-segredo)
 NOD_CREDENTIAL_KEY=$(segredo nod-credential-key)
 NOD_GOOGLE_CLIENT_ID=$GOOGLE_ID
@@ -43,10 +46,7 @@ EOF
 mv nod.env.novo nod.env
 
 docker compose pull nod
-# A aplicação (nod_app) nunca migra: a URL do dono só existe nesta execução.
-docker compose run --rm --no-deps -T \
-  -e DATABASE_URL_DONO="postgres://nod_dono:$(segredo nod-pg-senha-dono)@$SQL_IP:5432/nod?sslmode=require" \
-  nod node scripts/migrate.ts
+docker compose run --rm --no-deps -T nod node scripts/migrate.ts
 docker compose up -d --remove-orphans
 
 for _ in $(seq 1 30); do
