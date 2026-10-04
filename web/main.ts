@@ -21,6 +21,8 @@ import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
+import { avisoDeEstado } from "./lib/aviso-estado.ts";
+import { aplicarTema } from "./lib/tema.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
@@ -453,7 +455,7 @@ function renderSidebar(estado: Estado): string {
       <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
     ${ambiente}
-    ${falhaMotor ? `<p class="me-aviso" role="status">${esc(situacaoMotor)}</p>` : ""}
+    ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
     <div class="rodape">
       <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}" title="Menu da conta · ${esc(situacaoMotor)}"><span class="av-me">eu</span><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
       <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}">${LOJA}Marketplace</button>
@@ -1273,6 +1275,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome, el);
   },
   "alternar-modo-dev": () => agir(alternarModoDev),
+  "escolher-tema": (el) => {
+    const escolha = el.dataset.tema === "claro" || el.dataset.tema === "escuro" ? el.dataset.tema : "sistema";
+    aplicarTema(escolha, document.documentElement);
+    for (const b of el.parentElement?.querySelectorAll<HTMLElement>("[data-tema]") ?? []) {
+      b.classList.toggle("ativo", b === el);
+      b.setAttribute("aria-pressed", String(b === el));
+    }
+  },
   "relatar-mensagem": (el) => {
     const id = el.dataset.id;
     // definido em 2026-09-21: o correlation_id NÃO vai junto. `estado.erro` é o slot do último erro

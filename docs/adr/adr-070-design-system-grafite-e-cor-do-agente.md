@@ -1,0 +1,66 @@
+# ADR-070 — Design system: base grafite, azul só para o que é novo, cor do agente só na identidade
+
+**Status** novo · decidido em 2026-10-04
+
+## Decisão
+
+A cor da web passa a sair de um arquivo só, `web/tokens.css`, com os tokens do design system "Nod"
+(direção D, "grafite + cor do agente"). Os três CSS da interface usam só `var(--…)`.
+
+- **Superfícies:** `surface` (área principal), `surface-side` (barra lateral, gaveta, quadro),
+  `surface-raised` (balões, tags, hover), `surface-selected` (item atual). Separa-se por `line`;
+  sombra (`shadow-pop`) só no que flutua.
+- **Ação:** `action` (grafite no claro, quase branco no escuro) é a única cor de botão primário e
+  do enviar.
+- **Sinal:** `signal` (azul) só para o que é novo: divisor "Novas", ponto e contador de não lidas,
+  ponto do mascote de pergunta e de não lido, "esperando sua resposta". Link, seleção, foco, modo
+  automático, pergunta e aviso informativo ficam neutros.
+- **Estados:** `danger` (o trabalho não começa ou parou), `warning` (a pessoa resolve depois),
+  `success`; informação é neutra. O componente é o aviso de estado (`web/lib/aviso-estado.ts`),
+  sempre com ícone, texto e, quando houver, o botão que resolve. O "executor indisponível" virou
+  erro com **Conectar IA** (antes era âmbar e sem ação).
+- **Cor do agente:** as 12 skins viram `--agent-*`; a classe `c-*` do perfil define
+  `--mascote-cor` uma vez e o mascote, o avatar vazado e a amostra do editor leem dali.
+- **Tipografia:** Geist e Geist Mono, servidas pelo próprio Nod (`web/public/fontes/`, OFL), sem
+  Google Fonts: o app do Mac precisa funcionar sem depender de terceiros.
+- **Tema:** claro e escuro. "Sistema" segue o macOS; "Claro" e "Escuro" (Preferências) gravam
+  `data-theme` no `<html>` e ficam neste computador (`localStorage`, aplicado antes do primeiro
+  quadro pelo `index.html`).
+- **Logo:** os olhos do mascote ("Olhos") no favicon, no ícone do app e na tela de conexão do Mac.
+
+`tests/unit/web/cores-por-token.test.ts` recusa cor literal nos CSS da interface; a exceção é uma
+linha marcada com `cor-fixa: <motivo>` (hoje: a tela do computador do bot, escura nos dois temas, e
+a máscara do anel de "segurar para criar").
+
+## Por quê
+
+Os CSS tinham ~700 cores literais: uns 30 cinzas quase iguais, três azuis sem papel definido (link,
+seleção e "novas" com o mesmo azul) e nenhum modo escuro possível. E os bots já trazem 12 cores
+saturadas: uma cor de marca na interface competia com elas, e o vermelho de uma skin se confundia
+com erro.
+
+## Alternativas rejeitadas
+
+- **Azul como cor de marca e de ação (direção B).** Menor migração, mas o azul fazendo tudo deixa
+  de sinalizar o que é novo e briga com bots azuis e violeta.
+- **A interface vestindo a cor do agente em foco (direção C).** Mais identidade, mas âmbar, verde e
+  creme não têm contraste com texto branco (precisaria de regra por skin) e um bot vermelho deixa o
+  enviar com cara de erro.
+- **Fontes do Google Fonts.** O app do Mac carrega a página do servidor; depender de outro domínio
+  para a fonte é um ponto de falha e de rastreio a mais.
+
+## Limites
+
+- Os avatares continuam os do `bloub`. O design system também desenha um avatar novo (quadrado com
+  os olhos do logo), mas o mascote está em exploração (onça/capivara) e trocar agora seria refazer
+  duas vezes.
+- A skin `encre` quase some sobre o fundo escuro; o `bloub` não tem contorno para ela ainda.
+- O texto gravado da negação (`redacao.ts`) não mudou: mensagens antigas e a prévia da barra lateral
+  ainda mostram a frase técnica; a conversa mostra o aviso novo e deixa a frase em "Detalhes
+  técnicos".
+
+## Gatilho de reversão
+
+Reabrir se uma tela nova precisar de uma cor que nenhum token cobre mais de duas vezes (vira token
+novo no design system antes do CSS), ou se o modo escuro gerar mais de um relato de contraste por
+mês.

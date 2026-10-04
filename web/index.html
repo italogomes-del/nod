@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>nod</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Tema escolhido em Preferências (web/lib/tema.ts, mesma chave): aplicado antes do primeiro quadro, senão o app pisca claro. -->
+    <script>try { var t = localStorage.getItem("nod.tema"); if (t === "claro" || t === "escuro") document.documentElement.dataset.theme = t === "claro" ? "light" : "dark"; } catch (e) {}</script>
+    <link rel="stylesheet" href="/tokens.css" />
     <link rel="stylesheet" href="/estilos.css" />
     <link rel="stylesheet" href="/interface.css" />
     <link rel="stylesheet" href="/navegacao.css" />
