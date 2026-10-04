@@ -99,3 +99,12 @@ a pessoa só fala.
 Diferenças para o protótipo, por causa dos tokens do design system: o Atender usa o verde `--success` com anéis
 neutros, e os links ficam sublinhados. A rotina "15 min antes de cada reunião" virou "Dias úteis, 8:00" (o cron não
 expressa "antes do evento").
+
+### Onboarding com voz real e Claude Code (`scripts/uat/onboarding-voz.ts`)
+
+A Nina ligou ("Oi! Eu sou a Nina 2, sua primeira bot aqui no nod…" — já havia uma Nina no banco, a colisão de nome
+funcionou), o roteiro atendeu e respondeu falando. O Claude extraiu os quatro campos da fala transcrita pelo whisper
+local (apelido "Marlon", "indicação de um amigo", "responder e-mails dos clientes mais rápido", time "2_10"), os chips
+"Diga algo como" mudaram a cada pergunta, ela leu o resumo e pediu "Certo?", e com "Isso mesmo, pode seguir" a ligação
+foi para a configuração e propôs o bot "Atendente". Achado corrigido: "Marlon,." no resumo falado (o trecho cortado
+na vírgula ganhava ponto).

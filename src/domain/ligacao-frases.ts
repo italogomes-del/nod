@@ -96,6 +96,9 @@ function contarPalavras(texto: string): number {
 function comPonto(frase: string): string {
   const f = frase.trim();
   if (f === "") return "";
+  // Trecho cortado na vírgula (o primeiro trecho curto da segmentação) segue com a vírgula: "Marlon,." soava errado
+  // (UAT de 2026-10-04) e o ponto derrubaria a entonação no meio da frase.
+  if (/[,]["'”’)»]*$/u.test(f)) return f;
   return /[.!?…:;]["'”’)»]*$/u.test(f) ? f : `${f}.`;
 }
 

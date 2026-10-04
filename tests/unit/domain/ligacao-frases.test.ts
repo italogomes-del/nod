@@ -244,3 +244,9 @@ describe("removerAberturaRepetida", () => {
     expect(removerAberturaRepetida("Tático, o plano.", "reconhecimento.01")).toBe("Tático, o plano.");
   });
 });
+
+describe("trecho cortado na vírgula (UAT de 2026-10-04)", () => {
+  it("segue com a vírgula, sem ponto colado", () => {
+    expect(textoFalavel("Então: você é Marlon,").falavel).toBe("Então: você é Marlon,");
+  });
+});
