@@ -953,7 +953,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         paraCerebro({ t: "fim", motivo });
         setTimeout(finalizar, prazos.resumoMs);
       } else finalizar();
-      log("info", "voz_ligacao_encerrada", { ligacao_id: r.ligacaoId, motivo, trocas, interrupcoes, latencia_p50_ms: metricas.latenciaP50Ms });
+      log("info", "voz_ligacao_encerrada", { ligacao_id: r.ligacaoId, motivo, trocas, interrupcoes, latencia_p50_ms: metricas.latenciaP50Ms, audio_recebido_ms: Math.round(audioRecebidoMs), fala_ms: Math.round(sttSegundos * 1000), piso_vad: Math.round(vad.piso() * 10_000) / 10_000, limiar_vad: Math.round(vad.limiar() * 10_000) / 10_000 });
     }
 
     /**
