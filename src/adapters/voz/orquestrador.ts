@@ -895,6 +895,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     // Depois do `desligar`, o que o modelo ainda escrever não é falado (ele repetia a despedida).
     let desligando = false;
     function desligarDepoisDeFalar(): void {
+      // O modelo às vezes chama `desligar` sem se despedir: a despedida gravada cobre.
+      if (primeiroSomDaVez) tocarEspera("despedida");
       const tentar = (restante: number) => {
         if (encerrada) return;
         if ((!vezRespondida || botTocando() || fila.length > 0) && restante > 0) {
