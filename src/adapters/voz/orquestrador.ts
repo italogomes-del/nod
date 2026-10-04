@@ -5,6 +5,8 @@ import { criarSegmentador, removerAberturaRepetida, textoFalavel } from "../../d
 import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
 import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
 import { criarVad } from "../../domain/ligacao-vad.ts";
+import { interpretarComando, validarComando, type PerfilComando } from "../../domain/comando-de-voz.ts";
+import { randomUUID } from "node:crypto";
 import { log } from "../../obs/log.ts";
 import type { ProvedoresVoz, ResultadoStt, SessaoStt } from "./spi.ts";
 import { lerJson, type CanalVoz } from "./ws.ts";
@@ -107,6 +109,14 @@ export interface ServicoVoz {
   /** Aviso do sistema ao cérebro (resultado de tarefa, decisão): vira `[nod] …` na próxima brecha. */
   nota(ligacaoId: string, texto: string, confiavel: boolean): void;
   vivas(): number;
+  /** ADR-074: um card pendente na conversa da ligação — o bot o lê e abre a janela de aprovação por voz. */
+  pedirAprovacao(ligacaoId: string, p: PedidoAprovacaoVoz): void;
+  /** A rota de decisão confere (e gasta) o comando de voz antes de decidir: só vale uma vez, por 10 s. */
+  conferirComando(p: { pessoaId: string; ligacaoId: string; comandoId: string; decisaoId: string; acao: "aprovar" | "recusar" }): boolean;
+  /** A decisão foi decidida (por voz ou clique): fecha a janela e conta o resultado. */
+  decisaoDecidida(ligacaoId: string, p: { decisaoId: string; resultado: "aprovado" | "recusado" | "decidido"; porVoz: boolean }): void;
+  /** A ligação viva de uma conversa (para ligar os frames da conversa à ligação). */
+  daConversa(pessoaId: string, conversaId: string): string | null;
   /** Para de aceitar ligação nova e encerra as vivas com aviso (deploy). */
   drenar(motivo?: MotivoFimLigacao): Promise<void>;
   drenando(): boolean;
@@ -136,8 +146,10 @@ export function lerQuadroMicrofone(b: Uint8Array): { seq: number; pcm: Int16Arra
   return { seq: v.getUint32(1, true), pcm: new Int16Array(copia.buffer, copia.byteOffset, copia.byteLength / 2) };
 }
 
-type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number };
-type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array };
+export type PedidoAprovacaoVoz = { decisaoId: string; leitura: string; perfil: PerfilComando };
+
+type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; aoTerminar?: () => void };
+type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array; aoTerminar?: () => void };
 
 export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
   const relogio = deps.relogio ?? (() => Date.now());
@@ -147,6 +159,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
   let emDrenagem = false;
 
   function criarLigacaoViva(r: RegistroLigacao) {
+    const r0 = r;
     const ref: RefLigacao = { ligacaoId: r.ligacaoId, tenantId: r.tenantId, pessoaId: r.pessoaId, agenteId: r.agenteId, conversaId: r.conversaId, turnoId: r.turnoId };
     const inicio = relogio();
     let midia: CanalVoz | null = null;
@@ -259,7 +272,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     // ---- falas de espera --------------------------------------------------------------------------------------------
 
     function tocarEspera(categoria: CategoriaEspera, ferramenta?: string): boolean {
-      if (!deps.esperas || encerrada || !midia) return false;
+      if (!deps.esperas || encerrada || !midia || janela || lendo) return false;
       const fala = escolherFala(categoria, historicoEspera, relogio(), aleatorio, ferramenta);
       if (!fala) return false;
       const pcm = deps.esperas.obterPronto(fala, r.voz, r.velocidade);
@@ -302,6 +315,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       } finally {
         tocandoFila = false;
         if (!encerrada && fila.length === 0 && (fase === "falando" || fase === "pensando") && vezRespondida) mudarFase("ouvindo");
+        if (!encerrada && filaDecisoes.length > 0) agendar(300, proximaDecisao);
       }
     }
 
@@ -309,7 +323,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     async function tocarItem(item: ItemFila): Promise<void> {
       const utt = ++uttSeq;
-      const u: Utt = { utt, tipo: item.tipo, texto: item.texto, duracaoMs: 0, tocadoMs: 0, fim: false, n: item.n, enviadoEm: relogio() };
+      const u: Utt = { utt, tipo: item.tipo, texto: item.texto, duracaoMs: 0, tocadoMs: 0, fim: false, n: item.n, enviadoEm: relogio(), aoTerminar: item.aoTerminar };
       utts.set(utt, u);
       paraMidia({ t: "bot-fala", utt, tipo: item.tipo, texto: item.texto });
       if (item.tipo === "conteudo" || item.tipo === "leitura" || item.tipo === "aviso") mudarFase("falando");
@@ -326,9 +340,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           latencias.push(relogio() - vezEm);
         }
       };
+      const agendarFim = () => {
+        // Sem `tocou-fim` do cliente, a fala acaba pela duração (+500 ms).
+        if (u.aoTerminar) agendar(Math.max(0, u.enviadoEm + u.duracaoMs + 500 - relogio()), () => terminarUtt(u));
+      };
       if (item.pcm) {
         primeiroSom();
         mandar(item.pcm);
+        agendarFim();
         return;
       }
       const ac = new AbortController();
@@ -349,7 +368,15 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         }
       } finally {
         if (abortTts === ac) abortTts = null;
+        agendarFim();
       }
+    }
+
+    function terminarUtt(u: Utt): void {
+      u.fim = true;
+      const fn = u.aoTerminar;
+      u.aoTerminar = undefined;
+      fn?.();
     }
 
     function falarConteudo(texto: string, n: number | null, tipo: TipoFalaBot = "conteudo"): void {
@@ -410,6 +437,111 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       });
     }
 
+    // ---- aprovação por voz (ADR-074) --------------------------------------------------------------------------------
+
+    const filaDecisoes: PedidoAprovacaoVoz[] = [];
+    let lendo: PedidoAprovacaoVoz | null = null;
+    let janela: { pedido: PedidoAprovacaoVoz; abertaEm: number; timer: ReturnType<typeof setTimeout>; pediuDeNovo: boolean } | null = null;
+    const comandos = new Map<string, { decisaoId: string; acao: "aprovar" | "recusar"; criadoEm: number; usado: boolean }>();
+
+    function emBrecha(): boolean {
+      return !botTocando() && vezRespondida && pendente.textos.length === 0 && !falando;
+    }
+
+    function proximaDecisao(): void {
+      if (encerrada || lendo || janela || filaDecisoes.length === 0 || !midia) return;
+      if (!emBrecha()) {
+        agendar(400, proximaDecisao);
+        return;
+      }
+      lerDecisao(filaDecisoes.shift()!);
+    }
+
+    function lerDecisao(pedido: PedidoAprovacaoVoz): void {
+      lendo = pedido;
+      gravarFala({ autor: "bot", tipo: "leitura", texto: pedido.leitura, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
+      enfileirar({ tipo: "leitura", texto: pedido.leitura, n: null, aoTerminar: () => agendar(300, () => abrirJanela(pedido)) });
+    }
+
+    function abrirJanela(pedido: PedidoAprovacaoVoz): void {
+      if (encerrada || lendo !== pedido) return;
+      lendo = null;
+      const ate = relogio() + 20_000;
+      janela = { pedido, abertaEm: relogio(), pediuDeNovo: false, timer: agendar(20_000, () => fecharJanela(pedido.decisaoId)) };
+      paraMidia({ t: "janela", decisaoId: pedido.decisaoId, ate });
+      mudarFase("ouvindo");
+    }
+
+    function fecharJanela(decisaoId: string): void {
+      if (!janela || janela.pedido.decisaoId !== decisaoId) return;
+      cancelar(janela.timer);
+      janela = null;
+      paraMidia({ t: "janela-fechada", decisaoId });
+      agendar(300, proximaDecisao);
+    }
+
+    function falarAviso(texto: string): void {
+      gravarFala({ autor: "bot", tipo: "fala", texto, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
+      enfileirar({ tipo: "aviso", texto, n: null });
+    }
+
+    /** Uma fala final dentro da janela: comando (gramática fechada) ou fala normal, que fecha a janela. */
+    function tratarNaJanela(texto: string): boolean {
+      if (!janela || inicioFalaEm < janela.abertaEm) return false;
+      const r = interpretarComando(texto, janela.pedido.perfil, r0.nomeBot);
+      if (r.acao === "aprovar" || r.acao === "recusar") {
+        const comandoId = randomUUID();
+        comandos.set(comandoId, { decisaoId: janela.pedido.decisaoId, acao: r.acao, criadoEm: relogio(), usado: false });
+        paraMidia({ t: "comando", comandoId, decisaoId: janela.pedido.decisaoId, acao: r.acao });
+        const decisaoId = janela.pedido.decisaoId;
+        cancelar(janela.timer);
+        janela.timer = agendar(5_000, () => {
+          if (janela?.pedido.decisaoId === decisaoId) {
+            falarAviso("Não consegui registrar. Aprova na tela, por favor.");
+            fecharJanela(decisaoId);
+          }
+        });
+        return true;
+      }
+      if (r.acao === "repetir") {
+        const pedido = janela.pedido;
+        cancelar(janela.timer);
+        janela = null;
+        lerDecisao(pedido);
+        return true;
+      }
+      if (r.acao === "confirmar_de_novo" && !janela.pediuDeNovo) {
+        janela.pediuDeNovo = true;
+        falarAviso(janela.pedido.perfil === "estrito" ? "Para aprovar, diga: eu aprovo." : "Pode confirmar? Diga: pode criar.");
+        return true;
+      }
+      fecharJanela(janela.pedido.decisaoId);
+      return false;
+    }
+
+    function pedirAprovacao(pedido: PedidoAprovacaoVoz): void {
+      if (filaDecisoes.some((p) => p.decisaoId === pedido.decisaoId) || lendo?.decisaoId === pedido.decisaoId || janela?.pedido.decisaoId === pedido.decisaoId) return;
+      filaDecisoes.push(pedido);
+      proximaDecisao();
+    }
+
+    function conferirComando(comandoId: string, decisaoId: string, acao: "aprovar" | "recusar"): boolean {
+      const c = comandos.get(comandoId);
+      if (!c || c.decisaoId !== decisaoId || c.acao !== acao || !validarComando(c, relogio())) return false;
+      c.usado = true;
+      return true;
+    }
+
+    function decisaoDecidida(decisaoId: string, resultado: "aprovado" | "recusado" | "decidido", porVoz: boolean): void {
+      const idx = filaDecisoes.findIndex((p) => p.decisaoId === decisaoId);
+      if (idx >= 0) filaDecisoes.splice(idx, 1);
+      const estavaNaJanela = janela?.pedido.decisaoId === decisaoId || lendo?.decisaoId === decisaoId;
+      if (lendo?.decisaoId === decisaoId) lendo = null;
+      if (janela?.pedido.decisaoId === decisaoId) fecharJanela(decisaoId);
+      if (porVoz || estavaNaJanela) falarAviso(resultado === "aprovado" ? "Pronto, aprovado." : resultado === "recusado" ? "Ok, recusado." : "Pronto, registrado.");
+      nota(`A pessoa ${resultado === "aprovado" ? "aprovou" : resultado === "recusado" ? "recusou" : "decidiu"}${porVoz ? " por voz" : " na tela"} um pedido seu. Isso já foi dito a ela; não repita.`);
+    }
+
     // ---- a vez da pessoa ----------------------------------------------------------------------------------------------
 
     function decidirVez(): void {
@@ -460,6 +592,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const falasBot = [...utts.values()].filter((u) => u.tipo !== "espera").map((u) => ({ texto: u.texto, inicioMs: u.enviadoEm, fimMs: u.enviadoEm + u.duracaoMs }));
       if (ehEco({ texto, inicioMs: inicioFalaEm, fimMs: fimFalaEm, falasBot })) {
         log("info", "voz_eco_descartado", { ligacao_id: r.ligacaoId });
+        return;
+      }
+      if (janela && !botTocando()) {
+        paraMidia({ t: "legenda", id, texto, final: true });
+        gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: inicioFalaEm - inicio, fimMs: fimFalaEm - inicio, interrompida: false, confianca: res.confianca });
+        if (tratarNaJanela(texto)) return;
+        pendente.textos.push(texto);
+        agendarDecisao();
         return;
       }
       if (botTocando() && !barge.confirmado) {
@@ -610,8 +750,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "interrompido": {
           const u = typeof msg.utt === "number" ? utts.get(msg.utt) : undefined;
           if (u) {
-            u.fim = true;
             if (typeof msg.ms === "number") u.tocadoMs = msg.ms;
+            if (msg.t === "interrompido") {
+              u.fim = true;
+              u.aoTerminar = undefined;
+            } else terminarUtt(u);
           }
           // Esquece as falas muito antigas (só as últimas importam para o eco e o "ouviu até").
           for (const [id, x] of utts) if (x.fim && relogio() - x.enviadoEm > 15_000) utts.delete(id);
@@ -797,6 +940,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       anexarCerebro,
       encerrar,
       nota,
+      pedirAprovacao,
+      conferirComando,
+      decisaoDecidida,
       encerrada: () => encerrada,
       ultimaAtividadeEm: () => ultimaAtividadeEm,
     };
@@ -824,6 +970,20 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     },
     nota(ligacaoId, texto) {
       ligacoes.get(ligacaoId)?.nota(texto);
+    },
+    pedirAprovacao(ligacaoId, p) {
+      ligacoes.get(ligacaoId)?.pedirAprovacao(p);
+    },
+    conferirComando({ pessoaId, ligacaoId, comandoId, decisaoId, acao }) {
+      const l = ligacoes.get(ligacaoId);
+      return !!l && l.registro.pessoaId === pessoaId && l.conferirComando(comandoId, decisaoId, acao);
+    },
+    decisaoDecidida(ligacaoId, p) {
+      ligacoes.get(ligacaoId)?.decisaoDecidida(p.decisaoId, p.resultado, p.porVoz);
+    },
+    daConversa(pessoaId, conversaId) {
+      for (const l of ligacoes.values()) if (!l.encerrada() && l.registro.pessoaId === pessoaId && l.registro.conversaId === conversaId) return l.registro.ligacaoId;
+      return null;
     },
     vivas: () => [...ligacoes.values()].filter((l) => !l.encerrada()).length,
     async drenar(motivo = "drenagem") {

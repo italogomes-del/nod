@@ -6,6 +6,9 @@ import type { MotivoFimLigacao } from "../contracts/voz.ts";
 import { VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
 import { ehIdVoz, generoDaVoz } from "../domain/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import type { PerfilComando } from "../domain/comando-de-voz.ts";
+import { FECHO_LEITURA, redigirLeituraDeAprovacao, type PedidoDeLeitura } from "../domain/leitura-aprovacao.ts";
+import { rotuloFerramenta } from "../domain/rotulo-ferramenta.ts";
 import type { MetricasLigacao, NovaFala } from "../repositories/ligacoes.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -242,4 +245,37 @@ export const mandarNoChatDaLigacao: CasoDeUso<{ ligacaoId: string; agenteId: str
   const m = await deps.repos.mensagens.criar({ conversaId: input.conversaId, turnoId: input.turnoId, autoria, kind: "texto", texto, confianca: "confiavel" });
   if (!m) return { data: { mensagemId: null } };
   return { data: { mensagemId: m.id }, events: [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: input.conversaId, turnoId: input.turnoId, dados: { mensagem_id: m.id, kind: "texto" } })] };
+};
+
+/**
+ * A leitura de um card para a aprovação por voz (ADR-074): montada pelo servidor a partir dos campos tipados da decisão
+ * e dos itens (redigirLeituraDeAprovacao), nunca pelo modelo. null = este tipo não se decide falando (perguntas se
+ * respondem na própria conversa; decisão já fechada; decisão de outra pessoa).
+ */
+export const leituraDaDecisao: CasoDeUso<{ decisaoId: string }, { decisaoId: string; leitura: string; perfil: PerfilComando } | null> = async (deps, input) => {
+  const d = await deps.repos.decisoes.buscar(input.decisaoId);
+  if (!d || (d.estado !== "pendente" && d.estado !== "reaberta") || d.ownerId !== deps.escopo.pessoaId || d.decisorId !== deps.escopo.pessoaId) return { data: null };
+  const contaminado = d.turnoId ? await deps.repos.turnos.contaminado(d.turnoId) : false;
+  let pedido: PedidoDeLeitura | null = null;
+  if (d.tipo === "aprovacao" || d.tipo === "gate_rotina") {
+    const itens = await deps.repos.itensAprovacao.listar(d.id);
+    pedido = {
+      tipo: d.tipo,
+      contaminado,
+      acao: d.frase,
+      app: itens[0]?.destino.conector && itens[0].destino.conector !== "terminal" && itens[0].destino.conector !== "computador" ? itens[0].destino.conector : null,
+      itens: itens.map((i) => (i.destino.conector === "terminal" || i.destino.conector === "computador"
+        ? { tipo: i.destino.conector, rotuloFerramenta: rotuloFerramenta(i.destino.ferramenta) }
+        : { tipo: "app" as const, texto: i.textoFinal })),
+    };
+  } else if (d.tipo === "retomar_turno") pedido = { tipo: "retomar_turno", acao: d.frase, contaminado };
+  else if (d.tipo === "rotina" || d.tipo === "rotina_atualizacao" || d.tipo === "rotina_exclusao") pedido = { tipo: d.tipo, resumo: d.frase, horario: "", contaminado };
+  else if (d.tipo === "perfil") pedido = { tipo: "perfil", nome: d.frase, titulo: "", contaminado };
+  else if (d.tipo === "acesso") {
+    // O acesso se aprova inteiro pela voz só com o app já conectado; o texto do card diz o app e o nível.
+    return { data: { decisaoId: d.id, leitura: `${d.frase.slice(0, 140)}. ${FECHO_LEITURA}`, perfil: "estrito" } };
+  }
+  if (!pedido) return { data: null };
+  const perfil: PerfilComando = d.tipo === "aprovacao" || d.tipo === "gate_rotina" || d.tipo === "retomar_turno" ? "estrito" : "proposta";
+  return { data: { decisaoId: d.id, leitura: redigirLeituraDeAprovacao(pedido), perfil } };
 };
