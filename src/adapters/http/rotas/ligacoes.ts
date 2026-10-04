@@ -23,6 +23,8 @@ export type DepsRotasLigacoes = DepsRotas & {
   /** Depois do commit do POST: registra a ligação no orquestrador de voz (memória). */
   registrar(escopo: Escopo, l: { ligacaoId: string; agenteId: string; conversaId: string; turnoId: string; voz: string; velocidade: number; nomeBot: string; genero: "feminina" | "masculina" }): void;
   encerrarViva(ligacaoId: string): Promise<void>;
+  /** A prévia de uma voz (WAV) para escolher a voz do bot; null = voz desconhecida ou fora do ar. */
+  amostra(voz: string, velocidade: number): Promise<Buffer | null>;
   maxS: number;
 };
 
@@ -102,6 +104,19 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       padrao: /^\/voz\/consentimento$/,
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, consentirVoz, { versao: corpoObjeto(await ctx.corpo()).versao }));
+      },
+    },
+    {
+      // A prévia da voz (definido em 2026-10-04): o mesmo provedor das ligações, uma frase curta, em cache.
+      metodo: "GET",
+      padrao: /^\/voz\/amostra$/,
+      async handler(ctx) {
+        const q = new URL(ctx.req.url ?? "/", "http://x").searchParams;
+        const velocidade = Number(q.get("velocidade") ?? "1");
+        const wav = await d.amostra(q.get("voz") ?? "", Number.isFinite(velocidade) ? velocidade : 1);
+        if (!wav) throw new ErroDeDominio("nao_encontrado", { cause: "voz" });
+        ctx.res.writeHead(200, { "content-type": "audio/wav", "content-length": String(wav.length), "cache-control": "private, max-age=3600" });
+        ctx.res.end(wav);
       },
     },
     {

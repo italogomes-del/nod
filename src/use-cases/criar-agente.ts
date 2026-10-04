@@ -5,6 +5,7 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { nomeDeBoasVindas, proximaCor, proximaForma } from "../domain/proposta-agente.ts";
+import { proximaVoz } from "../domain/vozes.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
@@ -37,8 +38,10 @@ export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = asyn
   const forma = proximaForma(existentes.map((a) => a.forma));
   const cor = proximaCor(existentes.map((a) => a.cor));
 
-  const agente = await deps.repos.agentes.criar({ nome, titulo, descricao, confirmado, dono: input.dono, forma, cor, modelo: input.modelo ?? "auto", harness: input.harness ?? "auto" });
-  if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "agente não criado" });
+  const criado = await deps.repos.agentes.criar({ nome, titulo, descricao, confirmado, dono: input.dono, forma, cor, modelo: input.modelo ?? "auto", harness: input.harness ?? "auto" });
+  if (!criado) throw new ErroDeDominio("estado_invalido", { cause: "agente não criado" });
+  // ADR-071: cada bot nasce com a sua voz nas ligações, em rodízio como o mascote (trocável no perfil).
+  const agente = (await deps.repos.agentes.definirVoz(criado.id, { voz: proximaVoz(existentes.map((a) => a.voz)) })) ?? criado;
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente.id, visibility: agente.visibility });
   if (!conversa) throw new ErroDeDominio("estado_invalido", { cause: "conversa não criada" });
 

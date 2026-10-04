@@ -53,7 +53,7 @@ import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
-import { ICONE_LIGACAO } from "./telas/ligacao.ts";
+import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
@@ -1591,6 +1591,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "inteligencia": (el) => abrirInteligencia(el.dataset.id),
   // ADR-059: o chip do campo abre os três modos; o × do aviso o fecha para este bot e este modo.
   "modo-aprovacao": (el) => abrirModoAprovacao(el),
+  // Prévia da voz do bot (Editar perfil): toca a amostra do provedor das ligações.
+  "ouvir-voz": (el) => {
+    const tenant = estado.sessao?.tenantId;
+    const voz = el.dataset.voz;
+    if (!tenant || !voz) return;
+    const vel = el.closest("form")?.querySelector<HTMLInputElement>('input[name="vozVelocidade"]:checked')?.value ?? "1";
+    void new Audio(`/api/t/${encodeURIComponent(tenant)}/voz/amostra?voz=${encodeURIComponent(voz)}&velocidade=${encodeURIComponent(vel)}`).play().catch(() => undefined);
+  },
   "fechar-aviso-modo": () => {
     const t = estado.tela;
     const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
@@ -1783,6 +1791,10 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     const d = new FormData(form);
     return agir(async () => {
       await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), ...(d.has("inteligencia") ? escolhaInteligencia(d) : {}), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
+      // ADR-071: a voz nas ligações mora em rota própria (vale na próxima frase de uma ligação em curso).
+      const voz = VOZES.find((v) => v.id === d.get("voz"))?.id;
+      const vozVelocidade = VELOCIDADES.find((v) => String(v) === d.get("vozVelocidade"));
+      if (voz || vozVelocidade) await api!.ajustarVoz(form.dataset.id ?? "", { ...(voz ? { voz } : {}), ...(vozVelocidade ? { vozVelocidade } : {}) });
       dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
       fecharNivel();
     });

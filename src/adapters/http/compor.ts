@@ -106,6 +106,8 @@ import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts"
 import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz } from "../voz/orquestrador.ts";
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
 import type { ProvedoresVoz } from "../voz/spi.ts";
+import { concatenar, montarWav } from "../voz/audio.ts";
+import { VELOCIDADES_VOZ, VOZES_NOD } from "../../contracts/vozes.ts";
 import { criarCacheDeFalas } from "../voz/falas-de-espera.ts";
 import { anexarCanaisVoz, type CanaisVoz } from "../voz/ws.ts";
 import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
@@ -496,6 +498,27 @@ export function comporApp(o: OpcoesCompor): App {
     });
     inscricoesVoz.set(ligacaoId, sair);
   }
+  // Prévia da voz do bot (Editar perfil, Ajustes da ligação): uma frase pelo provedor das ligações, em memória.
+  const amostras = new Map<string, Promise<Buffer | null>>();
+  function amostraDeVoz(idVoz: string, velocidade: number): Promise<Buffer | null> {
+    const vozNod = VOZES_NOD.find((v) => v.id === idVoz);
+    if (!vozNod || !(VELOCIDADES_VOZ as readonly number[]).includes(velocidade)) return Promise.resolve(null);
+    const chave = `${idVoz}:${velocidade}`;
+    let p = amostras.get(chave);
+    if (!p) {
+      p = (async () => {
+        const pedacos: Int16Array[] = [];
+        for await (const pcm of provedoresVoz.tts.sintetizar({ texto: `Oi! Esta é a voz ${vozNod.nome}. É assim que eu falo nas ligações.`, voz: idVoz, velocidade })) pedacos.push(pcm);
+        return montarWav(concatenar(pedacos), 24_000);
+      })().catch((e: unknown) => {
+        amostras.delete(chave);
+        log("aviso", "voz_amostra_falhou", { erro: e instanceof Error ? e.name : "desconhecido" });
+        return null;
+      });
+      amostras.set(chave, p);
+    }
+    return p;
+  }
   async function ehAdminVoz(escopo: Escopo): Promise<boolean> {
     if (adminsVoz.length === 0) return false;
     if (adminsVoz.includes(escopo.pessoaId.toLowerCase())) return true;
@@ -715,6 +738,7 @@ export function comporApp(o: OpcoesCompor): App {
         acompanharDecisoes(escopo, l.ligacaoId, l.conversaId);
       },
       encerrarViva: (id) => voz.encerrar(id, "pessoa_desligou"),
+      amostra: amostraDeVoz,
     }),
     ...rotasConcessoes({ dentro }),
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
