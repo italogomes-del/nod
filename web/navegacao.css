@@ -233,14 +233,14 @@
 /* Voz nas ligações (ADR-071): uma linha por voz com a prévia ▶, e a velocidade embaixo. */
 .gv-vozes { border: 0; margin: 0; padding: 0; }
 .gv-vozes legend { padding: 0; margin-bottom: 6px; }
-.gv-lista-vozes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.gv-voz { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.gv-lista-vozes { display: grid; grid-template-columns: 1fr; gap: 6px; width: 100%; box-sizing: border-box; }
+.gv-voz { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; box-sizing: border-box; min-width: 0; }
 .gv-voz:has(input:checked) { border-color: var(--ink); background: var(--surface-raised); }
-.gv-voz label { display: flex; align-items: center; gap: 8px; cursor: pointer; min-width: 0; }
-.gv-voz label span { display: flex; flex-direction: column; min-width: 0; }
+.gv-voz label { display: flex; align-items: center; gap: 10px; cursor: pointer; min-width: 0; flex: 1; text-align: left; }
+.gv-voz label span { display: flex; flex-direction: row; align-items: baseline; gap: 8px; min-width: 0; }
 .gv-voz b { color: var(--ink); font-weight: 600; font-size: 13px; }
 .gv-voz small { color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gv-voz input { accent-color: var(--ink); }
+.gv-vozes .gv-voz input { width: auto; padding: 0; margin: 0; border: 0; accent-color: var(--ink); flex: none; }
 .gv-vozes .segmentado { margin-top: 8px; align-self: flex-start; }
 .gv-vozes .segmentado .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .gv-vozes .segmentado .seg:has(input:checked) { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--ink); }
