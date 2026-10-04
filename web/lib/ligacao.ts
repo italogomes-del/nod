@@ -59,16 +59,10 @@ const PENDENTES_MAX = 100;
 const RESTRICOES_AUDIO = { noiseSuppression: true, autoGainControl: true, channelCount: 1 } as const;
 
 async function abrirMicrofone(): Promise<MediaStream> {
-  try {
-    // "all" (Chromium ≥ 135) também tira o som de outros apps que sai no alto-falante; quem não entende recusa a restrição.
-    // O lib.dom do TypeScript 5.9 só conhece boolean nesta restrição; o valor vai por Reflect para não mentir no tipo.
-    const restricoes: MediaTrackConstraints = { ...RESTRICOES_AUDIO };
-    Reflect.set(restricoes, "echoCancellation", "all");
-    return await navigator.mediaDevices.getUserMedia({ audio: restricoes });
-  } catch (e) {
-    if (e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError" || e.name === "NotFoundError")) throw e;
-    return navigator.mediaDevices.getUserMedia({ audio: { ...RESTRICOES_AUDIO, echoCancellation: true } });
-  }
+  // revisto em 2026-10-04 (teste do Marlon no Chrome do Mac): com echoCancellation "all" o microfone chegava ao servidor
+  // só com zeros (35 s de áudio, energia 0). Volta ao AEC padrão do Chromium, que já usa a voz tocada nesta página como
+  // referência.
+  return navigator.mediaDevices.getUserMedia({ audio: { ...RESTRICOES_AUDIO, echoCancellation: true } });
 }
 
 export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
@@ -181,7 +175,22 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
     toque.port.postMessage({ tipo: "voz", utt: q.utt, pcm: q.pcm }, [q.pcm.buffer]);
   }
 
+  // Diagnóstico (definido em 2026-10-04): 4 s de quadros só com zeros = microfone que abriu mas não manda som.
+  let quadrosZerados = 0;
+  let avisouMudo = false;
+  function conferirSilencioAbsoluto(pcm: Int16Array): void {
+    if (avisouMudo || mudo) return;
+    let zero = true;
+    for (let i = 0; i < pcm.length; i++) if (pcm[i] !== 0) { zero = false; break; }
+    quadrosZerados = zero ? quadrosZerados + 1 : 0;
+    if (quadrosZerados >= 200) {
+      avisouMudo = true;
+      emitir({ t: "local", estado: "microfone-mudo" });
+    }
+  }
+
   function enviarQuadro(pcm: Int16Array): void {
+    conferirSilencioAbsoluto(pcm);
     if (mudo || !ws || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > ATRASO_MAX_BYTES) return;
     ws.send(quadroMicrofone(seq, pcm));
     seq = (seq + 1) >>> 0;

@@ -43,6 +43,8 @@ export type EstadoLocalLigacao =
   | "microfone-negado"
   | "microfone-restrito"
   | "microfone-indisponivel"
+  /** O microfone abriu mas só manda silêncio absoluto (zeros): aparelho errado ou bloqueado pelo sistema. */
+  | "microfone-mudo"
   | "audio-suspenso"
   | "reconectando"
   | "conectado"

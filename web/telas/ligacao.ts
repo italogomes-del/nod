@@ -135,6 +135,8 @@ export function avisoDoEstadoLocal(estado: EstadoLocalLigacao, noApp: boolean): 
       return { tom: "erro", texto: noApp ? "Libere o microfone em Ajustes do Sistema › Privacidade › Microfone. Enquanto isso, dá para digitar." : "Libere o microfone para este site nos ajustes do navegador. Enquanto isso, dá para digitar." };
     case "microfone-restrito":
       return { tom: "erro", texto: "O microfone deste Mac está bloqueado por quem administra o computador. Enquanto isso, dá para digitar." };
+    case "microfone-mudo":
+      return { tom: "erro", texto: noApp ? "O microfone não está mandando som. Confira em Ajustes do Sistema › Privacidade › Microfone e o aparelho de entrada em Som. Enquanto isso, dá para digitar." : "O microfone não está mandando som. Confira se o navegador tem acesso ao microfone em Ajustes do Sistema › Privacidade › Microfone e qual aparelho de entrada ele usa. Enquanto isso, dá para digitar." };
     case "microfone-indisponivel":
       return { tom: "erro", texto: "Nenhum microfone encontrado. Conecte um e ligue de novo; enquanto isso, dá para digitar." };
     case "voz-fora":
