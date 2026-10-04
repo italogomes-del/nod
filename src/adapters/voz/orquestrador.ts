@@ -228,7 +228,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let vezRefeita = false;
     let refazerConferido = true;
     let proximoOuvido: string | null = null;
-    let ultimaEspera: { categoria: CategoriaEspera; texto: string } | null = null;
+    let ultimaEspera: { categoria: CategoriaEspera; texto: string; n: number } | null = null;
+    let primeiroTrechoDaVez = true;
     let respostaTexto = "";
     let respostaFoiProChat = false;
     let botPerguntou = false;
@@ -322,8 +323,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const pcm = deps.esperas.obterPronto(fala, r.voz, r.velocidade);
       if (!pcm) return false;
       historicoEspera.push({ id: fala.id, categoria, em: relogio() });
-      ultimaEspera = { categoria, texto: fala.texto };
-      enfileirar({ tipo: "espera", texto: fala.texto, n: null, pcm });
+      ultimaEspera = { categoria, texto: fala.texto, n: vezAtual };
+      const item: ItemFila = { tipo: "espera", texto: fala.texto, n: null, pcm };
+      // A resposta já está sendo sintetizada mas ainda não tem som: a espera passa na frente (com a voz do Google, o
+      // áudio vem ~1,2 s depois do texto, e a pessoa ficava em silêncio).
+      if (emSintese && !emSintese.comAudio) void tocarItem(item);
+      else enfileirar(item);
       return true;
     }
 
@@ -427,6 +432,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     let vezRespondida = true;
+    let emSintese: { comAudio: boolean } | null = null;
 
     async function tocarItem(item: ItemFila): Promise<void> {
       const utt = ++uttSeq;
@@ -445,6 +451,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         if (item.n !== null && item.n === vezAtual && primeiroSomDaVez) {
           primeiroSomDaVez = false;
           latencias.push(relogio() - vezEm);
+          // As esperas da vez param quando a resposta começa a soar, não quando chega o texto.
+          cancelarEsperas();
         }
       };
       const agendarFim = () => {
@@ -460,11 +468,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const preparo = preparar(item);
       const ac = preparo.ac;
       abortTts = ac;
+      const sintese = { comAudio: false };
+      emSintese = sintese;
       anteciparFila();
       try {
         for await (const pcm of consumir(preparo)) {
           if (ac.signal.aborted || encerrada) break;
           if (item.n !== null && item.n === vezCancelada) break;
+          sintese.comAudio = true;
           primeiroSom();
           mandar(pcm);
         }
@@ -475,6 +486,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           paraMidia({ t: "aviso", texto: "A voz falhou nesta frase; ela está na legenda." });
         }
       } finally {
+        if (emSintese === sintese) emSintese = null;
         if (abortTts === ac) abortTts = null;
         // Saiu antes do fim (vez cancelada, encerrada): a síntese adiantada para também.
         ac.abort();
@@ -493,7 +505,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function falarConteudo(texto: string, n: number | null, tipo: TipoFalaBot = "conteudo"): void {
       const { falavel, foiProChat } = textoFalavel(texto);
       if (foiProChat) respostaFoiProChat = true;
-      const limpo = n !== null && ultimaEspera?.categoria === "reconhecimento" ? removerAberturaRepetida(falavel, ultimaEspera.texto) : falavel;
+      // Só a primeira frase da mesma vez em que tocou o "Entendi." perde o "Beleza," repetido (antes valia para qualquer
+      // frase de qualquer vez seguinte: "Beleza, Marlon. Até a próxima!" saiu como "Marlon.").
+      const repetiria = n !== null && n === vezAtual && primeiroTrechoDaVez && ultimaEspera?.categoria === "reconhecimento" && ultimaEspera.n === n;
+      if (n !== null && n === vezAtual) primeiroTrechoDaVez = false;
+      const limpo = repetiria && ultimaEspera ? removerAberturaRepetida(falavel, ultimaEspera.texto) : falavel;
       if (limpo.trim() === "") return;
       enfileirar({ tipo, texto: limpo, n });
     }
@@ -696,6 +712,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezAtual = n;
       vezEm = relogio();
       primeiroSomDaVez = true;
+      primeiroTrechoDaVez = true;
       vezRespondida = false;
       respostaTexto = "";
       respostaFoiProChat = false;
@@ -888,8 +905,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           refazerConferido = true;
           refazerVezSePreciso(agora);
         }
-        fimFalaEm = agora;
-        if (abertoIdx >= 0) trechos[abertoIdx]!.fim = agora;
+        // O fim real da voz (o VAD só avisa depois de 600 ms de silêncio): a espera do fim de turno conta daqui — antes
+        // contava do aviso, e o silêncio de base virava 1,2 s.
+        fimFalaEm = ev.em;
+        if (abertoIdx >= 0) trechos[abertoIdx]!.fim = ev.em;
         stt?.fimDeFala();
         // O final do STT agenda a decisão; se ele demorar, a vez espera por ele (nunca decide sem texto).
       }
@@ -1050,7 +1069,6 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "fala": {
           if (typeof msg.n !== "number" || typeof msg.delta !== "string") return;
           if (msg.n === 0 || msg.n !== vezAtual || msg.n === vezCancelada || vezRespondida || desligando) return;
-          cancelarEsperas();
           respostaTexto += msg.delta;
           for (const trecho of segmentador.adicionar(msg.delta, relogio())) falarConteudo(trecho, msg.n);
           cancelar(timerVencer);
@@ -1067,8 +1085,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           cancelar(timerVencer);
           for (const trecho of segmentador.fechar()) falarConteudo(trecho, msg.n);
           vezRespondida = true;
-          cancelarEsperas();
           const resposta = respostaTexto.trim();
+          // Sem nada a dizer, nenhuma espera toca depois; com texto, elas param quando o áudio começar.
+          if (resposta === "" || !primeiroSomDaVez) cancelarEsperas();
           botPerguntou = resposta.endsWith("?");
           if (resposta !== "") gravarFala({ autor: "bot", tipo: "fala", texto: textoFalavel(resposta).falavel || resposta, inicioMs: vezEm - inicio, fimMs: msDesdeInicio(), interrompida: false });
           if (respostaFoiProChat && resposta !== "" && deps.persistencia.mandarNoChat) seguro(deps.persistencia.mandarNoChat(ref, resposta), "voz_mandar_no_chat_falhou");
@@ -1200,6 +1219,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezAtual = n;
       vezEm = relogio();
       primeiroSomDaVez = true;
+      primeiroTrechoDaVez = true;
       vezRespondida = false;
       respostaTexto = "";
       respostaFoiProChat = false;
