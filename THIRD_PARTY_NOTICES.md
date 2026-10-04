@@ -15,3 +15,11 @@ BotEngine.sample (default unchanged) to disable wandering/blinking/breathing for
 The neutral expression is calibrated in web/lib/mascote-pose.ts to the supplied static reference.
 The SVG renderer and DOM lifecycle adapter live in web/lib/mascote-svg.ts and
 web/lib/mascote-elemento.ts. No Vue runtime is included.
+
+## Geist and Geist Mono fonts
+
+The web interface serves the Geist and Geist Mono variable fonts (latin and latin-ext subsets,
+`web/public/fontes/`), Copyright 2024 The Geist Project Authors
+(https://github.com/vercel/geist-font), licensed under the SIL Open Font License 1.1. Files taken from
+the `@fontsource-variable/geist` and `@fontsource-variable/geist-mono` packages, version 5.3.0.
+Full license: web/public/fontes/OFL-geist.txt.

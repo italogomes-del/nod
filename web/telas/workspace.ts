@@ -10,7 +10,7 @@ export function abrirWorkspace(api: Api, conversaId: string): void {
     <p data-estado role="status">Carregando…</p><div data-escolha hidden><p data-caminho></p><button data-pai>Voltar uma pasta</button><details><summary>Ir para uma pasta pelo caminho</summary><label>Caminho da pasta<input data-endereco aria-label="Caminho da pasta"></label><button data-ir>Abrir pasta</button></details><ul data-pastas></ul>
     <p>Por padrão, projetos Git usam uma cópia de trabalho separada. Você pode pedir ao agente para trabalhar diretamente na pasta original.</p>
     <p data-restricao hidden>Escolha uma pasta de projeto ou de documentos, não a pasta pessoal inteira nem as pastas internas do Nod.</p><button data-permitir>Permitir nesta pasta</button></div><button data-revogar hidden>Remover acesso (preserva arquivos)</button>`;
-  dialog.style.cssText = "max-width:640px;width:90%;max-height:85vh;overflow:auto;padding:28px;border:1px solid #d8dce5;border-radius:18px";
+  dialog.style.cssText = "max-width:640px;width:90%;max-height:85vh;overflow:auto;padding:28px;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--ink)";
   document.body.append(dialog); dialog.showModal();
   dialog.addEventListener("close", () => dialog.remove(), { once: true });
   const q = <T extends HTMLElement = HTMLElement>(s: string) => dialog.querySelector<T>(s)!;

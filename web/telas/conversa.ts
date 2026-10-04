@@ -24,6 +24,8 @@ import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
 import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
+import { avisoDeEstado } from "../lib/aviso-estado.ts";
+import { inventarioEmUso } from "./frota.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -178,11 +180,35 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "resultado_aprovacao") return reciboDaDecisao(m, p, estado);
   if (m.kind === "resultado_aprovacao") return reciboSemDetalhe(m);
   if (m.kind === "consentimento" && !p) return reciboDaRegra(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (p?.kind === "negacao" && p.classe === "plano_ausente") return avisoSemExecutor(m, estado);
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
   if (p?.kind === "parada") return `<div class="msg-parada">■ ${paragrafos(m.texto)}</div>`;
   if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
+}
+
+/**
+ * Executor indisponível (ADR-029, classe plano_ausente) como aviso de ERRO do design system (definido em 2026-10-04):
+ * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e o instante em ISO);
+ * na frente, o que aconteceu em palavras e o próximo passo: "Conectar IA" enquanto a IA continua fora, e "mande de
+ * novo" quando ela já voltou (a mensagem perdida não é reenviada sozinha).
+ */
+function avisoSemExecutor(m: Mensagem, estado: Estado): string {
+  const nome = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id)?.nome : undefined;
+  const inv = inventarioEmUso(estado);
+  // Sem sonda ainda (inventário null, logo ao abrir a página) vale como fora: dizer "já voltou" seria afirmar sem saber.
+  const aindaFora = !inv || inv.estado !== "pronto";
+  const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
+  return avisoDeEstado({
+    tom: "erro",
+    titulo: "Nenhum trabalho começou.",
+    texto: aindaFora
+      ? `${nome ?? "O bot"} não pôde começar: sua conta de IA não está conectada neste computador.`
+      : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. Ela já voltou: mande a mensagem de novo.`,
+    extra: detalhes,
+    acao: aindaFora ? botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }) : undefined,
+  });
 }
 
 /**

@@ -14,9 +14,14 @@ export type AlvoAviso = { tipo: "conversa"; conversaId: string; agenteId: string
 /** Um aviso já redigido pela web (web/lib/avisos.ts): o Mac só mostra. */
 export type AvisoDesktop = { titulo: string; corpo: string; alvo: AlvoAviso };
 
-/** A preferência "Avisos no Mac" (userData/preferencias.json) e o que o macOS deixou mostrar. */
+/** Tema escolhido em Preferências (definido em 2026-10-04, ADR-070); "sistema" segue o macOS. */
+export type TemaDesktop = "sistema" | "claro" | "escuro";
+
+/** As preferências do app (userData/preferencias.json) e o que o macOS deixou mostrar. */
 export type PreferenciasDesktop = {
   avisos: boolean;
+  /** O tema da janela: o processo principal o aplica em nativeTheme, que é o que o prefers-color-scheme da página lê. */
+  tema: TemaDesktop;
   /** O último aviso falhou ao aparecer: as notificações do nod estão desligadas nos Ajustes do Sistema. */
   bloqueados: boolean;
 };
@@ -28,6 +33,11 @@ export type NodDesktop = {
   contador(n: number): Promise<void>;
   preferencias(): Promise<PreferenciasDesktop>;
   definirAvisos(ligado: boolean): Promise<PreferenciasDesktop>;
+  /**
+   * Grava o tema fora da página: o localStorage da janela web é apagado a cada conexão. Opcional porque o app
+   * instalado antes de 2026-10-04 não tem: a web confere antes de chamar.
+   */
+  definirTema?(tema: TemaDesktop): Promise<PreferenciasDesktop>;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -38,6 +48,7 @@ export const CANAIS_DESKTOP = {
   contador: "nod:contador",
   preferencias: "nod:preferencias",
   definirAvisos: "nod:definir-avisos",
+  definirTema: "nod:definir-tema",
   abrir: "nod:abrir",
 } as const;
 

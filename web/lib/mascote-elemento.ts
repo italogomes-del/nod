@@ -9,7 +9,7 @@ import { PintorMascote, svgMascote } from "./mascote-svg.ts";
 // getComputedStyle — 4 pinturas por mascote no upgrade —, e 10 mascotes animados, 9 a 16 ms de CPU por quadro, cada um
 // com o próprio requestAnimationFrame (bancada no chrome-headless-shell 148 com o CSS da web). Agora: uma pintura ao
 // conectar, cor pelo CSS, quadro parado em cache, atributos remendados e um rAF para todos.
-const INK = "var(--mascote-cor,#a3a3a3)";
+const INK = "var(--mascote-cor, var(--agent-gris))";
 /** Maior fundo do catálogo (orbit, 0,6 s) com folga: daí em diante o repouso é o mesmo quadro (mascote-pintura.test.ts). */
 const ASSENTA = .8;
 /** definido em 2026-09-30: teto de 60 quadros por segundo; numa tela de 120 Hz o rAF dobraria o custo sem ganho visível. */

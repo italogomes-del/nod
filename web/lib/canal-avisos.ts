@@ -30,7 +30,7 @@ export function criarCanalAvisos(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: ()
 }
 
 function canalMac(mac: NodDesktop, aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
-  let prefs: PreferenciasDesktop = { avisos: true, bloqueados: false };
+  let prefs: PreferenciasDesktop = { avisos: true, tema: "sistema", bloqueados: false };
   const aplicar = (p: PreferenciasDesktop): void => {
     const mudou = p.avisos !== prefs.avisos || p.bloqueados !== prefs.bloqueados;
     prefs = p;

@@ -33,7 +33,7 @@ export function svgMascote(f: BotFrame, id: string, ink: string, paper = PAPEL):
     ${f.arcs.map((a,i) => `<linearGradient id="${id}-a${i}" gradientUnits="userSpaceOnUse" x1="${a.grad.x1}" y1="${a.grad.y1}" x2="${a.grad.x2}" y2="${a.grad.y2}">${a.grad.stops.map((c,j) => `<stop offset="${j/(a.grad.stops.length-1)}" stop-color="${c}"/>`).join("")}</linearGradient>`).join("")}
     </defs>${arcs("back")}${f.dotsBehind ? dots : ""}
     <g opacity="${f.bodyAlpha}"><path d="${esc(f.bodyPath)}" fill="${paper}"/><g mask="url(#${id})"><rect x="-${V}" y="-${V}" width="${2*V}" height="${2*V}" ${preencher(ink)}/></g></g>
-    ${f.dotsBehind ? "" : dots}${f.notif ? `<circle cx="${f.notif.x}" cy="${f.notif.y}" r="${f.notif.r}" fill="#2496e8" style="fill: var(--nod-aviso, #2496e8)"/>` : ""}${arcs("front")}</svg>`;
+    ${f.dotsBehind ? "" : dots}${f.notif ? `<circle cx="${f.notif.x}" cy="${f.notif.y}" r="${f.notif.r}" style="fill: var(--nod-aviso, var(--signal))"/>` : ""}${arcs("front")}</svg>`;
 }
 
 /** O que muda o ESQUELETO do SVG. Igual ao do quadro anterior, os nós servem e só atributos mudam. */

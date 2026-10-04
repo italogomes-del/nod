@@ -170,7 +170,7 @@ Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
 
 Definido em 2026-09-24 (aviso no Mac): a janela web carrega `preload-web.cjs`, que expõe SÓ
-`window.nodDesktop` (avisar, contador, preferências); a tela de conexão carrega `preload.cjs`
+`window.nodDesktop` (avisar, contador, preferências, tema — ADR-070); a tela de conexão carrega `preload.cjs`
 (`window.nod`, com `conectar`). Nunca dê o segundo à página remota. A página continua sem permissão
 nenhuma (`proteger`): o aviso sai do processo principal, que confere remetente e argumentos
 (`desktop/avisos-mac.ts`). `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`)

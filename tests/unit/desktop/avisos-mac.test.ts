@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } from "../../../desktop/avisos-mac.ts";
+import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "../../../desktop/avisos-mac.ts";
 
 /**
  * O que o processo principal aceita da janela web (definido em 2026-09-24, "aviso no Mac"): a página é
@@ -54,10 +54,18 @@ describe("argumentos", () => {
     expect(lerContador("3")).toBeNull();
   });
 
-  it("preferencias.json: ausente ou corrompido, os avisos nascem ligados", () => {
-    expect(lerPreferencias(null)).toEqual({ avisos: true });
-    expect(lerPreferencias("{")).toEqual({ avisos: true });
-    expect(lerPreferencias('{"avisos":"sim"}')).toEqual({ avisos: true });
-    expect(lerPreferencias('{"avisos":false}')).toEqual({ avisos: false });
+  it("preferencias.json: ausente ou corrompido, os avisos nascem ligados e o tema segue o sistema", () => {
+    expect(lerPreferencias(null)).toEqual({ avisos: true, tema: "sistema" });
+    expect(lerPreferencias("{")).toEqual({ avisos: true, tema: "sistema" });
+    expect(lerPreferencias('{"avisos":"sim"}')).toEqual({ avisos: true, tema: "sistema" });
+    expect(lerPreferencias('{"avisos":false}')).toEqual({ avisos: false, tema: "sistema" });
+  });
+
+  it("preferencias.json: o tema só aceita sistema, claro e escuro (ADR-070)", () => {
+    expect(lerPreferencias('{"avisos":false,"tema":"escuro"}')).toEqual({ avisos: false, tema: "escuro" });
+    expect(lerPreferencias('{"tema":"roxo"}')).toEqual({ avisos: true, tema: "sistema" });
+    expect(lerTemaDesktop("claro")).toBe("claro");
+    expect(lerTemaDesktop("<script>")).toBeNull();
+    expect(lerTemaDesktop(1)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
-import { app, BrowserWindow, ipcMain, Menu, Notification, safeStorage, session, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeTheme, Notification, safeStorage, session, shell, type IpcMainInvokeEvent } from "electron";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, dirname } from "node:path";
@@ -12,8 +12,8 @@ import { criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
-import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop } from "../src/contracts/desktop.ts";
-import { lerAviso, lerContador, lerPreferencias, origemDe, remetenteWebValido } from "./avisos-mac.ts";
+import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
+import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
@@ -82,7 +82,7 @@ function caminhoConfig() { return join(app.getPath("userData"), "conexao.enc"); 
 // A preferência mora em userData/preferencias.json: o localStorage da janela web é apagado a cada
 // conexão (clearStorageData abaixo). O aviso sai daqui, do processo principal — a página continua sem
 // permissão nenhuma (proteger) —, e só com a janela fora de foco.
-let preferencias = { avisos: true };
+let preferencias: Pick<PreferenciasDesktop, "avisos" | "tema"> = { avisos: true, tema: "sistema" };
 /** O último aviso falhou ao aparecer (o macOS bloqueou); o próximo que aparecer desfaz. */
 let bloqueados = false;
 let contadorAtual = 0;
@@ -90,7 +90,7 @@ let contadorAtual = 0;
 const avisosVivos: Notification[] = [];
 const MAX_AVISOS_VIVOS = 20;
 function caminhoPreferencias() { return join(app.getPath("userData"), "preferencias.json"); }
-function estadoPreferencias(): PreferenciasDesktop { return { avisos: preferencias.avisos, bloqueados }; }
+function estadoPreferencias(): PreferenciasDesktop { return { avisos: preferencias.avisos, tema: preferencias.tema, bloqueados }; }
 async function carregarPreferencias() {
   preferencias = lerPreferencias(await readFile(caminhoPreferencias(), "utf8").catch(() => null));
 }
@@ -100,10 +100,22 @@ async function gravarPreferencias() {
   await writeFile(tmp, JSON.stringify(preferencias), { mode: 0o600 });
   await rename(tmp, caminhoPreferencias());
 }
+// ---- Tema (definido em 2026-10-04, ADR-070) ------------------------------------------------------------
+// O nativeTheme decide o prefers-color-scheme da página: com ele, o tema escolhido vale desde o primeiro quadro,
+// mesmo com o localStorage apagado a cada conexão, e a janela já nasce com o fundo certo (sem piscar branco).
+function aplicarTemaNativo() { nativeTheme.themeSource = preferencias.tema === "claro" ? "light" : preferencias.tema === "escuro" ? "dark" : "system"; }
+/** Fundo da janela antes da página pintar: os valores de --surface em web/tokens.css. */
+function fundoDaJanela() { return nativeTheme.shouldUseDarkColors ? "#131315" : "#ffffff"; }
+async function definirTema(tema: TemaDesktop): Promise<PreferenciasDesktop> {
+  preferencias = { ...preferencias, tema };
+  aplicarTemaNativo();
+  await gravarPreferencias();
+  return estadoPreferencias();
+}
 /** Desligado, o Dock também apaga: o número é parte dos avisos. */
 function aplicarContador() { app.setBadgeCount(preferencias.avisos ? contadorAtual : 0); }
 async function definirAvisos(ligado: boolean): Promise<PreferenciasDesktop> {
-  preferencias = { avisos: ligado };
+  preferencias = { ...preferencias, avisos: ligado };
   montarMenu(); aplicarContador();
   await gravarPreferencias();
   return estadoPreferencias();
@@ -175,7 +187,7 @@ async function mostrarSetup() {
   const anterior = janela;
   // Sem a janela web, o número do Dock ficaria parado no último valor.
   contadorAtual = 0; aplicarContador();
-  const nova = new BrowserWindow({ width: 580, height: 850, minWidth: 500, title: "Conectar ao nod", webPreferences: { preload: join(dir, "preload.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const nova = new BrowserWindow({ width: 580, height: 850, minWidth: 500, title: "Conectar ao nod", backgroundColor: fundoDaJanela(), webPreferences: { preload: join(dir, "preload.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova);
   nova.on("closed", () => { if (janela === nova) janela = null; });
   await nova.loadFile(setup);
@@ -231,7 +243,7 @@ async function conectar(c: Config) {
   laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId) }), cliente.ponte);
   const anterior = janela;
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
-  const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", backgroundColor: fundoDaJanela(), webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova, c.url);
   nova.on("closed", () => { if (janela === nova) janela = null; });
   nova.webContents.on("did-fail-load", (_e, code, _description, _url, main) => { if (main && code !== -3) { mensagem = mensagens.servidor_fora!; void mostrarSetup(); } });
@@ -257,6 +269,7 @@ else {
   });
   void app.whenReady().then(async () => {
     await carregarPreferencias();
+    aplicarTemaNativo();
     montarMenu();
     ipcMain.handle(CANAIS_DESKTOP.avisar, (e, dados: unknown) => {
       validarRemetenteWeb(e);
@@ -273,6 +286,12 @@ else {
       validarRemetenteWeb(e);
       if (typeof ligado !== "boolean") throw new Error("entrada_invalida");
       return definirAvisos(ligado);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.definirTema, (e, tema: unknown) => {
+      validarRemetenteWeb(e);
+      const lido = lerTemaDesktop(tema);
+      if (!lido) throw new Error("entrada_invalida");
+      return definirTema(lido);
     });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).
