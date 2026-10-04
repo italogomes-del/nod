@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Roadmap Nod × OpenMausBot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: uma coluna de leitura (máx. 1040px); faixa de resumo, barra de filtros fixa, grupos por área com linhas de decisão. */
+/* Tokens: os do design system do Nod (web/tokens.css, direção D grafite). action = grafite; estados só para status. */
+:root {
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-side: #f7f7f8;
+  --surface-raised: #f0f0f2;
+  --surface-selected: #ececef;
+  --line: #e5e5e9;
+  --line-strong: #8e8e96;
+  --ink: #18181b;
+  --ink-2: #5d5d66;
+  --ink-3: #6b6b74;
+  --action: #18181b;
+  --on-action: #ffffff;
+  --signal: #1866c0;
+  --signal-soft: #e6f0fb;
+  --warning: #7a4e08;
+  --warning-soft: #fdf5e6;
+  --warning-line: #efd6a6;
+  --danger: #c42b1c;
+  --danger-soft: #fdecea;
+  --danger-line: #f3c2bc;
+  --success: #177040;
+  --success-soft: #e8f5ee;
+  --success-line: #b9dfc9;
+  --shadow-pop: 0 6px 20px rgba(24, 24, 27, .10), 0 1px 2px rgba(24, 24, 27, .06);
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #131315; --surface-side: #18181b; --surface-raised: #232327; --surface-selected: #2a2a2f;
+    --line: #2d2d32; --line-strong: #6a6a73;
+    --ink: #ededef; --ink-2: #a4a4ac; --ink-3: #8b8b94;
+    --action: #ededef; --on-action: #131315;
+    --signal: #4ea3f0; --signal-soft: #15283c;
+    --warning: #ebbd6a; --warning-soft: #2a2214; --warning-line: #4d3c1c;
+    --danger: #f2796b; --danger-soft: #2e1613; --danger-line: #5a2a24;
+    --success: #4cc38a; --success-soft: #132a1e; --success-line: #1f4a33;
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .04);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #131315; --surface-side: #18181b; --surface-raised: #232327; --surface-selected: #2a2a2f;
+  --line: #2d2d32; --line-strong: #6a6a73;
+  --ink: #ededef; --ink-2: #a4a4ac; --ink-3: #8b8b94;
+  --action: #ededef; --on-action: #131315;
+  --signal: #4ea3f0; --signal-soft: #15283c;
+  --warning: #ebbd6a; --warning-soft: #2a2214; --warning-line: #4d3c1c;
+  --danger: #f2796b; --danger-soft: #2e1613; --danger-line: #5a2a24;
+  --success: #4cc38a; --success-soft: #132a1e; --success-line: #1f4a33;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .04);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--surface); color: var(--ink);
+  font: 14px/1.5 var(--font-sans); font-feature-settings: "ss01";
+}
+[hidden] { display: none !important; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+code, .mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* Cabeçalho */
+header.top { padding-block: 40px 24px; display: grid; gap: 14px; }
+.eyebrow { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+h1 { font-size: 30px; line-height: 1.15; margin: 0; letter-spacing: -.02em; font-weight: 650; text-wrap: balance; }
+.lede { margin: 0; max-width: 68ch; color: var(--ink-2); font-size: 15px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-3); font-size: 12.5px; }
+.meta span b { color: var(--ink-2); font-weight: 500; }
+
+/* Resumo */
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.summary > div { padding: 14px 16px; display: grid; gap: 2px; border-right: 1px solid var(--line); min-width: 0; }
+.summary > div:last-child { border-right: 0; }
+.summary .k { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.summary .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.summary .sub { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--line-strong); }
+.dot.sim { background: var(--success); } .dot.talvez { background: var(--warning); } .dot.nao { background: var(--ink-3); } .dot.pend { background: transparent; border: 1.5px solid var(--line-strong); }
+.summary > div.bar { grid-column: 1 / -1; height: 6px; padding: 0; display: flex; gap: 0; background: var(--surface-raised); border-right: 0; border-bottom: 0; border-top: 1px solid var(--line); }
+.bar i { display: block; height: 100%; transition: width .25s ease; }
+.bar .sim { background: var(--success); } .bar .talvez { background: var(--warning); } .bar .nao { background: var(--ink-3); }
+@media (max-width: 640px) {
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary > div:nth-child(2) { border-right: 0; }
+  .summary > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+}
+
+/* Barra de filtros */
+.toolbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  padding-block: 12px; margin-top: 20px;
+}
+.toolbar .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.toolbar .row + .row { margin-top: 8px; }
+.search { flex: 1 1 240px; min-width: 0; position: relative; }
+.search input {
+  width: 100%; height: 34px; padding: 0 12px 0 32px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+}
+.search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+select.f {
+  height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-side); padding: 0 28px 0 10px;
+  appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 15px, calc(100% - 10px) 15px; background-size: 4px 4px; background-repeat: no-repeat;
+  max-width: 100%;
+}
+.btn {
+  height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-side);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.btn:hover { background: var(--surface-raised); }
+.btn.primary { background: var(--action); color: var(--on-action); border-color: var(--action); }
+.btn.primary:hover { opacity: .9; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn.ghost:hover { background: var(--surface-raised); }
+.count { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; margin-left: auto; }
+
+/* Painel de exportação / confirmação */
+.panel { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-side); padding: 14px; margin-top: 12px; display: grid; gap: 10px; }
+.panel textarea { width: 100%; min-height: 160px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; background: var(--surface); font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+.panel .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.panel p { margin: 0; color: var(--ink-2); max-width: 70ch; }
+.toast { color: var(--success); font-size: 13px; }
+
+/* Grupos */
+main { padding-block: 8px 64px; }
+section.area { margin-top: 32px; }
+.area-head { display: flex; align-items: baseline; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.area-head h2 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+.area-head .n { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.area-head .mini { margin-left: auto; display: flex; height: 4px; width: 120px; background: var(--surface-raised); border-radius: 2px; overflow: hidden; align-self: center; }
+.area-head .mini i { display: block; height: 100%; }
+.area-head .mini .sim { background: var(--success); } .area-head .mini .talvez { background: var(--warning); } .area-head .mini .nao { background: var(--ink-3); }
+
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 20px; padding-block: 16px; border-bottom: 1px solid var(--line); }
+.item.decided-nao .title, .item.decided-nao .omb { color: var(--ink-3); }
+.item .body { min-width: 0; display: grid; gap: 6px; }
+.title { font-weight: 600; font-size: 14.5px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.title .id { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); font-weight: 400; }
+.omb { margin: 0; color: var(--ink); max-width: 72ch; }
+.nod { margin: 0; color: var(--ink-2); max-width: 72ch; font-size: 13.5px; }
+.nod b, .why b { font-weight: 500; color: var(--ink); }
+.why { margin: 0; color: var(--ink-2); max-width: 72ch; font-size: 13.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.chip { font-size: 11.5px; line-height: 20px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface); white-space: nowrap; }
+.chip.falta { color: var(--ink); border-color: var(--line-strong); }
+.chip.parcial { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-line); }
+.chip.pr { color: var(--success); background: var(--success-soft); border-color: var(--success-line); }
+.chip.contra { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-line); }
+.chip.verificar { border-style: dashed; }
+.chip.ideia { background: var(--surface-raised); }
+.chip.sug { background: var(--surface-raised); border-color: transparent; }
+.ev { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); overflow-wrap: anywhere; }
+
+.decide { display: grid; gap: 8px; justify-items: end; align-content: start; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; padding: 2px; background: var(--surface-side); }
+.seg button {
+  border: 0; background: transparent; height: 28px; padding: 0 10px; border-radius: 7px; cursor: pointer; color: var(--ink-2); font-size: 13px; white-space: nowrap;
+}
+.seg button:hover { color: var(--ink); background: var(--surface-raised); }
+.seg button[aria-pressed="true"].sim { background: var(--success-soft); color: var(--success); box-shadow: inset 0 0 0 1px var(--success-line); }
+.seg button[aria-pressed="true"].talvez { background: var(--warning-soft); color: var(--warning); box-shadow: inset 0 0 0 1px var(--warning-line); }
+.seg button[aria-pressed="true"].nao { background: var(--surface-selected); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.prio { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--ink-3); }
+.prio button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; height: 24px; padding: 0 8px; cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.prio button[aria-pressed="true"] { background: var(--action); color: var(--on-action); border-color: var(--action); }
+.notebtn { font-size: 12px; color: var(--ink-3); background: none; border: 0; cursor: pointer; padding: 2px 4px; }
+.notebtn:hover { color: var(--ink); }
+.note { grid-column: 1 / -1; }
+.note textarea { width: 100%; min-height: 56px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; background: var(--surface); resize: vertical; }
+@media (max-width: 680px) {
+  .item { grid-template-columns: minmax(0, 1fr); }
+  .decide { justify-items: start; }
+}
+
+.empty { padding: 40px 0; color: var(--ink-3); text-align: center; }
+
+/* Seções de referência */
+details.ref { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 16px; }
+details.ref summary { cursor: pointer; font-weight: 600; font-size: 17px; list-style: none; display: flex; align-items: baseline; gap: 10px; }
+details.ref summary::-webkit-details-marker { display: none; }
+details.ref summary::before { content: "›"; display: inline-block; transition: transform .15s; color: var(--ink-3); width: 10px; }
+details.ref[open] summary::before { transform: rotate(90deg); }
+details.ref summary .n { font-weight: 400; color: var(--ink-3); font-size: 12.5px; }
+.ref-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 24px; margin-top: 12px; }
+.ref-grid div { padding: 8px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.ref-grid b { font-weight: 500; display: block; }
+.ref-grid span { color: var(--ink-3); font-size: 12.5px; }
+.prose { max-width: 72ch; color: var(--ink-2); }
+.prose p { margin: 10px 0; }
+.prose ul { padding-left: 18px; margin: 8px 0; }
+.prose li { margin: 4px 0; }
+footer { padding-block: 24px 48px; color: var(--ink-3); font-size: 12.5px; border-top: 1px solid var(--line); margin-top: 40px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Roadmap de paridade · 4 out 2026</div>
+    <h1>Roadmap Nod × OpenMausBot</h1>
+    <p class="lede">Tudo o que o OpenMausBot já tem e o Nod ainda não tem (ou tem só em parte). Para cada item, escolha <b>Implementar</b>, <b>Talvez</b> ou <b>Não</b>, defina a prioridade e deixe uma nota. As decisões ficam salvas neste navegador. Para me passar o resultado, use <b>Exportar decisões</b>.</p>
+    <div class="meta">
+      <span>OpenMausBot <b>v0.1.95</b> · commit <b class="mono">6dd4403</b> (4 out)</span>
+      <span>Nod <b>origin/main</b> · <b class="mono">1921093</b> (PR #114) + PRs abertas #99, #111, #115</span>
+      <span>Fontes: código, docs, ADRs e notas de release dos dois repositórios</span>
+    </div>
+  </header>
+
+  <div class="summary" id="summary" aria-live="polite"></div>
+
+  <div class="toolbar" id="toolbar">
+    <div class="row">
+      <label class="search" for="q">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input id="q" type="search" placeholder="Buscar feature, ADR, arquivo…" autocomplete="off" aria-label="Buscar">
+      </label>
+      <select class="f" id="fArea" aria-label="Área"></select>
+      <select class="f" id="fStatus" aria-label="Situação no Nod">
+        <option value="">Situação no Nod: todas</option>
+        <option value="falta">Não existe</option>
+        <option value="parcial">Parcial</option>
+        <option value="pr">Em PR aberta</option>
+        <option value="contra">Contraria uma decisão (ADR)</option>
+        <option value="verificar">A verificar</option>
+        <option value="ideia">Ideia de engenharia</option>
+      </select>
+      <select class="f" id="fDec" aria-label="Decisão">
+        <option value="">Decisão: todas</option>
+        <option value="pend">Sem decisão</option>
+        <option value="sim">Implementar</option>
+        <option value="talvez">Talvez</option>
+        <option value="nao">Não</option>
+      </select>
+      <select class="f" id="fSug" aria-label="Sugestão">
+        <option value="">Minha sugestão: todas</option>
+        <option value="sim">Sugiro implementar</option>
+        <option value="talvez">Avaliar</option>
+        <option value="nao">Sugiro não</option>
+      </select>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="bExport" type="button">Exportar decisões</button>
+      <button class="btn" id="bImport" type="button">Importar</button>
+      <button class="btn ghost" id="bSug" type="button">Preencher com as sugestões</button>
+      <button class="btn ghost" id="bReset" type="button">Limpar decisões</button>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="panel" id="pExport" hidden>
+      <p>Markdown pronto para colar no chat comigo, numa issue ou no Linear. O JSON serve para reimportar aqui.</p>
+      <textarea id="tExport" readonly aria-label="Decisões exportadas"></textarea>
+      <div class="actions">
+        <button class="btn primary" id="bCopy" type="button">Copiar</button>
+        <button class="btn" id="bFmt" type="button">Ver JSON</button>
+        <button class="btn ghost" id="bCloseExp" type="button">Fechar</button>
+        <span class="toast" id="tCopy" role="status"></span>
+      </div>
+    </div>
+    <div class="panel" id="pImport" hidden>
+      <p>Cole o JSON exportado antes. As decisões atuais serão substituídas.</p>
+      <textarea id="tImport" aria-label="JSON para importar"></textarea>
+      <div class="actions">
+        <button class="btn primary" id="bDoImport" type="button">Importar decisões</button>
+        <button class="btn ghost" id="bCloseImp" type="button">Cancelar</button>
+        <span class="toast" id="tImp" role="status"></span>
+      </div>
+    </div>
+    <div class="panel" id="pConfirm" hidden>
+      <p id="confirmText"></p>
+      <div class="actions">
+        <button class="btn primary" id="bConfirmYes" type="button">Confirmar</button>
+        <button class="btn ghost" id="bConfirmNo" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <main id="list"></main>
+
+  <details class="ref" id="parity">
+    <summary>O Nod já tem <span class="n" id="parityN"></span></summary>
+    <p class="prose">Features do OpenMausBot que já existem no Nod com cobertura equivalente. Ficam fora da lista de decisão.</p>
+    <div class="ref-grid" id="parityGrid"></div>
+  </details>
+
+  <details class="ref" id="only">
+    <summary>Só o Nod tem <span class="n" id="onlyN"></span></summary>
+    <p class="prose">O que o Nod faz e o OpenMausBot não faz, segundo o código dos dois. São as vantagens a preservar enquanto a lista acima anda.</p>
+    <div class="ref-grid" id="onlyGrid"></div>
+  </details>
+
+  <details class="ref">
+    <summary>Como esta lista foi feita</summary>
+    <div class="prose">
+      <p>O OpenMausBot foi clonado no commit <code>6dd4403</code> (release v0.1.95, 3 out 2026). Foram lidos o README, as docs (<code>docs/</code> e o site em <code>apps/docs</code>), o catálogo de strings da interface (<code>src/locales/en.json</code>, 3.491 chaves), as rotas de <code>server/index.ts</code> (cerca de 230 endpoints), <code>electron/</code>, <code>ios/</code>, <code>android/</code> e as notas das releases v0.1.85 a v0.1.95.</p>
+      <p>O Nod foi lido no <code>origin/main</code> (<code>1921093</code>), mais as três PRs abertas. O <code>main</code> local estava 53 commits atrás. Os documentos <code>docs/comparacao-openmausbot.md</code> e a seção “O que NÃO existe” do README estão desatualizados (ainda dizem que não há Electron, computador por bot nem Codex) e não foram usados como fonte.</p>
+      <ul>
+        <li><b>Não existe</b>: nada no código nem nos planos.</li>
+        <li><b>Parcial</b>: existe com limites claros, descritos na linha “No Nod hoje”.</li>
+        <li><b>Em PR aberta</b>: só numa PR ainda não mergeada.</li>
+        <li><b>Contraria uma decisão</b>: há ADR ou registro dizendo para não construir. Implementar exige reverter a decisão.</li>
+        <li><b>A verificar</b>: o levantamento não confirmou nem descartou. Vale uma olhada antes de decidir.</li>
+        <li><b>Ideia de engenharia</b>: técnica de implementação do OpenMausBot que vale copiar; não é feature visível.</li>
+      </ul>
+      <p>A sugestão de cada item é minha e leva em conta as regras do Nod: minimalismo, a pessoa sempre sabendo o próximo passo, decisões auditáveis, e o Nod sem IA própria rodando no executor do Mac. Esforço: P (dias), M (uma a duas semanas), G (mais que isso).</p>
+      <p>Nenhum dos dois tem kanban. O “Delegation Task Board” do OpenMausBot está planejado e não foi entregue. O pilar de kanban do Nod é uma chance de chegar antes.</p>
+    </div>
+  </details>
+
+  <footer>Arquivo gerado em 4 out 2026 em <span class="mono">docs/roadmap/openmausbot-gap.html</span>. As decisões ficam no armazenamento local deste navegador.</footer>
+</div>
+
+<script>
+const AREAS = {
+  motores: "Motores e modelos",
+  bots: "Bots e perfil",
+  threads: "Threads e organização",
+  composer: "Composer",
+  transcript: "Mensagens e transcript",
+  memoria: "Memória",
+  skills: "Skills",
+  aprovacoes: "Aprovações e segurança",
+  salas: "Salas e coordenação",
+  rotinas: "Rotinas, gatilhos e agenda",
+  computadores: "Computadores e navegador",
+  apps: "Apps conectados e MCP",
+  voz: "Voz",
+  avisos: "Notificações",
+  ajustes: "Ajustes, atalhos e idioma",
+  uso: "Uso, custo e auditoria",
+  times: "Compartilhar times",
+  desktop: "App desktop",
+  celular: "Celular e acesso remoto",
+  org: "Organização e admin",
+  plataforma: "Integrações externas",
+  engenharia: "Ideias de engenharia"
+};
+const STATUS = { falta: "Não existe", parcial: "Parcial", pr: "Em PR aberta", contra: "Contraria ADR", verificar: "A verificar", ideia: "Ideia de engenharia" };
+const SUG = { sim: "Sugiro implementar", talvez: "Avaliar", nao: "Sugiro não" };
+const DEC = { sim: "Implementar", talvez: "Talvez", nao: "Não" };
+const PRIO = { agora: "Agora", proximo: "Próximo", depois: "Depois" };
+
+/* a: área · t: título · o: o que o OpenMausBot faz · n: o Nod hoje · s: situação · r: sugestão · w: por quê · e: esforço · ev: evidência no OpenMausBot */
+const ITEMS = [
+  // Motores e modelos
+  { id: "m1", a: "motores", t: "Grok como motor (CLI Grok Build e API xAI)", o: "Bots rodam no Grok pelo CLI oficial (ACP) ou pela API da xAI, lado a lado com Claude e Codex no seletor de modelos.", n: "Só um placeholder “Hermes” em <code>harness.ts</code>; nenhum driver. O onboarding mostra Grok como “em breve”.", s: "falta", r: "talvez", w: "Fecha a promessa do card “em breve” do onboarding. Com o núcleo ACP (m3) sai quase de graça.", e: "M", ev: "server/drivers/acp/grok*.ts, server/drivers/xai*.ts" },
+  { id: "m2", a: "motores", t: "Cursor Agent como motor", o: "Driver ACP para o CLI do Cursor, com login e catálogo próprios.", n: "Listado como “Em preparação” (<code>integrado:false</code>).", s: "falta", r: "talvez", w: "Pouca gente usa o Cursor CLI como assinatura principal; vale se o núcleo ACP existir.", e: "P", ev: "server/drivers/acp/cursor.ts" },
+  { id: "m3", a: "motores", t: "Núcleo ACP genérico (Kimi, Droid, OpenCode, Qwen, Gemini, pi, Antigravity…)", o: "Um runtime JSON-RPC sobre stdio atende todo CLI que fala ACP; cada motor é um arquivo pequeno de particularidades. São 19 drivers no total.", n: "Dois drivers escritos à mão (claude-cli e codex-cli) no mesmo SPI.", s: "falta", r: "talvez", w: "É a peça que deixa o OpenMausBot ter 19 motores. Só compensa se o Nod quiser sair de Claude + Codex.", e: "G", ev: "server/drivers/acp/core.ts, server/drivers/builtIn.ts" },
+  { id: "m4", a: "motores", t: "Motor ACP personalizado por configuração", o: "Qualquer CLI que fale ACP entra com uma entrada de config, sem código.", n: "Não existe.", s: "falta", r: "nao", w: "Recurso de entusiasta; aumenta a superfície que o Nod precisa governar.", e: "P", ev: "server/drivers/acp/custom.ts, docs/custom-engines.md" },
+  { id: "m5", a: "motores", t: "Endpoints compatíveis com OpenAI e chaves de API (OpenRouter, Groq, DeepSeek, Mistral…)", o: "Bots rodam em qualquer endpoint OpenAI-compatible, com presets de provedores e chave colada em Ajustes.", n: "Contra a linha do produto: ADR-015 tem uma denylist para nenhuma chave entrar no turno e o Codex filtra <code>OPENAI_*</code>. O Nod usa a assinatura do CLI da pessoa.", s: "contra", r: "nao", w: "Mudaria o modelo de custo e de confiança do Nod. Reavaliar só se surgir demanda por modelos baratos ou locais.", e: "G", ev: "server/drivers/openai-compat.ts, server/model-catalog/presets.ts" },
+  { id: "m6", a: "motores", t: "Modelos locais no seletor (Ollama, LM Studio, oMLX, EXO)", o: "Sonda servidores locais e lista os modelos carregados na VRAM primeiro.", n: "Não existe. Depende de m5.", s: "falta", r: "nao", w: "Depende de abrir mão da regra de m5.", e: "M", ev: "server/drivers/local-inject.ts" },
+  { id: "m7", a: "motores", t: "Catálogo de modelos descoberto (models.dev e ~/.codex)", o: "Catálogo empacotado que se atualiza em tempo de execução; perfis do <code>~/.codex</code> do usuário aparecem como “Custom”.", n: "Lista editorial fixa em <code>src/contracts/harness.ts</code>.", s: "parcial", r: "talvez", w: "Evita release a cada modelo novo da Anthropic ou da OpenAI.", e: "P", ev: "server/model-catalog/catalog.ts, server/drivers/codex-catalog.ts" },
+  { id: "m8", a: "motores", t: "Instalar, atualizar e remover CLIs pelos Ajustes", o: "Roda npm sem sudo num diretório do app, com o pacote fixado pelo driver, a qualquer momento.", n: "O app do Mac detecta, instala e loga a IA só durante o setup (<code>desktop/ia-mac.ts</code>).", s: "parcial", r: "talvez", w: "Útil quando a pessoa quer adicionar o Codex depois do setup.", e: "P", ev: "server/engine-install.ts, src/components/EngineLibrary.tsx" },
+  { id: "m9", a: "motores", t: "Atualizar o Claude Code pelo app", o: "Aviso “este modelo precisa de um Claude Code mais novo” com botão que roda o updater e confere a versão.", n: "Não existe.", s: "falta", r: "sim", w: "Problema real com modelos novos e barato de resolver. Evita a pessoa abrir o terminal.", e: "P", ev: "server/claude-update.ts, ClaudeUpdatePrompt.tsx" },
+  { id: "m10", a: "motores", t: "Várias contas Claude e ChatGPT nomeadas por bot", o: "Contas “Trabalho” e “Pessoal”, cada uma com seu diretório de config, escolhidas por bot.", n: "Uma conta por Mac.", s: "falta", r: "talvez", w: "Vale para quem separa assinatura pessoal e da empresa.", e: "M", ev: "server/claude-accounts.ts, ClaudeAccountSettings.tsx" },
+  { id: "m11", a: "motores", t: "Binário ou wrapper personalizado por motor", o: "Descobre binários candidatos, deixa testar e fixar um caminho por motor.", n: "Só a variável <code>NOD_CLAUDE_BIN</code>.", s: "parcial", r: "nao", w: "Recurso de desenvolvedor; a variável de ambiente basta.", e: "P", ev: "/api/cli-candidates, /api/cli-test" },
+  { id: "m12", a: "motores", t: "Uso do plano (limite de 5 h e semanal restante)", o: "Mostra quanto resta da assinatura Claude, ChatGPT e Grok por provedor.", n: "Não existe.", s: "falta", r: "sim", w: "Quem usa a própria assinatura quer saber quando vai bater no limite, ainda mais com rotinas rodando.", e: "M", ev: "server/plan-usage.ts, PlanUsage.tsx" },
+  { id: "m13", a: "motores", t: "Recuperação automática com modelo reserva", o: "Opcional: se o turno falha antes de começar, tenta de novo no modelo reserva, recusando trocas que percam ferramentas.", n: "ADR-036 proíbe trocar de fornecedor em silêncio. O ROADMAP R7 prevê <code>--fallback-model</code> do mesmo fornecedor.", s: "contra", r: "talvez", w: "A versão do mesmo fornecedor (R7) cabe na regra; a troca entre fornecedores não.", e: "P", ev: "server/automatic-recovery.ts" },
+  { id: "m14", a: "motores", t: "Trocar de motor no meio da conversa com replay do contexto", o: "Ao trocar Claude por Codex, reenvia o ramo ativo inline e registra o que cada sessão nativa já viu.", n: "Modelo e harness por bot, <code>/modelo</code> no chat e contexto reconstruído para rotinas e colegas. Não está claro se a troca de harness no meio da conversa preserva o histórico.", s: "verificar", r: "talvez", w: "Conferir o comportamento atual antes de decidir.", e: "M", ev: "server/turn-context.ts, server/delta-context.ts" },
+
+  // Bots e perfil
+  { id: "b1", a: "bots", t: "Avatar com foto ou imagem própria", o: "Upload com zoom e reposição; a imagem também pode virar o corpo do mascote.", n: "Só forma e cor do Bloub.", s: "falta", r: "talvez", w: "O Bloub é identidade do Nod. Foto própria pode diluir isso, mas é pedido comum.", e: "P", ev: "BotProfileAvatarCard.tsx, docs/avatar-storage.md" },
+  { id: "b2", a: "bots", t: "Avatar gerado por IA", o: "Gera avatar com OpenAI, xAI ou outra API de imagens, com um briefing fixo que funciona em 28 px.", n: "Não existe.", s: "falta", r: "nao", w: "Exige chave de API e o Nod não tem IA própria. O mascote já resolve.", e: "P", ev: "server/avatar-image.ts" },
+  { id: "b3", a: "bots", t: "Papéis prontos no Novo bot (Assistente, Inbox, Scout, Dev, Watch, Ops)", o: "Rascunho completo e editável antes de criar, com papéis prontos e botões de nome aleatório.", n: "Bot instantâneo com nome sugerido e opções de missão (ADR-033).", s: "parcial", r: "talvez", w: "Papéis prontos encurtam o “o que eu faço com isso?” do primeiro bot.", e: "P", ev: "NewBotDialog.tsx, src/lib/bot-roles.ts" },
+  { id: "b4", a: "bots", t: "Padrões para bots novos", o: "Salva um modelo completo (identidade, modelo, memória, skills, rotinas) usado em todo bot novo. Nunca guarda acessos.", n: "Não existe.", s: "falta", r: "talvez", w: "Ajuda quem cria muitos bots parecidos.", e: "P", ev: "server/new-bot-defaults.ts" },
+  { id: "b5", a: "bots", t: "Instruções permanentes em SOUL.md editável no disco", o: "Instruções de até 24 KB espelhadas num arquivo da pasta do bot; editar no próprio editor e aplicar ou descartar no app.", n: "Missão e perfil no banco; a pasta <code>~/nod/&lt;bot&gt;</code> existe, sem esse espelho.", s: "parcial", r: "talvez", w: "Quem usa Claude Code gosta de editar markdown. O Nod roda em servidor, então o espelho precisa de cuidado.", e: "M", ev: "server/bot-folder.ts, SoulField.tsx" },
+  { id: "b6", a: "bots", t: "Histórico de versões do perfil com desfazer", o: "Log append-only de cada mudança de perfil, com segredos removidos e rollback.", n: "Não existe. A trilha registra eventos, mas não há tela nem rollback.", s: "falta", r: "sim", w: "Combina com a proposta de decisões auditáveis do Nod e dá segurança para o bot editar o próprio perfil.", e: "M", ev: "server/profile-versions.ts, bot-settings/HistorySection.tsx" },
+  { id: "b7", a: "bots", t: "Visão geral “o que este bot faz” em frases simples", o: "Frases geradas a partir do perfil, rotinas, apps e computador, iguais no celular e no desktop.", n: "<code>ver_colegas</code> dá isso aos bots; para a pessoa só existe a gaveta do perfil.", s: "parcial", r: "talvez", w: "Ajuda a pessoa a saber o que cada bot faz, coerente com “sempre saber o próximo passo”.", e: "P", ev: "server/bot-overview.ts" },
+  { id: "b8", a: "bots", t: "Bot propõe mudanças em si mesmo por cartão (perfil, modelo, exclusão)", o: "O bot nunca muda estado direto: abre um cartão com hash de revisão, e a confirmação falha se o registro mudou no meio.", n: "<code>atualizar_perfil</code> propõe o perfil na criação; não há proposta de troca de modelo ou de exclusão.", s: "parcial", r: "talvez", w: "Mesma filosofia do Nod (proposta e decisão), estendida a mais tipos.", e: "M", ev: "server/profile-requests.ts, server/model-requests.ts" },
+  { id: "b9", a: "bots", t: "Configurar conversando (/setup)", o: "O bot entrevista a pessoa e configura a si mesmo, a qualquer momento, não só na criação.", n: "Criação conversacional e a entrevista da ligação de onboarding.", s: "parcial", r: "sim", w: "Reaproveita a entrevista do onboarding por voz para bots que já existem.", e: "P", ev: "server/setup-mode.ts" },
+  { id: "b10", a: "bots", t: "Visibilidade por bot (todos, admins, lista de pessoas)", o: "Em espaço compartilhado, cada bot tem audiência própria; a de uma sala só pode estreitar.", n: "Visibilidade “equipe” parcial (ADR-034).", s: "parcial", r: "talvez", w: "Necessário quando o Nod tiver mais de uma pessoa usando de verdade.", e: "M", ev: "server/bot-visibility.ts" },
+  { id: "b11", a: "bots", t: "Seleção de ferramentas por bot (permitir ou excluir)", o: "Usa todas as ferramentas ou uma lista de permitidas e excluídas, útil para modelos pequenos.", n: "Concessões por bot para apps; o kit do terminal é fixo.", s: "parcial", r: "nao", w: "O modo de aprovação e as concessões já cobrem a necessidade real.", e: "P", ev: "bot-settings/ToolSelectionCard.tsx, docs/tool-selection.md" },
+  { id: "b12", a: "bots", t: "Copiar ID da conversa", o: "Item do menu de contexto do bot.", n: "Não existe.", s: "falta", r: "nao", w: "Só útil com servidor MCP ou integrações externas (p1).", e: "P", ev: "sidebar.bot.copyId" },
+
+  // Threads
+  { id: "t1", a: "threads", t: "Várias threads por bot", o: "Cada thread tem transcript, modelo, aprovações, custo e Parar próprios. Até 3 rodam em paralelo por bot.", n: "Uma conversa por bot, com <code>/nova-sessao</code> e “Outro assunto” durante perguntas.", s: "falta", r: "sim", w: "É a maior diferença estrutural do chat: hoje um assunto novo bloqueia ou mistura o anterior. Abre caminho para t2–t6.", e: "G", ev: "TaskPicker.tsx, /api/bots/:id/tasks*" },
+  { id: "t2", a: "threads", t: "Pastas e projetos de threads", o: "Pastas opcionais com ícone sob cada bot; reordenar, marcar como lida, excluir mantendo as threads.", n: "Não existe. Depende de t1.", s: "falta", r: "talvez", w: "Só depois de t1, e só se a lista ficar longa.", e: "M", ev: "/api/bots/:id/projects*, src/lib/folder-order.ts" },
+  { id: "t3", a: "threads", t: "Ações de thread (renomear, título por IA, copiar link, arquivar, mover)", o: "Títulos curtos gerados pela primeira mensagem, “Regenerar título”, arquivar e mover para pasta.", n: "Não existe. Depende de t1.", s: "falta", r: "sim", w: "Vem junto com t1; sem isso a lista de threads vira bagunça.", e: "P", ev: "server/thread-title.ts" },
+  { id: "t4", a: "threads", t: "Adiar thread (snooze)", o: "Até nova atividade, até 18h ou até amanhã às 9h, no desktop e no celular.", n: "Não existe. As pendências (ADR-064) têm “não antes de”, mas são do bot.", s: "falta", r: "talvez", w: "Barato e combina com a fila “Sua vez”.", e: "P", ev: "task.snooze*" },
+  { id: "t5", a: "threads", t: "Fixar threads e seção de fixadas na sidebar", o: "Threads fixadas de todos os bots numa seção do topo.", n: "Fixar existe para bots, não para conversas.", s: "falta", r: "talvez", w: "Depende de t1.", e: "P", ev: "SidebarPinnedThreadsPanel.tsx" },
+  { id: "t6", a: "threads", t: "Painel “Threads ativas” (esperando, rodando, não lidas)", o: "Popover do sino ou painel fixo com o trabalho de todos os bots que espera você, roda ou não foi lido.", n: "“Sua vez” cobre o que espera a pessoa; não mostra o que está rodando.", s: "parcial", r: "talvez", w: "Juntar “rodando agora” à “Sua vez” dá a visão de agentes trabalhando que o pilar de kanban quer.", e: "P", ev: "SidebarAttentionPanel.tsx, src/lib/sidebar-attention.ts" },
+  { id: "t7", a: "threads", t: "Bots abrem e fecham threads em colegas", o: "<code>start_thread</code>, <code>close_thread</code> e <code>retry_thread</code>, com chips e links de thread no markdown.", n: "Não existe. Depende de t1.", s: "falta", r: "talvez", w: "Bom para delegação longa sem poluir a conversa principal.", e: "M", ev: "ThreadChip.tsx, src/lib/thread-refs.ts" },
+
+  // Composer
+  { id: "c1", a: "composer", t: "Ditado no composer", o: "Botão de microfone transcreve no próprio Mac (reconhecimento da Apple) com orientação quando o Ditado está desligado.", n: "Voz só existe dentro da ligação.", s: "falta", r: "sim", w: "O Nod já tem STT (whisper.cpp local e Google) e permissão de microfone no app. É um botão.", e: "P", ev: "electron/speech.mjs, composer.dictation.*" },
+  { id: "c2", a: "composer", t: "Escolher entre fila e “steer” e editar mensagens na fila", o: "“Steer”, “Steer next” e “Steer all” empurram a mensagem para dentro do turno; mensagens na fila podem ser editadas.", n: "Fila com Cancelar (5 s para desfazer) e sessão viva que injeta mensagens no meio do turno (ADR-067). A pessoa não escolhe nem edita.", s: "parcial", r: "talvez", w: "Ajuste fino; o comportamento atual já resolve o caso comum.", e: "P", ev: "server/steer-queue.ts, docs/specs/steer-vs-queue.md" },
+  { id: "c3", a: "composer", t: "Responder a uma mensagem específica (citar)", o: "Reply com link para a original; a citação vai como dado, nunca como instrução.", n: "Não existe.", s: "falta", r: "sim", w: "Básico de app de mensagens e do pilar “Slack com agentes”, principalmente em salas.", e: "P", ev: "server/replies.ts, ReplyQuote.tsx" },
+  { id: "c4", a: "composer", t: "Citar trecho selecionado", o: "Selecionar texto numa mensagem e citá-lo na resposta, em chats e salas.", n: "Não existe.", s: "falta", r: "talvez", w: "Complemento de c3.", e: "P", ev: "CitationUI.tsx" },
+  { id: "c5", a: "composer", t: "Modo de aprovação no composer", o: "Chip Ask / Edits / Auto / Full / Custom por thread, ao lado do campo.", n: "Modo por bot no perfil (ADR-059).", s: "parcial", r: "talvez", w: "Trocar o modo sem abrir o perfil ajuda em tarefas pontuais.", e: "P", ev: "ApprovalModeSelector.tsx" },
+  { id: "c6", a: "composer", t: "Autocomplete de @menção", o: "Menciona bot ou sala com lista de sugestões e destaque no texto.", n: "@menção existe em salas; o autocomplete está planejado (jornada 02, E5).", s: "parcial", r: "sim", w: "Já planejado e barato.", e: "P", ev: "MentionTextarea.tsx, src/lib/mentions.ts" },
+  { id: "c7", a: "composer", t: "Recuperar envio que falhou", o: "Faixa “Não enviado: …” com tentar de novo; o envio é idempotente.", n: "Não confirmado no levantamento.", s: "verificar", r: "talvez", w: "Conferir o que acontece hoje com a rede caindo no envio.", e: "P", ev: "src/lib/failed-turn.ts, server/send-idempotency.ts" },
+
+  // Mensagens e transcript
+  { id: "x1", a: "transcript", t: "Buscar em todas as conversas", o: "Busca de texto em todos os bots, threads e salas, com trecho destacado e salto para a mensagem e o ramo exatos.", n: "Só busca bots por nome (⌘K). Não há rota de busca de mensagens.", s: "falta", r: "sim", w: "Com o histórico crescendo, achar “o que o bot disse sobre X” vira necessidade. Postgres tem full-text pronto.", e: "M", ev: "server/message-search*.ts, SearchResults.tsx" },
+  { id: "x2", a: "transcript", t: "Buscar na conversa (⌘F)", o: "Barra de busca com anterior e próximo dentro do transcript.", n: "Não existe.", s: "falta", r: "sim", w: "Barato, e o ⌘F do navegador falha com a lista virtualizada.", e: "P", ev: "ChatFindBar.tsx" },
+  { id: "x3", a: "transcript", t: "Editar mensagem enviada, regenerar e ramos", o: "Editar cria um ramo com setas de versão; Regenerar; ↑ edita a última.", n: "Não existe.", s: "falta", r: "talvez", w: "Útil, mas mexe na sessão do CLI e na trilha imutável. Exige desenho cuidadoso.", e: "M", ev: "/api/bots/:id/messages/:mid/edit, server/context-rebuild.ts" },
+  { id: "x4", a: "transcript", t: "Exportar conversa (Markdown ou JSON)", o: "Copiar como Markdown ou baixar .md ou .json.", n: "Não existe.", s: "falta", r: "sim", w: "Barato; também ajuda a pessoa a tirar dados do Nod (LGPD).", e: "P", ev: "/api/threads/:id/export, ExportTranscriptMenu.tsx" },
+  { id: "x5", a: "transcript", t: "Markdown rico (bloco de código com copiar, Mermaid, KaTeX, task lists)", o: "Tabelas com reparo, listas de tarefa, KaTeX, Mermaid, spoiler, código com copiar, quebrar e baixar, e alternar markdown cru.", n: "Listas, títulos, links como chips e tabelas com copiar CSV e JSON (ADR-053).", s: "parcial", r: "sim", w: "Pelo menos o bloco de código com copiar é essencial para quem usa os bots para programar.", e: "P", ev: "ChatMarkdown.tsx, RawMarkdownToggle.tsx" },
+  { id: "x6", a: "transcript", t: "Bot devolve arquivos como anexo no chat", o: "<code>attach_file</code> manda arquivos da pasta do bot para o chat, servidos por um resolvedor endurecido (realpath, <code>O_NOFOLLOW</code>).", n: "Artefatos HTML e arquivo do Mac para apps (ADR-068); o bot não anexa arquivo na conversa.", s: "falta", r: "sim", w: "“Me manda a planilha” é um pedido básico. Hoje o bot só consegue descrever onde está o arquivo.", e: "M", ev: "server/bot-attachment.ts, server/message-file.ts" },
+  { id: "x7", a: "transcript", t: "Imagens geradas no transcript", o: "Imagens do Codex e de ferramentas MCP aparecem na conversa.", n: "Não existe.", s: "falta", r: "talvez", w: "Vem quase junto com x6.", e: "P", ev: "server/generated-image.ts, server/mcp-tool-images.ts" },
+  { id: "x8", a: "transcript", t: "Visualizador de mídia", o: "Imagens com anterior e próxima, vídeo até 25 MB, player de áudio, salvar arquivo.", n: "Anexos de imagem, PDF e texto vão para o modelo; não confirmado um visualizador completo.", s: "verificar", r: "talvez", w: "Depende de x6.", e: "P", ev: "AttachmentPreview.tsx, AttachmentGallery.tsx" },
+  { id: "x9", a: "transcript", t: "Cartão de pergunta com abas, múltipla escolha e “Outro”", o: "Várias perguntas num cartão, com abas, múltipla escolha, resposta livre e progresso.", n: "<code>pedir_a_pessoa</code> com até 4 botões de opção e “Outro assunto”.", s: "parcial", r: "talvez", w: "O formato do Nod (pergunta como conversa) é mais leve. Talvez só a múltipla escolha.", e: "P", ev: "QuestionCard.tsx, server/options-card.ts" },
+  { id: "x10", a: "transcript", t: "Cartão de pedido de credencial", o: "O bot pede uma chave por um cartão só de escrita, para alvos fixos; nunca escolhe o caminho da config. Do celular, vai criptografada (HPKE).", n: "Não existe.", s: "falta", r: "sim", w: "Impede que a pessoa cole segredos no chat, onde ficariam no histórico e no modelo. Combina com o ADR-015.", e: "M", ev: "SecretRequestCard.tsx, server/phone-secret.ts" },
+  { id: "x11", a: "transcript", t: "Fixar mensagens", o: "Fixa no topo da thread ou da sala, com “Ir para a mensagem fixada”.", n: "Não existe.", s: "falta", r: "talvez", w: "Bom em salas longas.", e: "P", ev: "chat.pin*" },
+  { id: "x12", a: "transcript", t: "Reações com emoji", o: "Reações em mensagens (no iOS e na API; o desktop não tem a interface).", n: "Não existe.", s: "falta", r: "talvez", w: "Pilar “Slack com agentes”: reação como aprovação leve ou feedback ao bot.", e: "P", ev: "/api/threads/:id/messages/:mid/reactions" },
+  { id: "x13", a: "transcript", t: "Resumo do turno (“N chamadas · M arquivos alterados”)", o: "Cada turno grava comandos rodados, arquivos alterados e notas de memória, abertos em “O que este turno fez”.", n: "Card de atividade com ferramentas em português e checklist (ADR-056), sem o resumo de arquivos.", s: "parcial", r: "talvez", w: "Ajuda a pessoa a revisar o trabalho sem abrir o Raio-X.", e: "P", ev: "server/digest.ts, DigestChip.tsx" },
+  { id: "x14", a: "transcript", t: "Checkpoints de arquivos por turno (desfazer o que o bot mudou)", o: "Repositório git sombra por turno; o <code>.git</code> do usuário nunca é tocado.", n: "Não existe. As worktrees por tarefa (ADR-065) isolam o git, mas não desfazem um turno.", s: "falta", r: "sim", w: "O terminal do Nod não tem sandbox (ADR-055). Poder desfazer um turno é a rede de segurança natural.", e: "M", ev: "server/checkpoints.ts" },
+  { id: "x15", a: "transcript", t: "Chip de contexto e compactação automática", o: "Chip com tokens, custo e % da janela de contexto; compactação automática que mantém as trocas recentes literais.", n: "<code>/contexto</code>, <code>/uso</code> e <code>/compactar</code> manuais (ADR-056).", s: "parcial", r: "talvez", w: "Os comandos existem; falta deixar visível sem precisar pedir.", e: "P", ev: "server/compaction-summary.ts, server/context-budget.ts" },
+  { id: "x16", a: "transcript", t: "Capturas da tela do bot no transcript", o: "Quadros da tela do computador do bot entram na conversa quando o turno acaba.", n: "As capturas aparecem na tela do computador, não no chat.", s: "parcial", r: "talvez", w: "Ajuda a ver o que o bot fez no computador sem abrir o painel.", e: "P", ev: "ScreenFrame.tsx, server/screen-frame-gate.ts" },
+
+  // Memória
+  { id: "me1", a: "memoria", t: "“Sobre mim”: perfil da pessoa compartilhado com todos os bots", o: "Perfil de até 24 mil caracteres que todo bot lê, com a lista “Adicionado pelos seus bots” para remover fatos. Fato removido não volta.", n: "Não existe. Cada bot tem só a própria memória.", s: "falta", r: "sim", w: "A entrevista do onboarding já coleta nome, objetivo e tamanho do time. Hoje isso não chega aos outros bots.", e: "M", ev: "server/profile-learned.ts, AboutMeSettings.tsx" },
+  { id: "me2", a: "memoria", t: "Diário da memória com desfazer", o: "Toda mudança na memória fica registrada e pode ser desfeita com um clique; há “marcar como revisado”.", n: "CRUD da memória e recibo “Anotei uma preferência…”, sem histórico.", s: "falta", r: "sim", w: "Barato e dá confiança para deixar o bot lembrar sozinho.", e: "P", ev: "server/memory-journal.ts, server/routes/bot-memory.ts" },
+  { id: "me3", a: "memoria", t: "Manutenção da memória (captura, organização, faxina noturna)", o: "Capta fatos quando a conversa esfria, organiza em tópicos e, às 3h, expira, deduplica e arquiva.", n: "Não existe.", s: "falta", r: "talvez", w: "Cada passo gasta turno da assinatura da pessoa. Vale com limite e opção de desligar.", e: "M", ev: "server/memory-upkeep.ts, memory-tidy.ts" },
+  { id: "me4", a: "memoria", t: "Recall automático antes de cada turno", o: "Buscas SQL limitadas, sem chamar modelo, injetam memórias relevantes no turno 1:1.", n: "Não confirmado se o Nod injeta toda a memória ou só parte.", s: "verificar", r: "talvez", w: "Importa quando a memória crescer.", e: "P", ev: "server/recall.ts" },
+  { id: "me5", a: "memoria", t: "Bot busca e lê as próprias conversas passadas", o: "Ferramentas <code>session_search</code> e <code>session_read</code>.", n: "Não existe. Depende de x1.", s: "falta", r: "sim", w: "Com a busca pronta, expor como ferramenta é barato e melhora muito o “lembra quando…”.", e: "P", ev: "server/drivers/agents-catalog.ts" },
+  { id: "me6", a: "memoria", t: "Memória do time (pessoas, lugares, decisões, termos)", o: "Por time ou seção; os bots propõem entradas e a pessoa revisa.", n: "Não existe.", s: "falta", r: "talvez", w: "Faz sentido junto com o pilar de salas e times.", e: "M", ev: "server/team-memory.ts, TeamMemoryDialog.tsx" },
+  { id: "me7", a: "memoria", t: "Instruções do time escritas só pela pessoa", o: "Briefing por seção que os bots leem e não podem editar.", n: "Seções existem só para organizar a sidebar.", s: "falta", r: "talvez", w: "Barato se as seções virarem times.", e: "P", ev: "server/section-context.ts" },
+  { id: "me8", a: "memoria", t: "Aviso quando o bot usa memória privada numa sala", o: "Se o bot responde numa sala com algo lembrado de uma conversa privada, a sala é avisada.", n: "Não existe.", s: "falta", r: "sim", w: "É exatamente o tipo de transparência que o Nod promete.", e: "P", ev: "server/recall-disclosure.ts" },
+  { id: "me9", a: "memoria", t: "Consciência entre conversas", o: "Algumas linhas sobre a atividade recente do bot nas outras conversas entram no prompt.", n: "Não existe.", s: "falta", r: "talvez", w: "Ganha valor com várias threads (t1).", e: "P", ev: "server/recent-work.ts" },
+  { id: "me10", a: "memoria", t: "Medidor de memória carregada", o: "Mostra quanto da memória entra em cada turno.", n: "Não existe.", s: "falta", r: "nao", w: "Detalhe técnico; o Raio-X já mostra o que foi enviado.", e: "P", ev: "bot-settings/MemorySection.tsx" },
+
+  // Skills
+  { id: "sk1", a: "skills", t: "Biblioteca de skills (importar SKILL.md, atribuir por bot)", o: "Importa do GitHub, de uma subpasta ou do skills.sh; a skill chega desligada, com origem e hash registrados, e é atribuída por bot.", n: "Bots usam as skills do Claude Code do Mac pelo menu “/” (ADR-055). Não há biblioteca nem atribuição por bot.", s: "parcial", r: "sim", w: "Tira as skills do Mac de uma pessoa e as leva para o servidor, para o time e para o Codex.", e: "M", ev: "server/skills.ts, server/skill-fetch.ts" },
+  { id: "sk2", a: "skills", t: "Bot escreve skills (/learn) com revisão", o: "O bot rascunha uma skill a partir da conversa e a pessoa aprova num cartão antes de ativar.", n: "Não existe.", s: "falta", r: "talvez", w: "Bom para “faz sempre assim”. Depende de sk1.", e: "M", ev: "server/skill-learn.ts" },
+  { id: "sk3", a: "skills", t: "Playbooks montados por gatilho", o: "Skills empacotadas entram no turno só quando o gatilho aparece no pedido.", n: "Não existe.", s: "falta", r: "nao", w: "O Claude Code já carrega skills sob demanda.", e: "P", ev: "server/installed-playbooks.ts" },
+
+  // Aprovações
+  { id: "a1", a: "aprovacoes", t: "Tela de decisões de autorização (com CSV)", o: "Qual chamada foi permitida, negada ou virou cartão, e por qual regra, com exportação CSV.", n: "A trilha imutável existe (ADR-004, ADR-023), mas só pela API <code>GET /trilha</code>, sem tela.", s: "parcial", r: "sim", w: "A trilha é o diferencial do Nod e hoje ninguém consegue vê-la.", e: "M", ev: "server/decision-log.ts, /api/decisions(.csv)" },
+  { id: "a2", a: "aprovacoes", t: "Teto diário para ações externas (enviar, postar, pagar)", o: "Ações de saída sempre pedem confirmação ou são liberadas até um teto diário (25 por padrão), contado em disco.", n: "Modos de aprovação, <code>NUNCA_PERMANENTE</code> e <code>readOnlyHint</code>; sem teto por dia.", s: "parcial", r: "talvez", w: "Protege contra um bot em modo automático mandando 300 e-mails.", e: "P", ev: "server/outbound-requests.ts, server/outbound-counts.ts" },
+  { id: "a3", a: "aprovacoes", t: "Aprovar conversa entre bots", o: "Com <code>approvePeerComms</code>, falar com outro bot exige aprovação humana.", n: "<code>pedir_a_bot</code> com até 3 passes; sem opção de exigir aprovação.", s: "falta", r: "talvez", w: "Opção conservadora barata.", e: "P", ev: "server/peer-approval.ts" },
+  { id: "a4", a: "aprovacoes", t: "Watchdog de travamento e detecção de loop", o: "Vigia atividade (não tempo) e ignora turnos esperando aprovação; marca a mesma ferramenta com os mesmos argumentos repetida no turno.", n: "Lacuna conhecida no ADR-067: um processo travado fica “trabalhando” até alguém apertar Parar.", s: "falta", r: "sim", w: "Fecha um buraco já registrado no próprio ADR.", e: "P", ev: "server/turn-watchdog.ts, server/repeat-detector.ts" },
+  { id: "a5", a: "aprovacoes", t: "“Aprovar por mim” (revisão automática do provedor) e Full access", o: "Níveis mapeados ao modo nativo do provedor, incluindo auto-review e acesso total com aviso.", n: "Três modos próprios (ADR-059). Revisor com segundo modelo rejeitado no grokbot-comparison.", s: "contra", r: "nao", w: "Os três modos do Nod já cobrem; delegar a decisão a outro modelo vai contra a proposta.", e: "P", ev: "docs/approval-levels.md, server/auto-approve.ts" },
+
+  // Salas
+  { id: "s1", a: "salas", t: "Mural e pasta compartilhada da sala, com setup antes da 1ª mensagem", o: "Cada sala tem instruções compartilhadas, pasta de trabalho comum, várias tarefas e um assistente de configuração.", n: "Salas com 2–6 bots, concessão por membro e política de resposta; sem instruções nem pasta da sala.", s: "falta", r: "sim", w: "Instruções da sala dizem aos bots para que ela existe. Barato e melhora toda resposta.", e: "P", ev: "GroupView.tsx, server/room-cwd.ts" },
+  { id: "s2", a: "salas", t: "Modo objetivo (/goal)", o: "O time trabalha até cumprir o objetivo; coordenador e executor alternam e o coordenador sempre tem a última palavra.", n: "Não existe. Rodadas de sala têm orçamento e 3 passes.", s: "falta", r: "talvez", w: "Poderoso, mas gasta muito turno. Precisa de teto de custo (R7) antes.", e: "M", ev: "server/group-goal-run.ts, GoalRunCard.tsx" },
+  { id: "s3", a: "salas", t: "Chief of Staff (coordenador do time)", o: "Papel por time que delega, resume, nomeia líderes e propõe bots especialistas com modelo escolhido.", n: "Não existe.", s: "falta", r: "talvez", w: "Pode virar o “agente que move os cards” do kanban.", e: "M", ev: "server/chief-of-staff.ts, server/team-setup-requests.ts" },
+  { id: "s4", a: "salas", t: "Incidentes do time", o: "Execuções que falham ou travam vão para a thread “Incidentes” do coordenador, com tentar de novo e delegar.", n: "Faixa de conector fora do ar (ADR-060) e aviso de Mac dormindo (ADR-045).", s: "falta", r: "talvez", w: "Depende de s3.", e: "M", ev: "server/incidents.ts, docs/team-incidents.md" },
+  { id: "s5", a: "salas", t: "Bots criam bots, salas e threads", o: "Ferramentas <code>create_bot</code>, <code>create_room</code> e <code>manage_room</code>, sempre por cartão de confirmação.", n: "<code>propor_bot</code> só na ligação de onboarding (ADR-077).", s: "parcial", r: "talvez", w: "Generalizar <code>propor_bot</code> é barato; criar sala sozinho, mais delicado.", e: "M", ev: "server/drivers/agents-catalog.ts" },
+  { id: "s6", a: "salas", t: "Roteamento automático (Auto) por modelo de decisão", o: "Um classificador rápido (Jev) escolhe quem responde numa mensagem sem menção; abaixo de p=0,6 volta ao líder.", n: "README marca “regex de intenção” como NÃO CONSTRUIR; a política é determinística (menções, líder, todos).", s: "contra", r: "nao", w: "Exige uma IA do próprio Nod e uma chave de terceiro.", e: "M", ev: "server/decider/*.ts, docs/decision-model.md" },
+  { id: "s7", a: "salas", t: "Mapa do time (canvas visual)", o: "Bots agrupados por time num canvas: arrastar, zoom, trocar modelo padrão, atribuir computadores, ver handoffs.", n: "Não existe.", s: "falta", r: "talvez", w: "Parecido com a visão agêntica do Deco Studio que você usou como referência, mas compete com o kanban por atenção.", e: "G", ev: "TeamMapPage.tsx, TeamCanvas.tsx" },
+  { id: "s8", a: "salas", t: "Uso e custo por sala", o: "Selo de tokens e custo por thread de sala.", n: "Custo por turno em <code>gastos</code>; sem soma por sala.", s: "parcial", r: "talvez", w: "Barato com os dados que já existem.", e: "P", ev: "GroupUsageChip.tsx, server/group-thread-usage.ts" },
+  { id: "s9", a: "salas", t: "Salas com várias pessoas e bots de donos diferentes", o: "Espaço compartilhado com convites, papéis e visibilidade por bot.", n: "Modelo existe (ADR-027) em um tenant; sem tela de convite. Bot-a-bot entre donos só com um salto.", s: "parcial", r: "sim", w: "Sem isso o pilar “Slack com agentes” fica só com uma pessoa.", e: "G", ev: "ManageMembersPanel.tsx, docs/org-library.md" },
+
+  // Rotinas
+  { id: "r1", a: "rotinas", t: "Gatilhos por webhook", o: "URL secreta ou bearer, filtro por evento (cabeçalhos do GitHub), dedupe, limite de pendentes (429), log de entregas, rotação e disparo de teste.", n: "Não existe.", s: "falta", r: "sim", w: "O Nod já roda num servidor público, então dispensa o relay que o OpenMausBot ainda não tem. “Quando abrir um PR, revise” vira uma linha.", e: "M", ev: "server/webhooks.ts, server/webhook-ingress.ts" },
+  { id: "r2", a: "rotinas", t: "Calendário de rotinas", o: "Visões de dia, 3 dias e semana, mini mês, filtro por bot, logs e marcas de execuções com problema.", n: "Lista de rotinas com histórico por rotina.", s: "falta", r: "sim", w: "Com muitos bots e rotinas, a pessoa precisa ver a semana.", e: "M", ev: "RoutineCalendarPage.tsx" },
+  { id: "r3", a: "rotinas", t: "Agenda de reuniões com bots", o: "Eventos únicos ou recorrentes com um ou mais bots; com vários, abre uma sala de reunião com o prompt do evento.", n: "Não existe.", s: "falta", r: "talvez", w: "Junta rotina e sala. Natural depois de r2.", e: "M", ev: "server/calendar-calls.ts" },
+  { id: "r4", a: "rotinas", t: "Agendas mensais e anuais, janelas de horário, data de fim, pular se a anterior ainda roda", o: "Intervalos de 5 a 1.440 min alinhados ao início, dias da semana, janela, fim, e pula a ocorrência se a anterior não terminou.", n: "Cron com fuso e intervalos 5/15/30/60 min; não confirmado o “pular se ainda roda”.", s: "parcial", r: "talvez", w: "O “pular se ainda roda” evita fila infinita de rotina lenta. O resto é conforto.", e: "P", ev: "server/routines.ts, docs/routine-schedules.md" },
+  { id: "r5", a: "rotinas", t: "Manter o Mac acordado antes de uma rotina", o: "Impede o sono na hora anterior a uma rotina, só na tomada.", n: "<code>powerSaveBlocker</code> só enquanto trabalha. O Mac dormindo gera um aviso (ADR-045).", s: "parcial", r: "sim", w: "Rotina que não roda porque o Mac dormiu é a reclamação mais provável do Nod.", e: "P", ev: "electron/routine-wake.mjs" },
+  { id: "r6", a: "rotinas", t: "Rotina roda sem o Mac (computador na nuvem)", o: "A rotina pode rodar na VM da nuvem em vez da máquina da pessoa.", n: "Precisa de um Mac conectado; não há executor de servidor (<code>custo_servidor_mes</code> é 0 por construção).", s: "falta", r: "talvez", w: "Resolve o Mac fechado de vez, mas exige executor no servidor e muda o modelo de custo.", e: "G", ev: "docs/routine-schedules.md, server/drivers/boatagent.ts" },
+  { id: "r7", a: "rotinas", t: "Limite de duração opcional por execução", o: "“Advanced run limit” opcional para parar trabalho travado; sem limite por padrão.", n: "Por desenho, sem relógio (ADR-040, ADR-067). Teto de custo por rotina previsto no R7.", s: "contra", r: "talvez", w: "O teto de custo do R7 resolve o mesmo problema sem contrariar o ADR.", e: "P", ev: "server/routines.ts" },
+
+  // Computadores
+  { id: "co1", a: "computadores", t: "Controlar o Mac da pessoa (mouse e teclado)", o: "Driver Cua empacotado, ativado explicitamente, com fluxos de permissão de Acessibilidade e Gravação de Tela.", n: "Planejado (jornada 01, E4).", s: "falta", r: "talvez", w: "A feature mais “mágica” e mais arriscada. Combina com o app do Mac, mas pede um ADR próprio.", e: "G", ev: "electron/cua.mjs, MacLocalControl.tsx" },
+  { id: "co2", a: "computadores", t: "Computador na nuvem gerenciado (VM por bot que dorme)", o: "VM persistente por bot (Boat) que dorme e acorda, pausando a cobrança e mantendo o disco.", n: "Docker no host do servidor do Nod (ADR-037); provisionar na nuvem ficou fora deste recorte.", s: "contra", r: "talvez", w: "O <code>DriverComputador</code> já é trocável. Faz sentido quando o host único não aguentar.", e: "G", ev: "server/boat.ts" },
+  { id: "co3", a: "computadores", t: "VM local no Mac (Docker ou Podman)", o: "Desktop Cua em contêiner, compartilhado ou um por bot (até 8), dois lado a lado, com timeout ocioso.", n: "Não existe. O computador roda no servidor.", s: "falta", r: "nao", w: "O Nod escolheu o computador no servidor. VM no Mac dobra o suporte.", e: "M", ev: "server/container-computer.ts, LocalVmWorkspace.tsx" },
+  { id: "co4", a: "computadores", t: "VPS própria por SSH", o: "Desktop Docker endurecido num servidor da pessoa, com “ligar a VPS automaticamente”.", n: "Não existe.", s: "falta", r: "nao", w: "O servidor do Nod já é o lugar dos computadores.", e: "M", ev: "server/vps-computer.ts, docs/byo-vps.md" },
+  { id: "co5", a: "computadores", t: "Tela ao vivo (noVNC) em vez de capturas", o: "Visualizador noVNC dentro do app, com fallback para o navegador.", n: "Capturas como imagem; streaming ficou fora deste recorte (ADR-037).", s: "contra", r: "talvez", w: "Assumir o controle para fazer login e 2FA é bem mais fácil com tela ao vivo.", e: "M", ev: "server/routes/desktop-viewer.ts, DesktopViewer.tsx" },
+  { id: "co6", a: "computadores", t: "Computador do time com fila de espera", o: "Um computador para o time, com posição na fila em vez de erro.", n: "Fora deste recorte (ADR-037).", s: "contra", r: "nao", w: "Isolamento por bot é mais simples de auditar.", e: "M", ev: "server/team-computers.ts, server/computer-wait.ts" },
+  { id: "co7", a: "computadores", t: "Navegador embutido com perfis de login", o: "Chromium que você assiste; seu clique assume e o controle volta quando você para. Perfis de navegador nomeados e conexão a um Chrome aberto via CDP.", n: "O computador do bot tem Chromium com abas e checkpoint de cookies.", s: "parcial", r: "talvez", w: "Os perfis nomeados (“conta da empresa”) seriam o ganho principal.", e: "M", ev: "BrowserPanel.tsx, BrowserProfilesManager.tsx" },
+  { id: "co8", a: "computadores", t: "Aba Arquivos (pasta do bot e arquivos alterados neste chat)", o: "Lista a pasta de trabalho e o que a conversa mudou.", n: "Não existe.", s: "falta", r: "sim", w: "Com terminal sem sandbox, ver o que o bot mexeu é básico. Combina com x14.", e: "P", ev: "ComputerFilesPane.tsx" },
+  { id: "co9", a: "computadores", t: "Controle de celular Android por USB", o: "Espelha e controla um Android conectado (skill Phone Harness).", n: "Não existe.", s: "falta", r: "nao", w: "Nicho.", e: "M", ev: "electron/android-device.mjs" },
+
+  // Apps
+  { id: "ap1", a: "apps", t: "Várias contas por app (trabalho, pessoal)", o: "Até 5 contas rotuladas por app; desconectar revoga o acesso no provedor.", n: "Uma conta por app.", s: "falta", r: "talvez", w: "Pedido comum com Gmail e Google Calendar.", e: "M", ev: "ConnectionDetail.tsx, multiple-accounts.mdx" },
+  { id: "ap2", a: "apps", t: "MCP por URL com login OAuth e importar JSON do Claude Desktop", o: "Descoberta RFC 9728/8414, cliente dinâmico ou pré-registrado, PKCE; cola um bloco JSON do Claude Desktop ou Cursor; botão Testar.", n: "MCP por comando stdio ou URL HTTPS com cabeçalhos, sondado e com env cifrado.", s: "parcial", r: "sim", w: "Os MCPs remotos novos (Linear, Notion, Sentry) usam OAuth. Sem isso, muitos não conectam.", e: "M", ev: "server/mcp-oauth*.ts, McpServersPanel.tsx" },
+  { id: "ap3", a: "apps", t: "Catálogo completo (500+) e chave Composio própria", o: "Inclui toolkits sem auth gerenciada usando o projeto Composio da pessoa (habilita X/Twitter).", n: "123 toolkits com auth gerenciada mais a lista curada; os 189 sem auth gerenciada ficam de fora (ADR-057).", s: "parcial", r: "talvez", w: "Abrir só quando alguém pedir um app que falta.", e: "P", ev: "settings.connections.selfHost" },
+  { id: "ap4", a: "apps", t: "Usar os MCPs do Claude Code da pessoa", o: "“Também usar meus servidores MCP do Claude Code”.", n: "Rejeitado no ROADMAP e no ADR-013 (<code>--strict-mcp-config</code>).", s: "contra", r: "nao", w: "Furaria o plano de turno, que é o ponto central da governança do Nod.", e: "P", ev: "settings.experimental.claudeUserMcp" },
+  { id: "ap5", a: "apps", t: "Bot propõe adicionar um servidor MCP", o: "Ferramenta <code>add_mcp_server</code> que vira cartão de confirmação.", n: "Não existe.", s: "falta", r: "talvez", w: "Barato e segue o padrão proposta e decisão.", e: "P", ev: "server/drivers/agents-catalog.ts" },
+  { id: "ap6", a: "apps", t: "Página “Apps” com filtros e “Usado por…”", o: "Todos, Conectados e Servidores MCP numa página, mostrando quais bots usam cada app.", n: "Conectar e permitir no mesmo lugar (ADR-049).", s: "parcial", r: "talvez", w: "“Usado por” ajuda a decidir o que desconectar.", e: "P", ev: "apps.*" },
+
+  // Voz
+  { id: "v1", a: "voz", t: "Botão “ouvir” em cada resposta", o: "Lê a resposta em voz alta; código, caminhos e tabelas são reescritos para fala.", n: "Voz só dentro da ligação.", s: "falta", r: "sim", w: "TTS (Chirp 3 HD e <code>say</code>) e voz por bot já existem. É ligar a peça a um botão.", e: "P", ev: "SpeakButton.tsx, server/tts/speech-text.ts" },
+  { id: "v2", a: "voz", t: "Leitura automática das respostas por bot", o: "O bot lê as respostas conforme chegam (“ouvir o que rodou à noite no café”).", n: "Não existe.", s: "falta", r: "talvez", w: "Vem quase junto com v1.", e: "P", ev: "bot-settings/VoiceSection.tsx" },
+  { id: "v3", a: "voz", t: "Notas de voz do bot", o: "O bot manda mp3 com player; o texto serve de transcrição.", n: "Não existe.", s: "falta", r: "talvez", w: "Bom para resumos de rotina no celular.", e: "P", ev: "VoiceNoteBubble.tsx, /api/internal/voice-note" },
+  { id: "v4", a: "voz", t: "Mais provedores de voz (ElevenLabs, Fish, xAI, Chatterbox local)", o: "Voz por bot em vários provedores, com a chave colada uma vez.", n: "Google (Gemini Live Transcribe e Chirp 3 HD) e local (whisper.cpp e <code>say</code>).", s: "parcial", r: "nao", w: "O Nod escolheu Google e pt-BR. Mais provedores multiplicam testes de latência.", e: "M", ev: "server/tts/*.ts" },
+  { id: "v5", a: "voz", t: "Ligação com vários bots (conferência)", o: "Um microfone, vários membros da sala, respostas enfileiradas em ordem.", n: "Fora da v1 (<code>plano-modo-ligacao.md</code>).", s: "contra", r: "talvez", w: "Depois que a ligação 1:1 sair para todos.", e: "M", ev: "GroupCallView.tsx, src/lib/group-call.ts" },
+  { id: "v6", a: "voz", t: "Push-to-talk (walkie)", o: "Segurar para falar; a resposta é lida de volta.", n: "Não existe.", s: "falta", r: "talvez", w: "Faz mais sentido no celular (PWA).", e: "P", ev: "ios/App/WalkieView.swift, src/lib/push-to-talk.ts" },
+  { id: "v7", a: "voz", t: "Ligar para o bot pelo celular", o: "Ligações no iOS e no Android (WebRTC).", n: "Fora da v1 (sem WebRTC nem TURN).", s: "contra", r: "talvez", w: "Depende da PWA (#99).", e: "G", ev: "LiveCallBar.swift, android Live calls" },
+
+  // Notificações
+  { id: "n1", a: "avisos", t: "Notificações por tipo, com clique que abre a thread exata", o: "Precisa aprovar, tem pergunta, precisa das suas mãos, terminou, rotina falhou. Agrupadas por bot e suprimidas se a thread já está visível.", n: "Notificações do navegador e do Mac com agrupamento e silêncio (<code>avisador.ts</code>). Tipos e clique não conferidos.", s: "verificar", r: "talvez", w: "Conferir a cobertura dos tipos antes de decidir.", e: "P", ev: "server/notify.ts, docs/notification-and-proactivity-qa.md" },
+  { id: "n2", a: "avisos", t: "Bot avisa a pessoa por conta própria", o: "Notificação disparada pelo bot (rotina, conclusão).", n: "Planejado no ROADMAP R6 (<code>avisar_pessoa</code>).", s: "parcial", r: "sim", w: "Já planejado; destrava rotinas que só falam quando têm novidade.", e: "P", ev: "src/lib/notify.ts" },
+  { id: "n3", a: "avisos", t: "Desligar o som das notificações", o: "Silencia o som neste computador mantendo os banners.", n: "Toggle “Avisos no Mac”; não confirmado um toggle só de som.", s: "verificar", r: "talvez", w: "Barato.", e: "P", ev: "settings.notificationSounds.*" },
+  { id: "n4", a: "avisos", t: "Anúncios para leitor de tela", o: "Região live anuncia “X respondeu” e “X precisa da sua aprovação”.", n: "Não confirmado.", s: "verificar", r: "talvez", w: "Acessibilidade barata.", e: "P", ev: "TranscriptAnnouncer.tsx" },
+
+  // Ajustes
+  { id: "aj1", a: "ajustes", t: "Atalhos de teclado e folha de atalhos", o: "⌘K com busca no transcript, ⌘N novo bot, ⌘1–9 pula para o bot, ⌘⇧[ ] anterior e próximo, ? ou ⌘/ mostra a folha.", n: "⌘K busca bots e ⌘⇧D abre o modo dev.", s: "parcial", r: "sim", w: "Barato e faz o app parecer rápido.", e: "P", ev: "src/lib/keyboard-shortcuts.ts, KeyboardShortcutsModal.tsx" },
+  { id: "aj2", a: "ajustes", t: "Idiomas (10 pacotes)", o: "Idioma do sistema ou por dispositivo: en, de, es, fr, hi, ja, pt-BR, zh, zh-TW, uk. Pacotes gerados com o próprio CLI.", n: "Só pt-BR, sem camada de i18n.", s: "falta", r: "talvez", w: "Necessário para sair do Brasil. Caro de fazer depois, mais caro ainda quanto mais tarde.", e: "G", ev: "src/locales/index.ts, docs/localization.md" },
+  { id: "aj3", a: "ajustes", t: "Densidade da sidebar e bots fixados como círculos", o: "Confortável, compacta ou só avatares; fixados em grade de círculos estilo Grok Bot.", n: "Sidebar estilo Grok redimensionável (ADR-060).", s: "parcial", r: "talvez", w: "Os círculos fixados são a cara do Grok Bot que o Nod está clonando.", e: "P", ev: "settings.pinnedCircles.*, sidebar.density.*" },
+  { id: "aj4", a: "ajustes", t: "Temas (9 skins) e fonte da interface", o: "Midnight, Atelier, Graphite, Linen… com miniaturas ao vivo; fonte Inter, Poppins ou serifa.", n: "Claro, escuro e sistema no design system grafite (ADR-070).", s: "parcial", r: "nao", w: "Vai contra o minimalismo e a identidade única.", e: "M", ev: "src/lib/skins.ts, SkinPicker.tsx" },
+  { id: "aj5", a: "ajustes", t: "Busca nos Ajustes", o: "Ajustes pesquisáveis, agrupados em Você, IA, Computadores e Conta.", n: "Não existe.", s: "falta", r: "nao", w: "Só compensa com muitos ajustes; o Nod tem poucos de propósito.", e: "P", ev: "SettingsModal.tsx" },
+  { id: "aj6", a: "ajustes", t: "Acessibilidade: alto contraste e movimento reduzido", o: "CSS para forced-colors, respeito a prefers-reduced-motion, foco preso em diálogos.", n: "Não confirmado.", s: "verificar", r: "talvez", w: "Auditar uma vez.", e: "P", ev: "src/styles.css (forced-colors)" },
+
+  // Uso
+  { id: "u1", a: "uso", t: "Histórico de uso com CSV", o: "Tokens e custo por bot, modelo, pessoa, dia, motor ou rotina, com exportação.", n: "Custo real por turno em <code>gastos</code>, <code>/uso</code> e Raio-X; sem tela agregada.", s: "parcial", r: "sim", w: "Os dados já existem; falta a tela. Também alimenta m12.", e: "M", ev: "server/usage-ledger.ts, UsageHistory.tsx" },
+  { id: "u2", a: "uso", t: "Log de atividade administrativa", o: "Quem mudou ajustes, pessoas, acessos ou bots e quem respondeu aprovações, com CSV.", n: "Trilha imutável só pela API.", s: "parcial", r: "talvez", w: "Junta com a1 numa tela só.", e: "P", ev: "server/admin-activity.ts, ActivityPanel.tsx" },
+  { id: "u3", a: "uso", t: "Limite mensal de gasto", o: "Recusa turnos no teto e avisa admins.", n: "O R7 exclui orçamento mensal por pessoa.", s: "contra", r: "nao", w: "Com assinatura, o gasto é fixo; o teto por rotina (R7) basta.", e: "P", ev: "server/spend.ts, UsageBudget.tsx" },
+  { id: "u4", a: "uso", t: "Atividade por bot em linguagem simples", o: "Recibos do que o bot fez e log de ações de saída.", n: "Não existe como tela.", s: "falta", r: "talvez", w: "Pode ser uma aba do perfil alimentada pela trilha.", e: "P", ev: "server/activity.ts" },
+
+  // Times
+  { id: "sh1", a: "times", t: "Compartilhar um time inteiro como arquivo", o: "Bots, imagens, skills, salas, rotinas, coordenador e espaços de conexão num arquivo, com prévia e remoção de segredos.", n: "Não existe.", s: "falta", r: "talvez", w: "Base para templates e para um marketplace de times.", e: "M", ev: "server/package-export.ts, ShareTeamDialog.tsx" },
+  { id: "sh2", a: "times", t: "Importar time com tela de revisão", o: "De arquivo, URL do GitHub ou playbook Markdown; bots chegam em Ask, skills desligadas, rotinas pausadas e sem acessos.", n: "Não existe.", s: "falta", r: "talvez", w: "Os padrões seguros do OpenMausBot casam com o Nod. Faz par com sh1.", e: "M", ev: "server/package-import.ts, src/lib/team-import.ts" },
+  { id: "sh3", a: "times", t: "Templates de time prontos (galeria)", o: "Times do BotMRR com “Add to OpenMausBot” e link de instalação de um clique.", n: "Não existe.", s: "falta", r: "talvez", w: "Ótimo para ativação: o usuário começa com um time que funciona.", e: "M", ev: "server/team-library.ts, electron/package-link.mjs" },
+  { id: "sh4", a: "times", t: "Scout de projeto (sugere um time a partir de uma pasta)", o: "Lê uma pasta sem escrever nada e sugere bots para ela.", n: "Não existe.", s: "falta", r: "talvez", w: "Combina com a descoberta de pasta do ADR-039.", e: "M", ev: "server/project-scout.ts" },
+  { id: "sh5", a: "times", t: "Presets de bot compartilháveis", o: "Os padrões de Novo bot viram um arquivo que aparece no Novo bot de quem importa.", n: "Não existe.", s: "falta", r: "nao", w: "Coberto por sh1 e b4.", e: "P", ev: "server/presets.ts, docs/presets.md" },
+
+  // Desktop
+  { id: "d1", a: "desktop", t: "Atualização automática", o: "Verifica, baixa com progresso, reinicia e instala (macOS e Windows).", n: "O servidor anuncia uma versão mínima e a pessoa reinstala o DMG.", s: "falta", r: "sim", w: "Sem isso, cada release depende de a pessoa baixar de novo. Quase obrigatório antes de ter mais usuários.", e: "M", ev: "electron/updater.mjs, updater-coordinator.mjs" },
+  { id: "d2", a: "desktop", t: "Assinatura e notarização Apple", o: "DMGs assinados e notarizados para Apple silicon e Intel.", n: "Workflow pronto (<code>desktop-release.yml</code>); as prévias publicadas saem sem assinatura.", s: "parcial", r: "sim", w: "Pré-requisito do d1 e do microfone (AEC) no app assinado.", e: "P", ev: "electron-builder.yml" },
+  { id: "d3", a: "desktop", t: "Windows", o: "Instalador x64 por usuário, sem admin, com bandeja do sistema.", n: "Alvo NSIS no <code>electron-builder.yml</code>, nunca testado.", s: "parcial", r: "talvez", w: "Depende de quantos usuários do Claude Code estão no Windows.", e: "M", ev: "electron/system-tray.mjs, window-chrome.mjs" },
+  { id: "d4", a: "desktop", t: "Linux (.deb e AppImage)", o: "Ubuntu 24.04 em beta.", n: "Sem alvo.", s: "falta", r: "nao", w: "Público pequeno para um app de consumo.", e: "M", ev: "docs/linux-desktop.md" },
+  { id: "d5", a: "desktop", t: "Deep links (nod://…)", o: "Links que abrem uma conversa, instalam um time ou entram numa organização.", n: "Não existe.", s: "falta", r: "talvez", w: "Notificação, e-mail e site abrindo direto no app.", e: "P", ev: "electron/main.mjs, electron/cloud-entry.mjs" },
+  { id: "d6", a: "desktop", t: "Instância única e estado da janela", o: "Abrir de novo foca o app; posição e tamanho da janela são lembrados.", n: "Não confirmado.", s: "verificar", r: "talvez", w: "Barato.", e: "P", ev: "electron/single-instance.mjs, window-state.cjs" },
+  { id: "d7", a: "desktop", t: "Exportar diagnóstico para suporte", o: "Pacote redigido para relatório de bug.", n: "Relatos de resposta ruim com estado técnico (ADR-041), mas não diagnóstico do app.", s: "parcial", r: "talvez", w: "Útil quando o problema é o app do Mac e não a resposta.", e: "P", ev: "electron/diagnostics.mjs" },
+
+  // Celular
+  { id: "ce1", a: "celular", t: "Nod instalável no celular (PWA)", o: "O OpenMausBot tem apps nativos; a PWA é pedida na issue #869.", n: "PR #99 em rascunho: navegação por toque, página offline e CI mobile; sem teste em aparelho e sem push.", s: "pr", r: "sim", w: "Terminar a #99 dá aprovação pelo celular, que é o caso de uso principal.", e: "M", ev: "OMB issue #869" },
+  { id: "ce2", a: "celular", t: "Push no celular com o app fechado", o: "Android com serviço em primeiro plano opcional; iOS ainda depende de um relay APNs.", n: "O R6 exclui push; só notificações do navegador e do Mac.", s: "falta", r: "sim", w: "Sem push, aprovação pelo celular não funciona na prática.", e: "M", ev: "AlwaysOnConnectionService.kt, docs/notification-and-proactivity-qa.md" },
+  { id: "ce3", a: "celular", t: "App iOS nativo", o: "Chat, aprovações, widgets “Precisa de você”, Live Activities, Dynamic Island e share extension.", n: "Fora do plano além da PWA.", s: "falta", r: "talvez", w: "Depois de validar a PWA.", e: "G", ev: "ios/" },
+  { id: "ce4", a: "celular", t: "App Android nativo", o: "Paridade com o iOS: pareamento, chat, aprovações, ligações e 8 skins.", n: "Fora do plano além da PWA.", s: "falta", r: "nao", w: "A PWA cobre bem o Android.", e: "G", ev: "android/" },
+  { id: "ce5", a: "celular", t: "Mandar algo de qualquer app para um bot (share)", o: "Share extension no iOS e share target no Android para texto, links, imagens e documentos.", n: "Não existe.", s: "falta", r: "talvez", w: "A PWA suporta Web Share Target no Android.", e: "P", ev: "ios/ShareExtension/" },
+  { id: "ce6", a: "celular", t: "Pareamento por QR, túnel gerenciado e Tailscale", o: "Celular ou outro desktop pareia com a máquina da pessoa por código.", n: "Rejeitado: o Mac sempre disca para o servidor (ADR-021; decisão de 16/09).", s: "contra", r: "nao", w: "O Nod é hospedado; o celular fala com o servidor e dispensa pareamento.", e: "M", ev: "server/tunnel.ts, companion/" },
+  { id: "ce7", a: "celular", t: "CLI <code>npx</code> com setup guiado", o: "<code>npx openmausbot</code> abre um assistente com setas e sobe o app no navegador.", n: "Não existe.", s: "falta", r: "nao", w: "O app do Mac e o login pelo navegador (ADR-069) já cobrem.", e: "M", ev: "server/cli.ts, docs/cli-onboarding.md" },
+
+  // Org
+  { id: "o1", a: "org", t: "Pessoas e papéis", o: "Convite por e-mail ou @domínio; Super admin, Admin e Usuário; último acesso; gasto por pessoa.", n: "Allowlist por seed, trava de domínio Google opcional; sem console de admin.", s: "falta", r: "sim", w: "Hoje adicionar alguém exige mexer no banco.", e: "M", ev: "PeopleSection.tsx, server/account-signin.ts" },
+  { id: "o2", a: "org", t: "Cadastro autônomo", o: "Login por e-mail com código para convidados, sem cadastro prévio.", n: "Rejeitado com gatilho de reversão (ADR-030).", s: "contra", r: "talvez", w: "O gatilho de reversão do ADR-030 dispara quando houver lançamento público.", e: "M", ev: "BrowserSignInPage.tsx" },
+  { id: "o3", a: "org", t: "Política gerenciada pela organização", o: "“Gerenciado por {org}”: bloqueia provedores, servidores MCP ou acesso remoto.", n: "Política só por tenant está no NÃO CONSTRUIR.", s: "contra", r: "nao", w: "Cedo demais.", e: "M", ev: "server/managed-policy.ts" },
+  { id: "o4", a: "org", t: "Marca branca", o: "Logo, até 24 ícones de bot compartilhados, <code>brand.json</code> com nome, cor e link de suporte.", n: "Não existe.", s: "falta", r: "nao", w: "Não é o momento.", e: "M", ev: "server/brand.ts, docs/organization-branding.md" },
+  { id: "o5", a: "org", t: "SSO (OIDC/SAML)", o: "Planejado também no OpenMausBot, sem código ainda.", n: "Só Google OAuth.", s: "falta", r: "nao", w: "Nem o concorrente tem.", e: "M", ev: "enterprise/FEATURES" },
+  { id: "o6", a: "org", t: "Biblioteca da organização", o: "O admin publica pacotes de time que aparecem em Templates → From {Org}; atualiza sem sobrescrever edições locais.", n: "Não existe.", s: "falta", r: "nao", w: "Depende de sh1 e de multiusuário.", e: "M", ev: "server/org-library.ts" },
+
+  // Plataforma
+  { id: "p1", a: "plataforma", t: "Servidor MCP do Nod para clientes externos", o: "Claude Desktop ou Cursor listam, leem, mandam mensagem, criam e interrompem bots. Não aprovam, não excluem e não tocam credenciais.", n: "O proxy MCP é interno, por turno.", s: "falta", r: "talvez", w: "Quem vive no Claude Code poderia delegar ao time do Nod sem trocar de janela. A fronteira (sem aprovar) já vem desenhada.", e: "M", ev: "scripts/mcp-server.ts, docs/mcp-server.md" },
+  { id: "p2", a: "plataforma", t: "Gateways Telegram e Slack", o: "Runtime externo com token amarrado a uma thread e API de envio guardada (<code>expectedActiveLeafId</code>, <code>onBehalfOf</code>).", n: "Não existe.", s: "falta", r: "talvez", w: "Falar com o bot pelo Slack ou WhatsApp é uma porta de entrada forte.", e: "G", ev: "server/external-runtime.ts, server/guarded-requests.ts" },
+  { id: "p3", a: "plataforma", t: "Site de documentação com llms.txt", o: "Docs com getting started, provedores, computadores, segurança, changelog das releases e llms.txt.", n: "Site de marketing (<code>site/</code>).", s: "parcial", r: "talvez", w: "Quando houver usuários de fora.", e: "M", ev: "apps/docs/" },
+
+  // Engenharia
+  { id: "e1", a: "engenharia", t: "Prompt dividido em metade estável e volátil", o: "O system prompt separa o que não muda do que muda por turno, para o cache do provedor sobreviver.", n: "A verificar no montador de prompt do Nod.", s: "ideia", r: "sim", w: "Reduz custo e latência por turno sem mudar nada visível.", e: "P", ev: "server/drivers/prompt-split.ts" },
+  { id: "e2", a: "engenharia", t: "Idempotência de envio", o: "Reenviar reusa a mesma mensagem persistida e junta envios simultâneos.", n: "A verificar.", s: "ideia", r: "talvez", w: "Evita mensagem duplicada com rede instável (casa com c7).", e: "P", ev: "server/send-idempotency.ts" },
+  { id: "e3", a: "engenharia", t: "Retry com backoff só para 429 e 5xx", o: "Erros transitórios repetem com backoff limitado; erro de auth ou de formato nunca repete.", n: "A verificar.", s: "ideia", r: "talvez", w: "O Nod já classifica falha por estado de protocolo (ADR-009); só conferir a parte do retry.", e: "P", ev: "server/drivers/retry.ts" },
+  { id: "e4", a: "engenharia", t: "Redação de segredos mantendo o formato", o: "Logs, chips e exportações mostram nome e tamanho do segredo, nunca o valor; redige antes de truncar.", n: "A verificar.", s: "ideia", r: "sim", w: "Necessário antes de x4 (exportar) e d7 (diagnóstico).", e: "P", ev: "shared/redact.ts, server/redact.ts" },
+  { id: "e5", a: "engenharia", t: "Cartões de proposta com hash de revisão", o: "A confirmação recheca um hash e falha fechada se o registro mudou desde a proposta.", n: "Decisões tipadas existem; conferir se travam a revisão.", s: "ideia", r: "sim", w: "Fecha uma corrida em que a pessoa aprova algo que já mudou.", e: "P", ev: "server/profile-revision.ts" },
+  { id: "e6", a: "engenharia", t: "Driver desconhecido vira “indisponível”", o: "Config ruim ou driver desconhecido entra como sombra indisponível em vez de derrubar o boot.", n: "O Nod tem registry sombra (README L4); conferir o caso de config ruim.", s: "ideia", r: "talvez", w: "Robustez barata.", e: "P", ev: "server/harness/registry.ts" },
+  { id: "e7", a: "engenharia", t: "Esquema de ferramentas enxuto e observações deduplicadas", o: "O esquema do navegador cai de cerca de 12,5 mil tokens; capturas de tela idênticas não vão duas vezes ao modelo.", n: "As 12 ferramentas do computador estão no catálogo; conferir o tamanho.", s: "ideia", r: "talvez", w: "Economia direta de contexto nos turnos com computador.", e: "P", ev: "server/browser-tool-shape.ts, server/computer-observation.ts" },
+  { id: "e8", a: "engenharia", t: "Computador reservado só no primeiro uso de tela", o: "No modo Auto, a VM só é reservada quando o turno pede a tela pela primeira vez.", n: "A verificar.", s: "ideia", r: "talvez", w: "Diminui contenção e custo do host Docker.", e: "P", ev: "server/auto-vm-claims.ts" },
+  { id: "e9", a: "engenharia", t: "Evals de comportamento com traces de referência", o: "Motor roteirizado sem modelo, traces dourados, camada ao vivo opcional e bench de gatilho de skills.", n: "O catcher e o <code>e2e:fumaca</code> cobrem jornadas; não há traces de referência de comportamento.", s: "ideia", r: "talvez", w: "Ajuda a pegar regressão de prompt.", e: "M", ev: "evals/" }
+];
+
+const PARITY = [
+  ["Bots como contatos na sidebar", "com prévia, não lidas e hora"],
+  ["Menu de contexto do bot", "fixar, ocultar, duplicar, excluir recuperável"],
+  ["Seções na sidebar", "ADR-034"],
+  ["Não lidas automáticas e manuais", "migração 0039"],
+  ["Busca de bots (⌘K)", "por nome"],
+  ["Streaming por SSE", "frames numerados, retomada"],
+  ["Anexos para o modelo", "imagem, PDF e texto (ADR-046)"],
+  ["Parar (< 2 s), parar tudo, parar sala", ""],
+  ["Fila de mensagens enquanto o bot trabalha", "com cancelar"],
+  ["Perguntas do bot com opções", "pedir_a_pessoa"],
+  ["Menu “/” com skills e comandos", "ADR-056"],
+  ["Trocar modelo no chat e esforço por bot", "/modelo, --effort"],
+  ["Rascunho por conversa", ""],
+  ["Card de atividade com checklist", "ferramentas em português"],
+  ["Tabelas e links no texto do bot", "ADR-053"],
+  ["Memória por bot", "escrita pelo bot e pela pessoa"],
+  ["Modos de aprovação por bot", "manual, automático, ignorar (ADR-059)"],
+  ["“Sempre permitir” revogável", "ADR-042"],
+  ["Comandos do terminal decididos um a um", "ADR-055"],
+  ["Salas com @menção e política de resposta", "menções, líder, todos"],
+  ["Bot-a-bot com até 3 passes", "pedir_a_bot (ADR-058, ADR-063)"],
+  ["Rotinas por cron, fuso e intervalo", "proposta e confirmação"],
+  ["Testar rotina agora, pausar, histórico", ""],
+  ["Bot gerencia as próprias rotinas", "ADR-043"],
+  ["Computador Linux por bot", "assumir e devolver o controle (ADR-037)"],
+  ["Marketplace Composio com OAuth", "ADR-057"],
+  ["Servidor MCP próprio (stdio ou URL)", "env cifrado"],
+  ["Claude Code e Codex como motores", "ADR-036"],
+  ["Kit do terminal real e subagentes", "ADR-052, ADR-055"],
+  ["App do Mac com notificações e badge", "Intel e Apple silicon"],
+  ["Mac acordado enquanto trabalha", "powerSaveBlocker"],
+  ["Ligação por voz com o bot", "barge-in, aprovação falada (ADR-071 a 075)"],
+  ["Voz por bot com prévia e velocidade", ""],
+  ["Onboarding guiado", "por ligação (ADR-077)"],
+  ["Modo escuro", "sistema, claro, escuro"],
+  ["Modo dev com custo por turno", "Raio-X (ADR-054)"],
+  ["Inspector do que foi enviado", "Raio-X"],
+  ["Relatar resposta ruim com estado técnico", "ADR-041"],
+  ["Autohospedagem com Docker", "Dockerfile e compose"],
+  ["Mac emprestando terminal e arquivos ao servidor", "é o modelo padrão do Nod"]
+];
+
+const ONLY = [
+  ["Trilha imutável com autoria composta", "quem escreveu e em nome de quem, protegida por trigger (ADR-004, ADR-023)"],
+  ["Lista tipada de aprovação", "item a item, sensível nasce desmarcado"],
+  ["Fila global “Sua vez”", "com vencidos em cinza, reabrir e limpar"],
+  ["Pendências do bot", "“não antes de”, “Fazer agora” (ADR-064)"],
+  ["Plano de turno emitido pelo servidor", "proxy MCP fail-closed (ADR-024)"],
+  ["Multiusuário com RLS no Postgres", "isolamento por pessoa e por tenant"],
+  ["Mac conecta pelo navegador", "sem copiar chave nem parear (ADR-069)"],
+  ["Arquivo do Mac para qualquer app", "upload com troca de chave após aprovação (ADR-068)"],
+  ["Artefatos HTML interativos do bot", "versionados, com estado salvo (ADR-051)"],
+  ["Tabelas com “Copiar como planilha, CSV, JSON”", "ADR-053"],
+  ["Worktree por tarefa", "git só em ~/nod/<bot>/<repo>-<tarefa> (ADR-065)"],
+  ["Executor catcher", "o produto inteiro sem gastar turno, no dev e no CI"],
+  ["Voz pt-BR sem chave de terceiro", "Google ou local, com frases de espera gravadas (ADR-073)"],
+  ["Onboarding por ligação", "entrevista que vira o primeiro bot"],
+  ["Rotina que só roda se houver pendência", "e fim silencioso sem novidade"],
+  ["Classificação de dados pessoais (LGPD)", "prosa apagável (ADR-002)"]
+];
+
+/* ---------- estado ---------- */
+const KEY = "nod-roadmap-omb-v1";
+let state = {};
+try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { state = {}; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+function get(id) { return state[id] || (state[id] = {}); }
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const strip = (s) => String(s).replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/* filtros */
+const fArea = $("#fArea");
+fArea.innerHTML = '<option value="">Área: todas</option>' + Object.entries(AREAS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+
+function matches(it) {
+  const q = $("#q").value.trim().toLowerCase();
+  const d = (state[it.id] || {}).d || "pend";
+  if (fArea.value && it.a !== fArea.value) return false;
+  if ($("#fStatus").value && it.s !== $("#fStatus").value) return false;
+  if ($("#fDec").value && d !== $("#fDec").value) return false;
+  if ($("#fSug").value && it.r !== $("#fSug").value) return false;
+  if (q) {
+    const hay = (it.id + " " + it.t + " " + strip(it.o) + " " + strip(it.n) + " " + it.w + " " + it.ev + " " + ((state[it.id] || {}).note || "")).toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function itemHTML(it) {
+  const st = state[it.id] || {};
+  const d = st.d || "";
+  const segBtn = (v) => `<button type="button" class="${v}" data-act="dec" data-v="${v}" aria-pressed="${d === v}">${DEC[v]}</button>`;
+  const prio = d === "sim" ? `<div class="prio" role="group" aria-label="Prioridade">Prioridade ${Object.entries(PRIO).map(([k, v]) => `<button type="button" data-act="prio" data-v="${k}" aria-pressed="${st.p === k}">${v}</button>`).join("")}</div>` : "";
+  const hasNote = !!(st.note && st.note.trim());
+  return `<article class="item${d ? " decided-" + d : ""}" data-id="${it.id}">
+    <div class="body">
+      <div class="title"><span>${it.t}</span><span class="id">${it.id}</span></div>
+      <p class="omb">${it.o}</p>
+      <p class="nod"><b>No Nod hoje:</b> ${it.n}</p>
+      <p class="why"><b>${SUG[it.r]}:</b> ${esc(it.w)}</p>
+      <div class="chips">
+        <span class="chip ${it.s}">${STATUS[it.s]}</span>
+        <span class="chip sug">Esforço ${it.e}</span>
+        <span class="ev">${esc(it.ev)}</span>
+      </div>
+    </div>
+    <div class="decide">
+      <div class="seg" role="group" aria-label="Decisão para ${esc(strip(it.t))}">${segBtn("sim")}${segBtn("talvez")}${segBtn("nao")}</div>
+      ${prio}
+      <button type="button" class="notebtn" data-act="note">${hasNote ? "Editar nota" : "Adicionar nota"}</button>
+    </div>
+    <div class="note" ${hasNote || st.open ? "" : "hidden"}><textarea id="note-${it.id}" data-act="notetext" placeholder="Por que sim, por que não, dependências…" aria-label="Nota">${esc(st.note || "")}</textarea></div>
+  </article>`;
+}
+
+function render() {
+  const list = $("#list");
+  const visible = ITEMS.filter(matches);
+  let html = "";
+  for (const [k, label] of Object.entries(AREAS)) {
+    const its = visible.filter((i) => i.a === k);
+    if (!its.length) continue;
+    const all = ITEMS.filter((i) => i.a === k);
+    const c = { sim: 0, talvez: 0, nao: 0 };
+    all.forEach((i) => { const d = (state[i.id] || {}).d; if (d) c[d]++; });
+    const pct = (n) => (100 * n / all.length).toFixed(1) + "%";
+    html += `<section class="area" id="area-${k}">
+      <div class="area-head"><h2>${esc(label)}</h2><span class="n">${all.length} itens · ${c.sim + c.talvez + c.nao} decididos</span>
+      <span class="mini" aria-hidden="true"><i class="sim" style="width:${pct(c.sim)}"></i><i class="talvez" style="width:${pct(c.talvez)}"></i><i class="nao" style="width:${pct(c.nao)}"></i></span></div>
+      ${its.map(itemHTML).join("")}
+    </section>`;
+  }
+  list.innerHTML = html || '<div class="empty">Nenhum item com esses filtros.</div>';
+  $("#count").textContent = `${visible.length} de ${ITEMS.length} itens`;
+  renderSummary();
+}
+
+function renderSummary() {
+  const c = { sim: 0, talvez: 0, nao: 0, agora: 0 };
+  ITEMS.forEach((i) => { const s = state[i.id] || {}; if (s.d) c[s.d]++; if (s.d === "sim" && s.p === "agora") c.agora++; });
+  const pend = ITEMS.length - c.sim - c.talvez - c.nao;
+  const pct = (n) => (100 * n / ITEMS.length).toFixed(2) + "%";
+  const sugSim = ITEMS.filter((i) => i.r === "sim").length;
+  $("#summary").innerHTML = `
+    <div><span class="k"><span class="dot sim"></span>Implementar</span><span class="v">${c.sim}</span><span class="sub">${c.agora} marcados como Agora</span></div>
+    <div><span class="k"><span class="dot talvez"></span>Talvez</span><span class="v">${c.talvez}</span><span class="sub">para reavaliar</span></div>
+    <div><span class="k"><span class="dot nao"></span>Não</span><span class="v">${c.nao}</span><span class="sub">fora do Nod</span></div>
+    <div><span class="k"><span class="dot pend"></span>Sem decisão</span><span class="v">${pend}</span><span class="sub">de ${ITEMS.length} · sugiro ${sugSim}</span></div>
+    <div class="bar" aria-hidden="true"><i class="sim" style="width:${pct(c.sim)}"></i><i class="talvez" style="width:${pct(c.talvez)}"></i><i class="nao" style="width:${pct(c.nao)}"></i></div>`;
+  const pn = $("#parityN"); if (pn) pn.textContent = PARITY.length + " itens";
+}
+
+/* eventos da lista */
+$("#list").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-act]");
+  if (!btn) return;
+  const art = btn.closest(".item");
+  const id = art.dataset.id;
+  const st = get(id);
+  const act = btn.dataset.act;
+  if (act === "dec") {
+    st.d = st.d === btn.dataset.v ? undefined : btn.dataset.v;
+    if (st.d !== "sim") delete st.p;
+    else if (!st.p) st.p = "proximo";
+  } else if (act === "prio") {
+    st.p = btn.dataset.v;
+  } else if (act === "note") {
+    st.open = true;
+    const box = art.querySelector(".note");
+    box.hidden = false;
+    box.querySelector("textarea").focus();
+    return;
+  } else return;
+  save();
+  const keepFocus = `[data-act="${act}"][data-v="${btn.dataset.v}"]`;
+  const visibleNow = matches(ITEMS.find((i) => i.id === id));
+  if (visibleNow) {
+    art.outerHTML = itemHTML(ITEMS.find((i) => i.id === id));
+    const again = document.querySelector(`.item[data-id="${id}"] ${keepFocus}`);
+    if (again) again.focus();
+    refreshAreaHead(ITEMS.find((i) => i.id === id).a);
+    renderSummary();
+  } else render();
+});
+$("#list").addEventListener("input", (ev) => {
+  if (ev.target.dataset.act !== "notetext") return;
+  const id = ev.target.closest(".item").dataset.id;
+  get(id).note = ev.target.value;
+  save();
+});
+
+function refreshAreaHead(k) {
+  const sec = document.getElementById("area-" + k);
+  if (!sec) return;
+  const all = ITEMS.filter((i) => i.a === k);
+  const c = { sim: 0, talvez: 0, nao: 0 };
+  all.forEach((i) => { const d = (state[i.id] || {}).d; if (d) c[d]++; });
+  const pct = (n) => (100 * n / all.length).toFixed(1) + "%";
+  sec.querySelector(".area-head .n").textContent = `${all.length} itens · ${c.sim + c.talvez + c.nao} decididos`;
+  const mini = sec.querySelector(".mini");
+  mini.innerHTML = `<i class="sim" style="width:${pct(c.sim)}"></i><i class="talvez" style="width:${pct(c.talvez)}"></i><i class="nao" style="width:${pct(c.nao)}"></i>`;
+}
+
+["#q", "#fArea", "#fStatus", "#fDec", "#fSug"].forEach((s) => $(s).addEventListener(s === "#q" ? "input" : "change", render));
+
+/* exportar */
+let fmt = "md";
+function buildMarkdown() {
+  const lines = ["# Roadmap Nod × OpenMausBot: decisões", "", `Exportado em ${new Date().toLocaleString("pt-BR")}. ${ITEMS.length} itens.`, ""];
+  const group = (title, filter) => {
+    const its = ITEMS.filter(filter);
+    if (!its.length) return;
+    lines.push(`## ${title} (${its.length})`, "");
+    for (const it of its) {
+      const st = state[it.id] || {};
+      const note = st.note && st.note.trim() ? ` — nota: ${st.note.trim().replace(/\n+/g, " ")}` : "";
+      lines.push(`- **${it.id}** [${AREAS[it.a]}] ${strip(it.t)} · esforço ${it.e} · ${STATUS[it.s]}${note}`);
+    }
+    lines.push("");
+  };
+  const d = (i) => (state[i.id] || {}).d;
+  const p = (i) => (state[i.id] || {}).p;
+  group("Implementar · Agora", (i) => d(i) === "sim" && p(i) === "agora");
+  group("Implementar · Próximo", (i) => d(i) === "sim" && (p(i) === "proximo" || !p(i)));
+  group("Implementar · Depois", (i) => d(i) === "sim" && p(i) === "depois");
+  group("Talvez", (i) => d(i) === "talvez");
+  group("Não implementar", (i) => d(i) === "nao");
+  group("Sem decisão", (i) => !d(i));
+  return lines.join("\n");
+}
+function buildJSON() {
+  const out = {};
+  for (const [id, st] of Object.entries(state)) {
+    if (st.d || (st.note && st.note.trim())) out[id] = { d: st.d, p: st.p, note: st.note };
+  }
+  return JSON.stringify({ versao: 1, origem: "roadmap-nod-omb", decisoes: out }, null, 2);
+}
+function showExport() {
+  $("#tExport").value = fmt === "md" ? buildMarkdown() : buildJSON();
+  $("#bFmt").textContent = fmt === "md" ? "Ver JSON" : "Ver Markdown";
+  $("#tCopy").textContent = "";
+}
+function closePanels() { ["#pExport", "#pImport", "#pConfirm"].forEach((s) => ($(s).hidden = true)); }
+$("#bExport").addEventListener("click", () => { closePanels(); fmt = "md"; showExport(); $("#pExport").hidden = false; });
+$("#bFmt").addEventListener("click", () => { fmt = fmt === "md" ? "json" : "md"; showExport(); });
+$("#bCloseExp").addEventListener("click", closePanels);
+$("#bCopy").addEventListener("click", () => {
+  const ta = $("#tExport");
+  const done = () => { $("#tCopy").textContent = "Copiado"; };
+  const fallback = () => { ta.focus(); ta.select(); try { document.execCommand("copy"); done(); } catch (e) { $("#tCopy").textContent = "Texto selecionado: use ⌘C"; } };
+  try { navigator.clipboard.writeText(ta.value).then(done, fallback); } catch (e) { fallback(); }
+});
+
+/* importar */
+$("#bImport").addEventListener("click", () => { closePanels(); $("#tImport").value = ""; $("#tImp").textContent = ""; $("#pImport").hidden = false; $("#tImport").focus(); });
+$("#bCloseImp").addEventListener("click", closePanels);
+$("#bDoImport").addEventListener("click", () => {
+  try {
+    const data = JSON.parse($("#tImport").value);
+    const dec = data.decisoes || data;
+    const next = {};
+    const ids = new Set(ITEMS.map((i) => i.id));
+    let n = 0;
+    for (const [id, st] of Object.entries(dec)) {
+      if (!ids.has(id) || typeof st !== "object") continue;
+      next[id] = { d: ["sim", "talvez", "nao"].includes(st.d) ? st.d : undefined, p: ["agora", "proximo", "depois"].includes(st.p) ? st.p : undefined, note: typeof st.note === "string" ? st.note : undefined };
+      n++;
+    }
+    state = next; save(); render();
+    $("#tImp").textContent = `${n} decisões importadas`;
+  } catch (e) {
+    $("#tImp").textContent = "Esse texto não é um JSON válido. Cole o conteúdo de “Ver JSON”.";
+  }
+});
+
+/* confirmações dentro da página */
+let pending = null;
+function ask(text, fn) { closePanels(); $("#confirmText").textContent = text; pending = fn; $("#pConfirm").hidden = false; $("#bConfirmYes").focus(); }
+$("#bConfirmYes").addEventListener("click", () => { if (pending) pending(); pending = null; closePanels(); });
+$("#bConfirmNo").addEventListener("click", () => { pending = null; closePanels(); });
+$("#bSug").addEventListener("click", () => {
+  const n = ITEMS.filter((i) => !(state[i.id] || {}).d).length;
+  ask(`Preencher os ${n} itens sem decisão com a minha sugestão? “Sugiro implementar” vira Implementar (prioridade Próximo), “Avaliar” vira Talvez e “Sugiro não” vira Não. O que você já decidiu não muda.`, () => {
+    ITEMS.forEach((i) => { const st = get(i.id); if (!st.d) { st.d = i.r; if (i.r === "sim") st.p = "proximo"; } });
+    save(); render();
+  });
+});
+$("#bReset").addEventListener("click", () => {
+  ask("Apagar todas as decisões, prioridades e notas deste navegador? Exporte antes se quiser guardar.", () => { state = {}; save(); render(); });
+});
+
+/* referências */
+$("#parityGrid").innerHTML = PARITY.map(([t, s]) => `<div><b>${esc(t)}</b>${s ? `<span>${esc(s)}</span>` : ""}</div>`).join("");
+$("#onlyGrid").innerHTML = ONLY.map(([t, s]) => `<div><b>${esc(t)}</b><span>${esc(s)}</span></div>`).join("");
+$("#onlyN").textContent = ONLY.length + " itens";
+
+render();
+</script>
+</body>
+</html>
