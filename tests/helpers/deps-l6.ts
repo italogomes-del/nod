@@ -9,6 +9,7 @@ import { criarInterruptor, type InterruptorNod } from "../../src/services/interr
 import type { Escopo, Relogio, Tx } from "../../src/shared/types.ts";
 import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts";
 import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
+import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
 import { lembrar } from "../../src/use-cases/lembrar.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../src/use-cases/tipos.ts";
@@ -135,6 +136,8 @@ export function useCasesDeTeste(): UseCasesNod {
     anotarPendencia,
     concluirPendencia,
     descartarPendencia,
+    iniciarTarefa,
+    desligar,
   };
 }
 

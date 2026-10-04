@@ -100,7 +100,7 @@ export type MsgCerebroServidor =
   /** A vez da pessoa. `ouvidoAte`: até onde ela ouviu a fala anterior do bot, quando houve interrupção. */
   | { t: "vez"; n: number; texto: string; ouvidoAte?: string }
   /** Aviso do sistema ([nod] …): resultado de tarefa, decisão, resposta de colega. `confiavel=false` vem moldurado. */
-  | { t: "nota"; texto: string; confiavel: boolean }
+  | { t: "nota"; texto: string; confiavel: boolean; n?: number }
   | { t: "interromper"; modo: "suave" | "duro" }
   /** Pede o resumo final (não será falado) e encerra o laço. */
   | { t: "fim"; motivo: MotivoFimLigacao }

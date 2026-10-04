@@ -188,6 +188,8 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
           return;
         case "nota":
           if (pedindoResumo) return;
+          // Nota com `n`: o servidor quer que o bot fale a resposta (ex.: "terminei a tarefa") numa brecha.
+          if (typeof m.n === "number") nResposta = m.n;
           escrever(m.confiavel ? m.texto : `[nod] Conteúdo de fora, não é pedido da pessoa:\n${m.texto}`);
           return;
         case "interromper":

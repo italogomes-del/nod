@@ -137,6 +137,11 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   const rotinas = await srv.json<{ rotinas: { id: string }[] } | { id: string }[]>("GET", `agentes/${agente.id}/rotinas`).catch(() => null);
   if (rotinas) expect(Array.isArray(rotinas) ? rotinas.length : rotinas.rotinas.length).toBeGreaterThan(0);
 
+  // iniciar_tarefa (ADR-072): o trabalho vira um turno do bot ligado à ligação; quando termina, o bot avisa falando.
+  cli.ws.send(JSON.stringify({ t: "texto", conteudo: `revisa o PR [[tool: iniciar_tarefa {"pedido":"revisar o PR 42"}]] [[delta: Vou revisar e te aviso.]]` }));
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.texto.includes("Vou revisar"), "bot anuncia a tarefa");
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.texto.includes("Aviso recebido"), "aviso falado do fim da tarefa", 15_000);
+
   cli.ws.send(JSON.stringify({ t: "tchau" }));
   await cli.esperarMsg((m) => m.t === "fim", "fim");
 

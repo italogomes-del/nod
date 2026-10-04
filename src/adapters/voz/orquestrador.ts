@@ -106,8 +106,8 @@ export interface ServicoVoz {
   anexarMidia(p: { pessoaId: string; ligacaoId: string; retomar: boolean; canal: CanalVoz }): number | null;
   anexarCerebro(p: { turnoId: string; ligacaoId: string; canal: CanalVoz }): number | null;
   encerrar(ligacaoId: string, motivo: MotivoFimLigacao): Promise<void>;
-  /** Aviso do sistema ao cérebro (resultado de tarefa, decisão): vira `[nod] …` na próxima brecha. */
-  nota(ligacaoId: string, texto: string, confiavel: boolean): void;
+  /** Aviso do sistema ao cérebro (resultado de tarefa, decisão): vira `[nod] …`; com `falar`, o bot responde em voz numa brecha. */
+  nota(ligacaoId: string, texto: string, confiavel: boolean, falar?: boolean): void;
   vivas(): number;
   /** ADR-074: um card pendente na conversa da ligação — o bot o lê e abre a janela de aprovação por voz. */
   pedirAprovacao(ligacaoId: string, p: PedidoAprovacaoVoz): void;
@@ -316,6 +316,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         tocandoFila = false;
         if (!encerrada && fila.length === 0 && (fase === "falando" || fase === "pensando") && vezRespondida) mudarFase("ouvindo");
         if (!encerrada && filaDecisoes.length > 0) agendar(300, proximaDecisao);
+        if (!encerrada && notasParaFalar.length > 0) agendar(700, proximaNota);
       }
     }
 
@@ -870,6 +871,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             ferramentaRodando = null;
             if (!vezRespondida) mudarFase("pensando");
           }
+          // ADR-072: o bot chamou `desligar` — encerra depois da última frase dele.
+          if (msg.tipo === "fim" && /(^|__)desligar$/.test(nome)) desligarDepoisDeFalar();
           return;
         }
         case "ping":
@@ -878,6 +881,18 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         default:
           return;
       }
+    }
+
+    function desligarDepoisDeFalar(): void {
+      const tentar = (restante: number) => {
+        if (encerrada) return;
+        if ((!vezRespondida || botTocando() || fila.length > 0) && restante > 0) {
+          agendar(300, () => tentar(restante - 300));
+          return;
+        }
+        void encerrar("bot_desligou");
+      };
+      tentar(15_000);
     }
 
     // ---- fim ----------------------------------------------------------------------------------------------------------
@@ -930,10 +945,41 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       log("info", "voz_ligacao_encerrada", { ligacao_id: r.ligacaoId, motivo, trocas, interrupcoes, latencia_p50_ms: metricas.latenciaP50Ms });
     }
 
-    function nota(texto: string): void {
+    /**
+     * Aviso do sistema ao cérebro. `falar=false`: só contexto (ex.: decisão já dita). `falar=true`: o bot fala a
+     * resposta numa brecha (pessoa calada, bot calado, fora da janela) — é assim que "terminei a tarefa" chega à ligação.
+     */
+    const notasParaFalar: { texto: string; confiavel: boolean }[] = [];
+    function nota(texto: string, falar = false, confiavel = true): void {
       const linha = texto.startsWith("[nod]") ? texto : `[nod] ${texto}`;
-      if (cerebro) paraCerebro({ t: "nota", texto: linha, confiavel: true });
-      else notasPendentes.push(linha);
+      if (!falar) {
+        if (cerebro) paraCerebro({ t: "nota", texto: linha, confiavel });
+        else notasPendentes.push(linha);
+        return;
+      }
+      notasParaFalar.push({ texto: linha, confiavel });
+      proximaNota();
+    }
+    function proximaNota(): void {
+      if (encerrada || notasParaFalar.length === 0 || !cerebro) return;
+      if (!emBrecha() || lendo || janela || silencioDaPessoaMs() < 700) {
+        agendar(500, proximaNota);
+        return;
+      }
+      const { texto, confiavel } = notasParaFalar.shift()!;
+      const n = ++nVez;
+      vezAtual = n;
+      vezEm = relogio();
+      primeiroSomDaVez = true;
+      vezRespondida = false;
+      respostaTexto = "";
+      respostaFoiProChat = false;
+      segmentador = criarSegmentador();
+      paraCerebro({ t: "nota", texto, confiavel, n });
+      mudarFase("pensando");
+    }
+    function silencioDaPessoaMs(): number {
+      return falando ? 0 : relogio() - Math.max(fimFalaEm, inicio);
     }
 
     deps.esperas?.aquecer(FALAS_DE_ESPERA, r.voz, r.velocidade);
@@ -972,8 +1018,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     async encerrar(ligacaoId, motivo) {
       await ligacoes.get(ligacaoId)?.encerrar(motivo);
     },
-    nota(ligacaoId, texto) {
-      ligacoes.get(ligacaoId)?.nota(texto);
+    nota(ligacaoId, texto, confiavel, falar) {
+      ligacoes.get(ligacaoId)?.nota(texto, falar ?? false, confiavel);
     },
     pedirAprovacao(ligacaoId, p) {
       ligacoes.get(ligacaoId)?.pedirAprovacao(p);

@@ -279,3 +279,16 @@ export const leituraDaDecisao: CasoDeUso<{ decisaoId: string }, { decisaoId: str
   const perfil: PerfilComando = d.tipo === "aprovacao" || d.tipo === "gate_rotina" || d.tipo === "retomar_turno" ? "estrito" : "proposta";
   return { data: { decisaoId: d.id, leitura: redigirLeituraDeAprovacao(pedido), perfil } };
 };
+
+/**
+ * O resultado de uma tarefa pedida durante a ligação (`iniciar_tarefa`), para virar aviso falado: a última fala do bot
+ * naquele turno. null = o turno não é desta ligação, é o próprio cérebro ou não deixou fala.
+ */
+export const resultadoDaTarefaDaLigacao: CasoDeUso<{ turnoId: string; ligacaoId: string }, { texto: string; confiavel: boolean; concluido: boolean } | null> = async (deps, input) => {
+  const t = await deps.repos.turnos.buscar(input.turnoId);
+  if (!t || t.ligacaoId !== input.ligacaoId || t.origem === "ligacao") return { data: null };
+  const fala = (await deps.repos.mensagens.listarDaConversa(t.conversaId, 40)).filter((m) => m.turnoId === t.id && m.autoria.autor_tipo === "agente" && m.kind === "texto").at(-1);
+  const concluido = t.estado === "concluido";
+  const texto = fala?.texto.trim() || (concluido ? "terminou sem dizer nada" : "parou antes de terminar");
+  return { data: { texto: texto.slice(0, 1500), confiavel: t.entradaConfianca === "confiavel" && !(await deps.repos.turnos.contaminado(t.id)), concluido } };
+};

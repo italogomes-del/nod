@@ -194,6 +194,14 @@ async function rodarLigacaoCatcher(c: {
         acabar();
         return;
       }
+      if (m.t === "nota" && typeof m.n === "number") {
+        const n = m.n;
+        fila = fila.then(() => {
+          cerebro.enviar({ t: "fala", n, seq: 0, delta: "Aviso recebido." });
+          cerebro.enviar({ t: "fala-fim", n });
+        });
+        return;
+      }
       if (m.t !== "vez" || m.n === 0) return;
       vezes++;
       const n = m.n;
