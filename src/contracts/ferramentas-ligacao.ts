@@ -26,7 +26,7 @@ export const FERRAMENTAS_LIGACAO = {
 
 export type ArgsIniciarTarefa = { pedido: string };
 export type ResultadoIniciarTarefa = { ok: true; tarefa_id: string; instrucao: string } | { ok: false; erro: "fora_da_ligacao" | "limite_de_tarefas"; instrucao: string };
-export type ResultadoDesligar = { ok: true } | { ok: false; erro: "fora_da_ligacao" };
+export type ResultadoDesligar = { ok: true; instrucao: string } | { ok: false; erro: "fora_da_ligacao" };
 
 export type ContratoFerramentasLigacao = {
   iniciar_tarefa: { args: ArgsIniciarTarefa; resultado: ResultadoIniciarTarefa };

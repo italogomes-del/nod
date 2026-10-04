@@ -110,7 +110,6 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
     let seq = 0;
     let rodadas = 0;
     let pedindoResumo = false;
-    let rodadaDoResumo = -1;
     let capacidadeInterrupcao = false;
     let cancelaFila = false;
     let entradaAberta = true;
@@ -143,13 +142,12 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
         for (const k of ["attempted", "rejected", "promptSubmitted", "producedOutput"] as const) if (depois[k] && !sinais[k]) pendentes.push(sinks.sinal(k));
         sinais = depois;
         if (pedindoResumo) {
-          if (ev.tipo === "result" && rodadas >= rodadaDoResumo) {
+          // medido em 2026-10-04 (UAT com o CLI 2.1.289): o pedido de resumo escrito com uma volta em curso entra NESSA
+          // volta (ADR-067) — vem um `result` só. Esperar um segundo deixava o processo aberto para sempre.
+          if (ev.tipo === "result") {
             rodadas++;
-            if (entradaAberta) {
-              entradaAberta = false;
-              proc.fecharStdin();
-            }
-          } else if (ev.tipo === "result") rodadas++;
+            fecharEntrada();
+          }
           return;
         }
         if (ev.tipo === "delta" && nResposta > 0 && ev.texto !== "") cerebro?.enviar({ t: "fala", n: nResposta, seq: seq++, delta: ev.texto });
@@ -168,14 +166,20 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
     });
     c.aoProcesso(proc);
 
+    function fecharEntrada(): void {
+      if (!entradaAberta) return;
+      entradaAberta = false;
+      proc.fecharStdin();
+    }
     const escrever = (texto: string) => {
       if (entradaAberta) proc.escrever(mensagemClaude(texto, []));
     };
     const pedirResumo = () => {
       if (pedindoResumo || !entradaAberta) return;
       pedindoResumo = true;
-      rodadaDoResumo = rodadas + 1;
       escrever(PEDIDO_DE_RESUMO);
+      // definido em 2026-10-04: sem resposta em 45 s (CLI preso numa ferramenta), fecha mesmo assim.
+      setTimeout(fecharEntrada, 45_000).unref();
     };
 
     cerebro.aoMensagem((m: MsgCerebroServidor) => {

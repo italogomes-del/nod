@@ -46,5 +46,5 @@ export async function iniciarTarefa(deps: Deps, input: ContextoFerramenta & Args
 export async function desligar(deps: Deps, input: ContextoFerramenta): Promise<SaidaCasoDeUso<ResultadoDesligar>> {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   if (!turno || turno.origem !== "ligacao") return { data: { ok: false, erro: "fora_da_ligacao" } };
-  return { data: { ok: true } };
+  return { data: { ok: true, instrucao: "A ligação vai encerrar agora. Não diga mais nada." } };
 }

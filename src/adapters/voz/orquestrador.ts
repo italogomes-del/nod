@@ -833,7 +833,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       switch (msg.t) {
         case "fala": {
           if (typeof msg.n !== "number" || typeof msg.delta !== "string") return;
-          if (msg.n === 0 || msg.n !== vezAtual || msg.n === vezCancelada || vezRespondida) return;
+          if (msg.n === 0 || msg.n !== vezAtual || msg.n === vezCancelada || vezRespondida || desligando) return;
           cancelarEsperas();
           respostaTexto += msg.delta;
           for (const trecho of segmentador.adicionar(msg.delta, relogio())) falarConteudo(trecho, msg.n);
@@ -878,6 +878,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             if (!vezRespondida) mudarFase("pensando");
           }
           // ADR-072: o bot chamou `desligar` — encerra depois da última frase dele.
+          if (msg.tipo === "inicio" && /(^|__)desligar$/.test(nome)) desligando = true;
           if (msg.tipo === "fim" && /(^|__)desligar$/.test(nome)) desligarDepoisDeFalar();
           return;
         }
@@ -889,6 +890,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       }
     }
 
+    // Depois do `desligar`, o que o modelo ainda escrever não é falado (ele repetia a despedida).
+    let desligando = false;
     function desligarDepoisDeFalar(): void {
       const tentar = (restante: number) => {
         if (encerrada) return;
