@@ -1,5 +1,5 @@
 import type { IdHarness } from "../contracts/harness.ts";
-import { resolverHarness } from "../domain/harness.ts";
+import { modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
 import { MODELO_LIGACAO_CLAUDE, MODELO_LIGACAO_CODEX } from "../contracts/modelos.ts";
 import { generoDaVoz } from "../domain/vozes.ts";
@@ -194,12 +194,16 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const pessoaNome = onb.campos.apelido ?? pessoa?.nome ?? "a pessoa";
   const ligacaoDoTurno = modo === "ligacao" && turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
   const onboarding = ligacaoDoTurno?.iniciadaPor === "produto" && onb.guiaId === agente.id && (onb.etapa === "chamando" || onb.etapa === "entrevista" || onb.etapa === "configurando");
+  // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE), no chat e na
+  // ligação; um modelo escolhido no perfil dela vale como em qualquer bot.
+  const guiaNoMaisPotente = onb.guiaId === agente.id && turno.modelo === "auto";
+  const modeloEscolhido = escolha ? (guiaNoMaisPotente ? modeloMaisPotente(escolha.harness) : null) ?? escolha.modelo : null;
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
     workspaceVinculado: workspaceId !== null,
     computador: Boolean(deps.services.computadores),
     computadorFora,
-    turno: { ...turno, sobProcuracaoDe, ...(escolha ? { modelo: escolha.modelo } : {}) },
+    turno: { ...turno, sobProcuracaoDe, ...(modeloEscolhido ? { modelo: modeloEscolhido } : {}) },
     agente,
     memorias,
     concessoes,
@@ -247,9 +251,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     const lig = ligacaoDoTurno;
     if (!lig || (lig.estado !== "chamando" && lig.estado !== "em_curso")) throw new ErroDeDominio("estado_invalido", { cause: "ligação do turno não está viva" });
     const harnessDoPlano = escolha?.harness ?? "claude-cli";
+    const modeloRapido = harnessDoPlano === "codex-cli" ? MODELO_LIGACAO_CODEX : MODELO_LIGACAO_CLAUDE;
     parcial.ligacaoVoz = {
       ligacaoId: lig.id,
-      modelo: harnessDoPlano === "codex-cli" ? MODELO_LIGACAO_CODEX : MODELO_LIGACAO_CLAUDE,
+      modelo: (guiaNoMaisPotente ? modeloMaisPotente(harnessDoPlano) : null) ?? modeloRapido,
       nomeBot: agente.nome,
       generoVoz: generoDaVoz(lig.voz),
     };

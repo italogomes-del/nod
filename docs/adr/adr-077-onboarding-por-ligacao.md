@@ -83,3 +83,13 @@ rotina dele.
 - Modo de turno `onboarding` no texto (só a ligação tem as ferramentas).
 - "Atualizar" (`claude update`) e o instalador do Codex com SHA-256 fixado nos cards de IA.
 - O card ChatGPT seguir para o caminho sem voz com "voz com ChatGPT em breve" (o Codex já liga, ADR-076).
+
+## Emenda 2026-10-04 — a guia roda no modelo mais potente
+
+A guia (a Nina) com o modelo no "auto" roda no modelo mais potente do harness, no chat e na ligação
+(`MODELO_MAIS_POTENTE` em `src/contracts/modelos.ts`). No Claude é o alias `fable`, que acompanha o Fable mais novo
+(no Claude Code 2.1.289, `claude-fable-5-1`); no Codex é `gpt-6-astra`. Na ligação, isso abre uma exceção ao modelo
+rápido da ADR-072, só para a guia. Medido no mesmo dia: `--model fable` com `MAX_THINKING_TOKENS=0` respondeu em
+1,8 s, como o Haiku. Um modelo escolhido no perfil da guia vale como em qualquer bot. Custo aceito: cada vez da
+ligação custa no preço do Fable e pode esbarrar no limite de uso de Fable da assinatura da pessoa; nesse caso o turno
+da guia falha, porque ainda não há modelo reserva (R7 do ROADMAP).
