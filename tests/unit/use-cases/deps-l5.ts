@@ -1,4 +1,5 @@
 import { desligar, iniciarTarefa } from "../../../src/use-cases/ferramentas-ligacao.ts";
+import { anotarEntrevista, concluirEntrevista, proporBot } from "../../../src/use-cases/onboarding.ts";
 import type { Conector } from "../../../src/contracts/conector.ts";
 import type { ResultadoSonda } from "../../../src/contracts/servicos.ts";
 import { criarTokenTurno } from "../../../src/services/token-turno.ts";
@@ -83,6 +84,9 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     descartarPendencia,
     iniciarTarefa,
     desligar,
+    anotarEntrevista,
+    concluirEntrevista,
+    proporBot,
     ...opcoes.useCases,
   };
   const tx: Transacao = (fn) => fn({} as Tx);

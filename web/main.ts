@@ -55,6 +55,7 @@ import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } 
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
+import { criarTelaOnboarding } from "./telas/onboarding-controle.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
@@ -145,7 +146,42 @@ const telaLigacao = criarTelaLigacao({
   aoEncerrar: (l) => {
     dispatch({ tipo: "esquecer-disponibilidade-ligacao", agenteId: l.agenteId });
     dispatch({ tipo: "invalidar", quais: [`conversa:${l.conversaId}`, "ligacao"] });
+    void telaOnboarding.aoLigacaoEncerrada();
   },
+  aoOnboarding: (etapa, campos) => telaOnboarding.aoOnboarding(etapa, campos),
+});
+/**
+ * Onboarding por ligação (definido em 2026-10-04, ADR-077): a camada `#onboarding` (olá, a IA do Mac, "está te
+ * ligando", o painel da entrevista) e os cards guiados na conversa da guia. O que vem do servidor mora no reducer.
+ */
+const telaOnboarding = criarTelaOnboarding({
+  api: () => api,
+  dados: () => estado.onboarding,
+  aberto: () => estado.onboardingAberto,
+  hidratar: (o) => dispatch({ tipo: "hidratar-onboarding", onboarding: o }),
+  abrir: (aberto) => dispatch({ tipo: "onboarding-aberto", aberto }),
+  ligacao: { ativa: () => telaLigacao.ativa(), cheia: () => telaLigacao.cheia(), atenderOnboarding: (l) => telaLigacao.atenderOnboarding(l) },
+  garantirAgente: async (agenteId) => {
+    for (let i = 0; i < 6 && api; i++) {
+      if (botGerido(agenteId)) return true;
+      dispatch({ tipo: "hidratar-frota", frota: await api.frota() });
+      if (botGerido(agenteId)) return true;
+      await new Promise((r) => window.setTimeout(r, 400));
+    }
+    return !!botGerido(agenteId);
+  },
+  irParaConversa: (conversaId, agenteId) => navegar({ tipo: "conversa", conversaId, agenteId }),
+  iniciarConexao: (slug, depois) => iniciarConexao(slug, depois),
+  conectando: (slug) => slug in estado.conectando,
+  conectorHabilitado: async (slug) => {
+    const achar = () => estado.conectores.find((c) => c.slug === slug && c.habilitado)?.id ?? null;
+    if (achar() || !api) return achar();
+    dispatch({ tipo: "hidratar-conectores", ...(await api.conectores()) });
+    return achar();
+  },
+  invalidar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "rotinas", "conectores", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
+  erro: (e) => dispatch({ tipo: "erro", erro: erroDe(e) }),
+  aoMudar: () => render(),
 });
 /** A ligação viva que a página achou ao abrir (recarregada no meio dela): volta como pílula quando o bot chegar na frota. */
 let ligacaoParaRetomar: Ligacao | null = null;
@@ -241,6 +277,7 @@ function receberFrame(frame: FrameSse): void {
   const antes = estado;
   estado = reduzir(estado, { tipo: "frame", frame, agora: Date.now() });
   if (mudouNaTela(antes, estado)) renderNoQuadro();
+  telaOnboarding.aoFrame();
   // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
   if (estado.invalidacoes !== antes.invalidacoes) void reidratar();
 }
@@ -304,6 +341,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
+  // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
+  if (q === "onboarding") return { tipo: "hidratar-onboarding", onboarding: await api.onboarding().catch(() => null) };
   if (q === "ligacao") {
     const local = telaLigacao.ativa();
     if (local) return { tipo: "ligacao-viva", viva: { ligacaoId: local.ligacaoId, agenteId: local.agenteId, conversaId: local.conversaId, local: true } };
@@ -624,7 +663,9 @@ function partesDaTimeline(): PartesDaTimeline | null {
     const conversa = conversaDaTela(e);
     return conversa ? blocosDoHistorico(conversa, e) : [];
   });
-  return { historico, aoVivo: blocosAoVivo(c, estado) };
+  // ADR-077: os cards da configuração guiada entram como um bloco ao vivo na conversa da guia.
+  const guia = telaOnboarding.blocoNaConversa(c.conversa.id);
+  return { historico, aoVivo: guia ? [...blocosAoVivo(c, estado), { chave: "onboarding", html: guia }] : blocosAoVivo(c, estado) };
 }
 
 /**
@@ -810,7 +851,11 @@ function render(): void {
   regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDoEspaco()) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
-  document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco || telaLigacao.cheia());
+  // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
+  const camadaOnboarding = telaOnboarding.camada();
+  regiao("onboarding", camadaOnboarding);
+  document.getElementById("onboarding")?.toggleAttribute("hidden", camadaOnboarding === "");
+  document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre());
   document.getElementById("espaco")?.toggleAttribute("inert", telaLigacao.cheia());
   telaLigacao.render();
   const retomar = ligacaoParaRetomar;
@@ -858,6 +903,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   }, () => undefined);
   // Outra sessão: a ligação da anterior sai da tela (o servidor a encerra se ninguém voltar em 10 s).
   telaLigacao.descartar();
+  telaOnboarding.descartar();
   ligacaoParaRetomar = null;
   void api.ligacaoViva().then(({ ligacao }) => {
     if (ligacao && (ligacao.estado === "chamando" || ligacao.estado === "em_curso")) { ligacaoParaRetomar = ligacao; render(); }
@@ -1360,6 +1406,7 @@ function filtrarBots(texto: string, raiz = "#sidebar"): void {
 }
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
+  ...telaOnboarding.acoes,
   "abrir-raio-x": (el) => {
     const t = estado.tela;
     const nome = t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala";
@@ -1441,7 +1488,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (tela === "gestao") abrirEspaco("agentes");
     else if (tela === "espaco") abrirEspaco("conexao");
   },
-  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; } }),
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, onboarding: () => void telaOnboarding.deNovo() }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
@@ -1747,6 +1794,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  "onboarding-bot": async (form) => { await telaOnboarding.forms["onboarding-bot"]?.(form); },
   // O teclado da ligação: o texto entra como uma vez da pessoa, sem passar pelo STT.
   "ligacao-texto": async (form) => {
     const campo = form.elements.namedItem("texto") as HTMLInputElement | null;

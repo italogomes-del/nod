@@ -230,6 +230,11 @@ function htmlAviso(t: EstadoTelaLigacao): string {
   return aviso + audio;
 }
 
+/** "Diga algo como" (ADR-077): cada chip manda o texto como uma vez da pessoa; na pílula, embaixo dela. */
+function htmlSugestoes(t: EstadoTelaLigacao): string {
+  return t.sugestoes.length ? `<div class="lc-sugestoes"><span>Diga algo como</span>${t.sugestoes.map((s) => botao("ligacao-sugestao", esc(s), { classe: "chip-sugestao", dados: { texto: s } })).join("")}</div>` : "";
+}
+
 function htmlLegenda(t: EstadoTelaLigacao): string {
   const linhas = t.legendas.slice(-LEGENDAS_NA_TELA);
   const ultimaDoBot = [...linhas].reverse().find((l) => l.autor === "bot" && !l.espera)?.chave;
@@ -238,8 +243,7 @@ function htmlLegenda(t: EstadoTelaLigacao): string {
     const classes = ["lc-fala", l.autor === "bot" ? "lc-bot" : "lc-pessoa", l.espera ? "lc-espera" : "", !l.final ? "lc-parcial" : "", l.chave === ultimaDoBot ? "lc-atual" : ""].filter(Boolean).join(" ");
     return `<p class="${classes}">${esc(l.texto)}</p>`;
   }).join("");
-  const sugestoes = t.sugestoes.length ? `<div class="lc-sugestoes"><span>Diga algo como</span>${t.sugestoes.map((s) => botao("ligacao-sugestao", esc(s), { classe: "chip-sugestao", dados: { texto: s } })).join("")}</div>` : "";
-  return `${ps}${sugestoes}`;
+  return `${ps}${htmlSugestoes(t)}`;
 }
 
 /** O card da janela de aprovação: a frase, a contagem e os botões que também valem por clique. */
@@ -300,12 +304,12 @@ export function partesDaLigacao(t: EstadoTelaLigacao, card: CardJanela | null): 
       <div class="lp-barra"><div id="ligacao-mascote" class="lp-mascote"></div><div id="ligacao-info" class="lp-info"></div><div id="ligacao-controles" class="lp-controles"></div></div>
       <div id="ligacao-aviso" class="lp-aviso"></div>
       <div id="ligacao-card" class="lp-card"></div>
-      <div id="ligacao-legenda" hidden></div><div id="ligacao-teclado" hidden></div>
+      <div id="ligacao-legenda" class="lp-sugestoes"></div><div id="ligacao-teclado" hidden></div>
     </div>`,
     mascote: iconeAgente(t.agente, "sm", estadoDoMascote(t)),
     info: `<span class="lp-nome">${nome}</span><span class="lp-relogio" data-ligacao-relogio>${relogio}</span>${htmlOnda(t)}`,
     aviso: htmlAviso(t),
-    legenda: "",
+    legenda: htmlSugestoes(t),
     card: htmlCardJanela(card, t.agente.nome),
     teclado: "",
     controles: `${mudo}${botaoRedondo("ligacao-expandir", ICONE_LIGACAO.expandir(), "Abrir a ligação em tela cheia")}${desligar}`,

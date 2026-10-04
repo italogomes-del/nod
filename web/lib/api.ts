@@ -24,6 +24,7 @@ import type { AcaoComandoVoz } from "../../src/contracts/voz.ts";
 import type { IdVozNod, VelocidadeVoz } from "../../src/contracts/vozes.ts";
 import type { MotivoAvaliacaoLigacao } from "./ligacao-protocolo.ts";
 import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
+import type { EstadoOnboarding, PedidoEtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 
 /**
@@ -207,6 +208,14 @@ export function criarApi(escopo: Escopo) {
     apagarFalasLigacao: (id: string) => del<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/falas`),
     /** Ajustes da ligação: a voz e a velocidade do bot valem a partir da próxima frase. */
     ajustarVoz: (agenteId: string, ajuste: { voz?: IdVozNod | null; vozVelocidade?: VelocidadeVoz }) => patch<{ voz: string | null; vozVelocidade: number }>(`agentes/${encodeURIComponent(agenteId)}/voz`, ajuste),
+    // Onboarding por ligação (definido em 2026-10-04, ADR-077): a etapa mora no servidor; a web só lê e pede para mudar.
+    onboarding: () => get<EstadoOnboarding>("onboarding"),
+    etapaOnboarding: (p: PedidoEtapaOnboarding) => post<EstadoOnboarding>("onboarding/etapa", p),
+    concluirOnboarding: () => post<EstadoOnboarding>("onboarding/concluir"),
+    botDoOnboarding: (nome: string, descricao: string) => post<EstadoOnboarding>("onboarding/bot", { nome, descricao }),
+    rotinaDoOnboarding: (indice: number) => post<EstadoOnboarding>("onboarding/rotina", { indice }),
+    /** A decisão 'bot' do onboarding decidida pelo clique: o nome e a descrição podem ter sido editados no card. */
+    decidirBot: (id: string, corpo: { nome?: string; descricao?: string; recusar?: boolean }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),

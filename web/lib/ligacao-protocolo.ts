@@ -16,7 +16,10 @@ import type {
   TipoFalaBot,
   VERSAO_PROTOCOLO_VOZ as VersaoProtocolo,
   FECHAMENTOS_VOZ as FechamentosVoz,
+  SUGESTOES_MAX as SugestoesMax,
+  SUGESTAO_MAX_CHARS as SugestaoMaxChars,
 } from "../../src/contracts/voz.ts";
+import type { CamposEntrevista, EtapaOnboarding, TamanhoTime, ETAPAS_ONBOARDING as EtapasOnboarding, TAMANHOS_TIME as TamanhosTime } from "../../src/contracts/onboarding.ts";
 
 /**
  * Protocolo nod-voz/1 do lado do renderer (definido em 2026-10-04, ADR-071). A web só faz `import type` de src/: os
@@ -52,6 +55,25 @@ export type EstadoLocalLigacao =
 
 /** Motivos do 👎 em "Como foi a ligação?" (definido em 2026-10-04, protótipo HiFiMac). */
 export type MotivoAvaliacaoLigacao = "demorou" | "nao_entendeu" | "interrompeu" | "voz" | "outro";
+
+/** Onboarding por ligação (definido em 2026-10-04, ADR-077): os chips "Diga algo como" e as etapas que a mídia anuncia. */
+export const SUGESTOES_MAX: typeof SugestoesMax = 4;
+export const SUGESTAO_MAX_CHARS: typeof SugestaoMaxChars = 80;
+const ETAPAS: typeof EtapasOnboarding = ["ola", "executor", "chamando", "entrevista", "configurando", "concluido"];
+const TAMANHOS: typeof TamanhosTime = ["so_eu", "2_10", "11_50", "51_mais"];
+
+/** Os campos da entrevista conferidos um a um: texto curto ou null; o tamanho só dos quatro códigos. */
+function lerCampos(v: unknown): CamposEntrevista | null {
+  if (typeof v !== "object" || v === null) return null;
+  const c = v as Record<string, unknown>;
+  const texto = (x: unknown, max: number): string | null | undefined => (x === null || x === undefined ? null : typeof x === "string" && x.length <= max ? x : undefined);
+  const apelido = texto(c.apelido, 60);
+  const comoConheceu = texto(c.comoConheceu, 200);
+  const objetivo = texto(c.objetivo, 500);
+  const tamanhoTime = c.tamanhoTime === null || c.tamanhoTime === undefined ? null : typeof c.tamanhoTime === "string" && (TAMANHOS as readonly string[]).includes(c.tamanhoTime) ? (c.tamanhoTime as TamanhoTime) : undefined;
+  if (apelido === undefined || comoConheceu === undefined || objetivo === undefined || tamanhoTime === undefined) return null;
+  return { apelido, comoConheceu, objetivo, tamanhoTime };
+}
 
 /** 320 amostras: 20 ms a 16 kHz. */
 export const AMOSTRAS_POR_QUADRO = (TAXA_MICROFONE_HZ * QUADRO_MS) / 1000;
@@ -159,6 +181,12 @@ export function lerMsgServidor(texto: string): MsgMidiaServidor | null {
       return str(m.texto, 500) ? { t: "aviso", texto: m.texto } : null;
     case "fim":
       return typeof m.motivo === "string" && (MOTIVOS_FIM as readonly string[]).includes(m.motivo) ? { t: "fim", motivo: m.motivo as MotivoFimLigacao } : null;
+    case "onboarding": {
+      const campos = lerCampos(m.campos);
+      return typeof m.etapa === "string" && (ETAPAS as readonly string[]).includes(m.etapa) && campos ? { t: "onboarding", etapa: m.etapa as EtapaOnboarding, campos } : null;
+    }
+    case "sugestoes":
+      return Array.isArray(m.itens) && m.itens.length <= SUGESTOES_MAX && m.itens.every((x) => str(x, SUGESTAO_MAX_CHARS) && x.trim() !== "") ? { t: "sugestoes", itens: m.itens as string[] } : null;
     case "pong":
       return { t: "pong" };
     default:

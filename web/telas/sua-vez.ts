@@ -22,6 +22,7 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   rotina: "rotina proposta",
   rotina_atualizacao: "mudança de rotina",
   rotina_exclusao: "exclusão de rotina",
+  bot: "bot proposto",
   pergunta: "pergunta",
   falta_de_dado: "falta um dado",
   permissao: "pedido de permissão",
@@ -52,6 +53,7 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   rotina: nadaMudaSemVoce,
   rotina_atualizacao: nadaMudaSemVoce,
   rotina_exclusao: nadaMudaSemVoce,
+  bot: nadaMudaSemVoce,
   retomar_turno: vence,
   pergunta: vence,
   falta_de_dado: vence,
@@ -421,6 +423,9 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
     }
     case "perfil":
       return `<div class="acoes">${botao("decidir-proposta", "Confirmar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    // definido em 2026-10-04 (ADR-077): o primeiro bot que a Nina propõe no onboarding nasce pela mesma decisão.
+    case "bot":
+      return `<div class="acoes">${botao("decidir-proposta", "Criar bot", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
     case "rotina_atualizacao": {
       const comAcesso = acoesComAcesso(item.proposta, estado, { confirmar: "decidir-proposta", recusar: "recusar-decisao", rotuloRecusar: "Manter como está" });
       if (comAcesso) return `<div class="acoes">${comAcesso.botoes}</div>${comAcesso.ajuda}`;

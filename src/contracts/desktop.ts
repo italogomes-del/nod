@@ -32,6 +32,12 @@ export type PreferenciasDesktop = {
  */
 export type EstadoMicrofone = "concedido" | "negado" | "restrito";
 
+/** As IAs que o Mac sabe entrar ou instalar (ADR-077): o id do harness (src/contracts/harness.ts). */
+export const IAS_DESKTOP = ["claude-cli", "codex-cli"] as const;
+export type IaDesktop = (typeof IAS_DESKTOP)[number];
+/** "iniciado": o login (ou a página) abriu no navegador; o app sonda de novo a cada 3 s e reanuncia quando ficar pronto. */
+export type ResultadoIaDesktop = { ok: true } | { ok: false; motivo: "nao_instalado" | "falhou" };
+
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
   avisar(aviso: AvisoDesktop): Promise<boolean>;
@@ -54,6 +60,13 @@ export type NodDesktop = {
    * throttling da janela e passa a perguntar "Encerrar a ligação?" antes de fechar. Opcional pelo mesmo motivo.
    */
   emLigacao?(ativa: boolean): Promise<void>;
+  /**
+   * Onboarding (definido em 2026-10-04, ADR-077): sem IA pronta no Mac, a web mostra os cards de IA e o clique chega
+   * aqui. "entrar" roda o login do próprio CLI (`claude auth login` / `codex login`), que abre o navegador: o nod nunca
+   * vê token. "instalar" abre a página oficial no navegador. Opcionais pelo mesmo motivo dos de cima.
+   */
+  iaEntrar?(ia: IaDesktop): Promise<ResultadoIaDesktop>;
+  iaInstalar?(ia: IaDesktop): Promise<ResultadoIaDesktop>;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -68,6 +81,8 @@ export const CANAIS_DESKTOP = {
   abrir: "nod:abrir",
   microfone: "nod:microfone",
   emLigacao: "nod:em-ligacao",
+  iaEntrar: "nod:ia-entrar",
+  iaInstalar: "nod:ia-instalar",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */

@@ -10,6 +10,12 @@ import type { JsonSchema } from "./json-schema.ts";
  * criar_rotina (o nascimento) veio junto em 2026-09-21, quando a main trouxe sem_novidade e o
  * arquivo de lá passou das 200 linhas de novo: TODO schema de rotina mora aqui agora.
  */
+/**
+ * definido em 2026-10-04 (ADR-077): no onboarding por ligação, a Nina pede o acesso e propõe a rotina PARA o bot novo
+ * da pessoa. Só vale para o bot que o onboarding criou (preferencias.onboarding_bot_id); fora dele a ferramenta recusa.
+ */
+export const PARA_BOT: JsonSchema = { type: "string", description: "Só no onboarding: o nome do bot novo que você acabou de criar com a pessoa. Fora disso, omita.", minLength: 1, maxLength: 60 };
+
 const ROTINA_ID: JsonSchema = { type: "string", description: "Id da rotina, exatamente como veio do inventário, de listar_rotinas ou de ver_colegas.", minLength: 1 };
 
 /**
@@ -58,6 +64,7 @@ export const FERRAMENTAS_ROTINA = {
       politica_sem_dado: { type: "string", description: "O que fazer quando não houver dado.", minLength: 1 },
       acessos: ACESSOS,
       so_com_pendencia: SO_COM_PENDENCIA,
+      para_bot: PARA_BOT,
     },
     required: ["cron", "fuso_iana", "instrucao", "fonte", "entregavel", "limites_aprovacao", "politica_sem_dado"],
     additionalProperties: false,
@@ -121,6 +128,8 @@ export type ArgsCriarRotina = {
   acessos?: ArgsPedirAcesso[];
   /** Ausente = false: a rotina acorda em toda janela (0045). */
   so_com_pendencia?: boolean;
+  /** ADR-077: só no onboarding, o bot novo da pessoa (o nome dele). */
+  para_bot?: string;
 };
 /** Sem argumentos: o agente só pode listar as rotinas DELE, que vêm do contexto do turno. */
 export type ArgsListarRotinas = object;

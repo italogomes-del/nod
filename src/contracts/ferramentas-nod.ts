@@ -1,6 +1,6 @@
 import type { ResultadoPedirAcesso } from "./acesso.ts";
 import type { MotivoPasse, MotivoSemNovidade } from "./motivos.ts";
-import { FERRAMENTAS_ROTINA } from "./ferramentas-rotina.ts";
+import { FERRAMENTAS_ROTINA, PARA_BOT } from "./ferramentas-rotina.ts";
 import { FERRAMENTAS_PERFIL, type ArgsAtualizarPerfil, type ArgsVerColegas, type ResultadoAtualizarPerfil, type ResultadoVerColegas } from "./ferramentas-perfil.ts";
 import { FERRAMENTAS_ARTEFATO, type ContratoFerramentasArtefato } from "./ferramentas-artefato.ts";
 import { FERRAMENTAS_PENDENCIA, type ContratoFerramentasPendencia } from "./ferramentas-pendencia.ts";
@@ -51,6 +51,7 @@ export const FERRAMENTAS_NOD = {
       nivel: { type: "string", enum: ["leitura", "escrita"] },
       para: { type: "string", description: "Para que você precisa do acesso, numa frase curta que começa com verbo no infinitivo, sem citar a pessoa. Ex.: \"Listar as tarefas atrasadas do time\"." },
       nao_pedido: { type: "array", items: { type: "string" }, description: "O que explicitamente NÃO está sendo pedido." },
+      para_bot: PARA_BOT,
     },
     required: ["conector", "capacidades", "nivel", "nao_pedido"],
     additionalProperties: false,
@@ -142,10 +143,11 @@ export const NOMES_FERRAMENTAS_NOD = [
   "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "pedir_aprovacao",
   "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot", "ver_colegas", "publicar_artefato", "ler_artefato",
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "iniciar_tarefa", "desligar",
+  "anotar_entrevista", "concluir_entrevista", "propor_bot",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
-export type ArgsPedirAcesso = { conector: string; capacidades: string[]; nivel: "leitura" | "escrita"; nao_pedido: string[]; para?: string };
+export type ArgsPedirAcesso = { conector: string; capacidades: string[]; nivel: "leitura" | "escrita"; nao_pedido: string[]; para?: string; para_bot?: string };
 export type ItemPedidoAprovacao = {
   texto: string;
   destino: { conector: string; ferramenta: string; argumentos: Record<string, unknown> };

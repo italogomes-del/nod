@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { MODELO_LIGACAO_CLAUDE, MODELO_LIGACAO_CODEX } from "../contracts/modelos.ts";
 import { generoDaVoz } from "../domain/vozes.ts";
 import { montarPromptLigacao, MENSAGENS_NO_PROMPT_LIGACAO } from "../domain/prompt-ligacao.ts";
+import { linhasDoPromptOnboarding } from "../domain/roteiro-onboarding.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
@@ -187,6 +188,12 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const pessoaDelegante = sobProcuracaoDe && sobProcuracaoDe !== pessoa?.id ? await deps.repos.pessoas.buscar(sobProcuracaoDe) : pessoa;
   // Resolvido ANTES de montar: as nativas dependem de haver projeto autorizado E do modo/confiança (nativas.ts).
   const pastas = workspaceId ? await deps.services.workspaces?.pastasDoHarness({ ...deps.escopo, conversaId: turno.conversaId }) ?? null : null;
+  // ADR-077: o apelido que a pessoa deu na entrevista do onboarding é o nome dela em todos os prompts. A ligação que o
+  // produto iniciou com o onboarding em curso (a da guia) ganha as ferramentas e o roteiro do onboarding.
+  const onb = await deps.repos.onboarding.buscar();
+  const pessoaNome = onb.campos.apelido ?? pessoa?.nome ?? "a pessoa";
+  const ligacaoDoTurno = modo === "ligacao" && turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
+  const onboarding = ligacaoDoTurno?.iniciadaPor === "produto" && onb.guiaId === agente.id && (onb.etapa === "chamando" || onb.etapa === "entrevista" || onb.etapa === "configurando");
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
     workspaceVinculado: workspaceId !== null,
@@ -206,9 +213,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     sessaoCli,
     anexos: await deps.repos.anexos.metas(turno.entradaAnexos),
     contextoConversa,
-    pessoaNome: pessoa?.nome ?? "a pessoa",
+    pessoaNome,
     colegas: visiveis.filter((a) => ehColega(agente, a)),
     rotinasDoAgente,
+    onboarding,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
     // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
     delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "a pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
@@ -236,7 +244,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   // ADR-072: o turno da ligação leva o que o laço de voz precisa (a ligação, o modelo rápido, o nome e o gênero da voz).
   if (modo === "ligacao") {
-    const lig = turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
+    const lig = ligacaoDoTurno;
     if (!lig || (lig.estado !== "chamando" && lig.estado !== "em_curso")) throw new ErroDeDominio("estado_invalido", { cause: "ligação do turno não está viva" });
     const harnessDoPlano = escolha?.harness ?? "claude-cli";
     parcial.ligacaoVoz = {
@@ -251,13 +259,15 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       generoVoz: generoDaVoz(lig.voz),
       titulo: agente.titulo,
       descricao: agente.descricao,
-      pessoaNome: pessoa?.nome ?? "a pessoa",
+      pessoaNome,
       memorias,
       ultimasMensagens: mensagens.filter((m) => m.kind === "texto").slice(-MENSAGENS_NO_PROMPT_LIGACAO).map((m) => ({ autor: autorDe(m), texto: m.texto })),
       colegas: visiveis.filter((a) => ehColega(agente, a)).map((a) => ({ nome: a.nome, titulo: a.titulo })),
       apps: parcial.catalogo.servidores.map((s) => s.nome),
       modoAprovacao: agente.modoAprovacao ?? "manual",
       iniciarTarefa: parcial.catalogo.ferramentas.some((f) => f.nome === "iniciar_tarefa"),
+      onboarding,
+      ...(onboarding ? { roteiroOnboarding: linhasDoPromptOnboarding({ nomeGuia: agente.nome, campos: onb.campos, etapa: onb.etapa }) } : {}),
     });
   }
 

@@ -5,6 +5,7 @@ import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { DisponibilidadeLigacao } from "../../src/contracts/ligacao.ts";
+import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
@@ -91,7 +92,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "ligacao" | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -185,6 +186,15 @@ export type Estado = {
   ligacaoViva: LigacaoVivaNaTela | null;
   /** A disponibilidade de ligar para cada bot (só decide se o botão "Ligar" aparece); null = a leitura falhou. */
   disponibilidadeLigacao: Record<string, DisponibilidadeLigacao | null>;
+  /**
+   * Onboarding por ligação (definido em 2026-10-04, ADR-077): o que `GET onboarding` disse. undefined = ainda não leu;
+   * null = a leitura falhou ou a rota não existe (falha fechada: o app abre normal). `onboardingAberto` = a camada do
+   * onboarding está na frente (resolverInicio abre quando `mostrar`; "Ver o onboarding de novo" reabre).
+   */
+  onboarding?: EstadoOnboarding | null;
+  onboardingAberto: boolean;
+  /** A primeira leitura já decidiu se o onboarding abre (só uma vez por sessão; depois só pelo menu da conta). */
+  onboardingResolvido?: boolean;
 };
 
 export type Acao =
@@ -230,7 +240,9 @@ export type Acao =
   | { tipo: "ocupado"; valor: boolean }
   | { tipo: "ligacao-viva"; viva: LigacaoVivaNaTela | null }
   | { tipo: "hidratar-disponibilidade-ligacao"; agenteId: string; disponibilidade: DisponibilidadeLigacao | null }
-  | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string };
+  | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string }
+  | { tipo: "hidratar-onboarding"; onboarding: EstadoOnboarding | null }
+  | { tipo: "onboarding-aberto"; aberto: boolean };
 
 export const estadoInicial: Estado = {
   sessao: null,
@@ -276,6 +288,7 @@ export const estadoInicial: Estado = {
   ocupado: false,
   ligacaoViva: null,
   disponibilidadeLigacao: {},
+  onboardingAberto: false,
 };
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
@@ -466,7 +479,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
-        disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {} };
+        disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false }) };
     case "navegar":
       return resolverInicio({
         ...estado,
@@ -611,6 +625,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "hidratar-disponibilidade-ligacao":
       return { ...estado, disponibilidadeLigacao: { ...estado.disponibilidadeLigacao, [acao.agenteId]: acao.disponibilidade } };
+    case "hidratar-onboarding":
+      return resolverInicio({ ...estado, onboarding: acao.onboarding });
+    case "onboarding-aberto":
+      return estado.onboardingAberto === acao.aberto ? estado : { ...estado, onboardingAberto: acao.aberto };
     case "esquecer-disponibilidade-ligacao": {
       if (!(acao.agenteId in estado.disponibilidadeLigacao)) return estado;
       const disponibilidadeLigacao = { ...estado.disponibilidadeLigacao };
@@ -656,7 +674,18 @@ export function conversaDaTela(estado: Estado): ConversaEstado | null {
  * (fixados primeiro, na ordem da barra lateral) e, sem nenhum, em "Novo bot". Enquanto a frota não chega
  * a tela fica "inicio" (vazia); qualquer navegação para "inicio" resolve do mesmo jeito.
  */
-export function resolverInicio(estado: Estado): Estado {
+export function resolverInicio(entrada: Estado): Estado {
+  let estado = entrada;
+  // definido em 2026-10-04 (ADR-077): quem não concluiu o onboarding abre nele (a camada #onboarding por cima do app). A
+  // primeira leitura que diz `mostrar` abre uma vez; fechar (concluir) não reabre sozinho — só "Ver o onboarding de novo".
+  if (estado.onboarding !== undefined && !estado.onboardingResolvido) {
+    const o = estado.onboarding;
+    if (o?.mostrar) {
+      const guia = o.guia;
+      return { ...estado, onboardingResolvido: true, onboardingAberto: true, tela: guia ? { tipo: "conversa", conversaId: guia.conversaId, agenteId: guia.id } : estado.tela };
+    }
+    estado = { ...estado, onboardingResolvido: true };
+  }
   if (estado.tela.tipo !== "inicio" || !estado.frota) return estado;
   const meus = estado.frota.agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId && a.conversaId);
   const primeiro = meus.find((a) => a.fixado) ?? meus[0];
@@ -671,6 +700,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const secao = estado.espaco?.secao;
   if (secao === "agentes" && !estado.gestao) faltas.push("gestao");
   if (!estado.frota) faltas.push("frota");
+  // ADR-077: o onboarding é lido uma vez por sessão (a falha vira null e o app abre normal).
+  if (estado.sessao && estado.onboarding === undefined) faltas.push("onboarding");
   if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (t.tipo === "sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "nova-sala" && !estado.carregado.salas) faltas.push("salas");

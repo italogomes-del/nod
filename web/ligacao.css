@@ -83,6 +83,13 @@
 .lp-controles .lig-bt.desligar { width: 48px; height: 48px; background: var(--danger); color: var(--on-status); }
 .lp-aviso, .lp-card { width: 456px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: 6px; }
 .lp-aviso:empty, .lp-card:empty { display: none; }
+/* ADR-077: os chips "Diga algo como" embaixo da pílula (configuração guiada do onboarding). */
+.lp-sugestoes { width: 456px; max-width: calc(100vw - 24px); }
+.lp-sugestoes:empty { display: none; }
+.lp-sugestoes .lc-sugestoes { justify-content: center; }
+.lp-sugestoes .chip-sugestao.bt { background: var(--surface); box-shadow: var(--shadow-pop); }
+/* O rótulo flutua sobre a timeline como os chips: sem fundo, ele se misturava ao texto da conversa embaixo. */
+.lp-sugestoes .lc-sugestoes > span { background: var(--surface); border-radius: 999px; padding: 4px 10px; box-shadow: var(--shadow-pop); }
 .lp-aviso .aviso-compacto { margin: 0; box-shadow: var(--shadow-pop); }
 .lp-card .ligacao-janela { box-shadow: var(--shadow-pop); }
 

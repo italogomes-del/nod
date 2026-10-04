@@ -1,6 +1,6 @@
 import type { PreferenciaHarness } from "../contracts/harness.ts";
 import { validarInteligencia } from "../domain/harness.ts";
-import type { Agente, DonoAgente } from "../contracts/agente.ts";
+import type { Agente, CorAgente, DonoAgente, FormaAgente } from "../contracts/agente.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -13,7 +13,20 @@ import type { CasoDeUso } from "./tipos.ts";
 /** EMENDA 17: nome opcional; ausente → 'Novo agente' e o modelo propõe pelo atualizar_perfil. */
 export const NOME_INICIAL = "Novo agente";
 
-export type EntradaCriarAgente = { dono: DonoAgente; interativo?: boolean; nome?: string; modelo?: string; harness?: PreferenciaHarness; titulo?: string; descricao?: string };
+export type EntradaCriarAgente = {
+  dono: DonoAgente;
+  interativo?: boolean;
+  nome?: string;
+  modelo?: string;
+  harness?: PreferenciaHarness;
+  titulo?: string;
+  descricao?: string;
+  /** definido em 2026-10-04 (ADR-077): o onboarding escolhe o mascote (a guia azul, o bot do modelo); ausente = rodízio. */
+  forma?: FormaAgente;
+  cor?: CorAgente;
+  /** ADR-077: a linha de sistema da conversa nova, no lugar da padrão (a guia do onboarding se apresenta). */
+  mensagem?: string;
+};
 export type SaidaCriarAgente = { agente: Agente; conversa: Conversa; mensagem: Mensagem };
 
 /**
@@ -34,8 +47,8 @@ export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = asyn
   const confirmado = nome !== NOME_INICIAL && descricao !== "";
   const agora = deps.agora();
 
-  const forma = proximaForma(existentes.map((a) => a.forma));
-  const cor = proximaCor(existentes.map((a) => a.cor));
+  const forma = input.forma ?? proximaForma(existentes.map((a) => a.forma));
+  const cor = input.cor ?? proximaCor(existentes.map((a) => a.cor));
 
   const agente = await deps.repos.agentes.criar({ nome, titulo, descricao, confirmado, dono: input.dono, forma, cor, modelo: input.modelo ?? "auto", harness: input.harness ?? "auto" });
   if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "agente não criado" });
@@ -48,7 +61,7 @@ export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = asyn
     autoria: input.interativo ? autoriaDoAgente(deps.escopo, agente.id, { decididoPor: "regra:boas_vindas" }) : autoria,
     kind: input.interativo ? "texto" : "sistema",
     payload: input.interativo ? { kind: "boas_vindas" } : null,
-    texto: input.interativo ? `Oi! Eu sou ${nome}. Acabamos de nos conhecer. Para que você quer minha ajuda? Pode escolher uma opção ou me contar do seu jeito.` : confirmado ? `${nome} está pronto. O perfil que você definiu já está salvo; envie a primeira tarefa.` : redigir("agente-nasceu", agora),
+    texto: input.mensagem && !input.interativo ? input.mensagem : input.interativo ? `Oi! Eu sou ${nome}. Acabamos de nos conhecer. Para que você quer minha ajuda? Pode escolher uma opção ou me contar do seu jeito.` : confirmado ? `${nome} está pronto. O perfil que você definiu já está salvo; envie a primeira tarefa.` : redigir("agente-nasceu", agora),
     confianca: "confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem não criada" });

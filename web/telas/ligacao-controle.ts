@@ -1,5 +1,6 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
+import type { CamposEntrevista, EtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { IdVozNod, VelocidadeVoz } from "../../src/contracts/vozes.ts";
 import { ErroApi, type Api } from "../lib/api.ts";
 import type { EventoMotor, MotorLigacao, OpcoesMotor } from "../lib/ligacao.ts";
@@ -40,6 +41,8 @@ export type DepsTelaLigacao = {
   decidirPeloClique: (decisaoId: string, aprovar: boolean) => Promise<void>;
   /** A ligação acabou: o main relê a conversa (a linha "Chat de voz") e a disponibilidade do bot. */
   aoEncerrar: (ligacao: Ligacao) => void;
+  /** ADR-077: a entrevista do onboarding anotou um campo ou terminou (`configurando`: a tela encolhe para a pílula). */
+  aoOnboarding?: (etapa: EtapaOnboarding, campos: CamposEntrevista) => void;
 };
 
 export type TelaLigacao = ReturnType<typeof criarTelaLigacao>;
@@ -149,6 +152,13 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
         return;
       case "local":
         aoEstadoLocal(ev.estado);
+        return;
+      case "sugestoes":
+        mudar((e) => ({ ...e, sugestoes: ev.itens }));
+        return;
+      case "onboarding":
+        if (ev.etapa === "configurando") mudar((e) => ({ ...e, modo: "pilula", teclado: false }), true);
+        deps.aoOnboarding?.(ev.etapa, ev.campos);
         return;
       case "subir":
       case "interromper":
@@ -306,6 +316,16 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     cheia: (): boolean => t?.modo === "cheia",
     render,
     ligar,
+    /**
+     * ADR-077: o Atender do onboarding. A ligação já foi criada pelo servidor (iniciada pelo produto) e o consentimento
+     * gravado: abre a tela cheia e o motor direto, sem passar por disponibilidade/consentimento/POST ligacoes.
+     */
+    atenderOnboarding(ligacao: Ligacao): boolean {
+      if (t) return t.ligacao.id === ligacao.id;
+      if (!deps.agente(ligacao.agenteId)) return false;
+      abrirTela(ligacao, "cheia", false);
+      return t !== null;
+    },
     /** Ao recarregar a página com a ligação viva: volta como pílula e o motor reconecta com `retomar`. */
     retomar(ligacao: Ligacao): void {
       if (t || (ligacao.estado !== "chamando" && ligacao.estado !== "em_curso")) return;

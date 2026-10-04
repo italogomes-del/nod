@@ -90,6 +90,12 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
  * plano é o fim do turno: a entrega revoga o token, o Parar e a exclusão do agente negam a chamada (execucaoBloqueada,
  * paradas) e o lease vencido assenta o turno. O campo `expiraEm` continua no contrato, com este valor.
  */
+/**
+ * definido em 2026-10-04 (ADR-077): as três ferramentas do onboarding por ligação. Somam-se ao catálogo `ligacao` só
+ * quando o plano é da ligação que o produto iniciou com o onboarding da pessoa em curso (`EntradaPlano.onboarding`).
+ */
+export const FERRAMENTAS_NOD_ONBOARDING: readonly NomeFerramentaNod[] = ["anotar_entrevista", "concluir_entrevista", "propor_bot"];
+
 export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
@@ -163,6 +169,8 @@ export type EntradaPlano = {
   pastasAutorizadas?: boolean;
   /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
   terminal?: boolean;
+  /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
+  onboarding?: boolean;
   agora: number;
 };
 
@@ -180,7 +188,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // salto (montarFerramentas tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
-  const nod = FERRAMENTAS_NOD_POR_MODO[modo].map(ferramentaNod);
+  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : [])].map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.

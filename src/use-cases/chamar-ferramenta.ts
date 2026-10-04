@@ -82,6 +82,9 @@ const DESPACHO: Despacho = {
   descartar_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.descartar_pendencia](deps, { ...ctx, ...args }),
   iniciar_tarefa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.iniciar_tarefa](deps, { ...ctx, ...args }),
   desligar: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.desligar](deps, { ...ctx, ...args }),
+  anotar_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.anotar_entrevista](deps, { ...ctx, ...args }),
+  concluir_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.concluir_entrevista](deps, { ...ctx, ...args }),
+  propor_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.propor_bot](deps, { ...ctx, ...args }),
 };
 
 /**
