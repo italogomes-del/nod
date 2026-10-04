@@ -1,4 +1,4 @@
-import { LIMITES_AVISO, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop } from "../src/contracts/desktop.ts";
+import { LIMITES_AVISO, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
 
 /**
  * O que o processo principal aceita da janela web (definido em 2026-09-24, "aviso no Mac"). A janela
@@ -58,13 +58,22 @@ export function lerContador(n: unknown): number | null {
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? Math.min(n, LIMITES_AVISO.contador) : null;
 }
 
-/** preferencias.json: sem arquivo, corrompido ou sem o campo, os avisos nascem ligados. */
-export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDesktop, "avisos"> {
+/** O tema que a página pede (ou que está no arquivo): só os três valores; qualquer outra coisa → null. */
+export function lerTemaDesktop(valor: unknown): TemaDesktop | null {
+  return valor === "sistema" || valor === "claro" || valor === "escuro" ? valor : null;
+}
+
+/** preferencias.json: sem arquivo, corrompido ou sem o campo, os avisos nascem ligados e o tema segue o sistema. */
+export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDesktop, "avisos" | "tema"> {
+  let lido: unknown = null;
   try {
-    const lido: unknown = conteudo === null ? null : JSON.parse(conteudo);
-    if (typeof lido === "object" && lido !== null && "avisos" in lido && typeof lido.avisos === "boolean") return { avisos: lido.avisos };
+    lido = conteudo === null ? null : JSON.parse(conteudo);
   } catch {
     // arquivo corrompido: volta ao padrão
   }
-  return { avisos: true };
+  const obj = typeof lido === "object" && lido !== null ? lido : {};
+  return {
+    avisos: "avisos" in obj && typeof obj.avisos === "boolean" ? obj.avisos : true,
+    tema: ("tema" in obj ? lerTemaDesktop(obj.tema) : null) ?? "sistema",
+  };
 }

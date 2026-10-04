@@ -105,6 +105,9 @@ function painelOculto(): boolean {
  * Notification API e título da aba no navegador (web/lib/canal-avisos.ts).
  */
 const canalAvisos = criarCanalAvisos((alvo) => abrirAlvoDoAviso(alvo), () => { if (estado.sessao) render(); });
+// definido em 2026-10-04 (ADR-070): no app do Mac, a escolha de tema mora em preferencias.json (o localStorage é apagado a
+// cada conexão); ao abrir, ela volta para o localStorage e para o data-theme, e Preferências mostra o botão certo.
+void window.nodDesktop?.preferencias().then((p) => { if (p.tema) aplicarTema(p.tema, document.documentElement); }, () => undefined);
 const avisador = criarAvisador({
   relogio: { agora: () => Date.now(), esperar: (ms, fn) => { const t = window.setTimeout(fn, ms); return () => window.clearTimeout(t); } },
   temFoco: () => document.hasFocus(),
@@ -1289,6 +1292,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "escolher-tema": (el) => {
     const escolha = el.dataset.tema === "claro" || el.dataset.tema === "escuro" ? el.dataset.tema : "sistema";
     aplicarTema(escolha, document.documentElement);
+    // No app do Mac o localStorage some a cada conexão: o tema também vai para o processo principal (nativeTheme).
+    void window.nodDesktop?.definirTema?.(escolha).catch(() => undefined);
     for (const b of el.parentElement?.querySelectorAll<HTMLElement>("[data-tema]") ?? []) {
       b.classList.toggle("ativo", b === el);
       b.setAttribute("aria-pressed", String(b === el));

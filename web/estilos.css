@@ -55,6 +55,8 @@ body.ocupado { cursor: progress; }
   grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; color: var(--ink-2); border: 1px solid transparent; }
 .row:hover, .sr:hover { background: var(--surface-raised); }
 .row[aria-current="true"], .sr[aria-current="true"] { background: var(--surface-selected); }
+/* ink-3 sobre surface-selected fica abaixo de 4,5:1: no item atual, o texto secundário sobe para ink-2. */
+.row[aria-current="true"] .txt span, .row[aria-current="true"] .meta { color: var(--ink-2); }
 .row .g { width: 24px; text-align: center; color: var(--ink-3); }
 .txt { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .txt b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
@@ -92,10 +94,11 @@ body.ocupado { cursor: progress; }
 /* avatares vazados (mensagens de sistema / membros de sala) — mantidos do shell antigo */
 .av { display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
 .av-pessoa { border-radius: 50%; background: var(--surface-raised); color: var(--ink-2); }
-.av-agente { border-radius: 7px; background: transparent; border: 2px solid currentColor; color: var(--mascote-cor, var(--ink-2)); }
+/* A cor do agente fica na borda; as iniciais em tinta, porque creme, âmbar e verde não têm contraste como texto. */
+.av-agente { border-radius: 7px; background: transparent; border: 2px solid var(--mascote-cor, var(--line-strong)); color: var(--ink-2); }
 .av.sm { width: 20px; height: 20px; font-size: 8px; } .av.md { width: 30px; height: 30px; } .av.lg { width: 42px; height: 42px; font-size: 13px; }
 
-/* ---- palco: painel branco arredondado e flutuante (protótipo .main) ---- */
+/* ---- palco: a área principal (surface) ao lado da barra (surface-side) ---- */
 .stage { min-height: 0; display: flex; flex-direction: column; min-width: 0; position: relative;
   background: var(--surface); margin: 6px; border: 1px solid var(--line); overflow: hidden;
   border-top-left-radius: 18px; border-bottom-left-radius: 18px;
@@ -266,7 +269,7 @@ body.ocupado { cursor: progress; }
 .lista > li { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--surface); }
 .bt { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .bt:hover { border-color: var(--ink-3); background: var(--surface-raised); } .bt.pri { background: var(--action); color: var(--on-action); border-color: var(--action); }
-.bt.pri:hover { background: var(--action); opacity: .88; }
+.bt.pri:hover { opacity: .88; }
 /* Botão desabilitado precisa PARECER desabilitado: sem isso "Sempre permitir" bloqueado num card
    sensível lê como clicável, e a pessoa não entende por que nada acontece (ADR-029 em espírito —
    o motivo está no title). Cursor e opacidade dizem o estado antes do clique. */
@@ -284,7 +287,7 @@ body.ocupado { cursor: progress; }
 .inv-linha, .ex-linha { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ex-linha { padding-top: 6px; border-top: 1px dashed var(--line); }
 .ex-mudo { font-size: 12px; color: var(--ink-3); } .ex-recusa { font-size: 12px; color: var(--warning); }
-.inv-ok { border-color: var(--line); } .inv-falha { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
+.inv-falha { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
 .negacoes h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
 .negacao { font-size: 13px; padding: 8px 12px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--warning-line); background: var(--warning-soft); color: var(--warning); }
 .negacao-ferramenta_negada { border-color: var(--line); background: var(--surface-raised); color: var(--ink-2); }
@@ -453,11 +456,11 @@ body.ocupado { cursor: progress; }
 .faixa-dev-bt:hover { text-decoration: underline; text-underline-offset: 3px; }
 .faixa-dev-bt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .msg-linha .faixa-dev { margin-left: 0; }
-.selo-dev { padding: 3px 7px; border-radius: 6px; background: var(--action); color: var(--on-action); font: 700 10px/1 var(--font-mono); letter-spacing: .06em; }
+.selo-dev { padding: 3px 7px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 700 10px/1 var(--font-mono); letter-spacing: .06em; }
 .dev-hoje { color: var(--ink-2); font-size: 12px; white-space: nowrap; }
 
 /* definido em 2026-09-28 (revisão contra o canvas modo-dev, D2/D3): gaveta encostada à direita, com a conversa
-   visível ao lado; cartões brancos sobre fundo levemente cinza; a parte fixa numa barra só, uma linha por chamada. */
+   visível ao lado; cartões em surface sobre o fundo surface-side; a parte fixa numa barra só, uma linha por chamada. */
 .raio-x { position: fixed; inset: 0 0 0 auto; z-index: 30; box-sizing: border-box; width: min(600px, 100vw); height: 100dvh;
   max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0;
   background: var(--surface-side); color: var(--ink); font-size: 13px; }

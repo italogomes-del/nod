@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
@@ -21,6 +22,13 @@ describe("aviso de estado", () => {
     expect(html.indexOf("Resolver")).toBeGreaterThan(html.indexOf("&lt;b&gt;"));
     expect(html).not.toContain("role=");
   });
+
+  it("papel e classe entram no aviso, com a classe escapada", () => {
+    const html = avisoDeEstado({ tom: "alerta", texto: "x", papel: "status", classe: 'aviso-compacto" onclick="y' });
+    expect(html).toContain('role="status"');
+    expect(html).toContain("tom-alerta aviso-compacto");
+    expect(html).not.toContain('" onclick="');
+  });
 });
 
 describe("executor indisponível vira aviso de erro com o próximo passo", () => {
@@ -33,6 +41,12 @@ describe("executor indisponível vira aviso de erro com o próximo passo", () =>
     expect(html).toContain("Conectar IA");
     expect(html).toContain("<summary>Detalhes técnicos</summary>");
     expect(html).not.toContain("tag-ambar");
+  });
+
+  it("sem sonda ainda (inventário desconhecido): não afirma que a IA voltou e oferece Conectar IA", () => {
+    const html = renderMensagem(negacao, com(null));
+    expect(html).not.toContain("já voltou");
+    expect(html).toContain("Conectar IA");
   });
 
   it("com a IA de volta: sem botão, e diz para mandar a mensagem de novo", () => {
@@ -67,6 +81,22 @@ describe("tema", () => {
     a.setItem(CHAVE_TEMA, "roxo");
     expect(lerTema(a)).toBe("sistema");
     expect(atributoDoTema("sistema")).toBeNull();
+  });
+
+  it("armazenamento bloqueado: lê sistema e ainda aplica o atributo", () => {
+    const quebrado = { getItem: (): string | null => { throw new Error("bloqueado"); }, setItem: (): void => { throw new Error("bloqueado"); }, removeItem: (): void => { throw new Error("bloqueado"); } };
+    expect(lerTema(quebrado)).toBe("sistema");
+    const raiz: { dataset: Record<string, string | undefined> } = { dataset: {} };
+    expect(() => aplicarTema("escuro", raiz, quebrado)).not.toThrow();
+    expect(raiz.dataset.theme).toBe("dark");
+    aplicarTema("claro", raiz, null);
+    expect(raiz.dataset.theme).toBe("light");
+  });
+
+  it("o script do index.html (antes do primeiro quadro) usa a mesma chave e o mesmo mapeamento de tema.ts", () => {
+    const html = readFileSync(new URL("../../../web/index.html", import.meta.url), "utf8");
+    expect(html).toContain(`localStorage.getItem("${CHAVE_TEMA}")`);
+    expect(html).toContain(`t === "claro" ? "${atributoDoTema("claro")}" : "${atributoDoTema("escuro")}"`);
   });
 
   it("a escolha em Preferências marca o botão atual", () => {

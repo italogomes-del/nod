@@ -68,7 +68,6 @@ export function renderSeloModoDev(estado: Estado, conversaId: string | undefined
   return `<span class="selo-dev" title="Modo dev ligado (⌘⇧D)">MODO DEV</span>${total}`;
 }
 
-/** Em "Seu espaço": o interruptor, com o mesmo desenho do de avisos. */
 /**
  * Aparência (definido em 2026-10-04, design system do Nod): Sistema, Claro ou Escuro, deste computador. O clique
  * aplica na hora (web/lib/tema.ts) e marca o botão no próprio DOM: a escolha não mora no Estado.
@@ -80,6 +79,7 @@ export function renderEscolhaTema(atual: EscolhaTema): string {
       <p class="intro">Sistema acompanha o modo claro ou escuro do macOS. A escolha vale para este computador.</p>`;
 }
 
+/** Em "Seu espaço": Aparência e o interruptor do modo dev, com o mesmo desenho do de avisos. */
 export function renderPreferenciaModoDev(estado: Estado): string {
   return `<section class="espaco-secao">
       <h2>Preferências</h2>

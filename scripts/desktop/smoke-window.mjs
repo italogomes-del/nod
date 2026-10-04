@@ -18,7 +18,7 @@ async function janelaWeb() {
   try {
     await w.loadURL("data:text/html;charset=utf-8,<!doctype html><title>nod</title><body>web</body>");
     const estado = await w.webContents.executeJavaScript(`({ node: typeof require, processo: typeof process, nod: typeof window.nod, ponte: Object.keys(window.nodDesktop ?? {}).sort().join(","), ipc: typeof window.ipcRenderer })`);
-    const esperado = "aoAbrir,avisar,contador,definirAvisos,preferencias";
+    const esperado = "aoAbrir,avisar,contador,definirAvisos,definirTema,preferencias";
     if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado) throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
     await w.webContents.executeJavaScript(`window.nodDesktop.aoAbrir((alvo) => { window.alvoAberto = alvo; }); window.nodDesktop.contador(3)`);
     w.webContents.send("nod:abrir", { tipo: "sua-vez" });

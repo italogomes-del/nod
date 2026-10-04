@@ -11,7 +11,8 @@ A cor da web passa a sair de um arquivo só, `web/tokens.css`, com os tokens do 
   `surface-raised` (balões, tags, hover), `surface-selected` (item atual). Separa-se por `line`;
   sombra (`shadow-pop`) só no que flutua.
 - **Ação:** `action` (grafite no claro, quase branco no escuro) é a única cor de botão primário e
-  do enviar.
+  do enviar. Exceção do próprio design system: dentro de um aviso de estado, o botão que resolve usa
+  a cor do estado (vermelho em "Conectar IA").
 - **Sinal:** `signal` (azul) só para o que é novo: divisor "Novas", ponto e contador de não lidas,
   ponto do mascote de pergunta e de não lido, "esperando sua resposta". Link, seleção, foco, modo
   automático, pergunta e aviso informativo ficam neutros.
@@ -25,7 +26,11 @@ A cor da web passa a sair de um arquivo só, `web/tokens.css`, com os tokens do 
   Google Fonts: o app do Mac precisa funcionar sem depender de terceiros.
 - **Tema:** claro e escuro. "Sistema" segue o macOS; "Claro" e "Escuro" (Preferências) gravam
   `data-theme` no `<html>` e ficam neste computador (`localStorage`, aplicado antes do primeiro
-  quadro pelo `index.html`).
+  quadro pelo `index.html`). No app do Mac o `localStorage` é apagado a cada conexão, então a escolha
+  também vai para `userData/preferencias.json` (`nodDesktop.definirTema`) e o processo principal a
+  aplica em `nativeTheme.themeSource`: o `prefers-color-scheme` da página já nasce certo e a janela
+  abre com o fundo do tema, sem piscar branco. O app instalado antes desta versão não tem a função;
+  nele o tema volta a "Sistema" ao reabrir.
 - **Logo:** os olhos do mascote ("Olhos") no favicon, no ícone do app e na tela de conexão do Mac.
 
 `tests/unit/web/cores-por-token.test.ts` recusa cor literal nos CSS da interface; a exceção é uma

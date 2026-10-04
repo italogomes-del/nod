@@ -197,7 +197,8 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
 function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   const nome = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id)?.nome : undefined;
   const inv = inventarioEmUso(estado);
-  const aindaFora = !!inv && inv.estado !== "pronto";
+  // Sem sonda ainda (inventário null, logo ao abrir a página) vale como fora: dizer "já voltou" seria afirmar sem saber.
+  const aindaFora = !inv || inv.estado !== "pronto";
   const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
   return avisoDeEstado({
     tom: "erro",

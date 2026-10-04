@@ -35,6 +35,29 @@ describe("cores só por token", () => {
     expect(faltam).toEqual([]);
   });
 
+  const mapa = (texto: string): Record<string, string> => Object.fromEntries([...texto.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1] ?? "", (m[2] ?? "").trim()]));
+  const blocoDe = (texto: string, inicio: string): string => {
+    const i = texto.indexOf(inicio);
+    expect(i).toBeGreaterThan(-1);
+    return texto.slice(i, texto.indexOf("}", i));
+  };
+
+  it("os dois blocos do escuro (sistema e escolha manual) têm exatamente os mesmos valores", () => {
+    const tokens = ler("tokens.css");
+    expect(mapa(blocoDe(tokens, ':root:not([data-theme="light"])'))).toEqual(mapa(blocoDe(tokens, ':root[data-theme="dark"]')));
+  });
+
+  it("a cópia em desktop/setup.css (tela de conexão do Mac) tem os mesmos valores de tokens.css", () => {
+    const tokens = ler("tokens.css");
+    const setup = readFileSync(new URL("../../../desktop/setup.css", import.meta.url), "utf8");
+    const claro = mapa(blocoDe(tokens, ":root {"));
+    const escuro = mapa(blocoDe(tokens, ':root[data-theme="dark"]'));
+    const setupClaro = mapa(blocoDe(setup, ":root{"));
+    const setupEscuro = mapa(blocoDe(setup, "@media (prefers-color-scheme:dark){:root{"));
+    for (const [nome, valor] of Object.entries(setupClaro)) expect(`${nome} ${valor}`).toBe(`${nome} ${claro[nome]}`);
+    for (const [nome, valor] of Object.entries(setupEscuro)) expect(`${nome} ${valor}`).toBe(`${nome} ${escuro[nome]}`);
+  });
+
   it("os tokens de cor do tema claro são todos redefinidos nos dois blocos do escuro", () => {
     const tokens = ler("tokens.css");
     const bloco = (inicio: string): string => {

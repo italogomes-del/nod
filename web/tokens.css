@@ -1,10 +1,13 @@
 /* =====================================================================================
    Tokens do design system do Nod (definido em 2026-10-04; fonte: o design system "Nod", project/tokens.json,
    direção D "grafite + cor do agente"). É o ÚNICO arquivo da web com cor literal: os outros CSS usam var(--…)
-   e tests/unit/cores-por-token.test.ts recusa hex/rgb fora daqui (exceção: linha marcada com "cor-fixa").
+   e tests/unit/web/cores-por-token.test.ts recusa hex/rgb fora daqui (exceção: linha marcada com "cor-fixa").
+   desktop/setup.css (tela de conexão do Mac, que não carrega este arquivo) tem uma cópia dos valores que usa; o mesmo
+   teste confere que ela continua igual a esta.
 
    Regras de uso (README do design system):
-   - action é a única cor de ação (botão primário, enviar); signal é só para o que é NOVO (divisor de novas,
+   - action é a única cor de ação (botão primário, enviar), com uma exceção do próprio design system: dentro de um aviso
+     de estado, o botão que resolve usa a cor do estado; signal é só para o que é NOVO (divisor de novas,
      não lidas, menção a você) e nunca para link, seleção, botão, foco ou aviso;
    - estados: danger (o trabalho não começa ou parou), warning (o usuário resolve depois), success; informação
      é neutra (surface-raised + line + ink);
