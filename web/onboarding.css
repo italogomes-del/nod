@@ -127,6 +127,7 @@
 
 /* Sem a conversa da guia (fallback): os cards numa coluna por cima da tela. */
 .ob-guia-solta { position: fixed; inset: 0; z-index: 30; background: var(--surface); overflow: auto; padding: 96px 24px 24px; }
+.ob-depois { display: block; margin: 0 auto; font-size: 13px; padding: 6px; color: var(--ink-2); }
 
 @keyframes ob-ola { 0% { opacity: 0; transform: translateY(8px); filter: blur(8px); } 35% { opacity: 1; transform: none; filter: blur(0); } 80% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes ob-sobe { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
