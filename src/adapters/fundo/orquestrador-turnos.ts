@@ -67,7 +67,7 @@ export async function iniciarOrquestrador(o: OpcoesOrquestrador): Promise<Orques
   const anunciar = async (): Promise<Inventario> => {
     const executor = o.executor ?? "catcher";
     const inventario = await inventarioDoRegistry(o.registry, executor, relogio());
-    await o.ponte.conectar({ machineId: o.machineId, nome, inventario, versaoContrato: 1 });
+    await o.ponte.conectar({ machineId: o.machineId, nome, inventario, versaoContrato: 1, ligacao: true });
     anunciadoEm = relogio();
     return inventario;
   };

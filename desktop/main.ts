@@ -231,7 +231,7 @@ async function conectar(c: Config) {
   cliente = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
   // ADR-048: o gh já logado neste Mac vira o jeito de conectar o GitHub da pessoa, sem ela configurar nada.
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
-  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1, harnesses: criado.inventarios, github: { gh } });
+  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1, harnesses: criado.inventarios, github: { gh }, ligacao: true });
   if (gh) vigiarItensGithub(cliente);
   if (inv.estado !== "pronto") {
     mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta do Claude Code ou Codex e conecte novamente." : "Instale o Claude Code ou Codex neste Mac e conecte novamente.";

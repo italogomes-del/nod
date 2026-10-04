@@ -1,6 +1,8 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import { resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
+import { MODELO_LIGACAO_CLAUDE, MODELO_LIGACAO_CODEX } from "../contracts/modelos.ts";
+import { generoDaVoz } from "../contracts/vozes.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
@@ -61,6 +63,8 @@ export const MOTOR_CLI = "claude-cli";
  * 'peer' fica para o turno legado de perguntar_a_bot que ainda estiver na fila.
  */
 export function modoDoTurno(turno: Pick<Turno, "origem" | "profundidade">, conversa: Pick<Conversa, "tipo"> | null, agente: Pick<Agente, "confirmado">, ligadoARotina = false, ligadoADelegacao = false): ModoTurno {
+  // definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação tem modo próprio (catálogo e prompt de voz).
+  if (turno.origem === "ligacao") return "ligacao";
   if (turno.origem === "delegacao" || ligadoADelegacao) return "delegacao";
   if (turno.origem === "peer") return "peer";
   if (turno.origem === "rotina" || ligadoARotina) return "rotina";
@@ -123,7 +127,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // `!escolha` desligava o --resume de todo turno real desde os harnesses (18/09), e cada mensagem abria uma
   // sessão com 20 falas de 1.000 caracteres. Só o Claude Code retoma sessão hoje (o Codex devolve null).
   const sessaoDoHarness = escolha ? escolha.harness === "claude-cli" && conversa?.sessaoHarness === escolha.harness : true;
-  const sessaoDaConversa = sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  const sessaoDaConversa = sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "ligacao" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   // definido em 2026-10-01 (ADR-066): a retomada de rotina ou de pedido de colega volta na sessão DO TURNO que ela
   // continua (nunca na da conversa, pelos motivos acima). Antes ela começava do zero: em 30/09 o Milton, retomado 13
   // min depois de uma aprovação cujo comentário falhou, leu a task, chamou sem_novidade e não refez nem avisou. Com o
@@ -214,7 +218,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pendencias,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
-    terminal: executor === "local" && (escolha ? escolha.harness === "claude-cli" : true),
+    // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).
+    terminal: modo !== "ligacao" && executor === "local" && (escolha ? escolha.harness === "claude-cli" : true),
     agora,
   });
 
@@ -227,6 +232,19 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-28: sem nativas o driver nem recebe as pastas — cwd temporário e `--tools ""`, também
   // num app desktop antigo que ainda decide as nativas só pela presença das pastas.
   parcial.workspacePastas = parcial.nativas?.length ? pastas : null;
+
+  // ADR-072: o turno da ligação leva o que o laço de voz precisa (a ligação, o modelo rápido, o nome e o gênero da voz).
+  if (modo === "ligacao") {
+    const lig = turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
+    if (!lig || (lig.estado !== "chamando" && lig.estado !== "em_curso")) throw new ErroDeDominio("estado_invalido", { cause: "ligação do turno não está viva" });
+    const harnessDoPlano = escolha?.harness ?? "claude-cli";
+    parcial.ligacaoVoz = {
+      ligacaoId: lig.id,
+      modelo: harnessDoPlano === "codex-cli" ? MODELO_LIGACAO_CODEX : MODELO_LIGACAO_CLAUDE,
+      nomeBot: agente.nome,
+      generoVoz: generoDaVoz(lig.voz),
+    };
+  }
 
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
   const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };

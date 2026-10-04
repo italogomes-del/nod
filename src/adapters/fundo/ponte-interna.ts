@@ -89,7 +89,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined });
+          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             escopos.set(r.data.plano.turnoId, escopo);

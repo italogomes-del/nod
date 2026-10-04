@@ -26,6 +26,8 @@ export type TipoFrame =
   | "agente.mudou"
   | "parada.faixa"
   | "relato.criado"
+  /** definido em 2026-10-04 (ADR-075): uma ligação começou, mudou de estado ou acabou — a tela relê a conversa e a ligação viva. */
+  | "ligacao.mudou"
   | "resumed";
 
 /**

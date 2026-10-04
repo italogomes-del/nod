@@ -26,7 +26,8 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
   const parada = await deps.repos.paradas.ativar({ conversaId, agora });
   if (!parada) throw new ErroDeDominio("estado_invalido", { cause: "parada não gravada" });
 
-  const pendentes = await deps.repos.turnos.pendentesDaPessoa(conversaId ?? undefined);
+  // definido em 2026-10-04 (ADR-072): o Parar é do trabalho do bot; a ligação se encerra pelo Desligar.
+  const pendentes = (await deps.repos.turnos.pendentesDaPessoa(conversaId ?? undefined)).filter((t) => t.origem !== "ligacao");
   const pendentesInterrompidos: string[] = [];
   for (const t of pendentes) {
     const i = await deps.repos.turnos.interromper(t.id, "parado_pela_pessoa");
@@ -35,7 +36,7 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
     events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente" } }));
   }
 
-  const despachando = (await deps.repos.turnos.despachandoDaPessoa()).filter((t) => conversaId === null || t.conversaId === conversaId);
+  const despachando = (await deps.repos.turnos.despachandoDaPessoa()).filter((t) => t.origem !== "ligacao" && (conversaId === null || t.conversaId === conversaId));
   await deps.repos.turnos.pedirInterrupcao(despachando.map((t) => t.id), agora);
   const tentativas: TentativaInterrupcao[] = [];
   for (const t of despachando) {

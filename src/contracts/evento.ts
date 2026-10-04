@@ -49,7 +49,9 @@ export type KindEvento =
   | "concessao_criada"
   | "agente_atualizado"
   | "parada"
-  | "relato_criado";
+  | "relato_criado"
+  /** definido em 2026-10-04 (ADR-075): a ligação começou, foi atendida ou acabou (só ids e estado, nunca fala). */
+  | "ligacao_mudou";
 
 /** Dados do evento: só escalares (o CHECK da trilha e o outbox não aceitam prosa aninhada). */
 export type DadosEvento = Record<string, string | number | boolean | null>;

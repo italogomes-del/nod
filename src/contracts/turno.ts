@@ -77,6 +77,8 @@ export type Turno = {
    * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
    */
   sobProcuracaoDe?: string | null;
+  /** definido em 2026-10-04 (ADR-072): a ligação deste turno (o turno-cérebro e o trabalho pedido durante ela). */
+  ligacaoId?: string | null;
 };
 
 export type TokensTurno = {

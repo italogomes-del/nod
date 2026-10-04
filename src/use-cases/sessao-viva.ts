@@ -36,7 +36,7 @@ export const gravarFalasDaSessao: CasoDeUso<{ turnoId: string; machineId: string
  * resposta deles vai a outro bot ou passa pelos responders, e uma fala da pessoa no meio a misturaria.
  */
 export function aceitaMensagemNaSessao(t: Turno): boolean {
-  return t.estado === "despachando" && t.sobProcuracaoDe === null && t.origem !== "delegacao" && t.origem !== "peer" && t.origem !== "sala";
+  return t.estado === "despachando" && t.sobProcuracaoDe === null && t.origem !== "delegacao" && t.origem !== "peer" && t.origem !== "sala" && t.origem !== "ligacao";
 }
 
 /**

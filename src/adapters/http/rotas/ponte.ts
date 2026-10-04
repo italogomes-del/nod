@@ -93,7 +93,7 @@ export function criarPonteHttpServidor(d: {
         const anunciados = objeto(b.harnesses);
         for (const h of HARNESSES) if (anunciados[h.id] !== undefined && h.integrado) motores[h.id] = inventario(anunciados[h.id], d.agora());
       }
-      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores });
+      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true });
       await persistir(c);
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),

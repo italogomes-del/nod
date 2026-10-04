@@ -84,7 +84,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | "ligacao" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -334,6 +334,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-29 (0039): a mensagem nova também relê os não lidos (o ponto da barra e o ícone do topo).
   "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos") : e),
   "turno.iniciado": (e, f, agora) => {
+    // definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação não é trabalho do bot — nada de "trabalhando", fila ou Parar.
+    if (f.dados.modo === "ligacao" || f.dados.origem === "ligacao") return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
     if (!turnoId || !conversaId) return invalidar(e, conv(f));
@@ -377,6 +379,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "proposta.nova": (e, f) => invalidar(e, conv(f)),
+  // ADR-075: a ligação começou, foi atendida ou acabou — relê a conversa (a linha "Chat de voz") e a ligação viva.
+  "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
   "rotina.criada": (e, f) => invalidar(e, "rotinas", conv(f)),
   "rotina.executou": (e, f) => {
     const rotinaId = texto(f.dados.rotinaId) ?? texto(f.dados.rotina_id);
