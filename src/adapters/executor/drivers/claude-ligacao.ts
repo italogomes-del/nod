@@ -110,6 +110,9 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
     let seq = 0;
     let rodadas = 0;
     let pedindoResumo = false;
+    // Há uma volta do modelo em curso (escrevemos e o `result` ainda não veio).
+    let emVolta = false;
+    let resultsAPular = 0;
     let capacidadeInterrupcao = false;
     let cancelaFila = false;
     let entradaAberta = true;
@@ -141,12 +144,14 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
         const depois = reduzirSinais(sinais, ev);
         for (const k of ["attempted", "rejected", "promptSubmitted", "producedOutput"] as const) if (depois[k] && !sinais[k]) pendentes.push(sinks.sinal(k));
         sinais = depois;
+        if (ev.tipo === "result") emVolta = false;
         if (pedindoResumo) {
-          // medido em 2026-10-04 (UAT com o CLI 2.1.289): o pedido de resumo escrito com uma volta em curso entra NESSA
-          // volta (ADR-067) — vem um `result` só. Esperar um segundo deixava o processo aberto para sempre.
+          // medido em 2026-10-04 (scripts/sonda-ligacao-claude.ts, CLI 2.1.289): mensagem escrita com uma volta em curso
+          // abre OUTRA volta — dois `result`. O da volta que já corria é pulado; o seguinte é o do resumo.
           if (ev.tipo === "result") {
             rodadas++;
-            fecharEntrada();
+            if (resultsAPular > 0) resultsAPular--;
+            else fecharEntrada();
           }
           return;
         }
@@ -172,11 +177,14 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
       proc.fecharStdin();
     }
     const escrever = (texto: string) => {
-      if (entradaAberta) proc.escrever(mensagemClaude(texto, []));
+      if (!entradaAberta) return;
+      emVolta = true;
+      proc.escrever(mensagemClaude(texto, []));
     };
     const pedirResumo = () => {
       if (pedindoResumo || !entradaAberta) return;
       pedindoResumo = true;
+      resultsAPular = emVolta ? 1 : 0;
       escrever(PEDIDO_DE_RESUMO);
       // definido em 2026-10-04: sem resposta em 45 s (CLI preso numa ferramenta), fecha mesmo assim.
       setTimeout(fecharEntrada, 45_000).unref();

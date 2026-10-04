@@ -12,8 +12,8 @@
   rápido (`MODELO_LIGACAO_CLAUDE` = Haiku 4.5 pelo id; Codex: `gpt-6-luna`; trocáveis por `NOD_MODELO_LIGACAO_*`).
 - **Claude Code:** `claude -p` com stream-json e stdin aberto a ligação inteira, `--system-prompt` de voz,
   `--tools ""`, `--no-session-persistence`, `MAX_THINKING_TOKENS=0`. A vez 0 aquece o cache e não é falada. No `fim`,
-  pede um resumo de até 5 linhas: **o pedido entra na volta em curso** (medido em 2026-10-04 no UAT com o CLI 2.1.289)
-  e o primeiro `result` depois dele fecha a entrada. O resumo vira mensagem do bot.
+  pede um resumo de até 5 linhas. Mensagem escrita com uma volta em curso **abre outra volta** (dois `result`); o laço
+  pula o `result` da volta que já corria e fecha a entrada no seguinte (45 s de teto). O resumo vira mensagem do bot.
 - **Interrupção:** suave (a próxima vez leva "a pessoa ouviu até …") ou dura (`control_request interrupt`, só se o
   `system/init` anunciar `interrupt_receipt_v1`).
 - **`iniciar_tarefa`** enfileira um turno de conversa do bot ligado à ligação; quando termina, o orquestrador manda uma
@@ -21,6 +21,14 @@
   depois não é falado.
 - O turno da ligação não aparece como trabalho na tela (frames ignorados, `vivosDaConversa` e `pendentesRenderizaveis`
   o excluem), o Parar não o derruba e ele nunca ganha aviso de interrupção nem card "Retomar".
+
+## Medido em 2026-10-04 (`scripts/sonda-ligacao-claude.ts`, CLI 2.1.289, Haiku 4.5, US$ 0,0035)
+
+- `system/init` anuncia `interrupt_receipt_v1`, `interrupt_cancel_queued_v1` e `interrupt_send_now_v1`.
+- Primeiro texto com o `--system-prompt` de voz: 1.628 ms a frio, 632 ms quente (`ttft_ms` 631).
+- `control_request interrupt` no meio de uma resposta: `control_response` em 5 ms, `result` (`error_during_execution`)
+  em 10 ms, e o processo segue vivo — a mensagem seguinte responde em 1.180 ms.
+- Mensagem escrita com a volta em curso: dois `result` (volta própria).
 
 ## Por quê
 
