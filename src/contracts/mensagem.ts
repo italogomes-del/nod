@@ -35,7 +35,11 @@ export type PayloadMensagem =
   /** Forma das mensagens gravadas antes de 2026-09-24: uma capacidade por consentimento. */
   | { kind: "consentimento"; conectorId: string; slug: string; capacidade: string; naoInclui: string[] }
   | { kind: "rotina_execucao"; rotinaId: string; instanteAgendado: EpochMs; desfecho: DesfechoRotina }
-  | { kind: "resultado_aprovacao"; decisaoId: string; itens: { idx: number; desfecho: DesfechoItem }[] }
+  /**
+   * definido em 2026-10-03: `frase` (o pedido) e `texto` por item entram para a web desenhar o recibo compacto da
+   * decisão sem reler o texto redigido; as mensagens gravadas antes não os têm.
+   */
+  | { kind: "resultado_aprovacao"; decisaoId: string; frase?: string; itens: { idx: number; desfecho: DesfechoItem; texto?: string }[] }
   | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   /**

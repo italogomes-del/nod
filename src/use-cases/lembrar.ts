@@ -7,6 +7,8 @@ import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, UseCasesNod } from "./tipos.ts";
 
 const TIPOS: readonly TipoMemoria[] = ["preferencia", "fato", "resumo"];
+/** definido em 2026-10-03: a linha da conversa dizia "Anotei como preferencia" — o enum cru, sem acento. */
+const TIPO_NA_FRASE: Record<TipoMemoria, string> = { preferencia: "uma preferência", fato: "um fato", resumo: "um resumo" };
 
 export type EntradaRegistrarMemoria = {
   agenteId: string;
@@ -42,7 +44,7 @@ export const registrarMemoria: CasoDeUso<EntradaRegistrarMemoria, { memoria: Mem
       turnoId: input.turnoId,
       autoria,
       kind: "sistema",
-      texto: redigir("anotei", agora, { tipo: memoria.tipo, texto: memoria.texto }),
+      texto: redigir("anotei", agora, { tipo: TIPO_NA_FRASE[memoria.tipo], texto: memoria.texto }),
       confianca: "confiavel",
     });
     if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: input.conversaId, turnoId: input.turnoId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));

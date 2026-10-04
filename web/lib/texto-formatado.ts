@@ -48,8 +48,85 @@ function formatar(texto: string, opcoes: OpcoesTexto): string {
   let tabelas = 0;
   return texto.split(/(```[\s\S]*?```)/g).map((trecho, i) => {
     if (i % 2 === 1) return `<pre><code>${esc(trecho.slice(3, -3).replace(/^\w*\n/, ""))}</code></pre>`;
-    return blocos(trecho).map((b) => (typeof b === "string" ? emLinha(b, opcoes) : tabelaHtml(b, opcoes, tabelas++))).join("");
+    return blocos(trecho).map((b) => (typeof b === "string" ? comListas(b, opcoes) : tabelaHtml(b, opcoes, tabelas++))).join("");
   }).join("");
+}
+
+/**
+ * Só os links de uma linha viram chip (definido em 2026-10-03): a linha "agora" do cartão de atividade cita o PR ou a
+ * planilha que o bot está lendo; o resto continua texto, numa linha.
+ */
+export function soLinks(texto: string, agora?: Date): string {
+  let saida = "";
+  let desde = 0;
+  for (const achado of texto.matchAll(/https?:\/\/[^\s<>"'`]+/g)) {
+    const aparada = aparaUrl(achado[0]);
+    const url = lerLink(aparada);
+    saida += esc(texto.slice(desde, achado.index)) + (url ? chipDoLink(url, agora) : esc(aparada));
+    desde = achado.index + aparada.length;
+  }
+  return saida + esc(texto.slice(desde));
+}
+
+// ---------------------------------------------------------------- listas e títulos
+
+/**
+ * definido em 2026-10-03 (canvas "Texto formatado e streaming"): os modelos escrevem listas e títulos o tempo todo, e
+ * eles apareciam crus ("- item", "## Resumo"). "-", "*", "+" e "1." / "1)" no começo da linha viram lista; "#" a
+ * "######" viram uma linha de título (um tamanho só: o balão não tem hierarquia de documento). O texto sem lista nem
+ * título segue o caminho de sempre, byte a byte.
+ */
+const ITEM_DE_LISTA = /^ {0,3}([-*+]|\d{1,3}[.)])\s+(\S.*)$/;
+const TITULO = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/;
+
+function comListas(texto: string, opcoes: OpcoesTexto): string {
+  const linhas = texto.split("\n");
+  if (!linhas.some((l) => ITEM_DE_LISTA.test(l) || TITULO.test(l))) return emLinha(texto, opcoes);
+  const saida: string[] = [];
+  let paragrafo: string[] = [];
+  let lista: { ordenada: boolean; inicio: number; itens: string[] } | null = null;
+  const fecharParagrafo = (): void => {
+    // As linhas em branco em volta de uma lista ou título são o espaço deles, não <br> a mais.
+    while (paragrafo.length && paragrafo[0]?.trim() === "") paragrafo.shift();
+    while (paragrafo.length && paragrafo.at(-1)?.trim() === "") paragrafo.pop();
+    if (paragrafo.length) saida.push(`<p class="md-paragrafo">${emLinha(paragrafo.join("\n"), opcoes)}</p>`);
+    paragrafo = [];
+  };
+  const fecharLista = (): void => {
+    if (!lista) return;
+    const tag = lista.ordenada ? "ol" : "ul";
+    const inicio = lista.ordenada && lista.inicio !== 1 ? ` start="${lista.inicio}"` : "";
+    saida.push(`<${tag} class="md-lista"${inicio}>${lista.itens.map((i) => `<li>${emLinha(i, opcoes)}</li>`).join("")}</${tag}>`);
+    lista = null;
+  };
+  for (const linha of linhas) {
+    const item = ITEM_DE_LISTA.exec(linha);
+    if (item) {
+      fecharParagrafo();
+      const ordenada = /\d/.test(item[1] ?? "");
+      if (lista && lista.ordenada !== ordenada) fecharLista();
+      lista ??= { ordenada, inicio: ordenada ? Number.parseInt(item[1] ?? "1", 10) : 1, itens: [] };
+      lista.itens.push(item[2] ?? "");
+      continue;
+    }
+    const titulo = TITULO.exec(linha);
+    if (titulo) {
+      fecharParagrafo();
+      fecharLista();
+      saida.push(`<p class="md-titulo">${emLinha(titulo[1] ?? "", opcoes)}</p>`);
+      continue;
+    }
+    // Linha recuada logo depois de um item continua o item; linha em branco fecha a lista.
+    if (lista && /^\s{2,}\S/.test(linha) && lista.itens.length) {
+      lista.itens[lista.itens.length - 1] += ` ${linha.trim()}`;
+      continue;
+    }
+    fecharLista();
+    paragrafo.push(linha);
+  }
+  fecharParagrafo();
+  fecharLista();
+  return saida.join("");
 }
 
 // ---------------------------------------------------------------- em linha
@@ -176,7 +253,41 @@ function tabelaHtml(t: Tabela, opcoes: OpcoesTexto, indice: number): string {
   const escondidas = t.linhas.length - LINHAS_VISIVEIS;
   const disclosure = opcoes.chave ? ` data-disclosure="${esc(`tabela:${opcoes.chave}:${indice}`)}"` : "";
   const mais = recolhe ? `<details class="md-tabela-mais"${disclosure}><summary><span class="md-mais">Mostrar as outras ${escondidas} linhas</span><span class="md-menos">Mostrar menos</span></summary></details>` : "";
-  return `<div class="md-tabela"><div class="md-tabela-rolagem"><table><thead>${cabeca}</thead><tbody>${corpo}</tbody></table></div>${mais}<button type="button" class="md-tabela-copiar" data-act="copiar-tabela" data-tsv="${esc(tabelaParaTsv(t))}" aria-label="Copiar tabela">${ICONE_COPIAR}<span>Copiar</span></button></div>`;
+  return `<div class="md-tabela"><div class="md-tabela-rolagem"><table><thead>${cabeca}</thead><tbody>${corpo}</tbody></table></div>${mais}${rodapeDaTabela(t)}</div>`;
+}
+
+/**
+ * Rodapé da tabela (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): quantas linhas e colunas e
+ * "Copiar como" Planilha · CSV · JSON. O botão "Copiar" de antes só aparecia no hover, por cima da última coluna, e só
+ * copiava para planilha. "Planilha" (colunas por tabulação) fica porque colar CSV numa planilha não separa as colunas.
+ * O conteúdo vai uma vez só, em `data-tabela`, e main.ts escreve o formato pedido no clique.
+ */
+function rodapeDaTabela(t: Tabela): string {
+  const n = t.linhas.length;
+  const m = t.cabecalho.length;
+  const dados = esc(JSON.stringify(celulasSimples(t)));
+  const opcao = (formato: FormatoTabela, rotulo: string, titulo: string): string => `<button type="button" data-act="copiar-tabela" data-formato="${formato}" data-tabela="${dados}" title="${esc(titulo)}">${rotulo}</button>`;
+  return `<div class="md-tabela-rodape"><span>${n} ${n === 1 ? "linha" : "linhas"} · ${m} ${m === 1 ? "coluna" : "colunas"}</span><div class="md-copiar" role="group" aria-label="Copiar dados da tabela"><span class="md-copiar-rot">${ICONE_COPIAR}Copiar como</span>${opcao("tsv", "Planilha", "Colunas separadas por tabulação: cola direto nas células de uma planilha")}${opcao("csv", "CSV", "Copia como CSV, separado por vírgula, com cabeçalho")}${opcao("json", "JSON", "Copia como JSON: uma lista de objetos, um por linha")}</div></div>`;
+}
+
+export type FormatoTabela = "tsv" | "csv" | "json";
+
+/** O cabeçalho e as linhas como a pessoa lê na célula (o nome do link, o código sem crases, sem os asteriscos). */
+function celulasSimples(t: Tabela): string[][] {
+  return [t.cabecalho, ...t.linhas].map((linha) => linha.map(textoSimples));
+}
+
+/** O texto de cada formato, a partir de `data-tabela` (cabeçalho na primeira linha). */
+export function tabelaComo(formato: FormatoTabela, celulas: readonly (readonly string[])[]): string {
+  if (formato === "tsv") return celulas.map((linha) => linha.join("\t")).join("\n");
+  if (formato === "csv") return celulas.map((linha) => linha.map(campoCsv).join(",")).join("\n");
+  const [cabecalho = [], ...linhas] = celulas;
+  const nomes = cabecalho.map((c, k) => c || `coluna ${k + 1}`);
+  return JSON.stringify(linhas.map((linha) => Object.fromEntries(nomes.map((nome, k) => [nome, linha[k] ?? ""]))), null, 2);
+}
+
+function campoCsv(c: string): string {
+  return /[",\n\r]/.test(c) ? `"${c.replaceAll('"', '""')}"` : c;
 }
 
 /**
@@ -184,7 +295,7 @@ function tabelaHtml(t: Tabela, opcoes: OpcoesTexto, indice: number): string {
  * espera, com o que a pessoa lê na célula (o nome do link, o código sem crases, sem os asteriscos).
  */
 export function tabelaParaTsv(t: Tabela): string {
-  return [t.cabecalho, ...t.linhas].map((linha) => linha.map(textoSimples).join("\t")).join("\n");
+  return tabelaComo("tsv", celulasSimples(t));
 }
 
 function textoSimples(celula: string): string {

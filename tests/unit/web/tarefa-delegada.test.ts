@@ -61,7 +61,7 @@ describe("'Sempre permitir' não é oferecido para aprovar PR (ADR-047)", () => 
 
   it("comentar e aprovar no mesmo card: o botão oferece só o comentar", () => {
     const html = renderTimeline(conversa, com({ ...base, itensAprovacao: [item("i1", "pr_comentar"), item("i2", "pr_revisar")], nuncaPermanente: ["i2"] }));
-    expect(html).toContain("Sempre permitir github.pr_comentar");
+    expect(html).toContain("Sempre permitir pr comentar no github");
     expect(html).not.toContain("Sempre permitir estas");
   });
 });

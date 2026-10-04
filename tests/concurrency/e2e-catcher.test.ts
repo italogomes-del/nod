@@ -196,7 +196,7 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     expect(t.estado).toBe("concluido");
     const lista = await json<{ memorias: Memoria[] }>("GET", `agentes/${vera.agenteId}/memoria`);
     expect(lista.memorias.map((m) => [m.tipo, m.origem, m.texto])).toEqual([["preferencia", "agente", "prefere resumos em tópicos"]]);
-    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.startsWith("Anotei como preferencia"))).toBe(true);
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.startsWith("Anotei uma preferência"))).toBe(true);
     const m = lista.memorias[0]?.id ?? "";
     expect((await json<{ memoria: Memoria }>("PATCH", `agentes/${vera.agenteId}/memoria/${m}`, { texto: "prefere tópicos curtos" })).memoria.texto).toBe("prefere tópicos curtos");
     const nova = await json<{ memoria: Memoria }>("POST", `agentes/${vera.agenteId}/memoria`, { tipo: "fato", texto: "o time revisa PRs às terças" });

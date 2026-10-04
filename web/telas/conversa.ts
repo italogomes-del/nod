@@ -9,14 +9,15 @@ import { assinatura } from "../lib/assinatura.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
-import { textoFormatado } from "../lib/texto-formatado.ts";
+import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
+import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
-import { detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
+import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
@@ -66,6 +67,85 @@ function acoesDaMensagem(m: Mensagem): string {
   return `<div class="msg-actions">${botao("relatar-mensagem", bug, { id: m.id, titulo: "Relatar comportamento indesejado", aria: "Relatar comportamento indesejado" })}</div>`;
 }
 
+// ---------------------------------------------------------------- recibos das decisões
+
+/**
+ * Recibos (definido em 2026-10-03, revisão da conversa "depois"): depois de decidir, a conversa ganhava parágrafos
+ * soltos — "Marlon aprovou 0 de 3; não enviado: … (falhou na execução)", "Marlon permitiu para sempre:
+ * googlesheets.update_values. Vale já…". Agora cada um é UMA linha: quem decidiu, o quê e como terminou, com o
+ * detalhe por item recolhido. O texto redigido continua gravado (e no title) para quem lê a conversa crua.
+ */
+const IC_RECIBO = {
+  ok: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 8.5 2.5 2.5L12 5.5"/></svg>',
+  falha: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 4.5v4.2"/><path d="M8 11.3v.2"/></svg>',
+  recusa: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 8h6"/></svg>',
+  regra: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7.5" width="9" height="6" rx="1.5"/><path d="M5.5 7.5V5.5a2.5 2.5 0 0 1 4.9-.7"/></svg>',
+} as const;
+
+const DESFECHO_NO_RECIBO: Record<string, string> = { executado: "feito", retirado_pela_pessoa: "você tirou", sensivel_nao_aprovado: "dado pessoal, não aprovado", falhou_na_execucao: "falhou ao executar" };
+
+function quemDecidiu(m: Mensagem, estado: Estado): string {
+  if (m.autoria.autor_id === estado.sessao?.pessoaId) return "Você";
+  const nome = nomesDe(estado)[m.autoria.autor_id];
+  return nome ? nome.charAt(0).toUpperCase() + nome.slice(1) : "Alguém";
+}
+
+function reciboDaDecisao(m: Mensagem, p: Extract<NonNullable<Mensagem["payload"]>, { kind: "resultado_aprovacao" }>, estado: Estado): string {
+  const total = p.itens.length;
+  const feitos = p.itens.filter((i) => i.desfecho === "executado").length;
+  const aprovados = p.itens.filter((i) => i.desfecho === "executado" || i.desfecho === "falhou_na_execucao").length;
+  const tipo = aprovados === 0 ? "recusa" : feitos === aprovados ? "ok" : "falha";
+  const verbo = aprovados === 0 ? "recusou" : "aprovou";
+  const oque = p.frase ?? (total === 1 && p.itens[0]?.texto ? p.itens[0].texto : `${total} ${total === 1 ? "ação" : "ações"}`);
+  const estadoFinal = tipo === "recusa" ? "" : tipo === "ok" ? (total > 1 ? `${feitos} de ${total} feitas` : "feito") : feitos === 0 ? "não saiu" : `${aprovados - feitos} de ${aprovados} não saíram`;
+  const linha = `<span class="recibo-ic">${IC_RECIBO[tipo]}</span><span class="recibo-txt"><b>${esc(quemDecidiu(m, estado))} ${verbo}</b> · ${esc(oque)}</span>${estadoFinal ? `<span class="recibo-estado">${esc(estadoFinal)}</span>` : ""}`;
+  const comTexto = p.itens.some((i) => i.texto);
+  const detalhe = comTexto
+    ? `<ul class="recibo-itens">${p.itens.map((i) => `<li class="recibo-item-${i.desfecho === "executado" ? "ok" : i.desfecho === "falhou_na_execucao" ? "falha" : "recusa"}"><span>${esc(i.texto ?? "")}</span><small>${esc(DESFECHO_NO_RECIBO[i.desfecho] ?? i.desfecho.replaceAll("_", " "))}</small></li>`).join("")}</ul>`
+    : `<p class="recibo-texto">${paragrafos(m.texto)}</p>`;
+  // Um item que deu certo, ou um pedido recusado inteiro, não tem o que abrir: a linha já diz tudo.
+  if ((tipo === "ok" && total === 1) || tipo === "recusa") return `<div class="recibo recibo-${tipo}" title="${esc(m.texto)}">${linha}</div>`;
+  return `<details class="recibo recibo-${tipo}" data-disclosure="recibo-${esc(m.id)}"><summary title="${esc(m.texto)}">${linha}<span class="recibo-ver">detalhes</span></summary>${detalhe}</details>`;
+}
+
+/** Resultado sem payload (o que uma regra aprovou sozinha, itens-na-maquina.ts): a mesma linha, com o texto inteiro. */
+function reciboSemDetalhe(m: Mensagem): string {
+  return `<div class="recibo recibo-ok" title="${esc(m.texto)}"><span class="recibo-ic">${IC_RECIBO.ok}</span><span class="recibo-txt">${esc(m.texto)}</span></div>`;
+}
+
+/** "{pessoa} permitiu para sempre: a.b, c.d. Vale já…" (redacao.ts permissao-permanente) vira "Regra nova · sempre permitir editar no Google Sheets". */
+const PERMITIU = /^(.+?) permitiu para sempre: (.+?)\. Vale já/;
+
+function reciboDaRegra(m: Mensagem, estado: Estado): string | null {
+  const achado = PERMITIU.exec(m.texto);
+  if (!achado) return null;
+  const acoes = (achado[2] ?? "").split(", ").map((n) => {
+    const ponto = n.indexOf(".");
+    return ponto > 0 ? acaoHumana(estado.conectores, n.slice(0, ponto), n.slice(ponto + 1)) : n;
+  });
+  const quem = quemDecidiu(m, estado);
+  return `<div class="recibo recibo-regra" title="${esc(m.texto)}"><span class="recibo-ic">${IC_RECIBO.regra}</span><span class="recibo-txt"><b>${quem === "Você" ? "Regra nova" : `Regra nova de ${esc(quem)}`}</b> · sempre permitir ${esc(acoes.join(" e "))}</span></div>`;
+}
+
+/**
+ * "Anotei uma preferência: …" com o caminho para a memória (definido em 2026-10-03, canvas "Uma conversa de verdade ·
+ * depois"): ver o que o bot aprendeu dá confiança no que ele vai lembrar. A linha é `sistema` sem payload
+ * (src/use-cases/lembrar.ts), então se reconhece pelo começo do texto; as gravadas antes de 2026-10-03 diziam o enum
+ * cru ("Anotei como preferencia") e são lidas na frase nova.
+ */
+const ANOTEI = /^Anotei (?:como (preferencia|fato|resumo)|(uma preferência|um fato|um resumo)): /;
+const TIPO_ANTIGO: Record<string, string> = { preferencia: "uma preferência", fato: "um fato", resumo: "um resumo" };
+
+function linhaDaMemoria(m: Mensagem, estado: Estado): string | null {
+  const achado = ANOTEI.exec(m.texto);
+  if (!achado) return null;
+  const tipo = achado[2] ?? TIPO_ANTIGO[achado[1] ?? ""] ?? "";
+  const agenteId = m.autoria.autor_tipo === "agente" ? m.autoria.autor_id : undefined;
+  const agente = agenteId ? agenteDe(estado, agenteId) : undefined;
+  const ver = agente ? ` ${botao("ir-memoria", "Ver na memória", { classe: "link sm", id: agente.id })}` : "";
+  return `<div class="msg-sistema msg-memoria">${paragrafos(`Anotei ${tipo}: ${m.texto.slice(achado[0].length)}`)}${ver}</div>`;
+}
+
 function corpoMensagem(m: Mensagem, estado: Estado): string {
   const p = m.payload;
   if (p?.kind === "computador_fora_do_ar") {
@@ -80,7 +160,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "pasta_aberta") return renderPastaAberta(p, estado, agenteDe(estado, p.agenteId));
   // definido em 2026-09-28 (ADR-051): o card do artefato; o iframe entra depois do render (telas/artefatos-vivos.ts).
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
-  if (m.kind === "sistema") return `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (m.kind === "sistema") return linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
@@ -95,7 +175,9 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     return `<div class="msg-consentimento"><b>Acesso permitido · ${esc(p.slug)}</b><div>${caps.length === 1 ? esc(caps[0] ?? "") : `${caps.length} ações`}</div><details data-disclosure="consentimento-${esc(m.id)}"><summary>Ver registro de autorização</summary>${paragrafos(m.texto)}</details></div>`;
   }
   if (p?.kind === "rotina_execucao") return `<div class="msg-rotina msg-rotina-${esc(p.desfecho)}">${paragrafos(m.texto)}</div>`;
-  if (p?.kind === "resultado_aprovacao") return `<div class="msg-resultado">${paragrafos(m.texto)}</div>`;
+  if (p?.kind === "resultado_aprovacao") return reciboDaDecisao(m, p, estado);
+  if (m.kind === "resultado_aprovacao") return reciboSemDetalhe(m);
+  if (m.kind === "consentimento" && !p) return reciboDaRegra(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
   if (p?.kind === "parada") return `<div class="msg-parada">■ ${paragrafos(m.texto)}</div>`;
   if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
@@ -160,6 +242,12 @@ export function comChipDeComando(texto: string): string {
 export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
+  // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
+  // na margem ele parecia de ninguém.
+  if (m.payload?.kind === "artefato") {
+    const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
+    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
+  }
   if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}${faixaDaMensagem(m, estado)}</div>`;
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
@@ -298,9 +386,9 @@ function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, 
   const visiveis = a.etapas.slice(-ETAPAS_VISIVEIS);
   const anteriores = a.totalEtapas - visiveis.length;
   const etapas = visiveis.map((e) => `<li title="${esc(e.texto)}"><span class="atividade-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span><small>${e.ferramentas === 1 ? "1 ferramenta" : `${e.ferramentas} ferramentas`}</small></li>`).join("");
-  return `<article class="message bot atividade" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
+  return `<article class="message bot atividade ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
     <div class="atividade-cab"><span class="atividade-pulso" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
-    <p class="atividade-agora">${esc(linhaAtual(a))}</p>
+    <p class="atividade-agora">${soLinks(linhaAtual(a))}</p>
     ${renderTarefasDoBot(a.tarefas)}
     <details data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-seta" aria-hidden="true">›</span><span>${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}</span><span class="atividade-ver">Ver etapas</span><span class="atividade-recolher">Recolher</span></summary>
       <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
@@ -328,17 +416,40 @@ export function renderTarefasDoBot(tarefas: readonly TarefaDoBot[]): string {
  * o turno pesado PIOR — o Chrome refaz o layout do parágrafo inteiro de qualquer jeito, e cada layout ficou mais caro
  * com os nós pequenos acrescentados (2,2 → 2,9 s de layout, 55 → 44 quadros/s; scripts/carga-tela).
  */
-function blocoDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): BlocoDaTimeline {
+function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const chave = `vivo:${t.turnoId}`;
   const atividade = estado.atividades[c.conversa.id]?.[t.turnoId];
+  const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
+  const nome = agente?.nome ?? "O agente";
   if (atividade && atividade.ferramentas > 0) {
-    const nome = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId)?.nome ?? "O agente" : "O agente";
-    return { chave, html: renderCartaoAtividade(t, atividade, estado, nome) };
+    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: renderCartaoAtividade(t, atividade, estado, nome) }];
   }
   if (atividade?.atual) {
-    return { chave, html: `<article class="message bot streaming" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${paragrafos(atividade.atual)}<span class="cursor">▍</span></div></div></article>` };
+    // definido em 2026-10-03: o texto ao vivo já sai formatado (negrito, listas, tabelas, chips), em vez de cru até o
+    // fim do turno — o salto da troca pelo balão final some. A memória por chave guarda o último pedaço formatado.
+    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave }))}</div></div></article>` }];
   }
-  return { chave, html: linhaDoTurnoVivo(t, c, estado) };
+  return [{ chave, html: linhaDoTurnoVivo(t, c, estado) }];
+}
+
+/** O cursor do streaming fica na mesma linha do último texto, mesmo quando ele termina num parágrafo, item ou título. */
+function comCursor(html: string): string {
+  const cursor = '<span class="cursor">▍</span>';
+  const fim = /(<\/(?:p|li)>(?:<\/[uo]l>)?)$/.exec(html);
+  return fim ? `${html.slice(0, fim.index)}${cursor}${fim[1]}` : `${html}${cursor}`;
+}
+
+/**
+ * Quem está falando ao vivo (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): o cartão de atividade
+ * e o balão em streaming começavam na margem, sem mascote, nome nem hora — não pareciam a mesma pessoa das falas de
+ * cima. O cabeçalho é um bloco À PARTE do corpo: o corpo muda a cada pedaço e a cada segundo do relógio, e o
+ * <nod-mascote> regravado junto reiniciaria a animação; este bloco só muda quando o turno sai da fila.
+ */
+function cabecalhoDoTurnoVivo(t: TurnoVivo, agente: FrotaDto["agentes"][number] | undefined, nome: string): BlocoDaTimeline {
+  return {
+    chave: `vivo-cab:${t.turnoId}`,
+    html: `<div class="message bot vivo-cab" data-turno="${esc(t.turnoId)}">${agente ? iconeAgente(agente, "md", t.estado === "rodando" ? "trabalhando" : "pensando") : ""}<div class="msg-autor"><b>${esc(nome)}</b><time>${esc(hora(t.desde))}</time><span class="vivo-selo"><span class="atividade-pulso" aria-hidden="true"></span>ao vivo</span></div></div>`,
+  };
 }
 
 function linhaDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
@@ -467,7 +578,7 @@ export function renderAoVivoDaTimeline(c: ConversaEstado, estado: Estado): strin
 /** Os turnos vivos da conversa e a faixa de parada, em blocos (um por turno). */
 export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id);
-  const blocos: BlocoDaTimeline[] = [...vivos.map((t) => blocoDoTurnoVivo(t, c, estado)), { chave: "faixa", html: renderFaixaParada(estado.faixaParada) }];
+  const blocos: BlocoDaTimeline[] = [...vivos.flatMap((t) => blocosDoTurnoVivo(t, c, estado)), { chave: "faixa", html: renderFaixaParada(estado.faixaParada) }];
   return blocos.filter((b) => b.html !== "");
 }
 
@@ -492,15 +603,56 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   const noPerfil = idsNoPerfil(c.propostas);
   const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id) && !noPerfil.has(p.id));
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
+  const idsDasPropostas = new Set(propostas.map((p) => p.id));
+  const { blocos, ancoradas } = comPedidosAncorados(blocosDasMensagens(c.mensagens, estado, sala), c, estado, idsDasPropostas);
   return [
     { chave: "sep", html: sep },
-    ...blocosDasMensagens(c.mensagens, estado, sala),
+    ...blocos,
     // ADR-064: o "a fazer" do bot fica logo abaixo da última mensagem da conversa própria dele.
     { chave: "a-fazer", html: c.conversa.tipo === "propria" && c.conversa.agenteId ? renderAFazerNaConversa(estado, c.conversa.agenteId) : "" },
     { chave: "acolhimento", html: acolhimento },
     ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
-    { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, new Set(propostas.map((p) => p.id))) },
+    { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
   ].filter((b) => b.html !== "");
+}
+
+/**
+ * A mensagem embaixo da qual o pedido fica (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): a
+ * última fala do turno que pediu (`Mensagem.turnoId`); com o turno ainda rodando, a mensagem que o disparou
+ * (`turnosEmCurso`); sem turno, a última mensagem anterior ao pedido. Sem nenhuma, o pedido fica na seção do fim.
+ */
+function ancoraDoPedido(d: { turnoId: string | null; criadoEm: string }, c: ConversaEstado): string | undefined {
+  const doTurno = d.turnoId ? c.mensagens.filter((m) => m.turnoId === d.turnoId).at(-1)?.id : undefined;
+  if (doTurno) return doTurno;
+  const origem = d.turnoId ? c.turnosEmCurso.find((t) => t.id === d.turnoId)?.mensagemId : undefined;
+  if (origem && c.mensagens.some((m) => m.id === origem)) return origem;
+  const criado = Date.parse(d.criadoEm);
+  return c.mensagens.filter((m) => m.criadoEm <= criado).at(-1)?.id;
+}
+
+/**
+ * Põe cada pedido aberto logo depois do bloco que contém a sua âncora. Os blocos já vêm com fios e avisos
+ * recolhidos: a chave de um bloco é o id da primeira mensagem dele (ou `avisos-<id>`), então a âncora que caiu dentro
+ * de um grupo recolhido fica depois do grupo — nunca some.
+ */
+function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estado: Estado, propostas: ReadonlySet<string>): { blocos: BlocoDaTimeline[]; ancoradas: ReadonlySet<string> } {
+  const pedidos = pedidosAncoraveis(estado, c.conversa.id, propostas);
+  if (pedidos.length === 0) return { blocos, ancoradas: new Set() };
+  const posicao = new Map(c.mensagens.map((m, i) => [m.id, i]));
+  const inicioDe = blocos.map((b) => posicao.get(b.chave.startsWith("avisos-") ? b.chave.slice("avisos-".length) : b.chave));
+  const depoisDe = new Map<number, typeof pedidos>();
+  for (const item of pedidos) {
+    const ancora = ancoraDoPedido(item.decisao, c);
+    const alvo = ancora === undefined ? undefined : posicao.get(ancora);
+    if (alvo === undefined) continue;
+    let bloco = -1;
+    inicioDe.forEach((inicio, i) => { if (inicio !== undefined && inicio <= alvo) bloco = i; });
+    if (bloco < 0) continue;
+    depoisDe.set(bloco, [...(depoisDe.get(bloco) ?? []), item]);
+  }
+  const ancoradas = new Set([...depoisDe.values()].flat().map((i) => i.decisao.id));
+  const saida = blocos.flatMap((b, i) => [b, ...(depoisDe.get(i) ?? []).map((item) => ({ chave: `decisao:${item.decisao.id}`, html: renderDecisaoAncorada(item, estado) }))]);
+  return { blocos: saida, ancoradas };
 }
 
 const PAINEL = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.5v13"/></svg>';
@@ -515,8 +667,14 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
-  const pendente = estado.suaVez?.itens.some((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido");
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${pendente ? "Aguardando você" : vivo ? "Trabalhando" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível"}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
+  // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
+  // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o
+  // turno vivo vence nos dois e o que espera a pessoa entra junto, contado por fio ("Trabalhando · 2 esperam você").
+  const esperam = new Set((estado.suaVez?.itens ?? []).filter((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido").map(chaveDoItem)).size;
+  const presenca = vivo
+    ? `Trabalhando${esperam ? ` <span class="presenca-sep" aria-hidden="true">·</span> <b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : ""}`
+    : esperam ? "Aguardando você" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
       ${renderSeloModoDev(estado, a?.conversaId, nome)}
       ${vivo ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" }) : ""}

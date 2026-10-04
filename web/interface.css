@@ -61,6 +61,11 @@ body { background: #fcfdff; }
 .bubble { box-shadow: none; border-radius: 17px; padding: 12px 16px; line-height: 1.65; font-size: 14px; overflow-wrap: anywhere; }
 .message.bot .bubble, .message.you .bubble { background: #f3f4f8; color: #30384b; border-radius: 17px; }
 .message.you .bubble { background: #f0f3f8; }
+/* definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): o balão de quem escreve é o azul da marca, com o
+   canto de cima mais reto do lado de quem fala — espelho do balão do bot. Cinza contra cinza não separava as vozes. */
+.message.you .bubble { background: var(--blue); color: #fff; border-top-right-radius: 8px; }
+.message.you .bubble .chip-comando { background: rgba(255, 255, 255, .18); color: #fff; }
+.message.you .bubble a { color: #fff; }
 .msg-autor { display: flex; gap: 10px; align-items: center; margin: 0 0 6px; font-size: 12px; }
 .msg-autor b { font-weight: 600; }
 .msg-autor time { color: var(--ink-3); font-size: 10px; }
@@ -216,10 +221,6 @@ body { background: #fcfdff; }
 .md-tabela-mais summary { list-style: none; cursor: pointer; padding: 10px 14px; border-top: 1px solid #eef0f4; background: #fafbfc; font-size: 13px; font-weight: 500; color: var(--blue); }
 .md-tabela-mais summary::-webkit-details-marker { display: none; }
 .md-tabela-mais[open] .md-mais, .md-tabela-mais:not([open]) .md-menos { display: none; }
-.md-tabela-copiar { position: absolute; top: 5px; right: 8px; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 8px; border: 1px solid #e3e7ef; background: #fff; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
-.md-tabela-copiar svg { width: 13px; height: 13px; }
-.md-tabela:hover .md-tabela-copiar, .md-tabela-copiar:focus-visible { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .md-tabela-copiar { opacity: .8; pointer-events: auto; } }
 
 /* definido em 2026-09-17: acolhimento e conexões acompanham a conversa. */
 .create-actions{display:flex;gap:2px;align-items:center}.create-actions .create-trigger{position:relative;display:grid;place-items:center;line-height:1}.segurar-anel{position:absolute;inset:-1px;box-sizing:border-box;border-radius:9px;pointer-events:none;opacity:0;background:conic-gradient(var(--acento,#1f67c6) var(--segurar-progresso,0turn),transparent 0);padding:2px;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}.create-trigger.segurando .segurar-anel{opacity:1;animation:segurar-progresso var(--ms-segurar,500ms) linear forwards}.create-trigger.segurando{color:#4d5567}@keyframes segurar-progresso{from{--segurar-progresso:0turn}to{--segurar-progresso:1turn}}@property --segurar-progresso{syntax:'<angle>';inherits:true;initial-value:0turn}@media (prefers-reduced-motion:reduce){.create-trigger.segurando .segurar-anel{animation:none;opacity:1;--segurar-progresso:1turn}}@supports not (background:conic-gradient(red var(--x,0turn),transparent 0)){.create-trigger.segurando .segurar-anel{animation:none;opacity:1;--segurar-progresso:1turn}}
@@ -428,7 +429,8 @@ body { background: #fcfdff; }
 .atividade-cartao li.atividade-anteriores { padding-left: 24px; color: var(--ink-3); font-size: 12px; border-top: 0; }
 
 /* Fila da conversa (2026-09-24): cada mensagem que espera mostra onde está e um Cancelar só dela. */
-.message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { background: var(--panel); border: 1px dashed var(--ink-4); }
+.message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { background: var(--panel); border: 1px dashed var(--ink-4); color: #30384b; }
+.message.you.fila-na_fila .bubble .chip-comando, .message.you.fila-cancelando .bubble .chip-comando, .message.you.fila-cancelada .bubble .chip-comando { background: #e8f0fd; color: #1f4a8f; }
 .message.you.fila-cancelada .bubble { background: var(--panel); border: 1px dashed var(--line-2); color: var(--ink-3); text-decoration: line-through; }
 .fila-chip { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; font-size: 12px; color: #5d6575; }
 .fila-chip.cancelada { color: var(--ink-3); }
@@ -924,3 +926,134 @@ nod-mascote[data-aviso="nao-lido"] { --nod-aviso: #8a93a6; }
 .secao-a-fazer .pd-texto { font-size: 13.5px; font-weight: 500; line-height: 1.4; }
 .secao-a-fazer .pd-corpo { gap: 5px; }
 @media (max-width: 700px) { .a-fazer { margin-left: 35px; max-width: 89%; } }
+
+/* ---- Conversa "depois" (definido em 2026-10-03, canvas "Uma conversa de verdade · depois") ---- */
+/* Aprovação de um item: o desenho do cartão de atividade, sem a borda âmbar de lista (renderCardAprovacao). */
+.lista > li.aprov-card, .aprov-card { padding: 0; border: 1px solid #e3e6ec !important; border-left: 1px solid #e3e6ec !important; border-radius: 17px; border-top-left-radius: 8px; background: var(--panel); box-shadow: 0 1px 2px rgba(8, 10, 14, .04); overflow: hidden; margin-bottom: 12px; }
+/* 52px = o mascote md (38px, .icon.md acima) + o gap de 14px da .message: o card começa onde o balão começa. */
+.decisoes-ancoradas { list-style: none; padding: 0; margin: -10px 0 25px 52px; width: min(600px, calc(100% - 52px)); }
+.decisoes-ancoradas > li.decisao:not(.aprov-card) { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.aprov-cab { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 18px 0; font-size: 13px; color: var(--ink-3); }
+.aprov-cab b { font-weight: 600; color: var(--ink-2); }
+.aprov-ponto { width: 8px; height: 8px; border-radius: 50%; background: #e0a030; flex: none; }
+.aprov-card .aprov-titulo { margin: 6px 0 0; padding: 0 18px 0 34px; font-size: 15px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.aprov-onde { margin: 8px 0 0; padding: 0 18px 0 34px; font-size: 12.5px; color: var(--ink-3); }
+.aprov-app .app-logo { width: 18px; height: 18px; min-width: 18px; border-radius: 5px; font-size: 10px; border: 0; }
+.aprov-card .ap-comando, .aprov-card > .ap-oque { margin: 10px 18px 0 34px; }
+.aprov-previa { margin: 14px 18px 0 34px; }
+.aprov-previa-cab { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.aprov-previa .md-tabela { margin: 0; }
+.aprov-previa .md-tabela td { padding: 6px 14px; }
+.aprov-previa-mais { padding: 6px 14px; border-top: 1px solid #eef0f4; background: #fafbfc; font-size: 12px; color: var(--ink-3); }
+.aprov-campos { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; padding: 10px 14px; border: 1px solid #e3e7ef; border-radius: 10px; font-size: 12.5px; }
+.aprov-campos dt { color: var(--ink-3); }
+.aprov-campos dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }
+.aprov-card .ap-porque { margin: 12px 18px 0 34px; }
+.aprov-card .tag { margin: 10px 0 0 34px; }
+.aprov-card .aprov-acoes { display: flex; gap: 8px; flex-wrap: wrap; padding: 16px 18px 16px 34px; margin: 0; }
+.aprov-card .aprov-acoes .bt.pri { background: var(--blue); border-color: var(--blue); color: #fff; }
+.aprov-rodape { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 12px; padding: 12px 18px 12px 34px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--line); background: #f7f8fa; }
+.aprov-rodape > span { padding-top: 1px; }
+.aprov-rodape .ap-detalhe { margin: 0 0 0 auto; }
+.aprov-rodape .ap-detalhe[open] { flex-basis: 100%; margin-left: 0; }
+.aprov-rodape .ap-detalhe > summary { color: var(--blue); font-weight: 500; font-size: 12px; margin-left: auto; }
+.aprov-card.realce { box-shadow: 0 0 0 3px rgba(224, 160, 48, .25); transition: box-shadow .2s ease; }
+/* Cabeçalho: "Trabalhando · 2 esperam você" (renderCabecalhoConversa). */
+.presenca .presenca-sep { color: var(--ink-4); }
+.presenca b { font-weight: 600; color: #24477f; }
+/* Rodapé da tabela: linhas · colunas e "Copiar como" (texto-formatado.ts rodapeDaTabela). */
+.md-tabela-rodape { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; padding: 4px 8px 4px 14px; border-top: 1px solid #e3e7ef; background: #fafbfc; font-size: 11.5px; color: var(--ink-3); }
+.md-copiar { display: inline-flex; align-items: center; gap: 2px; }
+.md-copiar-rot { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; }
+.md-copiar-rot svg { width: 13px; height: 13px; }
+.md-copiar button { min-height: 28px; padding: 0 9px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--blue); }
+.md-copiar button:hover, .md-copiar button:focus-visible { background: var(--blue-soft); }
+/* Listas e títulos no texto do bot (texto-formatado.ts comListas). */
+.md-lista { margin: 4px 0 8px; padding-left: 22px; }
+.md-lista li { margin: 2px 0; }
+.md-lista li::marker { color: var(--ink-3); }
+.md-titulo { margin: 10px 0 4px; font-weight: 650; color: var(--ink); }
+.md-titulo:first-child, .md-paragrafo:first-child { margin-top: 0; }
+.md-paragrafo { margin: 0 0 8px; }
+.md-paragrafo:last-child, .md-lista:last-child { margin-bottom: 0; }
+/* Parte ao vivo ancorada no mascote (conversa.ts cabecalhoDoTurnoVivo): o cabeçalho é um bloco, o corpo outro. */
+.message.vivo-cab { margin: 0 0 4px; align-items: center; }
+.message.vivo-cab > .icon { margin-top: 0; }
+.message.vivo-cab .msg-autor { margin: 0; }
+.message.ao-vivo { padding-left: 52px; }
+.message.ao-vivo .bubble-wrap { width: min(100%, 600px); }
+.message.streaming.ao-vivo .bubble-wrap { width: auto; }
+.vivo-selo { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-size: 10.5px; font-weight: 500; }
+.vivo-selo .atividade-pulso { width: 6px; height: 6px; }
+.atividade-agora .lk-chip { vertical-align: 0; }
+/* "Anotei uma preferência: …" + "Ver na memória" (conversa.ts linhaDaMemoria). */
+.msg-memoria .bt.link { display: inline; min-height: 0; padding: 0 2px; font-size: inherit; font-weight: 500; color: var(--blue); vertical-align: baseline; }
+/* Artefato: "Abrir em nova aba" (card-artefato.ts). */
+.artefato-nova-aba { display: inline-flex; align-items: center; gap: 4px; }
+.artefato-nova-aba svg { flex: none; }
+/* "N coisas esperam você" acima do campo (pergunta.ts renderEspera). */
+.tag-azul { color: var(--blue); border-color: #cfe0f5; background: var(--blue-soft); }
+.espera { margin: 0 0 8px; border: 1px solid #d9e1ee; border-radius: 14px; background: #fff; overflow: hidden; }
+.espera-cab { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; color: var(--ink); background: #f7f9fc; border-bottom: 1px solid var(--line); }
+.espera-n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--blue); color: #fff; font-size: 11px; }
+.espera ol { list-style: none; margin: 0; padding: 0; max-height: 168px; overflow: auto; }
+.espera li { display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 14px; border-top: 1px solid #f1f3f7; font-size: 12.5px; color: var(--ink-2); line-height: 1.4; }
+.espera li:first-child { border-top: 0; }
+.espera-ord { width: 14px; flex: none; text-align: center; font-size: 11px; color: var(--ink-3); }
+.espera .tag { flex: none; }
+.esp-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.esp-txt small { display: block; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; }
+.espera li .bt.link { flex: none; min-height: 28px; white-space: nowrap; color: var(--blue); }
+.lista > li.decisao.realce, .card-acesso.realce, [data-proposta].realce { box-shadow: 0 0 0 3px rgba(224, 160, 48, .25); transition: box-shadow .2s ease; }
+/* Artefato como fala do bot (conversa.ts renderMensagem): mascote, nome e hora; o card ocupa a coluna do balão. */
+.message.com-artefato .bubble-wrap { width: min(100%, 760px); }
+.message.com-artefato .artefato { margin: 0; max-width: none; }
+/* Aprovação com vários itens no mesmo card (sua-vez.ts renderCardAprovacao). */
+.aprov-itens { list-style: none; margin: 12px 18px 0 34px; padding: 0; border: 1px solid #e3e7ef; border-radius: 12px; overflow: hidden; }
+.aprov-item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 10px; padding: 10px 12px; border-top: 1px solid #eef0f4; }
+.aprov-item:first-child { border-top: 0; }
+.aprov-item.sensivel { background: var(--amber-bg); }
+.aprov-marca { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }
+.aprov-marca input { margin: 3px 0 0; accent-color: var(--blue); flex: none; }
+.aprov-item-txt { font-size: 13.5px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.aprov-item-txt small { display: block; font-size: 12px; color: var(--ink-3); }
+.aprov-item .ap-detalhe { margin: 1px 0 0; flex: none; }
+.aprov-item .ap-detalhe > summary { font-size: 12px; }
+.aprov-item .ap-detalhe[open] { flex-basis: 100%; padding-left: 24px; }
+.aprov-item .justificativa, .aprov-item .ap-porque { flex-basis: 100%; margin: 4px 0 0 24px; font-size: 12px; }
+.aprov-item .tag { margin: 4px 0 0 24px; }
+/* Recibos das decisões (conversa.ts reciboDaDecisao / reciboDaRegra): uma linha de feedback do sistema, centrada. */
+.recibo { margin: 4px auto 12px; width: fit-content; max-width: min(620px, 100%); padding: 6px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fafbfc; font-size: 12.5px; color: var(--ink-3); }
+.recibo, .recibo > summary { display: flex; align-items: center; gap: 8px; }
+.recibo > summary { list-style: none; cursor: pointer; }
+.recibo > summary::-webkit-details-marker { display: none; }
+details.recibo { display: block; }
+.recibo-ic { width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--panel-soft); color: var(--ink-3); }
+.recibo-ic svg { width: 12px; height: 12px; }
+.recibo-ok .recibo-ic { background: #e6f6ec; color: var(--ok); }
+.recibo-falha .recibo-ic { background: #fdecea; color: var(--red); }
+.recibo-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recibo-txt b { font-weight: 600; color: var(--ink-2); }
+.recibo-estado { flex: none; font-size: 11.5px; font-weight: 500; color: var(--ok); }
+.recibo-falha .recibo-estado { color: var(--red); }
+.recibo-ver { flex: none; font-size: 11.5px; color: var(--blue); }
+details.recibo[open] .recibo-ver { visibility: hidden; }
+.recibo-itens { list-style: none; margin: 8px 0 2px 26px; padding: 0; border-left: 2px solid var(--line); }
+.recibo-itens li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0 3px 10px; color: var(--ink-2); }
+.recibo-itens li small { flex: none; color: var(--ink-3); }
+.recibo-itens .recibo-item-ok small { color: var(--ok); }
+.recibo-itens .recibo-item-falha small { color: var(--red); }
+.recibo-texto { margin: 6px 0 0 26px; color: var(--ink-2); }
+
+/* Feedback do sistema no centro (definido em 2026-10-03, revisão da conversa "depois"): o que NÃO é fala do bot —
+   aprovação decidida, pergunta resolvida, rotina executada, parada, negação, acesso concedido, pasta aberta, aviso de
+   computador — fica centrado, como .msg-sistema e o fio resolvido já ficavam. A coluna da esquerda é só do bot. */
+.msg-linha > .msg-rotina, .msg-linha > .msg-resultado, .msg-linha > .msg-parada, .msg-linha > .msg-passe {
+  margin: 4px auto 12px; max-width: 620px; text-align: center; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+.msg-linha > .msg-consentimento { margin: 4px auto 12px; max-width: 620px; padding: 0; border-left: 0; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+.msg-linha > .msg-consentimento b { color: var(--ink-2); font-weight: 600; }
+.msg-linha > .msg-consentimento details { text-align: left; }
+.msg-linha > .msg-consentimento summary { text-align: center; }
+.msg-linha > .negacao { width: fit-content; max-width: 620px; margin: 4px auto 12px; text-align: center; }
+.msg-linha > .pasta-aberta { margin: 4px auto 16px; }
+.msg-linha > .msg-computador-fora { max-width: 620px; margin: 4px auto 12px; }
