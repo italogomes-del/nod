@@ -78,3 +78,24 @@ Depois de desligar: "Como foi a ligação?":
 - **Codex**: só contra o app-server falso (o Codex não está instalado aqui).
 - **whisper base**: erra nomes curtos ("Ouina" por "Oi Nina"); suficiente para dev (decisão de 2026-10-04: grátis e
   compreensível). Para mais acerto, `NOD_VOZ_WHISPER_MODELO` com o `small`.
+
+## Onboarding por ligação (fase 5)
+
+Feito com o catcher e a voz falsa (e2e `tests/concurrency/onboarding-catcher.test.ts`: etapa → Nina liga → Atender
+grava o consentimento → entrevista com `anotar_entrevista` → `concluir_entrevista` → `propor_bot` aprovado por voz →
+bot criado → concluir) e capturas no Chrome comparadas com o protótipo HiFiMac renderizado. Nas capturas da entrevista,
+os marcadores `[[tool: …]]` aparecem na legenda porque o roteiro do catcher manda as falas por texto; numa ligação real
+a pessoa só fala.
+
+| Etapa | Captura |
+|---|---|
+| Olá | ![olá](uat-modo-ligacao/onboarding-01-ola.png) |
+| A IA dos seus bots (cards) | ![ia](uat-modo-ligacao/onboarding-02-ia-cards.png) |
+| Nina está te ligando | ![chamando](uat-modo-ligacao/onboarding-03-chamando.png) |
+| Entrevista com "O que você contou" e "Diga algo como" | ![entrevista](uat-modo-ligacao/onboarding-05-entrevista-painel.png) |
+| Pílula guiando: novo bot preenchido | ![bot](uat-modo-ligacao/onboarding-06-configurando-bot.png) |
+| Tudo montado | ![fim](uat-modo-ligacao/onboarding-09-fim.png) |
+
+Diferenças para o protótipo, por causa dos tokens do design system: o Atender usa o verde `--success` com anéis
+neutros, e os links ficam sublinhados. A rotina "15 min antes de cada reunião" virou "Dias úteis, 8:00" (o cron não
+expressa "antes do evento").
