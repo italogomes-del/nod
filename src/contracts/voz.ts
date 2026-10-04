@@ -66,6 +66,12 @@ export type AcaoComandoVoz = "aprovar" | "recusar";
 export const SUGESTOES_MAX = 4;
 export const SUGESTAO_MAX_CHARS = 80;
 
+/**
+ * Por onde a voz do bot sai no aparelho da pessoa (definido em 2026-10-04, análise do Buzz): com fone não há eco, e a
+ * interrupção pode ser mais rápida; no alto-falante (ou sem saber), o servidor é conservador.
+ */
+export type RotaSaida = "fone" | "alto-falante" | "desconhecida";
+
 /** Cliente → servidor, canal de mídia. */
 export type MsgMidiaCliente =
   | { t: "ola"; v: number; ligacaoId: string; entrada: "pcm16"; saida: "pcm16"; retomar?: boolean }
@@ -77,6 +83,8 @@ export type MsgMidiaCliente =
   /** O composer durante a ligação: entra como uma vez da pessoa, sem passar pelo STT. */
   | { t: "texto"; conteudo: string }
   | { t: "mudo"; ativo: boolean }
+  /** A saída de áudio padrão, ao abrir e a cada troca de aparelho. */
+  | { t: "saida"; rota: RotaSaida }
   | { t: "ping" }
   | { t: "tchau" };
 

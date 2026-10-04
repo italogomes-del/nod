@@ -81,6 +81,8 @@ async function main(): Promise<void> {
   const audioPorUtt = new Map<number, Int16Array[]>();
   const todasAsVozes: Int16Array[] = [];
   let primeiroAudioEm = 0;
+  // Quando chegou o primeiro áudio de cada fala do bot: o que a pessoa ouve, não só o texto.
+  const audioEm = new Map<number, number>();
   ws.on("message", (dados, binario) => {
     const agora = Date.now();
     if (binario) {
@@ -89,6 +91,7 @@ async function main(): Promise<void> {
       const pcm = new Int16Array(b.buffer.slice(b.byteOffset + 7, b.byteOffset + b.byteLength));
       if (!audioPorUtt.has(utt)) {
         audioPorUtt.set(utt, []);
+        audioEm.set(utt, agora);
         // O "alto-falante": relata o fim da fala depois da duração, como o app faria.
         setTimeout(() => ws.send(JSON.stringify({ t: "tocou-fim", utt })), 400);
       }
@@ -138,8 +141,18 @@ async function main(): Promise<void> {
     const legenda = await esperar((m) => m.t === "legenda" && m.final === true, fimDaFala, 15_000);
     const resposta = await esperar((m) => m.t === "bot-fala" && m.tipo === "conteudo", fimDaFala, 30_000);
     const espera = await esperar((m) => m.t === "bot-fala" && m.tipo === "espera", fimDaFala, 1);
-    relatorio.push(`"${frase}" → STT ${legenda ? legenda.em - fimDaFala : "—"} ms · 1º conteúdo ${resposta ? resposta.em - fimDaFala : "—"} ms${espera ? ` · espera ${espera.em - fimDaFala} ms` : ""}`);
     await dormir(4000);
+    // Buraco entre frases da mesma resposta: o áudio da seguinte chegou depois de a anterior acabar de tocar?
+    const falas = msgs.filter((x) => x.em >= fimDaFala && x.m.t === "bot-fala" && x.m.tipo === "conteudo").map((x) => Number(x.m.utt));
+    let buracoMax = 0;
+    for (let i = 1; i < falas.length; i++) {
+      const ant = falas[i - 1]!;
+      const dur = ((audioPorUtt.get(ant) ?? []).reduce((n, p) => n + p.length, 0) / 24_000) * 1000;
+      const fimAnt = (audioEm.get(ant) ?? 0) + dur;
+      buracoMax = Math.max(buracoMax, (audioEm.get(falas[i]!) ?? fimAnt) - fimAnt);
+    }
+    const audio1 = resposta ? audioEm.get(Number(resposta.m.utt)) : undefined;
+    relatorio.push(`"${frase}" → STT ${legenda ? legenda.em - fimDaFala : "—"} ms · 1º conteúdo ${resposta ? resposta.em - fimDaFala : "—"} ms · 1º áudio ${audio1 ? audio1 - fimDaFala : "—"} ms${espera ? ` · espera ${espera.em - fimDaFala} ms` : ""}${falas.length > 1 ? ` · maior buraco entre frases ${Math.round(buracoMax)} ms` : ""}`);
   }
   ws.send(JSON.stringify({ t: "tchau" }));
   await esperar((m) => m.t === "fim", inicio, 10_000);

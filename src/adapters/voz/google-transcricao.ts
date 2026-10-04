@@ -8,8 +8,9 @@ import type { OpcoesSessaoStt, SessaoStt, Transcritor } from "./spi.ts";
  * STT `google` pela Live API do Vertex AI (Transcribe Live), por WebSocket (definido em 2026-10-04, ADR-071).
  *
  * Como funciona: uma conexão por ligação; o VAD é o do nod (`automaticActivityDetection.disabled`), então cada trecho
- * vai entre `activityStart` e `activityEnd`. As parciais vêm de `serverContent.inputTranscription` (pedaços somados); o
- * final sai quando o servidor fecha a transcrição (`finished`, `turnComplete` ou `generationComplete`) ou, se nada disso
+ * vai entre `activityStart` e `activityEnd`. As parciais vêm de `serverContent.interimInputTranscription`, cada uma com o
+ * texto do trecho até ali (conferido ao vivo em 2026-10-04: uma a cada ~0,5 s); o texto final vem de
+ * `serverContent.inputTranscription` (pedaços somados; sem ele, vale a última parcial). O final sai quando o servidor fecha a transcrição (`finished`, `turnComplete` ou `generationComplete`) ou, se nada disso
  * chegar, 2 s depois do `activityEnd` com o que houver. Áudio que chega enquanto um final está pendente fica guardado e
  * vai como o trecho seguinte, depois do final (a ordem dos finais nunca se inverte).
  *
@@ -83,7 +84,7 @@ export function urlLiveVertex(regiao: string): string {
 }
 
 /** O que importa de uma mensagem do servidor, já validado. */
-export type MsgLive = { setupComplete: boolean; transcricao: string | null; transcricaoFechada: boolean; turnoCompleto: boolean; goAway: boolean };
+export type MsgLive = { setupComplete: boolean; transcricao: string | null; parcial: string | null; transcricaoFechada: boolean; turnoCompleto: boolean; goAway: boolean };
 
 function obj(x: unknown): Record<string, unknown> | null {
   return typeof x === "object" && x !== null && !Array.isArray(x) ? (x as Record<string, unknown>) : null;
@@ -100,9 +101,11 @@ export function lerMsgLive(texto: string): MsgLive | null {
   if (!m) return null;
   const sc = obj(m.serverContent);
   const it = obj(sc?.inputTranscription);
+  const interina = obj(sc?.interimInputTranscription);
   return {
     setupComplete: m.setupComplete !== undefined,
     transcricao: typeof it?.text === "string" ? it.text : null,
+    parcial: typeof interina?.text === "string" ? interina.text : null,
     transcricaoFechada: it?.finished === true,
     turnoCompleto: sc?.turnComplete === true || sc?.generationComplete === true,
     goAway: m.goAway !== undefined,
@@ -217,6 +220,7 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
       let estado: "livre" | "falando" | "fechando" = "livre";
       let emitirFinal = true;
       let texto = "";
+      let ultimaParcial = "";
       let pendentes: Int16Array[] = [];
       let amostrasPendentes = 0;
       let timerFinal: ReturnType<typeof setTimeout> | null = null;
@@ -247,9 +251,10 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
         if (estado !== "fechando") return;
         if (timerFinal) clearTimeout(timerFinal);
         timerFinal = null;
-        if (emitirFinal) resultado(texto.trim(), true);
+        if (emitirFinal) resultado(texto.trim() || ultimaParcial.trim(), true);
         estado = "livre";
         texto = "";
+        ultimaParcial = "";
         emitirFinal = true;
         trocar(); // fronteira de trecho: se a nova sessão já está pronta, é aqui que ela assume
         if (pendentes.length > 0) {
@@ -277,6 +282,10 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
           if (m.transcricao !== null && estado !== "livre") {
             texto += m.transcricao;
             if (emitirFinal && texto.trim()) resultado(texto.trim(), false);
+          }
+          if (m.parcial !== null && estado !== "livre" && texto === "") {
+            ultimaParcial = m.parcial;
+            if (emitirFinal && ultimaParcial.trim()) resultado(ultimaParcial.trim(), false);
           }
           if (estado === "fechando" && (m.transcricaoFechada || m.turnoCompleto)) concluir();
         };
@@ -356,6 +365,7 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
             enviarJson(atual, { realtimeInput: { activityStart: {} } });
             estado = "falando";
             texto = "";
+            ultimaParcial = "";
           }
           enviarAudio(pcm16);
         },

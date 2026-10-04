@@ -11,6 +11,7 @@ import type {
   QUADRO_MICROFONE as QuadroMicrofone,
   QUADRO_MS as QuadroMs,
   QUADRO_VOZ as QuadroVoz,
+  RotaSaida,
   TAXA_MICROFONE_HZ as TaxaMicrofone,
   TAXA_VOZ_HZ as TaxaVoz,
   TipoFalaBot,
@@ -109,6 +110,18 @@ const MOTIVOS_FIM: typeof MotivosFim = [
 ];
 
 /** Fechamentos depois dos quais reconectar não adianta: a sessão, a ligação ou a versão não valem mais. */
+/**
+ * A rota pelo nome do aparelho de saída padrão (definido em 2026-10-04): o Chromium do Mac dá nomes como "Padrão -
+ * AirPods Pro (Bluetooth)", "Fones de ouvido externos (Built-in)" ou "Alto-falantes (MacBook Pro) (Built-in)". Fone
+ * vem antes porque o fone com fio também é "Built-in". Caixa de som Bluetooth e nome desconhecido não contam como fone.
+ */
+export function rotaPeloNome(nome: string): RotaSaida {
+  const n = nome.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  if (/fone|headphone|headset|earphone|earbud|airpods|earpods|\bbuds|beats|auricular|\bwh-|\bwf-|jabra|sennheiser|plantronics|quietcomfort/.test(n)) return "fone";
+  if (/speaker|alto-?falante|alto falante|built-in|integrad|macbook|imac|display|monitor|hdmi|\btv\b/.test(n)) return "alto-falante";
+  return "desconhecida";
+}
+
 export function fechamentoDefinitivo(codigo: number): boolean {
   return codigo === FECHAMENTOS.versao || codigo === FECHAMENTOS.sessao || codigo === FECHAMENTOS.origem || codigo === FECHAMENTOS.naoEncontrada || codigo === FECHAMENTOS.jaEmLigacao || codigo === FECHAMENTOS.encerrada || codigo === FECHAMENTOS.abuso || codigo === FECHAMENTOS.vozFora;
 }

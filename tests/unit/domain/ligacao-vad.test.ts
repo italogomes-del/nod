@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { criarVad, energiaRms, type EventoVad } from "../../../src/domain/ligacao-vad.ts";
+import { criarVad, energiaRms, type EventoVad, VOZ_MINIMA_MS } from "../../../src/domain/ligacao-vad.ts";
 
 /** Quadro de 20 ms (320 amostras a 16 kHz) com uma senoide de amplitude `amp` (0..1). */
 const quadro = (amp: number): Int16Array => {
@@ -50,8 +50,18 @@ describe("criarVad", () => {
     expect(r.eventos).toEqual([]);
     expect(vad.silencioMs()).toBe(580);
     r = passar(vad, silencio, 1, r.t);
-    expect(r.eventos).toEqual([{ tipo: "fim", em: fimVoz, duracaoMs: fimVoz - inicioVoz }]);
+    expect(r.eventos).toEqual([{ tipo: "fim", em: fimVoz, duracaoMs: fimVoz - inicioVoz, vozMs: 1000 }]);
     expect(vad.falando()).toBe(false);
+  });
+
+  it("o fim conta só os quadros com voz: uma batida de 100 ms fica abaixo de VOZ_MINIMA_MS (o orquestrador descarta)", () => {
+    const vad = criarVad();
+    let r = passar(vad, voz, 5, 0);
+    expect(r.eventos).toEqual([{ tipo: "inicio", em: 0 }]);
+    r = passar(vad, silencio, 30, r.t);
+    const fim = r.eventos[0];
+    expect(fim).toMatchObject({ tipo: "fim", vozMs: 100 });
+    expect(fim?.tipo === "fim" && fim.vozMs < VOZ_MINIMA_MS).toBe(true);
   });
 
   it("estalo isolado (1–2 quadros) não vira fala", () => {
@@ -121,6 +131,6 @@ describe("criarVad", () => {
     const vad = criarVad({ quadrosParaInicio: 1, silencioParaFimMs: 100 });
     expect(vad.passo(voz, 0)).toEqual({ tipo: "inicio", em: 0 });
     const r = passar(vad, silencio, 5, 20);
-    expect(r.eventos).toEqual([{ tipo: "fim", em: 20, duracaoMs: 20 }]);
+    expect(r.eventos).toEqual([{ tipo: "fim", em: 20, duracaoMs: 20, vozMs: 20 }]);
   });
 });

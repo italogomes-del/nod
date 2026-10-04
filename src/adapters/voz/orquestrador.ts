@@ -1,10 +1,10 @@
-import { FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, type FaseLigacao, type MotivoFimLigacao, type MsgCerebroServidor, type MsgMidiaServidor, type TipoFalaBot } from "../../contracts/voz.ts";
+import { FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, type FaseLigacao, type MotivoFimLigacao, type MsgCerebroServidor, type MsgMidiaServidor, type RotaSaida, type TipoFalaBot } from "../../contracts/voz.ts";
 import { ehEco } from "../../domain/ligacao-eco.ts";
 import { escolherFala, FALAS_DE_ESPERA, TEMPOS_ESPERA, type CategoriaEspera, type EsperaTocada, type FalaDeEspera } from "../../domain/ligacao-espera.ts";
 import { criarSegmentador, removerAberturaRepetida, textoFalavel } from "../../domain/ligacao-frases.ts";
 import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
-import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
-import { criarVad } from "../../domain/ligacao-vad.ts";
+import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, FATOR_VAD_BOT_FALANDO, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
+import { criarVad, VOZ_MINIMA_MS } from "../../domain/ligacao-vad.ts";
 import { interpretarComando, validarComando, type PerfilComando } from "../../domain/comando-de-voz.ts";
 import { sugestoesDoOnboarding } from "../../domain/roteiro-onboarding.ts";
 import type { CamposEntrevista, EtapaOnboarding, PassoConfiguracao } from "../../contracts/onboarding.ts";
@@ -96,6 +96,8 @@ export const PRAZOS_PADRAO = {
   confirmarInterrupcaoMs: 1_200,
   /** Fala da pessoa com o bot falando: confirma a interrupção a partir deste tanto de fala. */
   interrupcaoPorFalaMs: 600,
+  /** O mesmo com fone (sem eco): FALA_QUE_INTERROMPE_COM_FONE_MS. */
+  interrupcaoPorFalaFoneMs: 300,
   /** O resumo final do cérebro depois do `fim`. */
   resumoMs: 30_000,
   /** Silêncio total da ligação (sem ninguém falar) antes da despedida. */
@@ -171,7 +173,17 @@ export function lerQuadroMicrofone(b: Uint8Array): { seq: number; pcm: Int16Arra
 export type PedidoAprovacaoVoz = { decisaoId: string; leitura: string; perfil: PerfilComando };
 
 type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; fimEm?: number; aoTerminar?: () => void };
-type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array; aoTerminar?: () => void };
+type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array; aoTerminar?: () => void; preparo?: Preparo };
+
+/** A síntese de um item da fila já em curso: os pedaços vão chegando enquanto o item da frente toca. */
+type Preparo = { pedacos: Int16Array[]; acabou: boolean; erro: unknown; ac: AbortController; acordar: (() => void) | null };
+
+/**
+ * definido em 2026-10-04 (análise do Buzz e do OpenMausBot; a voz do Google leva ~1,2 s até o primeiro áudio, medido
+ * na VM): sintetiza adiantado até 2 itens da fila enquanto o da frente toca — sem isso, cada frase esperava a síntese
+ * da anterior terminar.
+ */
+const ITENS_ANTECIPADOS = 2;
 
 export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
   const relogio = deps.relogio ?? (() => Date.now());
@@ -191,6 +203,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let encerrada = false;
     let atendida = false;
     let mudo = false;
+    let rota: RotaSaida = "desconhecida";
+    const falaQueInterrompeMs = () => (rota === "fone" ? prazos.interrupcaoPorFalaFoneMs : prazos.interrupcaoPorFalaMs);
     let fase: FaseLigacao = "chamando";
     const vad = criarVad();
     const preRoll: Int16Array[] = [];
@@ -212,8 +226,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     // começado — a transcrição e o eco usam os tempos do trecho certo.
     const trechos: { inicio: number; fim: number }[] = [];
     let vezRefeita = false;
+    let refazerConferido = true;
     let proximoOuvido: string | null = null;
-    let ultimaEspera: { categoria: CategoriaEspera; texto: string } | null = null;
+    let ultimaEspera: { categoria: CategoriaEspera; texto: string; n: number } | null = null;
+    let primeiroTrechoDaVez = true;
     let respostaTexto = "";
     let respostaFoiProChat = false;
     let botPerguntou = false;
@@ -307,8 +323,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const pcm = deps.esperas.obterPronto(fala, r.voz, r.velocidade);
       if (!pcm) return false;
       historicoEspera.push({ id: fala.id, categoria, em: relogio() });
-      ultimaEspera = { categoria, texto: fala.texto };
-      enfileirar({ tipo: "espera", texto: fala.texto, n: null, pcm });
+      ultimaEspera = { categoria, texto: fala.texto, n: vezAtual };
+      const item: ItemFila = { tipo: "espera", texto: fala.texto, n: null, pcm };
+      // A resposta já está sendo sintetizada mas ainda não tem som: a espera passa na frente (com a voz do Google, o
+      // áudio vem ~1,2 s depois do texto, e a pessoa ficava em silêncio).
+      if (emSintese && !emSintese.comAudio) void tocarItem(item);
+      else enfileirar(item);
       return true;
     }
 
@@ -331,6 +351,65 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function enfileirar(item: ItemFila): void {
       fila.push(item);
       if (!tocandoFila) void tocarFila();
+      else anteciparFila();
+    }
+
+    function preparar(item: ItemFila): Preparo {
+      if (item.preparo) return item.preparo;
+      const p: Preparo = { pedacos: [], acabou: false, erro: null, ac: new AbortController(), acordar: null };
+      item.preparo = p;
+      ttsCaracteres += item.texto.length;
+      const acordar = () => {
+        const fn = p.acordar;
+        p.acordar = null;
+        fn?.();
+      };
+      void (async () => {
+        try {
+          for await (const pcm of deps.provedores.tts.sintetizar({ texto: item.texto, voz: r.voz, velocidade: r.velocidade, sinal: p.ac.signal })) {
+            if (p.ac.signal.aborted) break;
+            p.pedacos.push(pcm);
+            acordar();
+          }
+        } catch (e) {
+          p.erro = e;
+        } finally {
+          p.acabou = true;
+          acordar();
+        }
+      })();
+      return p;
+    }
+
+    async function* consumir(p: Preparo): AsyncGenerator<Int16Array> {
+      for (;;) {
+        const pcm = p.pedacos.shift();
+        if (pcm) {
+          yield pcm;
+          continue;
+        }
+        if (p.acabou) {
+          if (p.erro) throw p.erro;
+          return;
+        }
+        await new Promise<void>((acordar) => {
+          p.acordar = acordar;
+        });
+      }
+    }
+
+    function anteciparFila(): void {
+      if (encerrada) return;
+      for (const item of fila.slice(0, ITENS_ANTECIPADOS)) {
+        if (item.pcm || (item.n !== null && item.n === vezCancelada)) continue;
+        preparar(item);
+      }
+    }
+
+    /** Esvazia a fila cancelando as sínteses adiantadas. */
+    function limparFila(): void {
+      for (const item of fila) item.preparo?.ac.abort();
+      fila.length = 0;
     }
 
     async function tocarFila(): Promise<void> {
@@ -338,7 +417,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       try {
         while (fila.length > 0 && !encerrada) {
           const item = fila.shift()!;
-          if (item.n !== null && item.n === vezCancelada) continue;
+          if (item.n !== null && item.n === vezCancelada) {
+            item.preparo?.ac.abort();
+            continue;
+          }
           await tocarItem(item);
         }
       } finally {
@@ -350,6 +432,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     let vezRespondida = true;
+    let emSintese: { comAudio: boolean } | null = null;
 
     async function tocarItem(item: ItemFila): Promise<void> {
       const utt = ++uttSeq;
@@ -368,6 +451,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         if (item.n !== null && item.n === vezAtual && primeiroSomDaVez) {
           primeiroSomDaVez = false;
           latencias.push(relogio() - vezEm);
+          // As esperas da vez param quando a resposta começa a soar, não quando chega o texto.
+          cancelarEsperas();
         }
       };
       const agendarFim = () => {
@@ -380,13 +465,17 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         agendarFim();
         return;
       }
-      const ac = new AbortController();
+      const preparo = preparar(item);
+      const ac = preparo.ac;
       abortTts = ac;
-      ttsCaracteres += item.texto.length;
+      const sintese = { comAudio: false };
+      emSintese = sintese;
+      anteciparFila();
       try {
-        for await (const pcm of deps.provedores.tts.sintetizar({ texto: item.texto, voz: r.voz, velocidade: r.velocidade, sinal: ac.signal })) {
+        for await (const pcm of consumir(preparo)) {
           if (ac.signal.aborted || encerrada) break;
           if (item.n !== null && item.n === vezCancelada) break;
+          sintese.comAudio = true;
           primeiroSom();
           mandar(pcm);
         }
@@ -397,7 +486,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           paraMidia({ t: "aviso", texto: "A voz falhou nesta frase; ela está na legenda." });
         }
       } finally {
+        if (emSintese === sintese) emSintese = null;
         if (abortTts === ac) abortTts = null;
+        // Saiu antes do fim (vez cancelada, encerrada): a síntese adiantada para também.
+        ac.abort();
         agendarFim();
       }
     }
@@ -413,7 +505,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function falarConteudo(texto: string, n: number | null, tipo: TipoFalaBot = "conteudo"): void {
       const { falavel, foiProChat } = textoFalavel(texto);
       if (foiProChat) respostaFoiProChat = true;
-      const limpo = n !== null && ultimaEspera?.categoria === "reconhecimento" ? removerAberturaRepetida(falavel, ultimaEspera.texto) : falavel;
+      // Só a primeira frase da mesma vez em que tocou o "Entendi." perde o "Beleza," repetido (antes valia para qualquer
+      // frase de qualquer vez seguinte: "Beleza, Marlon. Até a próxima!" saiu como "Marlon.").
+      const repetiria = n !== null && n === vezAtual && primeiroTrechoDaVez && ultimaEspera?.categoria === "reconhecimento" && ultimaEspera.n === n;
+      if (n !== null && n === vezAtual) primeiroTrechoDaVez = false;
+      const limpo = repetiria && ultimaEspera ? removerAberturaRepetida(falavel, ultimaEspera.texto) : falavel;
       if (limpo.trim() === "") return;
       enfileirar({ tipo, texto: limpo, n });
     }
@@ -429,7 +525,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function interromperBot(textoPessoa: string): void {
       const atual = uttAtual();
       cancelarEsperas();
-      fila.length = 0;
+      limparFila();
       abortTts?.abort();
       if (atual) paraMidia({ t: "interromper", utt: atual.utt });
       interrupcoes++;
@@ -616,6 +712,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezAtual = n;
       vezEm = relogio();
       primeiroSomDaVez = true;
+      primeiroTrechoDaVez = true;
       vezRespondida = false;
       respostaTexto = "";
       respostaFoiProChat = false;
@@ -646,7 +743,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezCancelada = vezAtual;
       vezRespondida = true;
       cancelarEsperas();
-      fila.length = 0;
+      limparFila();
       abortTts?.abort();
       const atual = uttAtual();
       if (atual) paraMidia({ t: "interromper", utt: atual.utt });
@@ -654,6 +751,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       pendente.textos = [textoDaVez];
       vezRefeita = true;
       mudarFase("ouvindo");
+    }
+
+    /**
+     * definido em 2026-10-04: um trecho que não virou fala (ruído descartado, final vazio) não pode deixar a vez
+     * pendurada — o começo dele cancelou a decisão que estava agendada.
+     */
+    function retomarDecisao(): void {
+      if (pendente.textos.length > 0 && pendente.timer === null && !falando) agendarDecisao();
     }
 
     function agendarDecisao(): void {
@@ -669,7 +774,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (!res.final) {
         if (texto === "") return;
         paraMidia({ t: "legenda", id: legendaId, texto, final: false });
-        if (barge.ativa && !barge.confirmado && confirmaInterrupcao({ texto, falaMs: relogio() - barge.desde, ehEco: false, lendoConteudoNaoConfiavel: false })) confirmarBarge(texto);
+        if (barge.ativa && !barge.confirmado && confirmaInterrupcao({ texto, falaMs: relogio() - barge.desde, ehEco: false, lendoConteudoNaoConfiavel: false, falaQueInterrompeMs: falaQueInterrompeMs() })) confirmarBarge(texto);
         return;
       }
       const id = legendaId++;
@@ -678,7 +783,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const fimT = trecho && trecho.fim > 0 ? trecho.fim : fimFalaEm;
       if (texto === "") {
         // Fala longa que virou nada: pede para repetir (uma vez por trecho).
-        if (fimT - iniT > 1_200 && !botTocando()) tocarEspera("nao_entendi");
+        if (fimT - iniT > 1_200 && !botTocando() && pendente.textos.length === 0) tocarEspera("nao_entendi");
+        retomarDecisao();
         return;
       }
       // ADR-074: na janela de aprovação a guarda de eco por similaridade fica desligada — a frase de comando é justamente
@@ -707,7 +813,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         }
         // O final pode chegar depois da janela de confirmação (whisper local transcreve só no fim da fala): uma fala que
         // interrompe ("para", duas palavras de verdade) interrompe mesmo assim.
-        if (confirmaInterrupcao({ texto, falaMs: fimT - iniT, ehEco: false, lendoConteudoNaoConfiavel: false })) {
+        if (confirmaInterrupcao({ texto, falaMs: fimT - iniT, ehEco: false, lendoConteudoNaoConfiavel: false, falaQueInterrompeMs: falaQueInterrompeMs() })) {
           barge.ativa = true;
           confirmarBarge(texto);
         }
@@ -767,7 +873,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         inicioFalaEm = agora - 3 * QUADRO_MS;
         cancelar(pendente.timer);
         pendente.timer = null;
-        refazerVezSePreciso(agora);
+        refazerConferido = false;
         trechos.push({ inicio: inicioFalaEm, fim: 0 });
         if (botTocando()) iniciarBarge();
         if (stt) for (const q of preRoll) stt.enviar(q);
@@ -776,15 +882,33 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         return;
       }
       if (falando) {
+        // Só fala de verdade (não uma tosse) refaz a vez.
+        if (!refazerConferido && agora - inicioFalaEm >= VOZ_MINIMA_MS + 3 * QUADRO_MS) {
+          refazerConferido = true;
+          refazerVezSePreciso(agora);
+        }
         stt?.enviar(pcm);
         sttSegundos += QUADRO_MS / 1000;
-        if (barge.ativa && !barge.confirmado && agora - barge.desde >= prazos.interrupcaoPorFalaMs) confirmarBarge("");
+        if (barge.ativa && !barge.confirmado && agora - barge.desde >= falaQueInterrompeMs()) confirmarBarge("");
       }
       if (ev?.tipo === "fim") {
         falando = false;
-        fimFalaEm = agora;
-        const aberto = trechos.find((x) => x.fim === 0);
-        if (aberto) aberto.fim = agora;
+        const abertoIdx = trechos.findIndex((x) => x.fim === 0);
+        if (ev.vozMs < VOZ_MINIMA_MS) {
+          // Ruído curto: o STT descarta o trecho (sem final), e ele sai da lista para não desalinhar os próximos.
+          if (abertoIdx >= 0) trechos.splice(abertoIdx, 1);
+          stt?.descartar();
+          retomarDecisao();
+          return;
+        }
+        if (!refazerConferido) {
+          refazerConferido = true;
+          refazerVezSePreciso(agora);
+        }
+        // O fim real da voz (o VAD só avisa depois de 600 ms de silêncio): a espera do fim de turno conta daqui — antes
+        // contava do aviso, e o silêncio de base virava 1,2 s.
+        fimFalaEm = ev.em;
+        if (abertoIdx >= 0) trechos[abertoIdx]!.fim = ev.em;
         stt?.fimDeFala();
         // O final do STT agenda a decisão; se ele demorar, a vez espera por ele (nunca decide sem texto).
       }
@@ -880,6 +1004,13 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           decidirVez();
           return;
         }
+        case "saida": {
+          const nova = msg.rota === "fone" || msg.rota === "alto-falante" ? msg.rota : "desconhecida";
+          if (nova !== rota) log("info", "voz_rota_saida", { ligacao_id: r.ligacaoId, rota: nova });
+          rota = nova;
+          vad.definirFatorBotFalando(rota === "fone" ? FATOR_VAD_BOT_FALANDO.fone : FATOR_VAD_BOT_FALANDO.outro);
+          return;
+        }
         case "mudo":
           mudo = msg.ativo === true;
           if (mudo && falando) {
@@ -938,7 +1069,6 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "fala": {
           if (typeof msg.n !== "number" || typeof msg.delta !== "string") return;
           if (msg.n === 0 || msg.n !== vezAtual || msg.n === vezCancelada || vezRespondida || desligando) return;
-          cancelarEsperas();
           respostaTexto += msg.delta;
           for (const trecho of segmentador.adicionar(msg.delta, relogio())) falarConteudo(trecho, msg.n);
           cancelar(timerVencer);
@@ -955,8 +1085,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           cancelar(timerVencer);
           for (const trecho of segmentador.fechar()) falarConteudo(trecho, msg.n);
           vezRespondida = true;
-          cancelarEsperas();
           const resposta = respostaTexto.trim();
+          // Sem nada a dizer, nenhuma espera toca depois; com texto, elas param quando o áudio começar.
+          if (resposta === "" || !primeiroSomDaVez) cancelarEsperas();
           botPerguntou = resposta.endsWith("?");
           if (resposta !== "") gravarFala({ autor: "bot", tipo: "fala", texto: textoFalavel(resposta).falavel || resposta, inicioMs: vezEm - inicio, fimMs: msDesdeInicio(), interrompida: false });
           if (respostaFoiProChat && resposta !== "" && deps.persistencia.mandarNoChat) seguro(deps.persistencia.mandarNoChat(ref, resposta), "voz_mandar_no_chat_falhou");
@@ -1031,7 +1162,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       for (const t of timers) clearTimeout(t);
       timers.clear();
       abortTts?.abort();
-      fila.length = 0;
+      limparFila();
       const sessao = stt;
       stt = null;
       if (sessao) seguro(sessao.fechar(), "voz_stt_fechar_falhou");
@@ -1088,6 +1219,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezAtual = n;
       vezEm = relogio();
       primeiroSomDaVez = true;
+      primeiroTrechoDaVez = true;
       vezRespondida = false;
       respostaTexto = "";
       respostaFoiProChat = false;

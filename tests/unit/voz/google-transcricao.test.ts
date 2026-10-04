@@ -119,6 +119,33 @@ describe("voz: STT Live API (transporte falso)", () => {
     expect(resultados.at(-1)).toEqual({ texto: "Oi", final: true, confianca: null });
   });
 
+  it("parciais do Transcribe Live (`interimInputTranscription`, texto acumulado) e o final do `inputTranscription`, como ao vivo em 2026-10-04", async () => {
+    const t = transporteFalso();
+    const { s, resultados } = await abrirSessao(t);
+    const c = t.conexoes[0];
+    const interina = (text: string) => ({ serverContent: { interimInputTranscription: { text } } });
+    s.enviar(quadro(5));
+    t.servidor(c, interina("Hoy"));
+    t.servidor(c, interina("Oi, aqui é a Nina."));
+    t.servidor(c, interina("Oi, aqui é a Nina. Me conta,"));
+    s.fimDeFala();
+    t.servidor(c, transcricao("Oi, aqui é a Nina. Me conta, qual é a tarefa?"));
+    t.servidor(c, { serverContent: { generationComplete: true } });
+    expect(resultados.map((r) => [r.texto, r.final])).toEqual([
+      ["Hoy", false],
+      ["Oi, aqui é a Nina.", false],
+      ["Oi, aqui é a Nina. Me conta,", false],
+      ["Oi, aqui é a Nina. Me conta, qual é a tarefa?", false],
+      ["Oi, aqui é a Nina. Me conta, qual é a tarefa?", true],
+    ]);
+    // Sem `inputTranscription`, o final é a última parcial.
+    s.enviar(quadro(5));
+    t.servidor(c, interina("Pode criar"));
+    s.fimDeFala();
+    t.servidor(c, { serverContent: { turnComplete: true } });
+    expect(resultados.at(-1)).toEqual({ texto: "Pode criar", final: true, confianca: null });
+  });
+
   it("sem sinal de fim, fecha o final 2 s depois do activityEnd com o que houver", async () => {
     vi.useFakeTimers();
     const t = transporteFalso();

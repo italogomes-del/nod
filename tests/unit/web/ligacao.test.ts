@@ -4,7 +4,7 @@ import type { Ligacao } from "../../../src/contracts/ligacao.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { DetectorDeFala, dePcm16, Ganho, paraPcm16, QUADROS_PARA_CALAR, Reamostrador } from "../../../web/lib/ligacao-audio.ts";
-import { AMOSTRAS_POR_QUADRO, fechamentoDefinitivo, lerMsgServidor, lerQuadroVoz, quadroMicrofone } from "../../../web/lib/ligacao-protocolo.ts";
+import { AMOSTRAS_POR_QUADRO, fechamentoDefinitivo, lerMsgServidor, lerQuadroVoz, quadroMicrofone, rotaPeloNome } from "../../../web/lib/ligacao-protocolo.ts";
 import { duracaoRelogio } from "../../../web/lib/relogio.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { avisoDoEstadoLocal, botaoLigar, comLegenda, htmlCardJanela, partesDaLigacao, renderAvaliacao, renderLinhaLigacao, renderTranscricao, textoFase, textoFim, type EstadoTelaLigacao } from "../../../web/telas/ligacao.ts";
@@ -12,6 +12,19 @@ import { avisoDoEstadoLocal, botaoLigar, comLegenda, htmlCardJanela, partesDaLig
 /** Modo ligação na web (definido em 2026-10-04, ADR-071): protocolo, áudio, a tela e a linha "Chat de voz". */
 
 describe("protocolo nod-voz/1 no renderer", () => {
+  it("rota de saída pelo nome do aparelho (nomes do Chromium no Mac): fone antes de built-in", () => {
+    expect(rotaPeloNome("Padrão - AirPods Pro (Bluetooth)")).toBe("fone");
+    expect(rotaPeloNome("Default - External Headphones (Built-in)")).toBe("fone");
+    expect(rotaPeloNome("Padrão - Fones de ouvido externos (Built-in)")).toBe("fone");
+    expect(rotaPeloNome("Galaxy Buds2 Pro")).toBe("fone");
+    expect(rotaPeloNome("WH-1000XM5")).toBe("fone");
+    expect(rotaPeloNome("Padrão - Alto-falantes (MacBook Pro) (Built-in)")).toBe("alto-falante");
+    expect(rotaPeloNome("Default - MacBook Air Speakers (Built-in)")).toBe("alto-falante");
+    expect(rotaPeloNome("LG HDR 4K (DisplayPort)")).toBe("alto-falante");
+    expect(rotaPeloNome("JBL Flip 6")).toBe("desconhecida");
+    expect(rotaPeloNome("")).toBe("desconhecida");
+  });
+
   it("quadro do microfone: tipo 0x01, sequência u32 LE e PCM16LE", () => {
     const pcm = new Int16Array([1, -2, 32767, -32768]);
     const buf = quadroMicrofone(258, pcm);
