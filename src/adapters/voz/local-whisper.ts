@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -99,9 +99,15 @@ export async function acharBinarioWhisper(env: Record<string, string | undefined
   return null;
 }
 
+export const MODELO_WHISPER_SMALL = "ggml-small-q5_1.bin";
+
 export function caminhoModeloWhisper(env: Record<string, string | undefined>): string {
   const dir = env.NOD_VOZ_LOCAL || join(homedir(), ".cache", "nod", "voz");
-  return join(dir, env.NOD_VOZ_WHISPER_MODELO || MODELO_WHISPER_PADRAO);
+  if (env.NOD_VOZ_WHISPER_MODELO) return join(dir, env.NOD_VOZ_WHISPER_MODELO);
+  // medido em 2026-10-04 (M1, ~7 s de fala): base 0,23 s, small 0,65 s, large-v3-turbo 2,2 s. Com microfone de verdade
+  // o base errava demais ("Tá meu vinho?"); o small entra quando está baixado (scripts/voz/preparar-local.sh).
+  const small = join(dir, MODELO_WHISPER_SMALL);
+  return existsSync(small) ? small : join(dir, MODELO_WHISPER_PADRAO);
 }
 
 export type OpcoesWhisperLocal = {

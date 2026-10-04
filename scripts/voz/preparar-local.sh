@@ -4,7 +4,8 @@
 set -euo pipefail
 
 dir="${NOD_VOZ_LOCAL:-$HOME/.cache/nod/voz}"
-modelo="${NOD_VOZ_WHISPER_MODELO:-ggml-base-q5_1.bin}"
+# definido em 2026-10-04: o small (~190 MB) entende bem melhor a fala de verdade que o base; 0,65 s por ~7 s de fala no M1.
+modelo="${NOD_VOZ_WHISPER_MODELO:-ggml-small-q5_1.bin}"
 url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${modelo}"
 falhou=0
 

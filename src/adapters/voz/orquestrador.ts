@@ -104,6 +104,8 @@ export const PRAZOS_PADRAO = {
   naoAtendidaMs: 120_000,
 };
 
+/** definido em 2026-10-04: a pessoa que volta a falar até 3 s depois da vez, sem o bot ter dito nada, refaz a vez. */
+const JANELA_REFAZER_VEZ_MS = 3_000;
 /** definido em 2026-10-04: pré-roll do STT — o começo da fala que o VAD só confirma depois de 3 quadros. */
 const PRE_ROLL_QUADROS = 15;
 /** definido em 2026-10-04: pedaço de voz mandado ao cliente (100 ms a 24 kHz). */
@@ -205,6 +207,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let vezEm = 0;
     let primeiroSomDaVez = true;
     let ferramentaRodando: string | null = null;
+    let textoDaVez = "";
+    // Início e fim de cada trecho de fala, na ordem: o final do STT chega depois (whisper) e às vezes com outro trecho já
+    // começado — a transcrição e o eco usam os tempos do trecho certo.
+    const trechos: { inicio: number; fim: number }[] = [];
+    let vezRefeita = false;
     let proximoOuvido: string | null = null;
     let ultimaEspera: { categoria: CategoriaEspera; texto: string } | null = null;
     let respostaTexto = "";
@@ -616,10 +623,37 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       trocas++;
       const ouvido = proximoOuvido ?? undefined;
       proximoOuvido = null;
-      if (cerebro) paraCerebro({ t: "vez", n, texto, ...(ouvido ? { ouvidoAte: ouvido } : {}) });
-      else vezesSemCerebro.push({ n, texto, ...(ouvido ? { ouvidoAte: ouvido } : {}) });
+      textoDaVez = texto;
+      // A vez refeita leva a fala inteira; o cérebro já viu o começo e precisa saber que aquela resposta não vale.
+      const textoCerebro = vezRefeita ? `[nod] A pessoa ainda não tinha terminado; ignore a resposta anterior. A fala completa é:\n${texto}` : texto;
+      vezRefeita = false;
+      if (cerebro) paraCerebro({ t: "vez", n, texto: textoCerebro, ...(ouvido ? { ouvidoAte: ouvido } : {}) });
+      else vezesSemCerebro.push({ n, texto: textoCerebro, ...(ouvido ? { ouvidoAte: ouvido } : {}) });
       mudarFase("pensando");
       agendarEsperasDaVez(n, texto);
+    }
+
+    /**
+     * Refazer a vez (definido em 2026-10-04, plano "Camada de conversa"; teste do Marlon): a pessoa fez uma pausa no meio
+     * do pensamento, a vez foi decidida, e ela voltou a falar antes de o bot dizer qualquer coisa. A resposta em curso é
+     * descartada (interrupção dura no cérebro) e a fala inteira vira uma vez só — antes, cada pedaço virava uma resposta
+     * ("Desculpa, não entendi").
+     */
+    function refazerVezSePreciso(agora: number): void {
+      // Só antes de o cérebro mandar qualquer texto: depois disso a resposta já está saindo, e quem decide é a interrupção.
+      if (vezAtual === 0 || vezRespondida || !primeiroSomDaVez || respostaTexto !== "" || ferramentaRodando || janela || lendo) return;
+      if (agora - vezEm > JANELA_REFAZER_VEZ_MS || !textoDaVez) return;
+      vezCancelada = vezAtual;
+      vezRespondida = true;
+      cancelarEsperas();
+      fila.length = 0;
+      abortTts?.abort();
+      const atual = uttAtual();
+      if (atual) paraMidia({ t: "interromper", utt: atual.utt });
+      paraCerebro({ t: "interromper", modo: "duro" });
+      pendente.textos = [textoDaVez];
+      vezRefeita = true;
+      mudarFase("ouvindo");
     }
 
     function agendarDecisao(): void {
@@ -639,30 +673,33 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         return;
       }
       const id = legendaId++;
+      const trecho = trechos.shift();
+      const iniT = trecho?.inicio ?? inicioFalaEm;
+      const fimT = trecho && trecho.fim > 0 ? trecho.fim : fimFalaEm;
       if (texto === "") {
         // Fala longa que virou nada: pede para repetir (uma vez por trecho).
-        if (fimFalaEm - inicioFalaEm > 1_200 && !botTocando()) tocarEspera("nao_entendi");
+        if (fimT - iniT > 1_200 && !botTocando()) tocarEspera("nao_entendi");
         return;
       }
       // ADR-074: na janela de aprovação a guarda de eco por similaridade fica desligada — a frase de comando é justamente
       // a que o bot acabou de ler; quem protege é o tempo (só vale fala que começou depois da abertura).
       if (janela && !botTocando()) {
         paraMidia({ t: "legenda", id, texto, final: true });
-        gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: inicioFalaEm - inicio, fimMs: fimFalaEm - inicio, interrompida: false, confianca: res.confianca });
+        gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: iniT - inicio, fimMs: fimT - inicio, interrompida: false, confianca: res.confianca });
         if (tratarNaJanela(texto)) return;
         pendente.textos.push(texto);
         agendarDecisao();
         return;
       }
       const falasBot = [...utts.values()].filter((u) => u.tipo !== "espera").map((u) => ({ texto: u.texto, inicioMs: u.enviadoEm, fimMs: u.fimEm ?? u.enviadoEm + u.duracaoMs }));
-      if (ehEco({ texto, inicioMs: inicioFalaEm, fimMs: fimFalaEm, falasBot })) {
+      if (ehEco({ texto, inicioMs: iniT, fimMs: fimT, falasBot })) {
         log("info", "voz_eco_descartado", { ligacao_id: r.ligacaoId });
         return;
       }
       if (botTocando() && !barge.confirmado) {
         if (ehBackchannel(texto)) {
           // "uhum" com o bot falando: só a transcrição, sem interromper.
-          gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: inicioFalaEm - inicio, fimMs: fimFalaEm - inicio, interrompida: false, confianca: res.confianca });
+          gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: iniT - inicio, fimMs: fimT - inicio, interrompida: false, confianca: res.confianca });
           barge.ativa = false;
           const atual = uttAtual();
           if (atual) paraMidia({ t: "subir", utt: atual.utt });
@@ -670,14 +707,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         }
         // O final pode chegar depois da janela de confirmação (whisper local transcreve só no fim da fala): uma fala que
         // interrompe ("para", duas palavras de verdade) interrompe mesmo assim.
-        if (confirmaInterrupcao({ texto, falaMs: fimFalaEm - inicioFalaEm, ehEco: false, lendoConteudoNaoConfiavel: false })) {
+        if (confirmaInterrupcao({ texto, falaMs: fimT - iniT, ehEco: false, lendoConteudoNaoConfiavel: false })) {
           barge.ativa = true;
           confirmarBarge(texto);
         }
       }
       barge.ativa = false;
       paraMidia({ t: "legenda", id, texto, final: true });
-      gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: inicioFalaEm - inicio, fimMs: fimFalaEm - inicio, interrompida: false, confianca: res.confianca });
+      gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: iniT - inicio, fimMs: fimT - inicio, interrompida: false, confianca: res.confianca });
       reiniciarOciosidade();
       // Backchannel com o bot calado e sem pergunta pendente: só transcrição.
       if (ehBackchannel(texto) && !botPerguntou && vezRespondida && !botTocando()) return;
@@ -730,6 +767,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         inicioFalaEm = agora - 3 * QUADRO_MS;
         cancelar(pendente.timer);
         pendente.timer = null;
+        refazerVezSePreciso(agora);
+        trechos.push({ inicio: inicioFalaEm, fim: 0 });
         if (botTocando()) iniciarBarge();
         if (stt) for (const q of preRoll) stt.enviar(q);
         sttSegundos += (preRoll.length * QUADRO_MS) / 1000;
@@ -744,6 +783,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (ev?.tipo === "fim") {
         falando = false;
         fimFalaEm = agora;
+        const aberto = trechos.find((x) => x.fim === 0);
+        if (aberto) aberto.fim = agora;
         stt?.fimDeFala();
         // O final do STT agenda a decisão; se ele demorar, a vez espera por ele (nunca decide sem texto).
       }

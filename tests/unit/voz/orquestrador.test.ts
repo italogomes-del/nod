@@ -233,4 +233,30 @@ describe("orquestrador de voz", () => {
     expect(fins[0]?.motivo).toBe("bot_desligou");
     expect(msgs(midia, "bot-fala").some((m) => String(m.texto).includes("de novo"))).toBe(false);
   });
+
+  it("refazer a vez: a pessoa volta a falar antes de o bot dizer algo — a resposta é descartada e a fala vira uma vez só", async () => {
+    const { voz, midia, cerebro, provedores } = montar();
+    voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: midia });
+    voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: cerebro });
+    await dormir(30);
+    tocouTudo(midia);
+    provedores.stt.empurrarTexto("Primeiro eu quero definir o que você faz.");
+    provedores.stt.empurrarTexto("Quero que seja minha secretária.");
+    let seq = 0;
+    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
+    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1));
+    // Volta a falar antes de qualquer áudio da resposta.
+    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
+    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
+    const vez2 = await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
+    expect(String(vez2.texto)).toContain("Primeiro eu quero definir");
+    expect(String(vez2.texto)).toContain("minha secretária");
+    expect(String(vez2.texto)).toContain("ainda não tinha terminado");
+    // A resposta atrasada da vez 1 não é falada.
+    cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Resposta velha." });
+    await dormir(50);
+    expect(msgs(midia, "bot-fala").some((m) => String(m.texto).includes("velha"))).toBe(false);
+  });
 });
