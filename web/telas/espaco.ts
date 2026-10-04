@@ -3,6 +3,7 @@ import type { EstadoAvisos } from "../lib/avisos.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
+import type { Volta } from "../lib/volta.ts";
 import { inventarioEmUso, renderExecutor, textoInventario } from "./frota.ts";
 import { renderChaves } from "./chaves.ts";
 import { renderGestao } from "./gestao.ts";
@@ -27,8 +28,6 @@ export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: str
 ];
 
 export type Ambiente = { regime: string; porta?: number | null } | null;
-/** Para onde "‹" volta, escrito: o nome do bot (com o mascote), da sala ou da tela. */
-export type Volta = { rotulo: string; icone: string };
 
 export function textoAmbiente(ambiente: Ambiente): string | null {
   if (!ambiente) return null;

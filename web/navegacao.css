@@ -58,13 +58,15 @@
 .espaco { display: flex; height: 100%; }
 .espaco-nav { display: flex; flex-direction: column; flex-shrink: 0; width: 340px; box-sizing: border-box; padding: 16px 12px;
   background: var(--surface-side); border-right: 1px solid var(--line); }
-.espaco-volta { display: flex; align-items: center; gap: 10px; }
-.espaco-volta kbd { font: 11.5px var(--font-sans); color: var(--ink-3); }
-.espaco-voltar { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border: 1px solid var(--line-strong); border-radius: 10px;
+.espaco-volta, .tela-volta { display: flex; align-items: center; gap: 10px; }
+.espaco-volta kbd, .tela-volta kbd { font: 11.5px var(--font-sans); color: var(--ink-3); }
+.espaco-voltar, .tela-voltar { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border: 1px solid var(--line-strong); border-radius: 10px;
   background: var(--surface); font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
-.espaco-voltar:hover, .espaco-voltar:focus-visible { background: var(--surface-raised); }
-.espaco-voltar .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
-.espaco-voltar .icon.sm svg { width: 17px; height: 17px; }
+.espaco-voltar:hover, .espaco-voltar:focus-visible, .tela-voltar:hover, .tela-voltar:focus-visible { background: var(--surface-raised); }
+.espaco-voltar .icon.sm, .tela-voltar .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.espaco-voltar .icon.sm svg, .tela-voltar .icon.sm svg { width: 17px; height: 17px; }
+/* O mesmo "‹ <de onde veio>" no topo do Marketplace (definido em 2026-10-04). */
+.tela-volta { margin-bottom: 22px; }
 .espaco-nav h1 { margin: 0; padding: 26px 12px 12px; font-size: 22px; font-weight: 600; letter-spacing: -.3px; }
 .espaco-itens { display: flex; flex-direction: column; gap: 2px; }
 .espaco-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: none;

@@ -32,7 +32,8 @@ import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
-import { renderEspaco, situacaoCurtaAvisos, textoAmbiente, type Volta } from "./telas/espaco.ts";
+import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
+import { voltaDaTela } from "./lib/volta.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
@@ -515,13 +516,8 @@ function renderSidebar(estado: Estado): string {
   const grade = meus.length ? `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>` : "";
   const bots = meus.length ? grupo("Meus agentes", "", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, meus.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
   const equipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId).map(linha).join("");
-  const salas = estado.salas
-    .map(
-      (s) =>
-        // definido em 2026-09-29 (0039): a sala não tem mascote, então o ponto de não lido fica à direita.
-        `<button class="row"${atual(s.sala.conversaId)} data-act="abrir-sala" data-sala="${esc(s.sala.id)}" data-conversa="${esc(s.sala.conversaId)}"${temNovas(s.sala.conversaId, estado) ? ` aria-label="Abrir a sala ${esc(s.sala.nome)} (mensagem nova)"` : ""}><span class="g">#</span><span class="txt"><b>${esc(s.sala.nome)}</b></span><span class="meta">${temNovas(s.sala.conversaId, estado) ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</span></button>`,
-    )
-    .join("");
+  // definido em 2026-10-04: a seção Salas saiu da barra — só poluía. As salas voltam como uma feature pensada na
+  // jornada inteira; até lá, a tela da sala continua existindo e abre por Não lidos e pelos avisos.
 
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o banco persistente é o de todo dia e foi para o rodapé do
   // menu da conta; o efêmero e o não identificado continuam na barra, porque pedem atenção.
@@ -558,7 +554,6 @@ function renderSidebar(estado: Estado): string {
       ${grade}
       ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
       ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
-      <section class="section"><h3>Salas <button class="create-trigger" data-act="navegar" data-tela="nova-sala" aria-label="Nova sala">+</button></h3>${salas || '<p class="mudo">Reúna bots para trabalhar juntos.</p>'}</section>
     </div>
     ${ambiente}
     ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
@@ -848,7 +843,7 @@ function render(): void {
   document.querySelector(".app")?.classList.remove("sem-sessao");
   if (!arrastandoBot) redesenharSidebar();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
-  regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDoEspaco()) : "");
+  regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela)) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
@@ -992,7 +987,7 @@ function iniciarConexao(slug: string, depois: (() => Promise<void>) | null = nul
   if (!slug) return;
   // O GitHub não depende do Composio (ADR-048): o servidor tenta o gh desta máquina e o token antes.
   if (!estado.composioConfigurado && slug !== "github") {
-    navegar({ tipo: "conectores", avancado: true });
+    abrirMarketplace(true);
     dispatch({ tipo: "aviso-conexao", texto: "Para conectar apps, adicione a chave do Composio do time abaixo." });
     return;
   }
@@ -1017,6 +1012,16 @@ function navegar(tela: Tela): void {
   dispatch({ tipo: "navegar", tela });
   lerConversaDaTela();
   if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
+}
+
+/**
+ * definido em 2026-10-04: o Marketplace lembra de onde a pessoa veio para o "‹ <de onde veio>" do topo, como Seu espaço.
+ * Andar dentro dele (Avançado, voltar ao Marketplace, clicar no botão de novo) não esquece a origem.
+ */
+function abrirMarketplace(avancado = false): void {
+  const t = estado.tela;
+  const voltar = t.tipo === "conectores" ? t.voltar : t.tipo === "inicio" ? undefined : t;
+  navegar({ tipo: "conectores", ...(avancado ? { avancado: true as const } : {}), ...(voltar ? { voltar } : {}) });
 }
 
 async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
@@ -1481,7 +1486,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
     const tela = el.dataset.tela;
-    if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "conectores" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
+    if (tela === "conectores") abrirMarketplace();
+    else if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
     // As antigas telas da conta são seções de Seu espaço desde 2026-09-30.
     else if (tela === "chaves") abrirEspaco("computadores");
     else if (tela === "relatos") abrirEspaco("relatos");
@@ -1510,8 +1516,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const f = el.dataset.id;
     if (t.tipo === "conectores" && (f === "todos" || f === "conectados" || f === "atencao")) navegar({ ...t, filtro: f });
   },
-  "abrir-avancado": () => navegar({ tipo: "conectores", avancado: true }),
-  "navegar-marketplace": () => navegar({ tipo: "conectores" }),
+  "abrir-avancado": () => abrirMarketplace(true),
+  "navegar-marketplace": () => abrirMarketplace(),
   "nivel-bot": (el) => agir(async () => {
     const agenteId = el.dataset.id ?? "";
     const nivel = el.dataset.nivel;
@@ -2026,6 +2032,8 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
+  // Sem gaveta, Esc no Marketplace volta para onde a pessoa estava (definido em 2026-10-04) — menos digitando num campo.
+  if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.voltar && !(ev.target as HTMLElement).closest?.("dialog, input, textarea, select")) { ev.preventDefault(); void ACOES["voltar-conexao"]?.(document.body); return; }
   // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
   if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;
@@ -2337,18 +2345,6 @@ function fecharEspaco(): void {
   if (t.tipo === "conversa" || t.tipo === "sala") linhaEm = t.conversaId;
   lerConversaDaTela();
   document.querySelector<HTMLElement>("#sidebar .rodape .me")?.focus();
-}
-
-/** "‹ <de onde veio>": o bot com o mascote, a sala com #, ou o nome da tela. */
-function voltaDoEspaco(): Volta {
-  const t = estado.tela;
-  if (t.tipo === "conversa") {
-    const a = botGerido(t.agenteId);
-    return a ? { rotulo: a.nome, icone: iconeAgente(a, "sm") } : { rotulo: "a conversa", icone: "" };
-  }
-  if (t.tipo === "sala") return { rotulo: `# ${estado.salas.find((x) => x.sala.id === t.salaId)?.sala.nome ?? "sala"}`, icone: "" };
-  const nomes: Partial<Record<Tela["tipo"], string>> = { conectores: "Marketplace", "nao-lidos": "Não lidos", "sua-vez": "Sua vez", "novo-bot": "Novo bot", "nova-sala": "Nova sala", rotinas: "Rotinas", "nova-rotina": "Nova rotina" };
-  return { rotulo: nomes[t.tipo] ?? "Voltar", icone: "" };
 }
 
 function dadosMenuConta(): DadosMenuConta {

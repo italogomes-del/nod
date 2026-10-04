@@ -3,6 +3,8 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
+import { ICONE } from "../lib/icones.ts";
+import { voltaDaTela } from "../lib/volta.ts";
 import { acoes, blocoEsperando, blocoFalhou, botsQueUsam, conectorDoApp, gruposDe, meusBots, nivelDoBot, podeENao, ROTULO_NIVEL, SETA_EXTERNA, situacaoDoApp, type Nivel, type NivelAtual, type SituacaoApp } from "./app-acesso.ts";
 
 /**
@@ -189,7 +191,9 @@ export function renderMarketplace(estado: Estado): string {
   const principais = visiveis.filter((x) => !doCatalogo(x));
   const mais = visiveis.filter(doCatalogo);
   const selecionado = (slug: string) => tela?.gaveta?.slug === slug || tela?.app === slug;
-  const retorno = tela?.voltar ? botao("voltar-conexao", "← Voltar para a conversa", { classe: "link" }) : "";
+  // definido em 2026-10-04: o mesmo "‹ <de onde veio>" de Seu espaço, com o mascote do bot e o Esc.
+  const volta = tela?.voltar ? voltaDaTela(estado, tela.voltar) : null;
+  const retorno = volta ? `<div class="tela-volta"><button type="button" class="tela-voltar" data-act="voltar-conexao" aria-keyshortcuts="Escape" title="Voltar para ${esc(volta.rotulo)} (Esc)">${ICONE.voltar}${volta.icone}<span>${esc(volta.rotulo)}</span></button><kbd>esc</kbd></div>` : "";
   const semComposio = estado.composioConfigurado ? "" : `<p class="mkt-aviso">Para conectar a maioria dos apps, o Composio do time precisa estar configurado. ${botao("abrir-avancado", "Configurar", { classe: "link" })}</p>`;
   const aviso = estado.avisoConexao ? `<p class="connection-notice" role="status">${esc(estado.avisoConexao)}</p>` : "";
   const aberta = tela?.gaveta ? estado.marketplace.find((a) => a.slug === tela.gaveta?.slug) : undefined;
