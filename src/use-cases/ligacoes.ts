@@ -3,10 +3,10 @@ import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao,
 import { VERSAO_CONSENTIMENTO_VOZ } from "../contracts/ligacao.ts";
 import type { Turno } from "../contracts/turno.ts";
 import type { MotivoFimLigacao } from "../contracts/voz.ts";
-import { ehIdVoz, generoDaVoz, VOZES_NOD } from "../contracts/vozes.ts";
+import { ehIdVoz, generoDaVoz, VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { MetricasLigacao, NovaFala } from "../repositories/ligacoes.repo.ts";
-import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -218,3 +218,27 @@ export const consentirVoz: CasoDeUso<{ versao: unknown }, { versao: number }> = 
 export const ligacaoViva: CasoDeUso<Record<string, never>, { ligacao: Ligacao | null }> = async (deps) => ({ data: { ligacao: await deps.repos.ligacoes.viva() } });
 
 export const buscarLigacao: CasoDeUso<{ ligacaoId: string }, Ligacao | null> = async (deps, input) => ({ data: await deps.repos.ligacoes.buscar(input.ligacaoId) });
+
+/** A voz do bot e a velocidade da fala (ADR-071); `null` volta à voz derivada do id. */
+export const definirVozDoAgente: CasoDeUso<{ agenteId: string; voz: unknown; vozVelocidade: unknown }, { voz: string | null; vozVelocidade: number }> = async (deps, input) => {
+  const voz = input.voz === null ? null : input.voz === undefined ? undefined : ehIdVoz(input.voz) ? input.voz : false;
+  const velocidade = input.vozVelocidade === undefined ? undefined : (VELOCIDADES_VOZ as readonly unknown[]).includes(input.vozVelocidade) ? (input.vozVelocidade as number) : false;
+  if (voz === false || velocidade === false) throw new ErroDeDominio("entrada_invalida", { cause: "voz" });
+  const agente = await deps.repos.agentes.definirVoz(input.agenteId, { voz, velocidade });
+  if (!agente) throw new ErroDeDominio("nao_encontrado");
+  return { data: { voz: agente.voz ?? null, vozVelocidade: agente.vozVelocidade ?? 1 }, events: [evento(deps.escopo, { kind: "agente_atualizado", autoria: autoriaPessoa(deps.escopo), agora: deps.agora(), dados: { agente_id: agente.id } })] };
+};
+
+/**
+ * O que não coube na fala (código, tabela, link, resposta longa) vai para o chat como mensagem do bot, ligada ao turno
+ * da ligação. Confiança de quem falou: a resposta do cérebro sai como a de qualquer turno de conversa.
+ */
+export const mandarNoChatDaLigacao: CasoDeUso<{ ligacaoId: string; agenteId: string; conversaId: string; turnoId: string; texto: string }, { mensagemId: string | null }> = async (deps, input) => {
+  const texto = input.texto.trim().slice(0, 20_000);
+  if (texto === "") return { data: { mensagemId: null } };
+  const agora = deps.agora();
+  const autoria = autoriaAgente({ agenteId: input.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "local" });
+  const m = await deps.repos.mensagens.criar({ conversaId: input.conversaId, turnoId: input.turnoId, autoria, kind: "texto", texto, confianca: "confiavel" });
+  if (!m) return { data: { mensagemId: null } };
+  return { data: { mensagemId: m.id }, events: [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: input.conversaId, turnoId: input.turnoId, dados: { mensagem_id: m.id, kind: "texto" } })] };
+};

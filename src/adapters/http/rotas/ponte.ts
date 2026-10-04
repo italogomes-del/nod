@@ -214,9 +214,13 @@ export function criarPonteHttpServidor(d: {
     const c = conexoes.get(machineId);
     return !!c && c.gh && c.escopo.pessoaId === escopo.pessoaId && c.escopo.tenantId === escopo.tenantId && d.agora() - c.ultimo < 60_000;
   }
+  /** ADR-072: alguma máquina viva da pessoa anunciou o laço de voz (app que sabe atender ligação). */
+  function ligacaoDaPessoa(pessoaId: string): boolean {
+    return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000 && c.ponte.maquinasConectadas().some((m) => m.machineId === id && m.ligacao === true));
+  }
   /** Alguma máquina viva da pessoa tem o gh: o registro automático do GitHub pode nascer dele. */
   function ghDaPessoa(pessoaId: string): boolean {
     return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && ghDaMaquina(c.escopo, id));
   }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa };
 }

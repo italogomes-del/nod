@@ -21,6 +21,7 @@ import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
+import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
 import { listen } from "./servidor.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
 
@@ -105,6 +106,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   if (!donoEmprestado) await dbDono.end({ timeout: 2 });
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
+  let canaisVoz: { fechar(): Promise<void> } | null = null;
   const app = comporApp({ db, computador: o.computador, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
@@ -113,6 +115,10 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     autorizarTokenTurno: app.tokens.autorizar,
     autorizarMaquina: app.compartilhado ? app.autorizarMaquina : undefined,
     sessao,
+    // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.
+    upgrade: (server, resolverEscopo) => {
+      canaisVoz = app.anexarVoz(server, resolverEscopo);
+    },
   });
   const url = `http://127.0.0.1:${srv.port}`;
 
@@ -138,6 +144,16 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   // 5. inventário persistido por pessoa (ADR-019): é o que enviarMensagem/despacharTurno leem no gate pré-spawn.
   const listar = o.listarPessoas ?? (() => listarTodas(db));
   for (const p of await listar()) await app.inventario.obter(p.id);
+  // ADR-071: ligação que estava viva quando o processo caiu não tem mais orquestrador em memória — fecha com o motivo.
+  for (const p of await listar()) {
+    const escopo = { tenantId: p.tenantId, pessoaId: p.id };
+    await app.dentro(escopo, async (d) => {
+      for (const l of await d.repos.ligacoes.vivas()) {
+        const r = await encerrarLigacao(d, { ligacaoId: l.id, motivo: "reinicio_servidor" });
+        if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+      }
+    });
+  }
 
   // 6. laços de fundo, todos por paraCadaPessoa (EMENDA 3).
   const iv = o.intervalos ?? {};
@@ -208,6 +224,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       await despachante.parar();
       await orquestrador.parar();
       await app.fechar();
+      await canaisVoz?.fechar();
       for (const r of Object.values(registry)) if (r?.estado === "pronto") await r.instance.dispose();
       await srv.close();
       if (!dbEmprestado) await db.end({ timeout: 2 });

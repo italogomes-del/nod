@@ -1,4 +1,5 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
+import type { Escopo } from "../../shared/types.ts";
 import { log } from "../../obs/log.ts";
 import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
@@ -24,6 +25,11 @@ export interface OpcoesServidor {
   autorizarTokenTurno?: DepsRoteador["autorizarTokenTurno"];
   /** Modo de login (ADR-030). Default `stub`, que só escuta em loopback; o boot SEMPRE passa o do NOD_LOGIN. */
   sessao?: OpcoesSessao;
+  /**
+   * definido em 2026-10-04 (ADR-071): quem trata o upgrade de WebSocket (os canais da ligação por voz), com a mesma
+   * resolução de sessão do roteador. Sem isto, nenhum upgrade é aceito.
+   */
+  upgrade?: (server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null) => void;
 }
 
 export function criarServidor(opcoes: OpcoesServidor = {}) {
@@ -36,13 +42,15 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
     autorizarMaquina: opcoes.autorizarMaquina,
     fallback: criarEstatico(opcoes.staticDir ?? process.env.NOD_STATIC_DIR),
   });
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     if (req.method === "GET" && (req.url === "/metrics" || req.url?.startsWith("/metrics?"))) {
       responderMetricas(res);
       return;
     }
     roteador(req, res);
   });
+  opcoes.upgrade?.(server, sessao.resolverEscopo);
+  return server;
 }
 
 export function listen(
