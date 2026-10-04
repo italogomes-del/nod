@@ -79,3 +79,21 @@ describe("marketplace (revisto em 2026-09-25)", () => {
     expect(renderConectores({ ...base, composioConfigurado: false })).toContain("o Composio do time precisa estar configurado");
   });
 });
+
+describe("o ‹ de volta no topo do Marketplace (definido em 2026-10-04)", () => {
+  it("vindo da conversa, volta para o bot: o nome com o mascote e o Esc, como em Seu espaço", () => {
+    const html = renderConectores({ ...base, tela: { tipo: "conectores", voltar: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } } });
+    expect(html).toMatch(/<button type="button" class="tela-voltar" data-act="voltar-conexao" aria-keyshortcuts="Escape" title="Voltar para Milton \(Esc\)">[\s\S]*?class="icon[^"]*sm[\s\S]*?<span>Milton<\/span><\/button><kbd>esc<\/kbd>/);
+    expect(html).not.toContain("Voltar para a conversa");
+  });
+
+  it("vindo de outra tela, diz o nome dela; sem origem, não há botão", () => {
+    expect(renderConectores({ ...base, tela: { tipo: "conectores", voltar: { tipo: "nao-lidos" } } })).toContain("<span>Não lidos</span>");
+    expect(renderConectores(base)).not.toContain('data-act="voltar-conexao"');
+  });
+
+  it("a gaveta aberta e o filtro não apagam a origem", () => {
+    const html = renderConectores({ ...base, tela: { tipo: "conectores", filtro: "conectados", gaveta: { slug: "slack", passo: "detalhes" }, voltar: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } } });
+    expect(html).toContain('title="Voltar para Milton (Esc)"');
+  });
+});
