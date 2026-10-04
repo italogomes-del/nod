@@ -55,7 +55,14 @@ export const OPCOES_VAD_PADRAO: Required<OpcoesVad> = {
 /** definido em 2026-10-04: histerese — durante a fala, o quadro conta como voz até 75% do limiar, para não picotar. */
 const HISTERESE = 0.75;
 
-export type EventoVad = { tipo: "inicio"; em: number } | { tipo: "fim"; em: number; duracaoMs: number };
+/**
+ * definido em 2026-10-04 (análise do Buzz, que exige 192 ms): um trecho com menos que isto de quadros com voz é ruído
+ * (tosse, batida, estalo, eco curto) — não vai ao STT, que transcreveria uma palavra inventada. 160 ms e não 192 porque
+ * "sim" e "não" ditos rápido em pt-BR ficam perto de 200 ms.
+ */
+export const VOZ_MINIMA_MS = 160;
+
+export type EventoVad = { tipo: "inicio"; em: number } | { tipo: "fim"; em: number; duracaoMs: number; vozMs: number };
 
 export type Vad = {
   /** Processa um quadro que começa em `agoraMs`; devolve o evento que ele provocou, se houver. */
@@ -64,6 +71,8 @@ export type Vad = {
   silencioMs(): number;
   falando(): boolean;
   definirBotFalando(b: boolean): void;
+  /** Troca o fator do limiar com o bot falando (com fone não há eco: o limiar pode ficar mais perto do normal). */
+  definirFatorBotFalando(f: number): void;
   /** Limiar em uso agora (já com o fator do bot falando). */
   limiar(): number;
   /** Piso de ruído estimado. */
@@ -72,6 +81,7 @@ export type Vad = {
 
 export function criarVad(opcoes: OpcoesVad = {}): Vad {
   const o: Required<OpcoesVad> = { ...OPCOES_VAD_PADRAO, ...opcoes };
+  let fatorBotFalando = o.fatorBotFalando;
   let piso = 0;
   let botFalando = false;
   let falando = false;
@@ -80,6 +90,7 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
   let inicioEm = 0;
   let fimDaVozEm = 0;
   let seguidosEmSilencio = 0;
+  let quadrosComVoz = 0;
   const recentes: number[] = [];
   const quadrosNaJanela = Math.max(1, Math.round(o.janelaPisoMs / o.quadroMs));
 
@@ -98,7 +109,7 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
     else if (podeSubir) piso += (alvo - piso) * o.alfaPiso;
   };
 
-  const limiar = (): number => Math.max(o.limiarMinimo, piso * o.fatorSobrePiso) * (botFalando ? o.fatorBotFalando : 1);
+  const limiar = (): number => Math.max(o.limiarMinimo, piso * o.fatorSobrePiso) * (botFalando ? fatorBotFalando : 1);
 
   return {
     passo(q, agoraMs) {
@@ -109,11 +120,15 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
       if (comVoz) {
         seguidosEmSilencio = 0;
         fimDaVozEm = agoraMs + o.quadroMs;
-        if (falando) return null;
+        if (falando) {
+          quadrosComVoz++;
+          return null;
+        }
         if (seguidosComVoz === 0) primeiroComVozEm = agoraMs;
         seguidosComVoz++;
         if (seguidosComVoz < o.quadrosParaInicio) return null;
         falando = true;
+        quadrosComVoz = seguidosComVoz;
         inicioEm = primeiroComVozEm;
         return { tipo: "inicio", em: inicioEm };
       }
@@ -121,7 +136,7 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
       seguidosEmSilencio++;
       if (falando && seguidosEmSilencio * o.quadroMs >= o.silencioParaFimMs) {
         falando = false;
-        return { tipo: "fim", em: fimDaVozEm, duracaoMs: fimDaVozEm - inicioEm };
+        return { tipo: "fim", em: fimDaVozEm, duracaoMs: fimDaVozEm - inicioEm, vozMs: quadrosComVoz * o.quadroMs };
       }
       return null;
     },
@@ -129,6 +144,9 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
     falando: () => falando,
     definirBotFalando(b) {
       botFalando = b;
+    },
+    definirFatorBotFalando(f) {
+      fatorBotFalando = f;
     },
     limiar,
     piso: () => piso,

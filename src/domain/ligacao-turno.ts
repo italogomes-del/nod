@@ -152,18 +152,27 @@ export function ehParadaDura(texto: string): boolean {
 export const FALA_QUE_INTERROMPE_MS = 600;
 
 /**
+ * definido em 2026-10-04 (análise do Buzz: com fone, o começo confirmado da fala já toma a vez; no alto-falante, 320 ms):
+ * com fone não há eco para confundir, então 300 ms de fala bastam; no alto-falante e sem saber, os 600 ms de sempre.
+ */
+export const FALA_QUE_INTERROMPE_COM_FONE_MS = 300;
+
+/** Fator do limiar do VAD com o bot falando: 2,5× no alto-falante (o eco não dispara), 1,5× com fone. */
+export const FATOR_VAD_BOT_FALANDO = { fone: 1.5, outro: 2.5 } as const;
+
+/**
  * A fala da pessoa sobre a do bot é mesmo uma interrupção?
  * definido em 2026-10-04: eco nunca; lendo conteúdo não confiável, só palavra de parada; backchannel puro nunca
  * (mesmo longo — "uhuuum" de 700 ms não é pedir a vez); senão 2 palavras fora do backchannel, 1 de parada ou 600 ms.
  */
-export function confirmaInterrupcao(p: { texto: string; falaMs: number; ehEco: boolean; lendoConteudoNaoConfiavel: boolean }): boolean {
+export function confirmaInterrupcao(p: { texto: string; falaMs: number; ehEco: boolean; lendoConteudoNaoConfiavel: boolean; falaQueInterrompeMs?: number }): boolean {
   if (p.ehEco) return false;
   const parada = ehPalavraDeParada(p.texto);
   if (p.lendoConteudoNaoConfiavel) return parada;
   if (parada) return true;
   if (ehBackchannel(p.texto)) return false;
   const fora = palavrasDaFala(p.texto).filter((w) => !PALAVRAS_BACKCHANNEL.has(w));
-  return fora.length >= 2 || p.falaMs >= FALA_QUE_INTERROMPE_MS;
+  return fora.length >= 2 || p.falaMs >= (p.falaQueInterrompeMs ?? FALA_QUE_INTERROMPE_MS);
 }
 
 /**

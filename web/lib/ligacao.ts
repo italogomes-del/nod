@@ -1,7 +1,7 @@
-import type { MsgMidiaCliente, MsgMidiaServidor } from "../../src/contracts/voz.ts";
+import type { MsgMidiaCliente, MsgMidiaServidor, RotaSaida } from "../../src/contracts/voz.ts";
 import { decidirPorVoz, type DecisaoPorVoz } from "./api.ts";
 import type { EstadoLocalLigacao } from "./ligacao-protocolo.ts";
-import { FECHAMENTOS, fechamentoDefinitivo, lerMsgServidor, lerQuadroVoz, mensagemCliente, quadroMicrofone, VERSAO_PROTOCOLO } from "./ligacao-protocolo.ts";
+import { FECHAMENTOS, fechamentoDefinitivo, lerMsgServidor, lerQuadroVoz, mensagemCliente, quadroMicrofone, rotaPeloNome, VERSAO_PROTOCOLO } from "./ligacao-protocolo.ts";
 // Os worklets entram como bundle próprio (definido em 2026-10-04): `new URL("./x.worklet.ts", import.meta.url)` faz o
 // Vite copiar o .ts CRU para o build (asset), e o AudioWorklet não entende TypeScript; `?worker&url` compila o arquivo
 // com os imports dele e devolve a URL do .js gerado (conferido em `npm run build`: dist/web/assets/*.worklet-*.js).
@@ -81,6 +81,7 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
   let fonte: MediaStreamAudioSourceNode | null = null;
   let microfone: MediaStream | null = null;
   let trocaDeAparelho: number | null = null;
+  let rota: RotaSaida = "desconhecida";
   const vozPendente: { utt: number; pcm: Int16Array }[] = [];
 
   const emitir = (ev: EventoMotor): void => {
@@ -106,6 +107,7 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
       jaAbriu = true;
       enviar({ t: "ola", v: VERSAO_PROTOCOLO, ligacaoId: o.ligacaoId, entrada: "pcm16", saida: "pcm16", ...(retomar ? { retomar: true } : {}) });
       if (mudo) enviar({ t: "mudo", ativo: true });
+      if (rota !== "desconhecida") enviar({ t: "saida", rota });
       if (reconexao) {
         if (reconexao.timer !== null) window.clearTimeout(reconexao.timer);
         reconexao = null;
@@ -239,6 +241,7 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
       return;
     }
     microfone = stream;
+    void detectarRota();
     for (const tr of stream.getAudioTracks()) tr.enabled = !mudo;
     fonte = c.createMediaStreamSource(stream);
     if (!captura) {
@@ -259,6 +262,20 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
       captura = cap;
     }
     fonte.connect(captura);
+  }
+
+  /** Fone ou alto-falante pelo nome da saída padrão (os nomes só aparecem depois da permissão do microfone). */
+  async function detectarRota(): Promise<void> {
+    try {
+      const saidas = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput");
+      const padrao = saidas.find((d) => d.deviceId === "default") ?? saidas[0];
+      const nova = rotaPeloNome(padrao?.label ?? "");
+      if (nova === rota) return;
+      rota = nova;
+      enviar({ t: "saida", rota });
+    } catch {
+      // sem a lista de aparelhos, o servidor segue conservador ("desconhecida")
+    }
   }
 
   /** AirPods e fones Bluetooth trocam o aparelho no meio da ligação: a captura reabre no aparelho novo. */
