@@ -116,7 +116,9 @@ export const ligar: CasoDeUso<{ agenteId: string; contexto: ContextoLigacao; exe
   const r = await motivoDeRecusa(deps, input.agenteId, input.contexto);
   if ("motivo" in r) throw new ErroDeDominio(r.motivo === "limite_diario" || r.motivo === "limite_simultaneas" ? "limite_atingido" : "estado_invalido", { cause: r.motivo });
   const { versao } = await deps.repos.ligacoes.consentimento();
-  if ((versao ?? 0) < VERSAO_CONSENTIMENTO_VOZ) throw new ErroDeDominio("estado_invalido", { cause: "sem_consentimento" });
+  // ADR-077: a ligação do onboarding (iniciada pelo produto) nasce tocando antes do consentimento — o "Atender" É o
+  // consentimento, gravado antes de a mídia abrir; até lá o orquestrador recusa a mídia (aguardandoConsentimento).
+  if (input.iniciadaPor !== "produto" && (versao ?? 0) < VERSAO_CONSENTIMENTO_VOZ) throw new ErroDeDominio("estado_invalido", { cause: "sem_consentimento" });
   const agora = deps.agora();
   const { agente, conversaId } = r;
   const voz = vozDoAgente(agente.id, agente.voz);
@@ -252,9 +254,11 @@ export const mandarNoChatDaLigacao: CasoDeUso<{ ligacaoId: string; agenteId: str
  * e dos itens (redigirLeituraDeAprovacao), nunca pelo modelo. null = este tipo não se decide falando (perguntas se
  * respondem na própria conversa; decisão já fechada; decisão de outra pessoa).
  */
-export const leituraDaDecisao: CasoDeUso<{ decisaoId: string }, { decisaoId: string; leitura: string; perfil: PerfilComando } | null> = async (deps, input) => {
+export const leituraDaDecisao: CasoDeUso<{ decisaoId: string; soDoBotDoOnboarding?: boolean }, { decisaoId: string; leitura: string; perfil: PerfilComando } | null> = async (deps, input) => {
   const d = await deps.repos.decisoes.buscar(input.decisaoId);
   if (!d || (d.estado !== "pendente" && d.estado !== "reaberta") || d.ownerId !== deps.escopo.pessoaId || d.decisorId !== deps.escopo.pessoaId) return { data: null };
+  // ADR-077: fora da conversa da ligação, só o card do bot novo do onboarding (o acesso e a rotina dele, para_bot).
+  if (input.soDoBotDoOnboarding && d.agenteId !== (await deps.repos.onboarding.buscar()).botId) return { data: null };
   const contaminado = d.turnoId ? await deps.repos.turnos.contaminado(d.turnoId) : false;
   let pedido: PedidoDeLeitura | null = null;
   if (d.tipo === "aprovacao" || d.tipo === "gate_rotina") {
@@ -271,6 +275,10 @@ export const leituraDaDecisao: CasoDeUso<{ decisaoId: string }, { decisaoId: str
   } else if (d.tipo === "retomar_turno") pedido = { tipo: "retomar_turno", acao: d.frase, contaminado };
   else if (d.tipo === "rotina" || d.tipo === "rotina_atualizacao" || d.tipo === "rotina_exclusao") pedido = { tipo: d.tipo, resumo: d.frase.split(" · ")[0]!.replace(/\s*\([A-Za-z_]+\/[A-Za-z_ ]+\)/, "").replace(/^Rotina proposta:\s*/i, ""), horario: "", contaminado };
   else if (d.tipo === "perfil") pedido = { tipo: "perfil", nome: d.frase, titulo: "", contaminado };
+  else if (d.tipo === "bot") {
+    const p = await deps.repos.propostas.buscar(d.id);
+    pedido = { tipo: "bot", nome: p?.payload.kind === "bot" ? p.payload.nome : d.frase, titulo: p?.payload.kind === "bot" ? p.payload.descricao.slice(0, 140) : "", contaminado };
+  }
   else if (d.tipo === "acesso") {
     // O acesso se aprova inteiro pela voz só com o app já conectado; o texto do card diz o app e o nível.
     return { data: { decisaoId: d.id, leitura: `${d.frase.slice(0, 140)}. ${FECHO_LEITURA}`, perfil: "estrito" } };

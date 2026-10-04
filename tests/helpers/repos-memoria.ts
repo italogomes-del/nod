@@ -1,5 +1,6 @@
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
+import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
 import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
@@ -79,6 +80,8 @@ export type BancoMemoria = {
   /** 0036: o Raio-X de cada turno e as preferências de cada pessoa (chave tenant:pessoa). */
   raioX: Map<string, { composicao: ComposicaoRaioX | null; execucao: ExecucaoRaioX | null }>;
   preferencias: Map<string, Preferencias>;
+  /** 0049 (ADR-077): o onboarding de cada pessoa (chave tenant:pessoa). */
+  onboarding: Map<string, LinhaOnboarding>;
   /** 0038: o catálogo do "/" de cada pessoa (chave tenant:pessoa). */
   comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
   /** 0039: o "lido até" de cada pessoa em cada conversa (chave tenant:pessoa:conversa). */
@@ -134,6 +137,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     custoSessao: new Map(),
     raioX: new Map(),
     preferencias: new Map(),
+    onboarding: new Map(),
     comandos: new Map(),
     leituras: new Map(),
     contaminados: new Set(),
@@ -1844,6 +1848,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { modoDev: p.modoDev };
       },
     },
+    onboarding: (() => {
+      const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
+      const atual = (): LinhaOnboarding => b.onboarding.get(chave) ?? { etapa: null, guiaId: null, botId: null, concluidoEm: null, campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null } };
+      const mudar = async (fn: (l: LinhaOnboarding) => LinhaOnboarding) => {
+        const l = fn(atual());
+        b.onboarding.set(chave, l);
+        return l;
+      };
+      const CAMPO = { apelido: "apelido", como_conheceu: "comoConheceu", objetivo: "objetivo", tamanho_time: "tamanhoTime" } as const;
+      return {
+        async buscar() { return atual(); },
+        definirEtapa: (etapa: Exclude<LinhaOnboarding["etapa"], "concluido" | null>) => mudar((l) => ({ ...l, etapa })),
+        reiniciar: () => mudar((l) => ({ ...l, etapa: "ola", concluidoEm: null, botId: null, campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null } })),
+        concluir: (em: number) => mudar((l) => ({ ...l, etapa: "concluido", concluidoEm: em })),
+        anotar: (campo: keyof typeof CAMPO, valor: string) => mudar((l) => ({ ...l, campos: { ...l.campos, [CAMPO[campo]]: valor } })),
+        definirGuia: (id: string) => mudar((l) => ({ ...l, guiaId: id })),
+        definirBot: (id: string) => mudar((l) => ({ ...l, botId: id })),
+      };
+    })(),
     comandos: {
       async gravar(catalogo) {
         b.comandos.set(`${escopo.tenantId}:${escopo.pessoaId}`, { catalogo, em: agora() });

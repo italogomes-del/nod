@@ -297,8 +297,8 @@ Todas as migrações são só de adição (expand-only), porque o código velho 
   - **`ligacao_falas`**: `seq`, autor, `tipo` (`fala|texto|leitura`), `texto` ≤4.000, `inicio_ms`, `fim_ms`, `interrompida`, `falado_ate`, `confianca`, `UNIQUE (tenant_id, ligacao_id, seq)`.
   - `turnos.ligacao_id` com FK composta e CHECK de mão única `origem <> 'ligacao' OR ligacao_id IS NOT NULL`. `agentes.voz` e `agentes.voz_velocidade`. `preferencias.voz_consentimento_versao/em`.
   - `MOTIVOS_FIM_LIGACAO` em `motivos.ts`, com uma linha `motivo_fim_ligacao` no mapa de `motivos-enum.test.ts:28-46`.
-- `0049_bot_enum.sql` (fase 3): `kind_proposta` e `tipo_decisao` ganham `bot` (`agentes.ts:21,28`; `TipoDecisao` em `decisao.ts:4-15`).
-- `0050_onboarding.sql` (fase 5): `preferencias` ganha etapa, `onboarding_bot_id`, conclusão, apelido, origem e tamanho do time. Backfill entre NO FORCE/FORCE (regra da 0005): quem já tem bot ou chave de máquina é marcado como concluído.
+- `0050_bot_enum.sql` (feita na fase 5, emenda de 2026-10-04: a fase 3 não precisou): `kind_proposta` e `tipo_decisao` ganham `bot` (`agentes.ts:21,28`; `TipoDecisao` em `decisao.ts:4-15`).
+- `0049_onboarding.sql` (fase 5): `preferencias` ganha etapa, `onboarding_guia_id`, `onboarding_bot_id`, conclusão, apelido, origem e tamanho do time. Backfill entre NO FORCE/FORCE (regra da 0005): quem já tem bot ou chave de máquina é marcado como concluído.
 - **Eventos:** `KindEvento` ganha `ligacao_iniciada`/`ligacao_encerrada`, e o frame `ligacao.mudou` entra em `FRAME_POR_EVENTO`. Falas nunca vão para `trilha`, `events.dados`, outbox nem frames.
 - **Recusas:** DTO `RecusaLigacao` com 200 em `GET /ligacoes/disponibilidade`. Limites usam o `limite_atingido` existente. Nenhum `CodigoErro` novo.
 - **Histórico:** a mensagem `sistema` `{kind:"ligacao", ligacaoId, duracaoMs}` (`mensagem.ts:24`) é criada no início, já lida, e atualizada no fim, para ficar antes das ações. Ligação não atendida também ganha linha. A religação continua a mesma linha.
@@ -396,7 +396,7 @@ Todas as migrações são só de adição (expand-only), porque o código velho 
 - **Saída:** e2e com o Codex falso; 10 min manuais; conteúdo p50 ≤3,0 s e p95 ≤4,5 s.
 
 **Fase 5: onboarding "Proposta 2"** (atrás de `NOD_ONBOARDING_VOZ`)
-- **Entregas:** 0050 com backfill; "olá"; cards de IA com handlers; toque com aquecimento; modo `onboarding`; roteiro conduzido; `anotar_entrevista`/`concluir_entrevista`; `para_bot`; chips; caminho sem voz; ADR-077.
+- **Entregas:** 0049 com backfill e 0050 (enum `bot`); "olá"; cards de IA com handlers; toque com aquecimento; modo `onboarding`; roteiro conduzido; `anotar_entrevista`/`concluir_entrevista`; `para_bot`; chips; caminho sem voz; ADR-077.
 - **Arquivos:** `web/estado/reducer.ts`, `desktop/main.ts`, `rotas/ponte.ts`, `prompt-ligacao.ts`, `src/use-cases/propor-bot.ts`, `pedir-acesso.ts`, `web/telas/onboarding.ts`.
 - **Saída:** 10 pessoas internas novas terminam por voz com 1 bot, 1 app e 1 rotina do bot novo (mediana ≤8 min, máximo 10); "sem voz" e "sem IA" terminam; nenhum silêncio >2 s fora do login; usuários antigos não veem o onboarding.
 
@@ -448,7 +448,7 @@ Todas as migrações são só de adição (expand-only), porque o código velho 
   - plano de ligação: sem terminal, sem sessão da conversa, conectores com teto;
   - `decidir` com `canal:"voz"`: mesmas linhas do clique, recusa via itens desmarcados, sem `sempre`;
   - `parar` poupa a ligação; turno de `iniciar_tarefa` com `conversaComAPessoa` falso;
-  - resumo de queda; backfill da 0050; log sem texto falado.
+  - resumo de queda; backfill da 0049; log sem texto falado.
 - **Conformidade:** RLS das tabelas novas; `motivo_fim_ligacao` no mapa de `motivos-enum.test.ts`; `fronteiras.test.ts` com `src/adapters/voz`; teste novo "nenhuma ferramenta de ligação decide", no modelo de `conceder-so-pela-pessoa.test.ts` + `eslint.config.mjs:100-117`.
 - **Concurrency** (custo zero):
   - `tests/concurrency/ligacao-catcher.test.ts`: `servidorCompleto`, catcher em modo ligação, voz falsa, cliente WS com cookie e `Origin`. Fluxo ligar → saudação → fala → interromper → "eu aprovo" → `iniciar_tarefa` → desligar → linha, resumo, `concluido`. Casos extras: `Origin` inválido, Parar no meio, drenagem, religar.

@@ -12,6 +12,7 @@ import type { Escopo, Transacao, Tx } from "../../src/shared/types.ts";
 import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts";
 import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
 import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao.ts";
+import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-cases/onboarding.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
@@ -120,6 +121,9 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     descartarPendencia,
     iniciarTarefa,
     desligar,
+    anotarEntrevista,
+    concluirEntrevista,
+    proporBot,
     ...sobrescrita,
   };
 }

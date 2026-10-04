@@ -6,6 +6,8 @@ import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
 import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
 import { criarVad } from "../../domain/ligacao-vad.ts";
 import { interpretarComando, validarComando, type PerfilComando } from "../../domain/comando-de-voz.ts";
+import { sugestoesDoOnboarding } from "../../domain/roteiro-onboarding.ts";
+import type { CamposEntrevista, EtapaOnboarding, PassoConfiguracao } from "../../contracts/onboarding.ts";
 import { randomUUID } from "node:crypto";
 import { log } from "../../obs/log.ts";
 import type { ProvedoresVoz, ResultadoStt, SessaoStt } from "./spi.ts";
@@ -33,7 +35,17 @@ export type RegistroLigacao = RefLigacao & {
   onboarding?: boolean;
   /** Vocabulário para o STT (nomes de bots e apps). */
   vocabulario?: readonly string[];
+  /** ADR-077: a primeira fala, no lugar de "Oi! Aqui é {bot}." (o roteiro do onboarding). */
+  saudacao?: string;
+  /**
+   * ADR-077: a ligação do onboarding nasce tocando antes do consentimento (o "Atender" é o consentimento). Até
+   * `liberar`, a mídia é recusada (4403): nenhum áudio sobe sem o aceite gravado.
+   */
+  aguardandoConsentimento?: boolean;
 };
+
+/** O que o orquestrador precisa do onboarding para conduzir a ligação (ADR-077): a etapa, os campos e o passo. */
+export type EstadoVozOnboarding = { etapa: EtapaOnboarding | null; campos: CamposEntrevista; passo: PassoConfiguracao; nomeBot: string | null; pessoaNome: string | null };
 
 export type FalaParaGravar = { seq: number; autor: "pessoa" | "bot"; tipo: "fala" | "texto" | "leitura"; texto: string; inicioMs: number; fimMs: number; interrompida: boolean; confianca?: number | null };
 
@@ -53,6 +65,8 @@ export interface PersistenciaVoz {
   encerrar(ref: RefLigacao, motivo: MotivoFimLigacao, metricas: MetricasVoz): Promise<void>;
   /** O que não cabe na fala (código, tabela, link, resto de resposta longa) vai para o chat como mensagem do bot. */
   mandarNoChat?(ref: RefLigacao, texto: string): Promise<void>;
+  /** ADR-077: o estado do onboarding da pessoa (só nas ligações de onboarding). */
+  estadoOnboarding?(ref: RefLigacao): Promise<EstadoVozOnboarding | null>;
 }
 
 /** Clipes das falas de espera já sintetizados (falas-de-espera.ts); ausente = nenhuma espera toca. */
@@ -86,6 +100,8 @@ export const PRAZOS_PADRAO = {
   resumoMs: 30_000,
   /** Silêncio total da ligação (sem ninguém falar) antes da despedida. */
   ociosidadeMs: 180_000,
+  /** ADR-077: a ligação do onboarding toca por até 2 min esperando o "Atender"; depois vira não atendida. */
+  naoAtendidaMs: 120_000,
 };
 
 /** definido em 2026-10-04: pré-roll do STT — o começo da fala que o VAD só confirma depois de 3 quadros. */
@@ -103,6 +119,8 @@ const PRECOS: Record<string, { sttPorSegundo: number; ttsPorCaractere: number }>
 export interface ServicoVoz {
   registrar(r: RegistroLigacao): void;
   existe(ligacaoId: string): boolean;
+  /** ADR-077: o consentimento foi gravado (o "Atender" do onboarding): a mídia pode abrir. */
+  liberar(ligacaoId: string): void;
   anexarMidia(p: { pessoaId: string; ligacaoId: string; retomar: boolean; canal: CanalVoz }): number | null;
   anexarCerebro(p: { turnoId: string; ligacaoId: string; canal: CanalVoz }): number | null;
   encerrar(ligacaoId: string, motivo: MotivoFimLigacao): Promise<void>;
@@ -216,6 +234,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     const notasPendentes: string[] = [];
     const vezesSemCerebro: { n: number; texto: string; ouvidoAte?: string }[] = [];
     let saudou = false;
+    let liberada = r.aguardandoConsentimento !== true;
+    const saudacao = r.saudacao ?? `Oi! Aqui é ${r.nomeBot}.`;
 
     const agendar = (ms: number, fn: () => void): ReturnType<typeof setTimeout> => {
       const t = setTimeout(() => {
@@ -551,7 +571,31 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (janela?.pedido.decisaoId === decisaoId) fecharJanela(decisaoId);
       if (porVoz || estavaNaJanela) falarAviso(resultado === "aprovado" ? "Pronto, aprovado." : resultado === "recusado" ? "Ok, recusado." : "Pronto, registrado.");
       nota(`A pessoa ${resultado === "aprovado" ? "aprovou" : resultado === "recusado" ? "recusou" : "decidiu"}${porVoz ? " por voz" : " na tela"} um pedido seu. Isso já foi dito a ela; não repita.`);
+      atualizarOnboarding();
     }
+
+    // ---- onboarding (ADR-077) ----------------------------------------------------------------------------------------
+
+    /**
+     * Relê o onboarding e manda à mídia a etapa com os campos (o painel "O que você contou"; `configurando` encolhe
+     * para a pílula) e os chips "Diga algo como" da etapa. Só nas ligações de onboarding; o banco é da composição.
+     */
+    function atualizarOnboarding(): void {
+      const ler = deps.persistencia.estadoOnboarding;
+      if (!r.onboarding || !ler || encerrada) return;
+      ler(ref)
+        .then((e) => {
+          if (!e || encerrada) return;
+          if (e.etapa === "entrevista" || e.etapa === "configurando") paraMidia({ t: "onboarding", etapa: e.etapa, campos: e.campos });
+          paraMidia({ t: "sugestoes", itens: sugestoesDoOnboarding({ etapa: e.etapa, campos: e.campos, pessoaNome: e.pessoaNome, passo: e.passo, nomeBot: e.nomeBot }) });
+        })
+        .catch((e: unknown) => log("aviso", "voz_onboarding_falhou", { ligacao_id: r.ligacaoId, erro: e instanceof Error ? e.name : "desconhecido" }));
+    }
+    function liberar(): void {
+      liberada = true;
+    }
+    // A ligação do onboarding toca até o "Atender"; sem ele, vira não atendida (o onboarding segue sem voz).
+    if (r.onboarding) agendar(prazos.naoAtendidaMs, () => { if (!atendida && !encerrada) void encerrar("nao_atendida"); });
 
     // ---- a vez da pessoa ----------------------------------------------------------------------------------------------
 
@@ -710,7 +754,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function saudar(): void {
       if (saudou) return;
       saudou = true;
-      const texto = `Oi! Aqui é ${r.nomeBot}.`;
+      const texto = saudacao;
       gravarFala({ autor: "bot", tipo: "fala", texto, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
       enfileirar({ tipo: "conteudo", texto, n: null });
       botPerguntou = true;
@@ -718,6 +762,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     function anexarMidia(canal: CanalVoz, retomar: boolean): number | null {
       if (encerrada) return FECHAMENTOS_VOZ.encerrada;
+      if (!liberada) return FECHAMENTOS_VOZ.origem;
       if (midia && !retomar) return FECHAMENTOS_VOZ.jaEmLigacao;
       if (midia) midia.fechar(1000, "substituida");
       midia = canal;
@@ -750,6 +795,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         const maxMs = r.maxS * 1000;
         if (maxMs > 90_000) agendar(maxMs - 60_000, () => tocarEspera("limite_proximo"));
         agendar(maxMs, () => void encerrar("tempo_maximo"));
+        atualizarOnboarding();
         timerCerebroPrimeiro = cerebro ? null : agendar(prazos.cerebroPrimeiroMs, () => {
           if (!cerebro && !encerrada) {
             tocarEspera("queda_cerebro");
@@ -834,7 +880,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       });
       paraMidia({ t: "cerebro", online: true });
       // A primeira mensagem aquece o cache do CLI e conta o que o bot já disse; a resposta a ela não é falada.
-      paraCerebro({ t: "vez", n: 0, texto: `[nod] A ligação começou. Você já disse à pessoa: "Oi! Aqui é ${r.nomeBot}." Não responda nada a esta mensagem além de "ok". Espere a pessoa falar.` });
+      paraCerebro({ t: "vez", n: 0, texto: `[nod] A ligação começou. Você já disse à pessoa: "${saudacao}" Não responda nada a esta mensagem além de "ok". Espere a pessoa falar.` });
       for (const v of vezesSemCerebro.splice(0)) paraCerebro({ t: "vez", ...v });
       for (const t of notasPendentes.splice(0)) paraCerebro({ t: "nota", texto: t, confiavel: true });
       if (midia && fase !== "falando" && fase !== "pensando") mudarFase("ouvindo");
@@ -894,6 +940,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             ferramentaRodando = null;
             if (!vezRespondida) mudarFase("pensando");
           }
+          // ADR-077: uma ferramenta que mexe no onboarding terminou — o painel, a pílula e os chips acompanham.
+          if (msg.tipo === "fim" && /(^|__)(anotar_entrevista|concluir_entrevista|propor_bot|pedir_acesso|criar_rotina)$/.test(nome)) atualizarOnboarding();
           // ADR-072: o bot chamou `desligar` — encerra depois da última frase dele.
           if (msg.tipo === "inicio" && /(^|__)desligar$/.test(nome)) desligando = true;
           if (msg.tipo === "fim" && /(^|__)desligar$/.test(nome)) desligarDepoisDeFalar();
@@ -1014,6 +1062,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     return {
       registro: r,
+      liberar,
       anexarMidia,
       anexarCerebro,
       encerrar,
@@ -1034,6 +1083,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       ligacoes.set(r.ligacaoId, criarLigacaoViva(r));
     },
     existe: (id) => ligacoes.has(id),
+    liberar(id) {
+      ligacoes.get(id)?.liberar();
+    },
     anexarMidia({ pessoaId, ligacaoId, retomar, canal }) {
       const l = ligacoes.get(ligacaoId);
       if (!l || l.registro.pessoaId !== pessoaId) return FECHAMENTOS_VOZ.naoEncontrada;

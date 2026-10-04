@@ -1,5 +1,6 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
+import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, dirname } from "node:path";
@@ -8,11 +9,14 @@ import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cl
 import { iniciarLaco } from "../src/adapters/executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
-import { criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
+import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
+import { resolverBinario } from "../src/adapters/executor/caminho.ts";
+import type { ConfigDriver, Driver } from "../src/adapters/executor/spi.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
-import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
+import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
+import { ambienteDoLogin, comandoDeLogin, INTERVALO_SONDA_IA_MS, lerIaDesktop, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
@@ -38,6 +42,10 @@ let conectando = false;
 let encerrando = false;
 let falhando = false;
 let itensGithub: ReturnType<typeof setInterval> | null = null;
+/** Sem IA pronta (onboarding, ADR-077): a sonda de 3 em 3 s até alguma ficar pronta. */
+let sondaIa: ReturnType<typeof setInterval> | null = null;
+/** A config dos drivers da conexão atual (ambiente limpo + PATH aumentado): a sonda e o login da IA a reaproveitam. */
+let cfgExecutor: ConfigDriver | null = null;
 /**
  * definido em 2026-09-24 (ADR-048): de 5 em 5 s o app puxa os itens aprovados que rodam no gh deste
  * Mac (um comentário que a pessoa aprovou no celular sai assim que o Mac estiver aberto). Um por vez.
@@ -229,6 +237,8 @@ async function mostrarSetup() {
 async function parar() {
   if (itensGithub) clearInterval(itensGithub);
   itensGithub = null;
+  if (sondaIa) clearInterval(sondaIa);
+  sondaIa = null;
   const anterior = laco; laco = null;
   cliente?.cancelar();
   if (anterior) await anterior.parar().catch(() => undefined);
@@ -258,22 +268,46 @@ async function conectar(c: Config) {
   await guardar(c); configuracao = c;
   // ADR-052: o hook do nod vai empacotado ao lado do proxy; sem ele o kit do terminal não liga.
   const lig = { urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), hookPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "hook-nativas.mjs") : join(dir, "hook-nativas.mjs"), nodePath: process.execPath, electronComoNode: true, sondaSemTurno: true };
-  const criado = await criarRegistryDetalhado({ ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") }, [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)]);
+  const envExecutor = { ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") };
+  const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
+  const cfg = await configDosDrivers(envExecutor);
+  cfgExecutor = cfg;
+  const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
   registry = criado.registry;
   const inv = Object.values(criado.inventarios).find((i) => i?.estado === "pronto") ?? criado.inventarios["claude-cli"] ?? { estado: "ausente" as const, motivo: "Conecte sua conta de IA", em: Date.now() };
-  cliente = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
+  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
+  cliente = ponteHttp;
   // ADR-048: o gh já logado neste Mac vira o jeito de conectar o GitHub da pessoa, sem ela configurar nada.
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
-  await cliente.ponte.conectar({ machineId: dados.machineId, nome: hostname(), inventario: inv, versaoContrato: 1, harnesses: criado.inventarios, github: { gh }, ligacao: true });
-  if (gh) vigiarItensGithub(cliente);
-  if (inv.estado !== "pronto") {
-    mensagem = inv.estado === "nao_autenticado" ? "Entre na sua conta do Claude Code ou Codex e conecte novamente." : "Instale o Claude Code ou Codex neste Mac e conecte novamente.";
-    throw new Error("harness_indisponivel");
-  }
-  const reg = registry;
+  const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true } as const;
+  await ponteHttp.ponte.conectar({ ...anuncio, inventario: inv, harnesses: criado.inventarios });
+  if (gh) vigiarItensGithub(ponteHttp);
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
-  const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
-  laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId) }), cliente.ponte);
+  const subirLaco = (reg: Registry) => {
+    const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId) }), ponteHttp.ponte);
+  };
+  if (inv.estado === "pronto") subirLaco(criado.registry);
+  else {
+    // definido em 2026-10-04 (ADR-077, onboarding): sem IA pronta a janela abre do mesmo jeito — a web mostra os cards de
+    // IA (Entrar/Instalar) — e o app sonda de novo a cada 3 s. Um registry novo a cada volta: os drivers recriados não
+    // guardam o cache de 5 min da sonda do Codex. Pronta, o laço sobe e o Mac reanuncia o inventário ao servidor.
+    let sondando = false;
+    sondaIa = setInterval(() => {
+      if (sondando || cliente !== ponteHttp) return;
+      sondando = true;
+      void (async () => {
+        const novo = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
+        const pronto = Object.values(novo.inventarios).find((i) => i?.estado === "pronto");
+        if (!pronto || cliente !== ponteHttp || !sondaIa) return;
+        clearInterval(sondaIa);
+        sondaIa = null;
+        registry = novo.registry;
+        await ponteHttp.ponte.conectar({ ...anuncio, inventario: pronto, harnesses: novo.inventarios });
+        subirLaco(novo.registry);
+      })().catch(() => undefined).finally(() => { sondando = false; });
+    }, INTERVALO_SONDA_IA_MS);
+  }
   const anterior = janela;
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
   const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", backgroundColor: fundoDaJanela(), webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
@@ -287,6 +321,24 @@ async function conectar(c: Config) {
   nova.webContents.on("did-fail-load", (_e, code, _description, _url, main) => { if (main && code !== -3) { mensagem = mensagens.servidor_fora!; void mostrarSetup(); } });
   await nova.loadURL(c.url);
   anterior?.close(); mensagem = "Conectado.";
+}
+/**
+ * "Entrar" num card de IA (ADR-077): o login do próprio CLI, sem shell, desanexado e com o ambiente limpo dos drivers
+ * (ia-mac.ts). Ele abre o navegador; o nod nunca lê o token — a sonda de 3 s percebe quando ficou pronto.
+ */
+async function entrarNaIa(ia: IaDesktop): Promise<ResultadoIaDesktop> {
+  const cfg = cfgExecutor ?? await configDosDrivers({ ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") });
+  const home = cfg.env.HOME ?? "";
+  const { nome, args } = comandoDeLogin(ia);
+  const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
+  if (!bin) return { ok: false, motivo: "nao_instalado" };
+  return new Promise((resolver) => {
+    try {
+      const filho = spawn(bin, args, { cwd: home || undefined, env: ambienteDoLogin(cfg.env), detached: true, stdio: "ignore", shell: false });
+      filho.once("spawn", () => { filho.unref(); resolver({ ok: true }); });
+      filho.once("error", () => resolver({ ok: false, motivo: "falhou" }));
+    } catch { resolver({ ok: false, motivo: "falhou" }); }
+  });
 }
 function validarRemetente(event: IpcMainInvokeEvent) {
   if (event.senderFrame?.url !== setupUrl || event.sender !== janela?.webContents) throw new Error("origem_invalida");
@@ -344,6 +396,18 @@ else {
       const lido = lerEmLigacao(ativa);
       if (lido === null) throw new Error("entrada_invalida");
       definirEmLigacao(lido);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaEntrar, (e, ia: unknown) => {
+      validarRemetenteWeb(e);
+      const lida = lerIaDesktop(ia);
+      if (!lida) throw new Error("entrada_invalida");
+      return entrarNaIa(lida);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaInstalar, async (e, ia: unknown): Promise<ResultadoIaDesktop> => {
+      validarRemetenteWeb(e);
+      const lida = lerIaDesktop(ia);
+      if (!lida) throw new Error("entrada_invalida");
+      try { await shell.openExternal(URL_INSTALAR_IA[lida]); return { ok: true }; } catch { return { ok: false, motivo: "falhou" }; }
     });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).

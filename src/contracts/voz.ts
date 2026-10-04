@@ -1,3 +1,5 @@
+import type { CamposEntrevista, EtapaOnboarding } from "./onboarding.ts";
+
 /**
  * Protocolo nod-voz/1 (definido em 2026-10-04, ADR-071): dois canais WebSocket por ligação.
  *
@@ -60,6 +62,10 @@ export type TipoFalaBot = "conteudo" | "espera" | "leitura" | "aviso";
 
 export type AcaoComandoVoz = "aprovar" | "recusar";
 
+/** definido em 2026-10-04 (ADR-077): no máximo 4 chips "Diga algo como", cada um com até 80 caracteres. */
+export const SUGESTOES_MAX = 4;
+export const SUGESTAO_MAX_CHARS = 80;
+
 /** Cliente → servidor, canal de mídia. */
 export type MsgMidiaCliente =
   | { t: "ola"; v: number; ligacaoId: string; entrada: "pcm16"; saida: "pcm16"; retomar?: boolean }
@@ -92,6 +98,13 @@ export type MsgMidiaServidor =
   | { t: "comando"; comandoId: string; decisaoId: string; acao: AcaoComandoVoz }
   | { t: "cerebro"; online: boolean }
   | { t: "aviso"; texto: string }
+  /**
+   * ADR-077 (onboarding por ligação): a entrevista anotou um campo (`etapa:"entrevista"`) ou terminou
+   * (`etapa:"configurando"`: a tela encolhe para a pílula e a configuração guiada aparece).
+   */
+  | { t: "onboarding"; etapa: EtapaOnboarding; campos: CamposEntrevista }
+  /** ADR-077: os chips "Diga algo como" da etapa; lista vazia some com eles. Cada chip vira um `texto` da pessoa. */
+  | { t: "sugestoes"; itens: string[] }
   | { t: "fim"; motivo: MotivoFimLigacao }
   | { t: "pong" };
 

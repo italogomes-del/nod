@@ -73,7 +73,7 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
 }
 
 /** O menu da conta (web/telas/menu-conta.ts) sobre o mesmo diálogo dos menus do bot. */
-export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean> }): void {
+export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean>; onboarding?(): void }): void {
   const d = dialogo(htmlMenuConta(dados), true);
   d.classList.add("menu-conta");
   // Nasce acima do avatar, alinhado à esquerda da barra (a largura dela menos as margens).
@@ -84,6 +84,8 @@ export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes
     const alvo = e.target as HTMLElement;
     const secao = alvo.closest<HTMLElement>("[data-secao]")?.dataset.secao as SecaoEspaco | undefined;
     if (secao) { d.close(); acoes.secao(secao); return; }
+    // ADR-077: "Ver o onboarding de novo" volta ao "olá".
+    if (alvo.closest("[data-onboarding]")) { d.close(); acoes.onboarding?.(); return; }
     const chave = alvo.closest<HTMLElement>("[data-modo-dev]");
     if (chave) void acoes.modoDev().then((ligado) => chave.setAttribute("aria-checked", String(ligado)));
   });

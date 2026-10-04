@@ -7,6 +7,7 @@ import type { Escopo } from "../../../shared/types.ts";
 import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-cases/aplicar-proposta-rotina.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
+import { decidirPropostaDeBot } from "../../../use-cases/onboarding.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
 import { liberarNaTarefa } from "../../../use-cases/liberar-na-tarefa.ts";
 import { permitirSempre } from "../../../use-cases/permitir-sempre.ts";
@@ -164,6 +165,22 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           if (r.consentimentoId) ids.consentimento = r.consentimentoId;
           if (r.rotinaId) ids.rotina = r.rotinaId;
           if (r.turnoId) ids[r.rotinaId ? "turnoRotina" : "turnoRetomada"] = r.turnoId;
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "bot") {
+          // ADR-077: o card "Novo bot" do onboarding (propor_bot). O clique pode trazer o nome e o que ele faz editados;
+          // a voz confirma o que a Nina propôs (o corpo da voz é montado acima, sem campos).
+          const c = typeof corpo === "object" && corpo !== null ? (corpo as Record<string, unknown>) : {};
+          await comoDona(ctx.escopo, atual, async (deps) => {
+            const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
+            if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
+            const r = await executar(deps, decidirPropostaDeBot, { propostaId: atual.id, recusar: recusada(corpo), nome: c.nome, descricao: c.descricao });
+            if (r.agenteId) ids.agente = r.agenteId;
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) })]);
+          });
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

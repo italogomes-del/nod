@@ -335,6 +335,10 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
     const c = p.payload;
     // de→para: a pessoa confirma sem precisar abrir outra tela para lembrar como era.
     itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhaAcorda(c.soComPendencia, true)}${linhasPrecisa(p, estado)}`;
+  } else if (p.payload.kind === "bot") {
+    // definido em 2026-10-04 (ADR-077): o bot que a Nina propõe no onboarding — nome e o que faz; nasce pela decisão.
+    const c = p.payload;
+    itens = `<div class="it"><b>nome</b>${esc(c.nome)}</div><div class="it"><b>o que faz</b>${esc(c.descricao)}</div>`;
   } else if (p.payload.kind === "rotina_exclusao") {
     const c = p.payload;
     itens = `<div class="it"><b>quando</b>${esc(c.resumo)}</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it">Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</div>`;
@@ -353,7 +357,7 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   const comAcesso = acoesDaRotinaComAcesso(p, estado);
   return `<div class="card-prop" data-proposta="${esc(p.id)}">
     <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
-    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${rotinaParada}${marcaGemeas(aberto)}</div>
+    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "bot" ? "Novo bot" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${rotinaParada}${marcaGemeas(aberto)}</div>
     ${itens}
     <div class="ft">${comAcesso?.botoes ?? acoesProposta(p, estado)}</div>${comAcesso?.ajuda ?? ""}
   </div>`;
@@ -375,6 +379,7 @@ function decisaoAbertaDoCard(p: Proposta, estado: Estado): Decisao | null {
  *  definido em 2026-09-24 (ADR-044): acesso também — um clique concede e continua. "Revisar acesso"
  *  fica só para o pedido anterior, cuja decisão ainda não existe. */
 function acoesProposta(p: Proposta, estado: Estado): string {
+  if (p.payload.kind === "bot") return `${botao("decidir-proposta", "Criar bot", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Deixar de lado", { id: p.id })}`;
   if (p.payload.kind === "rotina_atualizacao") return `${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter como está", { id: p.id })}`;
   if (p.payload.kind === "rotina_exclusao") return `${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter rotina", { id: p.id })}`;
   if (p.payload.kind === "acesso" && decisaoAbertaDoCard(p, estado)) {

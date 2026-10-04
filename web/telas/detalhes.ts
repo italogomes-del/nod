@@ -1,3 +1,4 @@
+import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import type { RotinaDto } from "../../src/contracts/api.ts";
 import type { Estado, NivelGaveta } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
@@ -110,7 +111,10 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
 
   // ADR-064: o "a fazer" do bot acima de Rotinas, com as mesmas ações da lista embaixo da conversa.
   const aFazer = dona ? renderAFazerNaGaveta(estado, a.id) : "";
-  return identidade + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
+  // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
+  const o = estado.onboarding;
+  const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
+  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------

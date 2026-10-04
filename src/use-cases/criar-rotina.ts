@@ -13,6 +13,7 @@ import { validarRotinaNormalizada, type RotinaNormalizada } from "../domain/roti
 import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
 import { ativarRotina } from "./ativar-rotina.ts";
 import { confirmacaoPeloModo } from "./confirmar-pelo-modo.ts";
+import { alvoDoParaBot } from "./onboarding-contexto.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaRotina = {
@@ -96,6 +97,7 @@ export async function prepararRotina(deps: Deps, agenteId: string, args: ArgsCri
  * fora do catálogo, escrita sem os nomes exatos, dois itens para o mesmo app).
  */
 export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) => {
+  if (input.para_bot !== undefined) return criarRotinaParaBot(deps, input);
   let payload: PayloadPropostaRotina;
   try {
     payload = await prepararRotina(deps, input.agenteId, input);
@@ -132,6 +134,38 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
   if (decisao) events.push(evento(deps, "decisao_criada", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: input.conversaId, turnoId: input.turnoId }));
   return { data: { proposta_id: proposta.id, proxima_execucao: payload.proximaExecucao, resumo: payload.resumo }, events };
 };
+
+/**
+ * `criar_rotina` com `para_bot` (definido em 2026-10-04, ADR-077): no onboarding por ligação a Nina propõe a rotina DO
+ * bot novo. A proposta e a decisão nascem na conversa dele, com o agente dele e sem turno (a rotina posta na conversa
+ * do bot, não na da Nina). A pessoa confirma clicando ou dizendo "pode criar".
+ */
+async function criarRotinaParaBot(deps: Deps, input: Parameters<CasoNod<Deps, "criar_rotina">>[1]): ReturnType<CasoNod<Deps, "criar_rotina">> {
+  const alvo = await alvoDoParaBot(deps, input.turnoId, input.para_bot ?? "");
+  if (!alvo) return { data: { erro: "entrada_invalida" } };
+  let payload: PayloadPropostaRotina;
+  try {
+    payload = await prepararRotina(deps, alvo.agenteId, input);
+  } catch (e) {
+    if (ehErroDeDominio(e)) return { data: { erro: e.codigo } };
+    throw e;
+  }
+  const proposta = await deps.repos.propostas.criar({ conversaId: alvo.conversaId, agenteId: alvo.agenteId, payload });
+  if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: "proposta não criada" });
+  const decisao = await deps.repos.decisoes.criar({
+    id: proposta.id,
+    tipo: "rotina",
+    agenteId: alvo.agenteId,
+    conversaId: alvo.conversaId,
+    turnoId: null,
+    prazoDecisaoEm: deps.agora() + PRAZO_DECISAO_MS,
+    frase: `Rotina proposta: ${payload.resumo} · próxima execução ${carimbo(payload.proximaExecucao, payload.fusoIana)}`,
+  });
+  const autoria = autoriaAgente(input.agenteId, deps.escopo.pessoaId);
+  const events: RuntimeEvent[] = [evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: "rotina", proximaExecucao: payload.proximaExecucao }, { conversaId: alvo.conversaId })];
+  if (decisao) events.push(evento(deps, "decisao_criada", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: alvo.conversaId }));
+  return { data: { proposta_id: proposta.id, proxima_execucao: payload.proximaExecucao, resumo: payload.resumo }, events };
+}
 
 export type SaidaCriarRotinaPelaPessoa = { rotina: Rotina; proposta: Proposta | null; decisao: Decisao | null };
 

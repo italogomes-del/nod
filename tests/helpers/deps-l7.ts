@@ -90,6 +90,9 @@ export function useCasesFalsos(): UseCasesNod {
     descartarPendencia: naoImplementado("useCases.descartarPendencia"),
     iniciarTarefa: naoImplementado("useCases.iniciarTarefa"),
     desligar: naoImplementado("useCases.desligar"),
+    anotarEntrevista: naoImplementado("useCases.anotarEntrevista"),
+    concluirEntrevista: naoImplementado("useCases.concluirEntrevista"),
+    proporBot: naoImplementado("useCases.proporBot"),
   };
 }
 
