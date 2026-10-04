@@ -9,7 +9,13 @@ import type { JsonSchema } from "./ferramentas-nod.ts";
 import type { TransporteConector } from "./conector.ts";
 
 /** Modo do turno decide quais ferramentas nod entram no catálogo (src/domain/plano-turno.ts). */
-export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer" | "delegacao";
+export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer" | "delegacao" | "ligacao";
+
+/**
+ * definido em 2026-10-04 (ADR-072): o turno é o cérebro de uma ligação por voz. O executor abre o canal do cérebro
+ * (`/api/interno/voz/v1/cerebro`) com o token do turno e conversa por ele até a ligação acabar.
+ */
+export type LigacaoVozPlano = { ligacaoId: string; modelo: string; nomeBot: string; generoVoz: "feminina" | "masculina" };
 
 export type FerramentaPlano = {
   /** 'lembrar' | 'exemplo__enviar_email' (conector = `${slug}__${tool}`). */
@@ -100,6 +106,8 @@ export type PlanoTurno = {
    * no automático, apagar num app e merge que ela pediu ali saem sem card. Ausente (plano antigo) = não é conversa.
    */
   modoTurno?: ModoTurno;
+  /** Presente só no turno da ligação (modoTurno = "ligacao"). */
+  ligacaoVoz?: LigacaoVozPlano;
   /**
    * definido em 2026-09-21 (ADR-042): ferramentas que a PESSOA marcou como "sempre permitir",
    * resolvidas no PUXAR e embarcadas aqui — a avaliação é LOCAL, nunca consulta por chamada

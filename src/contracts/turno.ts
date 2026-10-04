@@ -24,7 +24,7 @@ export type EstadoTurno = "pendente" | "despachando" | "concluido" | "interrompi
  * pedido de colega (pedir_a_bot), com os acessos dele. 'peer' é legado: o turno de quem respondia a
  * perguntar_a_bot, que saiu na ADR-058; nenhum turno novo nasce com ele.
  */
-export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer" | "delegacao";
+export type OrigemTurno = "conversa" | "sala" | "rotina" | "retomada" | "peer" | "delegacao" | "ligacao";
 
 /**
  * Profundidade estrutural (E12.4; revisto em 2026-09-30, ADR-063): quantos passes seguidos entre bots este fio já

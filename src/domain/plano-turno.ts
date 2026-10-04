@@ -79,6 +79,9 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
   rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
   peer: ["lembrar"],
   delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia"],
+  // definido em 2026-10-04 (ADR-072): a ligação fala com a pessoa ao vivo. O kit da conversa sem pedir_a_pessoa (a
+  // pergunta é a própria fala) e sem artefatos (não há tela para lê-los); trabalho demorado vai por iniciar_tarefa.
+  ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
 };
 
 /**

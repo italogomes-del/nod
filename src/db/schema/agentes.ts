@@ -14,7 +14,7 @@ export const AGENTES = {
 /** Enums de ESTADO (não de motivo) que a 0002 cria; os de motivo vivem em src/contracts/motivos.ts. */
 export const ENUMS_DE_ESTADO = {
   estado_turno: ["pendente", "despachando", "concluido", "interrompido"],
-  origem_turno: ["conversa", "sala", "rotina", "retomada", "peer", "delegacao"],
+  origem_turno: ["conversa", "sala", "rotina", "retomada", "peer", "delegacao", "ligacao"],
   confianca: ["confiavel", "nao_confiavel"],
   dono_agente: ["pessoa", "empresa"],
   politica_resposta: ["so_mencoes", "lead", "todos"],

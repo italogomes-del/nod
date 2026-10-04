@@ -1,4 +1,5 @@
 import type { AnexoMeta } from "./anexo.ts";
+import type { PayloadLinhaLigacao } from "./ligacao.ts";
 import type { Autoria } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
@@ -69,7 +70,9 @@ export type PayloadMensagem =
    */
   | { kind: "pasta_aberta"; propostaId: string; agenteId: string; pasta: string; nome: string; onde?: string }
   /** definido em 2026-09-28 (ADR-051): só ids — o HTML (até 500 000 caracteres) não viaja com a conversa. */
-  | { kind: "artefato"; artefatoId: string; versao: number; titulo: string };
+  | { kind: "artefato"; artefatoId: string; versao: number; titulo: string }
+  /** definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a transcrição vem por GET ligacoes/:id/falas. */
+  | PayloadLinhaLigacao;
 
 export type Mensagem = {
   tenantId: TenantId;
