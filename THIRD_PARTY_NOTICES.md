@@ -23,3 +23,15 @@ The web interface serves the Geist and Geist Mono variable fonts (latin and lati
 (https://github.com/vercel/geist-font), licensed under the SIL Open Font License 1.1. Files taken from
 the `@fontsource-variable/geist` and `@fontsource-variable/geist-mono` packages, version 5.3.0.
 Full license: web/public/fontes/OFL-geist.txt.
+
+## ws (WebSocket server)
+
+The voice call channels (ADR-071) use [`ws`](https://github.com/websockets/ws), Copyright (c) 2011 Einar Otto
+Stangvik, Copyright (c) 2013 Arnout Kazemier and contributors, licensed under the MIT License, as a server-side runtime
+dependency only (the desktop app uses the built-in WebSocket client).
+
+## whisper.cpp and macOS `say` (development only)
+
+The free local voice provider for development (`NOD_VOZ_STT=local`, `NOD_VOZ_TTS=local`) calls a separately installed
+[`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) (`brew install whisper-cpp`, MIT License) with the
+`ggml-base-q5_1.bin` model, and the macOS `say` command. Neither is bundled with nod or used in production.
