@@ -26,6 +26,12 @@ export type PreferenciasDesktop = {
   bloqueados: boolean;
 };
 
+/**
+ * O acesso do macOS ao microfone (definido em 2026-10-04, ADR-071): "concedido" pode pedir o microfone; "negado" a
+ * pessoa desligou nos Ajustes do Sistema; "restrito" um perfil de gestão do Mac proíbe.
+ */
+export type EstadoMicrofone = "concedido" | "negado" | "restrito";
+
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
   avisar(aviso: AvisoDesktop): Promise<boolean>;
@@ -38,6 +44,16 @@ export type NodDesktop = {
    * instalado antes de 2026-10-04 não tem: a web confere antes de chamar.
    */
   definirTema?(tema: TemaDesktop): Promise<PreferenciasDesktop>;
+  /**
+   * Modo ligação (definido em 2026-10-04, ADR-071): confere e, se o macOS ainda não perguntou, pede o acesso ao
+   * microfone. Opcional porque o app instalado antes desta versão não tem: a web confere antes de chamar.
+   */
+  microfone?(): Promise<EstadoMicrofone>;
+  /**
+   * A página avisa que abriu (ou fechou) uma ligação: o processo principal impede a suspensão do app, desliga o
+   * throttling da janela e passa a perguntar "Encerrar a ligação?" antes de fechar. Opcional pelo mesmo motivo.
+   */
+  emLigacao?(ativa: boolean): Promise<void>;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -50,6 +66,8 @@ export const CANAIS_DESKTOP = {
   definirAvisos: "nod:definir-avisos",
   definirTema: "nod:definir-tema",
   abrir: "nod:abrir",
+  microfone: "nod:microfone",
+  emLigacao: "nod:em-ligacao",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */

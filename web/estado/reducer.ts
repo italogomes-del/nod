@@ -4,6 +4,7 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { DisponibilidadeLigacao } from "../../src/contracts/ligacao.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
@@ -68,6 +69,12 @@ export type NivelGaveta =
 
 export type ConexaoApp = { url: string | null; falhou: string | null };
 
+/**
+ * A ligação viva da pessoa (definido em 2026-10-04, ADR-071): `local` = aberta NESTA página (a tela da ligação);
+ * senão veio de `GET ligacoes/viva` (outra janela). A barra lateral marca o bot "Em ligação" nos dois casos.
+ */
+export type LigacaoVivaNaTela = { ligacaoId: string; agenteId: string; conversaId: string; local: boolean };
+
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
 
 export type ConversaEstado = ConversaDto & {
@@ -84,7 +91,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "ligacao" | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -175,6 +182,9 @@ export type Estado = {
   agora: number;
   erro: { codigo: string; mensagem: string; correlationId?: string | null } | null;
   ocupado: boolean;
+  ligacaoViva: LigacaoVivaNaTela | null;
+  /** A disponibilidade de ligar para cada bot (só decide se o botão "Ligar" aparece); null = a leitura falhou. */
+  disponibilidadeLigacao: Record<string, DisponibilidadeLigacao | null>;
 };
 
 export type Acao =
@@ -217,7 +227,10 @@ export type Acao =
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
   | { tipo: "erro"; erro: { codigo: string; mensagem: string; correlationId?: string | null } | null }
-  | { tipo: "ocupado"; valor: boolean };
+  | { tipo: "ocupado"; valor: boolean }
+  | { tipo: "ligacao-viva"; viva: LigacaoVivaNaTela | null }
+  | { tipo: "hidratar-disponibilidade-ligacao"; agenteId: string; disponibilidade: DisponibilidadeLigacao | null }
+  | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string };
 
 export const estadoInicial: Estado = {
   sessao: null,
@@ -261,6 +274,8 @@ export const estadoInicial: Estado = {
   agora: 0,
   erro: null,
   ocupado: false,
+  ligacaoViva: null,
+  disponibilidadeLigacao: {},
 };
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
@@ -322,6 +337,11 @@ function comAtividade(estado: Estado, conversaId: string, turnoId: string, mudar
   return { ...estado.atividades, [conversaId]: { ...daConversa, [turnoId]: mudar(daConversa[turnoId]) } };
 }
 
+/** O frame é do turno do cérebro de uma ligação (ADR-071)? `modo` é o que o servidor manda; `origem` também vale. */
+function turnoDeLigacao(dados: Record<string, unknown>): boolean {
+  return dados.modo === "ligacao" || dados.origem === "ligacao";
+}
+
 /** Um handler por TipoFrame — a tabela é TOTAL: um tipo novo no contrato não compila sem entrar aqui. */
 type Handler = (estado: Estado, frame: FrameSse, agora: number) => Estado;
 
@@ -337,6 +357,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
     if (!turnoId || !conversaId) return invalidar(e, conv(f));
+    // Modo ligação (definido em 2026-10-04, ADR-071): o turno do cérebro da ligação não é "trabalhando", nem fila, nem
+    // Parar — a tela da ligação mostra o que ele faz. O servidor marca o frame com `modo: "ligacao"` (e `origem`).
+    if (turnoDeLigacao(f.dados)) return invalidar(e, conv(f));
     // dados.kind distingue "na fila" (turno_criado) de "rodando" (turno_despachado) — pendência L8 §5.
     const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
     const anterior = e.turnosVivos[turnoId];
@@ -344,6 +367,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f));
   },
   "turno.delta": (e, f) => {
+    if (turnoDeLigacao(f.dados)) return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
     const trecho = typeof f.dados.texto === "string" ? f.dados.texto : "";
@@ -354,6 +378,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comTexto(a, trecho)) };
   },
   "turno.atividade": (e, f) => {
+    if (turnoDeLigacao(f.dados)) return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
     if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
@@ -363,6 +388,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     return { ...e, turnosVivos, atividades: comAtividade(e, conversaId, turnoId, (a) => comFerramenta(a, rotulo)) };
   },
   "turno.tarefas": (e, f) => {
+    if (turnoDeLigacao(f.dados)) return e;
     const turnoId = texto(f.dados.turnoId);
     const conversaId = texto(f.dados.conversaId);
     if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
@@ -418,6 +444,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // O relato é registro, não estado vivo da conversa: nada na timeline muda, então nada se invalida.
   // A tela de relatos recarrega quando é aberta (definido em 2026-09-21).
   "relato.criado": (e) => e,
+  // A linha "Chat de voz" da conversa e a ligação viva (a barra lateral marca o bot "Em ligação").
+  "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
   resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
@@ -434,7 +462,9 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
-        carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado };
+        carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
+        ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
+        disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {} };
     case "navegar":
       return resolverInicio({
         ...estado,
@@ -483,7 +513,9 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const conversaId = acao.conversa.conversa.id;
       // Turno aberto que a web não viu nascer (página recarregada no meio dele): o REST o devolve e ele
       // volta a ser vivo, com o `desde` do banco. O frame turno.iniciado não se repete para quem chegou depois.
-      const novos = (acao.conversa.turnosEmCurso ?? []).filter((t) => !estado.turnosVivos[t.id]);
+      // TODO(servidor, modo ligação): `TurnoEmCursoDto` (src/contracts/api.ts) não traz `origem`; o plano diz que
+      // `lerConversa` já exclui o turno `ligacao`. Se ele vier, a web o ignora aqui pelo campo `origem` (ou `modo`).
+      const novos = (acao.conversa.turnosEmCurso ?? []).filter((t) => !estado.turnosVivos[t.id] && !("origem" in t && t.origem === "ligacao") && !("modo" in t && t.modo === "ligacao"));
       const turnosVivos = novos.length === 0 ? estado.turnosVivos : { ...estado.turnosVivos };
       for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde };
       // O texto em streaming de um turno que já acabou sai; o dos que continuam vivos fica.
@@ -569,6 +601,20 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, erro: acao.erro, ocupado: false };
     case "ocupado":
       return { ...estado, ocupado: acao.valor };
+    case "ligacao-viva": {
+      const a = estado.ligacaoViva;
+      const b = acao.viva;
+      const igual = a === b || (a !== null && b !== null && a.ligacaoId === b.ligacaoId && a.local === b.local && a.agenteId === b.agenteId);
+      return igual ? estado : { ...estado, ligacaoViva: b };
+    }
+    case "hidratar-disponibilidade-ligacao":
+      return { ...estado, disponibilidadeLigacao: { ...estado.disponibilidadeLigacao, [acao.agenteId]: acao.disponibilidade } };
+    case "esquecer-disponibilidade-ligacao": {
+      if (!(acao.agenteId in estado.disponibilidadeLigacao)) return estado;
+      const disponibilidadeLigacao = { ...estado.disponibilidadeLigacao };
+      delete disponibilidadeLigacao[acao.agenteId];
+      return { ...estado, disponibilidadeLigacao };
+    }
   }
 }
 
@@ -629,6 +675,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "conversa" && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
   // ADR-064: o "a fazer" aparece embaixo da última mensagem e na gaveta, então chega junto com a conversa.
   if (t.tipo === "conversa" && !estado.pendencias[t.agenteId]) faltas.push(`pendencias:${t.agenteId}`);
+  // Modo ligação (2026-10-04): o botão "Ligar" do cabeçalho só aparece com a disponibilidade lida, e só para bot da pessoa.
+  if (t.tipo === "conversa" && !(t.agenteId in estado.disponibilidadeLigacao) && estado.frota?.agentes.some((a) => a.id === t.agenteId && a.ownerId === estado.sessao?.pessoaId)) faltas.push(`disponibilidade:${t.agenteId}`);
   // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.
   const nivel = t.tipo === "conversa" && estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
   if (nivel?.tipo === "memoria" && !estado.memorias[estado.gaveta?.agenteId ?? ""]) faltas.push(`memoria:${estado.gaveta?.agenteId ?? ""}`);

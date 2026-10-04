@@ -26,6 +26,8 @@ export type TipoFrame =
   | "agente.mudou"
   | "parada.faixa"
   | "relato.criado"
+  /** Modo ligação (ADR-071/075): a ligação da pessoa começou, mudou de estado ou acabou; a web relê a conversa e a ligação viva. */
+  | "ligacao.mudou"
   | "resumed";
 
 /**

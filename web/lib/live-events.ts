@@ -76,6 +76,7 @@ const TIPOS: Record<TipoFrame, true> = {
   "agente.mudou": true,
   "parada.faixa": true,
   "relato.criado": true,
+  "ligacao.mudou": true,
   resumed: true,
 };
 

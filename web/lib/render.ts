@@ -2,7 +2,7 @@ import type { Agente } from "../../src/contracts/agente.ts";
 import type { Autoria } from "../../src/contracts/evento.ts";
 import { esc } from "./escape.ts";
 import { formatoData } from "./formato-data.ts";
-import { htmlMascote, type EstadoMascote } from "./mascote.ts";
+import { htmlMascote, type EstadoMascote, type TamanhoMascote } from "./mascote.ts";
 export { esc } from "./escape.ts";
 export { atualizarMascote } from "./mascote.ts";
 
@@ -33,7 +33,7 @@ export function avatarAgente(a: Pick<Agente, "nome" | "cor">, tamanho: "sm" | "m
 /**
  * definido em 2026-09-17: rosto vetorial na forma e cor do perfil, conforme a referência visual.
  */
-export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: "" | "sm" | "md" | "lg" | "xl" = "", estado: EstadoMascote = "disponivel", extra = ""): string {
+export function iconeAgente(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: TamanhoMascote = "", estado: EstadoMascote = "disponivel", extra = ""): string {
   return htmlMascote(a, tamanho, estado, extra);
 }
 

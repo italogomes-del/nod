@@ -170,11 +170,13 @@ Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
 
 Definido em 2026-09-24 (aviso no Mac): a janela web carrega `preload-web.cjs`, que expõe SÓ
-`window.nodDesktop` (avisar, contador, preferências, tema — ADR-070); a tela de conexão carrega `preload.cjs`
-(`window.nod`, com `conectar`). Nunca dê o segundo à página remota. A página continua sem permissão
-nenhuma (`proteger`): o aviso sai do processo principal, que confere remetente e argumentos
-(`desktop/avisos-mac.ts`). `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`)
-confere as duas pontes sem empacotar.
+`window.nodDesktop` (avisar, contador, preferências, tema — ADR-070; microfone e emLigacao — ADR-071); a tela de
+conexão carrega `preload.cjs` (`window.nod`, com `conectar`). Nunca dê o segundo à página remota. A página
+continua sem permissão nenhuma (`proteger`), com UMA exceção desde 2026-10-04 (modo ligação): `media` só de áudio,
+só na origem do servidor e só no frame de topo (`desktop/permissoes-midia.ts`). O aviso sai do processo
+principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz do bot toca no AudioContext do
+renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
+`electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
 ## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
 
