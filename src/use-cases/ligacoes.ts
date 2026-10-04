@@ -46,7 +46,7 @@ const TEXTOS_RECUSA: Record<MotivoRecusaLigacao, string> = {
   sem_mac: "Para ligar, abra o app do nod no seu Mac: é ele que roda a IA do bot.",
   sem_ia: "A IA deste bot não está pronta no seu Mac. Abra o Claude Code (ou o Codex) e entre na sua conta.",
   app_antigo: "Atualize o app do nod no seu Mac para ligar.",
-  codex_em_breve: "A ligação com bots que usam o ChatGPT (Codex) chega em breve. Por enquanto, converse por texto.",
+  codex_em_breve: "A ligação com bots que usam o ChatGPT (Codex) está desligada neste servidor. Por enquanto, converse por texto.",
   ja_em_ligacao: "Você já está numa ligação. Desligue antes de começar outra.",
   bot_ocupado_em_ligacao: "Este bot já está numa ligação.",
   sala: "Ligação é só com um bot por vez, na conversa dele.",
