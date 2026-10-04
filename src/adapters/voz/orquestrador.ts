@@ -94,9 +94,10 @@ export const PRAZOS_PADRAO = {
   cerebroPrimeiroMs: 30_000,
   /** Interrupção não confirmada: o volume volta. */
   confirmarInterrupcaoMs: 1_200,
-  /** Fala da pessoa com o bot falando: confirma a interrupção a partir deste tanto de fala. */
-  interrupcaoPorFalaMs: 600,
-  /** O mesmo com fone (sem eco): FALA_QUE_INTERROMPE_COM_FONE_MS. */
+  /**
+   * Com fone, fala da pessoa com o bot falando confirma a interrupção a partir deste tanto de fala, mesmo sem texto
+   * (FALA_QUE_INTERROMPE_COM_FONE_MS). No alto-falante (ou sem saber) só o texto confirma: o eco também tem duração.
+   */
   interrupcaoPorFalaFoneMs: 300,
   /** O resumo final do cérebro depois do `fim`. */
   resumoMs: 30_000,
@@ -172,7 +173,13 @@ export function lerQuadroMicrofone(b: Uint8Array): { seq: number; pcm: Int16Arra
 
 export type PedidoAprovacaoVoz = { decisaoId: string; leitura: string; perfil: PerfilComando };
 
-type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; fimEm?: number; aoTerminar?: () => void };
+/**
+ * Uma fala do bot no ar. `inicioPrevisto`/`fimPrevisto`: quando ela toca no app — o cliente toca as falas na ordem em
+ * que o áudio chega, então uma fala mandada com outra ainda tocando só começa quando a anterior acaba (definido em
+ * 2026-10-04: com o TTS adiantado, contar do envio fazia a fala "acabar" antes de tocar, e o eco dela virava fala da
+ * pessoa).
+ */
+type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; inicioPrevisto: number | null; fimPrevisto: number; fimEm?: number; aoTerminar?: () => void };
 type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array; aoTerminar?: () => void; preparo?: Preparo };
 
 /** A síntese de um item da fila já em curso: os pedaços vão chegando enquanto o item da frente toca. */
@@ -204,7 +211,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let atendida = false;
     let mudo = false;
     let rota: RotaSaida = "desconhecida";
-    const falaQueInterrompeMs = () => (rota === "fone" ? prazos.interrupcaoPorFalaFoneMs : prazos.interrupcaoPorFalaMs);
+    const falaQueInterrompeMs = () => (rota === "fone" ? prazos.interrupcaoPorFalaFoneMs : Number.POSITIVE_INFINITY);
     let fase: FaseLigacao = "chamando";
     const vad = criarVad();
     const preRoll: Int16Array[] = [];
@@ -299,7 +306,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const agora = relogio();
       for (const u of utts.values()) {
         // Sem relato do cliente, a fala acaba pela duração (+500 ms de folga).
-        if (!u.fim && agora - u.enviadoEm < u.duracaoMs + 500) return true;
+        if (!u.fim && agora < u.fimPrevisto + 500) return true;
       }
       return tocandoFila;
     }
@@ -432,11 +439,13 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     let vezRespondida = true;
+    /** Até quando o app ainda tem voz do bot para tocar (a fila de reprodução do cliente). */
+    let tocaAte = 0;
     let emSintese: { comAudio: boolean } | null = null;
 
     async function tocarItem(item: ItemFila): Promise<void> {
       const utt = ++uttSeq;
-      const u: Utt = { utt, tipo: item.tipo, texto: item.texto, duracaoMs: 0, tocadoMs: 0, fim: false, n: item.n, enviadoEm: relogio(), aoTerminar: item.aoTerminar };
+      const u: Utt = { utt, tipo: item.tipo, texto: item.texto, duracaoMs: 0, tocadoMs: 0, fim: false, n: item.n, enviadoEm: relogio(), inicioPrevisto: null, fimPrevisto: relogio(), aoTerminar: item.aoTerminar };
       utts.set(utt, u);
       paraMidia({ t: "bot-fala", utt, tipo: item.tipo, texto: item.texto });
       if (item.tipo === "conteudo" || item.tipo === "leitura" || item.tipo === "aviso") mudarFase("falando");
@@ -445,6 +454,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           const pedaco = pcm.subarray(i, Math.min(pcm.length, i + AMOSTRAS_POR_PEDACO));
           midia?.enviarBinario(quadroDeVoz(seqQuadro++, utt, pedaco));
           u.duracaoMs += (pedaco.length / TAXA_VOZ_HZ) * 1000;
+          u.inicioPrevisto ??= Math.max(relogio(), tocaAte);
+          u.fimPrevisto = Math.max(u.fimPrevisto, u.inicioPrevisto + u.duracaoMs);
+          tocaAte = Math.max(tocaAte, u.fimPrevisto);
         }
       };
       const primeiroSom = () => {
@@ -457,7 +469,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       };
       const agendarFim = () => {
         // Sem `tocou-fim` do cliente, a fala acaba pela duração (+500 ms).
-        if (u.aoTerminar) agendar(Math.max(0, u.enviadoEm + u.duracaoMs + 500 - relogio()), () => terminarUtt(u));
+        if (u.aoTerminar) agendar(Math.max(0, u.fimPrevisto + 500 - relogio()), () => terminarUtt(u));
       };
       if (item.pcm) {
         primeiroSom();
@@ -516,6 +528,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     // ---- interrupção ------------------------------------------------------------------------------------------------
 
+    /** As falas do bot com o tempo em que tocaram (ou vão tocar), para a guarda de eco. As esperas também ecoam. */
+    function falasDoBotNoAr(): { texto: string; inicioMs: number; fimMs: number }[] {
+      return [...utts.values()].map((u) => ({ texto: u.texto, inicioMs: u.inicioPrevisto ?? u.enviadoEm, fimMs: u.fimEm ?? u.fimPrevisto }));
+    }
+
     function uttAtual(): Utt | null {
       let ultima: Utt | null = null;
       for (const u of utts.values()) if (!u.fim) ultima = u;
@@ -532,7 +549,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       // O que a pessoa ouviu da resposta em curso: frases inteiras já tocadas + a parcial cortada numa palavra.
       const daVez = [...utts.values()].filter((u) => u.n !== null && u.n === vezAtual && u.tipo === "conteudo");
       const ouvido = ouvidoAte({ frases: daVez.map((u) => ({ texto: u.texto, duracaoMs: u.duracaoMs || 1 })), tocadoMs: daVez.reduce((s, u) => s + (u.fim ? u.duracaoMs : u.tocadoMs), 0) });
-      for (const u of utts.values()) u.fim = true;
+      const agoraInterrompe = relogio();
+      for (const u of utts.values()) {
+        if (!u.fim) u.fimEm ??= agoraInterrompe;
+        u.fim = true;
+      }
+      tocaAte = agoraInterrompe;
       if (vezAtual > 0 && !vezRespondida) {
         vezCancelada = vezAtual;
         if (ouvido.trim() !== "") gravarFala({ autor: "bot", tipo: "fala", texto: ouvido, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: true });
@@ -747,6 +769,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       abortTts?.abort();
       const atual = uttAtual();
       if (atual) paraMidia({ t: "interromper", utt: atual.utt });
+      tocaAte = relogio();
       paraCerebro({ t: "interromper", modo: "duro" });
       pendente.textos = [textoDaVez];
       vezRefeita = true;
@@ -774,7 +797,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (!res.final) {
         if (texto === "") return;
         paraMidia({ t: "legenda", id: legendaId, texto, final: false });
-        if (barge.ativa && !barge.confirmado && confirmaInterrupcao({ texto, falaMs: relogio() - barge.desde, ehEco: false, lendoConteudoNaoConfiavel: false, falaQueInterrompeMs: falaQueInterrompeMs() })) confirmarBarge(texto);
+        if (barge.ativa && !barge.confirmado) {
+          // A parcial pode ser o próprio bot voltando pelo alto-falante: confere antes de cortar.
+          const eco = ehEco({ texto, inicioMs: barge.desde, fimMs: relogio(), falasBot: falasDoBotNoAr() });
+          if (confirmaInterrupcao({ texto, falaMs: relogio() - barge.desde, ehEco: eco, lendoConteudoNaoConfiavel: false, falaQueInterrompeMs: falaQueInterrompeMs() })) confirmarBarge(texto);
+        }
         return;
       }
       const id = legendaId++;
@@ -797,7 +824,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         agendarDecisao();
         return;
       }
-      const falasBot = [...utts.values()].filter((u) => u.tipo !== "espera").map((u) => ({ texto: u.texto, inicioMs: u.enviadoEm, fimMs: u.fimEm ?? u.enviadoEm + u.duracaoMs }));
+      const falasBot = falasDoBotNoAr();
       if (ehEco({ texto, inicioMs: iniT, fimMs: fimT, falasBot })) {
         log("info", "voz_eco_descartado", { ligacao_id: r.ligacaoId });
         return;
@@ -889,7 +916,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         }
         stt?.enviar(pcm);
         sttSegundos += QUADRO_MS / 1000;
-        if (barge.ativa && !barge.confirmado && agora - barge.desde >= falaQueInterrompeMs()) confirmarBarge("");
+        // Só pela duração, sem texto, apenas com fone: no alto-falante o eco do bot também "fala" sem parar, e cortava o
+        // bot sozinho (teste do Marlon, 2026-10-04: 3 interrupções em 3 trocas). Lá quem confirma é o texto.
+        if (rota === "fone" && barge.ativa && !barge.confirmado && agora - barge.desde >= falaQueInterrompeMs()) confirmarBarge("");
       }
       if (ev?.tipo === "fim") {
         falando = false;

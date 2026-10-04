@@ -217,7 +217,7 @@ describe("orquestrador de voz", () => {
   });
 
   it("fala por cima do bot: confirma a interrupção, manda interromper ao cliente e ao cérebro, e a próxima vez leva o 'ouviu até'", async () => {
-    const { voz, midia, cerebro, provedores } = montar({ prazos: { interrupcaoPorFalaMs: 200 } });
+    const { voz, midia, cerebro, provedores } = montar();
     voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: midia });
     voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: cerebro });
     await dormir(30);
@@ -241,7 +241,7 @@ describe("orquestrador de voz", () => {
     ["fone", true],
     ["alto-falante", false],
   ] as const)("com %s, 400 ms de fala sem texto por cima do bot interrompe? %s", async (rota, interrompe) => {
-    const { voz, midia, cerebro } = montar({ prazos: { interrupcaoPorFalaMs: 2000, interrupcaoPorFalaFoneMs: 200, confirmarInterrupcaoMs: 5000 } });
+    const { voz, midia, cerebro } = montar({ prazos: { interrupcaoPorFalaFoneMs: 200, confirmarInterrupcaoMs: 5000 } });
     voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: midia });
     voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: cerebro });
     midia.receber({ t: "saida", rota });
@@ -259,8 +259,36 @@ describe("orquestrador de voz", () => {
     expect(msgs(cerebro, "interromper").length > 0).toBe(interrompe);
   });
 
+  it("alto-falante: o eco da 3ª frase (mandada junto, tocando depois) é eco — não interrompe nem vira vez (teste do Marlon)", async () => {
+    const { voz, midia, cerebro, provedores } = montar({ prazos: { confirmarInterrupcaoMs: 5000 } });
+    voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: midia });
+    voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: cerebro });
+    midia.receber({ t: "saida", rota: "alto-falante" });
+    await dormir(30);
+    tocouTudo(midia);
+    midia.receber({ t: "texto", conteudo: "me conta três coisas" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1));
+    // Três frases de ~1,2 s mandadas de uma vez: a terceira só toca de ~2,4 s a ~3,6 s.
+    cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Primeira coisa aqui. Segunda coisa aqui. Terceira coisa aqui. " });
+    cerebro.receber({ t: "fala-fim", n: 1 });
+    await ate(() => msgs(midia, "bot-fala").find((m) => String(m.texto).includes("Terceira")));
+    await dormir(2300);
+    // O microfone pega a terceira frase de volta, longa (mais que os 600 ms de antes).
+    provedores.stt.empurrarTexto("Terceira coisa aqui.");
+    let seq = 0;
+    for (let i = 0; i < 40; i++) {
+      midia.receber(quadro(seq++, true));
+      if (i % 10 === 0) await dormir(100);
+    }
+    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    // A vez sairia 600 ms depois do fim da fala; espera de sobra.
+    await dormir(1500);
+    expect(msgs(cerebro, "interromper")).toHaveLength(0);
+    expect(msgs(cerebro, "vez").find((v) => v.n === 2)).toBeUndefined();
+  });
+
   it("'uhum' com o bot falando não interrompe: vai só para a transcrição e o volume volta", async () => {
-    const { voz, midia, cerebro, provedores, falas } = montar({ prazos: { interrupcaoPorFalaMs: 5000 } });
+    const { voz, midia, cerebro, provedores, falas } = montar();
     voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: midia });
     voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: cerebro });
     await dormir(30);
