@@ -12,6 +12,7 @@ import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
 import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
+import { rodarLigacaoClaude } from "./claude-ligacao.ts";
 import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
@@ -298,6 +299,29 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const { binario: bin, versao: v } = await garantirVersao();
               const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp });
               if (!floors.ok) throw new ErroDeDominio("executor_indisponivel", { cause: floors.motivo });
+
+              // ADR-072: o turno-cérebro de uma ligação é um laço de voz, não um turno de chat.
+              if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
+                if (!(flagsNoHelp ?? []).includes("--input-format")) throw new ErroDeDominio("executor_indisponivel", { cause: "CLI sem --input-format: atualize o Claude Code para ligar" });
+                return await rodarLigacaoClaude({
+                  plano,
+                  sinks,
+                  bin,
+                  flagsNoHelp: flagsNoHelp ?? [],
+                  env: montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs),
+                  cwdBase: cfg.cwdBase,
+                  urlNod: lig.urlNod,
+                  proxyPath: lig.proxyPath,
+                  nodePath: lig.nodePath,
+                  electronComoNode: lig.electronComoNode,
+                  sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
+                  modelo: cfg.env.NOD_MODELO_LIGACAO_CLAUDE ?? plano.ligacaoVoz.modelo,
+                  aoProcesso: (p) => {
+                    processo = p;
+                    if (p && interromperPedido) void p.interromper();
+                  },
+                });
+              }
 
               // Fail-closed: sem --restricted comprovado no help, não se aponta o cwd para a pasta
               // da pessoa — antes o turno cai para o diretório temporário e as nativas desligadas.
