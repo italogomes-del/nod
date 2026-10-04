@@ -55,7 +55,8 @@ export function criarProvedoresVoz(env: Record<string, string | undefined>, plat
     encerrar.push(local.encerrar);
     stt = local;
   } else {
-    stt = criarTranscritorFalso();
+    // NOD_VOZ_FALSO_ROTEIRO: as falas que o STT falso devolve, na ordem, separadas por "|" (e2e e dev sem microfone).
+    stt = criarTranscritorFalso(env.NOD_VOZ_FALSO_ROTEIRO ? env.NOD_VOZ_FALSO_ROTEIRO.split("|").map((s) => s.trim()) : undefined);
   }
 
   let tts: Sintetizador;

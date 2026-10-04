@@ -42,6 +42,10 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from rotina_execucoes where owner_id = ${p}`;
     await trx`delete from rotina_janelas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
+    // ADR-075 (0048): a ligação aponta para agente e conversa, e os turnos apontam para ela — sai entre os dois.
+    await trx`delete from ligacao_falas where owner_id = ${p}`;
+    await trx`delete from ligacoes where owner_id = ${p}`;
+    await trx`delete from preferencias where owner_id = ${p}`;
     await trx`delete from rotinas where owner_id = ${p}`;
     await trx`delete from sala_membros where owner_id = ${p}`;
     await trx`delete from salas where owner_id = ${p}`;

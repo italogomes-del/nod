@@ -1,6 +1,6 @@
 import { FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, type FaseLigacao, type MotivoFimLigacao, type MsgCerebroServidor, type MsgMidiaServidor, type TipoFalaBot } from "../../contracts/voz.ts";
 import { ehEco } from "../../domain/ligacao-eco.ts";
-import { escolherFala, FALAS_DE_ESPERA, TEMPOS_ESPERA, type CategoriaEspera, type FalaDeEspera, type HistoricoEspera } from "../../domain/ligacao-espera.ts";
+import { escolherFala, FALAS_DE_ESPERA, TEMPOS_ESPERA, type CategoriaEspera, type EsperaTocada, type FalaDeEspera } from "../../domain/ligacao-espera.ts";
 import { criarSegmentador, removerAberturaRepetida, textoFalavel } from "../../domain/ligacao-frases.ts";
 import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
 import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
@@ -185,7 +185,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let trocas = 0;
     let interrupcoes = 0;
     const latencias: number[] = [];
-    const historicoEspera: HistoricoEspera = [];
+    const historicoEspera: EsperaTocada[] = [];
     const utts = new Map<number, Utt>();
     const fila: ItemFila[] = [];
     let tocandoFila = false;
@@ -279,9 +279,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       cancelarEsperas();
       const social = texto.split(/\s+/).length <= 3;
       const reconhecer = !r.onboarding && !social && aleatorio() < 0.4;
-      if (reconhecer) timersEspera.push(agendar(TEMPOS_ESPERA.reconhecimento, () => { if (vezAtual === n && primeiroSomDaVez) tocarEspera("reconhecimento"); }));
-      timersEspera.push(agendar(TEMPOS_ESPERA.pensando, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando) tocarEspera("pensando"); }));
-      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoLongo, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando) tocarEspera("pensando_longo"); }));
+      if (reconhecer) timersEspera.push(agendar(TEMPOS_ESPERA.reconhecimentoMs, () => { if (vezAtual === n && primeiroSomDaVez) tocarEspera("reconhecimento"); }));
+      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando) tocarEspera("pensando"); }));
+      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoLongoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando) tocarEspera("pensando_longo"); }));
     }
 
     // ---- voz do bot: fila e TTS -------------------------------------------------------------------------------------
@@ -717,8 +717,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             ferramentaRodando = nome;
             mudarFase("trabalhando", nome);
             const n = vezAtual;
-            timersEspera.push(agendar(TEMPOS_ESPERA.ferramenta, () => { if (ferramentaRodando === nome && vezAtual === n && !botTocando()) tocarEspera("ferramenta", nome); }));
-            timersEspera.push(agendar(TEMPOS_ESPERA.tarefaLonga, () => { if (ferramentaRodando === nome && vezAtual === n && !botTocando()) tocarEspera("tarefa_longa"); }));
+            timersEspera.push(agendar(TEMPOS_ESPERA.ferramentaMs, () => { if (ferramentaRodando === nome && vezAtual === n && !botTocando()) tocarEspera("ferramenta", nome); }));
+            timersEspera.push(agendar(TEMPOS_ESPERA.tarefaLongaMs[0], () => { if (ferramentaRodando === nome && vezAtual === n && !botTocando()) tocarEspera("tarefa_longa"); }));
           } else if (ferramentaRodando === nome) {
             ferramentaRodando = null;
             if (!vezRespondida) mudarFase("pensando");
