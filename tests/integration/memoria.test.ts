@@ -25,7 +25,7 @@ describeIntegracao("memória por bot (Grok Bot: memória não é fonte)", () => 
       expect(r.events.map((e) => e.kind)).toEqual(["agente_atualizado", "mensagem_criada"]);
       const anotei = await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id);
       expect(anotei).toMatchObject({ kind: "sistema", turnoId: turno?.id, autoria: { autor_tipo: "agente", autor_id: criado.agente.id } });
-      expect(anotei?.texto).toBe("Anotei como preferencia: prefere resumos em tópicos");
+      expect(anotei?.texto).toBe("Anotei uma preferência: prefere resumos em tópicos");
 
       const daPessoa = await executar(deps, registrarMemoria, { agenteId: criado.agente.id, conversaId: null, turnoId: null, tipo: "fato", texto: "o repo é o nod", origem: "pessoa" });
       expect(daPessoa.data.mensagem).toBeNull();

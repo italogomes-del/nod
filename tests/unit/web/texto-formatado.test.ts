@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { textoFormatado } from "../../../web/lib/texto-formatado.ts";
+import { soLinks, tabelaComo, textoFormatado } from "../../../web/lib/texto-formatado.ts";
 
 describe("texto do modelo na conversa", () => {
   it("mostra ênfase e quebras sem transformar HTML ou URLs em elementos ativos", () => {
@@ -91,9 +91,50 @@ describe("tabelas no texto do bot", () => {
     expect(dez).not.toContain("md-tabela-mais");
   });
 
-  it("Copiar leva colunas separadas por tabulação, com o que a pessoa lê", () => {
+  const dadosDaTabela = (html: string): string[][] => JSON.parse(html.match(/data-tabela="([^"]*)"/)![1]!.replaceAll("&quot;", '"').replaceAll("&#39;", "'").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&")) as string[][];
+
+  it("Copiar como Planilha leva colunas separadas por tabulação, com o que a pessoa lê", () => {
     const html = textoFormatado("| PR | Link |\n|---|---|\n| **#417** | [abrir](https://github.com/x/y/pull/417) |\n| `#418` | https://zoom.us/pricing |");
-    const tsv = html.match(/data-tsv="([^"]*)"/)![1]!.replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#39;", "'").replaceAll("&lt;", "<").replaceAll("&gt;", ">");
-    expect(tsv).toBe("PR\tLink\n#417\tabrir\n#418\thttps://zoom.us/pricing");
+    expect(tabelaComo("tsv", dadosDaTabela(html))).toBe("PR\tLink\n#417\tabrir\n#418\thttps://zoom.us/pricing");
+  });
+
+  it("rodapé da tabela: quantas linhas e colunas e Copiar como Planilha · CSV · JSON (2026-10-03)", () => {
+    const html = textoFormatado("| Região | Receita |\n|---|--:|\n| Sul | R$ 98 mil |\n| Norte, Nordeste | R$ \"132\" mil |");
+    expect(html).toContain('<div class="md-tabela-rodape"><span>2 linhas · 2 colunas</span>');
+    expect(html.match(/data-act="copiar-tabela"/g)).toHaveLength(3);
+    expect(html).toContain('data-formato="csv"');
+    expect(html).not.toContain("md-tabela-copiar");
+    const dados = dadosDaTabela(html);
+    expect(tabelaComo("csv", dados)).toBe('Região,Receita\nSul,R$ 98 mil\n"Norte, Nordeste","R$ ""132"" mil"');
+    expect(JSON.parse(tabelaComo("json", dados))).toEqual([{ Região: "Sul", Receita: "R$ 98 mil" }, { Região: "Norte, Nordeste", Receita: 'R$ "132" mil' }]);
+  });
+});
+
+describe("listas e títulos no texto do bot (2026-10-03)", () => {
+  it("'-' e '1.' viram lista; '##' vira título; o texto em volta vira parágrafo sem <br> sobrando", () => {
+    const html = textoFormatado("## Resumo\nFechei setembro:\n\n- receita **R$ 482 mil**\n- 12% acima de agosto\n\n1. Sul\n2. Norte\n\nPosso mandar?");
+    expect(html).toBe('<p class="md-titulo">Resumo</p><p class="md-paragrafo">Fechei setembro:</p><ul class="md-lista"><li>receita <strong>R$ 482 mil</strong></li><li>12% acima de agosto</li></ul><ol class="md-lista"><li>Sul</li><li>Norte</li></ol><p class="md-paragrafo">Posso mandar?</p>');
+  });
+
+  it("lista numerada guarda o número de início; linha recuada continua o item", () => {
+    expect(textoFormatado("3. terceiro\n   continua\n4. quarto")).toBe('<ol class="md-lista" start="3"><li>terceiro continua</li><li>quarto</li></ol>');
+  });
+
+  it("sem lista nem título, o texto sai exatamente como antes", () => {
+    expect(textoFormatado("um *dois*\n\ntrês")).toBe("um <em>dois</em><br><br>três");
+  });
+
+  it("*itálico* no começo da linha não vira lista; HTML continua texto dentro do item", () => {
+    expect(textoFormatado("*ênfase* aqui")).toBe("<em>ênfase</em> aqui");
+    expect(textoFormatado("- <b>x</b>")).toBe('<ul class="md-lista"><li>&lt;b&gt;x&lt;/b&gt;</li></ul>');
+  });
+});
+
+describe("soLinks: a linha 'agora' do cartão de atividade (2026-10-03)", () => {
+  it("o link vira chip e o resto continua texto escapado", () => {
+    const html = soLinks("Lendo <os> arquivos de https://github.com/acme/loja/pull/481.");
+    expect(html.startsWith("Lendo &lt;os&gt; arquivos de ")).toBe(true);
+    expect(html).toContain('href="https://github.com/acme/loja/pull/481"');
+    expect(html.endsWith(".")).toBe(true);
   });
 });

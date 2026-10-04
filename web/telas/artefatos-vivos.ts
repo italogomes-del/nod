@@ -260,11 +260,28 @@ export function criarArtefatosVivos(deps: DepsArtefatos) {
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
+  /**
+   * "Abrir em nova aba" (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"). ADR-051 continua: o HTML
+   * do bot nunca vira página desta origem. A aba nova é um invólucro NOSSO (sem script) com o mesmo iframe sandbox da
+   * conversa — o artefato roda na origem opaca, como aqui. O blob tem a origem do Nod, mas só o invólucro mora nele.
+   * Na aba, o estado não é gravado (não há ninguém ouvindo a ponte); é para olhar grande, não para editar.
+   */
+  async function novaAba(mensagemId: string): Promise<void> {
+    const alvo = doCard(mensagemId);
+    if (!alvo) return;
+    const conteudo = await carregar(alvo.artefatoId, alvo.versao);
+    const quadro = iframeDoArtefato({ documento: documentoDoArtefato(conteudo.html, estados.get(alvo.artefatoId) ?? null), titulo: conteudo.titulo, chave: `${alvo.artefatoId}:${alvo.versao}:aba`, classe: "quadro" });
+    const pagina = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>${esc(conteudo.titulo)}</title><style>html,body{margin:0;height:100%;background:#fff}.quadro{display:block;width:100%;height:100%;border:0}</style></head><body>${quadro}</body></html>`;
+    const url = URL.createObjectURL(new Blob([pagina], { type: "text/html;charset=utf-8" }));
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
   // <details> de versão anterior aberto: o slot dele ganha o iframe só agora (toggle não borbulha).
   document.addEventListener("toggle", (ev) => {
     const el = ev.target;
     if (el instanceof HTMLDetailsElement && el.open && el.classList.contains("artefato-anterior")) hidratar(el);
   }, true);
 
-  return { hidratar, estacionar, telaCheia, baixar };
+  return { hidratar, estacionar, telaCheia, baixar, novaAba };
 }

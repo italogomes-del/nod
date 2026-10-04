@@ -2,7 +2,8 @@ import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { TIPOS_DISPENSAVEIS_ABERTOS, TipoDecisao } from "../../src/contracts/decisao.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { checkboxesDosGrupos } from "./app-acesso.ts";
+import { checkboxesDosGrupos, type IdGrupo } from "./app-acesso.ts";
+import { logoApp } from "./marketplace.ts";
 import { pedidosAbertos } from "../lib/avisos.ts";
 import { desdeDaParada, linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, contarFios, ehPergunta } from "../lib/perguntas.ts";
@@ -215,16 +216,102 @@ function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
         : "Dado pessoal sempre passa por você — não dá para permitir de uma vez.";
     return botao("decidir-aprovacao-sempre", "Sempre permitir", { id: item.decisao.id, desabilitado: true, titulo: motivo });
   }
+  const unicaAcao = elegiveis[0];
   const comNome = nomes.map((n) => {
     const [slug = "", ferramenta = ""] = n.split(".");
     const conector = conectores.find((c) => c.slug === slug)?.nome ?? slug;
     return `${ferramenta} no ${conector}`;
   });
-  const rotulo = nomes.length === 1 ? `Sempre permitir ${esc(nomes[0] ?? "")}` : `Sempre permitir estas ${nomes.length} ferramentas`;
+  const rotulo = nomes.length === 1 && unicaAcao ? `Sempre permitir ${esc(acaoHumana(conectores, unicaAcao.destino.conector, unicaAcao.destino.ferramenta))}` : `Sempre permitir estas ${nomes.length} ferramentas`;
   return botao("decidir-aprovacao-sempre", rotulo, {
     id: item.decisao.id,
     titulo: `Vale já para ${comNome.join(" e ")}, em qualquer destino, enquanto o bot não tiver lido conteúdo de fora na tarefa.`,
   });
+}
+
+/**
+ * O que a regra "Sempre permitir" libera, em português (definido em 2026-10-03, canvas "Uma conversa de verdade ·
+ * depois"): o botão mostrava o slug cru ("Sempre permitir googlesheets.update_values"). O grupo da ação chega pronto
+ * de GET /conectores (`grupo`, src/domain/grupos-de-acesso.ts); sem ele, o nome da ferramenta sem os sublinhados.
+ * O slug continua no título e no "Ver detalhes".
+ */
+const VERBO_DO_GRUPO: Record<IdGrupo, string> = { ler: "ler", criar: "criar e enviar", alterar: "editar", comentar: "comentar", outras: "usar", apagar: "apagar" };
+
+export function acaoHumana(conectores: Estado["conectores"], slug: string, ferramenta: string): string {
+  const conector = conectores.find((c) => c.slug === slug);
+  const grupo = conector?.catalogo.find((c) => c.nome === ferramenta)?.grupo;
+  const verbo = grupo && grupo !== "outras" ? VERBO_DO_GRUPO[grupo] : ferramenta.replaceAll("_", " ");
+  return `${verbo} no ${conector?.nome ?? slug}`;
+}
+
+/** Linhas da prévia antes do "e mais N" (definido em 2026-10-03): o card não vira a planilha inteira. */
+const LINHAS_DA_PREVIA = 8;
+
+/**
+ * "O que vai ser enviado" (definido em 2026-10-03): os argumentos da ferramenta, que só existiam atrás do "Ver
+ * detalhes", em forma legível — uma matriz (valores de planilha) vira tabela; texto, número e sim/não viram linhas
+ * rotuladas. O que não cabe nisso (objetos aninhados, ids longos) continua só no "Ver detalhes".
+ */
+export function previaDoItem(i: Pick<Item["itensAprovacao"][number], "destino">): string {
+  const args = Object.entries(i.destino.argumentos ?? {});
+  const matriz = args.map(([, v]) => v).find((v): v is unknown[][] => Array.isArray(v) && v.length > 0 && v.every((l) => Array.isArray(l)));
+  const celula = (v: unknown): string => esc(typeof v === "string" ? v : v === null || v === undefined ? "" : JSON.stringify(v));
+  if (matriz) {
+    const linhas = matriz.slice(0, LINHAS_DA_PREVIA).map((l) => `<tr>${l.map((v) => `<td>${celula(v)}</td>`).join("")}</tr>`).join("");
+    const resto = matriz.length - LINHAS_DA_PREVIA;
+    return `<div class="aprov-previa"><div class="aprov-previa-cab">O que vai ser enviado</div><div class="md-tabela"><div class="md-tabela-rolagem"><table><tbody>${linhas}</tbody></table></div>${resto > 0 ? `<div class="aprov-previa-mais">e mais ${resto} ${resto === 1 ? "linha" : "linhas"}</div>` : ""}</div></div>`;
+  }
+  const simples = args.filter(([, v]) => (typeof v === "string" && v.length > 0 && v.length <= 400) || typeof v === "number" || typeof v === "boolean").slice(0, 6);
+  if (simples.length === 0) return "";
+  return `<div class="aprov-previa"><div class="aprov-previa-cab">O que vai ser enviado</div><dl class="aprov-campos">${simples.map(([k, v]) => `<dt>${esc(k.replaceAll("_", " "))}</dt><dd>${celula(v)}</dd>`).join("")}</dl></div>`;
+}
+
+/**
+ * O card da aprovação (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"; revisto no mesmo dia para a
+ * lista): no desenho do cartão de atividade — quem pede e há quanto, a frase, ONDE (o app como chip), o que vai
+ * acontecer, os botões e, no rodapé, o prazo. Saem a tag "aprovação em lista" e a borda âmbar: o ponto âmbar já diz
+ * que espera você, e a lista com borda lateral parecia de outra plataforma. Um item comum mostra a prévia do que vai
+ * ser enviado; vários (ou um de origem sensível, que nasce desmarcado) viram linhas marcáveis no mesmo card. Mantém
+ * `data-decisao`, `data-item`, `data-contador` e o input do texto final, que main.ts lê.
+ */
+function renderCardAprovacao(item: Item, estado: Estado): string {
+  const d = item.decisao;
+  const conectores = estado.conectores;
+  const itens = item.itensAprovacao;
+  const unico = itens.length === 1 && itens[0] && !itens[0].origemSensivel ? itens[0] : undefined;
+  const slugs = [...new Set(itens.map((i) => i.destino.conector))];
+  const umApp = slugs.length === 1 ? slugs[0] : undefined;
+  const chip = (slug: string): string => {
+    const app = conectores.find((c) => c.slug === slug)?.nome ?? slug;
+    return slug === "computador" || slug === "terminal" ? esc(ondeAcontece(conectores, slug)) : `em <span class="lk-chip aprov-app">${logoApp(estado, slug, app)}<span>${esc(app)}</span></span>`;
+  };
+  const marcados = itens.filter((i) => i.selecionado).length;
+  const contagem = !unico && (itens.some((i) => i.origemSensivel) || marcados !== itens.length);
+  const rotulo = contagem ? `Pode fazer <span data-contador>${marcados}</span> de ${itens.length}` : "Pode fazer";
+  const naMaquina = unico && (unico.destino.conector === "computador" || unico.destino.conector === "terminal");
+  const resto = naMaquina ? botao("decidir-aprovacao-resto", "Pode fazer e o resto desta tarefa", { id: d.id }) : "";
+  const prazo = `Sem resposta, ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs), item)}`;
+  let corpo: string;
+  if (unico) {
+    const acao = unico.destino.conector === "terminal"
+      ? `<pre class="ap-comando"><code>${esc(unico.textoFinal)}</code></pre>`
+      : unico.destino.conector === "computador" && unico.textoFinal.trim() !== d.frase.trim() ? `<div class="ap-oque">${esc(unico.textoFinal)}</div>` : "";
+    corpo = `${acao}${previaDoItem(unico)}${porqueDaPausa(unico)}${tagDesfecho(unico, true)}`;
+  } else {
+    const linha = (i: Item["itensAprovacao"][number]): string => `<li class="aprov-item${i.origemSensivel ? " sensivel" : ""}">
+      <label class="aprov-marca"><input type="checkbox" data-item="${esc(i.id)}" ${i.selecionado ? "checked" : ""} /><span class="aprov-item-txt">${esc(i.textoFinal)}${umApp ? "" : `<small>${esc(ondeAcontece(conectores, i.destino.conector))}</small>`}</span></label>
+      ${i.origemSensivel ? `<p class="justificativa">${esc(i.justificativa ?? JUSTIFICATIVA_PADRAO)}</p>` : ""}${porqueDaPausa(i)}${tagDesfecho(i, true)}${detalheTecnico(i)}
+    </li>`;
+    corpo = `<ul class="aprov-itens">${itens.map(linha).join("")}</ul>`;
+  }
+  return `<li class="decisao aprov-card dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
+    <div class="aprov-cab"><span class="aprov-ponto" aria-hidden="true"></span><b>${esc(item.agenteNome)} precisa do seu ok</b><span>· ${esc(haQuanto(item.aguardandoHaMs))}</span>${marcaGemeas(item)}${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}</div>
+    <p class="aprov-titulo dec-frase">${esc(d.frase)}</p>
+    ${umApp ? `<div class="aprov-onde">${chip(umApp)}</div>` : ""}
+    ${corpo}
+    <div class="acoes aprov-acoes">${botao("decidir-aprovacao", rotulo, { classe: "pri", id: d.id })}${resto}${botao("decidir-aprovacao-nenhum", "Agora não", { id: d.id })}${botaoSempre(item, conectores)}</div>
+    <div class="aprov-rodape"><span>${esc(prazo)}</span>${unico ? detalheTecnico(unico) : ""}</div>
+  </li>`;
 }
 
 /**
@@ -371,6 +458,7 @@ function dispensavel(item: Item): boolean {
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
+  if (aberta && d.tipo === "aprovacao" && item.itensAprovacao.length > 0) return renderCardAprovacao(item, estado);
   const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs), item)}` : rotuloVencido(d, estado.agora);
   const parada = d.tipo === "acesso" && aberta ? { marca: marcaRotinaParada(item.proposta, item.rotinaParada, estado.agora), linha: linhaNaoRodaram(item.rotinaParada, estado.agora) } : { marca: "", linha: "" };
   // O "Retomar" aberto já tem "Dispensar" nas ações: o × repetiria o mesmo gesto no mesmo card.
@@ -382,7 +470,7 @@ function renderItem(item: Item, estado: Estado, naConversa = false): string {
   // A pergunta aberta já abre a conversa pelo "Responder na conversa": "abrir conversa" repetiria o gesto.
   const conversa = pergunta && daMinhaConversa ? undefined : estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
-    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
+    <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(d.tipo === "aprovacao" && item.itensAprovacao.length === 1 ? "aprovação" : TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
     <div class="dec-frase">${esc(d.frase)}</div>${parada.linha}
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${(d.tipo === "rotina" || d.tipo === "rotina_atualizacao") && aberta ? linhasPrecisa(item.proposta, estado) : ""}
@@ -509,12 +597,28 @@ function renderVencidos(vencidos: readonly Item[], estado: Estado, naConversa: b
  * (emenda da ADR-045): ela É a fala do agente na conversa, e o balão mostra onde está — aberta,
  * respondida ou vencida com o seu Reabrir (web/telas/pergunta.ts).
  */
-export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): string {
+export function renderDecisoesDaConversa(estado: Estado, conversaId: string, propostas: ReadonlySet<string>, ancoradas: ReadonlySet<string> = new Set()): string {
   const itens = estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && !propostas.has(item.decisao.id) && !ehPergunta(item.decisao.tipo)) ?? [];
   if (!itens.length) return "";
-  const abertos = itens.filter((item) => item.estadoColuna !== "vencido");
+  const abertos = itens.filter((item) => item.estadoColuna !== "vencido" && !ancoradas.has(item.decisao.id));
   const pedindo = abertos.length ? `<h2>Preciso da sua decisão para continuar</h2><p>Você pode resolver aqui, sem sair da conversa.</p><ul class="lista">${abertos.map((item) => renderItem(item, estado, true)).join("")}</ul>` : "";
-  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa">${pedindo}${renderVencidos(itens.filter((item) => item.estadoColuna === "vencido"), estado, true, conversaId)}</section>`;
+  const vencidos = renderVencidos(itens.filter((item) => item.estadoColuna === "vencido"), estado, true, conversaId);
+  if (!pedindo && !vencidos) return "";
+  return `<section class="decisoes-chat" aria-label="Decisões nesta conversa">${pedindo}${vencidos}</section>`;
+}
+
+/**
+ * Os pedidos ABERTOS desta conversa que podem ficar junto do turno que os pediu (definido em 2026-10-03, canvas
+ * "Uma conversa de verdade · depois"): no fim da timeline, a aprovação da planilha ficava embaixo de "Na fila",
+ * longe da fala que a explicava. Os mesmos filtros de `renderDecisoesDaConversa`; quem não acha âncora volta para lá.
+ */
+export function pedidosAncoraveis(estado: Estado, conversaId: string, propostas: ReadonlySet<string>): Item[] {
+  return estado.suaVez?.itens.filter((item) => item.decisao.conversaId === conversaId && item.estadoColuna !== "vencido" && !propostas.has(item.decisao.id) && !ehPergunta(item.decisao.tipo)) ?? [];
+}
+
+/** Um pedido ancorado: o mesmo card da seção, solto logo abaixo da mensagem do turno que o pediu. */
+export function renderDecisaoAncorada(item: Item, estado: Estado): string {
+  return `<ul class="decisoes-ancoradas" aria-label="Pedido de ${esc(item.agenteNome)}">${renderItem(item, estado, true)}</ul>`;
 }
 
 /**

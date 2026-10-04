@@ -82,7 +82,8 @@ describe("decisões no chat", () => {
     const b = { ...base, id: "i2", idx: 1, textoFinal: "Arquivar a planilha", destino: { conector: "drive", ferramenta: "move_file", argumentos: {} } };
     const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [a, b] }] } };
     const html = renderTimeline(conversa, e);
-    expect(html).toContain('class="ap-lista"');
+    // definido em 2026-10-03: a lista mora no mesmo card da aprovação de um item (sua-vez.ts renderCardAprovacao).
+    expect(html).toContain('class="aprov-itens"');
     expect(html).toContain('data-item="i1"');
     expect(html).toContain('data-item="i2"');
     expect(html).toContain("Avisar o time");
@@ -109,7 +110,9 @@ describe("decisões no chat", () => {
     const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [i] }] } };
     const html = renderTimeline(conversa, e);
     expect(html).toContain('data-act="decidir-aprovacao-sempre"');
-    expect(html).toContain("Sempre permitir slack.send_message");
+    // definido em 2026-10-03: o rótulo diz a ação em português; o slug fica no título e no "Ver detalhes".
+    expect(html).toContain("Sempre permitir send message no slack");
+    expect(html).not.toContain(">Sempre permitir slack.send_message<");
     expect(html).toContain("em qualquer destino");
     expect(html).not.toContain("disabled");
   });
@@ -126,8 +129,8 @@ describe("decisões no chat", () => {
     expect(html([comMotivo("fora_do_catalogo")])).toContain("não está no alcance do bot agora");
     // Lote misto: o botão nomeia só o que vai virar regra.
     const misto = html([comMotivo("gate_de_rotina"), comMotivo("sem_regra_permanente", "j", "update_task")]);
-    expect(misto).toContain("Sempre permitir clickup.update_task");
-    expect(misto).not.toContain("Sempre permitir clickup.create_task_comment");
+    expect(misto).toContain("Sempre permitir update task no clickup");
+    expect(misto).not.toContain("Sempre permitir create task comment");
   });
 
   it("card só com item sensível mostra o botão DESABILITADO com o motivo, nunca ausente", () => {

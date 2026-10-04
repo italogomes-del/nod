@@ -101,7 +101,7 @@ describe("card do artefato na conversa", () => {
     expect(html).toContain('data-artefato="art-1"');
     expect(html).toContain("▣");
     expect(html).toContain("Checklist &lt;do dia&gt;");
-    expect(html).toMatch(/v1 · \d\d:\d\d/);
+    expect(html).toContain('<span class="artefato-meta">v1</span>');
     expect(html).toContain('data-act="artefato-tela-cheia"');
     expect(html).toContain('data-act="artefato-baixar"');
     expect(html).toContain('<div class="artefato-corpo" data-artefato-slot="m1"></div>');

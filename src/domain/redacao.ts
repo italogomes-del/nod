@@ -58,7 +58,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-09-24 (emenda da ADR-045): só a frase curta da fila ("Sua vez", decisoes.frase); na
   // conversa a pergunta é a fala do próprio agente (pedir-a-pessoa.ts).
   "parei-falta-dado": "parei: falta {dado}; quem destrava: {quem}; não vou tentar de novo.",
-  anotei: "Anotei como {tipo}: {texto}",
+  // definido em 2026-10-03: {tipo} já com artigo e acento ("uma preferência"), nunca o enum cru (lembrar.ts).
+  anotei: "Anotei {tipo}: {texto}",
   // definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO da transição; a hora sai no cartão da web.
   "computador-fora-do-ar": "O computador de {agente} não responde: {motivo}. Tirei o computador das próximas execuções até você religá-lo.",
   // definido em 2026-09-24 (emenda da ADR-044): a linha ÚNICA quando o pedido de acesso da rotina vence —
