@@ -1,5 +1,6 @@
 import { HARNESSES } from "../contracts/harness.ts";
 import type { IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
 import { ErroDeDominio } from "./erro.ts";
 
 export function validarInteligencia(harness: unknown, modelo: unknown): asserts harness is PreferenciaHarness {
@@ -23,4 +24,9 @@ export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: strin
   const escolhido = fixo ?? (p.preferido && p.prontos.includes(p.preferido) ? p.preferido : HARNESSES.find((h) => p.prontos.includes(h.id))?.id);
   if (!escolhido || !p.prontos.includes(escolhido)) throw new ErroDeDominio("executor_indisponivel");
   return { harness: escolhido, modelo: p.modelo === "auto" ? (escolhido === "claude-cli" ? "sonnet" : "gpt-5.6-sol") : p.modelo };
+}
+
+/** O modelo mais potente do harness (MODELO_MAIS_POTENTE); null para harness ainda sem catálogo. */
+export function modeloMaisPotente(harness: IdHarness): string | null {
+  return harness === "claude-cli" || harness === "codex-cli" ? MODELO_MAIS_POTENTE[harness] : null;
 }

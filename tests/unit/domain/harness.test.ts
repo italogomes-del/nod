@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
+import { modeloMaisPotente, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
 
 describe("escolha de inteligência", () => {
   it("escolhe uma conta conectada sem configurar harness ou modelo", () => {
@@ -18,5 +18,10 @@ describe("escolha de inteligência", () => {
   it("recusa combinação de fornecedores, harness não integrado e entrada inválida", () => {
     for (const [h, m] of [["codex-cli", "sonnet"], ["claude-cli", "gpt-6-astra"], ["hermes", "auto"], ["auto", "--model x"], ["auto", null], [null, "auto"]]) expect(() => validarInteligencia(h, m)).toThrow("entrada_invalida");
     expect(() => validarInteligencia("auto", "claude-haiku-4-5-20251001")).not.toThrow();
+  });
+  it("o mais potente acompanha o Fable mais novo no Claude e é o topo do catálogo no Codex", () => {
+    expect(modeloMaisPotente("claude-cli")).toBe("fable");
+    expect(modeloMaisPotente("codex-cli")).toBe("gpt-6-astra");
+    expect(modeloMaisPotente("hermes")).toBeNull();
   });
 });
