@@ -2,7 +2,7 @@ import type { IdHarness } from "../contracts/harness.ts";
 import { resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
 import { MODELO_LIGACAO_CLAUDE, MODELO_LIGACAO_CODEX } from "../contracts/modelos.ts";
-import { generoDaVoz } from "../contracts/vozes.ts";
+import { generoDaVoz } from "../domain/vozes.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";

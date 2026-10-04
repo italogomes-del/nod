@@ -3,7 +3,8 @@ import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao,
 import { VERSAO_CONSENTIMENTO_VOZ } from "../contracts/ligacao.ts";
 import type { Turno } from "../contracts/turno.ts";
 import type { MotivoFimLigacao } from "../contracts/voz.ts";
-import { ehIdVoz, generoDaVoz, VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
+import { VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
+import { ehIdVoz, generoDaVoz } from "../domain/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { MetricasLigacao, NovaFala } from "../repositories/ligacoes.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";

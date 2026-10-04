@@ -22,12 +22,3 @@ export type IdVozNod = (typeof VOZES_NOD)[number]["id"];
 
 export const VELOCIDADES_VOZ = [1, 1.25, 1.5] as const;
 export type VelocidadeVoz = (typeof VELOCIDADES_VOZ)[number];
-
-export function ehIdVoz(x: unknown): x is IdVozNod {
-  return typeof x === "string" && VOZES_NOD.some((v) => v.id === x);
-}
-
-/** O gênero de uma voz do catálogo; id desconhecido cai em feminina (a voz padrão do produto). */
-export function generoDaVoz(id: string): GeneroVoz {
-  return VOZES_NOD.find((v) => v.id === id)?.genero ?? "feminina";
-}
