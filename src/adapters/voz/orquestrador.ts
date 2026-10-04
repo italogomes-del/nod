@@ -432,13 +432,19 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       barge.confirmado = false;
       barge.desde = relogio();
       cancelar(barge.timer);
-      barge.timer = agendar(prazos.confirmarInterrupcaoMs, () => {
+      const verificar = () => {
+        // A pessoa ainda está falando: espera mais (o final do STT pode confirmar depois).
+        if (!barge.confirmado && barge.ativa && falando) {
+          barge.timer = agendar(300, verificar);
+          return;
+        }
         if (!barge.confirmado && barge.ativa) {
           barge.ativa = false;
           const atual = uttAtual();
           if (atual) paraMidia({ t: "subir", utt: atual.utt });
         }
-      });
+      };
+      barge.timer = agendar(prazos.confirmarInterrupcaoMs, verificar);
     }
 
     // ---- aprovação por voz (ADR-074) --------------------------------------------------------------------------------
@@ -618,7 +624,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           if (atual) paraMidia({ t: "subir", utt: atual.utt });
           return;
         }
-        if (confirmaInterrupcao({ texto, falaMs: fimFalaEm - inicioFalaEm, ehEco: false, lendoConteudoNaoConfiavel: false })) confirmarBarge(texto);
+        // O final pode chegar depois da janela de confirmação (whisper local transcreve só no fim da fala): uma fala que
+        // interrompe ("para", duas palavras de verdade) interrompe mesmo assim.
+        if (confirmaInterrupcao({ texto, falaMs: fimFalaEm - inicioFalaEm, ehEco: false, lendoConteudoNaoConfiavel: false })) {
+          barge.ativa = true;
+          confirmarBarge(texto);
+        }
       }
       barge.ativa = false;
       paraMidia({ t: "legenda", id, texto, final: true });
@@ -735,6 +746,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         seguro(deps.persistencia.atender(ref), "voz_atender_falhou");
         saudar();
         reiniciarOciosidade();
+        // Teto da ligação (NOD_LIGACAO_MAX_S): aviso 1 min antes, depois encerra.
+        const maxMs = r.maxS * 1000;
+        if (maxMs > 90_000) agendar(maxMs - 60_000, () => tocarEspera("limite_proximo"));
+        agendar(maxMs, () => void encerrar("tempo_maximo"));
         timerCerebroPrimeiro = cerebro ? null : agendar(prazos.cerebroPrimeiroMs, () => {
           if (!cerebro && !encerrada) {
             tocarEspera("queda_cerebro");
