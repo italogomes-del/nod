@@ -79,6 +79,8 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
   function fase(d: EstadoOnboarding): FaseTela | null {
     if (!deps.aberto()) return null;
     if (d.etapa === "concluido") return acabouDeConcluir ? "fim" : null;
+    // O servidor tirou o onboarding da frente (a guia foi excluída no meio): a camada fecha na próxima leitura.
+    if (!d.mostrar) return null;
     if (!olaPassou && (d.etapa === null || d.etapa === "ola" || d.etapa === "executor")) return "ola";
     if (d.etapa === null || d.etapa === "ola" || d.etapa === "executor") return d.executor.pronto ? "chamando" : "executor";
     if (d.etapa === "chamando") return "chamando";
@@ -109,7 +111,8 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     const e = estadoTela();
     if (!e) return "";
     agendarPelaFase(e);
-    if (e.fase === "configurando" && !e.dados.guia) return `<div class="ob-guia-solta">${htmlGuia(e)}</div>`;
+    // Sem guia, a configuração é uma camada por cima do app: precisa de uma saída.
+    if (e.fase === "configurando" && !e.dados.guia) return `<div class="ob-guia-solta">${htmlGuia(e)}<button type="button" class="ob-link ob-depois" data-act="onboarding-depois">Fazer depois</button></div>`;
     return htmlCamada(e, deps.ligacao.cheia());
   }
 
@@ -285,6 +288,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
 
   const acoes: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     "onboarding-pular-ola": () => passarOla(),
+    "onboarding-depois": () => fazerDepois(),
     "onboarding-ia-entrar": (el) => iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "entrar"),
     "onboarding-ia-instalar": (el) => iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "instalar"),
     "onboarding-atender": () => atender(),
@@ -313,6 +317,21 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       return agir((a) => (decisao ? a.decidirBot(decisao, { nome, descricao }) : a.botDoOnboarding(nome, descricao)));
     },
   };
+
+  /** "Fazer depois" na configuração sem guia: conclui sem o "Tudo montado" e devolve o app (o menu da conta reabre). */
+  async function fazerDepois(): Promise<void> {
+    if (concluindo) return;
+    concluindo = true;
+    try {
+      acabouDeConcluir = false;
+      hidratar(await api().concluirOnboarding());
+      deps.aoMudar();
+    } catch (e) {
+      deps.erro(e);
+    } finally {
+      concluindo = false;
+    }
+  }
 
   /** "Ver o onboarding de novo" (menu da conta e o fim da configuração): volta ao "olá". */
   async function deNovo(): Promise<void> {

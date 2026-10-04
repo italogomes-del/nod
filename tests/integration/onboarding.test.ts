@@ -7,6 +7,7 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
 import type { ContextoLigacao, SaidaLigar } from "../../src/use-cases/ligacoes.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { gerirAgente } from "../../src/use-cases/gerir-agente.ts";
 import { depsSobreTrx, executar, MARLON, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
@@ -140,6 +141,28 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       expect(encerradas).toContain(chamando.ligacao?.id);
       const l = await d.repos.ligacoes.buscar(chamando.ligacao?.id ?? "");
       expect(l).toMatchObject({ estado: "nao_atendida" });
+      trxAtual = null;
+    });
+  });
+
+  it("excluir a guia no meio da configuração tira o onboarding da frente; 'Ver de novo' cria outra guia", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      contexto = { ...CONTEXTO_LIBERADO, permitido: false };
+      const marlon = await servidor.entrar("marlon");
+      const post = async (caminho: string, corpo: unknown) => (await (await servidor.chamar(marlon, "POST", caminho, corpo)).json()) as EstadoOnboarding;
+      await post("onboarding/etapa", { etapa: "chamando" });
+      const configurando = await post("onboarding/etapa", { etapa: "configurando", semVoz: true });
+      expect(configurando).toMatchObject({ etapa: "configurando", mostrar: true });
+      const guiaId = configurando.guia?.id ?? "";
+      await executar(depsSobreTrx(trx, MARLON), gerirAgente, { agenteId: guiaId, acao: "excluir" });
+      const depois = (await (await servidor.chamar(marlon, "GET", "onboarding")).json()) as EstadoOnboarding;
+      expect(depois).toMatchObject({ etapa: "configurando", mostrar: false, guia: null });
+      const deNovo = await post("onboarding/etapa", { etapa: "ola" });
+      expect(deNovo.mostrar).toBe(true);
+      const outra = await post("onboarding/etapa", { etapa: "chamando" });
+      expect(outra.guia?.id).toBeTruthy();
+      expect(outra.guia?.id).not.toBe(guiaId);
       trxAtual = null;
     });
   });

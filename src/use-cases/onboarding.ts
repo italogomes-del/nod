@@ -77,7 +77,10 @@ export const estadoOnboarding: CasoDeUso<EntradaEstadoOnboarding, EstadoOnboardi
   // Pessoa nova = nenhum bot confirmado dela além da guia. Quem chegou depois da 0049 com bots (seed, outro caminho)
   // não vê o onboarding sem pedir ("Ver o onboarding de novo").
   const meus = linha.etapa === null ? (await deps.repos.agentes.listar()).filter((a) => a.ownerId === deps.escopo.pessoaId && a.confirmado && a.dono === "pessoa" && a.id !== linha.guiaId) : [];
-  const mostrar = linha.concluidoEm === null && linha.etapa !== "concluido" && (linha.etapa !== null || meus.length === 0);
+  // definido em 2026-10-04 (teste do Marlon em produção): a pessoa excluiu a guia no meio do onboarding — ele sai da frente
+  // (sem a guia, a configuração virava uma tela cheia sem saída). "Ver o onboarding de novo" cria outra guia.
+  const guiaExcluida = linha.guiaId !== null && guia === null && (linha.etapa === "chamando" || linha.etapa === "entrevista" || linha.etapa === "configurando");
+  const mostrar = linha.concluidoEm === null && linha.etapa !== "concluido" && (linha.etapa !== null || meus.length === 0) && !guiaExcluida;
   return {
     data: {
       etapa: linha.etapa,
