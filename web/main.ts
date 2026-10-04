@@ -52,6 +52,11 @@ import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type It
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
+import { iniciarMotorLigacao } from "./lib/ligacao.ts";
+import { ICONE_LIGACAO } from "./telas/ligacao.ts";
+import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
+import type { Ligacao } from "../src/contracts/ligacao.ts";
+import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 
 /**
@@ -124,6 +129,47 @@ const artefatos = criarArtefatosVivos({
   salvar: (id, dados) => (api ? api.salvarEstadoArtefato(id, dados) : Promise.reject(new ErroApi(401, "nao_permitido", "sem sessão"))),
   salvarAoSair: (id, dados) => api?.salvarEstadoArtefatoAoSair(id, dados),
 });
+/**
+ * Modo ligação (definido em 2026-10-04, ADR-071): a tela e o motor moram fora do reducer, como os artefatos — o áudio,
+ * o WebSocket e a legenda mudam muitas vezes por segundo. O reducer só sabe QUAL ligação está viva (`ligacaoViva`), para
+ * a barra lateral, o cabeçalho e a linha "Chat de voz".
+ */
+const telaLigacao = criarTelaLigacao({
+  api: () => api,
+  tenantId: () => estado.sessao?.tenantId ?? null,
+  iniciarMotor: iniciarMotorLigacao,
+  agente: (id) => botGerido(id),
+  suaVez: () => estado.suaVez,
+  aoMudar: () => sincronizarLigacao(),
+  decidirPeloClique: (id, aprovar) => decidirPelaLigacao(id, aprovar),
+  aoEncerrar: (l) => {
+    dispatch({ tipo: "esquecer-disponibilidade-ligacao", agenteId: l.agenteId });
+    dispatch({ tipo: "invalidar", quais: [`conversa:${l.conversaId}`, "ligacao"] });
+  },
+});
+/** A ligação viva que a página achou ao abrir (recarregada no meio dela): volta como pílula quando o bot chegar na frota. */
+let ligacaoParaRetomar: Ligacao | null = null;
+
+function sincronizarLigacao(): void {
+  const a = telaLigacao.ativa();
+  dispatch({ tipo: "ligacao-viva", viva: a ? { ligacaoId: a.ligacaoId, agenteId: a.agenteId, conversaId: a.conversaId, local: true } : estado.ligacaoViva?.local ? null : estado.ligacaoViva });
+}
+
+/**
+ * O clique em Aprovar/Recusar no card da ligação usa o fluxo normal de decisão (plano, "Aprovação por voz" §5): na
+ * aprovação em lista, aprovar = a seleção padrão e recusar = todos os itens desmarcados; o "Retomar" retoma ou dispensa;
+ * os outros tipos decidem ou recusam inteiros.
+ */
+async function decidirPelaLigacao(decisaoId: string, aprovar: boolean): Promise<void> {
+  if (!api) return;
+  const item = estado.suaVez?.itens.find((i) => i.decisao.id === decisaoId);
+  const tipo = item?.decisao.tipo;
+  if (tipo === "aprovacao" || tipo === "gate_rotina") await api.decidir(decisaoId, { itens: (item?.itensAprovacao ?? []).map((i) => ({ id: i.id, selecionado: aprovar && i.selecionado })) });
+  else if (tipo === "retomar_turno") await (aprovar ? api.retomar(decisaoId) : api.dispensar(decisaoId));
+  else await api.decidir(decisaoId, aprovar ? {} : { recusar: true });
+  dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota", ...(item?.decisao.conversaId ? [`conversa:${item.decisao.conversaId}` as Invalidacao] : [])] });
+}
+
 /** A última leitura de "Sua vez" foi com a janela atrás (`?ver=0`): ao voltar, relê para carimbar vista_em. */
 let suaVezSemVer = false;
 /** A decisora designada que não é dona não recebe frames (ADR-016): a cada 4 ticks (60 s) "Sua vez" é relida. */
@@ -258,6 +304,19 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
+  if (q === "ligacao") {
+    const local = telaLigacao.ativa();
+    if (local) return { tipo: "ligacao-viva", viva: { ligacaoId: local.ligacaoId, agenteId: local.agenteId, conversaId: local.conversaId, local: true } };
+    const { ligacao } = await api.ligacaoViva();
+    const viva = ligacao && (ligacao.estado === "chamando" || ligacao.estado === "em_curso");
+    return { tipo: "ligacao-viva", viva: viva ? { ligacaoId: ligacao.id, agenteId: ligacao.agenteId, conversaId: ligacao.conversaId, local: false } : null };
+  }
+  if (q.startsWith("disponibilidade:")) {
+    const agenteId = q.slice(16);
+    // Falha fechada: sem a resposta (rota ausente, erro), o botão "Ligar" não aparece — e nenhum erro sobe para a faixa.
+    const disponibilidade = await api.disponibilidadeLigacao(agenteId).catch(() => null);
+    return { tipo: "hidratar-disponibilidade-ligacao", agenteId, disponibilidade };
+  }
   if (q.startsWith("conversa:")) {
     // Modo dev (0036): a faixa de cada resposta acompanha a conversa — o turno que acabou de assentar já tem Raio-X.
     void carregarRaioX(q.slice(9));
@@ -335,7 +394,8 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
-  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos") return true;
+  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao") return true;
+  if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
   const secao = estado.espaco?.secao;
   if (q === "gestao") return secao === "agentes";
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
@@ -390,11 +450,13 @@ function renderSidebar(estado: Estado): string {
     const estadoVisual = aviso && mascote === "disponivel" ? "aguardando" : mascote;
     // definido em 2026-09-24 (sidebar no estilo do Grok): o título vira um chip ao lado do nome e a linha de
     // baixo é a última mensagem; os estados que pedem ação (fora do ar, pergunta, rotina parada) ganham dela.
-    const subtitulo = a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
+    // definido em 2026-10-04 (ADR-071): "Em ligação" ganha da última mensagem, discreto, com o fone.
+    const emLigacao = estado.ligacaoViva?.agenteId === a.id;
+    const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
     const chip = a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "";
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
+    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   // Cada seção é um alvo de soltar (data-grupo); "Meus agentes" é a seção "" e continua alvo mesmo vazia (só aparece arrastando).
@@ -406,7 +468,8 @@ function renderSidebar(estado: Estado): string {
     const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : temNovas(a.conversaId, estado) ? "nao-lido" : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
-    return `<div class="fixado" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
+    const emLigacao = estado.ligacaoViva?.agenteId === a.id;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
   };
   const secoes = [...new Set(meus.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
   const fixados = meus.filter((a) => a.fixado);
@@ -746,7 +809,15 @@ function render(): void {
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
   regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDoEspaco()) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
-  document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco);
+  // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
+  document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco || telaLigacao.cheia());
+  document.getElementById("espaco")?.toggleAttribute("inert", telaLigacao.cheia());
+  telaLigacao.render();
+  const retomar = ligacaoParaRetomar;
+  if (retomar && botGerido(retomar.agenteId)) {
+    ligacaoParaRetomar = null;
+    queueMicrotask(() => telaLigacao.retomar(retomar));
+  }
   renderPrincipal();
 }
 
@@ -785,9 +856,15 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
     const c = conversaDaTela(estado);
     if (p.modoDev && c) void carregarRaioX(c.conversa.id);
   }, () => undefined);
+  // Outra sessão: a ligação da anterior sai da tela (o servidor a encerra se ninguém voltar em 10 s).
+  telaLigacao.descartar();
+  ligacaoParaRetomar = null;
+  void api.ligacaoViva().then(({ ligacao }) => {
+    if (ligacao && (ligacao.estado === "chamando" || ligacao.estado === "em_curso")) { ligacaoParaRetomar = ligacao; render(); }
+  }, () => undefined);
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
-    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
+    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", "ligacao", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") receberFrame(ev.frame);
@@ -1289,6 +1366,34 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome, el);
   },
   "alternar-modo-dev": () => agir(alternarModoDev),
+  // Modo ligação (definido em 2026-10-04, ADR-071).
+  "iniciar-ligacao": () => { const t = estado.tela; if (t.tipo === "conversa") void telaLigacao.ligar(t.agenteId); },
+  "ligacao-encolher": () => telaLigacao.encolher(),
+  "ligacao-expandir": () => telaLigacao.expandir(),
+  "ligacao-mudo": () => telaLigacao.alternarMudo(),
+  "ligacao-teclado": () => telaLigacao.alternarTeclado(),
+  "ligacao-ajustes": (el) => telaLigacao.abrirAjustes(el),
+  "ligacao-desligar": () => telaLigacao.desligar(),
+  "ligacao-aprovar": (el) => agir(() => telaLigacao.decidir(el.dataset.id ?? "", true)),
+  "ligacao-recusar": (el) => agir(() => telaLigacao.decidir(el.dataset.id ?? "", false)),
+  "ligacao-retomar-audio": () => telaLigacao.retomarAudio(),
+  "ligacao-sugestao": (el) => { telaLigacao.enviarTexto(el.dataset.texto ?? ""); },
+  "ligacao-avaliar": (el) => telaLigacao.avaliar(el.dataset.nota === "ruim" ? "ruim" : "boa"),
+  "ligacao-motivo": (el) => telaLigacao.motivo((el.dataset.motivo ?? "outro") as MotivoAvaliacaoLigacao),
+  "ligacao-fechar-avaliacao": () => telaLigacao.fecharAvaliacao(),
+  "ligacao-fechar-recusa": () => telaLigacao.fecharRecusa(),
+  "ver-transcricao": (el) => {
+    const t = estado.tela;
+    void telaLigacao.verTranscricao(el.dataset.id ?? "", t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "Bot" : "Bot");
+  },
+  "apagar-transcricao": (el) => {
+    const id = el.dataset.id ?? "";
+    const alvo = conversaAtual();
+    pedirGestao("Apagar a transcrição?", "<p>O resumo continua na conversa.</p>", "Apagar transcrição", async () => {
+      await telaLigacao.apagarTranscricao(id);
+      if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
+    }, true);
+  },
   "escolher-tema": (el) => {
     const escolha = el.dataset.tema === "claro" || el.dataset.tema === "escuro" ? el.dataset.tema : "sistema";
     aplicarTema(escolha, document.documentElement);
@@ -1642,6 +1747,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  // O teclado da ligação: o texto entra como uma vez da pessoa, sem passar pelo STT.
+  "ligacao-texto": async (form) => {
+    const campo = form.elements.namedItem("texto") as HTMLInputElement | null;
+    if (campo && telaLigacao.enviarTexto(campo.value)) campo.value = "";
+    campo?.focus();
+  },
   "emitir-chave": (form) =>
     agir(async () => {
       const nome = (form.elements.namedItem("nome") as HTMLInputElement | null)?.value.trim() ?? "";
@@ -1850,6 +1961,8 @@ document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
   if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
+  // Esc na ligação em tela cheia encolhe para a pílula; nunca desliga (definido em 2026-10-04).
+  if (ev.key === "Escape" && telaLigacao.cheia() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); telaLigacao.encolher(); return; }
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }

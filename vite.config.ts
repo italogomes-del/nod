@@ -31,6 +31,9 @@ export default defineConfig({
           });
         },
       },
+      // Modo ligação (definido em 2026-10-04, ADR-071): o canal de mídia é WebSocket. Antes do "/api" genérico (o
+      // primeiro que casa ganha) e com changeOrigin: false, porque o servidor confere o Origin do upgrade.
+      "^/api/t/[^/]+/voz": { target: api, changeOrigin: false, ws: true },
       "/api": api,
     },
   },

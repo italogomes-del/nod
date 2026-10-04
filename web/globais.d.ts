@@ -8,3 +8,12 @@ interface Window {
    */
   nodDesktop?: import("../src/contracts/desktop.ts").NodDesktop;
 }
+
+/**
+ * Os worklets da ligação (web/lib/ligacao.ts) entram pelo sufixo `?worker&url` do Vite: o arquivo é compilado como
+ * bundle próprio e o import devolve a URL do .js. O tsconfig da web não carrega vite/client, então o tipo mora aqui.
+ */
+declare module "*?worker&url" {
+  const url: string;
+  export default url;
+}

@@ -27,6 +27,9 @@ mac:
   entitlements: desktop/entitlements.mac.plist
   entitlementsInherit: desktop/entitlements.mac.plist
   minimumSystemVersion: '12.0'
+  # Modo ligação (2026-10-04, ADR-071): o texto que o macOS mostra ao pedir o microfone.
+  extendInfo:
+    NSMicrophoneUsageDescription: O nod usa o microfone só durante as ligações com os seus bots.
 dmg:
   sign: true
 win:

@@ -125,7 +125,7 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: "forjado", acao: "aprovar" })).status).toBe(403);
   for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
   for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
-  const comando = await cli.esperarMsg((m) => m.t === "comando", "comando de voz").catch((e: unknown) => { console.error("DEBUG", JSON.stringify(cli.msgs.slice(-15))); throw e; });
+  const comando = await cli.esperarMsg((m) => m.t === "comando", "comando de voz");
   if (comando.t !== "comando") throw new Error("sem comando");
   expect(comando.acao).toBe("aprovar");
   // A voz decide o card inteiro: "sempre" junto é recusado, e o comando continua válido para o pedido certo.

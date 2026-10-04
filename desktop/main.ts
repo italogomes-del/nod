@@ -1,5 +1,5 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, Notification, safeStorage, session, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, dirname } from "node:path";
@@ -15,6 +15,8 @@ import { versaoAceita } from "../src/domain/versao-app.ts";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type PreferenciasDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
+import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
+import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
 
@@ -180,8 +182,39 @@ function proteger(w: BrowserWindow, origem?: string) {
   // MESMO — link, location, meta refresh —, a única saída que a CSP não fecha. No app, subframe nenhum sai
   // do documento que a página lhe deu (no navegador, a web fecha o iframe no segundo `load`).
   w.webContents.on("will-frame-navigate", (e) => { if (!e.isMainFrame && !/^about:(srcdoc|blank)$/.test(e.url)) e.preventDefault(); });
-  w.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  w.webContents.session.setPermissionCheckHandler(() => false);
+  // definido em 2026-10-04 (ADR-071, modo ligação): a única permissão da página é o microfone — `media` só de áudio, só na
+  // origem do servidor, só no frame de topo desta janela (desktop/permissoes-midia.ts). A tela de conexão (sem origem) não
+  // ganha nada. O macOS ainda pergunta antes (nod:microfone).
+  w.webContents.session.setPermissionRequestHandler((wc, permission, callback, details) => {
+    callback(!!origem && wc === w.webContents && permitirPedidoDeMidia({ permissao: permission, tiposDeMidia: "mediaTypes" in details ? details.mediaTypes : undefined, urlDoPedido: details.requestingUrl, frameDeTopo: details.isMainFrame, servidor: origem }));
+  });
+  w.webContents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => !!origem && wc === w.webContents && permitirChecagemDeMidia({ permissao: permission, tipoDeMidia: details.mediaType, origem: requestingOrigin, frameDeTopo: details.isMainFrame, servidor: origem }));
+}
+
+// ---- Modo ligação (definido em 2026-10-04, ADR-071) -----------------------------------------------------------------
+// A página avisa que abriu uma ligação (nodDesktop.emLigacao): o app não é suspenso, a janela não é estrangulada em
+// segundo plano (a voz continua com o nod atrás de outra janela) e fechar pergunta antes. Exceção à ADR-045 registrada na
+// ADR-071: só com a ligação aberta pela pessoa.
+let emLigacao = false;
+let bloqueioDeSuspensao: number | null = null;
+function definirEmLigacao(ativa: boolean) {
+  emLigacao = ativa;
+  const w = janelaWeb();
+  if (ativa && bloqueioDeSuspensao === null) bloqueioDeSuspensao = powerSaveBlocker.start("prevent-app-suspension");
+  if (!ativa && bloqueioDeSuspensao !== null) { powerSaveBlocker.stop(bloqueioDeSuspensao); bloqueioDeSuspensao = null; }
+  w?.webContents.setBackgroundThrottling(!ativa);
+}
+/** O macOS pergunta pelo microfone uma vez; depois responde do que a pessoa escolheu (Ajustes do Sistema › Privacidade). */
+async function acessoAoMicrofone(): Promise<EstadoMicrofone> {
+  if (process.platform !== "darwin") return "concedido";
+  const estado = estadoDoMicrofone(systemPreferences.getMediaAccessStatus("microphone"));
+  if (estado) return estado;
+  return (await systemPreferences.askForMediaAccess("microphone")) ? "concedido" : "negado";
+}
+/** Fechar com a ligação aberta: confirma; confirmado, a janela fecha e o servidor encerra pela queda da mídia. */
+async function confirmarFecharEmLigacao(w: BrowserWindow): Promise<boolean> {
+  const r = await dialog.showMessageBox(w, { type: "question", message: TEXTO_FECHAR_EM_LIGACAO.mensagem, detail: TEXTO_FECHAR_EM_LIGACAO.detalhe, buttons: [TEXTO_FECHAR_EM_LIGACAO.encerrar, TEXTO_FECHAR_EM_LIGACAO.continuar], defaultId: 1, cancelId: 1 });
+  return r.response === 0;
 }
 async function mostrarSetup() {
   const anterior = janela;
@@ -245,7 +278,12 @@ async function conectar(c: Config) {
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
   const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", backgroundColor: fundoDaJanela(), webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   janela = nova; proteger(nova, c.url);
-  nova.on("closed", () => { if (janela === nova) janela = null; });
+  nova.on("close", (e) => {
+    if (!emLigacao) return;
+    e.preventDefault();
+    void confirmarFecharEmLigacao(nova).then((sim) => { if (sim) { definirEmLigacao(false); nova.close(); } });
+  });
+  nova.on("closed", () => { if (janela === nova) { janela = null; definirEmLigacao(false); } });
   nova.webContents.on("did-fail-load", (_e, code, _description, _url, main) => { if (main && code !== -3) { mensagem = mensagens.servidor_fora!; void mostrarSetup(); } });
   await nova.loadURL(c.url);
   anterior?.close(); mensagem = "Conectado.";
@@ -264,7 +302,14 @@ else {
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", (event) => {
     if (encerrando) return;
-    event.preventDefault(); encerrando = true;
+    event.preventDefault();
+    // Cmd+Q com a ligação aberta pergunta como o fechar da janela; "Continuar" cancela a saída.
+    const w = janelaWeb();
+    if (emLigacao && w) {
+      void confirmarFecharEmLigacao(w).then((sim) => { if (sim) { definirEmLigacao(false); app.quit(); } });
+      return;
+    }
+    encerrando = true;
     void parar().finally(() => app.quit());
   });
   void app.whenReady().then(async () => {
@@ -292,6 +337,13 @@ else {
       const lido = lerTemaDesktop(tema);
       if (!lido) throw new Error("entrada_invalida");
       return definirTema(lido);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.microfone, (e) => { validarRemetenteWeb(e); return acessoAoMicrofone(); });
+    ipcMain.handle(CANAIS_DESKTOP.emLigacao, (e, ativa: unknown) => {
+      validarRemetenteWeb(e);
+      const lido = lerEmLigacao(ativa);
+      if (lido === null) throw new Error("entrada_invalida");
+      definirEmLigacao(lido);
     });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).
