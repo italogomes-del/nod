@@ -1,6 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { EventoStream, SinaisTurno } from "../../../contracts/turno.ts";
@@ -12,6 +11,10 @@ import { resolverBinario } from "../caminho.ts";
 import { executarColetando, iniciarProcesso, type Processo } from "../processo.ts";
 import type { Driver } from "../spi.ts";
 import type { LigacaoClaudeCli } from "./claude-cli.ts";
+import { ambienteCodex, configMcpCodex, escreverLauncherProxy, OVERRIDES_ISOLAMENTO_CODEX } from "./codex-comum.ts";
+import { rodarLigacaoCodex } from "./codex-ligacao.ts";
+
+export { configMcpCodex } from "./codex-comum.ts";
 
 export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config", "--sandbox", "--skip-git-repo-check"] as const;
 
@@ -36,22 +39,10 @@ export function argsCodex(plano: PlanoTurno, config: string, imagens: readonly s
   return ["exec", ...FLAGS_CODEX.filter((f) => f !== "--sandbox"), "--sandbox", pastas ? "workspace-write" : "read-only", "--color", "never", "--model", plano.entrada.modelo,
     ...(pastas ? ["--cd", pastas.ativa] : []),
     "-c", `developer_instructions=${JSON.stringify(plano.promptSistema)}`,
-    "-c", `mcp_servers=${config}`, "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
-    "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", "features.apply_patch_freeform=false",
-    "-c", "features.multi_agent=false", "-c", "features.apps=false", "-c", "features.js_repl=false", "-c", "features.view_image=false", "-c", "features.plugins=false", "-c", "features.hooks=false",
-    "-c", "features.browser_use=false", "-c", "features.browser_use_external=false", "-c", "features.computer_use=false",
-    "-c", "features.in_app_browser=false", "-c", "features.remote_plugin=false", "-c", "features.image_generation=false",
-    "-c", "features.code_mode_host=false", "-c", "features.workspace_dependencies=false", "-c", "features.shell_snapshot=false",
-    "-c", "features.skip_host_skill_discovery=true", "-c", "features.skill_search=false", "-c", "project_doc_max_bytes=0",
+    "-c", `mcp_servers=${config}`, "-c", 'approval_policy="never"',
+    ...OVERRIDES_ISOLAMENTO_CODEX.flatMap((o) => ["-c", o]),
     // ADR-046: imagem anexada entra como arquivo do turno; o texto continua pelo stdin ("-").
     ...imagens.flatMap((i) => ["--image", i]), "-"];
-}
-
-/** definido em 2026-09-18: configuração aponta para um launcher privado; token nunca em argv. */
-export function configMcpCodex(plano: PlanoTurno, lig: LigacaoClaudeCli): string {
-  const mcp = { command: lig.nodePath ?? process.execPath, args: [lig.proxyPath], env: lig.electronComoNode ? { ELECTRON_RUN_AS_NODE: "1" } : {} };
-  const quote = JSON.stringify;
-  return `{ nod = { command = ${quote(mcp.command)}, args = [${mcp.args.map((s) => quote(s)).join(", ")}], required = true, enabled_tools = [${plano.catalogo.ferramentas.map((f) => quote(f.nome)).join(", ")}], tool_timeout_sec = ${Math.ceil(plano.politicaExecucao.prazoMs / 1000)}, env = { ${Object.entries(mcp.env).map(([k, v]) => `${k} = ${quote(v)}`).join(", ")} } } }`;
 }
 
 export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
@@ -59,7 +50,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
     meta: { id: "codex-cli", locality: "local" },
     async create(cfg) {
       const home = cfg.env.HOME ?? "";
-      const env = Object.fromEntries(Object.entries(cfg.env).filter(([k]) => !/^(OPENAI_|CODEX_API_KEY$|CODEX_ACCESS_TOKEN$|DATABASE_|PGPASSWORD$)/.test(k)));
+      const env = ambienteCodex(cfg.env);
       let bin: string | null = null;
       let inv: Inventario | null = null;
       async function sondar(): Promise<Inventario> {
@@ -75,6 +66,14 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         if (login.exitCode !== 0) return inv = { estado: "nao_autenticado", motivo: "Abra o Codex, entre na sua conta e tente novamente.", versao, em };
         return inv = { estado: "pronto", versao, em };
       }
+      // ADR-076: piso do laço de voz = `codex app-server --help` responde; as flags listadas ali decidem as opcionais.
+      let flagsAppServer: { bin: string; flags: string[] | null } | null = null;
+      async function sondarAppServer(b: string): Promise<string[] | null> {
+        if (flagsAppServer?.bin === b) return flagsAppServer.flags;
+        const help = await executarColetando({ bin: b, args: ["app-server", "--help"], env, cwd: home, timeoutMs: 10_000 });
+        flagsAppServer = { bin: b, flags: help.exitCode === 0 ? [...new Set(help.stdout.match(/--[a-z][a-z0-9-]*/g) ?? [])] : null };
+        return flagsAppServer.flags;
+      }
       return {
         sondar,
         adapter(plano) {
@@ -87,11 +86,26 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
               await sinks.sinal("attempted");
               if ((await sondar()).estado !== "pronto" || !bin) throw new ErroDeDominio("executor_indisponivel");
+              // ADR-076: o turno-cérebro de uma ligação é o laço de voz no app-server, não um `codex exec`.
+              if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
+                const flagsNoHelp = await sondarAppServer(bin);
+                if (!flagsNoHelp) throw new ErroDeDominio("executor_indisponivel", { cause: "codex sem app-server: atualize o Codex para ligar" });
+                await mkdir(cfg.cwdBase, { recursive: true });
+                return await rodarLigacaoCodex({
+                  plano, sinks, bin, flagsNoHelp, env, cwdBase: cfg.cwdBase,
+                  urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
+                  sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
+                  modelo: cfg.env.NOD_MODELO_LIGACAO_CODEX ?? plano.ligacaoVoz.modelo,
+                  aoProcesso: (p) => {
+                    proc = p;
+                    if (p && parado) void p.interromper();
+                  },
+                });
+              }
               await mkdir(cfg.cwdBase, { recursive: true });
               const dir = await mkdtemp(join(cfg.cwdBase, "codex-"));
               try {
-                const launcher = join(dir, "proxy.mjs");
-                await writeFile(launcher, `process.env.NOD_URL = ${JSON.stringify(lig.urlNod)};\nprocess.env.NOD_TOKEN_TURNO = ${JSON.stringify(plano.tokenDeTurno)};\nconst proxy = await import(${JSON.stringify(pathToFileURL(lig.proxyPath).href)});\nawait proxy.main();\n`, { mode: 0o600, flag: "wx" });
+                const launcher = await escreverLauncherProxy(dir, { urlNod: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath });
                 // ADR-046 (não homologado: o Codex não estava instalado na máquina da medição): imagem por
                 // --image, texto de arquivo no prompt, PDF vira linha de "não lido".
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];

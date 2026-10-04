@@ -507,8 +507,9 @@ export function comporApp(o: OpcoesCompor): App {
       permitido: modoLigacao === "todas" || (modoLigacao === "admins" && (await ehAdminVoz(escopo))),
       maquinaComLigacao: compartilhado ? ponteHttp.ligacaoDaPessoa(escopo.pessoaId) : ponte.maquinasConectadas().some((m) => m.ligacao === true),
       iaPronta,
-      // ADR-076 (fase 4): o laço de voz do Codex é o app-server; até ele existir no app, bot com Codex fala por texto.
-      codexSemVoz: executorAtual !== "catcher" && harness === "codex-cli" && env.NOD_LIGACAO_CODEX !== "1",
+      // ADR-076 (fase 4): o laço de voz do Codex é o app-server (drivers/codex-ligacao.ts). Liga por padrão;
+      // NOD_LIGACAO_CODEX=0 é a chave de desligar (o app-server é experimental na OpenAI).
+      codexSemVoz: executorAtual !== "catcher" && harness === "codex-cli" && env.NOD_LIGACAO_CODEX === "0",
       drenando: voz.drenando(),
       vozDisponivel: true,
       vivasNoServidor: voz.vivas(),
