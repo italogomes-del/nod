@@ -9,3 +9,11 @@ export const MODELO_SONDA_PADRAO = "claude-haiku-4-5-20251001";
  */
 export const MODELO_LIGACAO_CLAUDE = "claude-haiku-4-5-20251001";
 export const MODELO_LIGACAO_CODEX = "gpt-6-luna";
+
+/**
+ * definido em 2026-10-04: a guia do onboarding no "auto" roda no modelo mais potente do harness, no chat e na ligação.
+ * No Claude é o alias `fable` (Claude Code 2.1.289: resolve para claude-fable-5-1), que acompanha o Fable mais novo sem
+ * release; medido no mesmo dia, `--model fable` com MAX_THINKING_TOKENS=0 respondeu em 1,8 s, como o Haiku. No Codex é
+ * o topo do catálogo editorial.
+ */
+export const MODELO_MAIS_POTENTE = { "claude-cli": "fable", "codex-cli": "gpt-6-astra" } as const;
