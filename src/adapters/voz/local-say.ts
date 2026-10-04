@@ -29,7 +29,9 @@ const AMOSTRAS_POR_PEDACO = (100 * TAXA_VOZ_HZ) / 1000;
 /** definido em 2026-10-04: teto de uma frase no `say` (uma frase de ~25 palavras leva ~1 s; 30 s é processo travado). */
 const TIMEOUT_SAY_MS = 30_000;
 
-export type OpcoesSay = { bin?: string };
+export type OpcoesSay = {
+  /** Onde nasce o diretório temporário de cada frase (testes isolam o seu); padrão: o tmpdir do sistema. */
+  dirBase?: string; bin?: string };
 
 function rodarSay(bin: string, args: string[], sinal: AbortSignal | undefined): Promise<"ok" | "abortado"> {
   return new Promise((resolver, rejeitar) => {
@@ -59,7 +61,7 @@ export function criarSintetizadorSay(o: OpcoesSay = {}): Sintetizador {
     capacidades: { streaming: false, velocidade: true },
     async *sintetizar(p: PedidoTts) {
       if (p.sinal?.aborted) return;
-      const dir = await mkdtemp(join(tmpdir(), "nod-say-"));
+      const dir = await mkdtemp(join(o.dirBase ?? tmpdir(), "nod-say-"));
       let pcm: Int16Array;
       try {
         const entrada = join(dir, "texto.txt");

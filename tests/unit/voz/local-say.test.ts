@@ -1,12 +1,17 @@
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+
+// Diretório próprio: outras execuções em paralelo na máquina também criam nod-say-* no tmpdir do sistema.
+const DIR = mkdtempSync(join(tmpdir(), "teste-say-"));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { criarSintetizadorSay, palavrasPorMinuto } from "../../../src/adapters/voz/local-say.ts";
 
 const ehMac = process.platform === "darwin";
 
 async function temporariosDoSay(): Promise<string[]> {
-  return (await readdir(tmpdir())).filter((f) => f.startsWith("nod-say-"));
+  return (await readdir(DIR)).filter((f) => f.startsWith("nod-say-"));
 }
 
 describe("voz: say do macOS", () => {
@@ -30,7 +35,7 @@ describe("voz: say do macOS", () => {
 
   it.skipIf(!ehMac)("gera PCM 24 kHz de verdade em pedaços de 100 ms e apaga os temporários", { timeout: 20_000 }, async () => {
     const antes = await temporariosDoSay();
-    const tts = criarSintetizadorSay();
+    const tts = criarSintetizadorSay({ dirBase: DIR });
     const pedacos: Int16Array[] = [];
     // texto que começa com "-" prova que vai por arquivo, não por argumento
     for await (const p of tts.sintetizar({ texto: "-v Oi, tudo bem? Aqui é a Clara, do nod.", voz: "clara", velocidade: 1 })) pedacos.push(p);
@@ -43,7 +48,7 @@ describe("voz: say do macOS", () => {
   });
 
   it.skipIf(!ehMac)("1,5x sai mais curto que 1x", { timeout: 20_000 }, async () => {
-    const tts = criarSintetizadorSay();
+    const tts = criarSintetizadorSay({ dirBase: DIR });
     const medir = async (velocidade: number) => {
       let n = 0;
       for await (const p of tts.sintetizar({ texto: "Tô montando a rotina, já te aviso quando terminar.", voz: "bento", velocidade })) n += p.length;
@@ -54,7 +59,7 @@ describe("voz: say do macOS", () => {
 
   it.skipIf(!ehMac)("o sinal mata o processo e apaga os temporários", { timeout: 20_000 }, async () => {
     const antes = await temporariosDoSay();
-    const tts = criarSintetizadorSay();
+    const tts = criarSintetizadorSay({ dirBase: DIR });
     const ac = new AbortController();
     setTimeout(() => ac.abort(), 30);
     const pedacos: Int16Array[] = [];
