@@ -12,7 +12,10 @@ import type { OpcoesSessaoStt, SessaoStt, Transcritor } from "./spi.ts";
  * texto do trecho até ali (conferido ao vivo em 2026-10-04: uma a cada ~0,5 s); o texto final vem de
  * `serverContent.inputTranscription` (pedaços somados; sem ele, vale a última parcial). O final sai quando o servidor fecha a transcrição (`finished`, `turnComplete` ou `generationComplete`) ou, se nada disso
  * chegar, 2 s depois do `activityEnd` com o que houver. Áudio que chega enquanto um final está pendente fica guardado e
- * vai como o trecho seguinte, depois do final (a ordem dos finais nunca se inverte).
+ * vai como o trecho seguinte, depois do final (a ordem dos finais nunca se inverte). Cada trecho guardado continua
+ * sendo um trecho: se ele acaba (`fimDeFala`) antes de o final anterior chegar, fecha assim que for reenviado
+ * (definido em 2026-10-04: antes o `fimDeFala` era ignorado nesse estado, o trecho ficava aberto para sempre e a vez
+ * da pessoa nunca era decidida).
  *
  * Rotação: a Live API do Vertex fecha a sessão aos 10 min. Aos 9 min (ou num `goAway`), abre a conexão nova, espera o
  * `setupComplete` e só troca numa fronteira de trecho; a antiga só fecha depois da troca. Nenhum quadro se perde: até a
@@ -42,7 +45,7 @@ export const ROTACAO_MS = 9 * 60_000;
 export const FINAL_SEM_SINAL_MS = 2_000;
 const SETUP_TIMEOUT_MS = 15_000;
 const VERIFICAR_ROTACAO_MS = 15_000;
-/** definido em 2026-10-04: até 10 s de áudio guardado enquanto um final está pendente (o resto é descartado). */
+/** definido em 2026-10-04: até 10 s de áudio guardado, somando os trechos, enquanto um final está pendente (o resto é descartado). */
 const PENDENTE_MAX_AMOSTRAS = 10 * TAXA_MICROFONE_HZ;
 const MIME_AUDIO = `audio/pcm;rate=${TAXA_MICROFONE_HZ}`;
 
@@ -221,8 +224,9 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
       let emitirFinal = true;
       let texto = "";
       let ultimaParcial = "";
-      let pendentes: Int16Array[] = [];
-      let amostrasPendentes = 0;
+      // Trechos que começaram enquanto um final estava pendente, na ordem; `fechado` = a fala deles já acabou.
+      const guardados: { quadros: Int16Array[]; amostras: number; fechado: boolean }[] = [];
+      let amostrasGuardadas = 0;
       let timerFinal: ReturnType<typeof setTimeout> | null = null;
 
       const enviarJson = (l: Ligacao, m: object) => l.conn.enviar(JSON.stringify(m));
@@ -257,13 +261,14 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
         ultimaParcial = "";
         emitirFinal = true;
         trocar(); // fronteira de trecho: se a nova sessão já está pronta, é aqui que ela assume
-        if (pendentes.length > 0) {
-          const guardados = pendentes;
-          pendentes = [];
-          amostrasPendentes = 0;
+        const proximo = guardados.shift();
+        if (proximo) {
+          amostrasGuardadas -= proximo.amostras;
           enviarJson(atual, { realtimeInput: { activityStart: {} } });
           estado = "falando";
-          for (const p of guardados) enviarAudio(p);
+          for (const p of proximo.quadros) enviarAudio(p);
+          // A fala dele já tinha acabado: fecha na hora; os que vieram depois esperam o final deste.
+          if (proximo.fechado) fecharTrecho(true);
         }
       }
 
@@ -356,9 +361,17 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
         enviar(pcm16: Int16Array) {
           if (fechada || pcm16.length === 0) return;
           if (estado === "fechando") {
-            if (amostrasPendentes + pcm16.length > PENDENTE_MAX_AMOSTRAS) return;
-            pendentes.push(pcm16.slice());
-            amostrasPendentes += pcm16.length;
+            // O trecho ganha a entrada dele mesmo sem caber áudio: o `fimDeFala` dele tem de achar o que fechar, e o
+            // final (vazio) dele mantém a conta de quem espera um final por trecho.
+            let emCurso = guardados.at(-1);
+            if (!emCurso || emCurso.fechado) {
+              emCurso = { quadros: [], amostras: 0, fechado: false };
+              guardados.push(emCurso);
+            }
+            if (amostrasGuardadas + pcm16.length > PENDENTE_MAX_AMOSTRAS) return;
+            emCurso.quadros.push(pcm16.slice());
+            emCurso.amostras += pcm16.length;
+            amostrasGuardadas += pcm16.length;
             return;
           }
           if (estado === "livre") {
@@ -370,17 +383,28 @@ export function criarTranscritorGoogle(o: OpcoesTranscricaoGoogle): Transcritor 
           enviarAudio(pcm16);
         },
         fimDeFala() {
-          if (fechada || estado !== "falando") return;
+          if (fechada) return;
+          if (estado === "fechando") {
+            const emCurso = guardados.at(-1);
+            if (emCurso && !emCurso.fechado) emCurso.fechado = true;
+            return;
+          }
+          if (estado !== "falando") return;
           fecharTrecho(true);
         },
         descartar() {
           if (fechada) return;
-          if (pendentes.length > 0) {
-            pendentes = [];
-            amostrasPendentes = 0;
+          const emCurso = guardados.at(-1);
+          if (emCurso && !emCurso.fechado) {
+            // O trecho em curso ainda está guardado: some sem ir ao provedor; os anteriores seguem.
+            guardados.pop();
+            amostrasGuardadas -= emCurso.amostras;
+          } else if (guardados.length > 0) {
+            // Nada em curso (o último guardado já fechou): não há o que descartar.
           } else if (estado === "falando") fecharTrecho(false);
           else if (estado === "fechando") emitirFinal = false;
         },
+        guardando: () => estado === "fechando",
         fechar: encerrar,
       };
     },

@@ -34,12 +34,16 @@ export type OpcoesVad = {
   janelaPisoMs?: number;
   /** Duração de um quadro. */
   quadroMs?: number;
+  /** Teto de um trecho: passou disto "falando", o trecho fecha sozinho. */
+  maxFalaMs?: number;
 };
 
 /**
  * definido em 2026-10-04: 3 quadros (60 ms) para o início, como o worklet; 600 ms de silêncio para o fim; limiar
  * mínimo 0,01 (≈ −40 dBFS); 3× o piso; 2,5× com o bot falando; o piso persegue o MÍNIMO de energia dos últimos 2 s
  * (entre uma palavra e outra a energia cai ao fundo), com média móvel de peso 0,05 (≈ 400 ms de memória).
+ * definido em 2026-10-04: teto de 30 s por trecho — na ligação do Marlon (alto-falante), um trecho ficou 35 s aberto com
+ * três palavras, e o seguinte nunca fechou: sem 600 ms seguidos de silêncio, o VAD de energia não tem saída.
  */
 export const OPCOES_VAD_PADRAO: Required<OpcoesVad> = {
   quadrosParaInicio: 3,
@@ -50,6 +54,7 @@ export const OPCOES_VAD_PADRAO: Required<OpcoesVad> = {
   alfaPiso: 0.05,
   janelaPisoMs: 2000,
   quadroMs: QUADRO_MS,
+  maxFalaMs: 30_000,
 };
 
 /** definido em 2026-10-04: histerese — durante a fala, o quadro conta como voz até 75% do limiar, para não picotar. */
@@ -62,7 +67,8 @@ const HISTERESE = 0.75;
  */
 export const VOZ_MINIMA_MS = 160;
 
-export type EventoVad = { tipo: "inicio"; em: number } | { tipo: "fim"; em: number; duracaoMs: number; vozMs: number };
+/** `teto`: o trecho não acabou em silêncio — fechou por ter passado de `maxFalaMs`. */
+export type EventoVad = { tipo: "inicio"; em: number } | { tipo: "fim"; em: number; duracaoMs: number; vozMs: number; teto?: true };
 
 export type Vad = {
   /** Processa um quadro que começa em `agoraMs`; devolve o evento que ele provocou, se houver. */
@@ -77,6 +83,15 @@ export type Vad = {
   limiar(): number;
   /** Piso de ruído estimado. */
   piso(): number;
+  /** Quanto do trecho em curso teve voz (0 se ninguém está falando). */
+  vozMs(): number;
+  /**
+   * Fecha o trecho em curso sem esperar o silêncio (a vigia do orquestrador: a transcrição parou de andar). Devolve o
+   * `fim` do trecho, ou null se ninguém estava falando. O próximo quadro com voz começa um trecho novo.
+   * `comoRuido`: o trecho não tinha palavra nenhuma — o piso sobe já para o mínimo da janela. Sem isso, fechar o
+   * trecho antes dos 2 s impediria o piso de aprender um ruído constante (ele só sobe depois de uma janela "falando").
+   */
+  encerrarTrecho(comoRuido?: boolean): Extract<EventoVad, { tipo: "fim" }> | null;
 };
 
 export function criarVad(opcoes: OpcoesVad = {}): Vad {
@@ -111,6 +126,13 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
 
   const limiar = (): number => Math.max(o.limiarMinimo, piso * o.fatorSobrePiso) * (botFalando ? fatorBotFalando : 1);
 
+  const fecharTrecho = (): Extract<EventoVad, { tipo: "fim" }> => {
+    falando = false;
+    seguidosComVoz = 0;
+    seguidosEmSilencio = 0;
+    return { tipo: "fim", em: fimDaVozEm, duracaoMs: fimDaVozEm - inicioEm, vozMs: quadrosComVoz * o.quadroMs };
+  };
+
   return {
     passo(q, agoraMs) {
       const e = energiaRms(q);
@@ -122,6 +144,7 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
         fimDaVozEm = agoraMs + o.quadroMs;
         if (falando) {
           quadrosComVoz++;
+          if (agoraMs + o.quadroMs - inicioEm >= o.maxFalaMs) return { ...fecharTrecho(), teto: true };
           return null;
         }
         if (seguidosComVoz === 0) primeiroComVozEm = agoraMs;
@@ -135,9 +158,12 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
       seguidosComVoz = 0;
       seguidosEmSilencio++;
       if (falando && seguidosEmSilencio * o.quadroMs >= o.silencioParaFimMs) {
-        falando = false;
-        return { tipo: "fim", em: fimDaVozEm, duracaoMs: fimDaVozEm - inicioEm, vozMs: quadrosComVoz * o.quadroMs };
+        const fim = fecharTrecho();
+        // O silêncio que fechou o trecho continua contando (quem lê `silencioMs()` logo depois vê os 600 ms).
+        seguidosEmSilencio = Math.round(o.silencioParaFimMs / o.quadroMs);
+        return fim;
       }
+      if (falando && agoraMs + o.quadroMs - inicioEm >= o.maxFalaMs) return { ...fecharTrecho(), teto: true };
       return null;
     },
     silencioMs: () => seguidosEmSilencio * o.quadroMs,
@@ -150,5 +176,11 @@ export function criarVad(opcoes: OpcoesVad = {}): Vad {
     },
     limiar,
     piso: () => piso,
+    vozMs: () => (falando ? quadrosComVoz * o.quadroMs : 0),
+    encerrarTrecho(comoRuido = false) {
+      if (!falando) return null;
+      if (comoRuido && !botFalando && recentes.length > 0) piso = Math.max(piso, Math.min(...recentes));
+      return fecharTrecho();
+    },
   };
 }

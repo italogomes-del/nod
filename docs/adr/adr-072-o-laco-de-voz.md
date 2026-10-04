@@ -39,3 +39,25 @@ e efêmero, deixa o trabalho pesado na sessão do bot sem travar a conversa.
 
 - **Mesma sessão do bot.** Prompt de texto, kit do terminal e thinking: lento, e a ligação travaria o trabalho.
 - **Absorver a fala pela renovação.** A renovação é de 1 s; a fala vai pelo canal do cérebro, direto.
+
+## Emenda 2026-10-04 — de qual vez é cada pedaço de texto: o eco do CLI
+
+Medido em 2026-10-04 (`scripts/sonda-voltas-ligacao.ts`, CLI 2.1.289, Haiku 4.5, US$ 0,02), com
+`--replay-user-messages`:
+
+- Mensagem escrita com o **texto saindo**: é lida depois do `result` e abre outra volta (dois `result`), como a
+  primeira sonda já tinha medido.
+- Mensagem escrita com uma **ferramenta rodando**: é lida na **mesma** volta, logo depois do resultado da ferramenta,
+  e o modelo passa a responder a ela. Um `result` só.
+- O CLI ecoa cada mensagem (`type:"user"`, `isReplay:true`) no instante em que a lê, com o `uuid` que mandamos.
+- `interrupt` com `cancel_queued` e uma mensagem na fila: a mensagem é cancelada (`cancelled` na resposta) e nunca é
+  lida; a escrita logo depois do `interrupt` é respondida normalmente.
+- Resposta que termina numa ferramenta, sem texto depois: o CLI injeta "[Your previous response had no visible
+  output…]" e o modelo repete a fala e a ferramenta (três vezes na sonda). Quem fala antes de uma ferramenta tem de
+  escrever algo depois dela.
+
+O driver marcava o texto com a última vez **escrita**. Com uma vez nova escrita durante a volta anterior, o `result`
+da volta antiga saía como `fala-fim` da vez nova: o servidor dava a vez por respondida e descartava a resposta de
+verdade — a ligação ficava muda. Agora cada mensagem leva um `uuid` e o driver só troca de vez quando o eco dela
+chega. Sem a flag (CLI antigo) ou até o primeiro eco aparecer, vale a regra antiga. O `fim` usa o mesmo eco para saber
+qual `result` é o do resumo.

@@ -43,6 +43,92 @@ if (args.includes("--help") && process.env.NOD_FALSO_HELP) {
   process.exit(0);
 }
 
+// ADR-072, laço de voz. Imita o que a sonda mediu em 2026-10-04 no 2.1.289: cada volta abre com um `init`; com
+// `--replay-user-messages` o CLI ecoa a mensagem (com o `uuid` dela) no momento em que a lê; uma mensagem escrita com
+// o TEXTO saindo espera o `result` e abre outra volta; escrita com uma FERRAMENTA rodando, é lida na mesma volta, logo
+// depois do resultado da ferramenta (um `result` só); `control_request interrupt` corta a volta com um `result` de erro
+// e, com `cancel_queued`, descarta o que estava na fila.
+if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
+  const sessaoVoz = valor("--session-id") ?? "00000000-0000-4000-8000-000000000000";
+  const eco = args.includes("--replay-user-messages");
+  const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
+  const fila = [];
+  let emVolta = false;
+  let fechada = false;
+  let cortar = null;
+  let ferramentas = 0;
+  const delta = (t) => out({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: t } } });
+  const ler = (m) => {
+    if (eco) out({ type: "user", isReplay: true, uuid: m.uuid, session_id: sessaoVoz, message: m.message });
+  };
+  const textoDe = (m) => (typeof m.message.content === "string" ? m.message.content : m.message.content.filter((b) => b.type === "text").map((b) => b.text).join(""));
+  const rodar = async () => {
+    if (emVolta) return;
+    emVolta = true;
+    while (fila.length > 0) {
+      let m = fila.shift();
+      const volta = { cortada: false };
+      cortar = () => { volta.cortada = true; };
+      out({ type: "system", subtype: "init", session_id: sessaoVoz, tools: [], model: valor("--model"), claude_code_version: VERSAO, apiKeySource: "none", capabilities: ["interrupt_receipt_v1", "interrupt_cancel_queued_v1"] });
+      ler(m);
+      let ultimo = "";
+      for (;;) {
+        const texto = textoDe(m);
+        if (texto.includes("[[ferramenta]]")) {
+          delta("Vou anotar.");
+          const id = `tu_${++ferramentas}`;
+          out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name: "mcp__nod__lembrar", input: {} }] } });
+          await dormir(150);
+          if (volta.cortada) break;
+          out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+          const noMeio = fila.shift();
+          if (noMeio) {
+            ler(noMeio);
+            m = noMeio;
+            continue;
+          }
+          ultimo = "Anotado.";
+        } else if (texto.includes("demorar")) {
+          delta("Pensando");
+          await dormir(200);
+          if (volta.cortada) break;
+          ultimo = " terminei.";
+        } else ultimo = texto.includes("Escreva para o chat") ? "Resumo da ligação." : `Entendi: ${texto}.`;
+        delta(ultimo);
+        break;
+      }
+      cortar = null;
+      out({ type: "result", subtype: volta.cortada ? "error_during_execution" : "success", is_error: volta.cortada, session_id: sessaoVoz, result: volta.cortada ? "" : ultimo, total_cost_usd: 0.01, num_turns: 1, usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 10, cache_creation_input_tokens: 0 }, permission_denials: [] });
+    }
+    emVolta = false;
+    if (fechada) process.exit(0);
+  };
+  process.on("SIGTERM", () => process.exit(143));
+  let resto = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (pedaco) => {
+    resto += pedaco;
+    let i;
+    while ((i = resto.indexOf("\n")) !== -1) {
+      const linha = resto.slice(0, i);
+      resto = resto.slice(i + 1);
+      if (linha.trim() === "") continue;
+      const m = JSON.parse(linha);
+      if (m.type === "control_request") {
+        const cancelados = m.request?.cancel_queued ? fila.splice(0).map((x) => x.uuid) : [];
+        out({ type: "control_response", response: { subtype: "success", request_id: m.request_id, response: { still_queued: [], cancelled: cancelados } } });
+        cortar?.();
+        continue;
+      }
+      fila.push(m);
+      void rodar();
+    }
+  });
+  process.stdin.on("end", () => {
+    fechada = true;
+    if (!emVolta) process.exit(0);
+  });
+} else
 // ADR-067, sessão viva: com `--input-format stream-json` o CLI real lê mensagens pelo stdin enquanto ele está aberto.
 // Este cenário imita a medição M1 (01/10/2026, 2.1.286): a 1ª mensagem põe um comando em segundo plano e responde;
 // quando ele termina, o CLI volta sozinho ("Testes verdes."); cada mensagem seguinte ganha uma resposta; o processo

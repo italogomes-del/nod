@@ -44,7 +44,7 @@ type Bloco =
  * Uma linha de `--input-format stream-json` com texto + imagem/PDF como blocos (medido em 2026-09-24:
  * `claude -p` leu PNG e PDF na mesma mensagem). Texto de arquivo vai como bloco de texto.
  */
-export function mensagemClaude(texto: string, anexos: readonly AnexoBaixado[]): string {
+export function mensagemClaude(texto: string, anexos: readonly AnexoBaixado[], uuid?: string): string {
   const blocos: Bloco[] = [];
   if (texto.trim() !== "") blocos.push({ type: "text", text: texto });
   for (const a of anexos) {
@@ -56,7 +56,8 @@ export function mensagemClaude(texto: string, anexos: readonly AnexoBaixado[]): 
     else blocos.push({ type: "text", text: textoDoArquivo(a) });
   }
   if (blocos.length === 0) blocos.push({ type: "text", text: "(mensagem sem texto)" });
-  return `${JSON.stringify({ type: "user", message: { role: "user", content: blocos } })}\n`;
+  // O `uuid` volta no eco do CLI (`--replay-user-messages`): quem escreve sabe quando a mensagem foi lida.
+  return `${JSON.stringify({ type: "user", ...(uuid ? { uuid } : {}), message: { role: "user", content: blocos } })}\n`;
 }
 
 /**

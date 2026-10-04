@@ -30,6 +30,11 @@ export interface SessaoStt {
   fimDeFala(): void;
   /** Descarta o trecho em curso sem emitir final (eco, ruído). */
   descartar(): void;
+  /**
+   * O áudio do trecho em curso ainda não foi ao provedor (espera o final do trecho anterior): nenhuma parcial dele
+   * pode chegar. Quem vigia "trecho sem texto" não conta esse tempo. Ausente = nunca guarda.
+   */
+  guardando?(): boolean;
   fechar(): Promise<void>;
 }
 

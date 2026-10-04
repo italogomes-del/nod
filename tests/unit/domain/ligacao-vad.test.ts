@@ -127,6 +127,74 @@ describe("criarVad", () => {
     expect(vad.piso()).toBe(0);
   });
 
+  it("teto do trecho: ruído que nunca dá 600 ms de silêncio fecha sozinho aos 30 s, e o que vem depois é um trecho novo", () => {
+    const vad = criarVad();
+    // Um estalo acima do limiar a cada 400 ms: nunca há 600 ms seguidos de silêncio.
+    const eventos: EventoVad[] = [];
+    let t = 0;
+    passar(vad, voz, 3, t).eventos.forEach((e) => eventos.push(e));
+    t = 60;
+    while (t < 31_000) {
+      const q = t % 400 === 0 ? voz : silencio;
+      const e = vad.passo(q, t);
+      if (e) eventos.push(e);
+      t += 20;
+    }
+    const fim = eventos.find((e) => e.tipo === "fim");
+    expect(fim).toMatchObject({ tipo: "fim", teto: true });
+    expect(fim && fim.tipo === "fim" ? fim.duracaoMs : 0).toBeGreaterThanOrEqual(29_000);
+    expect(eventos.filter((e) => e.tipo === "fim")).toHaveLength(1);
+    // Fala de verdade depois do teto começa outro trecho.
+    expect(passar(vad, voz, 3, t).eventos[0]?.tipo).toBe("inicio");
+  });
+
+  it("o teto é opção: com 1 s, fala contínua fecha em 1 s", () => {
+    const vad = criarVad({ maxFalaMs: 1000 });
+    const r = passar(vad, voz, 60, 0);
+    expect(r.eventos[1]).toEqual({ tipo: "fim", em: 1000, duracaoMs: 1000, vozMs: 1000, teto: true });
+  });
+
+  it("encerrarTrecho fecha o trecho em curso sem esperar o silêncio; sem ninguém falando, devolve null", () => {
+    const vad = criarVad();
+    expect(vad.encerrarTrecho()).toBeNull();
+    passar(vad, voz, 20, 0);
+    expect(vad.falando()).toBe(true);
+    expect(vad.encerrarTrecho()).toEqual({ tipo: "fim", em: 400, duracaoMs: 400, vozMs: 400 });
+    expect(vad.falando()).toBe(false);
+    expect(vad.encerrarTrecho()).toBeNull();
+    // O ruído que segue precisa de 3 quadros de novo para abrir outro trecho.
+    expect(passar(vad, voz, 2, 400).eventos).toEqual([]);
+    expect(passar(vad, voz, 1, 440).eventos).toEqual([{ tipo: "inicio", em: 400 }]);
+  });
+
+  it("trecho fechado como ruído ensina o piso na hora: o mesmo ruído não abre outro trecho; fechado sem isso, abre", () => {
+    const ruido = quadro(0.02);
+    const semAprender = criarVad();
+    let r = passar(semAprender, ruido, 75, 0);
+    expect(semAprender.encerrarTrecho()).toMatchObject({ tipo: "fim" });
+    expect(passar(semAprender, ruido, 3, r.t).eventos[0]?.tipo).toBe("inicio");
+
+    const aprendendo = criarVad();
+    r = passar(aprendendo, ruido, 75, 0);
+    expect(aprendendo.encerrarTrecho(true)).toMatchObject({ tipo: "fim" });
+    expect(aprendendo.limiar()).toBeGreaterThan(energiaRms(ruido));
+    expect(passar(aprendendo, ruido, 20, r.t).eventos).toEqual([]);
+    // Voz de verdade por cima do ruído ainda dispara.
+    expect(passar(aprendendo, voz, 3, r.t + 400).eventos[0]?.tipo).toBe("inicio");
+  });
+
+  it("vozMs conta só os quadros com voz do trecho em curso", () => {
+    const vad = criarVad();
+    expect(vad.vozMs()).toBe(0);
+    let r = passar(vad, voz, 5, 0);
+    expect(vad.vozMs()).toBe(100);
+    r = passar(vad, silencio, 10, r.t);
+    expect(vad.vozMs()).toBe(100);
+    passar(vad, silencio, 25, r.t);
+    expect(vad.falando()).toBe(false);
+    expect(vad.vozMs()).toBe(0);
+  });
+
   it("opções mudam o número de quadros e o silêncio do fim", () => {
     const vad = criarVad({ quadrosParaInicio: 1, silencioParaFimMs: 100 });
     expect(vad.passo(voz, 0)).toEqual({ tipo: "inicio", em: 0 });

@@ -177,6 +177,73 @@ describe("voz: STT Live API (transporte falso)", () => {
     expect(resultados.filter((r) => r.final).map((r) => r.texto)).toEqual(["primeiro", "segundo"]);
   });
 
+  it("trecho que começa e acaba com o final anterior pendente fecha assim que é reenviado (antes ficava aberto para sempre)", async () => {
+    const t = transporteFalso();
+    const { s, resultados } = await abrirSessao(t);
+    const c = t.conexoes[0];
+    s.enviar(quadro(1));
+    s.fimDeFala();
+    // O trecho B inteiro acontece antes de o final de A chegar.
+    s.enviar(quadro(2));
+    s.enviar(quadro(3));
+    s.fimDeFala();
+    // E o C começa, ainda com o final de A pendente.
+    s.enviar(quadro(4));
+    expect(tipos(c)).toEqual(["setup", "inicio", "audio", "fim"]);
+    t.servidor(c, transcricao("primeira parte", true));
+    // B foi reenviado e fechado na hora; C espera o final de B.
+    expect(tipos(c)).toEqual(["setup", "inicio", "audio", "fim", "inicio", "audio", "audio", "fim"]);
+    t.servidor(c, transcricao("segunda parte", true));
+    expect(tipos(c)).toEqual(["setup", "inicio", "audio", "fim", "inicio", "audio", "audio", "fim", "inicio", "audio"]);
+    s.fimDeFala();
+    t.servidor(c, transcricao("terceira parte", true));
+    expect(resultados.filter((r) => r.final).map((r) => r.texto)).toEqual(["primeira parte", "segunda parte", "terceira parte"]);
+    expect(audiosDe(c).map((a) => bytesParaPcm(Buffer.from(a.data, "base64"))[0])).toEqual([1, 2, 3, 4]);
+  });
+
+  it("descartar com o final anterior pendente tira só o trecho em curso: o final anterior e os trechos já fechados seguem", async () => {
+    const t = transporteFalso();
+    const { s, resultados } = await abrirSessao(t);
+    const c = t.conexoes[0];
+    s.enviar(quadro(1));
+    s.fimDeFala();
+    s.enviar(quadro(2));
+    s.fimDeFala();
+    // Uma batida curta (ruído) depois: o orquestrador descarta.
+    s.enviar(quadro(9));
+    s.descartar();
+    // Descartar de novo, sem nada em curso, não engole o que já fechou.
+    s.descartar();
+    t.servidor(c, transcricao("primeira parte", true));
+    t.servidor(c, transcricao("segunda parte", true));
+    expect(resultados.filter((r) => r.final).map((r) => r.texto)).toEqual(["primeira parte", "segunda parte"]);
+    expect(audiosDe(c).map((a) => bytesParaPcm(Buffer.from(a.data, "base64"))[0])).toEqual([1, 2]);
+    expect(tipos(c).at(-1)).toBe("fim");
+  });
+
+  it("guardando() diz quando o trecho em curso ainda não foi ao provedor; o trecho que não coube nos 10 s ainda ganha o final dele", async () => {
+    const t = transporteFalso();
+    const { s, resultados } = await abrirSessao(t);
+    const c = t.conexoes[0];
+    expect(s.guardando?.()).toBe(false);
+    s.enviar(quadro(1));
+    expect(s.guardando?.()).toBe(false);
+    s.fimDeFala();
+    expect(s.guardando?.()).toBe(true);
+    // B enche os 10 s guardados (500 quadros de 20 ms); C não cabe, mas a fala dele também acaba.
+    for (let i = 0; i < 500; i++) s.enviar(quadro(2));
+    s.fimDeFala();
+    s.enviar(quadro(3));
+    s.fimDeFala();
+    t.servidor(c, transcricao("primeira", true));
+    t.servidor(c, transcricao("segunda", true));
+    // C foi aberto e fechado sem áudio: o final dele (vazio) mantém um final por trecho.
+    expect(tipos(c).slice(-2)).toEqual(["inicio", "fim"]);
+    t.servidor(c, { serverContent: { turnComplete: true } });
+    expect(resultados.filter((r) => r.final).map((r) => r.texto)).toEqual(["primeira", "segunda", ""]);
+    expect(s.guardando?.()).toBe(false);
+  });
+
   it("descartar fecha a atividade no servidor e engole o final daquele trecho", async () => {
     const t = transporteFalso();
     const { s, resultados } = await abrirSessao(t);
