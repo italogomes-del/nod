@@ -124,6 +124,7 @@ async function main(): Promise<void> {
   for (const frase of frases) {
     const pcm = wavDoSay(frase);
     const quadros = Math.ceil(pcm.length / 320);
+    let fimDaFala = 0;
     for (let q = 0; q < quadros + 75; q++) {
       const pedaco = q < quadros ? pcm.subarray(q * 320, q * 320 + 320) : new Int16Array(320);
       const b = Buffer.alloc(5 + 640);
@@ -131,13 +132,13 @@ async function main(): Promise<void> {
       b.writeUInt32LE(seq++, 1);
       Buffer.from(pedaco.buffer, pedaco.byteOffset, pedaco.byteLength).copy(b, 5);
       ws.send(b);
-      if (q === quadros) var fimDaFala = Date.now();
+      if (q === quadros) fimDaFala = Date.now();
       await dormir(20);
     }
-    const legenda = await esperar((m) => m.t === "legenda" && m.final === true, fimDaFala!, 15_000);
-    const resposta = await esperar((m) => m.t === "bot-fala" && m.tipo === "conteudo", fimDaFala!, 30_000);
-    const espera = await esperar((m) => m.t === "bot-fala" && m.tipo === "espera", fimDaFala!, 1);
-    relatorio.push(`"${frase}" → STT ${legenda ? legenda.em - fimDaFala! : "—"} ms · 1º conteúdo ${resposta ? resposta.em - fimDaFala! : "—"} ms${espera ? ` · espera ${espera.em - fimDaFala!} ms` : ""}`);
+    const legenda = await esperar((m) => m.t === "legenda" && m.final === true, fimDaFala, 15_000);
+    const resposta = await esperar((m) => m.t === "bot-fala" && m.tipo === "conteudo", fimDaFala, 30_000);
+    const espera = await esperar((m) => m.t === "bot-fala" && m.tipo === "espera", fimDaFala, 1);
+    relatorio.push(`"${frase}" → STT ${legenda ? legenda.em - fimDaFala : "—"} ms · 1º conteúdo ${resposta ? resposta.em - fimDaFala : "—"} ms${espera ? ` · espera ${espera.em - fimDaFala} ms` : ""}`);
     await dormir(4000);
   }
   ws.send(JSON.stringify({ t: "tchau" }));
