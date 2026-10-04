@@ -26,9 +26,10 @@ type SocketMinimo = {
 export type FabricaSocket = (url: string, headers: Record<string, string>) => SocketMinimo;
 
 const fabricaGlobal: FabricaSocket = (url, headers) => {
-  const Ctor = (globalThis as { WebSocket?: new (u: string, o: { headers: Record<string, string> }) => SocketMinimo }).WebSocket;
-  if (!Ctor) throw new Error("WebSocket global ausente");
-  return new Ctor(url, { headers });
+  const Ctor: unknown = Reflect.get(globalThis, "WebSocket");
+  if (typeof Ctor !== "function") throw new Error("WebSocket global ausente");
+  // O WebSocket do undici aceita `headers` como opção (conferido em 2026-10-04); o tipo da DOM não declara.
+  return Reflect.construct(Ctor, [url, { headers }]) as SocketMinimo;
 };
 
 export function urlDoCerebro(urlNod: string): string {

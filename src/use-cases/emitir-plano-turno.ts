@@ -3,6 +3,7 @@ import { resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
 import { MODELO_LIGACAO_CLAUDE, MODELO_LIGACAO_CODEX } from "../contracts/modelos.ts";
 import { generoDaVoz } from "../domain/vozes.ts";
+import { montarPromptLigacao, MENSAGENS_NO_PROMPT_LIGACAO } from "../domain/prompt-ligacao.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
@@ -244,6 +245,20 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       nomeBot: agente.nome,
       generoVoz: generoDaVoz(lig.voz),
     };
+    // O prompt de voz (prompt-ligacao.ts) substitui o de texto: curto, falado, sem "Formatação:".
+    parcial.promptSistema = montarPromptLigacao({
+      nomeBot: agente.nome,
+      generoVoz: generoDaVoz(lig.voz),
+      titulo: agente.titulo,
+      descricao: agente.descricao,
+      pessoaNome: pessoa?.nome ?? "a pessoa",
+      memorias,
+      ultimasMensagens: mensagens.filter((m) => m.kind === "texto").slice(-MENSAGENS_NO_PROMPT_LIGACAO).map((m) => ({ autor: autorDe(m), texto: m.texto })),
+      colegas: visiveis.filter((a) => ehColega(agente, a)).map((a) => ({ nome: a.nome, titulo: a.titulo })),
+      apps: parcial.catalogo.servidores.map((s) => s.nome),
+      modoAprovacao: agente.modoAprovacao ?? "manual",
+      iniciarTarefa: parcial.catalogo.ferramentas.some((f) => f.nome === "iniciar_tarefa"),
+    });
   }
 
   const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
