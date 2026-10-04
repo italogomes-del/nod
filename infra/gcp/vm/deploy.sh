@@ -42,12 +42,24 @@ NOD_CREDENTIAL_KEY=$(segredo nod-credential-key)
 NOD_GOOGLE_CLIENT_ID=$GOOGLE_ID
 NOD_GOOGLE_CLIENT_SECRET=$GOOGLE_SEGREDO
 NOD_GOOGLE_REDIRECT_URI=https://$NOD_DOMINIO/api/sessao/google/callback
+# Modo ligação (ADR-071): voz pelo Google pago pelos créditos do projeto; só admins na fase 1 (NOD_ADMINS no config.env).
+NOD_VOZ_PROJETO=$PROJETO
+NOD_LIGACAO=${NOD_LIGACAO:-admins}
+NOD_ADMINS=${NOD_ADMINS:-}
+NOD_DRENAGEM_MAX_MS=600000
 EOF
 mv nod.env.novo nod.env
 
 docker compose pull nod
 docker compose run --rm --no-deps -T nod node scripts/migrate.ts
 docker compose up -d --remove-orphans
+# O Caddy lê o Caddyfile num bind de arquivo único: mudou o arquivo, recria o container (fora disso, nunca — derrubaria
+# os WebSockets das ligações).
+SHA_CADDY="$(sha256sum Caddyfile | cut -d' ' -f1)"
+if [ "$SHA_CADDY" != "$(cat .caddyfile.sha 2>/dev/null || true)" ]; then
+  docker compose up -d --force-recreate --no-deps caddy
+  echo "$SHA_CADDY" > .caddyfile.sha
+fi
 
 for _ in $(seq 1 30); do
   if [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q nod)")" = healthy ]; then

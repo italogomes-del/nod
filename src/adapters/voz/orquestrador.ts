@@ -120,6 +120,8 @@ export interface ServicoVoz {
   /** Para de aceitar ligação nova e encerra as vivas com aviso (deploy). */
   drenar(motivo?: MotivoFimLigacao): Promise<void>;
   drenando(): boolean;
+  /** Deploy (SIGTERM): recusa ligação nova e avisa as vivas falando; elas seguem até acabar ou até o prazo. */
+  iniciarDrenagem(): void;
   fechar(): Promise<void>;
 }
 
@@ -1002,6 +1004,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       pedirAprovacao,
       conferirComando,
       decisaoDecidida,
+      avisar: (texto: string) => falarAviso(texto),
       encerrada: () => encerrada,
       ultimaAtividadeEm: () => ultimaAtividadeEm,
     };
@@ -1050,6 +1053,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       await Promise.all([...ligacoes.values()].map((l) => l.encerrar(motivo)));
     },
     drenando: () => emDrenagem,
+    iniciarDrenagem() {
+      if (emDrenagem) return;
+      emDrenagem = true;
+      for (const l of ligacoes.values()) if (!l.encerrada()) l.avisar("Daqui a pouco eu preciso reiniciar. Se a ligação cair, é só me ligar de novo.");
+    },
     async fechar() {
       emDrenagem = true;
       await Promise.all([...ligacoes.values()].map((l) => l.encerrar("reinicio_servidor")));

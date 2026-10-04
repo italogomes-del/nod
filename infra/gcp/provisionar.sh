@@ -12,7 +12,8 @@ passo() { printf '\n== %s\n' "$*"; }
 passo "APIs"
 gc services enable compute.googleapis.com sqladmin.googleapis.com servicenetworking.googleapis.com \
   artifactregistry.googleapis.com secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com \
-  sts.googleapis.com iap.googleapis.com logging.googleapis.com monitoring.googleapis.com cloudresourcemanager.googleapis.com
+  sts.googleapis.com iap.googleapis.com logging.googleapis.com monitoring.googleapis.com cloudresourcemanager.googleapis.com \
+  texttospeech.googleapis.com aiplatform.googleapis.com speech.googleapis.com
 
 passo "Rede $REDE (sem as regras abertas da rede default)"
 gc compute networks describe "$REDE" >/dev/null 2>&1 || gc compute networks create "$REDE" --subnet-mode=custom
@@ -71,7 +72,8 @@ done
 passo "Conta de serviço da VM"
 SA_VM="nod-vm@$PROJETO.iam.gserviceaccount.com"
 gc iam service-accounts describe "$SA_VM" >/dev/null 2>&1 || gc iam service-accounts create nod-vm --display-name="nod: VM"
-for papel in roles/logging.logWriter roles/monitoring.metricWriter; do
+# ADR-071: a voz da ligação (Transcribe Live pela Vertex, Chirp 3 HD) roda com a conta da VM.
+for papel in roles/logging.logWriter roles/monitoring.metricWriter roles/aiplatform.user roles/serviceusage.serviceUsageConsumer; do
   gc projects add-iam-policy-binding "$PROJETO" --member="serviceAccount:$SA_VM" --role="$papel" --condition=None >/dev/null
 done
 gc artifacts repositories add-iam-policy-binding "$REPO" --location="$REGIAO" --member="serviceAccount:$SA_VM" --role=roles/artifactregistry.reader >/dev/null

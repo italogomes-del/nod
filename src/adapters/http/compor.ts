@@ -105,6 +105,7 @@ import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
 import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
 import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz } from "../voz/orquestrador.ts";
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
+import type { ProvedoresVoz } from "../voz/spi.ts";
 import { criarCacheDeFalas } from "../voz/falas-de-espera.ts";
 import { anexarCanaisVoz, type CanaisVoz } from "../voz/ws.ts";
 import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
@@ -431,7 +432,16 @@ export function comporApp(o: OpcoesCompor): App {
   const maxLigacaoS = numero(env.NOD_LIGACAO_MAX_S, 30 * 60);
   const limiteDiarioMs = numero(env.NOD_LIGACAO_MINUTOS_DIA, 60) * 60_000;
   const maxSimultaneas = numero(env.NOD_LIGACAO_SIMULTANEAS, 20);
-  const provedoresVoz = criarProvedoresVoz(env);
+  // Voz mal configurada nunca derruba o servidor: a ligação fica indisponível ("voz fora do ar") e o resto segue.
+  let vozConfigurada = true;
+  let provedoresVoz: ProvedoresVoz;
+  try {
+    provedoresVoz = criarProvedoresVoz(env);
+  } catch (e) {
+    vozConfigurada = false;
+    log("erro", "voz_nao_configurada", { erro: e instanceof Error ? e.name : "desconhecido" });
+    provedoresVoz = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "falso" });
+  }
   const esperasVoz = criarCacheDeFalas({ tts: provedoresVoz.tts, provedor: provedoresVoz.tts.id, diretorio: env.NOD_VOZ_CACHE });
   const escopoDaRef = (ref: RefLigacao): Escopo => ({ tenantId: ref.tenantId, pessoaId: ref.pessoaId });
   const rodarCaso = <I, O>(escopo: Escopo, caso: (d: Deps, i: I) => Promise<{ data: O; events?: RuntimeEvent[] }>, input: I): Promise<O> =>
@@ -511,7 +521,7 @@ export function comporApp(o: OpcoesCompor): App {
       // NOD_LIGACAO_CODEX=0 é a chave de desligar (o app-server é experimental na OpenAI).
       codexSemVoz: executorAtual !== "catcher" && harness === "codex-cli" && env.NOD_LIGACAO_CODEX === "0",
       drenando: voz.drenando(),
-      vozDisponivel: true,
+      vozDisponivel: vozConfigurada,
       vivasNoServidor: voz.vivas(),
       maxSimultaneas,
       limiteDiarioMs,

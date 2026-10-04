@@ -4,6 +4,8 @@ services:
   nod:
     image: ${NOD_IMAGEM:?defina NOD_IMAGEM}
     restart: unless-stopped
+    # ADR-071: no SIGTERM o nod drena as ligações vivas por até 10 min (NOD_DRENAGEM_MAX_MS) antes de sair.
+    stop_grace_period: 11m
     env_file: /opt/nod/nod.env
     volumes:
       - nod_home:/data/nod
