@@ -15,6 +15,7 @@ import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { tabelaComo } from "./lib/texto-formatado.ts";
 import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type PedidoPareamento } from "./lib/parear-mac.ts";
 import { abrirPareamento } from "./telas/parear-mac.ts";
 import { criarAvisador } from "./lib/avisador.ts";
@@ -1236,6 +1237,16 @@ function verPergunta(decisaoId: string): void {
   window.setTimeout(() => balao.classList.remove("realce"), 1600);
 }
 
+/** "Ver aprovação" (definido em 2026-10-03): da lista "N coisas esperam você" ao card do pedido na timeline. */
+function verDecisao(decisaoId: string): void {
+  const id = CSS.escape(decisaoId);
+  const card = document.querySelector<HTMLElement>(`[data-decisao="${id}"], [data-proposta="${id}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  card.classList.add("realce");
+  window.setTimeout(() => card.classList.remove("realce"), 1600);
+}
+
 function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; textoFinal?: string }[] {
   const raiz = document.querySelector(`[data-decisao="${CSS.escape(decisaoId)}"]`);
   if (!raiz) return [];
@@ -1294,17 +1305,21 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // ADR-051: o artefato numa janela grande (o mesmo documento, o mesmo estado) e o .html para guardar.
   "artefato-tela-cheia": (el) => agir(() => artefatos.telaCheia(el.dataset.mensagem ?? "")),
   "artefato-baixar": (el) => agir(() => artefatos.baixar(el.dataset.mensagem ?? "")),
+  "artefato-nova-aba": (el) => agir(() => artefatos.novaAba(el.dataset.mensagem ?? "")),
   // ADR-053: a tabela do bot vai para a área de transferência com as colunas separadas, pronta para a planilha.
+  // definido em 2026-10-03: o rodapé da tabela copia como Planilha, CSV ou JSON (web/lib/texto-formatado.ts rodapeDaTabela).
   "copiar-tabela": async (el) => {
-    const rotulo = el.querySelector("span");
-    if (!rotulo) return;
+    const antes = el.textContent ?? "";
+    const formato = el.dataset.formato === "csv" || el.dataset.formato === "json" ? el.dataset.formato : "tsv";
     try {
-      await navigator.clipboard.writeText(el.dataset.tsv ?? "");
-      rotulo.textContent = "Copiada";
+      const celulas: unknown = JSON.parse(el.dataset.tabela ?? "[]");
+      const linhas = Array.isArray(celulas) ? celulas.map((l) => (Array.isArray(l) ? l.map(String) : [])) : [];
+      await navigator.clipboard.writeText(tabelaComo(formato, linhas));
+      el.textContent = "Copiada";
     } catch {
-      rotulo.textContent = "Não copiou";
+      el.textContent = "Não copiou";
     }
-    setTimeout(() => { rotulo.textContent = "Copiar"; }, 1500);
+    setTimeout(() => { el.textContent = antes; }, 1500);
   },
   entrar: (el) => agir(async () => iniciarSessao(await sessaoApi.entrar(el.dataset.pessoa ?? ""))),
   navegar: (el) => {
@@ -1581,6 +1596,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "composer-responder": (el) => escolherNoComposer(false, el.dataset.id),
   "composer-outro": () => escolherNoComposer(true),
   "ver-pergunta": (el) => verPergunta(el.dataset.id ?? ""),
+  "ver-decisao": (el) => verDecisao(el.dataset.id ?? ""),
   // A resposta pronta é TEXTO da pessoa (EMENDA 16): o toque manda as palavras da opção por `responder`.
   "responder-opcao": (el) =>
     agir(async () => {

@@ -1,7 +1,7 @@
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { FioDaPergunta } from "../../src/contracts/pedido.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { estadoDaPergunta, fioLendo, fiosDaConversa, iconeBalao, inicioDaPergunta, mensagemDaPergunta, modoDoComposer, MOTIVO_SEM_ANEXO, perguntasAbertas, rodadaEscrita, type ItemPergunta, type ModoComposer } from "../lib/perguntas.ts";
+import { ehPergunta, estadoDaPergunta, fioLendo, fiosDaConversa, iconeBalao, inicioDaPergunta, mensagemDaPergunta, modoDoComposer, MOTIVO_SEM_ANEXO, perguntasAbertas, rodadaEscrita, type ItemPergunta, type ModoComposer } from "../lib/perguntas.ts";
 import { emQuanto, haQuanto } from "../lib/relogio.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { rotuloVencido } from "./sua-vez.ts";
@@ -140,15 +140,60 @@ function renderCitacao(modo: Extract<ModoComposer, { tipo: "resposta" }>, estado
  * pergunta esperando, só a faixa neutra do fio em que o agente está lendo (`conversaId` a localiza).
  */
 export function renderTopoComposer(modo: ModoComposer, estado: Estado, conversaId?: string): string {
+  const outros = conversaId ? outrosPedidos(estado, conversaId) : [];
   if (modo.tipo === "normal") {
     const lendo = conversaId ? fioLendo(estado, conversaId) : undefined;
-    return lendo ? renderFaixaLendo(lendo, estado) : "";
+    return (lendo ? renderFaixaLendo(lendo, estado) : "") + (outros.length ? renderEspera([], outros, estado, modo) : "");
   }
   const alvo = modo.tipo === "resposta" ? modo.alvo : modo.perguntas[0];
   if (!alvo) return "";
   const modos = `<div class="modo-envio" role="group" aria-label="O que a próxima mensagem faz">${segmento("composer-responder", "Responder à pergunta", modo.tipo === "resposta")}${segmento("composer-outro", "Outro assunto", modo.tipo === "outro")}</div>`;
   const citacao = modo.tipo === "resposta" && modo.perguntas.length > 1 ? renderCitacao(modo, estado) : "";
-  return `${renderFaixaPergunta(alvo, estado, !citacao)}<div class="composer-modo">${modos}${citacao}</div>`;
+  const topo = outros.length ? renderEspera(modo.perguntas, outros, estado, modo) : renderFaixaPergunta(alvo, estado, !citacao);
+  return `${topo}<div class="composer-modo">${modos}${citacao}</div>`;
+}
+
+type ItemDaFila = NonNullable<Estado["suaVez"]>["itens"][number];
+
+/** Os pedidos abertos da conversa que NÃO são pergunta (aprovação, acesso, proposta…), do mais antigo ao mais novo. */
+function outrosPedidos(estado: Estado, conversaId: string): ItemDaFila[] {
+  return (estado.suaVez?.itens ?? [])
+    .filter((i) => i.decisao.conversaId === conversaId && i.estadoColuna !== "vencido" && !ehPergunta(i.decisao.tipo))
+    .sort((a, b) => Date.parse(a.decisao.criadoEm) - Date.parse(b.decisao.criadoEm));
+}
+
+const ROTULO_DO_PEDIDO: Partial<Record<ItemDaFila["decisao"]["tipo"], string>> = { aprovacao: "aprovação", acesso: "acesso", gate_rotina: "rotina", retomar_turno: "retomar" };
+
+/**
+ * "N coisas esperam você" (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): com uma aprovação aberta
+ * além da pergunta, a pessoa via a faixa azul da pergunta, o card âmbar na timeline e o cabeçalho, cada um dizendo uma
+ * parte. Um ponto só acima do campo, em ordem, com uma ação para cada — a pergunta se responde no campo; o pedido leva
+ * ao card dele. Sem outro pedido, a faixa da pergunta continua como era.
+ */
+function renderEspera(perguntas: readonly ItemPergunta[], outros: readonly ItemDaFila[], estado: Estado, modo: ModoComposer): string {
+  const linhas: { em: number; html: string }[] = [
+    ...perguntas.map((p) => {
+      const { vence } = relogio(p, estado.agora);
+      const rodada = p.fio?.rodada ?? 1;
+      const texto = textoDaPergunta(estado, p.decisao);
+      const respondendo = modo.tipo === "resposta" && modo.alvo.decisao.id === p.decisao.id;
+      const acao = respondendo
+        ? (mensagemDaPergunta(mensagensDe(estado, p.decisao.conversaId), p.decisao.id) ? botao("ver-pergunta", "Ver pergunta", { classe: "link sm", id: p.decisao.id }) : "")
+        : botao("composer-responder", "Responder", { classe: "link sm", id: p.decisao.id });
+      return { em: Date.parse(p.decisao.criadoEm), html: `<span class="tag tag-azul">pergunta</span><span class="esp-txt" title="${esc(texto)}">${esc(inicioDaPergunta(texto, TRECHO_FAIXA_MAX))}<small>${esc(p.agenteNome)} parou aqui${rodada > 1 ? ` · ${esc(rodadaEscrita(rodada))}` : ""} · vence ${esc(emQuanto(vence))}</small></span>${acao}` };
+    }),
+    ...outros.map((i) => {
+      const d = i.decisao;
+      const vence = estado.agora ? Date.parse(d.prazoDecisaoEm) - estado.agora : i.recusaAutomaticaEmMs;
+      const slug = i.itensAprovacao[0]?.destino.conector;
+      const app = slug ? estado.conectores.find((c) => c.slug === slug)?.nome ?? slug : "";
+      const prazo = d.tipo === "aprovacao" || d.tipo === "acesso" ? `recusa automática ${emQuanto(vence)}` : `vence ${emQuanto(vence)}`;
+      const ver = botao("ver-decisao", d.tipo === "aprovacao" ? "Ver aprovação" : "Ver pedido", { classe: "link sm", id: d.id });
+      return { em: Date.parse(d.criadoEm), html: `<span class="tag tag-ambar">${esc(ROTULO_DO_PEDIDO[d.tipo] ?? "decisão")}</span><span class="esp-txt">${esc(d.frase)}<small>${esc([app, prazo].filter(Boolean).join(" · "))}</small></span>${ver}` };
+    }),
+  ].sort((a, b) => a.em - b.em);
+  const n = linhas.length;
+  return `<section class="espera" aria-label="O que espera você agora"><div class="espera-cab"><span class="espera-n">${n}</span>${n === 1 ? "coisa espera você" : "coisas esperam você"}</div><ol>${linhas.map((l, k) => `<li><span class="espera-ord">${k + 1}</span>${l.html}</li>`).join("")}</ol></section>`;
 }
 
 export type AparenciaComposer = {

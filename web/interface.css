@@ -46,7 +46,12 @@
 .bubble-wrap { max-width: min(86%, 760px); min-width: 0; }
 .bubble { box-shadow: none; border-radius: 17px; padding: 12px 16px; line-height: 1.65; font-size: 14px; overflow-wrap: anywhere; }
 .message.bot .bubble, .message.you .bubble { background: var(--surface-raised); color: var(--ink); border-radius: 17px; }
-.message.you .bubble { background: var(--surface-raised); }
+/* definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): o balão de quem escreve se destaca do bot, com o
+   canto de cima mais reto do lado de quem fala — espelho do balão do bot. Cinza contra cinza não separava as vozes.
+   Revisto em 2026-10-04 (ADR-070): grafite (action) em vez do azul da marca — o azul é só do que é novo. */
+.message.you .bubble { background: var(--action); color: var(--on-action); border-top-right-radius: 8px; }
+.message.you .bubble .chip-comando { background: color-mix(in srgb, var(--on-action) 18%, transparent); color: var(--on-action); }
+.message.you .bubble a { color: var(--on-action); }
 .msg-autor { display: flex; gap: 10px; align-items: center; margin: 0 0 6px; font-size: 12px; }
 .msg-autor b { font-weight: 600; }
 .msg-autor time { color: var(--ink-3); font-size: 10px; }
@@ -198,10 +203,6 @@
 .md-tabela-mais summary { list-style: none; cursor: pointer; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--surface-side); font-size: 13px; font-weight: 500; color: var(--ink); }
 .md-tabela-mais summary::-webkit-details-marker { display: none; }
 .md-tabela-mais[open] .md-mais, .md-tabela-mais:not([open]) .md-menos { display: none; }
-.md-tabela-copiar { position: absolute; top: 5px; right: 8px; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
-.md-tabela-copiar svg { width: 13px; height: 13px; }
-.md-tabela:hover .md-tabela-copiar, .md-tabela-copiar:focus-visible { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .md-tabela-copiar { opacity: .8; pointer-events: auto; } }
 
 /* definido em 2026-09-17: acolhimento e conexões acompanham a conversa. */
 .create-actions{display:flex;gap:2px;align-items:center}.create-actions .create-trigger{position:relative;display:grid;place-items:center;line-height:1}.segurar-anel{position:absolute;inset:-1px;box-sizing:border-box;border-radius:9px;pointer-events:none;opacity:0;background:conic-gradient(var(--ink) var(--segurar-progresso,0turn),transparent 0);padding:2px;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}.create-trigger.segurando .segurar-anel{opacity:1;animation:segurar-progresso var(--ms-segurar,500ms) linear forwards}.create-trigger.segurando{color:var(--ink-2)}@keyframes segurar-progresso{from{--segurar-progresso:0turn}to{--segurar-progresso:1turn}}@property --segurar-progresso{syntax:'<angle>';inherits:true;initial-value:0turn}@media (prefers-reduced-motion:reduce){.create-trigger.segurando .segurar-anel{animation:none;opacity:1;--segurar-progresso:1turn}}@supports not (background:conic-gradient(red var(--x,0turn),transparent 0)){.create-trigger.segurando .segurar-anel{animation:none;opacity:1;--segurar-progresso:1turn}} /* cor-fixa: o #000 da máscara só define o alfa do anel */
@@ -269,7 +270,7 @@
 .computador-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 26px;font-size:12px}.computador-toolbar label{display:flex;align-items:center;gap:8px;margin-left:auto}.computador-dialog select{padding:6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--ink)}
 .computador-ajuda{margin:5px 26px 10px;font-size:13px;color:var(--ink-2)}.computador-erro:empty{display:none}.computador-erro{margin:10px 26px;color:var(--danger);font-size:13px}
 .computador-layout{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;padding:8px 26px 24px}.computador-desktop{min-width:0}.computador-url{display:flex;gap:8px;padding:8px;background:var(--surface-selected);border-radius:10px 10px 0 0}.computador-dialog input:not([type=file]),.computador-dialog textarea{font:inherit;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);border-radius:6px;padding:8px;min-width:0;box-sizing:border-box}.computador-url input{flex:1;font-size:12px!important}.computador-abas{display:flex;gap:3px;overflow-x:auto;background:var(--surface-selected);padding:0 8px 5px}.computador-abas button{overflow:hidden;text-overflow:ellipsis;max-width:190px;font-size:11px;padding:5px 8px}.computador-abas .ativa{background:var(--surface)}
-.computador-viewport{background:#111113;border:1px solid var(--line);aspect-ratio:1.6;position:relative;overflow:hidden;border-radius:0 0 9px 9px}.computador-viewport img{width:100%;height:100%;object-fit:contain;display:block;outline-offset:-3px}.computador-viewport img[hidden]{display:none}.computador-viewport img.controlavel{cursor:crosshair}.computador-vazio{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;color:#d4d4d8;font-size:18px}.computador-vazio[hidden]{display:none}.computador-vazio small{font-size:12px;color:#a1a1aa} /* cor-fixa: a tela do computador é escura nos dois temas, como um monitor */
+.computador-viewport{background:var(--action);border:1px solid var(--line);aspect-ratio:1.6;position:relative;overflow:hidden;border-radius:0 0 9px 9px}.computador-viewport img{width:100%;height:100%;object-fit:contain;display:block;outline-offset:-3px}.computador-viewport img[hidden]{display:none}.computador-viewport img.controlavel{cursor:crosshair}.computador-vazio{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;color:var(--ink-3);font-size:18px}.computador-vazio[hidden]{display:none}.computador-vazio small{font-size:12px;color:var(--ink-3)} /* cor-fixa: a tela do computador é escura nos dois temas, como um monitor */
 .computador-input{display:flex;gap:5px;margin:12px 0 6px;font-size:11px;flex-wrap:wrap}.computador-texto{display:flex;flex:1;gap:5px}.computador-texto input{width:100%;font-size:11px!important}.computador-dica{font-size:11px;line-height:1.6;color:var(--ink-3)}.computador-desktop audio{height:34px;width:100%;margin-top:5px}.computador-lateral{font-size:12px;min-width:0}.computador-lateral details{border-bottom:1px solid var(--line);padding:10px 0}.computador-lateral summary{font-size:13px;font-weight:600;cursor:pointer}.computador-lateral p{color:var(--ink-3);font-size:11px;line-height:1.5}.computador-pasta{display:flex;gap:4px;margin:10px 0}.computador-pasta input{width:100%}.computador-upload{display:block;font-size:11px;margin:12px 0}.computador-upload input{display:block;max-width:100%;margin-top:7px;font-size:10px}.computador-arquivos{max-height:240px;overflow:auto}.computador-arquivos button{display:flex;width:100%;gap:5px;text-align:left;border:0;padding:7px 0;background:transparent;white-space:normal;word-break:break-word}.computador-arquivos small{margin-left:auto;white-space:nowrap;color:var(--ink-3)}.computador-terminal textarea{width:100%;margin:10px 0;font-family:monospace!important;font-size:12px!important}.computador-saida{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px}.computador-atividade{list-style:none;padding:0;max-height:250px;overflow:auto}.computador-atividade li{padding:7px 0;font-size:11px;border-bottom:1px solid var(--line)}.computador-atividade small{display:block;color:var(--ink-3);margin-top:4px}
 @media(max-width:950px){.computador-layout{grid-template-columns:1fr;padding:8px 12px 16px}.computador-header,.computador-toolbar{padding-left:12px;padding-right:12px}.computador-ajuda{margin-left:12px;margin-right:12px}.computador-lateral{display:grid;grid-template-columns:1fr 1fr;gap:14px}.computador-toolbar label{margin-left:0}.computador-vazio{font-size:14px}.computador-dialog{width:98vw;max-height:97vh}}
 
@@ -408,7 +409,8 @@
 .atividade-cartao li.atividade-anteriores { padding-left: 24px; color: var(--ink-3); font-size: 12px; border-top: 0; }
 
 /* Fila da conversa (2026-09-24): cada mensagem que espera mostra onde está e um Cancelar só dela. */
-.message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { background: var(--surface); border: 1px dashed var(--ink-3); }
+.message.you.fila-na_fila .bubble, .message.you.fila-cancelando .bubble { background: var(--surface); border: 1px dashed var(--ink-3); color: var(--ink); }
+.message.you.fila-na_fila .bubble .chip-comando, .message.you.fila-cancelando .bubble .chip-comando, .message.you.fila-cancelada .bubble .chip-comando { background: var(--surface-raised); color: var(--ink-2); }
 .message.you.fila-cancelada .bubble { background: var(--surface); border: 1px dashed var(--line-strong); color: var(--ink-3); text-decoration: line-through; }
 .fila-chip { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; font-size: 12px; color: var(--ink-2); }
 .fila-chip.cancelada { color: var(--ink-3); }
@@ -903,3 +905,135 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .secao-a-fazer .pd-texto { font-size: 13.5px; font-weight: 500; line-height: 1.4; }
 .secao-a-fazer .pd-corpo { gap: 5px; }
 @media (max-width: 700px) { .a-fazer { margin-left: 35px; max-width: 89%; } }
+
+/* ---- Conversa "depois" (definido em 2026-10-03, canvas "Uma conversa de verdade · depois") ---- */
+/* Aprovação de um item: o desenho do cartão de atividade, sem a borda âmbar de lista (renderCardAprovacao). */
+.lista > li.aprov-card, .aprov-card { padding: 0; border: 1px solid var(--line) !important; border-left: 1px solid var(--line) !important; border-radius: 17px; border-top-left-radius: 8px; background: var(--surface); overflow: hidden; margin-bottom: 12px; }
+/* 52px = o mascote md (38px, .icon.md acima) + o gap de 14px da .message: o card começa onde o balão começa. */
+.decisoes-ancoradas { list-style: none; padding: 0; margin: -10px 0 25px 52px; width: min(600px, calc(100% - 52px)); }
+.decisoes-ancoradas > li.decisao:not(.aprov-card) { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.aprov-cab { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 18px 0; font-size: 13px; color: var(--ink-3); }
+.aprov-cab b { font-weight: 600; color: var(--ink-2); }
+.aprov-ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); flex: none; }
+.aprov-card .aprov-titulo { margin: 6px 0 0; padding: 0 18px 0 34px; font-size: 15px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.aprov-onde { margin: 8px 0 0; padding: 0 18px 0 34px; font-size: 12.5px; color: var(--ink-3); }
+.aprov-app .app-logo { width: 18px; height: 18px; min-width: 18px; border-radius: 5px; font-size: 10px; border: 0; }
+.aprov-card .ap-comando, .aprov-card > .ap-oque { margin: 10px 18px 0 34px; }
+.aprov-previa { margin: 14px 18px 0 34px; }
+.aprov-previa-cab { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.aprov-previa .md-tabela { margin: 0; }
+.aprov-previa .md-tabela td { padding: 6px 14px; }
+.aprov-previa-mais { padding: 6px 14px; border-top: 1px solid var(--line); background: var(--surface-side); font-size: 12px; color: var(--ink-3); }
+.aprov-campos { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; }
+.aprov-campos dt { color: var(--ink-3); }
+.aprov-campos dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }
+.aprov-card .ap-porque { margin: 12px 18px 0 34px; }
+.aprov-card .tag { margin: 10px 0 0 34px; }
+.aprov-card .aprov-acoes { display: flex; gap: 8px; flex-wrap: wrap; padding: 16px 18px 16px 34px; margin: 0; }
+.aprov-card .aprov-acoes .bt.pri { background: var(--action); border-color: var(--action); color: var(--on-action); }
+.aprov-rodape { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 12px; padding: 12px 18px 12px 34px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--line); background: var(--surface-raised); }
+.aprov-rodape > span { padding-top: 1px; }
+.aprov-rodape .ap-detalhe { margin: 0 0 0 auto; }
+.aprov-rodape .ap-detalhe[open] { flex-basis: 100%; margin-left: 0; }
+.aprov-rodape .ap-detalhe > summary { color: var(--ink); font-weight: 500; font-size: 12px; margin-left: auto; }
+.aprov-card.realce { box-shadow: 0 0 0 3px var(--warning-line); transition: box-shadow .2s ease; }
+/* Cabeçalho: "Trabalhando · 2 esperam você" (renderCabecalhoConversa). */
+.presenca .presenca-sep { color: var(--ink-3); }
+.presenca b { font-weight: 600; color: var(--ink-2); }
+/* Rodapé da tabela: linhas · colunas e "Copiar como" (texto-formatado.ts rodapeDaTabela). */
+.md-tabela-rodape { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; padding: 4px 8px 4px 14px; border-top: 1px solid var(--line); background: var(--surface-side); font-size: 11.5px; color: var(--ink-3); }
+.md-copiar { display: inline-flex; align-items: center; gap: 2px; }
+.md-copiar-rot { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; }
+.md-copiar-rot svg { width: 13px; height: 13px; }
+.md-copiar button { min-height: 28px; padding: 0 9px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.md-copiar button:hover, .md-copiar button:focus-visible { background: var(--surface-raised); color: var(--ink); }
+/* Listas e títulos no texto do bot (texto-formatado.ts comListas). */
+.md-lista { margin: 4px 0 8px; padding-left: 22px; }
+.md-lista li { margin: 2px 0; }
+.md-lista li::marker { color: var(--ink-3); }
+.md-titulo { margin: 10px 0 4px; font-weight: 650; color: var(--ink); }
+.md-titulo:first-child, .md-paragrafo:first-child { margin-top: 0; }
+.md-paragrafo { margin: 0 0 8px; }
+.md-paragrafo:last-child, .md-lista:last-child { margin-bottom: 0; }
+/* Parte ao vivo ancorada no mascote (conversa.ts cabecalhoDoTurnoVivo): o cabeçalho é um bloco, o corpo outro. */
+.message.vivo-cab { margin: 0 0 4px; align-items: center; }
+.message.vivo-cab > .icon { margin-top: 0; }
+.message.vivo-cab .msg-autor { margin: 0; }
+.message.ao-vivo { padding-left: 52px; }
+.message.ao-vivo .bubble-wrap { width: min(100%, 600px); }
+.message.streaming.ao-vivo .bubble-wrap { width: auto; }
+.vivo-selo { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 10.5px; font-weight: 500; }
+.vivo-selo .atividade-pulso { width: 6px; height: 6px; }
+.atividade-agora .lk-chip { vertical-align: 0; }
+/* "Anotei uma preferência: …" + "Ver na memória" (conversa.ts linhaDaMemoria). */
+.msg-memoria .bt.link { display: inline; min-height: 0; padding: 0 2px; font-size: inherit; font-weight: 500; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; vertical-align: baseline; }
+/* Artefato: "Abrir em nova aba" (card-artefato.ts). */
+.artefato-nova-aba { display: inline-flex; align-items: center; gap: 4px; }
+.artefato-nova-aba svg { flex: none; }
+/* "N coisas esperam você" acima do campo (pergunta.ts renderEspera). Revisto em 2026-10-04 (ADR-070): o que espera
+   você é "novo para você", no azul de sinal; o resto da faixa é neutro. */
+.tag-azul { color: var(--signal); border-color: transparent; background: var(--signal-soft); }
+.espera { margin: 0 0 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.espera-cab { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; color: var(--ink); background: var(--surface-side); border-bottom: 1px solid var(--line); }
+.espera-n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--signal); color: var(--on-signal); font-size: 11px; }
+.espera ol { list-style: none; margin: 0; padding: 0; max-height: 168px; overflow: auto; }
+.espera li { display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); line-height: 1.4; }
+.espera li:first-child { border-top: 0; }
+.espera-ord { width: 14px; flex: none; text-align: center; font-size: 11px; color: var(--ink-3); }
+.espera .tag { flex: none; }
+.esp-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.esp-txt small { display: block; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; }
+.espera li .bt.link { flex: none; min-height: 28px; white-space: nowrap; color: var(--ink); }
+.lista > li.decisao.realce, .card-acesso.realce, [data-proposta].realce { box-shadow: 0 0 0 3px var(--warning-line); transition: box-shadow .2s ease; }
+/* Artefato como fala do bot (conversa.ts renderMensagem): mascote, nome e hora; o card ocupa a coluna do balão. */
+.message.com-artefato .bubble-wrap { width: min(100%, 760px); }
+.message.com-artefato .artefato { margin: 0; max-width: none; }
+/* Aprovação com vários itens no mesmo card (sua-vez.ts renderCardAprovacao). */
+.aprov-itens { list-style: none; margin: 12px 18px 0 34px; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.aprov-item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.aprov-item:first-child { border-top: 0; }
+.aprov-item.sensivel { background: var(--warning-soft); }
+.aprov-marca { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }
+.aprov-marca input { margin: 3px 0 0; accent-color: var(--ink); flex: none; }
+.aprov-item-txt { font-size: 13.5px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.aprov-item-txt small { display: block; font-size: 12px; color: var(--ink-3); }
+.aprov-item .ap-detalhe { margin: 1px 0 0; flex: none; }
+.aprov-item .ap-detalhe > summary { font-size: 12px; }
+.aprov-item .ap-detalhe[open] { flex-basis: 100%; padding-left: 24px; }
+.aprov-item .justificativa, .aprov-item .ap-porque { flex-basis: 100%; margin: 4px 0 0 24px; font-size: 12px; }
+.aprov-item .tag { margin: 4px 0 0 24px; }
+/* Recibos das decisões (conversa.ts reciboDaDecisao / reciboDaRegra): uma linha de feedback do sistema, centrada. */
+.recibo { margin: 4px auto 12px; width: fit-content; max-width: min(620px, 100%); padding: 6px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-side); font-size: 12.5px; color: var(--ink-3); }
+.recibo, .recibo > summary { display: flex; align-items: center; gap: 8px; }
+.recibo > summary { list-style: none; cursor: pointer; }
+.recibo > summary::-webkit-details-marker { display: none; }
+details.recibo { display: block; }
+.recibo-ic { width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--surface-raised); color: var(--ink-3); }
+.recibo-ic svg { width: 12px; height: 12px; }
+.recibo-ok .recibo-ic { background: var(--success-soft); color: var(--success); }
+.recibo-falha .recibo-ic { background: var(--danger-soft); color: var(--danger); }
+.recibo-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recibo-txt b { font-weight: 600; color: var(--ink-2); }
+.recibo-estado { flex: none; font-size: 11.5px; font-weight: 500; color: var(--success); }
+.recibo-falha .recibo-estado { color: var(--danger); }
+.recibo-ver { flex: none; font-size: 11.5px; color: var(--ink-2); }
+details.recibo[open] .recibo-ver { visibility: hidden; }
+.recibo-itens { list-style: none; margin: 8px 0 2px 26px; padding: 0; border-left: 2px solid var(--line); }
+.recibo-itens li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0 3px 10px; color: var(--ink-2); }
+.recibo-itens li small { flex: none; color: var(--ink-3); }
+.recibo-itens .recibo-item-ok small { color: var(--success); }
+.recibo-itens .recibo-item-falha small { color: var(--danger); }
+.recibo-texto { margin: 6px 0 0 26px; color: var(--ink-2); }
+
+/* Feedback do sistema no centro (definido em 2026-10-03, revisão da conversa "depois"): o que NÃO é fala do bot —
+   aprovação decidida, pergunta resolvida, rotina executada, parada, negação, acesso concedido, pasta aberta, aviso de
+   computador — fica centrado, como .msg-sistema e o fio resolvido já ficavam. A coluna da esquerda é só do bot. */
+.msg-linha > .msg-rotina, .msg-linha > .msg-resultado, .msg-linha > .msg-parada, .msg-linha > .msg-passe {
+  margin: 4px auto 12px; max-width: 620px; text-align: center; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+.msg-linha > .msg-consentimento { margin: 4px auto 12px; max-width: 620px; padding: 0; border-left: 0; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+.msg-linha > .msg-consentimento b { color: var(--ink-2); font-weight: 600; }
+.msg-linha > .msg-consentimento details { text-align: left; }
+.msg-linha > .msg-consentimento summary { text-align: center; }
+.msg-linha > .negacao { width: fit-content; max-width: 620px; margin: 4px auto 12px; text-align: center; }
+.msg-linha > .pasta-aberta { margin: 4px auto 16px; }
+.msg-linha > .msg-computador-fora { max-width: 620px; margin: 4px auto 12px; }

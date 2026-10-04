@@ -237,7 +237,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
     autoria,
     kind: "resultado_aprovacao",
     texto,
-    payload: { kind: "resultado_aprovacao", decisaoId: decisao.id, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho ?? "falhou_na_execucao" })) },
+    payload: { kind: "resultado_aprovacao", decisaoId: decisao.id, frase: decisao.frase, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho ?? "falhou_na_execucao", texto: i.textoFinal })) },
     confianca: "confiavel",
   });
   const events: RuntimeEvent[] = [];
