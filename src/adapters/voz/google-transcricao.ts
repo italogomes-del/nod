@@ -21,9 +21,11 @@ import type { OpcoesSessaoStt, SessaoStt, Transcritor } from "./spi.ts";
  * node:http local: o `WebSocket` global do Node 24.19 (undici) manda os headers de `new WebSocket(url, { headers })`,
  * então o token não precisa ir na query (`access_token`), onde vazaria em log de proxy.
  *
- * A CONFIRMAR NA FASE 0 (não havia credencial GCP nesta máquina em 2026-10-04; nada disto foi testado ao vivo):
- * - o nome do modelo de transcrição (`NOD_VOZ_STT_MODELO`, padrão "gemini-3.5-transcribe-live") e a região
- *   (`NOD_VOZ_REGIAO`, padrão us-central1) em que ele existe;
+ * Modelo e região conferidos ao vivo em 2026-10-04 (listagem `publishers/google/models` do Vertex + setup pela Live
+ * API): o id é "gemini-3.5-transcribe-live-preview" (`NOD_VOZ_STT_MODELO`) e só existe em `global` (`NOD_VOZ_REGIAO`);
+ * em us-central1 o setup fecha com 1008 "Publisher model … was not found".
+ *
+ * A CONFIRMAR NA FASE 0:
  * - se o modelo de transcrição pede `responseModalities` (mandamos ["TEXT"]) e se responde algo além da transcrição
  *   (o que vier em `modelTurn` é ignorado);
  * - se o vocabulário influencia a transcrição pela `systemInstruction` (é o único lugar que a Live API oferece);
@@ -31,8 +33,8 @@ import type { OpcoesSessaoStt, SessaoStt, Transcritor } from "./spi.ts";
  * - o limite real da sessão só de áudio no Vertex (10 min, pela documentação) e o formato do `goAway`.
  */
 
-export const MODELO_STT_GOOGLE_PADRAO = "gemini-3.5-transcribe-live";
-export const REGIAO_GOOGLE_PADRAO = "us-central1";
+export const MODELO_STT_GOOGLE_PADRAO = "gemini-3.5-transcribe-live-preview";
+export const REGIAO_GOOGLE_PADRAO = "global";
 /** definido em 2026-10-04: troca de sessão aos 9 min (o Vertex fecha aos 10; sobra 1 min para o trecho em curso acabar). */
 export const ROTACAO_MS = 9 * 60_000;
 /** definido em 2026-10-04: sem sinal de fim de transcrição 2 s depois do `activityEnd`, fecha o final com o que houver. */

@@ -79,10 +79,10 @@ describe("voz: STT Live API (transporte falso)", () => {
     const { stt, s } = await abrirSessao(t, { vocabulario: ["Tuca", "Nod"] });
     expect(stt.capacidades).toEqual({ parciais: true, vocabulario: true, fimDeFalaManual: true });
     const c = t.conexoes[0];
-    expect(c?.url).toBe("wss://us-central1-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent");
+    expect(c?.url).toBe("wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent");
     expect(c?.headers).toEqual({ Authorization: "Bearer tok-123", "x-goog-user-project": "proj-1" });
     const setup = c?.enviados[0]?.setup as Record<string, unknown>;
-    expect(setup.model).toBe("projects/proj-1/locations/us-central1/publishers/google/models/gemini-3.5-transcribe-live");
+    expect(setup.model).toBe("projects/proj-1/locations/global/publishers/google/models/gemini-3.5-transcribe-live-preview");
     expect(setup.inputAudioTranscription).toEqual({});
     expect(setup.realtimeInputConfig).toEqual({ automaticActivityDetection: { disabled: true } });
     expect(JSON.stringify(setup.systemInstruction)).toContain("Tuca, Nod");
