@@ -100,6 +100,22 @@ import { criarRotasTurnos } from "./rotas/turnos.ts";
 import { criarRotasRaioX } from "./rotas/raio-x.ts";
 import { criarRotasComandos } from "./rotas/comandos.ts";
 import { criarRotasNaoLidos } from "./rotas/nao-lidos.ts";
+import { criarRotasLigacoes } from "./rotas/ligacoes.ts";
+import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
+import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
+import { anotarEntrevista, concluirEntrevista, estadoOnboardingParaVoz, proporBot } from "../../use-cases/onboarding.ts";
+import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
+import type { IaNoMac } from "../../contracts/onboarding.ts";
+import { criarRotasOnboarding } from "./rotas/onboarding.ts";
+import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz } from "../voz/orquestrador.ts";
+import { criarProvedoresVoz } from "../voz/fabrica.ts";
+import type { ProvedoresVoz } from "../voz/spi.ts";
+import { concatenar, montarWav } from "../voz/audio.ts";
+import { VELOCIDADES_VOZ, VOZES_NOD } from "../../contracts/vozes.ts";
+import { criarCacheDeFalas } from "../voz/falas-de-espera.ts";
+import { anexarCanaisVoz, type CanaisVoz } from "../voz/ws.ts";
+import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
+import type { IncomingMessage, Server } from "node:http";
 
 /**
  * Composição do app (L9): UMA função monta Services concreto, UseCasesNod completo, a ponte
@@ -161,6 +177,10 @@ export type App = {
   /** Ligação do driver catcher: cada passo vira linha em catcher_registros na tx escopada do turno. */
   aoRegistrarCatcher(r: RegistroCatcher): void;
   tenantDe(pessoaId: string): Promise<string | null>;
+  /** ADR-071: o orquestrador das ligações por voz (memória deste processo). */
+  voz: ServicoVoz;
+  /** Liga os dois canais WebSocket da ligação ao servidor HTTP (boot, depois do listen). */
+  anexarVoz(server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null): CanaisVoz;
   fechar(): Promise<void>;
 };
 
@@ -216,7 +236,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -411,6 +431,152 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   });
 
+  // ---- Ligação por voz (definido em 2026-10-04, ADR-071/072) ----------------------------------------------------------
+  // NOD_LIGACAO: desligada | admins | todas. Padrão: todas fora de produção; em produção, só admins (fase 1, atrás de flag).
+  const modoLigacao = env.NOD_LIGACAO ?? (env.NODE_ENV === "production" ? "admins" : "todas");
+  const adminsVoz = (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const maxLigacaoS = numero(env.NOD_LIGACAO_MAX_S, 30 * 60);
+  const limiteDiarioMs = numero(env.NOD_LIGACAO_MINUTOS_DIA, 60) * 60_000;
+  const maxSimultaneas = numero(env.NOD_LIGACAO_SIMULTANEAS, 20);
+  // Voz mal configurada nunca derruba o servidor: a ligação fica indisponível ("voz fora do ar") e o resto segue.
+  let vozConfigurada = true;
+  let provedoresVoz: ProvedoresVoz;
+  try {
+    provedoresVoz = criarProvedoresVoz(env);
+  } catch (e) {
+    vozConfigurada = false;
+    log("erro", "voz_nao_configurada", { erro: e instanceof Error ? e.name : "desconhecido" });
+    provedoresVoz = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "falso" });
+  }
+  const esperasVoz = criarCacheDeFalas({ tts: provedoresVoz.tts, provedor: provedoresVoz.tts.id, diretorio: env.NOD_VOZ_CACHE });
+  const escopoDaRef = (ref: RefLigacao): Escopo => ({ tenantId: ref.tenantId, pessoaId: ref.pessoaId });
+  const rodarCaso = <I, O>(escopo: Escopo, caso: (d: Deps, i: I) => Promise<{ data: O; events?: RuntimeEvent[] }>, input: I): Promise<O> =>
+    abrirTxEscopada(db, escopo)(async (trx) => {
+      const d = depsDe(trx, escopo);
+      const r = await caso(d, input);
+      if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+      return r.data;
+    });
+  const persistenciaVoz: PersistenciaVoz = {
+    async atender(ref) { await rodarCaso(escopoDaRef(ref), atenderLigacao, { ligacaoId: ref.ligacaoId }); },
+    async gravarFala(ref, f) { await rodarCaso(escopoDaRef(ref), gravarFalaLigacao, { ...f, ligacaoId: ref.ligacaoId }); },
+    async encerrar(ref, motivo, metricas) {
+      inscricoesVoz.get(ref.ligacaoId)?.();
+      inscricoesVoz.delete(ref.ligacaoId);
+      decisoesDeForaDaLigacao.delete(ref.ligacaoId);
+      await rodarCaso(escopoDaRef(ref), encerrarLigacao, { ligacaoId: ref.ligacaoId, motivo, metricas });
+    },
+    async mandarNoChat(ref, texto) { await rodarCaso(escopoDaRef(ref), mandarNoChatDaLigacao, { ligacaoId: ref.ligacaoId, agenteId: ref.agenteId, conversaId: ref.conversaId, turnoId: ref.turnoId, texto }); },
+    // ADR-077: a etapa e os campos do onboarding, para o painel, a pílula e os chips da ligação de onboarding.
+    async estadoOnboarding(ref) { return rodarCaso(escopoDaRef(ref), estadoOnboardingParaVoz, {}); },
+  };
+  const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio });
+  // ADR-074: os cards da conversa da ligação viram leitura + janela de aprovação por voz. O orquestrador não lê banco:
+  // a composição escuta os frames da pessoa e monta a leitura (leituraDaDecisao) numa tx dela.
+  const inscricoesVoz = new Map<string, () => void>();
+  const decididasPorVoz = new Set<string>();
+  /** ADR-077: as decisões de fora da conversa da ligação que ela acompanha (o acesso e a rotina do bot novo do onboarding). */
+  const decisoesDeForaDaLigacao = new Map<string, Set<string>>();
+  function lerParaVoz(escopo: Escopo, ligacaoId: string, decisaoId: string, soDoBotDoOnboarding = false): void {
+    rodarCaso(escopo, leituraDaDecisao, { decisaoId, soDoBotDoOnboarding })
+      .then((p) => {
+        if (!p) return;
+        if (soDoBotDoOnboarding) decisoesDeForaDaLigacao.get(ligacaoId)?.add(decisaoId);
+        voz.pedirAprovacao(ligacaoId, p);
+      })
+      .catch((e: unknown) => log("aviso", "voz_leitura_falhou", { ligacao_id: ligacaoId, erro: e instanceof Error ? e.name : "desconhecido" }));
+  }
+  function acompanharDecisoes(escopo: Escopo, ligacaoId: string, conversaId: string, onboarding = false): void {
+    if (onboarding) decisoesDeForaDaLigacao.set(ligacaoId, new Set());
+    // Ao ligar, as pendências da conversa entram na fila de leitura.
+    dentro(escopo, (d) => d.repos.decisoes.listarSuaVez(relogio()))
+      .then((ds) => { for (const x of ds) if (x.conversaId === conversaId) lerParaVoz(escopo, ligacaoId, x.id); })
+      .catch(() => undefined);
+    const sair = barramento.inscrever(escopo.pessoaId, (f) => {
+      if (f.dados.conversaId !== conversaId) {
+        // ADR-077: no onboarding, o card do bot novo (na conversa dele) também se lê e se decide por voz.
+        const de = decisoesDeForaDaLigacao.get(ligacaoId);
+        const id = typeof f.dados.decisao_id === "string" ? f.dados.decisao_id : typeof f.dados.decisaoId === "string" ? f.dados.decisaoId : null;
+        if (!de || !id) return;
+        if (f.tipo === "decisao.nova") lerParaVoz(escopo, ligacaoId, id, true);
+        else if (f.tipo === "decisao.decidida" && de.has(id) && !decididasPorVoz.has(id)) voz.decisaoDecidida(ligacaoId, { decisaoId: id, resultado: f.dados.recusada === true ? "recusado" : "decidido", porVoz: false });
+        return;
+      }
+      // ADR-072: tarefa pedida na ligação (iniciar_tarefa) terminou — o bot avisa falando, numa brecha.
+      if ((f.tipo === "turno.encerrado" || f.tipo === "turno.interrompido") && typeof f.dados.turnoId === "string" && f.dados.origem !== "ligacao") {
+        rodarCaso(escopo, resultadoDaTarefaDaLigacao, { turnoId: f.dados.turnoId, ligacaoId })
+          .then((r) => {
+            if (!r) return;
+            const corpo = neutralizarDelimitadores(r.texto).replace(/\[nod\]/gi, "[n o d]");
+            voz.nota(ligacaoId, r.concluido ? `A tarefa que você iniciou na ligação terminou. Conte à pessoa em uma ou duas frases. Resultado:\n${corpo}` : `A tarefa que você iniciou na ligação parou antes de terminar (${corpo}). Conte à pessoa em uma frase.`, r.confiavel, true);
+          })
+          .catch(() => undefined);
+        return;
+      }
+      const decisaoId = typeof f.dados.decisao_id === "string" ? f.dados.decisao_id : typeof f.dados.decisaoId === "string" ? f.dados.decisaoId : null;
+      if (!decisaoId) return;
+      if (f.tipo === "decisao.nova") lerParaVoz(escopo, ligacaoId, decisaoId);
+      else if (f.tipo === "decisao.decidida" && !decididasPorVoz.has(decisaoId)) voz.decisaoDecidida(ligacaoId, { decisaoId, resultado: f.dados.recusada === true ? "recusado" : "decidido", porVoz: false });
+    });
+    inscricoesVoz.set(ligacaoId, sair);
+  }
+  // Prévia da voz do bot (Editar perfil, Ajustes da ligação): uma frase pelo provedor das ligações, em memória.
+  const amostras = new Map<string, Promise<Buffer | null>>();
+  function amostraDeVoz(idVoz: string, velocidade: number): Promise<Buffer | null> {
+    const vozNod = VOZES_NOD.find((v) => v.id === idVoz);
+    if (!vozNod || !(VELOCIDADES_VOZ as readonly number[]).includes(velocidade)) return Promise.resolve(null);
+    const chave = `${idVoz}:${velocidade}`;
+    let p = amostras.get(chave);
+    if (!p) {
+      p = (async () => {
+        const pedacos: Int16Array[] = [];
+        for await (const pcm of provedoresVoz.tts.sintetizar({ texto: `Oi! Esta é a voz ${vozNod.nome}. É assim que eu falo nas ligações.`, voz: idVoz, velocidade })) pedacos.push(pcm);
+        return montarWav(concatenar(pedacos), 24_000);
+      })().catch((e: unknown) => {
+        amostras.delete(chave);
+        log("aviso", "voz_amostra_falhou", { erro: e instanceof Error ? e.name : "desconhecido" });
+        return null;
+      });
+      amostras.set(chave, p);
+    }
+    return p;
+  }
+  async function ehAdminVoz(escopo: Escopo): Promise<boolean> {
+    if (adminsVoz.length === 0) return false;
+    if (adminsVoz.includes(escopo.pessoaId.toLowerCase())) return true;
+    const email = (await dentro(escopo, (d) => d.repos.pessoas.buscar(escopo.pessoaId)))?.email?.toLowerCase();
+    return !!email && adminsVoz.includes(email);
+  }
+  /** Início do dia em São Paulo (UTC−3, sem horário de verão desde 2019), para o limite diário. */
+  const inicioDoDiaSp = (agora: number): number => {
+    const fuso = 3 * 3_600_000;
+    return Math.floor((agora - fuso) / 86_400_000) * 86_400_000 + fuso;
+  };
+  async function contextoLigacao(escopo: Escopo, agenteId: string, onboarding = false): Promise<ContextoLigacao> {
+    const agente = await dentro(escopo, (d) => d.repos.agentes.buscar(agenteId));
+    const harness = agente?.harness && agente.harness !== "auto" ? agente.harness : driverPreferido;
+    const prontos = compartilhado ? ponteHttp.harnessesDaPessoa(escopo.pessoaId) : null;
+    const iaPronta = executorAtual === "catcher" ? true : compartilhado ? prontos?.[harness as IdDriver & keyof typeof prontos]?.estado === "pronto" : inventarioPorDriver[harness as IdDriver]?.estado === "pronto";
+    return {
+      habilitada: modoLigacao !== "desligada",
+      // ADR-077: NOD_ONBOARDING_VOZ=1 abre a ligação de onboarding (a da guia) mesmo com as ligações só para admins.
+      permitido: modoLigacao === "todas" || (onboarding && env.NOD_ONBOARDING_VOZ === "1") || (modoLigacao === "admins" && (await ehAdminVoz(escopo))),
+      maquinaComLigacao: compartilhado ? ponteHttp.ligacaoDaPessoa(escopo.pessoaId) : ponte.maquinasConectadas().some((m) => m.ligacao === true),
+      iaPronta,
+      // ADR-076 (fase 4): o laço de voz do Codex é o app-server (drivers/codex-ligacao.ts). Liga por padrão;
+      // NOD_LIGACAO_CODEX=0 é a chave de desligar (o app-server é experimental na OpenAI).
+      codexSemVoz: executorAtual !== "catcher" && harness === "codex-cli" && env.NOD_LIGACAO_CODEX === "0",
+      drenando: voz.drenando(),
+      vozDisponivel: vozConfigurada,
+      vivasNoServidor: voz.vivas(),
+      maxSimultaneas,
+      limiteDiarioMs,
+      inicioDoDia: inicioDoDiaSp(relogio()),
+      provedorStt: provedoresVoz.stt.id,
+      provedorTts: provedoresVoz.tts.id,
+    };
+  }
+
   const varredorMaquinas = compartilhado ? setInterval(() => {
     void ponteHttp.varrer().catch(() => log("aviso", "presenca_maquinas_falhou", {}));
   }, 15_000) : null;
@@ -553,6 +719,13 @@ export function comporApp(o: OpcoesCompor): App {
     return p;
   }
 
+  /** ADR-077: a IA dos bots no Mac da pessoa, para os cards de IA do onboarding (o catcher conta como pronto). */
+  function executorDoMac(pessoaId: string): { pronto: boolean; ias: IaNoMac[] } {
+    const catalogo = catalogoHarness(pessoaId);
+    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}) }));
+    return { pronto: (!compartilhado && executorAtual === "catcher") || ias.some((i) => i.estado === "pronto"), ias };
+  }
+
   const depsRotas: DepsRotas = {
     abrirTx: (escopo) => abrirTxEscopada(db, escopo),
     services,
@@ -586,6 +759,34 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasRaioX(depsRotas),
     ...criarRotasComandos(depsRotas),
     ...criarRotasNaoLidos(depsRotas),
+    ...criarRotasLigacoes({
+      ...depsRotas,
+      contexto: contextoLigacao,
+      maxS: maxLigacaoS,
+      registrar: (escopo, l) => {
+        voz.registrar({ ...l, tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, maxS: maxLigacaoS });
+        acompanharDecisoes(escopo, l.ligacaoId, l.conversaId);
+      },
+      encerrarViva: (id) => voz.encerrar(id, "pessoa_desligou"),
+      amostra: amostraDeVoz,
+    }),
+    ...criarRotasOnboarding({
+      ...depsRotas,
+      executorDoMac: (escopo) => executorDoMac(escopo.pessoaId),
+      contexto: (escopo, agenteId) => contextoLigacao(escopo, agenteId, true),
+      registrar: (escopo, l) => {
+        voz.registrar({
+          ligacaoId: l.ligacao.id, agenteId: l.ligacao.agenteId, conversaId: l.ligacao.conversaId, turnoId: l.turno.id, voz: l.voz, velocidade: l.velocidade, nomeBot: l.nomeBot, genero: l.genero,
+          tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, maxS: maxLigacaoS,
+          onboarding: true, saudacao: saudacaoDoOnboarding(l.nomeBot), aguardandoConsentimento: true,
+          vocabulario: Object.values(MODELOS_DE_BOT).flatMap((m) => [m.nome, m.app.nome]),
+        });
+        acompanharDecisoes(escopo, l.ligacao.id, l.ligacao.conversaId, true);
+      },
+      liberar: (id) => voz.liberar(id),
+      encerrarViva: (id, motivo) => voz.encerrar(id, motivo),
+      fusoPadrao: env.NOD_FUSO_PADRAO ?? "America/Sao_Paulo",
+    }),
     ...rotasConcessoes({ dentro }),
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
@@ -601,6 +802,11 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasDecisoes({
       dentro,
       services,
+      conferirComandoVoz: (p) => voz.conferirComando(p),
+      aoDecidirPorVoz: (p) => {
+        decididasPorVoz.add(p.decisaoId);
+        voz.decisaoDecidida(p.ligacaoId, { decisaoId: p.decisaoId, resultado: p.acao === "aprovar" ? "aprovado" : "recusado", porVoz: true });
+      },
       prazoDecisaoMs,
       get executor() {
         return executorAtual;
@@ -689,7 +895,19 @@ export function comporApp(o: OpcoesCompor): App {
     iniciarLaco: iniciar,
     aoRegistrarCatcher,
     tenantDe,
+    voz,
+    anexarVoz(server, resolverEscopo) {
+      return anexarCanaisVoz(server, {
+        resolverEscopo,
+        autorizarTokenTurno: (token) => tokens.autorizar(token),
+        ligacaoDoTurno: (turnoId) => tokens.planoDe(turnoId)?.ligacaoVoz?.ligacaoId ?? null,
+        anexarMidia: ({ escopo, ligacaoId, retomar, canal }) => voz.anexarMidia({ pessoaId: escopo.pessoaId, ligacaoId, retomar, canal }),
+        anexarCerebro: ({ identidade, ligacaoId, canal }) => voz.anexarCerebro({ turnoId: identidade.turnoId, ligacaoId, canal }),
+      });
+    },
     async fechar() {
+      await voz.fechar();
+      await provedoresVoz.encerrar();
       if (varredorMaquinas) clearInterval(varredorMaquinas);
       await conectoresVivos.fechar();
     },

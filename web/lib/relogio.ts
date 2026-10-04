@@ -19,6 +19,19 @@ export function duracaoCurta(ms: number): string {
   return `${Math.round(abs / DIA)} d`;
 }
 
+/**
+ * 'mm:ss' do cronômetro da ligação (definido em 2026-10-04): '00:07', '03:12'; de uma hora em diante, 'h:mm:ss'.
+ * Negativo vira zero (o relógio da máquina pode estar um pouco atrás do servidor).
+ */
+export function duracaoRelogio(ms: number): string {
+  const total = Math.floor(Math.max(0, ms) / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const dois = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${dois(m)}:${dois(s)}` : `${dois(m)}:${dois(s)}`;
+}
+
 /** 'há 6h' — para aguardandoHaMs. */
 export function haQuanto(ms: number): string {
   return ms < MIN ? "agora" : `há ${duracaoCurta(ms)}`;

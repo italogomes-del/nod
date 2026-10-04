@@ -17,6 +17,11 @@ export type AnuncioMaquina = {
    * pessoa dona da chave desta máquina — o login do gh serve a quem o fez, nunca a um colega.
    */
   github?: { gh: boolean };
+  /**
+   * definido em 2026-10-04 (ADR-072): este app roda o laço de voz (abre o canal do cérebro da ligação). Ausente = app
+   * antigo: o turno da ligação nunca vai para ele.
+   */
+  ligacao?: boolean;
 };
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */
@@ -50,7 +55,7 @@ export type PedidoRenovar = {
   aceitaMensagens?: boolean;
 };
 /** O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067). */
-export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[] };
+export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes

@@ -67,6 +67,9 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     NOD_CREDENTIAL_KEY: CHAVE_DE_TESTE,
     NOD_HOME: process.env.NOD_HOME ?? "~/.nod",
     NOD_MACHINE_ID: randomUUID(),
+    // ADR-071: voz falsa (sem whisper nem say) — custo zero e determinística.
+    NOD_VOZ_STT: "falso",
+    NOD_VOZ_TTS: "falso",
     ...(o.env ?? {}),
   };
   const servidor = await boot({

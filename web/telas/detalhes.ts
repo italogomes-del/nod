@@ -1,3 +1,4 @@
+import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import type { RotinaDto } from "../../src/contracts/api.ts";
 import type { Estado, NivelGaveta } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
@@ -5,6 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
+import { VELOCIDADES, VOZES } from "./ligacao.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { nomeInteligencia, renderInteligencia } from "./inteligencia.ts";
@@ -109,7 +111,10 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
 
   // ADR-064: o "a fazer" do bot acima de Rotinas, com as mesmas ações da lista embaixo da conversa.
   const aFazer = dona ? renderAFazerNaGaveta(estado, a.id) : "";
-  return identidade + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
+  // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
+  const o = estado.onboarding;
+  const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
+  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------
@@ -210,8 +215,22 @@ function nivelPerfil(a: Bot): Nivel {
       <div class="gv-cores" role="radiogroup" aria-label="Cor do mascote">${cores}</div></div>
     <label class="gv-campo">Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60" /></label>
     <label class="gv-campo">Título<input name="titulo" value="${esc(a.titulo)}" maxlength="80" /></label>
-    <label class="gv-campo">Missão e orientações<textarea name="descricao" rows="10">${esc(a.descricao)}</textarea></label>`;
+    <label class="gv-campo">Missão e orientações<textarea name="descricao" rows="10">${esc(a.descricao)}</textarea></label>
+    ${campoVoz(a)}`;
   return { titulo: "Editar perfil", corpo, rodape: rodapeDeFormulario("Salvar"), form: `data-form="editar-perfil" data-id="${esc(a.id)}"` };
+}
+
+/**
+ * A voz do bot nas ligações (definido em 2026-10-04, ADR-071): escolhida como o mascote, com prévia (▶ toca a amostra do
+ * provedor das ligações) e velocidade. Bot sem voz salva mostra a que o servidor deu a ele na criação.
+ */
+function campoVoz(a: Bot): string {
+  const atual = a.voz ?? VOZES[0].id;
+  const vozes = VOZES.map((v) => `<div class="gv-voz"><label><input type="radio" name="voz" value="${v.id}"${v.id === atual ? " checked" : ""} /><span><b>${esc(v.nome)}</b><small>${esc(v.descricao)}</small></span></label><button type="button" class="gv-icone" data-act="ouvir-voz" data-voz="${v.id}" aria-label="Ouvir a voz ${esc(v.nome)}" title="Ouvir">▶</button></div>`).join("");
+  const vel = a.vozVelocidade ?? 1;
+  const velocidades = VELOCIDADES.map((x) => `<label class="seg"><input type="radio" name="vozVelocidade" value="${x}"${x === vel ? " checked" : ""} /><span>${String(x).replace(".", ",")}x</span></label>`).join("");
+  return `<fieldset class="gv-campo gv-vozes"><legend>Voz nas ligações</legend><div class="gv-lista-vozes" role="radiogroup" aria-label="Voz do bot">${vozes}</div>
+    <div class="segmentado sm" role="radiogroup" aria-label="Velocidade da fala">${velocidades}</div></fieldset>`;
 }
 
 const NOMES_FORMAS = ["Quadrado", "Hexágono", "Círculo", "Galet", "Cápsula", "Triângulo", "Nuvem", "Gota"];

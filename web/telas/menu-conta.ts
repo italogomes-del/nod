@@ -33,6 +33,7 @@ export function htmlMenuConta(d: DadosMenuConta): string {
     <hr>
     ${item("agentes", ICONE.agentes, "Gerenciar agentes")}
     ${item("relatos", ICONE.bandeira, "Relatos")}
+    <button type="button" role="menuitem" data-onboarding>${ICONE.brilho}<span class="mc-nome">Ver o onboarding de novo</span></button>
     ${banco ? `<hr>${banco}` : ""}
   </div>`;
 }

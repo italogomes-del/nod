@@ -1,6 +1,6 @@
 import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
-import type { Visibilidade } from "./agente.ts";
+import type { CorAgente, FormaAgente, Visibilidade } from "./agente.ts";
 import type { Executor } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
 
@@ -31,7 +31,7 @@ export type Conversa = {
   criadoEm: EpochMs;
 };
 
-export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao";
+export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
 /**
@@ -131,7 +131,12 @@ export type PayloadPropostaPasta = {
   motivo: string;
   buscaTermo: string;
 };
-export type PayloadProposta = PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
+/**
+ * definido em 2026-10-04 (ADR-077, 0050): o primeiro bot que a Nina propõe no onboarding por ligação (propor_bot). A
+ * proposta é da Nina (agente/conversa dela); confirmar cria o bot novo com estes campos (confirmar-proposta.ts).
+ */
+export type PayloadPropostaBot = { kind: "bot"; nome: string; descricao: string; forma: FormaAgente; cor: CorAgente; voz: string | null; turnoId?: string };
+export type PayloadProposta = PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
 
 /** Proposta do modelo (ferramenta tipada) — nada é aplicado antes da confirmação da pessoa (E1.1). */
 export type Proposta = {

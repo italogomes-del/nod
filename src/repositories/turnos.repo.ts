@@ -40,10 +40,11 @@ interface Linha {
   mensagem_origem_id: string | null;
   absorvido_por: string | null;
   sob_procuracao_de: string | null;
+  ligacao_id: string | null;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -75,6 +76,7 @@ function paraTurno(l: Linha): Turno {
     mensagemOrigemId: l.mensagem_origem_id,
     absorvidoPor: l.absorvido_por,
     sobProcuracaoDe: l.sob_procuracao_de,
+    ligacaoId: l.ligacao_id,
   };
 }
 
@@ -102,6 +104,8 @@ export type NovoTurno = {
   decididoPor?: string;
   /** Turno que já nasce interrompido (executor indisponível, E9.3): nunca entra na fila. */
   interrompidoCom?: MotivoInterrupcao;
+  /** definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação e os turnos de trabalho pedidos durante ela. */
+  ligacaoId?: string | null;
 };
 
 export type Assentamento = {
@@ -128,11 +132,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
-          ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null})
+          ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },
@@ -167,7 +171,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * por pessoa, ADR-007); a segunda espera o commit da primeira e então enxerga o 'despachando'.
      * Pessoas diferentes não se bloqueiam. Chamado sobre um pool, abre a própria tx curta.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[] }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; aceitaLigacao?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         const [l] = await trx<Linha[]>`
@@ -177,9 +181,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
               ${p.harnessesProntos === undefined ? trx`` : trx`and ((t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[]))`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
-              and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.estado = 'despachando')
-              and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.agente_id = t.agente_id and d.estado = 'despachando')
-            order by (t.origem = 'rotina') asc, t.criado_em asc, t.id asc
+              -- definido em 2026-10-04 (ADR-072): o turno da ligação não serializa com o trabalho do bot, nos dois
+              -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só
+              -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).
+              and ((t.origem = 'ligacao' and ${p.aceitaLigacao === true})
+                or (t.origem <> 'ligacao'
+                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.estado = 'despachando' and d.origem <> 'ligacao')
+                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.agente_id = t.agente_id and d.estado = 'despachando' and d.origem <> 'ligacao')))
+            order by (t.origem = 'ligacao') desc, (t.origem = 'rotina') asc, t.criado_em asc, t.id asc
             for update skip locked limit 1)
           returning ${trx.unsafe(COLUNAS)}`;
         return l ? paraTurno(l) : null;
@@ -438,7 +447,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async vivosDaConversa(conversaId: string): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos
-        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado in ('pendente', 'despachando') order by criado_em`;
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado in ('pendente', 'despachando') and origem <> 'ligacao' order by criado_em`;
       return linhas.map(paraTurno);
     },
 
@@ -456,7 +465,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async pendentesRenderizaveis(conversaId: string): Promise<TurnoPendenteDto[]> {
       const pendentes = await conn<{ id: string; agente_id: string }[]>`
         select id, agente_id from turnos
-        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente'
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' and origem <> 'ligacao'
         order by criado_em`;
       if (pendentes.length === 0) return [];
       // O mais antigo despachando de cada agente ganha, como o `order by criado_em limit 1` de antes; sem nenhum do
@@ -464,7 +473,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const agentes = [...new Set(pendentes.map((p) => p.agente_id))];
       const ocupados = await conn<{ agente_id: string; conversa_id: string }[]>`
         select agente_id, conversa_id from turnos
-        where tenant_id = ${escopo.tenantId} and estado = 'despachando' and (agente_id = any(${agentes}::uuid[]) or conversa_id = ${conversaId})
+        where tenant_id = ${escopo.tenantId} and estado = 'despachando' and origem <> 'ligacao' and (agente_id = any(${agentes}::uuid[]) or conversa_id = ${conversaId})
         order by criado_em`;
       return pendentes.flatMap((p): TurnoPendenteDto[] => {
         const ocupado = ocupados.find((d) => d.agente_id === p.agente_id) ?? ocupados.find((d) => d.conversa_id === conversaId);

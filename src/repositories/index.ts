@@ -34,8 +34,10 @@ import type { Repos } from "./tipos.ts";
 import { trilhaRepo } from "./trilha.repo.ts";
 import { turnosRepo } from "./turnos.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
+import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
 import { leiturasRepo } from "./leituras.repo.ts";
+import { ligacoesRepo } from "./ligacoes.repo.ts";
 
 /** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Práticas §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
@@ -77,6 +79,8 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     preferencias: preferenciasRepo(conn, escopo),
     comandos: comandosRepo(conn, escopo),
     leituras: leiturasRepo(conn, escopo),
+    ligacoes: ligacoesRepo(conn, escopo),
+    onboarding: onboardingRepo(conn, escopo),
   };
 }
 

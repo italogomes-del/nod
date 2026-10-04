@@ -7,6 +7,7 @@ import type { Escopo } from "../../../shared/types.ts";
 import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-cases/aplicar-proposta-rotina.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
+import { decidirPropostaDeBot } from "../../../use-cases/onboarding.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
 import { liberarNaTarefa } from "../../../use-cases/liberar-na-tarefa.ts";
 import { permitirSempre } from "../../../use-cases/permitir-sempre.ts";
@@ -20,6 +21,12 @@ import { executar, textoDoCorpo, type DentroDeTx } from "./dentro-de-tx.ts";
 
 export type DepsRotasDecisoes = {
   dentro: DentroDeTx;
+  /**
+   * definido em 2026-10-04 (ADR-074): aprovação por voz. O orquestrador confere (e gasta) o comando que ele mesmo
+   * emitiu ao reconhecer "eu aprovo"/"recuso" na janela; sem o comando válido, `canal:"voz"` é recusado.
+   */
+  conferirComandoVoz?(p: { pessoaId: string; ligacaoId: string; comandoId: string; decisaoId: string; acao: "aprovar" | "recusar" }): boolean;
+  aoDecidirPorVoz?(p: { pessoaId: string; ligacaoId: string; decisaoId: string; acao: "aprovar" | "recusar" }): void;
   services: Pick<Services, "conectores" | "rotinas" | "computadores">;
   prazoDecisaoMs?: number;
   executor?: Executor;
@@ -46,6 +53,16 @@ function sempre(corpo: unknown): boolean {
 /** "Pode fazer e o resto desta tarefa" (2026-09-28): libera o computador ou o terminal (ADR-055) para a cadeia do turno raiz. */
 function restoDaTarefa(corpo: unknown): boolean {
   return typeof corpo === "object" && corpo !== null && (corpo as { restoDaTarefa?: unknown }).restoDaTarefa === true;
+}
+
+/** O pedido veio da janela de aprovação por voz: `{canal:"voz", ligacaoId, comandoId, acao}`. */
+function comandoDeVoz(corpo: unknown): { ligacaoId: string; comandoId: string; acao: "aprovar" | "recusar" } | null {
+  if (typeof corpo !== "object" || corpo === null || (corpo as { canal?: unknown }).canal !== "voz") return null;
+  const c = corpo as Record<string, unknown>;
+  if (typeof c.ligacaoId !== "string" || typeof c.comandoId !== "string" || (c.acao !== "aprovar" && c.acao !== "recusar")) throw new ErroDeDominio("entrada_invalida", { cause: "comando de voz" });
+  // A voz aprova ou recusa o card inteiro: nada de "sempre", resto da tarefa, edição ou seleção parcial.
+  if ("sempre" in c || "restoDaTarefa" in c || "itens" in c || "capacidades" in c) throw new ErroDeDominio("entrada_invalida", { cause: "voz decide o card inteiro" });
+  return { ligacaoId: c.ligacaoId, comandoId: c.comandoId, acao: c.acao };
 }
 
 function recusada(corpo: unknown): boolean {
@@ -88,9 +105,24 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
       padrao: new RegExp(`^/decisoes/${ID}/decidir$`),
       async handler(ctx) {
         const decisaoId = ctx.params.id ?? "";
-        const corpo = await ctx.corpo();
+        let corpo = await ctx.corpo();
         const atual = await d.dentro(ctx.escopo, (deps) => deps.repos.decisoes.buscar(decisaoId));
         if (!atual) throw new ErroDeDominio("nao_encontrado", { cause: "decisão" });
+        const voz = comandoDeVoz(corpo);
+        if (voz) {
+          if (!d.conferirComandoVoz?.({ pessoaId: ctx.escopo.pessoaId, ligacaoId: voz.ligacaoId, comandoId: voz.comandoId, decisaoId, acao: voz.acao })) throw new ErroDeDominio("nao_permitido", { cause: "comando de voz inválido ou já usado" });
+          if (atual.tipo === "retomar_turno" && voz.acao === "recusar") throw new ErroDeDominio("estado_invalido", { cause: "retomar não se recusa por voz" });
+          // O corpo é montado aqui, como a web faria: recusar uma aprovação = todos os itens desmarcados.
+          if (voz.acao === "recusar" && (atual.tipo === "aprovacao" || atual.tipo === "gate_rotina")) {
+            const itens = await d.dentro(ctx.escopo, (deps) => deps.repos.itensAprovacao.listar(decisaoId));
+            corpo = { itens: itens.map((i) => ({ id: i.id, selecionado: false })) };
+          } else corpo = voz.acao === "recusar" ? { recusar: true } : {};
+          // Só depois de decidida de fato (resposta 200): a ligação fala o resultado e avisa o cérebro.
+          const aviso = { pessoaId: ctx.escopo.pessoaId, ligacaoId: voz.ligacaoId, decisaoId, acao: voz.acao };
+          ctx.res.once("finish", () => {
+            if (ctx.res.statusCode === 200) d.aoDecidirPorVoz?.(aviso);
+          });
+        }
         const ids: Record<string, string> = { decisao: atual.id };
 
         if (atual.tipo === "aprovacao" || atual.tipo === "gate_rotina" || atual.tipo === "retomar_turno") {
@@ -133,6 +165,22 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           if (r.consentimentoId) ids.consentimento = r.consentimentoId;
           if (r.rotinaId) ids.rotina = r.rotinaId;
           if (r.turnoId) ids[r.rotinaId ? "turnoRotina" : "turnoRetomada"] = r.turnoId;
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "bot") {
+          // ADR-077: o card "Novo bot" do onboarding (propor_bot). O clique pode trazer o nome e o que ele faz editados;
+          // a voz confirma o que a Nina propôs (o corpo da voz é montado acima, sem campos).
+          const c = typeof corpo === "object" && corpo !== null ? (corpo as Record<string, unknown>) : {};
+          await comoDona(ctx.escopo, atual, async (deps) => {
+            const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
+            if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
+            const r = await executar(deps, decidirPropostaDeBot, { propostaId: atual.id, recusar: recusada(corpo), nome: c.nome, descricao: c.descricao });
+            if (r.agenteId) ids.agente = r.agenteId;
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) })]);
+          });
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

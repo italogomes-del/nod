@@ -26,6 +26,7 @@ import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
+import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -162,6 +163,8 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "pasta_aberta") return renderPastaAberta(p, estado, agenteDe(estado, p.agenteId));
   // definido em 2026-09-28 (ADR-051): o card do artefato; o iframe entra depois do render (telas/artefatos-vivos.ts).
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
+  // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
+  if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
   if (m.kind === "sistema") return linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
@@ -332,6 +335,10 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
     const c = p.payload;
     // de→para: a pessoa confirma sem precisar abrir outra tela para lembrar como era.
     itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhaAcorda(c.soComPendencia, true)}${linhasPrecisa(p, estado)}`;
+  } else if (p.payload.kind === "bot") {
+    // definido em 2026-10-04 (ADR-077): o bot que a Nina propõe no onboarding — nome e o que faz; nasce pela decisão.
+    const c = p.payload;
+    itens = `<div class="it"><b>nome</b>${esc(c.nome)}</div><div class="it"><b>o que faz</b>${esc(c.descricao)}</div>`;
   } else if (p.payload.kind === "rotina_exclusao") {
     const c = p.payload;
     itens = `<div class="it"><b>quando</b>${esc(c.resumo)}</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it">Depois de excluída, nada mais é disparado por ela. Para só interromper por um tempo, peça para pausar.</div>`;
@@ -350,7 +357,7 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   const comAcesso = acoesDaRotinaComAcesso(p, estado);
   return `<div class="card-prop" data-proposta="${esc(p.id)}">
     <div class="hd">${esc(a?.nome ?? "o agente")} propõe · nada vale antes de você confirmar</div>
-    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${rotinaParada}${marcaGemeas(aberto)}</div>
+    <div class="ttl">${p.payload.kind === "perfil" ? "Perfil" : p.payload.kind === "bot" ? "Novo bot" : p.payload.kind === "rotina" ? "Rotina" : p.payload.kind === "rotina_atualizacao" ? "Mudança de rotina" : p.payload.kind === "rotina_exclusao" ? "Excluir rotina" : "Acesso a conector"}${rotinaParada}${marcaGemeas(aberto)}</div>
     ${itens}
     <div class="ft">${comAcesso?.botoes ?? acoesProposta(p, estado)}</div>${comAcesso?.ajuda ?? ""}
   </div>`;
@@ -372,6 +379,7 @@ function decisaoAbertaDoCard(p: Proposta, estado: Estado): Decisao | null {
  *  definido em 2026-09-24 (ADR-044): acesso também — um clique concede e continua. "Revisar acesso"
  *  fica só para o pedido anterior, cuja decisão ainda não existe. */
 function acoesProposta(p: Proposta, estado: Estado): string {
+  if (p.payload.kind === "bot") return `${botao("decidir-proposta", "Criar bot", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Deixar de lado", { id: p.id })}`;
   if (p.payload.kind === "rotina_atualizacao") return `${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter como está", { id: p.id })}`;
   if (p.payload.kind === "rotina_exclusao") return `${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: p.id })}${botao("recusar-decisao", "Manter rotina", { id: p.id })}`;
   if (p.payload.kind === "acesso" && decisaoAbertaDoCard(p, estado)) {
@@ -553,10 +561,10 @@ const AVISOS_PARA_RECOLHER = 3;
 
 /**
  * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
- * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista.
+ * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista; a linha "Chat de voz" (2026-10-04) também.
  */
 function linhaDeSistema(m: Mensagem): boolean {
-  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta") || m.kind === "rotina_execucao";
+  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta" && m.payload?.kind !== "ligacao") || m.kind === "rotina_execucao";
 }
 
 /**
@@ -693,16 +701,21 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
+  const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
+  const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
   // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
   // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o
   // turno vivo vence nos dois e o que espera a pessoa entra junto, contado por fio ("Trabalhando · 2 esperam você").
   const esperam = new Set((estado.suaVez?.itens ?? []).filter((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido").map(chaveDoItem)).size;
-  const presenca = vivo
+  const presenca = emLigacao
+    ? "Em ligação"
+    : vivo
     ? `Trabalhando${esperam ? ` <span class="presenca-sep" aria-hidden="true">·</span> <b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : ""}`
     : esperam ? "Aguardando você" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo || emLigacao ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
       ${renderSeloModoDev(estado, a?.conversaId, nome)}
+      ${ligar}
       ${vivo ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" }) : ""}
       <button type="button" class="bt toggle-detalhes" data-act="alternar-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot">${PAINEL}</button>
     </div>`;

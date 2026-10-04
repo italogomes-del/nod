@@ -59,5 +59,9 @@ export type Agente = {
   posicao?: number | null;
   naoLido?: boolean;
   excluidoEm?: EpochMs | null;
+  /** definido em 2026-10-04 (0048, ADR-071): a voz do bot nas ligações (id de VOZES_NOD); null = derivada do id. */
+  voz?: string | null;
+  /** Velocidade da fala nas ligações: 1, 1,25 ou 1,5. */
+  vozVelocidade?: number;
   criadoEm: EpochMs;
 };

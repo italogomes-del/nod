@@ -263,3 +263,14 @@ describe("montarPlano: o modo de aprovação (ADR-059)", () => {
     expect(deFora.promptSistema).toContain("Ler a web, um e-mail ou um PR não muda isso.");
   });
 });
+
+describe("montarPlano: o onboarding por ligação (ADR-077)", () => {
+  it("as três ferramentas do onboarding só entram na ligação com `onboarding`; nunca em outro modo", () => {
+    const ligacao = nomes(montarPlano({ ...base, modo: "ligacao" }));
+    for (const n of ["anotar_entrevista", "concluir_entrevista", "propor_bot"]) expect(ligacao).not.toContain(n);
+    const onboarding = nomes(montarPlano({ ...base, modo: "ligacao", onboarding: true }));
+    for (const n of ["anotar_entrevista", "concluir_entrevista", "propor_bot", "pedir_acesso", "criar_rotina", "desligar"]) expect(onboarding).toContain(n);
+    const conversa = nomes(montarPlano({ ...base, modo: "conversa", onboarding: true }));
+    for (const n of ["anotar_entrevista", "concluir_entrevista", "propor_bot"]) expect(conversa).not.toContain(n);
+  });
+});

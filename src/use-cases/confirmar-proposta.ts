@@ -12,6 +12,7 @@ import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento
 import { garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
 import { carimbo } from "./apoio-l7.ts";
+import { decidirPropostaDeBot } from "./onboarding.ts";
 import { retomarAposPerfil } from "./retomar-apos-perfil.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -111,6 +112,12 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   const existente = await deps.repos.propostas.buscar(input.propostaId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
   if (existente.payload.kind === "acesso" && existente.payload.conectar) return conexaoViraPedido(deps, existente, existente.payload);
+  // ADR-077: a proposta de bot (propor_bot) cria o bot novo do onboarding; não passa pelo caminho genérico abaixo.
+  if (existente.payload.kind === "bot") {
+    const r = await decidirPropostaDeBot(deps, { propostaId: existente.id, recusar: false });
+    const agente = r.data.agenteId ? await deps.repos.agentes.buscar(r.data.agenteId) : null;
+    return { data: { proposta: { ...existente, estado: "confirmada" }, agente, rotina: null, decisao: null }, events: r.events ?? [] };
+  }
   if (existente.payload.kind === "acesso" && existente.estado === "pendente") {
     const jaAberta = await deps.repos.decisoes.buscar(existente.id);
     if (jaAberta) return { data: { proposta: existente, agente: null, rotina: null, decisao: jaAberta }, events: [] };
@@ -156,6 +163,8 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     // vez" (POST decisoes/:id/decidir → aplicar-proposta-rotina.ts), não por este caminho, que é o
     // de propostas nascidas da conversa. Aqui seria aplicar sem a decisão correspondente.
     throw new ErroDeDominio("estado_invalido", { cause: "proposta de rotina existente se confirma pela decisão em Sua vez" });
+  } else if (proposta.payload.kind === "bot") {
+    throw new ErroDeDominio("estado_invalido", { cause: "proposta de bot se confirma por decidirPropostaDeBot" });
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);

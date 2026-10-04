@@ -11,12 +11,25 @@ const ESPERADAS = [
   "ver_colegas",
   "publicar_artefato", "ler_artefato",
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia",
+  "iniciar_tarefa", "desligar",
+  "anotar_entrevista", "concluir_entrevista", "propor_bot",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as VINTE E UMA ferramentas (EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
+  it("lista fechada com as VINTE E SEIS ferramentas (2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
+  });
+
+  it("ADR-077: as três do onboarding têm schema fechado e o para_bot é opcional em pedir_acesso e criar_rotina", () => {
+    expect(FERRAMENTAS_NOD.anotar_entrevista.properties.campo.enum).toEqual(["apelido", "como_conheceu", "objetivo", "tamanho_time"]);
+    expect(FERRAMENTAS_NOD.anotar_entrevista.required).toEqual(["campo", "valor"]);
+    expect(FERRAMENTAS_NOD.concluir_entrevista.required).toEqual([]);
+    expect(FERRAMENTAS_NOD.propor_bot.required).toEqual(["nome", "descricao"]);
+    expect(FERRAMENTAS_NOD.pedir_acesso.required).not.toContain("para_bot");
+    expect(FERRAMENTAS_NOD.criar_rotina.required).not.toContain("para_bot");
+    expect(Object.keys(FERRAMENTAS_NOD.pedir_acesso.properties)).toContain("para_bot");
+    expect(Object.keys(FERRAMENTAS_NOD.criar_rotina.properties)).toContain("para_bot");
   });
 
   it("NOMES_FERRAMENTAS_NOD é literal (EMENDA 26) e cobre TODAS as chaves de FERRAMENTAS_NOD, no tipo e em runtime", () => {

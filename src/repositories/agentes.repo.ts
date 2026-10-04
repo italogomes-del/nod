@@ -26,10 +26,12 @@ interface Linha {
   posicao: number | null;
   nao_lido: boolean;
   excluido_em: Date | null;
+  voz: string | null;
+  voz_velocidade: number | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade";
 
 function paraAgente(l: Linha): Agente {
   return {
@@ -55,6 +57,8 @@ function paraAgente(l: Linha): Agente {
     posicao: l.posicao,
     naoLido: l.nao_lido,
     excluidoEm: l.excluido_em ? ms(l.excluido_em) : null,
+    voz: l.voz ?? null,
+    vozVelocidade: l.voz_velocidade ?? 1,
     criadoEm: ms(l.criado_em),
   };
 }
@@ -177,6 +181,16 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
           modelo = coalesce(${perfil.modelo ?? null}, modelo),
           harness = coalesce(${perfil.harness ?? null}, harness),
           esforco = case when ${perfil.esforco !== undefined} then ${perfil.esforco ?? null} else esforco end
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraAgente(l) : null;
+    },
+
+    /** ADR-071: a voz do bot nas ligações e a velocidade; só a dona muda. */
+    async definirVoz(id: string, p: { voz?: string | null; velocidade?: number }): Promise<Agente | null> {
+      const [l] = await conn<Linha[]>`update agentes set
+          voz = case when ${p.voz !== undefined} then ${p.voz ?? null} else voz end,
+          voz_velocidade = coalesce(${p.velocidade ?? null}, voz_velocidade)
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;

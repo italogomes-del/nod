@@ -6,6 +6,8 @@ import { classificarResultado } from "../../../domain/stream-json.ts";
 // gramática dos marcadores tem que ser UMA — copiar aqui faria as duas divergirem.
 import { roteiroPadrao, type Roteiro } from "../../../../tests/helpers/catcher-roteiro.ts";
 import { criarClienteNod, type ClienteNod } from "../cliente-nod.ts";
+import { conectarCerebro, type FabricaSocket } from "../cerebro-ligacao.ts";
+import type { SinksTurno } from "../spi.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
 
 /**
@@ -25,6 +27,8 @@ export type OpcoesCatcher = {
   /** Atraso entre eventos (testes de interrupção no meio do streaming). */
   atrasoMs?: number;
   clienteNod?: (lig: { url: string; token: string }) => ClienteNod;
+  /** Testes: o WebSocket do canal do cérebro (padrão: o global). */
+  fabricaSocket?: FabricaSocket;
 };
 
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -60,6 +64,8 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
             async rodarTurno(sinks): Promise<ResultadoTurno> {
               sinksDoTurno = sinks;
               await sinks.sinal("attempted");
+              // ADR-072: o turno-cérebro de uma ligação, sem CLI e sem custo — para o e2e e o dev sem assinatura.
+              if (plano.modoTurno === "ligacao" && plano.ligacaoVoz && o.urlNod) return rodarLigacaoCatcher({ plano, sinks, urlNod: o.urlNod, cliente, registrar, interrompido: () => interrompido, fabricaSocket: o.fabricaSocket });
               const roteiro = roteiroFixo ?? roteiroPadrao({ prompt: plano.entrada.texto, ferramentas });
               // 0005: o catcher NÃO fabrica sessão do CLI — um uuid aqui virava `--resume` fantasma no claude-cli
               // quando a pessoa trocava de executor na mesma conversa (medido 2026-09-16).
@@ -148,3 +154,93 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
 
 /** Instância sem ligação: roteiro/prompt viram eventos, tool_use responde "não executada". */
 export const catcherDriver: Driver = criarCatcherDriver();
+
+/**
+ * O laço de voz do catcher (definido em 2026-10-04, ADR-072): responde cada vez com o roteiro dos marcadores do texto
+ * (a mesma gramática do turno: `[[tool: …]]` chama a ferramenta pelo cliente do proxy) ou, sem marcador, com
+ * "Entendi: <o que a pessoa disse>." em dois pedaços. No `fim`, o resumo é "Resumo da ligação: N falas.".
+ */
+async function rodarLigacaoCatcher(c: {
+  plano: PlanoTurno;
+  sinks: SinksTurno;
+  urlNod: string;
+  cliente: ClienteNod | null;
+  registrar: (tipo: string, dados: Record<string, unknown>) => void;
+  interrompido: () => boolean;
+  fabricaSocket?: FabricaSocket;
+}): Promise<ResultadoTurno> {
+  const { plano, sinks } = c;
+  await sinks.sinal("promptSubmitted");
+  const cerebro = await conectarCerebro({ urlNod: c.urlNod, token: plano.tokenDeTurno, ligacaoId: plano.ligacaoVoz!.ligacaoId, harness: "catcher", interrupcao: true, fabrica: c.fabricaSocket });
+  c.registrar("ligacao_conectada", { ligacaoId: plano.ligacaoVoz!.ligacaoId });
+  let vezes = 0;
+  let resumo = "";
+  let fila = Promise.resolve();
+  await new Promise<void>((acabar) => {
+    const espiao = setInterval(() => {
+      if (c.interrompido()) {
+        clearInterval(espiao);
+        acabar();
+      }
+    }, 100);
+    cerebro.aoFim(() => {
+      clearInterval(espiao);
+      acabar();
+    });
+    cerebro.aoMensagem((m) => {
+      if (m.t === "fim") {
+        resumo = `Resumo da ligação: ${vezes} fala(s) da pessoa.`;
+        clearInterval(espiao);
+        acabar();
+        return;
+      }
+      if (m.t === "nota" && typeof m.n === "number") {
+        const n = m.n;
+        fila = fila.then(() => {
+          cerebro.enviar({ t: "fala", n, seq: 0, delta: "Aviso recebido." });
+          cerebro.enviar({ t: "fala-fim", n });
+        });
+        return;
+      }
+      if (m.t !== "vez" || m.n === 0) return;
+      vezes++;
+      const n = m.n;
+      fila = fila.then(async () => {
+        const roteiro = roteiroPadrao({ prompt: m.texto, ferramentas: plano.catalogo.ferramentas.map((f) => f.nomeMcp) });
+        const temMarcador = /\[\[(delta|tool|texto):/.test(m.texto);
+        let seq = 0;
+        if (temMarcador) {
+          for (const p of roteiro.passos) {
+            if (p.tipo === "delta") cerebro.enviar({ t: "fala", n, seq: seq++, delta: p.texto });
+            else if (p.tipo === "tool_use" && c.cliente) {
+              const nome = p.nome.replace(/^mcp__nod__/, "");
+              cerebro.enviar({ t: "atividade", tipo: "inicio", nome });
+              try {
+                await c.cliente.chamarFerramenta(nome, p.input);
+              } catch {
+                // a falha da ferramenta é do e2e; o laço segue
+              }
+              cerebro.enviar({ t: "atividade", tipo: "fim", nome });
+            }
+          }
+        } else {
+          const limpo = m.texto.replace(/^\[nod\][^\n]*\n/, "").trim();
+          cerebro.enviar({ t: "fala", n, seq: seq++, delta: "Entendi: " });
+          cerebro.enviar({ t: "fala", n, seq: seq++, delta: `${limpo}.` });
+        }
+        cerebro.enviar({ t: "fala-fim", n });
+        await sinks.sinal("producedOutput");
+      });
+    });
+  });
+  await fila;
+  cerebro.fechar();
+  c.registrar("ligacao_encerrada", { vezes });
+  const eventos: EventoStream[] = [
+    { tipo: "init", sessaoCli: null, ferramentas: [], modelo: plano.entrada.modelo, versaoCli: "catcher", apiKeySource: "none" },
+    ...(resumo ? [{ tipo: "delta" as const, texto: resumo }] : []),
+    { tipo: "result", sucesso: true, subtype: "success", sessaoCli: null, texto: resumo, custoUsd: 0, tokens: TOKENS_ZERADOS, numTurnos: 1, negacoesPermissao: [], erroCru: null },
+  ];
+  for (const ev of eventos) sinks.evento(ev);
+  return classificarResultado({ eventos, exitCode: c.interrompido() ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: c.interrompido() });
+}

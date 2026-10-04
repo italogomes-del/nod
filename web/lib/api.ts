@@ -19,7 +19,12 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
+import type { AcaoComandoVoz } from "../../src/contracts/voz.ts";
+import type { IdVozNod, VelocidadeVoz } from "../../src/contracts/vozes.ts";
+import type { MotivoAvaliacaoLigacao } from "./ligacao-protocolo.ts";
 import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
+import type { EstadoOnboarding, PedidoEtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 
 /**
@@ -83,6 +88,16 @@ function subir(url: string, arquivo: File, mime: string, aoProgresso?: (fracao: 
 }
 
 export type Api = ReturnType<typeof criarApi>;
+
+export type { MotivoAvaliacaoLigacao };
+
+/** O corpo da decisão por voz (plano, "Aprovação por voz" §5): o servidor confere o comando e monta o resto. */
+export type DecisaoPorVoz = { canal: "voz"; ligacaoId: string; comandoId: string; acao: AcaoComandoVoz };
+
+/** Chamado pelo motor da ligação (web/lib/ligacao.ts) ao receber `comando`: a decisão sai com o cookie da própria página. */
+export function decidirPorVoz(tenantId: string, decisaoId: string, corpo: DecisaoPorVoz): Promise<RespostaMutacao> {
+  return pedir<RespostaMutacao>("POST", `/api/t/${encodeURIComponent(tenantId)}/decisoes/${encodeURIComponent(decisaoId)}/decidir`, corpo);
+}
 
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
@@ -182,6 +197,25 @@ export function criarApi(escopo: Escopo) {
     // fora de foco, que não carimba vista_em (ADR-007, refinamento da mesma data).
     suaVez: (ver = true) => get<SuaVezDto>(ver ? "sua-vez" : "sua-vez?ver=0"),
     dispensarIncidente: (id: string) => post<RespostaMutacao>(`incidentes/${id}/dispensar`),
+    // Modo ligação (definido em 2026-10-04, ADR-071/075): disponibilidade é 200 com o motivo, nunca erro.
+    disponibilidadeLigacao: (agenteId: string) => get<DisponibilidadeLigacao>(`ligacoes/disponibilidade?agenteId=${encodeURIComponent(agenteId)}`),
+    consentirVoz: (versao: number) => post<RespostaMutacao>("voz/consentimento", { versao }),
+    criarLigacao: (agenteId: string) => post<LigacaoCriada>("ligacoes", { agenteId }),
+    ligacaoViva: () => get<{ ligacao: Ligacao | null }>("ligacoes/viva"),
+    encerrarLigacao: (id: string) => post<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/encerrar`),
+    avaliarLigacao: (id: string, nota: "boa" | "ruim", motivo?: MotivoAvaliacaoLigacao) => post<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/avaliacao`, motivo ? { nota, motivo } : { nota }),
+    falasLigacao: (id: string) => get<{ falas: FalaLigacao[] }>(`ligacoes/${encodeURIComponent(id)}/falas`),
+    apagarFalasLigacao: (id: string) => del<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/falas`),
+    /** Ajustes da ligação: a voz e a velocidade do bot valem a partir da próxima frase. */
+    ajustarVoz: (agenteId: string, ajuste: { voz?: IdVozNod | null; vozVelocidade?: VelocidadeVoz }) => patch<{ voz: string | null; vozVelocidade: number }>(`agentes/${encodeURIComponent(agenteId)}/voz`, ajuste),
+    // Onboarding por ligação (definido em 2026-10-04, ADR-077): a etapa mora no servidor; a web só lê e pede para mudar.
+    onboarding: () => get<EstadoOnboarding>("onboarding"),
+    etapaOnboarding: (p: PedidoEtapaOnboarding) => post<EstadoOnboarding>("onboarding/etapa", p),
+    concluirOnboarding: () => post<EstadoOnboarding>("onboarding/concluir"),
+    botDoOnboarding: (nome: string, descricao: string) => post<EstadoOnboarding>("onboarding/bot", { nome, descricao }),
+    rotinaDoOnboarding: (indice: number) => post<EstadoOnboarding>("onboarding/rotina", { indice }),
+    /** A decisão 'bot' do onboarding decidida pelo clique: o nome e a descrição podem ter sido editados no card. */
+    decidirBot: (id: string, corpo: { nome?: string; descricao?: string; recusar?: boolean }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),

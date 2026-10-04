@@ -1,5 +1,6 @@
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
+import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
 import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
@@ -79,6 +80,8 @@ export type BancoMemoria = {
   /** 0036: o Raio-X de cada turno e as preferências de cada pessoa (chave tenant:pessoa). */
   raioX: Map<string, { composicao: ComposicaoRaioX | null; execucao: ExecucaoRaioX | null }>;
   preferencias: Map<string, Preferencias>;
+  /** 0049 (ADR-077): o onboarding de cada pessoa (chave tenant:pessoa). */
+  onboarding: Map<string, LinhaOnboarding>;
   /** 0038: o catálogo do "/" de cada pessoa (chave tenant:pessoa). */
   comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
   /** 0039: o "lido até" de cada pessoa em cada conversa (chave tenant:pessoa:conversa). */
@@ -134,6 +137,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     custoSessao: new Map(),
     raioX: new Map(),
     preferencias: new Map(),
+    onboarding: new Map(),
     comandos: new Map(),
     leituras: new Map(),
     contaminados: new Set(),
@@ -382,6 +386,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const a = doTenant(b.agentes).find((x) => x.id === id);
         if (!a) return null;
         a.oculto = oculto;
+        return a;
+      },
+      async definirVoz(id, p) {
+        const a = doTenant(b.agentes).find((x) => x.id === id);
+        if (!a) return null;
+        if (p.voz !== undefined) a.voz = p.voz;
+        if (p.velocidade !== undefined) a.vozVelocidade = p.velocidade;
         return a;
       },
     },
@@ -1837,6 +1848,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { modoDev: p.modoDev };
       },
     },
+    onboarding: (() => {
+      const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
+      const atual = (): LinhaOnboarding => b.onboarding.get(chave) ?? { etapa: null, guiaId: null, botId: null, concluidoEm: null, campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null } };
+      const mudar = async (fn: (l: LinhaOnboarding) => LinhaOnboarding) => {
+        const l = fn(atual());
+        b.onboarding.set(chave, l);
+        return l;
+      };
+      const CAMPO = { apelido: "apelido", como_conheceu: "comoConheceu", objetivo: "objetivo", tamanho_time: "tamanhoTime" } as const;
+      return {
+        async buscar() { return atual(); },
+        definirEtapa: (etapa: Exclude<LinhaOnboarding["etapa"], "concluido" | null>) => mudar((l) => ({ ...l, etapa })),
+        reiniciar: () => mudar((l) => ({ ...l, etapa: "ola", concluidoEm: null, botId: null, campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null } })),
+        concluir: (em: number) => mudar((l) => ({ ...l, etapa: "concluido", concluidoEm: em })),
+        anotar: (campo: keyof typeof CAMPO, valor: string) => mudar((l) => ({ ...l, campos: { ...l.campos, [CAMPO[campo]]: valor } })),
+        definirGuia: (id: string) => mudar((l) => ({ ...l, guiaId: id })),
+        definirBot: (id: string) => mudar((l) => ({ ...l, botId: id })),
+      };
+    })(),
     comandos: {
       async gravar(catalogo) {
         b.comandos.set(`${escopo.tenantId}:${escopo.pessoaId}`, { catalogo, em: agora() });
@@ -1883,6 +1913,48 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           b.leituras.set(chave(conversaId), ultima - 0.001);
           return true;
         },
+      };
+    })(),
+    // definido em 2026-10-04 (ADR-075): ligações em memória, só o necessário para os testes de unidade.
+    ligacoes: (() => {
+      type L = import("../../src/contracts/ligacao.ts").Ligacao & { ownerId: string; tenantId: string };
+      const lista: L[] = [];
+      const falas: (import("../../src/contracts/ligacao.ts").FalaLigacao & { ligacaoId: string })[] = [];
+      let consentimento: { versao: number | null; em: number | null } = { versao: null, em: null };
+      const minhas = () => lista.filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId);
+      const sem = (l: L | undefined) => (l ? (({ ownerId: _o, tenantId: _t, ...r }) => r)(l) : null);
+      return {
+        async criar(n: import("../../src/repositories/ligacoes.repo.ts").NovaLigacao) {
+          if (minhas().some((l) => l.estado === "chamando" || l.estado === "em_curso")) return null;
+          const l: L = { ...n, id: randomUUID(), estado: "chamando", mensagemId: null, iniciadaEm: agora(), atendidaEm: null, encerradaEm: null, motivoFim: null, duracaoMs: null, religacoes: 0, trocas: 0, interrupcoes: 0, sttSegundos: 0, ttsCaracteres: 0, custoEstimadoUsd: null, latenciaP50Ms: null, latenciaP95Ms: null, avaliacao: null, transcricaoApagadaEm: null, resumida: false, ownerId: escopo.pessoaId, tenantId: escopo.tenantId };
+          lista.push(l);
+          return sem(l);
+        },
+        async buscar(id: string) { return sem(minhas().find((l) => l.id === id)); },
+        async viva() { return sem(minhas().find((l) => l.estado === "chamando" || l.estado === "em_curso")); },
+        async vivas() { return minhas().filter((l) => l.estado === "chamando" || l.estado === "em_curso").map((l) => sem(l)!); },
+        async vincularMensagem(id: string, mensagemId: string) { const l = minhas().find((x) => x.id === id); if (l) l.mensagemId = mensagemId; },
+        async atender(id: string, em: number) { const l = minhas().find((x) => x.id === id && (x.estado === "chamando" || x.estado === "em_curso")); if (!l) return null; l.estado = "em_curso"; l.atendidaEm ??= em; return sem(l); },
+        async religou(id: string) { const l = minhas().find((x) => x.id === id); if (l) l.religacoes += 1; },
+        async encerrar(id: string, p: { motivo: import("../../src/contracts/voz.ts").MotivoFimLigacao; agora: number }) {
+          const l = minhas().find((x) => x.id === id && (x.estado === "chamando" || x.estado === "em_curso"));
+          if (!l) return null;
+          l.estado = l.atendidaEm === null ? "nao_atendida" : "encerrada";
+          l.encerradaEm = p.agora;
+          l.motivoFim = l.atendidaEm === null && ["pessoa_desligou", "cerebro_caiu", "midia_caiu"].includes(p.motivo) ? "nao_atendida" : p.motivo;
+          l.duracaoMs = l.atendidaEm === null ? 0 : Math.max(0, p.agora - l.atendidaEm);
+          return sem(l);
+        },
+        async marcarResumida(id: string) { const l = minhas().find((x) => x.id === id); if (l) l.resumida = true; },
+        async duracaoDesde(desde: number) { return minhas().filter((l) => l.iniciadaEm >= desde && l.iniciadaPor === "pessoa").reduce((s, l) => s + (l.duracaoMs ?? 0), 0); },
+        async gravarFala(f: import("../../src/repositories/ligacoes.repo.ts").NovaFala) { if (falas.some((x) => x.ligacaoId === f.ligacaoId && x.seq === f.seq)) return false; falas.push({ ligacaoId: f.ligacaoId, seq: f.seq, autor: f.autor, tipo: f.tipo, texto: f.texto, inicioMs: f.inicioMs, fimMs: f.fimMs, interrompida: f.interrompida }); return true; },
+        async falas(ligacaoId: string) { return falas.filter((f) => f.ligacaoId === ligacaoId).sort((a, b) => a.seq - b.seq).map(({ ligacaoId: _l, ...r }) => r); },
+        async ultimasFalas(ligacaoId: string, n: number) { return falas.filter((f) => f.ligacaoId === ligacaoId).sort((a, b) => a.seq - b.seq).slice(-n).map(({ ligacaoId: _l, ...r }) => r); },
+        async apagarFalas(ligacaoId: string, em: number) { const antes = falas.length; for (let i = falas.length - 1; i >= 0; i--) if (falas[i]!.ligacaoId === ligacaoId) falas.splice(i, 1); const l = minhas().find((x) => x.id === ligacaoId); if (l) l.transcricaoApagadaEm = em; return antes - falas.length; },
+        async avaliar(id: string, nota: "boa" | "ruim") { const l = minhas().find((x) => x.id === id); if (!l || (l.estado !== "encerrada" && l.estado !== "nao_atendida")) return false; l.avaliacao = nota; return true; },
+        async consentimento() { return consentimento; },
+        async consentir(versao: number, em: number) { consentimento = { versao, em }; },
+        async atualizarLinha() { /* a linha vive em mensagens; o teste de unidade não a confere */ },
       };
     })(),
   } satisfies Repos;

@@ -1,7 +1,14 @@
 # HTTPS automático (Let's Encrypt) para o endereço do nod. Sem `encode`: o SSE e o long-poll da ponte
 # (até 35 s, ADR-021) passam direto; flush_interval -1 manda cada frame na hora.
 {$NOD_DOMINIO} {
+	# As métricas levam tenant_id e pessoa_id: ficam só dentro da VM (definido em 2026-10-04, plano do modo ligação).
+	@metricas path /metrics /api/metrics
+	respond @metricas 404
+
+	# O WebSocket da ligação (/api/t/*/voz/v1/midia e /api/interno/voz/v1/cerebro) passa pelo mesmo proxy; num reload
+	# do Caddy as conexões vivas ganham 5 min antes de cair (ADR-071).
 	reverse_proxy nod:8888 {
 		flush_interval -1
+		stream_close_delay 5m
 	}
 }

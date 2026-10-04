@@ -170,11 +170,13 @@ Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
 
 Definido em 2026-09-24 (aviso no Mac): a janela web carrega `preload-web.cjs`, que expõe SÓ
-`window.nodDesktop` (avisar, contador, preferências, tema — ADR-070); a tela de conexão carrega `preload.cjs`
-(`window.nod`, com `conectar`). Nunca dê o segundo à página remota. A página continua sem permissão
-nenhuma (`proteger`): o aviso sai do processo principal, que confere remetente e argumentos
-(`desktop/avisos-mac.ts`). `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`)
-confere as duas pontes sem empacotar.
+`window.nodDesktop` (avisar, contador, preferências, tema — ADR-070; microfone e emLigacao — ADR-071); a tela de
+conexão carrega `preload.cjs` (`window.nod`, com `conectar`). Nunca dê o segundo à página remota. A página
+continua sem permissão nenhuma (`proteger`), com UMA exceção desde 2026-10-04 (modo ligação): `media` só de áudio,
+só na origem do servidor e só no frame de topo (`desktop/permissoes-midia.ts`). O aviso sai do processo
+principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz do bot toca no AudioContext do
+renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
+`electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
 ## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
 
@@ -229,3 +231,19 @@ Cloud Agent ou noutra máquina, então a URL é a fonte canônica, não o caminh
 
 `~/.openmausbot/` **não é código**: são dados de runtime do app instalado (`bots.json`,
 `messages.db`). Servem como evidência de comportamento, nunca como fonte a copiar.
+
+## Modo ligação (ADR-071 a 077, 2026-10-04)
+
+Plano em [docs/plano-modo-ligacao.md](docs/plano-modo-ligacao.md). A voz roda no processo do nod (`src/adapters/voz/`,
+sem banco: grava pelo `PersistenciaVoz` que `compor.ts` injeta); o cérebro é um turno `origem='ligacao'` que o executor
+do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, `rodarLigacaoCatcher`). Provedores por
+`NOD_VOZ_STT`/`NOD_VOZ_TTS`: `local` (whisper.cpp + `say`, grátis) é o padrão em dev no Mac — rode
+`scripts/voz/preparar-local.sh` uma vez —, `falso` nos testes (o `servidorCompleto` já liga), `google` em produção.
+`NOD_LIGACAO` = desligada | admins | todas (padrão: todas fora de produção, admins em produção).
+
+- O e2e de custo zero é `tests/concurrency/ligacao-catcher.test.ts`; o UAT com voz e CLI de verdade é
+  `node scripts/uat/ligacao-voz.ts --url http://127.0.0.1:<porta> "frase" …` contra um servidor de pé (custa assinatura
+  com claude-cli).
+- A decisão por voz nunca é do modelo: só a rota de decisão com `canal:"voz"` e um `comandoId` que o orquestrador emitiu
+  (ADR-074). Não crie outro caminho de decisão a partir da fala.
+- Nenhum áudio é gravado e o texto falado não vai para log (`log` com contagens e tempos, nunca a fala).

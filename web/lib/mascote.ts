@@ -13,8 +13,10 @@ export const FORMAS_MASCOTE = ["shape-square", "shape-hex", "shape-circle", "sha
 export const CORES_MASCOTE = ["c-red", "c-pink", "c-purple", "c-blue", "c-teal", "c-green", "c-orange", "c-black", "c-brown", "c-amber", "c-gray", "c-cream"] as const;
 
 export const ESTADOS_BLOUB = { disponivel: "idle", pensando: "thinking", trabalhando: "orbit", aguardando: "notify", pausado: "sleep" } as const;
+/** `xxl` (definido em 2026-10-04): o mascote da tela cheia da ligação, o maior da interface. */
+export type TamanhoMascote = "" | "sm" | "md" | "lg" | "xl" | "xxl";
 const ROTULOS = { disponivel: "disponível", pensando: "pensando", trabalhando: "trabalhando", aguardando: "aguardando você", pausado: "pausado (reservado)" };
-export function htmlMascote(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: "" | "sm" | "md" | "lg" | "xl" = "", estado: EstadoMascote = "disponivel", extra = ""): string {
+export function htmlMascote(a: Pick<Agente, "nome" | "cor" | "forma">, tamanho: TamanhoMascote = "", estado: EstadoMascote = "disponivel", extra = ""): string {
   return `<nod-mascote class="icon mascote ${esc(a.cor)} ${esc(a.forma)}${tamanho ? ` ${tamanho}` : ""}" data-mascote data-estado="${estado}" state="${ESTADOS_BLOUB[estado]}" shape="${a.forma}" role="img" aria-label="${esc(a.nome)} · ${ROTULOS[estado]}" title="${esc(a.nome)} · ${ROTULOS[estado]}" ${extra}></nod-mascote>`;
 }
 type ElementoMascote = {

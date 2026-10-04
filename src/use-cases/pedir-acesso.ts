@@ -16,6 +16,7 @@ import { decidirAcesso } from "./decidir-acesso.ts";
 import { garantirGithubSemConfiguracao } from "./conectar-github.ts";
 import { abrirDecisaoDeAcesso, eventosDoPedido, garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
+import { alvoDoParaBot } from "./onboarding-contexto.ts";
 import type { Deps } from "./tipos.ts";
 
 function aguardandoPessoa(propostaId: string): ResultadoPedirAcesso {
@@ -78,6 +79,7 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
  * janela seguinte saía bloqueada até ele.
  */
 export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) => {
+  if (input.para_bot !== undefined) return pedirAcessoParaBot(deps, input);
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
   let conector = await deps.repos.conectores.buscarPorSlug(input.conector);
   let entrada = input;
@@ -163,3 +165,45 @@ export const pedirAcesso: CasoNod<Deps, "pedir_acesso"> = async (deps, input) =>
   }
   return { data: aguardandoPessoa(aberto.proposta.id), events: aberto.events };
 };
+
+/**
+ * `pedir_acesso` com `para_bot` (definido em 2026-10-04, ADR-077): no onboarding por ligação a Nina pede o app PARA o bot
+ * novo. O card nasce na conversa do bot novo, com o agente dele e SEM turno (a retomada do acesso é do turno de quem
+ * pediu, e quem pediu foi a Nina, noutra conversa: retomar-apos-acesso recusaria). Sem modo automático: o bot acabou de
+ * nascer manual, e o login do app é sempre da pessoa.
+ */
+async function pedirAcessoParaBot(deps: Deps, input: ContextoFerramenta & Parameters<CasoNod<Deps, "pedir_acesso">>[1]): ReturnType<CasoNod<Deps, "pedir_acesso">> {
+  const alvo = await alvoDoParaBot(deps, input.turnoId, input.para_bot ?? "");
+  if (!alvo) throw new ErroDeDominio("entrada_invalida", { cause: "para_bot só vale para o bot novo do onboarding" });
+  let conector = await deps.repos.conectores.buscarPorSlug(input.conector);
+  let entrada = input;
+  if (input.conector === SLUG_GITHUB && !conector?.habilitado) {
+    const r = await garantirGithubSemConfiguracao(deps, { pelaPessoa: false });
+    if (r.ok) {
+      conector = r.conector;
+      if (input.capacidades.length === 0) entrada = { ...input, capacidades: capacidadesDoNivel(r.conector.catalogo, input.nivel) };
+    }
+  }
+  const pedido = normalizarPedidoAcesso({ pedido: entrada, conector, emRotina: false, declaradas: [] });
+  const autoria = autoriaDoAgente(deps.escopo, input.agenteId);
+  const payload: PayloadPropostaAcesso = {
+    kind: "acesso",
+    ...(pedido.conectar ? { conectar: true as const } : {}),
+    conector: pedido.conector,
+    capacidades: pedido.capacidades,
+    nivel: pedido.nivel,
+    naoPedido: pedido.naoPedido,
+    para: pedido.para ?? `Usado pelo ${alvo.nome}`,
+  };
+  // O mesmo pedido já aberto para o bot (a Nina repetiu): devolve o card que está na tela.
+  for (const p of await deps.repos.propostas.pendentesDaConversa(alvo.conversaId)) {
+    if (p.payload.kind === "acesso" && p.agenteId === alvo.agenteId && p.payload.conector === pedido.conector && !p.payload.rotinaId) return { data: aguardandoPessoa(p.id), events: [] };
+  }
+  if (pedido.conectar || !conector) {
+    const proposta = await deps.repos.propostas.criar({ conversaId: alvo.conversaId, agenteId: alvo.agenteId, payload });
+    if (!proposta) throw new ErroDeDominio("estado_invalido", { cause: "proposta não criada" });
+    return { data: aguardandoPessoa(proposta.id), events: [evento(deps.escopo, { kind: "proposta_criada", autoria, agora: deps.agora(), conversaId: alvo.conversaId, dados: { proposta_id: proposta.id, kind: "acesso", conector: pedido.conector, capacidades: 0, nivel: pedido.nivel, para_bot: alvo.agenteId } })] };
+  }
+  const aberto = await abrirPedidoDeAcesso(deps, { conversaId: alvo.conversaId, agenteId: alvo.agenteId, turnoId: null, payload, conector, autoria });
+  return { data: aguardandoPessoa(aberto.proposta.id), events: aberto.events };
+}

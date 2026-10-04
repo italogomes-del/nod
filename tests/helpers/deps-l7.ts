@@ -88,6 +88,11 @@ export function useCasesFalsos(): UseCasesNod {
     anotarPendencia: naoImplementado("useCases.anotarPendencia"),
     concluirPendencia: naoImplementado("useCases.concluirPendencia"),
     descartarPendencia: naoImplementado("useCases.descartarPendencia"),
+    iniciarTarefa: naoImplementado("useCases.iniciarTarefa"),
+    desligar: naoImplementado("useCases.desligar"),
+    anotarEntrevista: naoImplementado("useCases.anotarEntrevista"),
+    concluirEntrevista: naoImplementado("useCases.concluirEntrevista"),
+    proporBot: naoImplementado("useCases.proporBot"),
   };
 }
 

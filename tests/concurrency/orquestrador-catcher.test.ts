@@ -218,7 +218,7 @@ describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process):
     expect(orq.lacos()).toEqual([PESSOA.pessoaId]);
     expect(vi.mocked(iniciarLaco)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(iniciarLaco).mock.calls[0]?.[0]).toMatchObject({ pessoaId: PESSOA.pessoaId, machineId, ponte });
-    expect(ponte.maquinasConectadas()).toEqual([{ machineId, nome: "teste", inventario: { estado: "pronto", versao: "catcher", em: expect.any(Number) }, versaoContrato: 1 }]);
+    expect(ponte.maquinasConectadas()).toEqual([{ machineId, nome: "teste", inventario: { estado: "pronto", versao: "catcher", em: expect.any(Number) }, versaoContrato: 1, ligacao: true }]);
 
     await orq.parar();
     expect(parados).toEqual([PESSOA.pessoaId]);

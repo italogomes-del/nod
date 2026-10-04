@@ -13,6 +13,8 @@
     <link rel="stylesheet" href="/estilos.css" />
     <link rel="stylesheet" href="/interface.css" />
     <link rel="stylesheet" href="/navegacao.css" />
+    <link rel="stylesheet" href="/ligacao.css" />
+    <link rel="stylesheet" href="/onboarding.css" />
   </head>
   <body>
     <!-- Regiões fixas (web/lib/render.ts): cada uma só é regravada quando o HTML muda; o composer nunca é regravado dentro da mesma conversa. -->
@@ -28,6 +30,10 @@
     </div>
     <!-- Seu espaço (2026-09-30): camada de tela cheia por cima do app; a tela de baixo continua montada. -->
     <div id="espaco" hidden></div>
+    <!-- Modo ligação (2026-10-04, ADR-071): tela cheia por cima de tudo (a .app fica inerte) ou pílula no alto (a .app segue viva). -->
+    <div id="ligacao" hidden></div>
+    <!-- Onboarding por ligação (2026-10-04, ADR-077): olá, a IA do Mac, "está te ligando" e o painel da entrevista. -->
+    <div id="onboarding" hidden></div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>
