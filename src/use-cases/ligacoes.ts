@@ -269,7 +269,7 @@ export const leituraDaDecisao: CasoDeUso<{ decisaoId: string }, { decisaoId: str
         : { tipo: "app" as const, texto: i.textoFinal })),
     };
   } else if (d.tipo === "retomar_turno") pedido = { tipo: "retomar_turno", acao: d.frase, contaminado };
-  else if (d.tipo === "rotina" || d.tipo === "rotina_atualizacao" || d.tipo === "rotina_exclusao") pedido = { tipo: d.tipo, resumo: d.frase, horario: "", contaminado };
+  else if (d.tipo === "rotina" || d.tipo === "rotina_atualizacao" || d.tipo === "rotina_exclusao") pedido = { tipo: d.tipo, resumo: d.frase.split(" · ")[0]!.replace(/\s*\([A-Za-z_]+\/[A-Za-z_ ]+\)/, "").replace(/^Rotina proposta:\s*/i, ""), horario: "", contaminado };
   else if (d.tipo === "perfil") pedido = { tipo: "perfil", nome: d.frase, titulo: "", contaminado };
   else if (d.tipo === "acesso") {
     // O acesso se aprova inteiro pela voz só com o app já conectado; o texto do card diz o app e o nível.

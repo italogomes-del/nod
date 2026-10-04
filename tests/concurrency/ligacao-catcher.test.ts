@@ -18,7 +18,7 @@ let srv: ServidorCompleto;
 const criados = { agentes: [] as string[], conversas: [] as string[] };
 
 beforeAll(async () => {
-  srv = await servidorCompleto({ env: { NOD_LIGACAO: "todas", NOD_VOZ_FALSO_ROTEIRO: "Oi, tudo bem com você?" } });
+  srv = await servidorCompleto({ env: { NOD_LIGACAO: "todas", NOD_VOZ_FALSO_ROTEIRO: "Oi, tudo bem com você?|pode criar" } });
 });
 
 afterAll(async () => {
@@ -113,6 +113,30 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   const viva = await srv.json<{ ligacao: Ligacao | null }>("GET", "ligacoes/viva");
   expect(viva.ligacao?.estado).toBe("em_curso");
 
+  // Aprovação por voz (ADR-074): o bot propõe uma rotina; o servidor lê o card, abre a janela, e "pode criar" vira um
+  // comando que o cliente manda à rota de decisão — que confere o comando de uso único e cria a rotina.
+  const rotina = { cron: "0 8 * * 1-5", fuso_iana: "America/Sao_Paulo", instrucao: "poste um resumo dos PRs abertos", fonte: "PRs abertos", entregavel: "resumo curto", limites_aprovacao: "nada sai sem aprovação", politica_sem_dado: "diga que não houve" };
+  cli.ws.send(JSON.stringify({ t: "texto", conteudo: `cria uma rotina [[tool: criar_rotina ${JSON.stringify(rotina)}]] [[delta: Proposta de rotina enviada.]]` }));
+  const leitura = await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "leitura", "leitura do card", 10_000);
+  expect(leitura.t === "bot-fala" && leitura.texto).toMatch(/Para aprovar/);
+  const janela = await cli.esperarMsg((m) => m.t === "janela", "janela aberta");
+  const decisaoId = janela.t === "janela" ? janela.decisaoId : "";
+  // Um comando forjado (sem passar pela janela) é recusado.
+  expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: "forjado", acao: "aprovar" })).status).toBe(403);
+  for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
+  for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
+  const comando = await cli.esperarMsg((m) => m.t === "comando", "comando de voz").catch((e: unknown) => { console.error("DEBUG", JSON.stringify(cli.msgs.slice(-15))); throw e; });
+  if (comando.t !== "comando") throw new Error("sem comando");
+  expect(comando.acao).toBe("aprovar");
+  // A voz decide o card inteiro: "sempre" junto é recusado, e o comando continua válido para o pedido certo.
+  expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: comando.comandoId, acao: "aprovar", sempre: true })).status).toBe(400);
+  expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: comando.comandoId, acao: "aprovar" })).status).toBe(200);
+  // Uso único.
+  expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: comando.comandoId, acao: "aprovar" })).status).toBe(403);
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.texto.includes("aprovado"), "resultado falado");
+  const rotinas = await srv.json<{ rotinas: { id: string }[] } | { id: string }[]>("GET", `agentes/${agente.id}/rotinas`).catch(() => null);
+  if (rotinas) expect(Array.isArray(rotinas) ? rotinas.length : rotinas.rotinas.length).toBeGreaterThan(0);
+
   cli.ws.send(JSON.stringify({ t: "tchau" }));
   await cli.esperarMsg((m) => m.t === "fim", "fim");
 
@@ -123,7 +147,8 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   expect(encerrada).toBe(true);
 
   const { falas } = await srv.json<{ falas: FalaLigacao[] }>("GET", `ligacoes/${ligacao.id}/falas`);
-  expect(falas.filter((f) => f.autor === "pessoa").map((f) => f.texto)).toEqual(["quero criar uma rotina", "Oi, tudo bem com você?"]);
+  expect(falas.filter((f) => f.autor === "pessoa").map((f) => f.texto)).toEqual(expect.arrayContaining(["quero criar uma rotina", "Oi, tudo bem com você?", "pode criar"]));
+  expect(falas.some((f) => f.tipo === "leitura")).toBe(true);
   expect(falas.some((f) => f.autor === "bot" && f.texto.includes("Entendi"))).toBe(true);
 
   // A linha "Chat de voz · mm:ss" e o resumo do bot (o turno-cérebro entregou no `fim`).

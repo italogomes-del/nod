@@ -105,7 +105,7 @@ import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
 import { criarCacheDeFalas } from "../voz/falas-de-espera.ts";
 import { anexarCanaisVoz, type CanaisVoz } from "../voz/ws.ts";
-import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, mandarNoChatDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
+import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
 import type { IncomingMessage, Server } from "node:http";
 
 /**
@@ -442,10 +442,37 @@ export function comporApp(o: OpcoesCompor): App {
   const persistenciaVoz: PersistenciaVoz = {
     async atender(ref) { await rodarCaso(escopoDaRef(ref), atenderLigacao, { ligacaoId: ref.ligacaoId }); },
     async gravarFala(ref, f) { await rodarCaso(escopoDaRef(ref), gravarFalaLigacao, { ...f, ligacaoId: ref.ligacaoId }); },
-    async encerrar(ref, motivo, metricas) { await rodarCaso(escopoDaRef(ref), encerrarLigacao, { ligacaoId: ref.ligacaoId, motivo, metricas }); },
+    async encerrar(ref, motivo, metricas) {
+      inscricoesVoz.get(ref.ligacaoId)?.();
+      inscricoesVoz.delete(ref.ligacaoId);
+      await rodarCaso(escopoDaRef(ref), encerrarLigacao, { ligacaoId: ref.ligacaoId, motivo, metricas });
+    },
     async mandarNoChat(ref, texto) { await rodarCaso(escopoDaRef(ref), mandarNoChatDaLigacao, { ligacaoId: ref.ligacaoId, agenteId: ref.agenteId, conversaId: ref.conversaId, turnoId: ref.turnoId, texto }); },
   };
   const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio });
+  // ADR-074: os cards da conversa da ligação viram leitura + janela de aprovação por voz. O orquestrador não lê banco:
+  // a composição escuta os frames da pessoa e monta a leitura (leituraDaDecisao) numa tx dela.
+  const inscricoesVoz = new Map<string, () => void>();
+  const decididasPorVoz = new Set<string>();
+  function lerParaVoz(escopo: Escopo, ligacaoId: string, decisaoId: string): void {
+    rodarCaso(escopo, leituraDaDecisao, { decisaoId })
+      .then((p) => { if (p) voz.pedirAprovacao(ligacaoId, p); })
+      .catch((e: unknown) => log("aviso", "voz_leitura_falhou", { ligacao_id: ligacaoId, erro: e instanceof Error ? e.name : "desconhecido" }));
+  }
+  function acompanharDecisoes(escopo: Escopo, ligacaoId: string, conversaId: string): void {
+    // Ao ligar, as pendências da conversa entram na fila de leitura.
+    dentro(escopo, (d) => d.repos.decisoes.listarSuaVez(relogio()))
+      .then((ds) => { for (const x of ds) if (x.conversaId === conversaId) lerParaVoz(escopo, ligacaoId, x.id); })
+      .catch(() => undefined);
+    const sair = barramento.inscrever(escopo.pessoaId, (f) => {
+      if (f.dados.conversaId !== conversaId) return;
+      const decisaoId = typeof f.dados.decisao_id === "string" ? f.dados.decisao_id : typeof f.dados.decisaoId === "string" ? f.dados.decisaoId : null;
+      if (!decisaoId) return;
+      if (f.tipo === "decisao.nova") lerParaVoz(escopo, ligacaoId, decisaoId);
+      else if (f.tipo === "decisao.decidida" && !decididasPorVoz.has(decisaoId)) voz.decisaoDecidida(ligacaoId, { decisaoId, resultado: f.dados.recusada === true ? "recusado" : "decidido", porVoz: false });
+    });
+    inscricoesVoz.set(ligacaoId, sair);
+  }
   async function ehAdminVoz(escopo: Escopo): Promise<boolean> {
     if (adminsVoz.length === 0) return false;
     if (adminsVoz.includes(escopo.pessoaId.toLowerCase())) return true;
@@ -659,7 +686,10 @@ export function comporApp(o: OpcoesCompor): App {
       ...depsRotas,
       contexto: contextoLigacao,
       maxS: maxLigacaoS,
-      registrar: (escopo, l) => voz.registrar({ ...l, tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, maxS: maxLigacaoS }),
+      registrar: (escopo, l) => {
+        voz.registrar({ ...l, tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, maxS: maxLigacaoS });
+        acompanharDecisoes(escopo, l.ligacaoId, l.conversaId);
+      },
       encerrarViva: (id) => voz.encerrar(id, "pessoa_desligou"),
     }),
     ...rotasConcessoes({ dentro }),
@@ -677,6 +707,11 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasDecisoes({
       dentro,
       services,
+      conferirComandoVoz: (p) => voz.conferirComando(p),
+      aoDecidirPorVoz: (p) => {
+        decididasPorVoz.add(p.decisaoId);
+        voz.decisaoDecidida(p.ligacaoId, { decisaoId: p.decisaoId, resultado: p.acao === "aprovar" ? "aprovado" : "recusado", porVoz: true });
+      },
       prazoDecisaoMs,
       get executor() {
         return executorAtual;

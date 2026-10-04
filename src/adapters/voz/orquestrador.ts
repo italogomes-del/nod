@@ -148,7 +148,7 @@ export function lerQuadroMicrofone(b: Uint8Array): { seq: number; pcm: Int16Arra
 
 export type PedidoAprovacaoVoz = { decisaoId: string; leitura: string; perfil: PerfilComando };
 
-type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; aoTerminar?: () => void };
+type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; fimEm?: number; aoTerminar?: () => void };
 type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array; aoTerminar?: () => void };
 
 export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
@@ -374,6 +374,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     function terminarUtt(u: Utt): void {
       u.fim = true;
+      u.fimEm ??= relogio();
       const fn = u.aoTerminar;
       u.aoTerminar = undefined;
       fn?.();
@@ -487,7 +488,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     /** Uma fala final dentro da janela: comando (gramática fechada) ou fala normal, que fecha a janela. */
     function tratarNaJanela(texto: string): boolean {
-      if (!janela || inicioFalaEm < janela.abertaEm) return false;
+      // A fala tem de ter sido DETECTADA depois da abertura (o pré-roll de 60 ms não conta).
+      if (!janela || inicioFalaEm + 3 * QUADRO_MS < janela.abertaEm) return false;
       const r = interpretarComando(texto, janela.pedido.perfil, r0.nomeBot);
       if (r.acao === "aprovar" || r.acao === "recusar") {
         const comandoId = randomUUID();
@@ -589,17 +591,19 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         if (fimFalaEm - inicioFalaEm > 1_200 && !botTocando()) tocarEspera("nao_entendi");
         return;
       }
-      const falasBot = [...utts.values()].filter((u) => u.tipo !== "espera").map((u) => ({ texto: u.texto, inicioMs: u.enviadoEm, fimMs: u.enviadoEm + u.duracaoMs }));
-      if (ehEco({ texto, inicioMs: inicioFalaEm, fimMs: fimFalaEm, falasBot })) {
-        log("info", "voz_eco_descartado", { ligacao_id: r.ligacaoId });
-        return;
-      }
+      // ADR-074: na janela de aprovação a guarda de eco por similaridade fica desligada — a frase de comando é justamente
+      // a que o bot acabou de ler; quem protege é o tempo (só vale fala que começou depois da abertura).
       if (janela && !botTocando()) {
         paraMidia({ t: "legenda", id, texto, final: true });
         gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: inicioFalaEm - inicio, fimMs: fimFalaEm - inicio, interrompida: false, confianca: res.confianca });
         if (tratarNaJanela(texto)) return;
         pendente.textos.push(texto);
         agendarDecisao();
+        return;
+      }
+      const falasBot = [...utts.values()].filter((u) => u.tipo !== "espera").map((u) => ({ texto: u.texto, inicioMs: u.enviadoEm, fimMs: u.fimEm ?? u.enviadoEm + u.duracaoMs }));
+      if (ehEco({ texto, inicioMs: inicioFalaEm, fimMs: fimFalaEm, falasBot })) {
+        log("info", "voz_eco_descartado", { ligacao_id: r.ligacaoId });
         return;
       }
       if (botTocando() && !barge.confirmado) {
