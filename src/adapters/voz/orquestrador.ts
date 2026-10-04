@@ -634,7 +634,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         try {
           stt = await deps.provedores.stt.abrir({
             idioma: "pt-BR",
-            vocabulario: [r.nomeBot, ...(r.vocabulario ?? [])],
+            // definido em 2026-10-04: termos do produto que o STT errava no teste local ("bote" no lugar de "bot").
+            vocabulario: [r.nomeBot, "nod", "bot", "bots", "rotina", "e-mail", "aprovo", "recuso", ...(r.vocabulario ?? [])],
             aoResultado: aoResultadoStt,
             aoErro: (e) => {
               log("aviso", "voz_stt_falhou", { ligacao_id: r.ligacaoId, erro: e.name });
@@ -696,7 +697,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function saudar(): void {
       if (saudou) return;
       saudou = true;
-      const texto = `Oi! Aqui é ${r.genero === "feminina" ? "a" : "o"} ${r.nomeBot}.`;
+      const texto = `Oi! Aqui é ${r.nomeBot}.`;
       gravarFala({ autor: "bot", tipo: "fala", texto, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
       enfileirar({ tipo: "conteudo", texto, n: null });
       botPerguntou = true;
@@ -862,6 +863,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "atividade": {
           const nome = typeof msg.nome === "string" ? msg.nome.slice(0, 80) : "";
           if (msg.tipo === "inicio") {
+            // O texto depois da ferramenta é outro bloco: sem isto, "Até mais!" e "Desligando" grudavam.
+            if (respostaTexto !== "" && !/\s$/.test(respostaTexto)) {
+              respostaTexto += " ";
+              segmentador.adicionar(" ", relogio());
+            }
             ferramentaRodando = nome;
             mudarFase("trabalhando", nome);
             const n = vezAtual;
