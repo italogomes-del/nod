@@ -30,6 +30,27 @@
   text-align: center; font-size: 13px; color: var(--ink-3); }
 .nova-secao-alvo.alvo-soltar { border-color: var(--ink); background: var(--surface-raised); color: var(--ink); }
 
+/* ---- Seções que recolhem (definido em 2026-10-04, web/lib/secoes.ts) -----------------
+   O título é o botão e ocupa a linha inteira. A seta só aparece no hover (no toque, sempre, mais clara) e fica à vista
+   com a seção recolhida, apontando para o lado. Recolhida, a seção mostra quantos bots tem e o ponto do aviso mais forte
+   entre os escondidos. Buscando, nada fica recolhido e o título é só texto: sem seta, contagem, ponto nem clique. */
+.secao-cab { flex: 1; min-width: 0; min-height: 24px; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.secao-cab:hover, .secao-cab:focus-visible { color: var(--ink); }
+/* `.section h3 span` (interface.css) encolhe todo span do título: o nome fica no tamanho do título e corta com reticências. */
+.secao-cab .secao-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; color: inherit; }
+.secao-cab > svg { flex: none; width: 14px; height: 14px; transform: rotate(90deg); opacity: 0; transition: opacity .12s; }
+.secao-cab:hover > svg, .secao-cab:focus-visible > svg, .secao-cab[aria-expanded="false"] > svg { opacity: 1; }
+.secao-cab[aria-expanded="false"] > svg { transform: none; }
+@media (hover: none) { .secao-cab > svg { opacity: .6; } }
+.secao-cab small { flex: none; font-size: 11px; color: var(--ink-3); }
+.secao-aviso { flex: none; width: 7px; height: 7px; margin-left: 2px; border-radius: 50%; background: var(--signal); }
+.secao-aviso[data-aviso="decisao"] { background: var(--warning); }
+#sidebar:not([data-buscando]) .bot-row.escondida { display: none; }
+.section[data-recolhida] { padding-bottom: 4px; }
+#sidebar[data-buscando] .secao-cab { pointer-events: none; }
+#sidebar[data-buscando] .secao-cab > svg, #sidebar[data-buscando] .secao-cab small, #sidebar[data-buscando] .secao-aviso { display: none; }
+
 /* ---- Menu da conta (canvas "Menu 1") -------------------------------------------------
    Nasce acima do avatar, da largura da barra menos as margens. A faixa do topo só aparece quando algo precisa de você. */
 .bot-menu.menu-conta { width: 316px; padding: 8px; border-radius: 18px; box-shadow: var(--shadow-pop); }
