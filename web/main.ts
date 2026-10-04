@@ -34,6 +34,7 @@ import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { voltaDaTela } from "./lib/volta.ts";
+import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
@@ -97,10 +98,14 @@ function fecharBusca(): void {
   const campo = document.getElementById("busca-bots") as HTMLInputElement | null;
   if (campo) campo.value = "";
   buscaAberta = false;
+  filtrarBots("");
   render();
 }
 const LUPA = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>';
 const LOJA = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 4.5 3h11L17 7.5"/><path d="M3 7.5a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.7 0"/><path d="M4.2 10v7h11.6v-7"/><path d="M8 17v-4h4v4"/></svg>';
+
+// definido em 2026-10-04: as seções recolhidas da barra (web/lib/secoes.ts); um conjunto novo a cada troca.
+let secoesRecolhidas: ReadonlySet<string> = lerSecoesRecolhidas();
 
 function painelOculto(): boolean {
   try { return localStorage.getItem(CHAVE_PAINEL_OCULTO) === "1"; } catch { return false; }
@@ -477,15 +482,17 @@ function renderSidebar(estado: Estado): string {
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): os bots da pessoa se arrastam — para a grade (fixa), entre
   // seções ou para uma seção nova. Os da equipe não: fixar e seção são da dona.
   const arrastavel = (a: (typeof agentes)[number]) => (a.ownerId === estado.sessao?.pessoaId ? ` draggable="true" data-arrastavel="${esc(a.id)}"` : "");
-  const linha = (a: (typeof agentes)[number]) => {
+  const avisos = new Map(agentes.map((a): [string, AvisoBot] => [a.id, (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntas.get(a.id) ? "pergunta" : temNovas(a.conversaId, estado) ? "nao-lido" : ""]));
+  const avisoDe = (a: (typeof agentes)[number]): AvisoBot => avisos.get(a.id) ?? "";
+  const linha = (a: (typeof agentes)[number], escondida = false) => {
     // definido em 2026-09-24 (revisão da interface): a linha só tem UM sinal, o ponto do próprio mascote.
     // A cor diz o tipo — âmbar decisão, azul pergunta, cinza mensagem não lida —; o mascote animado já
     // diz quando o bot trabalha. Selos ⚑, estrela de fixado e pontos soltos saíram.
     const perguntando = perguntas.get(a.id) ?? 0;
     // definido em 2026-09-24 (emenda da ADR-044): "rotina parada" (âmbar) quando uma rotina dele espera acesso.
     const nova = temNovas(a.conversaId, estado);
-    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : nova ? "nao-lido" : "";
-    const rotuloAviso = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
+    const aviso = avisoDe(a);
+    const rotuloAviso = aviso ? ` (${ESPERA[aviso]})` : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const estadoVisual = aviso && mascote === "disponivel" ? "aguardando" : mascote;
     // definido em 2026-09-24 (sidebar no estilo do Grok): o título vira um chip ao lado do nome e a linha de
@@ -496,18 +503,27 @@ function renderSidebar(estado: Estado): string {
     const chip = a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "";
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
-    return `<div class="bot-row" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
+    return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
+  // definido em 2026-10-04 (web/lib/secoes.ts): a seção recolhe pelo título. Recolhida, ficam à vista o bot da conversa
+  // aberta e os com problema (computador fora do ar, em ligação); os outros continuam no HTML, escondidos pelo CSS — a
+  // busca os mostra (data-buscando, em filtrarBots) e o arrasto abre a seção para medir a posição deles.
+  const pessoaId = estado.sessao?.pessoaId ?? "";
+  const conversaAberta = t.tipo === "conversa" ? t.conversaId : null;
+  const alertaDe = (a: (typeof agentes)[number]) => (!!a.computadorForaDoAr && a.ownerId === pessoaId) || estado.ligacaoViva?.agenteId === a.id;
+  const secaoDeBots = (nome: string, chave: string, lista: typeof agentes, atributos: string) => {
+    const s = estadoDaSecao({ chave, recolhidas: secoesRecolhidas, conversaAberta, bots: lista.map((a) => ({ conversaId: a.conversaId, aviso: avisoDe(a), alerta: alertaDe(a) })) });
+    return `<section class="section"${atributos}${s.recolhida ? " data-recolhida" : ""}>${cabecalhoSecao(nome, chave, { recolhida: s.recolhida, total: lista.length, aviso: s.aviso })}${lista.map((a, i) => linha(a, s.escondidos[i])).join("")}</section>`;
+  };
   // Cada seção é um alvo de soltar (data-grupo); "Meus agentes" é a seção "" e continua alvo mesmo vazia (só aparece arrastando).
-  const grupo = (nome: string, secao: string, lista: typeof agentes) => `<section class="section" data-grupo="secao" data-secao="${esc(secao)}"${lista.length ? "" : " data-vazio"}><h3>${esc(nome)}</h3>${lista.map(linha).join("")}</section>`;
+  const grupo = (nome: string, secao: string, lista: typeof agentes) => secaoDeBots(nome, chaveDaSecao(pessoaId, secao), lista, ` data-grupo="secao" data-secao="${esc(secao)}"${lista.length ? "" : " data-vazio"}`);
   // definido em 2026-09-24 (sidebar no estilo do Grok): fixados em grade de 4 — avatar grande, nome e o
   // título num chip. Mesmo aviso no mascote e o mesmo menu (clique direito / •••) da linha.
   const bloco = (a: (typeof agentes)[number]) => {
-    const perguntando = perguntas.get(a.id) ?? 0;
-    const aviso = (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntando ? "pergunta" : temNovas(a.conversaId, estado) ? "nao-lido" : "";
+    const aviso = avisoDe(a);
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
-    const rotulo = aviso === "decisao" ? " (esperando sua decisão)" : aviso === "pergunta" ? " (esperando sua resposta)" : aviso === "nao-lido" ? " (mensagem nova)" : "";
+    const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
     return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
   };
@@ -515,7 +531,8 @@ function renderSidebar(estado: Estado): string {
   const fixados = meus.filter((a) => a.fixado);
   const grade = meus.length ? `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>` : "";
   const bots = meus.length ? grupo("Meus agentes", "", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, meus.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
-  const equipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId).map(linha).join("");
+  const daEquipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId);
+  const equipe = daEquipe.length ? secaoDeBots("Agentes da equipe", chaveDaSecao(pessoaId, null), daEquipe, "") : "";
   // definido em 2026-10-04: a seção Salas saiu da barra — só poluía. As salas voltam como uma feature pensada na
   // jornada inteira; até lá, a tela da sala continua existindo e abre por Não lidos e pelos avisos.
 
@@ -553,7 +570,7 @@ function renderSidebar(estado: Estado): string {
     <div class="list">
       ${grade}
       ${bots || '<p class="mudo">Nenhum agente visível.</p>'}
-      ${equipe ? `<section class="section"><h3>Agentes da equipe</h3>${equipe}</section>` : ""}
+      ${equipe}
     </div>
     ${ambiente}
     ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
@@ -867,7 +884,7 @@ function render(): void {
  * (digitar na busca filtra direto, no ouvinte de input).
  */
 function redesenharSidebar(): void {
-  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida], renderSidebar);
+  const html = lembrar("sidebar", estado, [ambienteBanco, buscaAberta, termoBusca() !== "", naFrente(), deixarNaoLida, secoesRecolhidas], renderSidebar);
   if (!regiaoMudaria("sidebar", html)) return;
   const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
   const valorBusca = busca?.value ?? "";
@@ -1407,7 +1424,11 @@ function abrirInteligencia(agenteId: string | undefined): void {
 }
 
 function filtrarBots(texto: string, raiz = "#sidebar"): void {
-  for (const el of document.querySelectorAll<HTMLElement>(`${raiz} [data-busca]`)) el.hidden = !el.dataset.busca?.includes(texto.trim().toLowerCase());
+  const termo = texto.trim().toLowerCase();
+  for (const el of document.querySelectorAll<HTMLElement>(`${raiz} [data-busca]`)) el.hidden = !el.dataset.busca?.includes(termo);
+  // Buscando, as seções recolhidas mostram o que casa (navegacao.css) — por atributo, sem redesenhar a barra no meio da
+  // digitação: refazer o campo cortava o acento de tecla morta ("´é") e o focusout fechava a busca (definido em 2026-10-04).
+  if (raiz === "#sidebar") document.getElementById("sidebar")?.toggleAttribute("data-buscando", termo !== "");
 }
 
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
@@ -1515,6 +1536,16 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const t = estado.tela;
     const f = el.dataset.id;
     if (t.tipo === "conectores" && (f === "todos" || f === "conectados" || f === "atencao")) navegar({ ...t, filtro: f });
+  },
+  "recolher-secao": (el) => {
+    // Buscando, o título é só texto (navegacao.css): a escolha gravada não muda às cegas.
+    if (document.getElementById("sidebar")?.hasAttribute("data-buscando")) return;
+    const chave = el.dataset.chave ?? "";
+    const comFoco = document.activeElement === el;
+    secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, chave, !secoesRecolhidas.has(chave));
+    render();
+    // A barra é refeita: quem recolheu pelo teclado continua no mesmo título.
+    if (comFoco) document.querySelector<HTMLElement>(`#sidebar .secao-cab[data-chave="${CSS.escape(chave)}"]`)?.focus();
   },
   "abrir-avancado": () => abrirMarketplace(true),
   "navegar-marketplace": () => abrirMarketplace(),
@@ -2119,6 +2150,12 @@ function aoVoltarParaFrente(): void {
 }
 window.addEventListener("focus", aoVoltarParaFrente);
 document.addEventListener("visibilitychange", aoVoltarParaFrente);
+// Outra aba recolheu ou abriu uma seção: esta acompanha (definido em 2026-10-04).
+window.addEventListener("storage", (ev) => {
+  if (ev.key !== CHAVE_SECOES_RECOLHIDAS) return;
+  secoesRecolhidas = lerSecoesRecolhidas();
+  render();
+});
 
 void boot();
 
@@ -2234,6 +2271,13 @@ function encerrarArrasto(): void {
   limparIndicadores();
   document.getElementById("sidebar")?.classList.remove("arrastando-bot");
   for (const n of document.querySelectorAll("#sidebar .origem-arrasto")) n.classList.remove("origem-arrasto");
+  // A seção aberta só pelo arrasto volta a recolher: o render abaixo não a refaz quando o HTML não mudou. Se o bot foi
+  // solto nela, o drop já a abriu de vez e o render desenha a seção aberta.
+  for (const s of document.querySelectorAll("#sidebar [data-aberta-no-arrasto]")) {
+    s.removeAttribute("data-aberta-no-arrasto");
+    s.setAttribute("data-recolhida", "");
+    for (const n of s.querySelectorAll(":scope > [data-escondida-no-arrasto]")) { n.removeAttribute("data-escondida-no-arrasto"); n.classList.add("escondida"); }
+  }
   arrastandoBot = null;
   alvoArrasto = null;
   render();
@@ -2280,7 +2324,11 @@ function pedirNovaSecao(id: string): void {
   const nome = botGerido(id)?.nome ?? "o bot";
   pedirGestao("Nova seção", `<p>${esc(nome)} vai para a seção nova.</p><label>Nome da seção<input name="secao" required maxlength="60" placeholder="Produto e Engenharia" /></label>`, "Criar seção", async (d) => {
     const secao = String(d.get("secao") ?? "").trim();
-    if (secao) await mudarGestao(() => api!.organizarAgente(id, { fixado: false, secao, ordem: [id] }));
+    if (!secao) return;
+    // Seção nova nasce aberta, mesmo que uma antiga com o mesmo nome tenha ficado recolhida neste navegador.
+    const chave = chaveDaSecao(estado.sessao?.pessoaId ?? "", secao);
+    if (secoesRecolhidas.has(chave)) secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, chave, false);
+    await mudarGestao(() => api!.organizarAgente(id, { fixado: false, secao, ordem: [id] }));
   });
 }
 
@@ -2314,6 +2362,13 @@ document.addEventListener("dragover", (ev) => {
   }
   ev.preventDefault();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  // Seção recolhida abre ao passar com o bot (definido em 2026-10-04): as linhas aparecem e a posição de soltar é medida
+  // nelas — escondidas, todas mediam zero e o bot ia sempre para o fim. Ao fim do arrasto, encerrarArrasto desfaz.
+  if (grupo.hasAttribute("data-recolhida")) {
+    grupo.removeAttribute("data-recolhida");
+    grupo.setAttribute("data-aberta-no-arrasto", "");
+    for (const n of grupo.querySelectorAll(":scope > .bot-row.escondida")) { n.classList.remove("escondida"); n.setAttribute("data-escondida-no-arrasto", ""); }
+  }
   marcarAlvo(grupo, ev.clientX, ev.clientY);
 });
 document.addEventListener("drop", (ev) => {
@@ -2321,6 +2376,9 @@ document.addEventListener("drop", (ev) => {
   ev.preventDefault();
   const id = arrastandoBot;
   const alvo = alvoArrasto;
+  // Soltou numa seção recolhida: ela fica aberta, para o bot não sumir da vista.
+  const chave = alvo && alvo.destino !== "nova" && alvo.destino.grupo === "secao" ? alvo.el.querySelector<HTMLElement>(".secao-cab")?.dataset.chave : undefined;
+  if (chave && secoesRecolhidas.has(chave)) secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, chave, false);
   encerrarArrasto();
   if (!alvo) return;
   if (alvo.destino === "nova") pedirNovaSecao(id);
