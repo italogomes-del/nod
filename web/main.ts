@@ -59,7 +59,7 @@ import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } 
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
-import { criarTelaOnboarding } from "./telas/onboarding-controle.ts";
+import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
@@ -887,7 +887,9 @@ function render(): void {
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
   const camadaOnboarding = telaOnboarding.camada();
+  const devolverFoco = regiaoMudaria("onboarding", camadaOnboarding) ? guardarFocoDaCamada(document.getElementById("onboarding")) : null;
   regiao("onboarding", camadaOnboarding);
+  devolverFoco?.();
   document.getElementById("onboarding")?.toggleAttribute("hidden", camadaOnboarding === "");
   document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre());
   document.getElementById("espaco")?.toggleAttribute("inert", telaLigacao.cheia());

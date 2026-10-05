@@ -5,13 +5,19 @@ import type { Api } from "../lib/api.ts";
 import { esc } from "../lib/render.ts";
 import { dialogo } from "./gestao-agentes.ts";
 import { TEXTO_CONSENTIMENTO } from "./ligacao.ts";
-import { htmlCamada, htmlGuia, notaForaDoApp, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
+import { criarTesteDeIas } from "./onboarding-teste.ts";
+import { destinoAoFimDoOla, htmlCamada, htmlGuia, notaForaDoApp, textoComoLiberar, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
 
 /**
  * O controlador do onboarding por ligação (definido em 2026-10-04, ADR-077): a abertura, a sondagem da IA do Mac, o
  * Atender (consentimento + mídia), o "Configurar sem voz", a passagem da entrevista para a pílula e os cliques dos cards
  * guiados. O estado que vem do servidor mora no reducer (`estado.onboarding`); aqui fica só o que é da tela (timers,
  * o card de IA clicado, o botão ocupado). O desenho é de web/telas/onboarding.ts.
+ *
+ * definido em 2026-10-05 (o teste de verdade das IAs): dentro do app do Mac com `nodDesktop.iaTestar`, o teste começa
+ * junto com o "olá" e a ligação só toca com uma IA que respondeu. O que a tela guarda desse teste mora em
+ * onboarding-teste.ts; aqui ele é ligado ao "olá", à sonda de 3 s e aos cliques. Sem a ponte, nada disso liga e o
+ * caminho é o de 2026-10-04.
  */
 
 /** definido em 2026-10-04 (protótipo HiFiMac): o "olá" dura 3,3 s; a busca da IA gira 2 s; a sonda do Mac é a cada 3 s. */
@@ -48,6 +54,23 @@ export type DepsOnboarding = {
 
 export type TelaOnboarding = ReturnType<typeof criarTelaOnboarding>;
 
+/**
+ * A camada do onboarding é regravada inteira quando muda (web/lib/regioes.ts) e o botão com o foco some junto. definido
+ * em 2026-10-05, com as telas da IA que mudam sozinhas: quem chama guarda o foco ANTES de regravar e o devolve depois —
+ * ao mesmo botão (mesma ação, mesma IA) ou, se a tela trocou, ao título dela, que o leitor de tela anuncia. Sem foco na
+ * camada (a pessoa está num diálogo, ou não usa o teclado), não mexe em nada.
+ */
+export function guardarFocoDaCamada(raiz: HTMLElement | null): () => void {
+  const ativo = document.activeElement;
+  if (!raiz || !(ativo instanceof HTMLElement) || !raiz.contains(ativo)) return () => undefined;
+  const { act, ia } = ativo.dataset;
+  return () => {
+    if (raiz.contains(document.activeElement)) return;
+    const mesmo = act ? [...raiz.querySelectorAll<HTMLButtonElement>("button[data-act]")].find((b) => b.dataset.act === act && b.dataset.ia === ia && !b.disabled) : undefined;
+    (mesmo ?? raiz.querySelector<HTMLElement>("h1[tabindex]"))?.focus();
+  };
+}
+
 export function criarTelaOnboarding(deps: DepsOnboarding) {
   let olaPassou = false;
   let timerOla: number | null = null;
@@ -70,6 +93,27 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     return a;
   };
 
+  /** O teste de verdade das IAs deste Mac (definido em 2026-10-05): começa com o "olá" e decide se a ligação toca. */
+  const teste = criarTesteDeIas({
+    ponte: () => window.nodDesktop,
+    dados: deps.dados,
+    agendar: (fn, ms) => { const t = window.setTimeout(fn, ms); return () => window.clearTimeout(t); },
+    aoMudar: () => deps.aoMudar(),
+    reler: () => reler(),
+    aoFimDoTeste: () => {
+      deps.aoMudar();
+      const d = deps.dados();
+      // Antes do fim do "olá" nada muda na tela: `passarOla` decide quando ele acabar.
+      if (!olaPassou || !d) return;
+      // O Mac não testou (recusou o pedido): vale o que o servidor diz do login, como em 2026-10-04.
+      if (!teste.ativo()) void seguirPeloLogin(d, false);
+      else void reler();
+    },
+    ligar: () => chamar(),
+    ligando: () => avancando,
+    ficarNaEtapaDaIa: async () => { if (deps.dados()?.etapa !== "executor") await mudarEtapa("executor").catch(() => undefined); },
+  });
+
   function hidratar(o: EstadoOnboarding): void {
     deps.hidratar(o);
     deps.aoMudar();
@@ -82,7 +126,8 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     // O servidor tirou o onboarding da frente (a guia foi excluída no meio): a camada fecha na próxima leitura.
     if (!d.mostrar) return null;
     if (!olaPassou && (d.etapa === null || d.etapa === "ola" || d.etapa === "executor")) return "ola";
-    if (d.etapa === null || d.etapa === "ola" || d.etapa === "executor") return d.executor.pronto ? "chamando" : "executor";
+    // Com teste, o "pronto" do servidor é só o login: a ligação espera uma IA que respondeu e a pessoa ter seguido.
+    if (d.etapa === null || d.etapa === "ola" || d.etapa === "executor") return (teste.ativo() ? teste.podeLigar(d) : d.executor.pronto) ? "chamando" : "executor";
     if (d.etapa === "chamando") return "chamando";
     if (d.etapa === "entrevista" && deps.ligacao.ativa()) return "entrevista";
     return d.passo === "fim" ? "fim" : "configurando";
@@ -99,6 +144,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       procurando: Date.now() < procurandoAte,
       iaEntrando,
       notaIa,
+      teste: teste.naTela(),
       atendendo,
       emLigacao: deps.ligacao.ativa() !== null,
       appConectando: deps.conectando(d.modelo.app.slug),
@@ -118,6 +164,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
 
   /** Os efeitos de cada fase (timer do olá, sonda do Mac, conclusão) — idempotentes, chamados a cada desenho. */
   function agendarPelaFase(e: EstadoTelaOnboarding): void {
+    if (e.fase === "ola") teste.iniciar(e.dados);
     if (e.fase === "ola" && timerOla === null) timerOla = window.setTimeout(() => { timerOla = null; void passarOla(); }, OLA_MS);
     if (e.fase === "executor" && sonda === null) sonda = window.setInterval(() => void sondar(), SONDA_MS);
     if (e.fase !== "executor" && sonda !== null) { window.clearInterval(sonda); sonda = null; }
@@ -130,15 +177,25 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     if (timerOla !== null) { window.clearTimeout(timerOla); timerOla = null; }
     const d = deps.dados();
     if (!d) return;
-    if (!d.executor.pronto) {
+    teste.iniciar(d);
+    const destino = destinoAoFimDoOla(teste.naTela());
+    if (destino === "como_antes") { await seguirPeloLogin(d, true); return; }
+    if (destino === "ligar") { await teste.seguir(); return; }
+    // O teste ainda roda, ou nenhuma IA respondeu: a etapa "A IA dos seus bots" (a tela sai de `telaDaIa`).
+    deps.aoMudar();
+    if (d.etapa !== "executor") await mudarEtapa("executor").catch(() => undefined);
+  }
+
+  /** O caminho de 2026-10-04, sem teste: o que o servidor diz do login decide entre a ligação e os cards de IA. */
+  async function seguirPeloLogin(d: EstadoOnboarding, comBusca: boolean): Promise<void> {
+    if (d.executor.pronto) { await chamar(); return; }
+    if (comBusca) {
       procurandoAte = Date.now() + PROCURANDO_MS;
       if (timerProcura !== null) window.clearTimeout(timerProcura);
       timerProcura = window.setTimeout(() => { timerProcura = null; deps.aoMudar(); }, PROCURANDO_MS + 20);
-      deps.aoMudar();
-      if (d.etapa !== "executor") await mudarEtapa("executor").catch(() => undefined);
-      return;
     }
-    await chamar();
+    deps.aoMudar();
+    if (d.etapa !== "executor") await mudarEtapa("executor").catch(() => undefined);
   }
 
   async function mudarEtapa(etapa: Exclude<EtapaOnboarding, "concluido">, semVoz = false): Promise<EstadoOnboarding> {
@@ -169,6 +226,8 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     const o = await a.onboarding().catch(() => null);
     if (!o) return;
     hidratar(o);
+    // Com teste, o "pronto" do servidor é só o login: quem decide o próximo passo é o teste (onboarding-teste.ts).
+    if (teste.ativo()) { teste.aoEstadoDoServidor(o); return; }
     if (o.executor.pronto && !avancando) {
       const nome = iaEntrando === "codex-cli" ? "ChatGPT" : "Claude";
       notaIa = `${nome} conectado.`;
@@ -183,6 +242,8 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     const ponte = window.nodDesktop;
     const fn = acao === "entrar" ? ponte?.iaEntrar : ponte?.iaInstalar;
     if (!ponte || !fn) { notaIa = notaForaDoApp(ia, acao); deps.aoMudar(); return; }
+    // Com teste, o clique abre a conexão em três passos; sem ele, o card espera o login como em 2026-10-04.
+    if (teste.ativo()) { notaIa = null; await teste.conectar(ia, acao); return; }
     const nome = ia === "codex-cli" ? "ChatGPT" : "Claude";
     try {
       const r = await fn.call(ponte, ia);
@@ -192,6 +253,19 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       notaIa = notaForaDoApp(ia, acao);
     }
     deps.aoMudar();
+  }
+
+  /** "Testar de novo" fora do app do Mac (a causa veio do servidor, de outro computador da pessoa): diz onde testar. */
+  async function testarIa(ia: IaDesktop): Promise<void> {
+    if (!window.nodDesktop?.iaTestar) { notaIa = "O teste roda no app do nod, neste Mac. Abra o app para testar de novo."; deps.aoMudar(); return; }
+    await teste.testar(ia);
+  }
+
+  function comoLiberar(ia: IaDesktop): void {
+    const t = textoComoLiberar(ia);
+    const d = dialogo(`<div class="ligacao-consentimento"><h2>${esc(t.titulo)}</h2>${t.paragrafos.map((p) => `<p>${esc(p)}</p>`).join("")}<div class="acoes"><button class="bt pri" type="button" data-fechar>Entendi</button></div></div>`);
+    d.querySelector("[data-fechar]")?.addEventListener("click", () => d.close());
+    d.querySelector<HTMLButtonElement>("[data-fechar]")?.focus();
   }
 
   /** O Atender: o clique é o consentimento de voz e o gesto que libera áudio e microfone. */
@@ -286,11 +360,19 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     deps.aoMudar();
   }
 
+  const iaDoClique = (el: HTMLElement): IaDesktop => (el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli");
+
   const acoes: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     "onboarding-pular-ola": () => passarOla(),
     "onboarding-depois": () => fazerDepois(),
-    "onboarding-ia-entrar": (el) => iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "entrar"),
-    "onboarding-ia-instalar": (el) => iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "instalar"),
+    "onboarding-ia-entrar": (el) => iaNoMac(iaDoClique(el), "entrar"),
+    "onboarding-ia-instalar": (el) => iaNoMac(iaDoClique(el), "instalar"),
+    "onboarding-ia-testar": (el) => testarIa(iaDoClique(el)),
+    "onboarding-ia-como-liberar": (el) => comoLiberar(iaDoClique(el)),
+    "onboarding-ia-pagina": (el) => teste.abrirInstalacao(iaDoClique(el)),
+    "onboarding-ia-login": (el) => teste.abrirLogin(iaDoClique(el)),
+    "onboarding-ia-cancelar": () => teste.cancelar(),
+    "onboarding-ia-continuar": () => teste.seguir(),
     "onboarding-atender": () => atender(),
     "onboarding-sem-voz": async () => {
       if (atendendo) return;
@@ -340,6 +422,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       acabouDeConcluir = false;
       notaIa = null;
       iaEntrando = null;
+      teste.recomecar();
       hidratar(await api().etapaOnboarding({ etapa: "ola" }));
       deps.abrir(true);
       deps.aoMudar();
@@ -400,6 +483,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       acabouDeConcluir = false;
       iaEntrando = null;
       notaIa = null;
+      teste.descartar();
     },
   };
 }

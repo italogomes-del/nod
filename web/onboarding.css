@@ -23,15 +23,70 @@
 .ob-procurando { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--ink-2); }
 .ob-procurando .ob-gira { width: 16px; height: 16px; border-color: var(--line); border-top-color: var(--ink); }
 .ob-cards-ia { display: flex; flex-direction: column; gap: 10px; width: min(520px, 100%); animation: ob-sobe .45s cubic-bezier(.2, .7, .2, 1) both; }
-.ob-card-ia { display: flex; align-items: center; gap: 16px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; }
+.ob-cards-ia.largo { width: min(600px, 100%); }
+/* O card é uma coluna: a linha (logo, nome, estado, botão) e, embaixo, a prova do teste ou a explicação do aviso. */
+.ob-card-ia { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; }
 .ob-card-ia.em-breve { opacity: .45; }
+.ob-card-ia.aviso { border-color: var(--warning-line); }
+.ob-card-ia.menor { padding: 14px 18px; }
+.ob-ia-linha { display: flex; align-items: center; gap: 16px; }
 .ob-logo { width: 44px; height: 44px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--ink);
   display: flex; align-items: center; justify-content: center; flex: none; }
+.ob-card-ia.menor .ob-logo { width: 40px; height: 40px; border-radius: 10px; }
 .ob-ia-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ob-ia-txt b { font-size: 16px; font-weight: 600; }
 .ob-ia-txt span { font-size: 13px; color: var(--ink-3); }
+.ob-ia-txt span.ok, .ob-ia-txt span.aviso { display: flex; align-items: center; gap: 6px; font-weight: 500; }
 .ob-ia-txt span.ok { color: var(--success); }
+.ob-ia-txt span.aviso { color: var(--warning); }
+.ob-ia-txt span svg { flex: none; }
 .ob-nota { margin: 0; font-size: 13px; color: var(--ink-3); min-height: 20px; text-align: center; max-width: 560px; }
+.ob-cabeca h1:focus { outline: none; } /* recebe o foco só pelo código, quando a tela troca (web/main.ts) */
+
+/* O teste de verdade (definido em 2026-10-05): a pergunta do nod e a resposta da IA, dentro do card. */
+.ob-prova { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--surface-side); }
+.ob-prova-linha { display: flex; gap: 8px; align-items: baseline; font-size: 13px; line-height: 1.45; }
+.ob-prova-quem { width: 64px; flex: none; color: var(--ink-3); }
+.ob-prova-linha b { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.ob-pontos { display: inline-flex; gap: 4px; align-self: center; }
+.ob-pontos i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); animation: ob-ponto 1.2s ease-in-out infinite; }
+.ob-pontos i:nth-child(2) { animation-delay: .2s; }
+.ob-pontos i:nth-child(3) { animation-delay: .4s; }
+.ob-gira.grande { width: 18px; height: 18px; border-color: var(--line); border-top-color: var(--ink); opacity: 1; }
+.ob-gira.passo { width: 24px; height: 24px; border-width: 2.5px; border-color: var(--line); border-top-color: var(--ink); opacity: 1; }
+
+/* A conta sem acesso: o porquê e o "Como liberar", em tom de aviso (o usuário resolve depois). */
+.ob-ia-explica { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--warning-soft); font-size: 13px; line-height: 1.45; }
+.ob-ia-explica p { margin: 0; flex: 1; }
+.ob-ia-explica .ob-link { font-weight: 500; white-space: nowrap; flex: none; }
+
+/* Grok e Gemini, lado a lado e apagados. */
+.ob-breves { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ob-breve { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; opacity: .5; font-size: 14px; }
+.ob-breve b { font-weight: 500; }
+.ob-breve > span:last-child { margin-left: auto; font-size: 12px; color: var(--ink-2); }
+.ob-breve-logo { display: flex; color: var(--ink); }
+.ob-breve-logo svg { width: 22px; height: 22px; }
+
+/* Conectar em três passos. */
+.ob-conexao { width: min(600px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px 18px; display: flex; flex-direction: column;
+  gap: 4px; animation: ob-sobe .45s cubic-bezier(.2, .7, .2, 1) both; }
+.ob-passos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ob-passo { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; }
+.ob-passo.ativo { padding: 14px; margin: 0 -6px; border-radius: 14px; background: var(--surface-side); }
+.ob-passo-marca { width: 24px; height: 24px; box-sizing: border-box; flex: none; border-radius: 50%; border: 1px solid var(--line-strong); color: var(--ink-3); display: grid; place-items: center;
+  font-size: 12px; font-weight: 600; }
+.ob-passo-marca.feito { border: 0; background: var(--success); color: var(--on-status); }
+.ob-passo-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 1.45; color: var(--ink-3); }
+.ob-passo-txt b { font-size: 14px; font-weight: 500; color: var(--ink); }
+.ob-passo.depois .ob-passo-txt b { color: var(--ink-3); }
+.ob-passo.ativo .ob-passo-txt { color: var(--ink-2); gap: 4px; }
+.ob-passo.ativo .ob-passo-txt b { font-weight: 600; }
+.ob-passo-acoes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 4px; }
+.ob-passo-acoes .ob-link { display: inline-flex; align-items: center; gap: 5px; font-weight: 500; }
+
+/* "Seus bots já têm uma IA": o Continuar e a nota. */
+.ob-seguir { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 
 /* O botão do onboarding: pílula na cor de ação (o "Conectado" da IA em sucesso). */
 .ob-pilula { border: 0; background: var(--action); color: var(--on-action); border-radius: 999px; padding: 0 18px; height: 40px; font: inherit; font-size: 14px;
@@ -39,6 +94,11 @@
 .ob-pilula:hover:not(:disabled) { opacity: .88; }
 .ob-pilula:disabled { cursor: default; }
 .ob-pilula.ok, .ob-pilula.ok:disabled { background: var(--success); color: var(--on-status); }
+/* O secundário (Cancelar, o outro provedor na tela de sucesso): contorno, um degrau menor. */
+.ob-pilula.contorno { height: 36px; padding: 0 14px; font-size: 13px; background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); }
+.ob-pilula.contorno:hover:not(:disabled) { background: var(--surface-raised); opacity: 1; }
+.ob-pilula.grande { height: 48px; padding: 0 28px; font-size: 15px; }
+.ob-pilula.grande:disabled { opacity: .7; }
 .ob-pilula:focus-visible, .ob-redondo:focus-visible, .ob-link:focus-visible, .ob-rotina:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .ob-gira { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; opacity: .8;
   animation: ob-gira .9s linear infinite; flex: none; }
@@ -53,6 +113,11 @@
 .ob-quem { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .ob-quem b { font-size: 30px; font-weight: 600; letter-spacing: -.02em; }
 .ob-quem span { font-size: 15px; color: var(--ink-2); }
+/* Com qual conta a guia vai pensar (definido em 2026-10-05). */
+.ob-pensa { margin: 0; display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line);
+  font-size: 12px; line-height: 16px; color: var(--ink-2); }
+.ob-pensa-logo { display: flex; color: var(--ink); }
+.ob-pensa-logo svg { width: 16px; height: 16px; }
 .ob-botoes-ligacao { display: flex; gap: 56px; margin-top: 12px; padding-bottom: 48px; }
 .ob-botao-ligacao { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
 .ob-botao-ligacao:last-child { color: var(--ink); }
@@ -135,7 +200,11 @@
 @keyframes ob-anel { 0% { transform: scale(1); opacity: .5; } 100% { transform: scale(1.9); opacity: 0; } }
 @keyframes ob-gira { to { transform: rotate(360deg); } }
 @keyframes ob-chama { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes ob-ponto { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .ob-ola span, .ob-tela, .ob-cards-ia, .ob-linha, .ob-montado, .ob-balao, .ob-card, .ob-fim, .ob-painel-entrevista, .ob-anel, .ob-redondo.atender, .ob-gira { animation: none; }
+  .ob-ola span, .ob-tela, .ob-cards-ia, .ob-conexao, .ob-linha, .ob-montado, .ob-balao, .ob-card, .ob-fim, .ob-painel-entrevista, .ob-anel, .ob-redondo.atender, .ob-gira, .ob-pontos i { animation: none; }
   .ob-ola span { opacity: 1; }
+  /* Sem movimento, os três pontinhos ficam em degraus (como no protótipo parado). */
+  .ob-pontos i:nth-child(2) { opacity: .6; }
+  .ob-pontos i:nth-child(3) { opacity: .3; }
 }
