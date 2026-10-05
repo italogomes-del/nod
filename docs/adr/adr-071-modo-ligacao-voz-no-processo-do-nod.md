@@ -89,3 +89,34 @@ HTTP/2 crua der trabalho (GOAWAY, fluxos presos), troca-se o transporte por `@gr
 se o problema for do serviço, `NOD_VOZ_TTS_STREAMING=0`.
 
 **A confirmar.** Se `speaking_rate` é honrado no streaming e se cada fluxo conta na cota de pedidos por minuto.
+
+## Emenda 2026-10-05 — a drenagem cobre os turnos em execução (NOD-175)
+
+**O que muda.** Definido em 2026-10-05: no SIGTERM a drenagem deixa de proteger só as ligações. Com o mesmo prazo
+(`NOD_DRENAGEM_MAX_MS`, 10 min) o nod também:
+
+- **para de entregar turno novo aos Macs.** O `POST /api/maquina/puxar` volta `{plano:null}` na hora, na entrada e a
+  cada volta do long-poll. O turno fica `pendente` no Postgres (ADR-010) e o próximo processo o entrega. `renovar` e
+  `entregar` seguem aceitos.
+- **espera os turnos com token vivo** (`tokenTurno.ativos()`) e as reservas em voo da ponte, só no modo compartilhado.
+  No modo local o turno roda no próprio processo e o Ctrl+C não pode travar 10 min, então ali a espera continua só pelas
+  ligações.
+
+**Corrida entre a reserva e a drenagem.** A ponte conta os `ponte.puxar` em voo (`reservasEmVoo()`). Um plano reservado
+antes da drenagem e devolvido já durante ela **é entregue**: o token foi cunhado e passa a contar em `ativos()`. Uma
+reserva feita nunca é desfeita, e a drenagem só termina com esse contador em zero.
+
+**O que passa do prazo.** `fechar()` não revoga nada. O próximo boot assenta o turno remanescente como
+`reinicio_servidor` pelo varredor de lease (ADR-045) e o aviso sai como hoje.
+
+**Como.** `ServidorNod.drenar({prazoMs, intervaloMs})` (boot.ts) espera e devolve o resultado; `server.ts` faz
+`drenar().then(fechar)`. Log `drenagem_concluida {vivas, turnos, duracao_ms, prazo_vencido}`. O segundo sinal mata pelo
+padrão do Node (`process.once`).
+
+**Saúde.** `/api/saude` faz `select 1` com prazo de 2 s. Se falhar, devolve 503 `{ok:false}`, sem detalhe (log
+`saude_banco_falhou {motivo}`). Na drenagem continua 200: o banco segue no ar e o container só deve sair pelo SIGTERM.
+
+**Custo aceito.** Um deploy com uma sessão viva longa congela a entrega de turnos novos por até 10 min. Um token órfão
+(rollback depois do `cunhar`) segura a drenagem até o prazo, sem perder turno. A medida é
+`pos_restart{desfecho="perdido",origem="restart_servidor"}` por deploy, antes e depois, junto com
+`drenagem_concluida.duracao_ms`.

@@ -26,6 +26,7 @@ entra na VM pelo IAP; só o repositório `marlonwlv/nod`, na branch `main`, pode
 3. Copia `config.env`, `compose.yml`, `Caddyfile` e `deploy.sh` para `/opt/nod` na VM.
 4. `deploy.sh` monta `/opt/nod/nod.env` a partir do Secret Manager, roda as migrações como
    `nod_dono` com a imagem nova e recria o container do nod. Espera o healthcheck (`/api/saude`).
+   A saúde inclui o banco: `select 1` com prazo de 2 s, senão 503 (NOD-175).
    O env leva as duas URLs: `DATABASE_URL` (nod_app, das requisições) e `DATABASE_URL_DONO`, que o
    boot usa só para criar as partições de `events` (ADR-006) e fecha em seguida.
 

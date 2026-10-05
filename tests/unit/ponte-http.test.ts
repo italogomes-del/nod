@@ -1,4 +1,9 @@
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
+import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import { VERSAO_MINIMA_APP, type PonteInternaNod } from "../../src/adapters/fundo/ponte-interna.ts";
+import { criarPonteHttpServidor } from "../../src/adapters/http/rotas/ponte.ts";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
 import { versaoAceita } from "../../src/domain/versao-app.ts";
 import { entrega, falas, inventario, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
@@ -69,5 +74,56 @@ describe("desktop: fronteiras HTTP", () => {
     for (const ruim of [[{ seq: 0, texto: "x" }], [{ seq: 1.5, texto: "x" }], [{ seq: 1 }], [{ seq: 1, texto: "x".repeat(TEXTO_ENTREGA_MAX_CHARS + 1) }], "x", Array.from({ length: 51 }, (_, i) => ({ seq: i + 1, texto: "t" }))]) {
       expect(() => falas(ruim), JSON.stringify(ruim).slice(0, 60)).toThrow();
     }
+  });
+});
+
+describe("NOD-175: ponte do servidor na drenagem", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const plano = { turnoId: "00000000-0000-4000-8000-000000000003" } as PlanoTurno;
+
+  function montar(puxar: PonteInternaNod["puxar"]) {
+    const ponte: PonteInternaNod = { conectar: async () => undefined, puxar, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+    });
+    const chamar = async (nome: string, corpo: unknown = {}) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+    return { p, chamar };
+  }
+  const conectar = { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } };
+
+  it("reserva em voo quando a drenagem começa: o plano é entregue e reservasEmVoo volta de 1 a 0", async () => {
+    let soltar: (p: PlanoTurno) => void = () => undefined;
+    const { p, chamar } = montar(() => new Promise((r) => { soltar = r; }));
+    await chamar("conectar", conectar);
+    const puxando = chamar("puxar");
+    await vi.waitFor(() => expect(p.reservasEmVoo()).toBe(1));
+    p.iniciarDrenagem();
+    soltar(plano);
+    expect(await puxando).toEqual({ status: 200, body: { plano } });
+    expect(p.reservasEmVoo()).toBe(0);
+  });
+
+  it("drenando: o puxar volta {plano:null} na hora, sem chamar a ponte; drenagem no meio do long-poll também corta a espera", async () => {
+    const puxar = vi.fn<PonteInternaNod["puxar"]>().mockResolvedValue(null);
+    const { p, chamar } = montar(puxar);
+    await chamar("conectar", conectar);
+    const esperando = chamar("puxar");
+    await vi.waitFor(() => expect(puxar).toHaveBeenCalled());
+    const inicio = Date.now();
+    p.iniciarDrenagem();
+    expect(await esperando).toEqual({ status: 200, body: { plano: null } });
+    expect(Date.now() - inicio).toBeLessThan(500);
+    puxar.mockClear();
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: null } });
+    expect(puxar).not.toHaveBeenCalled();
+    expect(p.reservasEmVoo()).toBe(0);
   });
 });

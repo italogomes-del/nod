@@ -8,6 +8,7 @@ import type { ResultadoTurno } from "../../src/contracts/turno.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { criarInterruptor } from "../../src/services/interruptor.ts";
+import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
@@ -146,5 +147,35 @@ describeIntegracao("pool elástico de laços (2026-09-24): agentes diferentes em
       await pool.parar();
       for (const r of portoes.values()) r();
     }
+  });
+});
+
+describeIntegracao("NOD-175: a reserva que falha depois do cunhar não deixa token órfão", () => {
+  it("o token cunhado é revogado, o puxar devolve null e o turno volta a pendente", async () => {
+    // Token real: é `ativos()` que a drenagem do SIGTERM espera. O emitir cunha (como o de compor.ts) e falha em seguida.
+    const tokenTurno = criarTokenTurno({ agora: () => Date.now() });
+    const emitidos: string[] = [];
+    const planos = {
+      ...services.planos,
+      async emitir(_trx: Tx, turnoId: string) {
+        emitidos.push(turnoId);
+        tokenTurno.cunhar(turnoId, { tenantId: PESSOA.tenantId, pessoaId: PESSOA.pessoaId, agenteId: randomUUID() });
+        throw new Error("falha depois do cunhar");
+      },
+    };
+    const ponte = criarPonteInterna(db, { services: { ...services, tokenTurno, planos }, useCases, executor: "catcher", listarPessoas });
+    await ponte.conectar({ machineId: randomUUID(), nome: "teste", inventario: PRONTO, versaoContrato: 1 });
+    const turnoId = await escopado(async (trx) => {
+      const deps = depsSobreTrx(trx, PESSOA, { services });
+      const c = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Nina" })).data;
+      criados.agentes.push(c.agente.id);
+      criados.conversas.push(c.conversa.id);
+      return (await executar(deps, enviarMensagem, { conversaId: c.conversa.id, texto: "tarefa", inventario: PRONTO, executor: "catcher" })).data.turno.id;
+    });
+
+    expect(await ponte.puxar(PESSOA.pessoaId)).toBeNull();
+    expect(emitidos).toEqual([turnoId]);
+    expect(tokenTurno.ativos()).toBe(0);
+    expect(await escopado(async (trx) => (await trx<{ estado: string }[]>`select estado from turnos where id = ${turnoId}`)[0]?.estado)).toBe("pendente");
   });
 });

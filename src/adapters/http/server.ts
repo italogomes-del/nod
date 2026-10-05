@@ -17,18 +17,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const servidor = await boot();
   const encerrar = (sinal: string) => {
+    // SIGTERM e depois Ctrl+C (ou o contrário) também é "segundo sinal": sem ouvinte, o padrão do Node mata.
+    process.removeListener("SIGINT", aoSigint);
+    process.removeListener("SIGTERM", aoSigterm);
     log("info", "sinal_recebido", { sinal });
-    // definido em 2026-10-04 (ADR-071): drenagem — com ligação viva, avisa e espera ela acabar até NOD_DRENAGEM_MAX_MS
-    // (padrão 10 min; o compose dá stop_grace_period de 11 min). Sem ligação, fecha na hora como antes.
-    const voz = servidor.app.voz;
-    const prazo = Date.now() + (Number(process.env.NOD_DRENAGEM_MAX_MS) || 600_000);
-    voz.iniciarDrenagem();
-    const esperar = async () => {
-      while (voz.vivas() > 0 && Date.now() < prazo) await new Promise((r) => setTimeout(r, 1_000));
-      log("info", "drenagem_concluida", { vivas: voz.vivas() });
-    };
-    esperar().then(() => servidor.fechar()).then(() => process.exit(0), () => process.exit(1));
+    // definido em 2026-10-04 (ADR-071), revisto em 2026-10-05 (NOD-175): drenagem — recusa ligação nova, a ponte para de
+    // entregar turno novo e espera as ligações e os turnos com token vivo até NOD_DRENAGEM_MAX_MS (padrão 10 min; o
+    // compose dá stop_grace_period de 11 min). Sem nada vivo, fecha na hora como antes. Segundo sinal: o padrão mata.
+    servidor
+      .drenar({ prazoMs: Number(process.env.NOD_DRENAGEM_MAX_MS) || 600_000 })
+      .then(() => servidor.fechar())
+      .then(() => process.exit(0), () => process.exit(1));
   };
-  process.once("SIGINT", () => encerrar("SIGINT"));
-  process.once("SIGTERM", () => encerrar("SIGTERM"));
+  const aoSigint = () => encerrar("SIGINT");
+  const aoSigterm = () => encerrar("SIGTERM");
+  process.once("SIGINT", aoSigint);
+  process.once("SIGTERM", aoSigterm);
 }

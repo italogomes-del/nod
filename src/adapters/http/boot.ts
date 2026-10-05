@@ -49,6 +49,8 @@ export type OpcoesBoot = {
   staticDir?: string;
 };
 
+export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: number; prazo_vencido: boolean };
+
 export type ServidorNod = {
   app: App;
   registry: Registry;
@@ -56,6 +58,12 @@ export type ServidorNod = {
   port: number;
   machineId: string;
   inventario: Inventario;
+  /**
+   * Drenagem do SIGTERM (ADR-071, emenda NOD-175): recusa ligação nova, para a ponte de máquina de entregar turno novo e
+   * espera as ligações vivas e, no modo compartilhado, os turnos com token vivo e as reservas em voo — até `prazoMs`. Não
+   * fecha nada nem revoga o que sobrar: o próximo boot assenta como `reinicio_servidor` pelo varredor de lease (ADR-045).
+   */
+  drenar(o: { prazoMs: number; intervaloMs?: number }): Promise<ResultadoDrenagem>;
   fechar(): Promise<void>;
 };
 
@@ -115,6 +123,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     autorizarTokenTurno: app.tokens.autorizar,
     autorizarMaquina: app.compartilhado ? app.autorizarMaquina : undefined,
     sessao,
+    verificarBanco: () => db`select 1`,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.
     upgrade: (server, resolverEscopo) => {
       canaisVoz = app.anexarVoz(server, resolverEscopo);
@@ -215,6 +224,21 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     port: srv.port,
     machineId,
     inventario,
+    async drenar({ prazoMs, intervaloMs = 1_000 }) {
+      const inicio = agora();
+      app.voz.iniciarDrenagem();
+      app.drenarPonte();
+      // definido em 2026-10-05 (NOD-175): só o compartilhado espera tokens — no modo local o turno roda neste processo e
+      // o Ctrl+C do `npm start` não pode travar 10 min; o servidor local espera só as ligações, como antes.
+      const turnos = () => (app.compartilhado ? app.tokens.ativos() + app.reservasEmVoo() : 0);
+      const pendente = () => app.voz.vivas() > 0 || turnos() > 0;
+      while (pendente() && agora() - inicio < prazoMs) {
+        await new Promise((r) => setTimeout(r, Math.min(intervaloMs, Math.max(1, prazoMs - (agora() - inicio)))));
+      }
+      const r: ResultadoDrenagem = { vivas: app.voz.vivas(), turnos: turnos(), duracao_ms: agora() - inicio, prazo_vencido: pendente() };
+      log("info", "drenagem_concluida", r);
+      return r;
+    },
     async fechar() {
       if (fechado) return;
       fechado = true;

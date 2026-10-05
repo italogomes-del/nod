@@ -1,8 +1,11 @@
+import { createConnection, createServer, type Socket } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
+import { criarDb } from "../../src/db/client.ts";
 import { listen } from "../../src/adapters/http/server.ts";
 import type { Rota } from "../../src/adapters/http/roteador.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
 
 /** Servidor real em porta 0, sem banco: saúde, sessão stub, escopo da URL e rotas internas. */
 const rotasDeTeste: Rota[] = [
@@ -114,5 +117,121 @@ describe("servidor: saúde, sessão e roteador", () => {
   it("recusa NOD_HOST fora de 127.0.0.1 com o login de desenvolvimento (stub)", () => {
     expect(() => listen(0, "0.0.0.0")).toThrow(/NOD_HOST=0.0.0.0 recusado/);
     expect(() => listen(0, "0.0.0.0", { sessao: { modo: "stub" } })).toThrow(/NOD_HOST=0.0.0.0 recusado/);
+  });
+});
+
+describe("NOD-175: /api/saude com verificador falso (sem banco)", () => {
+  it("o banco recusa → 503 {ok:false} na hora, sem detalhe; o verificador que lança também é 503", async () => {
+    for (const verificarBanco of [() => Promise.reject(new Error("senha do banco: segredo")), () => { throw new Error("segredo"); }]) {
+      const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarBanco });
+      try {
+        const r = await fetch(`http://127.0.0.1:${srv.port}/api/saude`);
+        expect(r.status).toBe(503);
+        expect(await r.text()).toBe(JSON.stringify({ ok: false }));
+      } finally {
+        await srv.close();
+      }
+    }
+  });
+
+  it("pedidos simultâneos compartilham a verificação em voo; o seguinte abre outra", async () => {
+    let chamadas = 0;
+    let soltar: () => void = () => undefined;
+    const srv = await listen(0, "127.0.0.1", {
+      segredoSessao: "s",
+      sessao: { modo: "stub" },
+      verificarBanco: () => {
+        chamadas++;
+        return new Promise<void>((r) => { soltar = r; });
+      },
+    });
+    const saude = () => fetch(`http://127.0.0.1:${srv.port}/api/saude`);
+    try {
+      const juntos = Promise.all([saude(), saude(), saude()]);
+      await expect.poll(() => chamadas).toBe(1);
+      await new Promise((r) => setTimeout(r, 50));
+      soltar();
+      expect((await juntos).map((r) => r.status)).toEqual([200, 200, 200]);
+      expect(chamadas).toBe(1);
+
+      const depois = saude();
+      await expect.poll(() => chamadas).toBe(2);
+      soltar();
+      expect((await depois).status).toBe(200);
+    } finally {
+      await srv.close();
+    }
+  });
+});
+
+/**
+ * Proxy TCP entre o pool e o Postgres de teste. "engolir" aceita a conexão e descarta os bytes nos dois sentidos — o
+ * banco some sem recusar, o caso que pendura um `select 1` sem prazo; "repassar" liga as pontas.
+ */
+async function proxyTcp(alvo: URL) {
+  let modo: "repassar" | "engolir" = "repassar";
+  const abertos = new Set<Socket>();
+  const server = createServer((cliente) => {
+    abertos.add(cliente);
+    cliente.on("close", () => abertos.delete(cliente));
+    cliente.on("error", () => undefined);
+    if (modo === "engolir") {
+      cliente.on("data", () => undefined);
+      return;
+    }
+    const banco = createConnection(Number(alvo.port || 5432), alvo.hostname);
+    abertos.add(banco);
+    banco.on("close", () => abertos.delete(banco));
+    banco.on("error", () => cliente.destroy());
+    cliente.pipe(banco).pipe(cliente);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const addr = server.address();
+  const porta = typeof addr === "object" && addr ? addr.port : 0;
+  return {
+    porta,
+    engolir() {
+      modo = "engolir";
+      for (const s of abertos) s.destroy();
+    },
+    repassar() {
+      modo = "repassar";
+    },
+    fechar: () => new Promise<void>((r) => {
+      for (const s of abertos) s.destroy();
+      server.close(() => r());
+    }),
+  };
+}
+
+describeIntegracao("NOD-175: /api/saude verifica o banco", () => {
+  it("Postgres inacessível → 503 {ok:false} em até 3 s, sem detalhe; com o banco de volta → 200", async () => {
+    const alvo = new URL(process.env.DATABASE_URL_TEST ?? "");
+    const proxy = await proxyTcp(alvo);
+    const viaProxy = new URL(alvo);
+    viaProxy.hostname = "127.0.0.1";
+    viaProxy.port = String(proxy.porta);
+    const db = criarDb(viaProxy.toString(), { max: 2 });
+    const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarBanco: () => db`select 1` });
+    const saude = () => fetch(`http://127.0.0.1:${srv.port}/api/saude`);
+    try {
+      const ok = await saude();
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toEqual({ ok: true });
+
+      proxy.engolir();
+      const inicio = Date.now();
+      const fora = await saude();
+      expect(Date.now() - inicio).toBeLessThan(3_000);
+      expect(fora.status).toBe(503);
+      expect(await fora.json()).toEqual({ ok: false });
+
+      proxy.repassar();
+      await expect.poll(async () => (await saude()).status, { timeout: 15_000, interval: 250 }).toBe(200);
+    } finally {
+      await srv.close();
+      await proxy.fechar();
+      await db.end({ timeout: 0 });
+    }
   });
 });

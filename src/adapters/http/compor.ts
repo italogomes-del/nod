@@ -179,6 +179,10 @@ export type App = {
   tenantDe(pessoaId: string): Promise<string | null>;
   /** ADR-071: o orquestrador das ligações por voz (memória deste processo). */
   voz: ServicoVoz;
+  /** NOD-175: a ponte de máquina para de entregar turno novo (drenagem do SIGTERM); renovar e entregar seguem. */
+  drenarPonte(): void;
+  /** NOD-175: `puxar` da ponte de máquina em voo — reserva que ainda pode virar token vivo. */
+  reservasEmVoo(): number;
   /** Liga os dois canais WebSocket da ligação ao servidor HTTP (boot, depois do listen). */
   anexarVoz(server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null): CanaisVoz;
   fechar(): Promise<void>;
@@ -896,6 +900,8 @@ export function comporApp(o: OpcoesCompor): App {
     aoRegistrarCatcher,
     tenantDe,
     voz,
+    drenarPonte: () => ponteHttp.iniciarDrenagem(),
+    reservasEmVoo: () => ponteHttp.reservasEmVoo(),
     anexarVoz(server, resolverEscopo) {
       return anexarCanaisVoz(server, {
         resolverEscopo,

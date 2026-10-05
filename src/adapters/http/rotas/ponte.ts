@@ -50,6 +50,13 @@ export function criarPonteHttpServidor(d: {
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
+  /**
+   * definido em 2026-10-05 (NOD-175): na drenagem do SIGTERM o puxar não reserva turno novo — o turno fica `pendente` no
+   * Postgres (ADR-010) para o próximo processo. `reservando` conta os `ponte.puxar` em voo: o que já reservou antes da
+   * drenagem é ENTREGUE (o token foi cunhado e `ativos()` passa a contá-lo), nunca desfeito; a drenagem espera esse zero.
+   */
+  let drenando = false;
+  let reservando = 0;
   const ausente = (): Inventario => ({ estado: "ausente", motivo: "Abra o app nod e conecte sua conta de IA no seu computador", em: d.agora() });
   function atual(pessoaId: string): Inventario {
     const vivas = [...conexoes.values()].filter((c) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000);
@@ -109,8 +116,13 @@ export function criarPonteHttpServidor(d: {
           const identidade = await d.autorizar((ctx.req.headers.authorization ?? "").slice(7));
           if (!identidade) { ctx.json(401, { codigo: "nao_permitido" }); return; }
           c.ultimo = d.agora();
-          if (c.inv.estado === "pronto") plano = await c.ponte.puxar(ctx.escopo.pessoaId);
+          if (drenando) break;
+          if (c.inv.estado === "pronto") {
+            reservando++;
+            try { plano = await c.ponte.puxar(ctx.escopo.pessoaId); } finally { reservando--; }
+          }
           if (plano) { c.planos.set(plano.turnoId, plano); break; }
+          if (drenando) break;
           await esperar(250);
         } while (d.agora() < ate);
         ctx.json(200, { plano });
@@ -222,5 +234,9 @@ export function criarPonteHttpServidor(d: {
   function ghDaPessoa(pessoaId: string): boolean {
     return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && ghDaMaquina(c.escopo, id));
   }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa };
+  /** NOD-175: a partir daqui o puxar volta `{plano:null}` na hora; renovar e entregar seguem aceitos. Não se desfaz. */
+  function iniciarDrenagem(): void { drenando = true; }
+  /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
+  function reservasEmVoo(): number { return reservando; }
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

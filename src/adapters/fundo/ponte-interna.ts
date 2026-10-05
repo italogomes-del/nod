@@ -86,9 +86,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       if (!escopo) return null;
       const maquina = maquinas.values().next().value;
       if (!maquina) return null;
+      // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do
+      // `cunhar` (composição, outbox, commit), o turno volta a `pendente` e ninguém recebe o plano: o token cunhado
+      // aqui é revogado, senão ele conta em `ativos()` para sempre e segura a drenagem do SIGTERM até o prazo.
+      // Embrulha `planos.emitir` (é por ele que o despacho cunha), não `tokenTurno.cunhar`: o emitir composto em
+      // compor.ts usa os services do fechamento e não veria um cunhar trocado aqui.
+      const emitidos: string[] = [];
+      const planos = deps.services.planos;
+      const services: Services = { ...deps.services, planos: { ...planos, emitir: (trx, turnoId, machineId) => (emitidos.push(turnoId), planos.emitir(trx, turnoId, machineId)) } };
       try {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
-          const d = depsDe(trx, escopo);
+          const d = { ...depsDe(trx, escopo), services };
           const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
@@ -99,6 +107,12 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           return r.data.plano;
         });
       } catch (e) {
+        for (const turnoId of emitidos) {
+          escopos.delete(turnoId);
+          executores.delete(turnoId);
+          harnesses.delete(turnoId);
+          deps.services.tokenTurno.revogar(turnoId);
+        }
         log("erro", "ponte_puxar_falhou", { pessoa_id: pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
         return null;
       }

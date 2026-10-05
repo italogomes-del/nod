@@ -4,7 +4,7 @@ import { log } from "../../obs/log.ts";
 import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
 import { responderMetricas } from "./rotas/metricas.ts";
-import { rotaSaude } from "./rotas/saude.ts";
+import { criarRotaSaude } from "./rotas/saude.ts";
 import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type OpcoesSessao } from "./sessao.ts";
 
 /**
@@ -30,12 +30,14 @@ export interface OpcoesServidor {
    * resolução de sessão do roteador. Sem isto, nenhum upgrade é aceito.
    */
   upgrade?: (server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null) => void;
+  /** definido em 2026-10-05 (NOD-175): o `select 1` do `/api/saude`. Sem isto, a saúde responde 200 sem olhar o banco. */
+  verificarBanco?: () => Promise<unknown>;
 }
 
 export function criarServidor(opcoes: OpcoesServidor = {}) {
   const opcoesSessao = opcoes.sessao ?? { modo: "stub" };
   const sessao = criarSessao(segredoEfetivo(opcoesSessao.modo, opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO), opcoesSessao);
-  const rotas: Rota[] = [rotaSaude, ...sessao.rotas, ...(opcoes.rotas ?? [])];
+  const rotas: Rota[] = [criarRotaSaude(opcoes.verificarBanco), ...sessao.rotas, ...(opcoes.rotas ?? [])];
   const roteador = criarRoteador(rotas, {
     resolverEscopo: sessao.resolverEscopo,
     autorizarTokenTurno: opcoes.autorizarTokenTurno,
