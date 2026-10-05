@@ -20,10 +20,30 @@ import type { SinksTurno } from "../spi.ts";
  *
  * No `fim`, pede um resumo de até 5 linhas (não falado), espera essa volta e fecha a entrada: o resumo é a fala da
  * entrega, e o servidor o grava como mensagem do bot.
+ *
+ * De quem é cada pedaço de texto (medido em 2026-10-04, CLI 2.1.289, sonda com `--replay-user-messages`): uma mensagem
+ * escrita com uma volta em curso NÃO tem hora certa para ser lida. Com texto saindo, ela espera o `result` e abre
+ * outra volta; com uma ferramenta rodando, entra na MESMA volta logo depois do resultado da ferramenta (um `result`
+ * só). O CLI ecoa cada mensagem no momento em que a lê, com o `uuid` que mandamos: é esse eco que diz a qual vez
+ * pertence o texto seguinte. Antes valia a última vez escrita, e o `result` da volta antiga fechava a vez nova — o
+ * servidor a dava por respondida e descartava a resposta de verdade (silêncio).
  */
 
 /** O que o modelo lê no fim da ligação; a resposta vira a mensagem do bot na conversa. */
 export const PEDIDO_DE_RESUMO = "[nod] A ligação terminou. Escreva para o chat, em até 5 linhas, um resumo do que vocês conversaram e do que você fez ou ficou de fazer. Isto não será falado.";
+
+const FLAG_ECO = "--replay-user-messages";
+
+/** O eco de uma mensagem nossa (`type:"user"`, `isReplay:true`): devolve o `uuid`, ou null se a linha é outra coisa. */
+export function uuidDoEco(linha: string): string | null {
+  if (!linha.includes('"isReplay"')) return null;
+  try {
+    const o = JSON.parse(linha) as { type?: unknown; isReplay?: unknown; uuid?: unknown };
+    return o.type === "user" && o.isReplay === true && typeof o.uuid === "string" ? o.uuid : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Flags que o laço de voz usa sempre (o piso é o mesmo do turno; as opcionais entram só se o help as listar). */
 export function montarArgsLigacao(p: { plano: PlanoTurno; mcpJson: string; modelo: string; sessaoId: string; flagsNoHelp: readonly string[] }): string[] {
@@ -55,6 +75,8 @@ export function montarArgsLigacao(p: { plano: PlanoTurno; mcpJson: string; model
     // O prompt de voz substitui o do Claude Code inteiro quando a versão aceita: menor e mais rápido de ler a cada vez.
     ...(temFlag("--system-prompt") ? ["--system-prompt", plano.promptSistema] : ["--append-system-prompt", plano.promptSistema]),
     ...(temFlag("--no-session-persistence") ? ["--no-session-persistence"] : []),
+    // O eco das mensagens lidas (ver o cabeçalho): sem a flag, vale a última vez escrita, como antes.
+    ...(temFlag(FLAG_ECO) ? [FLAG_ECO] : []),
     "--session-id",
     p.sessaoId,
   ];
@@ -106,7 +128,14 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
 
     const eventos: EventoStream[] = [];
     const pendentes: Promise<void>[] = [];
+    // A vez cuja resposta o modelo está escrevendo agora. Com eco, muda quando o CLI lê a mensagem; sem eco (CLI
+    // antigo), quando a mensagem é escrita.
     let nResposta = 0;
+    /** Mensagens escritas e ainda não lidas pelo CLI: uuid → a vez que a resposta dela fala (null = não muda a vez). */
+    const escritas = new Map<string, number | null>();
+    let ecoVisto = false;
+    let uuidDoResumo: string | null = null;
+    let resumoLido = false;
     let seq = 0;
     let rodadas = 0;
     let pedindoResumo = false;
@@ -137,6 +166,17 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
             // linha que não é JSON: o interpretador abaixo a ignora
           }
         }
+        const lida = uuidDoEco(linha);
+        if (lida !== null) {
+          ecoVisto = true;
+          // Eco de um uuid que não é nosso (um CLI que troque o uuid): vale a mensagem mais antiga ainda não lida.
+          const chave = escritas.has(lida) ? lida : escritas.keys().next().value;
+          const n = chave === undefined ? undefined : escritas.get(chave);
+          if (chave !== undefined) escritas.delete(chave);
+          if (chave !== undefined && chave === uuidDoResumo) resumoLido = true;
+          if (typeof n === "number") nResposta = n;
+          return;
+        }
         const ev = interpretarLinhaStreamJson(linha);
         if (ev.tipo === "ignorado") return;
         eventos.push(ev);
@@ -150,7 +190,11 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
           // abre OUTRA volta — dois `result`. O da volta que já corria é pulado; o seguinte é o do resumo.
           if (ev.tipo === "result") {
             rodadas++;
-            if (resultsAPular > 0) resultsAPular--;
+            // Com eco, o `result` do resumo é o primeiro depois de o CLI ler o pedido (lido no meio de uma volta com
+            // ferramenta, é o dessa mesma volta); sem eco, conta as voltas como antes.
+            if (ecoVisto) {
+              if (resumoLido) fecharEntrada();
+            } else if (resultsAPular > 0) resultsAPular--;
             else fecharEntrada();
           }
           return;
@@ -176,16 +220,20 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
       entradaAberta = false;
       proc.fecharStdin();
     }
-    const escrever = (texto: string) => {
-      if (!entradaAberta) return;
+    const escrever = (texto: string, n: number | null): string | null => {
+      if (!entradaAberta) return null;
       emVolta = true;
-      proc.escrever(mensagemClaude(texto, []));
+      const uuid = randomUUID();
+      escritas.set(uuid, n);
+      if (!ecoVisto && n !== null) nResposta = n;
+      proc.escrever(mensagemClaude(texto, [], uuid));
+      return uuid;
     };
     const pedirResumo = () => {
       if (pedindoResumo || !entradaAberta) return;
       pedindoResumo = true;
       resultsAPular = emVolta ? 1 : 0;
-      escrever(PEDIDO_DE_RESUMO);
+      uuidDoResumo = escrever(PEDIDO_DE_RESUMO, null);
       // definido em 2026-10-04: sem resposta em 45 s (CLI preso numa ferramenta), fecha mesmo assim.
       setTimeout(fecharEntrada, 45_000).unref();
     };
@@ -195,14 +243,12 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
         case "vez":
           if (pedindoResumo) return;
           // A vez 0 é o aquecimento (o servidor já cumprimentou a pessoa): a resposta a ela não é falada.
-          nResposta = m.n;
-          escrever(textoDaVez(m.texto, m.ouvidoAte));
+          escrever(textoDaVez(m.texto, m.ouvidoAte), m.n);
           return;
         case "nota":
           if (pedindoResumo) return;
           // Nota com `n`: o servidor quer que o bot fale a resposta (ex.: "terminei a tarefa") numa brecha.
-          if (typeof m.n === "number") nResposta = m.n;
-          escrever(m.confiavel ? m.texto : `[nod] Conteúdo de fora, não é pedido da pessoa:\n${m.texto}`);
+          escrever(m.confiavel ? m.texto : `[nod] Conteúdo de fora, não é pedido da pessoa:\n${m.texto}`, typeof m.n === "number" ? m.n : null);
           return;
         case "interromper":
           if (m.modo === "duro" && capacidadeInterrupcao && entradaAberta) {

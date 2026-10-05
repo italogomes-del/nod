@@ -247,3 +247,9 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
 - A decisão por voz nunca é do modelo: só a rota de decisão com `canal:"voz"` e um `comandoId` que o orquestrador emitiu
   (ADR-074). Não crie outro caminho de decisão a partir da fala.
 - Nenhum áudio é gravado e o texto falado não vai para log (`log` com contagens e tempos, nunca a fala).
+- Para saber onde uma ligação demorou, leia o log `ligacao_vez` (uma linha por vez: fim da voz → trecho fechado → final
+  do STT → vez → primeiro texto → primeiro áudio, ferramenta antes do texto, quem fechou o trecho) e os contadores do
+  VAD em `voz_ligacao_encerrada` (emenda da ADR-073). Quem mexer na decisão da vez mantém a regra: com texto pendente e
+  ninguém falando, há sempre uma decisão agendada (`agendarDecisao`/`retomarDecisao` no orquestrador).
+- No laço do Claude, o texto pertence à vez da última mensagem que o CLI **leu** (o eco de `--replay-user-messages`),
+  não da última escrita (emenda da ADR-072). `scripts/sonda-voltas-ligacao.ts` mede isso contra o CLI real (centavos).

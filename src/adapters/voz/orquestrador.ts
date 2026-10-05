@@ -2,6 +2,7 @@ import { FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, 
 import { ehEco } from "../../domain/ligacao-eco.ts";
 import { escolherFala, FALAS_DE_ESPERA, TEMPOS_ESPERA, type CategoriaEspera, type EsperaTocada, type FalaDeEspera } from "../../domain/ligacao-espera.ts";
 import { criarSegmentador, removerAberturaRepetida, textoFalavel } from "../../domain/ligacao-frases.ts";
+import { novasMarcas, percentilMs, resumoDaVez, type DesfechoDaVez, type MarcasDaVez, type OrigemDaVez, type QuemFechouTrecho } from "../../domain/ligacao-medicao.ts";
 import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
 import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, FATOR_VAD_BOT_FALANDO, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
 import { criarVad, VOZ_MINIMA_MS } from "../../domain/ligacao-vad.ts";
@@ -111,6 +112,20 @@ export const PRAZOS_PADRAO = {
 const JANELA_REFAZER_VEZ_MS = 3_000;
 /** definido em 2026-10-04: pré-roll do STT — o começo da fala que o VAD só confirma depois de 3 quadros. */
 const PRE_ROLL_QUADROS = 15;
+/**
+ * definido em 2026-10-04 (ligação do Marlon no alto-falante: um trecho de 35 s com três palavras, e o seguinte nunca
+ * fechou): com STT que dá parciais, um trecho "falando" há 1,5 s sem texto novo fecha sozinho — as parciais do Google
+ * chegam a cada ~0,5 s, então três em branco seguidas são ruído segurando o VAD, não fala.
+ */
+const VIGIA_SEM_TEXTO_MS = 1_500;
+/**
+ * definido em 2026-10-04: depois de um trecho que fechou sem palavra nenhuma (ruído), por 5 s um começo de fala só
+ * segura a vez, refaz a vez ou interrompe o bot quando a transcrição trouxer texto. Sem isso o ruído seguinte
+ * cancelava a decisão de novo, e a vez nunca saía.
+ */
+const JANELA_RUIDO_MS = 5_000;
+/** definido em 2026-10-04: a medição da vez respondida espera 10 s pelo `tocado` do app e pelos buracos de áudio. */
+const MEDICAO_ESPERA_MS = 10_000;
 /** definido em 2026-10-04: pedaço de voz mandado ao cliente (100 ms a 24 kHz). */
 const AMOSTRAS_POR_PEDACO = 2400;
 /** definido em 2026-10-04: áudio subindo acima de 1,2× o tempo real (com 2 s de folga) é abuso e fecha a conexão. */
@@ -146,12 +161,6 @@ export interface ServicoVoz {
   /** Deploy (SIGTERM): recusa ligação nova e avisa as vivas falando; elas seguem até acabar ou até o prazo. */
   iniciarDrenagem(): void;
   fechar(): Promise<void>;
-}
-
-function percentil(valores: readonly number[], p: number): number | null {
-  if (valores.length === 0) return null;
-  const ord = [...valores].sort((a, b) => a - b);
-  return Math.round(ord[Math.min(ord.length - 1, Math.floor((p / 100) * ord.length))]!);
 }
 
 export function quadroDeVoz(seq: number, utt: number, pcm: Int16Array): Uint8Array {
@@ -231,7 +240,22 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let textoDaVez = "";
     // Início e fim de cada trecho de fala, na ordem: o final do STT chega depois (whisper) e às vezes com outro trecho já
     // começado — a transcrição e o eco usam os tempos do trecho certo.
-    const trechos: { inicio: number; fim: number }[] = [];
+    const trechos: { inicio: number; fim: number; fechou: QuemFechouTrecho | null; fechadoEm: number; suspeito: boolean }[] = [];
+    const temParciais = deps.provedores.stt.capacidades.parciais;
+    // O trecho em curso: a última parcial, quando a transcrição andou pela última vez e se já trouxe alguma palavra.
+    let ultimaParcial = "";
+    let textoNovoEm = 0;
+    let trechoComTexto = false;
+    /** O trecho começou em janela de ruído e ainda não trouxe texto: não segura a vez, não refaz e não interrompe. */
+    let trechoSuspeito = false;
+    let ruidoAte = 0;
+    let seqEsperado: number | null = null;
+    // Medição (ligacao-medicao.ts): as marcas da vez em curso e o que já se sabe da próxima (antes de ela ser decidida).
+    let marcas: MarcasDaVez | null = null;
+    let marcasEmitidas = true;
+    const antesDaVez: { fimDaVozEm: number | null; trechoFechadoEm: number | null; fechou: QuemFechouTrecho | null; finalSttEm: number | null; trechos: number; iniciosQueCancelaram: number; esperaMs: number | null } = { fimDaVozEm: null, trechoFechadoEm: null, fechou: null, finalSttEm: null, trechos: 0, iniciosQueCancelaram: 0, esperaMs: null };
+    const vozAVoz: number[] = [];
+    const cont = { falandoBotCaladoMs: 0, falandoBotTocandoMs: 0, vozMs: 0, trechos: 0, descartados: 0, finaisVazios: 0, ecos: 0, maiorTrechoMs: 0, pelaVigia: 0, peloTeto: 0, quadrosPerdidos: 0 };
     let vezRefeita = false;
     let refazerConferido = true;
     let proximoOuvido: string | null = null;
@@ -295,6 +319,31 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     const seguro = (p: Promise<unknown>, evento: string) => {
       p.catch((e: unknown) => log("erro", evento, { ligacao_id: r.ligacaoId, erro: e instanceof Error ? e.name : "desconhecido" }));
     };
+
+    /** Fecha a medição da vez em curso e emite o `ligacao_vez` (uma vez por vez; nunca leva texto falado). */
+    function fecharMedicao(desfecho: DesfechoDaVez): void {
+      if (!marcas || marcasEmitidas) return;
+      marcasEmitidas = true;
+      const resumo = resumoDaVez(marcas, desfecho);
+      if (resumo.voz_a_voz_ms !== null) vozAVoz.push(resumo.voz_a_voz_ms);
+      log("info", "ligacao_vez", { ligacao_id: r.ligacaoId, onboarding: r.onboarding === true, tts_streaming: deps.provedores.tts.capacidades.streaming, ...resumo });
+    }
+
+    function abrirMedicao(n: number, origem: OrigemDaVez, agora: number): void {
+      fecharMedicao(vezRespondida ? "respondida" : "substituida");
+      marcas = novasMarcas({ n, origem, vezEm: agora });
+      marcasEmitidas = false;
+      if (origem === "voz") {
+        marcas.fimDaVozEm = antesDaVez.fimDaVozEm;
+        marcas.trechoFechadoEm = antesDaVez.trechoFechadoEm;
+        marcas.fechou = antesDaVez.fechou;
+        marcas.finalSttEm = antesDaVez.finalSttEm;
+        marcas.trechos = antesDaVez.trechos;
+        marcas.esperaFimDeTurnoMs = antesDaVez.esperaMs;
+      }
+      marcas.iniciosQueCancelaram = antesDaVez.iniciosQueCancelaram;
+      Object.assign(antesDaVez, { fimDaVozEm: null, trechoFechadoEm: null, fechou: null, finalSttEm: null, trechos: 0, iniciosQueCancelaram: 0, esperaMs: null });
+    }
 
     function gravarFala(f: Omit<FalaParaGravar, "seq">): void {
       if (f.texto.trim() === "") return;
@@ -449,7 +498,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       utts.set(utt, u);
       paraMidia({ t: "bot-fala", utt, tipo: item.tipo, texto: item.texto });
       if (item.tipo === "conteudo" || item.tipo === "leitura" || item.tipo === "aviso") mudarFase("falando");
+      const daVezMedida = item.tipo === "conteudo" && item.n !== null && marcas !== null && marcas.n === item.n ? marcas : null;
+      let pedacoAnteriorEm = 0;
       const mandar = (pcm: Int16Array) => {
+        if (daVezMedida) {
+          const agora = relogio();
+          if (pedacoAnteriorEm > 0) daVezMedida.maiorBuracoDeAudioMs = Math.max(daVezMedida.maiorBuracoDeAudioMs, agora - pedacoAnteriorEm);
+          pedacoAnteriorEm = agora;
+        }
         for (let i = 0; i < pcm.length; i += AMOSTRAS_POR_PEDACO) {
           const pedaco = pcm.subarray(i, Math.min(pcm.length, i + AMOSTRAS_POR_PEDACO));
           midia?.enviarBinario(quadroDeVoz(seqQuadro++, utt, pedaco));
@@ -463,6 +519,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         if (item.n !== null && item.n === vezAtual && primeiroSomDaVez) {
           primeiroSomDaVez = false;
           latencias.push(relogio() - vezEm);
+          if (daVezMedida && daVezMedida.primeiroAudioEm === null) daVezMedida.primeiroAudioEm = relogio();
           // As esperas da vez param quando a resposta começa a soar, não quando chega o texto.
           cancelarEsperas();
         }
@@ -521,6 +578,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       // frase de qualquer vez seguinte: "Beleza, Marlon. Até a próxima!" saiu como "Marlon.").
       const repetiria = n !== null && n === vezAtual && primeiroTrechoDaVez && ultimaEspera?.categoria === "reconhecimento" && ultimaEspera.n === n;
       if (n !== null && n === vezAtual) primeiroTrechoDaVez = false;
+      if (marcas && n === marcas.n && marcas.primeiroTrechoEm === null) marcas.primeiroTrechoEm = relogio();
       const limpo = repetiria && ultimaEspera ? removerAberturaRepetida(falavel, ultimaEspera.texto) : falavel;
       if (limpo.trim() === "") return;
       enfileirar({ tipo, texto: limpo, n });
@@ -539,22 +597,43 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       return ultima;
     }
 
+    /**
+     * Manda `interromper` para toda fala que o app ainda toca ou guarda, da mais antiga para a mais nova (definido em
+     * 2026-10-04). O servidor manda o áudio de cada frase de uma vez e segue para a próxima, então o app costuma ter
+     * uma tocando e outras na fila; antes só a mais nova era interrompida, e as que estavam tocando seguiam até o fim.
+     */
+    function interromperFalasNoAr(): void {
+      const agora = relogio();
+      for (const u of utts.values()) {
+        if (u.fim) continue;
+        // Ainda tocando ou na fila do app; ou anunciada há pouco e sem áudio (em síntese): o app descarta o que chegar.
+        const noAr = agora < u.fimPrevisto + 500 || (u.duracaoMs === 0 && agora - u.enviadoEm < 15_000);
+        if (noAr) paraMidia({ t: "interromper", utt: u.utt });
+      }
+    }
+
     function interromperBot(textoPessoa: string): void {
-      const atual = uttAtual();
       cancelarEsperas();
       limparFila();
       abortTts?.abort();
-      if (atual) paraMidia({ t: "interromper", utt: atual.utt });
+      interromperFalasNoAr();
       interrupcoes++;
       // O que a pessoa ouviu da resposta em curso: frases inteiras já tocadas + a parcial cortada numa palavra.
       const daVez = [...utts.values()].filter((u) => u.n !== null && u.n === vezAtual && u.tipo === "conteudo");
       const ouvido = ouvidoAte({ frases: daVez.map((u) => ({ texto: u.texto, duracaoMs: u.duracaoMs || 1 })), tocadoMs: daVez.reduce((s, u) => s + (u.fim ? u.duracaoMs : u.tocadoMs), 0) });
       const agoraInterrompe = relogio();
+      const nMedida = marcas?.n ?? null;
+      const cortouAVez = nMedida !== null && ((vezAtual === nMedida && !vezRespondida) || [...utts.values()].some((u) => !u.fim && u.n === nMedida));
       for (const u of utts.values()) {
-        if (!u.fim) u.fimEm ??= agoraInterrompe;
+        if (u.fim) continue;
+        u.fimEm ??= agoraInterrompe;
+        // A leitura de uma aprovação cortada no meio abre a janela mesmo assim: antes `lendo` ficava preso (o app
+        // responde `interrompido`, que apagava o `aoTerminar`), e nenhuma janela, espera ou aviso saía mais.
+        if (u.tipo === "leitura") terminarUtt(u);
         u.fim = true;
       }
       tocaAte = agoraInterrompe;
+      if (cortouAVez) fecharMedicao("interrompida");
       if (vezAtual > 0 && !vezRespondida) {
         vezCancelada = vezAtual;
         if (ouvido.trim() !== "") gravarFala({ autor: "bot", tipo: "fala", texto: ouvido, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: true });
@@ -600,7 +679,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     const comandos = new Map<string, { decisaoId: string; acao: "aprovar" | "recusar"; criadoEm: number; usado: boolean }>();
 
     function emBrecha(): boolean {
-      return !botTocando() && vezRespondida && pendente.textos.length === 0 && !falando;
+      return !botTocando() && vezRespondida && pendente.textos.length === 0 && !seguraVez();
     }
 
     function proximaDecisao(): void {
@@ -641,9 +720,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     /** Uma fala final dentro da janela: comando (gramática fechada) ou fala normal, que fecha a janela. */
-    function tratarNaJanela(texto: string): boolean {
-      // A fala tem de ter sido DETECTADA depois da abertura (o pré-roll de 60 ms não conta).
-      if (!janela || inicioFalaEm + 3 * QUADRO_MS < janela.abertaEm) return false;
+    function tratarNaJanela(texto: string, inicioDoTrecho: number): boolean {
+      // A fala tem de ter sido DETECTADA depois da abertura (o pré-roll de 60 ms não conta). Vale o começo do trecho
+      // deste final, não o do trecho em curso: outro trecho pode ter começado depois de a janela abrir.
+      if (!janela || inicioDoTrecho + 3 * QUADRO_MS < janela.abertaEm) return false;
       const r = interpretarComando(texto, janela.pedido.perfil, r0.nomeBot);
       if (r.acao === "aprovar" || r.acao === "recusar") {
         const comandoId = randomUUID();
@@ -724,13 +804,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     // ---- a vez da pessoa ----------------------------------------------------------------------------------------------
 
-    function decidirVez(): void {
+    function decidirVez(origem: OrigemDaVez = "voz"): void {
       cancelar(pendente.timer);
       pendente.timer = null;
       const texto = pendente.textos.join(" ").replace(/\s+/g, " ").trim();
       pendente.textos = [];
       if (texto === "" || encerrada) return;
       const n = ++nVez;
+      abrirMedicao(n, origem, relogio());
       vezAtual = n;
       vezEm = relogio();
       primeiroSomDaVez = true;
@@ -762,13 +843,13 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       // Só antes de o cérebro mandar qualquer texto: depois disso a resposta já está saindo, e quem decide é a interrupção.
       if (vezAtual === 0 || vezRespondida || !primeiroSomDaVez || respostaTexto !== "" || ferramentaRodando || janela || lendo) return;
       if (agora - vezEm > JANELA_REFAZER_VEZ_MS || !textoDaVez) return;
+      fecharMedicao("refeita");
       vezCancelada = vezAtual;
       vezRespondida = true;
       cancelarEsperas();
       limparFila();
       abortTts?.abort();
-      const atual = uttAtual();
-      if (atual) paraMidia({ t: "interromper", utt: atual.utt });
+      interromperFalasNoAr();
       tocaAte = relogio();
       paraCerebro({ t: "interromper", modo: "duro" });
       pendente.textos = [textoDaVez];
@@ -781,14 +862,43 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
      * pendurada — o começo dele cancelou a decisão que estava agendada.
      */
     function retomarDecisao(): void {
-      if (pendente.textos.length > 0 && pendente.timer === null && !falando) agendarDecisao();
+      if (pendente.textos.length > 0 && pendente.timer === null) agendarDecisao();
     }
 
+    /** A pessoa está falando agora, e não é só ruído: a decisão da vez espera o fim deste trecho. */
+    function seguraVez(): boolean {
+      return falando && !trechoSuspeito;
+    }
+
+    /**
+     * definido em 2026-10-04: todo caminho que termina um trecho passa por aqui ou por `retomarDecisao` — com texto
+     * pendente e ninguém falando, há sempre uma decisão agendada. Antes, o final que chegava com outro trecho já em
+     * curso decidia a vez no meio da fala, e o eco e o "uhum" saíam sem rearmar a decisão que o começo deles cancelou.
+     */
     function agendarDecisao(): void {
       cancelar(pendente.timer);
+      pendente.timer = null;
+      if (pendente.textos.length === 0 || seguraVez()) return;
       const texto = pendente.textos.join(" ");
       const espera = esperaDeFimDeTurno({ texto, botPerguntou, ditado: false });
-      pendente.timer = agendar(fimFalaEm + espera - relogio(), decidirVez);
+      antesDaVez.esperaMs = espera;
+      pendente.timer = agendar(fimFalaEm + espera - relogio(), () => decidirVez());
+    }
+
+    /** O trecho em curso é o único esperando final: as parciais que chegam são dele (e não de um anterior fechando). */
+    function trechoAlinhado(): boolean {
+      return falando && trechos.length === 1 && trechos[0]!.fim === 0;
+    }
+
+    /** Começo de fala que vale: a decisão agendada espera, a vez recém-decidida pode ser refeita e o bot, interrompido. */
+    function aoComecoDeFala(): void {
+      if (pendente.timer) {
+        cancelar(pendente.timer);
+        pendente.timer = null;
+        antesDaVez.iniciosQueCancelaram++;
+      }
+      refazerConferido = false;
+      if (botTocando()) iniciarBarge();
     }
 
     function aoResultadoStt(res: ResultadoStt): void {
@@ -797,29 +907,62 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (!res.final) {
         if (texto === "") return;
         paraMidia({ t: "legenda", id: legendaId, texto, final: false });
-        if (barge.ativa && !barge.confirmado) {
-          // A parcial pode ser o próprio bot voltando pelo alto-falante: confere antes de cortar.
-          const eco = ehEco({ texto, inicioMs: barge.desde, fimMs: relogio(), falasBot: falasDoBotNoAr() });
-          if (confirmaInterrupcao({ texto, falaMs: relogio() - barge.desde, ehEco: eco, lendoConteudoNaoConfiavel: false, falaQueInterrompeMs: falaQueInterrompeMs() })) confirmarBarge(texto);
+        const agora = relogio();
+        // Parcial de um trecho anterior ainda fechando não diz nada sobre o trecho em curso.
+        const doTrechoEmCurso = trechoAlinhado();
+        if (doTrechoEmCurso && texto !== ultimaParcial) {
+          ultimaParcial = texto;
+          textoNovoEm = agora;
         }
+        const emBarge = barge.ativa && !barge.confirmado;
+        // A parcial pode ser o próprio bot voltando pelo alto-falante: confere antes de valer como fala ou de cortar.
+        const eco = (emBarge || (doTrechoEmCurso && !trechoComTexto)) && ehEco({ texto, inicioMs: emBarge ? barge.desde : inicioFalaEm, fimMs: agora, falasBot: falasDoBotNoAr() });
+        if (doTrechoEmCurso && !trechoComTexto && !eco) {
+          trechoComTexto = true;
+          if (trechoSuspeito) {
+            // O trecho que começou em janela de ruído trouxe palavras: passa a valer como fala de verdade.
+            trechoSuspeito = false;
+            trechos[0]!.suspeito = false;
+            aoComecoDeFala();
+            refazerConferido = true;
+            refazerVezSePreciso(agora);
+          }
+        }
+        if (barge.ativa && !barge.confirmado && confirmaInterrupcao({ texto, falaMs: agora - barge.desde, ehEco: eco, lendoConteudoNaoConfiavel: false, falaQueInterrompeMs: falaQueInterrompeMs() })) confirmarBarge(texto);
         return;
       }
       const id = legendaId++;
       const trecho = trechos.shift();
       const iniT = trecho?.inicio ?? inicioFalaEm;
       const fimT = trecho && trecho.fim > 0 ? trecho.fim : fimFalaEm;
+      // O final anterior saiu: daqui em diante as parciais são do trecho em curso, e a vigia dele começa a contar.
+      if (trechoAlinhado()) textoNovoEm = relogio();
       if (texto === "") {
-        // Fala longa que virou nada: pede para repetir (uma vez por trecho).
-        if (fimT - iniT > 1_200 && !botTocando() && pendente.textos.length === 0) tocarEspera("nao_entendi");
+        cont.finaisVazios++;
+        ruidoAte = relogio() + JANELA_RUIDO_MS;
+        // Fala longa que virou nada: pede para repetir (uma vez por trecho). O trecho que a vigia fechou não conta:
+        // ali quem "falava" era o ruído.
+        if (trecho?.fechou !== "vigia" && fimT - iniT > 1_200 && !botTocando() && pendente.textos.length === 0) tocarEspera("nao_entendi");
         retomarDecisao();
         return;
       }
+      const anotarNaMedicao = () => {
+        antesDaVez.fimDaVozEm = fimT;
+        antesDaVez.trechoFechadoEm = trecho && trecho.fechadoEm > 0 ? trecho.fechadoEm : null;
+        antesDaVez.fechou = trecho?.fechou ?? null;
+        antesDaVez.finalSttEm = relogio();
+        antesDaVez.trechos++;
+      };
       // ADR-074: na janela de aprovação a guarda de eco por similaridade fica desligada — a frase de comando é justamente
       // a que o bot acabou de ler; quem protege é o tempo (só vale fala que começou depois da abertura).
       if (janela && !botTocando()) {
         paraMidia({ t: "legenda", id, texto, final: true });
         gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: iniT - inicio, fimMs: fimT - inicio, interrompida: false, confianca: res.confianca });
-        if (tratarNaJanela(texto)) return;
+        if (tratarNaJanela(texto, iniT)) {
+          retomarDecisao();
+          return;
+        }
+        anotarNaMedicao();
         pendente.textos.push(texto);
         agendarDecisao();
         return;
@@ -827,7 +970,15 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const falasBot = falasDoBotNoAr();
       if (ehEco({ texto, inicioMs: iniT, fimMs: fimT, falasBot })) {
         log("info", "voz_eco_descartado", { ligacao_id: r.ligacaoId });
+        cont.ecos++;
+        retomarDecisao();
         return;
+      }
+      // Um trecho que começou em janela de ruído e só provou ser fala agora, no final: vale o que valeria no começo,
+      // e a espera do fim de turno conta do fim dele.
+      if (trecho?.suspeito) {
+        fimFalaEm = Math.max(fimFalaEm, fimT);
+        refazerVezSePreciso(relogio());
       }
       if (botTocando() && !barge.confirmado) {
         if (ehBackchannel(texto)) {
@@ -836,6 +987,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           barge.ativa = false;
           const atual = uttAtual();
           if (atual) paraMidia({ t: "subir", utt: atual.utt });
+          retomarDecisao();
           return;
         }
         // O final pode chegar depois da janela de confirmação (whisper local transcreve só no fim da fala): uma fala que
@@ -850,7 +1002,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: iniT - inicio, fimMs: fimT - inicio, interrompida: false, confianca: res.confianca });
       reiniciarOciosidade();
       // Backchannel com o bot calado e sem pergunta pendente: só transcrição.
-      if (ehBackchannel(texto) && !botPerguntou && vezRespondida && !botTocando()) return;
+      if (ehBackchannel(texto) && !botPerguntou && vezRespondida && !botTocando()) {
+        retomarDecisao();
+        return;
+      }
+      anotarNaMedicao();
       pendente.textos.push(texto);
       agendarDecisao();
     }
@@ -867,6 +1023,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             aoErro: (e) => {
               log("aviso", "voz_stt_falhou", { ligacao_id: r.ligacaoId, erro: e.name });
               stt = null;
+              // Nenhum final vem mais: os trechos que esperavam um saem da lista (senão os próximos finais casariam
+              // com o trecho errado), e o texto que já estava pendente não fica sem decisão.
+              trechos.length = 0;
+              trechoSuspeito = false;
+              retomarDecisao();
               paraMidia({ t: "aviso", texto: "Não estou conseguindo te ouvir direito. Se continuar, use o teclado." });
             },
           });
@@ -880,7 +1041,53 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       await abrindoStt;
     }
 
-    function aoQuadroMicrofone(pcm: Int16Array): void {
+    /**
+     * O trecho em curso acabou: pelo silêncio do VAD, pelo teto, ou pela vigia (a transcrição parou de andar e o VAD
+     * seguia "falando"). Trecho sem voz de verdade (batida curta) ou sem palavra nenhuma (ruído) não vai ao STT.
+     */
+    function aoFimDoTrecho(ev: { em: number; duracaoMs: number; vozMs: number }, agora: number, quem: QuemFechouTrecho): void {
+      falando = false;
+      const abertoIdx = trechos.findIndex((x) => x.fim === 0);
+      const aberto = abertoIdx >= 0 ? trechos[abertoIdx]! : null;
+      // Só o trecho alinhado sabe se teve palavras: com um final anterior pendente, as parciais ainda eram do outro.
+      const semPalavra = quem === "vigia" && !trechoComTexto && abertoIdx === 0;
+      cont.trechos++;
+      cont.vozMs += ev.vozMs;
+      cont.maiorTrechoMs = Math.max(cont.maiorTrechoMs, ev.duracaoMs);
+      if (quem === "vigia") cont.pelaVigia++;
+      if (quem === "teto") cont.peloTeto++;
+      const suspeito = trechoSuspeito;
+      trechoSuspeito = false;
+      if (ev.vozMs < VOZ_MINIMA_MS || semPalavra || !stt) {
+        // Ruído: o STT descarta o trecho (sem final), e ele sai da lista para não desalinhar os próximos.
+        if (abertoIdx >= 0) trechos.splice(abertoIdx, 1);
+        stt?.descartar();
+        cont.descartados++;
+        if (temParciais) ruidoAte = agora + JANELA_RUIDO_MS;
+        retomarDecisao();
+        return;
+      }
+      if (!refazerConferido) {
+        refazerConferido = true;
+        refazerVezSePreciso(agora);
+      }
+      // O fim real da voz (o VAD só avisa depois de 600 ms de silêncio): a espera do fim de turno conta daqui — antes
+      // contava do aviso, e o silêncio de base virava 1,2 s. Fechado pela vigia, a voz acabou quando o texto parou de
+      // andar: o que o VAD ouviu depois era ruído.
+      const fimDaVoz = quem === "vigia" ? Math.min(ev.em, textoNovoEm) : ev.em;
+      // O que segurou o VAD depois da última palavra não tinha texto: a janela de ruído abre também aqui. Sem ela, o
+      // ruído seguinte refazia a vez recém-decidida a cada 1,5 s. O custo conhecido: se era a pessoa segurando um
+      // "ééé" (ou as parciais atrasaram), a continuação só segura a vez quando trouxer texto, e a frase pode virar duas
+      // vezes se o cérebro já tiver começado a responder.
+      if (quem === "vigia") ruidoAte = agora + JANELA_RUIDO_MS;
+      // Um trecho suspeito que não trouxe texto não mexe no relógio da vez: se era ruído, o final vem vazio.
+      if (!suspeito) fimFalaEm = fimDaVoz;
+      if (aberto) Object.assign(aberto, { fim: fimDaVoz, fechou: quem, fechadoEm: agora, suspeito });
+      stt.fimDeFala();
+      // O final do STT agenda a decisão; se ele demorar, a vez espera por ele (nunca decide sem texto).
+    }
+
+    function aoQuadroMicrofone(pcm: Int16Array, seq: number): void {
       const agora = relogio();
       audioRecebidoMs += (pcm.length / 16_000) * 1000;
       if (midiaDesde > 0 && audioRecebidoMs > (agora - midiaDesde) * FATOR_ABUSO + 2_000) {
@@ -888,8 +1095,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         midia?.fechar(FECHAMENTOS_VOZ.abuso, "audio acima do tempo real");
         return;
       }
+      // O app descarta quadros quando a rede dele represa: o buraco aparece aqui como salto na sequência.
+      if (seqEsperado !== null && seq > seqEsperado) cont.quadrosPerdidos += seq - seqEsperado;
+      seqEsperado = seq + 1;
       if (mudo || encerrada) return;
-      vad.definirBotFalando(botTocando());
+      const tocando = botTocando();
+      vad.definirBotFalando(tocando);
       const ev = vad.passo(pcm, agora);
       if (!falando) {
         preRoll.push(pcm);
@@ -898,11 +1109,17 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (ev?.tipo === "inicio") {
         falando = true;
         inicioFalaEm = agora - 3 * QUADRO_MS;
-        cancelar(pendente.timer);
-        pendente.timer = null;
-        refazerConferido = false;
-        trechos.push({ inicio: inicioFalaEm, fim: 0 });
-        if (botTocando()) iniciarBarge();
+        ultimaParcial = "";
+        trechoComTexto = false;
+        textoNovoEm = agora;
+        // A interrupção confirmada é a do trecho anterior: sem isto, um trecho que não passa por `iniciarBarge` (bot
+        // calado no começo, ou começo em janela de ruído) herdava o "confirmado" e a fala por cima do bot não cortava.
+        barge.confirmado = false;
+        // Em janela de ruído, o começo sozinho não prova fala: o trecho só passa a valer quando trouxer texto.
+        trechoSuspeito = temParciais && agora < ruidoAte;
+        trechos.push({ inicio: inicioFalaEm, fim: 0, fechou: null, fechadoEm: 0, suspeito: trechoSuspeito });
+        if (trechoSuspeito) refazerConferido = true;
+        else aoComecoDeFala();
         if (stt) for (const q of preRoll) stt.enviar(q);
         sttSegundos += (preRoll.length * QUADRO_MS) / 1000;
         preRoll.length = 0;
@@ -910,36 +1127,30 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       }
       if (falando) {
         // Só fala de verdade (não uma tosse) refaz a vez.
-        if (!refazerConferido && agora - inicioFalaEm >= VOZ_MINIMA_MS + 3 * QUADRO_MS) {
+        if (!refazerConferido && vad.vozMs() >= VOZ_MINIMA_MS) {
           refazerConferido = true;
           refazerVezSePreciso(agora);
         }
         stt?.enviar(pcm);
         sttSegundos += QUADRO_MS / 1000;
+        if (tocando) cont.falandoBotTocandoMs += QUADRO_MS;
+        else cont.falandoBotCaladoMs += QUADRO_MS;
         // Só pela duração, sem texto, apenas com fone: no alto-falante o eco do bot também "fala" sem parar, e cortava o
         // bot sozinho (teste do Marlon, 2026-10-04: 3 interrupções em 3 trocas). Lá quem confirma é o texto.
         if (rota === "fone" && barge.ativa && !barge.confirmado && agora - barge.desde >= falaQueInterrompeMs()) confirmarBarge("");
       }
       if (ev?.tipo === "fim") {
-        falando = false;
-        const abertoIdx = trechos.findIndex((x) => x.fim === 0);
-        if (ev.vozMs < VOZ_MINIMA_MS) {
-          // Ruído curto: o STT descarta o trecho (sem final), e ele sai da lista para não desalinhar os próximos.
-          if (abertoIdx >= 0) trechos.splice(abertoIdx, 1);
-          stt?.descartar();
-          retomarDecisao();
-          return;
+        aoFimDoTrecho(ev, agora, ev.teto ? "teto" : "vad");
+        return;
+      }
+      // A vigia: o VAD segue "falando", mas a transcrição não anda. Só com o trecho alinhado (as parciais são dele) e já
+      // no provedor: enquanto o áudio está guardado (o trecho anterior ainda fechando), nenhuma parcial pode chegar.
+      if (falando && temParciais && stt && trechoAlinhado()) {
+        if (stt.guardando?.()) textoNovoEm = agora;
+        else if (agora - textoNovoEm >= VIGIA_SEM_TEXTO_MS) {
+          const fim = vad.encerrarTrecho(!trechoComTexto);
+          if (fim) aoFimDoTrecho(fim, agora, "vigia");
         }
-        if (!refazerConferido) {
-          refazerConferido = true;
-          refazerVezSePreciso(agora);
-        }
-        // O fim real da voz (o VAD só avisa depois de 600 ms de silêncio): a espera do fim de turno conta daqui — antes
-        // contava do aviso, e o silêncio de base virava 1,2 s.
-        fimFalaEm = ev.em;
-        if (abertoIdx >= 0) trechos[abertoIdx]!.fim = ev.em;
-        stt?.fimDeFala();
-        // O final do STT agenda a decisão; se ele demorar, a vez espera por ele (nunca decide sem texto).
       }
     }
 
@@ -962,11 +1173,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       midia = canal;
       midiaDesde = relogio();
       audioRecebidoMs = 0;
+      seqEsperado = null;
       cancelar(timerMidiaCaida);
       canal.aoMensagem((m) => {
         if ("binario" in m) {
           const q = lerQuadroMicrofone(m.binario);
-          if (q) aoQuadroMicrofone(q.pcm);
+          if (q) aoQuadroMicrofone(q.pcm, q.seq);
           return;
         }
         aoControleMidia(m.texto);
@@ -1007,6 +1219,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "tocado": {
           const u = typeof msg.utt === "number" ? utts.get(msg.utt) : undefined;
           if (u && typeof msg.ms === "number") u.tocadoMs = Math.max(u.tocadoMs, msg.ms);
+          if (u && u.tipo === "conteudo" && marcas && u.n === marcas.n && marcas.primeiroTocadoEm === null) marcas.primeiroTocadoEm = relogio();
           return;
         }
         case "tocou-fim":
@@ -1015,6 +1228,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           if (u) {
             if (typeof msg.ms === "number") u.tocadoMs = msg.ms;
             if (msg.t === "interrompido") {
+              // A leitura cortada abre a janela (ver interromperBot); as outras falas só acabam.
+              if (u.tipo === "leitura" && !u.fim) terminarUtt(u);
               u.fim = true;
               u.aoTerminar = undefined;
             } else terminarUtt(u);
@@ -1030,7 +1245,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           gravarFala({ autor: "pessoa", tipo: "texto", texto: conteudo, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
           reiniciarOciosidade();
           pendente.textos.push(conteudo);
-          decidirVez();
+          decidirVez("texto");
           return;
         }
         case "saida": {
@@ -1043,8 +1258,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "mudo":
           mudo = msg.ativo === true;
           if (mudo && falando) {
+            // O trecho cortado pelo mudo sai da lista (sem final) e o VAD recomeça do zero.
             falando = false;
+            trechoSuspeito = false;
+            vad.encerrarTrecho();
+            const abertoIdx = trechos.findIndex((x) => x.fim === 0);
+            if (abertoIdx >= 0) trechos.splice(abertoIdx, 1);
             stt?.descartar();
+            retomarDecisao();
           }
           return;
         case "ping":
@@ -1098,6 +1319,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "fala": {
           if (typeof msg.n !== "number" || typeof msg.delta !== "string") return;
           if (msg.n === 0 || msg.n !== vezAtual || msg.n === vezCancelada || vezRespondida || desligando) return;
+          if (marcas && marcas.n === msg.n) {
+            if (marcas.primeiroDeltaEm === null) marcas.primeiroDeltaEm = relogio();
+            if (marcas.ferramentaFimEm !== null) marcas.textoDepoisDaFerramenta = true;
+          }
           respostaTexto += msg.delta;
           for (const trecho of segmentador.adicionar(msg.delta, relogio())) falarConteudo(trecho, msg.n);
           cancelar(timerVencer);
@@ -1122,16 +1347,28 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           if (respostaFoiProChat && resposta !== "" && deps.persistencia.mandarNoChat) seguro(deps.persistencia.mandarNoChat(ref, resposta), "voz_mandar_no_chat_falhou");
           if (!tocandoFila && fila.length === 0) mudarFase("ouvindo");
           reiniciarOciosidade();
+          // A medição fecha depois (o `tocado` do app e os buracos de áudio ainda estão chegando) ou na próxima vez.
+          const nMedida = msg.n;
+          agendar(MEDICAO_ESPERA_MS, () => {
+            if (marcas?.n === nMedida) fecharMedicao("respondida");
+          });
           return;
         }
         case "atividade": {
           const nome = typeof msg.nome === "string" ? msg.nome.slice(0, 80) : "";
+          const vezAberta = vezAtual > 0 && !vezRespondida && vezAtual !== vezCancelada;
           if (msg.tipo === "inicio") {
-            // O texto depois da ferramenta é outro bloco: sem isto, "Até mais!" e "Desligando" grudavam.
-            if (respostaTexto !== "" && !/\s$/.test(respostaTexto)) {
-              respostaTexto += " ";
-              segmentador.adicionar(" ", relogio());
+            // O que o modelo disse antes da ferramenta sai agora, inteiro (definido em 2026-10-04). Antes, o espaço posto
+            // aqui fechava a última frase no segmentador e o trecho devolvido era jogado fora: "Vou ver sua agenda." só
+            // era falado se o relógio de 450 ms vencesse antes de a ferramenta começar. O texto depois dela é outro bloco.
+            cancelar(timerVencer);
+            const antes = segmentador.fechar();
+            if (vezAberta && !desligando) for (const trecho of antes) falarConteudo(trecho, vezAtual);
+            if (vezAberta && marcas && marcas.n === vezAtual && marcas.ferramentaInicioEm === null) {
+              marcas.ferramentaInicioEm = relogio();
+              marcas.ferramentaAntesDoTexto = respostaTexto === "";
             }
+            if (respostaTexto !== "" && !/\s$/.test(respostaTexto)) respostaTexto += " ";
             ferramentaRodando = nome;
             mudarFase("trabalhando", nome);
             const n = vezAtual;
@@ -1141,6 +1378,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             ferramentaRodando = null;
             if (!vezRespondida) mudarFase("pensando");
           }
+          if (msg.tipo === "fim" && vezAberta && marcas && marcas.n === vezAtual && marcas.ferramentaFimEm === null) marcas.ferramentaFimEm = relogio();
           // ADR-077: uma ferramenta que mexe no onboarding terminou — o painel, a pílula e os chips acompanham.
           if (msg.tipo === "fim" && /(^|__)(anotar_entrevista|concluir_entrevista|propor_bot|pedir_acesso|criar_rotina)$/.test(nome)) atualizarOnboarding();
           // ADR-072: o bot chamou `desligar` — encerra depois da última frase dele.
@@ -1188,6 +1426,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     async function encerrar(motivo: MotivoFimLigacao): Promise<void> {
       if (encerrada) return;
       encerrada = true;
+      fecharMedicao(vezRespondida ? "respondida" : "encerrada");
       for (const t of timers) clearTimeout(t);
       timers.clear();
       abortTts?.abort();
@@ -1206,8 +1445,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         sttSegundos: Math.round(sttSegundos),
         ttsCaracteres,
         custoEstimadoUsd: precos ? Math.round((sttSegundos * precos.sttPorSegundo + ttsCaracteres * precos.ttsPorCaractere) * 10_000) / 10_000 : 0,
-        latenciaP50Ms: percentil(latencias, 50),
-        latenciaP95Ms: percentil(latencias, 95),
+        latenciaP50Ms: percentilMs(latencias, 50),
+        latenciaP95Ms: percentilMs(latencias, 95),
       };
       try {
         await deps.persistencia.encerrar(ref, motivo, metricas);
@@ -1219,7 +1458,32 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         paraCerebro({ t: "fim", motivo });
         setTimeout(finalizar, prazos.resumoMs);
       } else finalizar();
-      log("info", "voz_ligacao_encerrada", { ligacao_id: r.ligacaoId, motivo, trocas, interrupcoes, latencia_p50_ms: metricas.latenciaP50Ms, audio_recebido_ms: Math.round(audioRecebidoMs), fala_ms: Math.round(sttSegundos * 1000), piso_vad: Math.round(vad.piso() * 10_000) / 10_000, limiar_vad: Math.round(vad.limiar() * 10_000) / 10_000 });
+      log("info", "voz_ligacao_encerrada", {
+        ligacao_id: r.ligacaoId,
+        motivo,
+        trocas,
+        interrupcoes,
+        latencia_p50_ms: metricas.latenciaP50Ms,
+        voz_a_voz_p50_ms: percentilMs(vozAVoz, 50),
+        voz_a_voz_p95_ms: percentilMs(vozAVoz, 95),
+        audio_recebido_ms: Math.round(audioRecebidoMs),
+        fala_ms: Math.round(sttSegundos * 1000),
+        // Quanto do tempo "falando" o VAD viu voz de verdade, e com o bot calado ou tocando: ruído segurando o VAD
+        // aparece como muito tempo "falando" com o bot calado, pouca voz e trechos fechados pela vigia.
+        voz_ms: cont.vozMs,
+        falando_bot_calado_ms: cont.falandoBotCaladoMs,
+        falando_bot_tocando_ms: cont.falandoBotTocandoMs,
+        trechos: cont.trechos,
+        trechos_descartados: cont.descartados,
+        finais_vazios: cont.finaisVazios,
+        ecos_descartados: cont.ecos,
+        maior_trecho_ms: Math.round(cont.maiorTrechoMs),
+        fechados_pela_vigia: cont.pelaVigia,
+        fechados_pelo_teto: cont.peloTeto,
+        quadros_perdidos: cont.quadrosPerdidos,
+        piso_vad: Math.round(vad.piso() * 10_000) / 10_000,
+        limiar_vad: Math.round(vad.limiar() * 10_000) / 10_000,
+      });
     }
 
     /**
@@ -1245,6 +1509,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       }
       const { texto, confiavel } = notasParaFalar.shift()!;
       const n = ++nVez;
+      abrirMedicao(n, "nota", relogio());
       vezAtual = n;
       vezEm = relogio();
       primeiroSomDaVez = true;
@@ -1257,7 +1522,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       mudarFase("pensando");
     }
     function silencioDaPessoaMs(): number {
-      return falando ? 0 : relogio() - Math.max(fimFalaEm, inicio);
+      return seguraVez() ? 0 : relogio() - Math.max(fimFalaEm, inicio);
     }
 
     deps.esperas?.aquecer(FALAS_DE_ESPERA, r.voz, r.velocidade);
