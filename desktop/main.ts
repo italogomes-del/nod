@@ -1,5 +1,5 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
 import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -19,6 +19,7 @@ import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type
 import { ambienteDoLogin, comandoDeLogin, INTERVALO_SONDA_IA_MS, lerIaDesktop, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
+import { focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
 import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
@@ -110,6 +111,32 @@ async function gravarPreferencias() {
   await writeFile(tmp, JSON.stringify(preferencias), { mode: 0o600 });
   await rename(tmp, caminhoPreferencias());
 }
+// ---- Estado da janela web (definido em 2026-10-05, NOD-137) ---------------------------------------------------------
+// Posição, tamanho e maximizada em userData/janela.json, lidos uma vez no boot e mantidos em memória: a reconexão recria a
+// janela no mesmo lugar sem reler o disco. Tela cheia e minimizada não gravam. As escritas entram numa fila (sem corrida
+// no rename) e o before-quit espera a última; escrita cortada deixa só o .tmp, e o janela.json anterior fica intacto.
+let estadoJanela: EstadoJanela | null = null;
+let gravacaoJanela: Promise<void> = Promise.resolve();
+const ESPERA_ESTADO_JANELA_MS = 250;
+const TAMANHO_PADRAO_JANELA = { largura: 1280, altura: 860 };
+function caminhoEstadoJanela() { return join(app.getPath("userData"), "janela.json"); }
+async function carregarEstadoJanela() {
+  estadoJanela = lerEstadoJanela(await readFile(caminhoEstadoJanela(), "utf8").catch(() => null));
+}
+async function gravarEstadoJanela(estado: EstadoJanela) {
+  await mkdir(app.getPath("userData"), { recursive: true });
+  const tmp = `${caminhoEstadoJanela()}.tmp`;
+  await writeFile(tmp, JSON.stringify(estado), { mode: 0o600 });
+  await rename(tmp, caminhoEstadoJanela());
+}
+function telas() { return { principal: screen.getPrimaryDisplay().workArea, todas: screen.getAllDisplays().map((d) => d.workArea) }; }
+/** Síncrono: mede a janela agora (medirEstadoJanela) e enfileira a escrita. */
+function capturarEstadoJanela(w: BrowserWindow) {
+  const estado = medirEstadoJanela(w);
+  if (!estado) return;
+  estadoJanela = estado;
+  gravacaoJanela = gravacaoJanela.then(() => gravarEstadoJanela(estado)).catch(() => undefined);
+}
 // ---- Tema (definido em 2026-10-04, ADR-070) ------------------------------------------------------------
 // O nativeTheme decide o prefers-color-scheme da página: com ele, o tema escolhido vale desde o primeiro quadro,
 // mesmo com o localStorage apagado a cada conexão, e a janela já nasce com o fundo certo (sem piscar branco).
@@ -153,8 +180,7 @@ function avisar(aviso: AvisoDesktop): boolean {
     soltar();
     const web = janelaWeb();
     if (!web) return;
-    if (web.isMinimized()) web.restore();
-    web.show(); web.focus();
+    focarJanela(web);
     const alvo: AlvoAviso = aviso.alvo;
     web.webContents.send(CANAIS_DESKTOP.abrir, alvo);
   });
@@ -310,14 +336,27 @@ async function conectar(c: Config) {
   }
   const anterior = janela;
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
-  const nova = new BrowserWindow({ width: 1280, height: 860, minWidth: 900, title: "nod", backgroundColor: fundoDaJanela(), webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  // NOD-137: nasce onde a pessoa deixou, inteira numa tela que existe; o mínimo de 900 cede numa tela mais estreita.
+  const bounds = resolverEstadoJanela(estadoJanela, telas(), TAMANHO_PADRAO_JANELA);
+  const nova = new BrowserWindow({ x: bounds.x, y: bounds.y, width: bounds.largura, height: bounds.altura, minWidth: Math.min(LARGURA_MINIMA, bounds.largura), title: "nod", backgroundColor: fundoDaJanela(), webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  if (bounds.maximizada) nova.maximize();
   janela = nova; proteger(nova, c.url);
+  // Os resize da animação de tela cheia do macOS chegam com isFullScreen() ainda false: a checagem é no disparo do timer.
+  let esperaEstado: ReturnType<typeof setTimeout> | null = null;
+  const cancelarEstado = () => { if (esperaEstado) clearTimeout(esperaEstado); esperaEstado = null; };
+  const agendarEstado = () => { cancelarEstado(); esperaEstado = setTimeout(() => { esperaEstado = null; capturarEstadoJanela(nova); }, ESPERA_ESTADO_JANELA_MS); };
+  nova.on("move", agendarEstado);
+  nova.on("resize", agendarEstado);
+  nova.on("maximize", agendarEstado);
+  nova.on("unmaximize", agendarEstado);
+  nova.on("enter-full-screen", cancelarEstado);
   nova.on("close", (e) => {
+    cancelarEstado(); capturarEstadoJanela(nova);
     if (!emLigacao) return;
     e.preventDefault();
     void confirmarFecharEmLigacao(nova).then((sim) => { if (sim) { definirEmLigacao(false); nova.close(); } });
   });
-  nova.on("closed", () => { if (janela === nova) { janela = null; definirEmLigacao(false); } });
+  nova.on("closed", () => { cancelarEstado(); if (janela === nova) { janela = null; definirEmLigacao(false); } });
   nova.webContents.on("did-fail-load", (_e, code, _description, _url, main) => { if (main && code !== -3) { mensagem = mensagens.servidor_fora!; void mostrarSetup(); } });
   await nova.loadURL(c.url);
   anterior?.close(); mensagem = "Conectado.";
@@ -350,7 +389,10 @@ function validarRemetenteWeb(event: IpcMainInvokeEvent) {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on("second-instance", () => { janela?.show(); janela?.focus(); });
+  // NOD-137: abrir de novo (segunda cópia, Dock) traz a janela atual, inclusive minimizada. Sem janela (boot ou troca em
+  // curso), o activate não faz nada: fechar a última janela sai do app (window-all-closed).
+  app.on("second-instance", () => focarJanela(janela));
+  app.on("activate", () => focarJanela(janela));
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", (event) => {
     if (encerrando) return;
@@ -362,10 +404,13 @@ else {
       return;
     }
     encerrando = true;
-    void parar().finally(() => app.quit());
+    // Cmd+Q: as janelas só fecham depois deste evento, então o estado é capturado aqui e a gravação entra na espera.
+    if (w) capturarEstadoJanela(w);
+    void Promise.all([parar(), gravacaoJanela]).finally(() => app.quit());
   });
   void app.whenReady().then(async () => {
     await carregarPreferencias();
+    await carregarEstadoJanela();
     aplicarTemaNativo();
     montarMenu();
     ipcMain.handle(CANAIS_DESKTOP.avisar, (e, dados: unknown) => {
