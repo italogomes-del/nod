@@ -166,6 +166,8 @@ const telaLigacao = criarTelaLigacao({
     void telaOnboarding.aoLigacaoEncerrada();
   },
   aoOnboarding: (etapa, campos) => telaOnboarding.aoOnboarding(etapa, campos),
+  // Rede de segurança da ligação (2026-10-05): o "Configurar sem voz" do aviso é o mesmo do onboarding.
+  configurarSemVoz: () => telaOnboarding.acoes["onboarding-sem-voz"]?.(document.body),
 });
 /**
  * Onboarding por ligação (definido em 2026-10-04, ADR-077): a camada `#onboarding` (olá, a IA do Mac, "está te
@@ -1483,6 +1485,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "ligacao-recusar": (el) => agir(() => telaLigacao.decidir(el.dataset.id ?? "", false)),
   "ligacao-retomar-audio": () => telaLigacao.retomarAudio(),
   "ligacao-sugestao": (el) => { telaLigacao.enviarTexto(el.dataset.texto ?? ""); },
+  // Rede de segurança (2026-10-05): a IA do Mac caiu no meio da ligação.
+  "ligacao-continuar-ia": (el) => telaLigacao.continuarCom(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli"),
+  "ligacao-ia-entrar": (el) => telaLigacao.iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "entrar"),
+  "ligacao-ia-instalar": (el) => telaLigacao.iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "instalar"),
+  "ligacao-sem-voz": () => telaLigacao.semVoz(),
   "ligacao-avaliar": (el) => telaLigacao.avaliar(el.dataset.nota === "ruim" ? "ruim" : "boa"),
   "ligacao-motivo": (el) => telaLigacao.motivo((el.dataset.motivo ?? "outro") as MotivoAvaliacaoLigacao),
   "ligacao-fechar-avaliacao": () => telaLigacao.fecharAvaliacao(),

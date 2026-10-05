@@ -14,8 +14,8 @@ export type OrigemDaVez = "voz" | "texto" | "nota";
 /** Quem fechou o último trecho de fala da vez: o silêncio do VAD, a vigia da transcrição parada ou o teto do trecho. */
 export type QuemFechouTrecho = "vad" | "vigia" | "teto";
 
-/** Como a vez acabou. */
-export type DesfechoDaVez = "respondida" | "interrompida" | "refeita" | "substituida" | "encerrada";
+/** Como a vez acabou. `cerebro_caiu` (definido em 2026-10-05): a IA do Mac caiu antes de responder (ligacao-sem-ia.ts). */
+export type DesfechoDaVez = "respondida" | "interrompida" | "refeita" | "substituida" | "encerrada" | "cerebro_caiu";
 
 /** Instantes (ms do relógio do orquestrador) e contagens de uma vez. `null` = não aconteceu ou não se aplica. */
 export type MarcasDaVez = {
