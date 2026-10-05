@@ -45,6 +45,7 @@ import { blocosAoVivo, blocosDoHistorico, htmlComposer, renderCabecalhoConversa,
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
+import { ehIa, inventarioDaIa } from "./telas/ia-fora.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
@@ -1548,6 +1549,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, onboarding: () => void telaOnboarding.deNovo() }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
+  // definido em 2026-10-05 (ia-fora.ts): os botões do aviso "a conta da IA não serve". Só existem dentro do app do Mac;
+  // o login abre no navegador e o app percebe sozinho quando termina (testa a conta nova e reanuncia).
+  "ia-entrar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void window.nodDesktop?.iaEntrar?.(ia).catch(() => undefined); },
+  "ia-conectar": (el) => {
+    const ia = el.dataset.ia;
+    if (!ehIa(ia)) return;
+    const mac = window.nodDesktop;
+    void (inventarioDaIa(estado, ia)?.estado === "ausente" ? mac?.iaInstalar?.(ia) : mac?.iaEntrar?.(ia))?.catch(() => undefined);
+  },
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
   // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha

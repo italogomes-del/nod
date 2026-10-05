@@ -143,6 +143,16 @@ body.ocupado { cursor: progress; }
 .aviso-estado-detalhes[open] > summary { margin-bottom: 4px; }
 /* Na barra lateral: menor, colado ao rodapé, e o botão volta ao tamanho do texto (vence o .sidebar .bt.sm de bloco). */
 .aviso-compacto { margin: 0 12px 6px; padding: 7px 8px 7px 10px; font-size: 12px; gap: 8px; }
+/* definido em 2026-10-05 (ia-fora.ts): o aviso "a conta da IA não serve" e a linha "Respondendo pelo ChatGPT". O logo do
+   provedor vai no HTML (cor de marca de terceiros, fora dos tokens de propósito); aqui só a moldura dele. */
+.ia-logo { width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.ia-logo svg { width: 14px; height: 14px; }
+.aviso-estado-acoes { display: flex; gap: 8px; flex-wrap: wrap; flex: none; }
+.bt.com-logo { display: inline-flex; align-items: center; gap: 7px; }
+.bt.com-logo .ia-logo { width: 18px; height: 18px; border-radius: 5px; }
+.bt.com-logo .ia-logo svg { width: 12px; height: 12px; }
+.aviso-ia-fora { flex-wrap: wrap; }
+.aviso-ia-trocada { margin: 4px 0 12px 46px; max-width: 620px; font-size: 13px; }
 .sidebar .aviso-estado .bt.sm { display: inline-block; width: auto; margin: 0; }
 .timeline-wrap { flex: 1; overflow: auto; min-height: 0; padding: 14px 16px 18px; }
 .timeline { max-width: 880px; margin: 0 auto; width: 100%; }

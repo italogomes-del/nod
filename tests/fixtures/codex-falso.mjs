@@ -28,6 +28,18 @@ else {
     process.stderr.write("No prompt provided via stdin.\n");
     process.exit(1);
   }
+  // O teste da conta (definido em 2026-10-05): `mcp_servers={}`, sem proxy. Responde a frase pedida, ou falha como uma
+  // conta logada que não responde (TESTE_NOD_TESTE_FALHA).
+  if (config.includes("mcp_servers={}")) {
+    if (process.env.TESTE_NOD_REGISTRO) writeFileSync(process.env.TESTE_NOD_REGISTRO, JSON.stringify({ args, env: process.env, cwd: process.cwd(), arquivos: readdirSync(process.cwd()), prompt }));
+    emit({ type: "thread.started", thread_id: "sessao-teste" });
+    if (process.env.TESTE_NOD_TESTE_FALHA) emit({ type: "turn.failed", error: { message: "conta sem uso disponível" } });
+    else {
+      emit({ type: "item.completed", item: { type: "agent_message", text: "“Oi, Marcelo. Tudo pronto.”" } });
+      emit({ type: "turn.completed", usage: { input_tokens: 3, output_tokens: 3 } });
+    }
+    process.exit(0);
+  }
   const arquivo = join(process.cwd(), "proxy.mjs");
   const child = spawn(process.execPath, [arquivo], { stdio: ["pipe", "pipe", "inherit"] });
   let resposta = "";

@@ -26,11 +26,15 @@ export function causaDaFalhaDeConta(texto: string | null | undefined): Extract<C
 
 /** definido em 2026-10-05: o nome entra numa pergunta ao modelo; só o que parece nome passa (sem quebra de linha nem pontuação de comando). */
 const FORMA_NOME = /^[\p{L}][\p{L} .'-]{0,39}$/u;
+/** definido em 2026-10-05: nome e sobrenomes; uma frase inteira não é nome. */
+const PALAVRAS_NOME_MAX = 4;
 
 export function nomeParaOTeste(v: unknown): string | null {
   if (typeof v !== "string") return null;
-  const nome = v.trim().replace(/\s+/g, " ");
-  return FORMA_NOME.test(nome) ? nome : null;
+  // Só espaço comum é normalizado: quebra de linha e tabulação reprovam o nome (antes de virarem espaço).
+  const nome = v.trim().replace(/ +/g, " ");
+  if (!FORMA_NOME.test(nome) || nome.split(" ").length > PALAVRAS_NOME_MAX) return null;
+  return nome;
 }
 
 /** A pergunta do teste: uma frase, para a resposta caber na tela do onboarding e custar o mínimo. */

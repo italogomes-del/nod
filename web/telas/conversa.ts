@@ -26,6 +26,7 @@ import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
+import { avisoContaSemAcesso, ehIa, linhaIaTrocada } from "./ia-fora.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
@@ -165,7 +166,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
   if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
-  if (m.kind === "sistema") return linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (m.kind === "sistema") return linhaIaTrocada(m) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
@@ -202,13 +203,16 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   const inv = inventarioEmUso(estado);
   // Sem sonda ainda (inventário null, logo ao abrir a página) vale como fora: dizer "já voltou" seria afirmar sem saber.
   const aindaFora = !inv || inv.estado !== "pronto";
+  // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
+  const negacao = m.payload?.kind === "negacao" ? m.payload : null;
+  if (negacao?.causa && ehIa(negacao.nome)) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia: negacao.nome, causa: negacao.causa, aindaFora, noApp: "nodDesktop" in globalThis });
   const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
   return avisoDeEstado({
     tom: "erro",
     titulo: "Nenhum trabalho começou.",
     texto: aindaFora
-      ? `${nome ?? "O bot"} não pôde começar: sua conta de IA não está conectada neste computador.`
-      : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. Ela já voltou: mande a mensagem de novo.`,
+      ? `${nome ?? "O bot"} não pôde começar: sua conta de IA não está conectada neste computador. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`
+      : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. Ela já voltou: se a resposta não chegou, mande a mensagem de novo.`,
     extra: detalhes,
     acao: aindaFora ? botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }) : undefined,
   });

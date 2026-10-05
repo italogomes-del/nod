@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,5 +113,42 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
     await chmod(lento, 0o755);
     const inv = await sondar(lento, env, MODELO, { relogio: () => 8, timeoutTurnoMs: 300 });
     expect(inv).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_resposta", versao: "1.2.3", em: 8 });
+  });
+
+  /**
+   * definido em 2026-10-05 (medido em produção nesse dia): conta LOGADA de uma organização que desativou o uso por
+   * assinatura. O login conferia e todo turno voltava com a frase abaixo no lugar da resposta.
+   */
+  const RECUSA = "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access";
+  const resultCom = (texto: string, erro = false) => JSON.stringify({ type: "result", subtype: erro ? "error_during_execution" : "success", is_error: erro, session_id: "s", result: texto, total_cost_usd: 0, num_turns: 1, permission_denials: [] });
+
+  it("a recusa da organização reprova a IA com a causa, venha num result 'de sucesso', num de erro ou só no texto do assistente", async () => {
+    const esperado = { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "2.1.272", em: 9 };
+    const comoSucesso = await shimProprio(dir, "claude-recusa-sucesso", `echo '${INIT("none")}'\necho '${resultCom(RECUSA)}'\nexit 0`);
+    const s = await sondarDetalhado(comoSucesso, env, MODELO, { relogio: () => 9 });
+    expect(s.inventario).toEqual(esperado);
+    expect(s.resposta).toBeNull();
+
+    const comoErro = await shimProprio(dir, "claude-recusa-erro", `echo '${INIT("none")}'\necho '${resultCom(RECUSA, true)}'\nexit 1`);
+    expect(await sondar(comoErro, env, MODELO, { relogio: () => 9 })).toEqual(esperado);
+
+    const soNoTexto = await shimProprio(dir, "claude-recusa-texto", `echo '${INIT("none")}'\necho '${JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: RECUSA }] }, session_id: "s" })}'\nexit 1`);
+    expect(await sondar(soNoTexto, env, MODELO, { relogio: () => 9 })).toEqual(esperado);
+  });
+
+  it("com o login já conferido, um turno que falha por outro motivo é 'teste_falhou' (não 'falta entrar'); sem isso, nenhuma causa", async () => {
+    const quebrou = await shimProprio(dir, "claude-quebrou", 'echo "API Error: 529" >&2\nexit 1');
+    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10, loginConferido: true })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", causa: "teste_falhou", versao: "2.1.272", em: 10 });
+    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.272", em: 10 });
+  });
+
+  it("o teste do onboarding: a pergunta vai inteira num argumento só e a resposta volta pronta para a tela", async () => {
+    const visto = join(dir, "pergunta-vista.txt");
+    const bin = await shimProprio(dir, "claude-oi", `printf '%s' "$2" > ${JSON.stringify(visto)}\necho '${INIT("none")}'\necho '${resultCom("“Oi, Marcelo. Tudo pronto por aqui.”\\nsegunda linha")}'\nexit 0`);
+    const pergunta = "Diga oi para Marcelo em uma frase curta, em português. Só a frase.";
+    const s = await sondarDetalhado(bin, env, MODELO, { relogio: () => 11, pergunta, loginConferido: true });
+    expect(s.inventario).toEqual({ estado: "pronto", versao: "2.1.272", em: 11 });
+    expect(s.resposta).toBe("Oi, Marcelo. Tudo pronto por aqui.");
+    expect(await readFile(visto, "utf8")).toBe(pergunta);
   });
 });
