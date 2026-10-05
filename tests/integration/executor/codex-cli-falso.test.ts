@@ -125,7 +125,7 @@ it("teste da conta: logada e sem responder é 'nao_autenticado' com a causa 'tes
   cfg.env.TESTE_NOD_TESTE_FALHA = "1";
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const t = await instance.testar!("Diga oi em uma frase curta, em português. Só a frase.");
-  expect(t).toEqual({ inventario: { estado: "nao_autenticado", motivo: "teste_falhou", versao: "codex-cli teste", causa: "teste_falhou", em: expect.any(Number) }, resposta: null });
+  expect(t).toEqual({ inventario: { estado: "nao_autenticado", motivo: "A conta entrou, mas não respondeu ao teste.", versao: "codex-cli teste", causa: "teste_falhou", em: expect.any(Number) }, resposta: null });
   expect(JSON.stringify(t)).not.toContain("conta sem uso");
   // O login continua valendo: a sonda grátis segue dizendo "pronto" (quem guarda o veredito é a vigia do app).
   expect((await instance.sondar()).estado).toBe("pronto");

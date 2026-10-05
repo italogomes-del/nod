@@ -160,7 +160,7 @@ describeIntegracao("rotas do artefato (ADR-051)", () => {
 
       const semDados = await servidor.chamar(marlon, "PUT", `artefatos/${artefato_id}/estado`, {});
       expect(semDados.status).toBe(400);
-      expect(await semDados.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+      expect(await semDados.json()).toEqual({ codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." });
       const grande = await servidor.chamar(marlon, "PUT", `artefatos/${artefato_id}/estado`, { dados: { x: "é".repeat(40_000) } });
       expect(grande.status).toBe(400);
       const ok = await servidor.chamar(marlon, "PUT", `artefatos/${artefato_id}/estado`, { dados: { a: true } });

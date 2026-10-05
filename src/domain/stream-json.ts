@@ -136,6 +136,9 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
     return { tipo: "ignorado", razao: "tipo_desconhecido", tipoBruto: `${type} ev=${str(ev?.["type"], "?")}` };
   }
   if (type === "assistant") {
+    // NOD-174: o erro da API vem também como `assistant` com model "<synthetic>" e o mesmo texto do `result` ("Credit
+    // balance is too low"). É do CLI, nunca do modelo: não vira bloco da fala. O cru segue no `erroCru` do result.
+    if (obj(o["message"])?.["model"] === "<synthetic>") return { tipo: "ignorado", razao: "sintetico", tipoBruto: "assistant" };
     const content = obj(o["message"])?.["content"];
     if (Array.isArray(content)) {
       for (const bloco of content) {
@@ -248,8 +251,8 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
  *    turno antes do spawn (montarPlano → executor_indisponivel); este classificador não o infere.
  *
  * O texto (definido em 2026-09-28) é o que vira a fala do bot e a resposta ao colega:
- *  - com result: comporFala(blocos antes da última ferramenta, final). O final é `result.texto`; vazio
- *    (Codex, que nunca o preenche, ou erro sem texto), são os blocos depois da última ferramenta; sem
+ *  - com result: comporFala(blocos antes da última ferramenta, final). O final é `result.texto` do sucesso; vazio
+ *    (Codex, que nunca o preenche, ou falha, cujo texto é o erro do CLI), são os blocos depois da última ferramenta; sem
  *    eles, todos os blocos; sem blocos, os deltas colados, como antes;
  *  - sem result (interrompido): tudo o que foi escrito — os blocos separados por linha em branco mais o
  *    trecho em streaming que não chegou a fechar um bloco; sem blocos, os deltas colados, como antes.
@@ -295,7 +298,9 @@ export function classificarResultado(entrada: {
   const todos = blocos.map((b) => b.texto);
   if (result) {
     const depois = blocos.filter((b) => b.posicao > ultimaFerramenta).map((b) => b.texto);
-    const final = result.texto || juntarBlocos(depois) || juntarBlocos(todos) || textoStream;
+    // NOD-174: na falha, o `result` é o erro do CLI em inglês, não fala do bot — fica só no `erroCru`. O que o modelo
+    // escreveu antes do erro continua (vira parcial no servidor).
+    const final = (result.sucesso ? result.texto : "") || juntarBlocos(depois) || juntarBlocos(todos) || textoStream;
     const antes = blocos.filter((b) => b.posicao < ultimaFerramenta).map((b) => b.texto);
     const base = {
       texto: comporFala(antes, final),

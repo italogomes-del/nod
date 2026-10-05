@@ -15,7 +15,7 @@ npm ci                      # Node 24.19.0 (pinado em .mise.toml)
 npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0010) e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
-npm run e2e:fumaca          # onze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
+npm run e2e:fumaca          # doze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
 npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou NOD_MODELO); imprime o custo somado — rode UMA vez, custa assinatura
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call

@@ -98,7 +98,7 @@ export function criarSessao(segredo: string, opcoes: OpcoesSessao = { modo: "stu
       publica: true,
       async handler(ctx) {
         if (!ctx.escopo) {
-          ctx.json(401, { codigo: "nao_permitido", mensagem: "entre com uma sessão" });
+          ctx.json(401, { codigo: "nao_permitido", mensagem: "Sua sessão terminou. Entre de novo para continuar." });
           return;
         }
         ctx.json(200, ctx.escopo);

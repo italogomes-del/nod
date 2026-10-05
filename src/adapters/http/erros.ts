@@ -6,29 +6,35 @@ import { log } from "../../obs/log.ts";
 import { json } from "./util.ts";
 
 /**
+ * definido em 2026-10-05 (NOD-174): cada mensagem é frase completa em pt-BR, com a ação quando há uma — é o que a
+ * pessoa lê no banner da web, que não mostra mais o código. O código continua no corpo, para quem depura.
+ *
  * A mensagem de erro é canal de vazamento (ADR-002/004 refinados): só sai o que está nesta tabela
  * FIXA, indexada pelo código fechado. Nunca err.message. Erro desconhecido vira 500 + correlation_id
  * para achar no log.
  */
-const TABELA: Record<CodigoErro, { status: number; mensagem: string }> = {
+export const TABELA_ERROS: Readonly<Record<CodigoErro, { status: number; mensagem: string }>> = {
   conector_indisponivel: { status: 502, mensagem: "Não foi possível acessar o serviço. Tente novamente ou refaça a conexão." },
   integracao_nao_configurada: { status: 409, mensagem: "Configure sua chave Composio no marketplace para conectar os apps." },
   integracao_autenticacao: { status: 403, mensagem: "O Composio recusou a autenticação. Confira a chave e as permissões do seu projeto." },
-  nao_encontrado: { status: 404, mensagem: "não encontrado" },
-  entrada_invalida: { status: 400, mensagem: "entrada inválida" },
-  escopo_vazio: { status: 400, mensagem: "escopo ausente" },
-  limite_atingido: { status: 429, mensagem: "limite atingido" },
-  nao_permitido: { status: 403, mensagem: "não permitido" },
-  estado_invalido: { status: 409, mensagem: "estado não permite esta ação" },
-  executor_indisponivel: { status: 503, mensagem: "executor indisponível" },
-  fuso_invalido: { status: 400, mensagem: "fuso inválido: use um nome IANA, nunca offset" },
-  cron_sem_futuro: { status: 400, mensagem: "a expressão cron não tem próxima execução" },
-  sala_tamanho: { status: 400, mensagem: "sala tem de 2 a 6 bots" },
-  http_toca_dado_pessoal: { status: 400, mensagem: "Use HTTPS para conectar um serviço que acessa dados pessoais" },
-  env_placeholder_chave_nova: { status: 400, mensagem: "placeholder de env só vale para chave já existente" },
-  dono_imutavel: { status: 403, mensagem: "o dono do agente não muda" },
-  texto_vazio: { status: 400, mensagem: "texto vazio" },
+  nao_encontrado: { status: 404, mensagem: "Não encontramos o que você pediu. Talvez tenha sido apagado; atualize a página." },
+  entrada_invalida: { status: 400, mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." },
+  escopo_vazio: { status: 400, mensagem: "Escolha pelo menos uma permissão antes de continuar." },
+  limite_atingido: { status: 429, mensagem: "Você chegou ao limite por agora. Espere um pouco e tente de novo." },
+  nao_permitido: { status: 403, mensagem: "Você não tem permissão para fazer isso." },
+  estado_invalido: { status: 409, mensagem: "Isso não pode ser feito agora. Atualize a página e tente de novo." },
+  executor_indisponivel: { status: 503, mensagem: "A inteligência não está disponível neste Mac agora. Abra o nod no Mac e tente de novo." },
+  fuso_invalido: { status: 400, mensagem: "Fuso horário inválido. Use o nome de uma região, como America/Sao_Paulo, e não uma diferença de horas." },
+  cron_sem_futuro: { status: 400, mensagem: "Esse horário não acontece mais. Escolha outro." },
+  sala_tamanho: { status: 400, mensagem: "Uma sala tem de 2 a 6 bots." },
+  http_toca_dado_pessoal: { status: 400, mensagem: "Use HTTPS para conectar um serviço que acessa dados pessoais." },
+  env_placeholder_chave_nova: { status: 400, mensagem: "O valor oculto só vale para uma chave que já existe. Preencha o valor da chave nova." },
+  dono_imutavel: { status: 403, mensagem: "O dono do agente não pode ser trocado." },
+  texto_vazio: { status: 400, mensagem: "Escreva algo antes de enviar." },
 };
+
+/** O 500: sem detalhe (ADR-002), mas com o que fazer. */
+export const MENSAGEM_FALHA_INTERNA = "Algo deu errado do nosso lado. Tente de novo; se repetir, relate o problema.";
 
 export interface ErroDto {
   codigo: string;
@@ -68,7 +74,7 @@ function logarRecusa(err: ErroDeDominio, status: number, origem: OrigemRequisica
 
 export function responderErro(res: ServerResponse, err: unknown, origem?: OrigemRequisicao): void {
   if (ehErroDeDominio(err)) {
-    const { status, mensagem } = TABELA[err.codigo];
+    const { status, mensagem } = TABELA_ERROS[err.codigo];
     logarRecusa(err, status, origem);
     const corpo: ErroDto = { codigo: err.codigo, mensagem };
     json(res, status, corpo);
@@ -76,7 +82,7 @@ export function responderErro(res: ServerResponse, err: unknown, origem?: Origem
   }
   if (typeof err === "object" && err !== null && (err as { code?: unknown }).code === SQLSTATE_TEXTO_INVALIDO) {
     logarRecusa(new ErroDeDominio("entrada_invalida"), 400, origem, "id_malformado");
-    json(res, 400, { codigo: "entrada_invalida", mensagem: TABELA.entrada_invalida.mensagem });
+    json(res, 400, { codigo: "entrada_invalida", mensagem: TABELA_ERROS.entrada_invalida.mensagem });
     return;
   }
   const correlationId = contextoAtual()?.correlationId ?? null;
@@ -84,6 +90,6 @@ export function responderErro(res: ServerResponse, err: unknown, origem?: Origem
     erro: err instanceof Error ? err.name : "desconhecido",
     correlation_id: correlationId,
   });
-  const corpo: ErroDto = { codigo: "falha_interna", mensagem: "falha interna", correlation_id: correlationId };
+  const corpo: ErroDto = { codigo: "falha_interna", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: correlationId };
   json(res, 500, corpo);
 }

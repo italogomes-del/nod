@@ -80,7 +80,7 @@ describe("servidor: saúde, sessão e roteador", () => {
         body: JSON.stringify(corpo),
       });
       expect(r.status).toBe(400);
-      expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+      expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." });
     }
   });
 

@@ -96,7 +96,7 @@ describeIntegracao("interruptor de executor: catcher ⇄ claude-cli em tempo de 
 
     const invalido = await srv.chamar("POST", "executor", { id: "gpt" });
     expect(invalido.status).toBe(400);
-    expect(await invalido.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+    expect(await invalido.json()).toEqual({ codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." });
   });
 
   it("trocar para o claude-cli sonda na hora; sonda 'nao_autenticado' → recusa escrita SÓ na resposta da troca, atual segue catcher, opção mostra a sonda", { timeout: CASO_MS }, async () => {

@@ -142,7 +142,10 @@ describe("dispararRotina", () => {
     const falha = await registrarDesfechoRotina(d.deps, { turnoId, desfecho: "falhou", motivo: "erro_execucao" });
     if (!("execucao" in falha.data)) throw new Error("deveria registrar");
     expect(falha.data.execucao.desfecho).toBe("falhou");
-    expect(d.banco.mensagens.filter((m) => m.kind === "rotina_execucao").at(-1)?.texto).toContain("A rotina falhou por erro técnico: erro_execucao");
+    // Regression: NOD-174 QA — a conversa lia "A rotina falhou por erro técnico: erro_execucao." (motivo cru).
+    const textoFalha = d.banco.mensagens.filter((m) => m.kind === "rotina_execucao").at(-1)?.texto ?? "";
+    expect(textoFalha).toContain("A rotina falhou por erro técnico: a IA parou por um erro");
+    expect(textoFalha).not.toMatch(/[a-z]+_[a-z]+/);
 
     const branco = await registrarDesfechoRotina(d.deps, { turnoId, desfecho: "passou_em_branco", motivo: "ninguem_respondeu_o_gate" });
     if (!("execucao" in branco.data)) throw new Error("deveria registrar");

@@ -6,7 +6,7 @@ import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
-import { redigir } from "../domain/redacao.ts";
+import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
@@ -260,7 +260,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
       ? `Rotina executou em ${quando} (${rotina.fusoIana}): ${resumoCron(rotina.cron, rotina.fusoIana)}.`
       : input.desfecho === "passou_em_branco"
         ? `${redigir("rotina-passou-em-branco", agora, { motivo: input.motivo ? (MOTIVO_EM_BRANCO[input.motivo] ?? input.motivo) : "sem motivo" })} (${quando})`
-        : `${redigir("rotina-falhou", agora, { motivo: input.motivo ?? "erro_execucao" })} (${quando})`;
+        : `${redigir("rotina-falhou", agora, { motivo: motivoEmPortugues(input.motivo ?? "erro_execucao") })} (${quando})`;
   const autoria = input.desfecho === "executou" ? autoriaAgente(rotina.agenteId, deps.escopo.pessoaId) : autoriaPessoa(deps.escopo.pessoaId, "regra:varredor-expiracao");
   await deps.repos.mensagens.criar({
     conversaId: rotina.conversaId,

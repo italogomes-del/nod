@@ -8,6 +8,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { fraseDoErroFornecedor } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
@@ -229,12 +230,15 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
+    // NOD-174: falha do fornecedor com classe conhecida ganha a frase com ação ("sua conta do Claude Code saiu deste
+    // Mac…"); o motivo gravado continua o do protocolo (ADR-009). O cru fica só no diagnóstico (ADR-041).
+    const fraseFornecedor = desfecho.motivoFalha ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru) : null;
     const aviso = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,
       autoria,
       kind: "sistema",
-      texto: redigir("turno-interrompido", agora, { motivo: motivoEmPortugues(motivo) }),
+      texto: redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoEmPortugues(motivo) }),
       confianca: "confiavel",
     });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));

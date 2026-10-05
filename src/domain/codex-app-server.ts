@@ -1,3 +1,5 @@
+import { redigirECortar } from "./segredos.ts";
+
 /**
  * Protocolo do `codex app-server` (definido em 2026-10-04, ADR-076): JSON-RPC 2.0, uma mensagem JSON por linha no
  * stdin/stdout do processo. Puro — só monta as linhas que o laço de voz escreve e interpreta as que ele lê.
@@ -7,6 +9,9 @@
  * app-server falso de `tests/fixtures/codex-falso.mjs`. O parser é tolerante: campo que falta vira null, linha que não
  * é JSON vira `ignorado`, nunca lança.
  */
+
+/** NOD-174: o mesmo teto do `erroCru` do Codex exec (codex-stream.ts). */
+const ERRO_CRU_APP_SERVER_MAX_CHARS = 500;
 
 export type IdRpc = number | string;
 
@@ -39,7 +44,7 @@ export type EventoAppServer =
   | { tipo: "pedido_servidor"; id: IdRpc; metodo: string }
   | { tipo: "uso"; tokens: TokensAppServer }
   /** Notificação `error` do servidor (a mensagem crua fica só aqui). */
-  | { tipo: "erro"; mensagem: string; vaiRepetir: boolean }
+  | { tipo: "erro"; mensagem: string | null; vaiRepetir: boolean }
   | { tipo: "ignorado" };
 
 type Obj = Record<string, unknown>;
@@ -170,7 +175,9 @@ function interpretarNotificacao(metodo: string, params: Obj): EventoAppServer {
     case "turn/completed": {
       const turno = ehObj(params.turn) ? params.turn : {};
       const status = turno.status === "interrupted" ? "interrupted" : turno.status === "failed" ? "failed" : "completed";
-      const erro = ehObj(turno.error) ? (texto(turno.error.message) ?? "erro") : null;
+      // NOD-174: o motivo do Codex chega ao `erroCru` (redigido antes do corte); sem mensagem fica null, nunca o "erro"
+      // genérico de antes. Interrompido não é falha do fornecedor: sem erro.
+      const erro = status !== "interrupted" && ehObj(turno.error) ? redigirECortar(texto(turno.error.message), ERRO_CRU_APP_SERVER_MAX_CHARS) : null;
       return { tipo: "turno_concluido", turnId: turnoDe(params), status, erro };
     }
     case "thread/tokenUsage/updated": {
@@ -180,7 +187,7 @@ function interpretarNotificacao(metodo: string, params: Obj): EventoAppServer {
     }
     case "error": {
       const erro = ehObj(params.error) ? params.error : {};
-      return { tipo: "erro", mensagem: texto(erro.message) ?? "erro", vaiRepetir: params.willRetry === true };
+      return { tipo: "erro", mensagem: redigirECortar(texto(erro.message), ERRO_CRU_APP_SERVER_MAX_CHARS), vaiRepetir: params.willRetry === true };
     }
     default:
       return { tipo: "ignorado" };

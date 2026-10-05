@@ -90,6 +90,16 @@ describe("linhas do servidor", () => {
     expect(interpretarLinhaAppServer(linha({ method: "turn/completed", params: { turn: { id: "t3", status: "failed", error: { message: "cota" } } } }))).toEqual({ tipo: "turno_concluido", turnId: "t3", status: "failed", erro: "cota" });
   });
 
+  it("NOD-174: o erro chega redigido e cortado; sem mensagem fica null, e interrompido não é erro do fornecedor", () => {
+    const falhou = (error: unknown, status = "failed") => interpretarLinhaAppServer(linha({ method: "turn/completed", params: { turn: { id: "t", status, error } } }));
+    expect(falhou({})).toMatchObject({ status: "failed", erro: null });
+    expect(falhou({ message: "cancelado" }, "interrupted")).toMatchObject({ status: "interrupted", erro: null });
+    const comChave = falhou({ message: `401 Unauthorized OPENAI_API_KEY=sk-proj-${"a".repeat(40)} ${"x".repeat(900)}` });
+    expect(comChave).toMatchObject({ erro: expect.stringContaining("OPENAI_API_KEY=«redigido: 48 caracteres»") });
+    expect(comChave.tipo === "turno_concluido" && comChave.erro!.length).toBeLessThanOrEqual(500);
+    expect(interpretarLinhaAppServer(linha({ method: "error", params: { error: {} } }))).toEqual({ tipo: "erro", mensagem: null, vaiRepetir: false });
+  });
+
   it("pedido do servidor (método E id) precisa de resposta", () => {
     expect(interpretarLinhaAppServer(linha({ id: "srv1", method: "item/commandExecution/requestApproval", params: { command: "rm" } }))).toEqual({ tipo: "pedido_servidor", id: "srv1", metodo: "item/commandExecution/requestApproval" });
     expect(interpretarLinhaAppServer(linha({ id: 0, method: "mcpServer/elicitation/request", params: {} }))).toEqual({ tipo: "pedido_servidor", id: 0, metodo: "mcpServer/elicitation/request" });

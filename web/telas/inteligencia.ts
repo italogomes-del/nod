@@ -1,5 +1,6 @@
 import type { Agente, EsforcoAgente } from "../../src/contracts/agente.ts";
 import type { CatalogoHarness, PreferenciaHarness } from "../../src/contracts/harness.ts";
+import type { Inventario } from "../../src/contracts/inventario.ts";
 import { esc } from "../lib/render.ts";
 
 export function nomeInteligencia(a: Pick<Agente, "modelo" | "harness">, catalogo?: CatalogoHarness): string {
@@ -25,6 +26,18 @@ const ESFORCOS: Record<EsforcoAgente, string> = {
   xhigh: "Muito alto",
   max: "Máximo · mais lento e mais caro",
 };
+
+/**
+ * NOD-174: o motivo do inventário mistura frase pronta (Codex: "Atualize o Codex: …") com código da sonda
+ * ("binario_nao_encontrado", "turno_de_sonda_sem_result", "teste_falhou"). Código vira frase pela situação; o código
+ * fica no diagnóstico do executor, não aqui. O driver em sombra embute o código ("ausente: claude_fora_do_path",
+ * "create_falhou: spawn ENOENT"); qualquer token snake_case conta como código.
+ */
+export function motivoDoInventario(nome: string, inv: Inventario): string {
+  if (inv.estado === "pronto") return "";
+  if (inv.motivo && !/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/.test(inv.motivo)) return inv.motivo;
+  return inv.estado === "ausente" ? `Não encontramos o ${nome} neste Mac. Instale e entre na sua conta para usá-lo no nod.` : `Entre na sua conta do ${nome} neste Mac e tente de novo.`;
+}
 
 function renderEsforco(atual: EsforcoAgente | null | undefined): string {
   const opcoes = [`<option value=""${atual ? "" : " selected"}>Padrão do modelo</option>`, ...(Object.keys(ESFORCOS) as EsforcoAgente[]).map((e) => `<option value="${e}"${e === atual ? " selected" : ""}>${esc(ESFORCOS[e])}</option>`)];
@@ -57,7 +70,7 @@ export function renderInteligencia(a: Pick<Agente, "modelo" | "harness" | "esfor
       <p id="inteligencia-ajuda" class="inteligencia-ajuda">Vale para as próximas tarefas. Seu histórico e sua memória continuam aqui. Volte a Automático quando quiser.</p>
       ${renderEsforco(a.esforco)}
       <details class="inteligencia-avancado"><summary>Harnesses e disponibilidade</summary><p>O harness conecta o agente à sua conta de IA. Cada um oferece seus próprios modelos; a disponibilidade depende da sua conta.</p>
-        <ul>${(catalogo?.opcoes ?? []).map((h) => `<li><div><b>${esc(h.nome)}</b><span class="harness-status ${h.inventario.estado === "pronto" && h.integrado ? "pronto" : ""}">${!h.integrado ? "Em preparação" : h.inventario.estado === "pronto" ? "Conectado" : "Não conectado"}</span></div><small>${esc(!h.integrado ? h.descricao : h.inventario.estado === "pronto" ? h.descricao : h.inventario.motivo)}</small></li>`).join("")}</ul>
+        <ul>${(catalogo?.opcoes ?? []).map((h) => `<li><div><b>${esc(h.nome)}</b><span class="harness-status ${h.inventario.estado === "pronto" && h.integrado ? "pronto" : ""}">${!h.integrado ? "Em preparação" : h.inventario.estado === "pronto" ? "Conectado" : "Não conectado"}</span></div><small>${esc(!h.integrado ? h.descricao : h.inventario.estado === "pronto" ? h.descricao : motivoDoInventario(h.nome, h.inventario))}</small></li>`).join("")}</ul>
       </details>
     </details>
   </section>`;

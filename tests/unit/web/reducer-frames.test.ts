@@ -173,7 +173,7 @@ describe("reduzir: hidratar e navegar", () => {
     e = reduzir(e, { tipo: "invalidacoes-tratadas", quais: ["frota"] });
     expect(e.invalidacoes).toEqual(["sua-vez"]);
     e = reduzir(e, { tipo: "faixa", faixa: { interrompidas: 0, naoInterrompidas: [], jaEntregues: [], nadaRodando: true } });
-    e = reduzir(e, { tipo: "erro", erro: { codigo: "nao_encontrado", mensagem: "não encontrado" } });
+    e = reduzir(e, { tipo: "erro", erro: { codigo: "nao_encontrado", mensagem: "Não encontramos o que você pediu. Talvez tenha sido apagado; atualize a página." } });
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "sua-vez" } });
     expect(e.erro).toBeNull();
     expect(e.faixaParada).toBeNull();

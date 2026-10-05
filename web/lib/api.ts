@@ -34,6 +34,10 @@ import type { Escopo } from "../../src/shared/types.ts";
  * servidor chega como `ErroApi` com o código FECHADO da tabela de erros — a web renderiza o código,
  * nunca inventa texto a partir de err.message (ADR-002/004).
  */
+/** NOD-174: quando o servidor não manda frase (proxy, corpo vazio), a pessoa lê isto — nunca "falha" solta. */
+const FALHA_SEM_FRASE = "Algo deu errado. Tente de novo; se repetir, relate o problema.";
+const FALHA_DE_REDE = "Não conseguimos falar com o servidor. Confira a conexão e tente de novo.";
+
 export class ErroApi extends Error {
   readonly status: number;
   readonly codigo: string;
@@ -65,7 +69,7 @@ async function pedir<T>(metodo: string, url: string, corpo?: unknown): Promise<T
   }
   if (!r.ok) {
     const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null };
-    throw new ErroApi(r.status, e.codigo ?? "falha_interna", e.mensagem ?? "falha", e.correlation_id ?? null);
+    throw new ErroApi(r.status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null);
   }
   return lido as T;
 }
@@ -77,12 +81,12 @@ function subir(url: string, arquivo: File, mime: string, aoProgresso?: (fracao: 
     x.setRequestHeader("content-type", mime);
     x.setRequestHeader("x-nod-nome", encodeURIComponent(arquivo.name));
     x.upload.onprogress = (e) => { if (e.lengthComputable) aoProgresso?.(e.loaded / e.total); };
-    x.onerror = () => rejeitar(new ErroApi(0, "falha_interna", "falha de rede"));
+    x.onerror = () => rejeitar(new ErroApi(0, "falha_interna", FALHA_DE_REDE));
     x.onload = () => {
       let lido: { codigo?: string; mensagem?: string } & Partial<AnexoMeta> = {};
       try { lido = JSON.parse(x.responseText) as typeof lido; } catch { lido = {}; }
       if (x.status >= 200 && x.status < 300) resolver(lido as AnexoMeta);
-      else rejeitar(new ErroApi(x.status, lido.codigo ?? "falha_interna", lido.mensagem ?? "falha"));
+      else rejeitar(new ErroApi(x.status, lido.codigo ?? "falha_interna", lido.mensagem ?? FALHA_SEM_FRASE));
     };
     x.send(arquivo);
   });

@@ -49,7 +49,7 @@ Contra-prova: `NOD_CLAUDE_BIN=/bin/false NOD_EXECUTOR=claude-cli npm run dev` �
 
 ```bash
 npm run check          # lint → typecheck (3 tsconfigs) → cerca do domínio → unit → integration → conformidade → concurrency
-npm run e2e:fumaca     # as onze jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
+npm run e2e:fumaca     # as doze jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
 npm run uat:regressao  # 16 testes de apoio ao aceite: produto, MCP, revogação e isolamento Composio
 npm run e2e:aceite     # scripts/e2e-aceite.sh: o mesmo roteiro com o CLI real e curl+jq; imprime o custo somado
 ```

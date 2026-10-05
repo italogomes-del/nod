@@ -27,6 +27,7 @@ import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedid
 import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
+import { IDIOMA_DO_APP, templateDoMenu } from "./menu.ts";
 
 /** ADR-069: o endereço do servidor vem no build (scripts/desktop/build.mjs, NOD_SERVIDOR_PADRAO); vazio = a pessoa informa. */
 declare const __NOD_SERVIDOR_PADRAO__: string;
@@ -165,7 +166,7 @@ async function definirAvisos(ligado: boolean): Promise<PreferenciasDesktop> {
   return estadoPreferencias();
 }
 function montarMenu() {
-  Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: "nod", submenu: [{ label: "Conexão / verificar conta de IA", click: () => { void parar().then(mostrarSetup); } }, { type: "separator" }, { label: "Avisos no Mac", type: "checkbox", checked: preferencias.avisos, click: (item) => { void definirAvisos(item.checked); } }, { type: "separator" }, { role: "quit" }] }, { role: "editMenu" }, { role: "viewMenu" }]));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); } })));
 }
 /** A janela aberta é a do nod web, na origem do servidor configurado (e não a tela de conexão). */
 function janelaWeb(): BrowserWindow | null {
@@ -414,6 +415,9 @@ function validarRemetenteWeb(event: IpcMainInvokeEvent) {
   const frame = event.senderFrame;
   if (event.sender !== janela?.webContents || !remetenteWebValido({ frameUrl: frame?.url, frameDeTopo: !!frame && frame.parent === null, servidor: configuracao?.url })) throw new Error("origem_invalida");
 }
+// NOD-174: menu de contexto, diálogos nativos e validação da página em pt-BR mesmo num Mac em inglês. Só vale antes do
+// `ready`: depois disso o Chromium ignora a troca em silêncio.
+app.commandLine.appendSwitch("lang", IDIOMA_DO_APP);
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   // NOD-137: abrir de novo (segunda cópia, Dock) traz a janela atual, inclusive minimizada. Sem janela (boot ou troca em

@@ -29,3 +29,13 @@ A mesma regra, aplicada às chamadas do servidor a provedores por HTTP (Composio
 - Medida: `conector_nova_tentativa` (conector, ferramenta, status, tentativa, espera, desfecho `recuperou`/`repetindo`/`esgotou`) e o status no `conector_chamada_falhou`.
 
 Fora desta emenda: relançar o turno ou o CLI (continua proibido), re-handshake de sessão MCP expirada (404), limpar "Fora do ar" quando a chamada seguinte dá certo.
+
+
+## Emenda de 2026-10-05 — classe do erro do fornecedor (NOD-174)
+
+O estado e o motivo do turno continuam vindo do protocolo (`desfecho`, `motivoFalha`); ao lado deles, o erro cru do Claude Code ou do Codex ganha uma **classe fechada** que só escolhe a frase do aviso. `src/domain/erro-fornecedor.ts`: `login_expirado`, `contexto_cheio`, `sobrecarga` e `desconhecido`, por regex sobre o `erroCru` já redigido (ADR-041 / NOD-158), na ordem fixa login > contexto > sobrecarga.
+
+- A classificação roda no servidor, em `assentar-turno`, a partir do `resultado.erroCru` que já atravessa a ponte. O protocolo da ponte não muda.
+- `desconhecido` não tem frase: o aviso fica com `motivoEmPortugues`, que agora é total sobre `MotivoFalha | MotivoInterrupcao` (motivo novo sem frase quebra o typecheck).
+- O `result` de falha do CLI e o `assistant` sintético (`model: "<synthetic>"`) não viram fala do bot. O texto em inglês do fornecedor fica só no diagnóstico e no relato.
+- Sem classe para crédito e rede: sem fixture confiável; caem em `desconhecido`.

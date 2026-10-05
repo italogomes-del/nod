@@ -120,6 +120,8 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     const resumoDeltas: string[] = [];
     const resumoBlocos: string[] = [];
     let resumoOk = false;
+    // NOD-174: o que o Codex disse de errado (evento `error` ou `turn/completed` com falha), para o `erroCru` do desfecho.
+    let ultimoErro: string | null = null;
     let tokens: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 };
     let negados = 0;
     let fechando = false;
@@ -271,6 +273,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           const atual = turno.estado === "ativo" ? turno.id : null;
           if (ev.turnId && atual && ev.turnId !== atual) return; // turno velho
           turno = { estado: "livre" };
+          ultimoErro = ev.erro ?? ultimoErro;
           if (resumo === "rodando") {
             resumo = "feito";
             resumoOk = ev.status === "completed";
@@ -283,6 +286,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           tokens = { ...ev.tokens, cacheCriacao: 0 };
           return;
         case "erro":
+          ultimoErro = ev.mensagem ?? ultimoErro;
           log("aviso", "codex_ligacao_erro_servidor", { turno_id: plano.turnoId, vai_repetir: ev.vaiRepetir });
           return;
         default:
@@ -357,7 +361,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     if (resumo === "feito") {
       const texto = resumoBlocos.length > 0 ? resumoBlocos.join("\n\n") : resumoDeltas.join("");
       if (texto !== "") emitir({ tipo: "texto_bloco", texto }, true);
-      emitir({ tipo: "result", sucesso: resumoOk, subtype: resumoOk ? "success" : "error", sessaoCli: null, texto: resumoOk ? texto : "", custoUsd: null, tokens, numTurnos: 1, negacoesPermissao: [], erroCru: resumoOk ? null : "resumo_falhou" }, true);
+      emitir({ tipo: "result", sucesso: resumoOk, subtype: resumoOk ? "success" : "error", sessaoCli: null, texto: resumoOk ? texto : "", custoUsd: null, tokens, numTurnos: 1, negacoesPermissao: [], erroCru: resumoOk ? null : (ultimoErro ?? "resumo_falhou") }, true);
     }
     const resultado = classificarResultado({
       eventos,

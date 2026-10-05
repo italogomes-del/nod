@@ -315,7 +315,7 @@ function erroDe(e: unknown): { codigo: string; mensagem: string; correlationId?:
   // O correlation_id atravessa para o relato poder citá-lo (ADR-041): é o que liga o que a pessoa
   // viu na tela à linha de log do servidor. Continua fora do que se RENDERIZA (ADR-002).
   if (e instanceof ErroApi) return { codigo: e.codigo, mensagem: e.message, correlationId: e.correlationId };
-  return { codigo: "falha_interna", mensagem: "falha ao falar com o servidor" };
+  return { codigo: "falha_interna", mensagem: "Não conseguimos falar com o servidor. Confira a conexão e tente de novo." };
 }
 
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
@@ -605,7 +605,8 @@ function renderSidebar(estado: Estado): string {
 
 function renderPrincipal(): void {
   const t = estado.tela;
-  const erro = estado.erro ? `<div class="erro" role="alert">${esc(estado.erro.codigo)} — ${esc(estado.erro.mensagem)} ${botao("fechar-erro", "×", { classe: "sm" })}</div>` : "";
+  // NOD-174: a pessoa lê a frase do servidor; o código fechado fica só no <details>, para quem depura.
+  const erro = estado.erro ? `<div class="erro" role="alert">${esc(estado.erro.mensagem)} ${botao("fechar-erro", "×", { classe: "sm" })}<details class="erro-detalhe"><summary>Detalhes</summary><code>${esc(estado.erro.codigo)}</code></details></div>` : "";
   let cabecalho = "";
   let corpo = "";
   let partes: PartesDaTimeline | null = null;

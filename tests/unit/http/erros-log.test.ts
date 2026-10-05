@@ -26,7 +26,7 @@ describe("responderErro registra a recusa no log", () => {
       caminho: `/api/t/172e1fdf-428d-48cb-b052-3bd7d2573e18/decisoes/${id}/decidir?x=1`,
     });
     expect(r.status()).toBe(400);
-    expect(r.corpo()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+    expect(r.corpo()).toEqual({ codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." });
     expect(linhas()).toEqual([expect.objectContaining({
       nivel: "aviso",
       evento: "requisicao_recusada",

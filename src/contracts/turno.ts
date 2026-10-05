@@ -179,7 +179,7 @@ export type EventoStream =
    * ou `task_notification` fecha.
    */
   | { tipo: "tarefa_fundo"; id: string; estado: "iniciada" | "terminada" }
-  | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido"; tipoBruto: string | null }
+  | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido" | "sintetico"; tipoBruto: string | null }
   /** Passo do driver catcher (Práticas §11): `subtipo` snake_case (CHECK catcher_registros_tipo); o servidor persiste em catcher_registros. */
   | { tipo: "catcher"; subtipo: string; dados: Record<string, unknown> };
 

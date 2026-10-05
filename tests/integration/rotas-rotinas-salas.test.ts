@@ -44,7 +44,7 @@ describeIntegracao("rotas de rotinas e salas (tabela ROTAS, L7): códigos da tab
       const { agenteId, repos } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const ruim = await srv.chamar(sessao, "POST", "rotinas", { cron: "0 8 * * *", fusoIana: "+03:00" });
       expect(ruim.status).toBe(400);
-      expect(await ruim.json()).toEqual({ codigo: "fuso_invalido", mensagem: "fuso inválido: use um nome IANA, nunca offset" });
+      expect(await ruim.json()).toEqual({ codigo: "fuso_invalido", mensagem: "Fuso horário inválido. Use o nome de uma região, como America/Sao_Paulo, e não uma diferença de horas." });
 
       const corpo = { agenteId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p" };
       const ok = await srv.chamar(sessao, "POST", "rotinas", corpo);
@@ -83,7 +83,7 @@ describeIntegracao("rotas de rotinas e salas (tabela ROTAS, L7): códigos da tab
       trxAtual = trx;
       const { agenteId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const corpo = { cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p" };
-      const esperado = { codigo: "entrada_invalida", mensagem: "entrada inválida" };
+      const esperado = { codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." };
       const semAgente = await srv.chamar(sessao, "POST", "rotinas", corpo);
       expect(semAgente.status).toBe(400);
       expect(await semAgente.json()).toEqual(esperado);
@@ -116,7 +116,7 @@ describeIntegracao("rotas de rotinas e salas (tabela ROTAS, L7): códigos da tab
       const bia = await agenteComConversa(trx, MARLON, { nome: "Bia" });
       const pequena = await srv.chamar(sessao, "POST", "salas", { nome: "x", agenteIds: [vera.agenteId] });
       expect(pequena.status).toBe(400);
-      expect(await pequena.json()).toEqual({ codigo: "sala_tamanho", mensagem: "sala tem de 2 a 6 bots" });
+      expect(await pequena.json()).toEqual({ codigo: "sala_tamanho", mensagem: "Uma sala tem de 2 a 6 bots." });
       expect((await srv.chamar(sessao, "POST", "salas", { nome: "x" })).status).toBe(400);
 
       const criada = await srv.chamar(sessao, "POST", "salas", { nome: "revisão", agenteIds: [vera.agenteId, tuca.agenteId] });

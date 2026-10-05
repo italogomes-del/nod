@@ -136,7 +136,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
     if (escopado) {
       const escopo = deps.resolverEscopo(req);
       if (!escopo) {
-        json(res, 401, { codigo: "nao_permitido", mensagem: "entre com uma sessão" });
+        json(res, 401, { codigo: "nao_permitido", mensagem: "Sua sessão terminou. Entre de novo para continuar." });
         return;
       }
       if (escopo.tenantId !== escopado[1]) {

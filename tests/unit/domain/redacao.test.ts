@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO } from "../../../src/contracts/motivos.ts";
 import { motivoEmPortugues, redigir } from "../../../src/domain/redacao.ts";
 
 describe("redacao", () => {
@@ -29,5 +30,19 @@ describe("redacao", () => {
     const t = redigir("decisao-vencida", 0, { quando: "24/09/2026, 15:00 UTC", desfecho: "alguém viu, mas ninguém respondeu" });
     expect(t).toBe("Este pedido venceu em 24/09/2026, 15:00 UTC sem resposta — alguém viu, mas ninguém respondeu. Você pode reabrir.");
     expect(t).not.toMatch(/expirou|_/);
+  });
+
+  it("NOD-174: todo motivo de falha e de interrupção tem frase em pt-BR, nunca o código cru", () => {
+    for (const m of [...MOTIVOS_FALHA, ...MOTIVOS_INTERRUPCAO]) {
+      const t = motivoEmPortugues(m);
+      expect(t, m).not.toBe(m);
+      expect(t, m).not.toMatch(/_/);
+    }
+    expect(motivoEmPortugues("erro_execucao")).toBe("a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem");
+  });
+
+  it("motivo legado fora do enum sai como está, sem quebrar; chave de Object.prototype não vira frase", () => {
+    expect(motivoEmPortugues("motivo_de_2025")).toBe("motivo_de_2025");
+    expect(motivoEmPortugues("toString")).toBe("toString");
   });
 });

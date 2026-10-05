@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
+import { classificarResultado, interpretarLinhaStreamJson } from "../../src/domain/stream-json.ts";
 import { assentarTurno, desfechoDaEntrega } from "../../src/use-cases/assentar-turno.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
@@ -196,6 +197,42 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       expect(await deps.repos.turnos.buscar(enviado.turno.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
       expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("claude-cli nao_autenticado: faça login no claude");
       expect(events.map((e) => e.kind)).toEqual(["turno_interrompido", "mensagem_criada"]);
+    });
+  });
+
+  /**
+   * NOD-174: o erro do Claude Code vinha como balão do bot ("Credit balance is too low"). Agora o `result` de falha e o
+   * `assistant` sintético não viram fala; o que o modelo escreveu antes fica, parcial, e o aviso sai em pt-BR.
+   */
+  it("falha do fornecedor não vira balão em inglês: fala anterior parcial e aviso em pt-BR com a frase da classe", async () => {
+    const linhas = (erro: string) => [
+      { type: "system", subtype: "init", session_id: randomUUID(), tools: [], model: "m", claude_code_version: "v", apiKeySource: "none" },
+      { type: "assistant", message: { model: "claude", content: [{ type: "text", text: "Vou olhar a planilha." }] } },
+      { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: erro }] } },
+      { type: "result", subtype: "success", is_error: true, result: erro, session_id: randomUUID(), total_cost_usd: 0, usage: {}, num_turns: 1 },
+    ].map((l) => interpretarLinhaStreamJson(JSON.stringify(l)));
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const casos = [
+        { erro: "Credit balance is too low", aviso: "Turno interrompido: a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem." },
+        { erro: "Invalid API key · Please run /login", aviso: "Turno interrompido: sua conta do Claude Code saiu deste Mac; use Conectar IA para entrar de novo." },
+      ];
+      for (const c of casos) {
+        const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+        await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+        const maquina = randomUUID();
+        const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+        const resultado = classificarResultado({ eventos: linhas(c.erro), exitCode: 1, signal: null, stderr: "" });
+        expect(resultado).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao", texto: "Vou olhar a planilha." });
+        expect(resultado.erroCru).toContain(c.erro);
+        const { data } = await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, harness: "claude-cli", fala: { tipo: "texto", texto: resultado.texto }, resultado });
+        expect(data.turno).toMatchObject({ estado: "interrompido", motivoFalha: "erro_execucao" });
+        const doTurno = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.turnoId === turnoId);
+        expect(doTurno.map((m) => [m.kind, m.parcial])).toEqual([["texto", true], ["sistema", false]]);
+        expect(doTurno.map((m) => m.texto).join("\n")).not.toContain(c.erro);
+        expect(doTurno[1]?.texto).toContain(c.aviso);
+        expect(doTurno[1]?.texto).not.toMatch(/[a-z]+_[a-z]+/);
+      }
     });
   });
 });

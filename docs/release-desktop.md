@@ -48,6 +48,22 @@ O endereço e a chave ficam cifrados em `Application Support/nod/conexao.enc`. A
 
 Fechar o app encerra sua execução. Quando o computador some sem desconectar, o lease encerra o turno órfão, sem reenfileirar automaticamente. As decisões e consultas continuam pela web.
 
+## UAT do idioma (NOD-174)
+
+O menu nativo, o menu de contexto e os diálogos do Chromium só aparecem no `.app` empacotado; o vitest cobre o template
+(`tests/unit/desktop/menu.test.ts`), não o que o macOS desenha. Rode no `.app` assinado, uma vez com o macOS em
+pt-BR e outra com o macOS em inglês, e anexe as fotos a esta seção:
+
+1. **Menu nod:** Conexão / verificar conta de IA, Avisos no Mac e **Sair do nod** (Cmd+Q sai).
+2. **Editar:** Desfazer, Refazer, Recortar, Copiar, Colar, Selecionar tudo. Copie e cole um texto no composer: o
+   rótulo explícito não pode desligar o item nativo (risco do plano, Electron 43.7.1).
+3. **Visualizar:** Recarregar, Tamanho real, Aumentar, Diminuir, Tela cheia. **Ferramentas de desenvolvedor** não
+   aparece no app empacotado.
+4. **Menu de contexto** (botão direito num campo de texto) e **balão de validação** da tela de conexão (campo
+   obrigatório vazio) em pt-BR mesmo com o macOS em inglês (`lang=pt-BR` antes do `ready`).
+5. **Pedido de microfone** (`Info.plist`) e **diálogo de fechar em ligação** em pt-BR.
+6. **Turno com a conta de IA deslogada:** a conversa mostra o aviso em pt-BR com a ação, e nenhum balão em inglês.
+
 ## Atualizar a partir da preview
 
 Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Instale o novo DMG sobre o app anterior, mantendo a configuração cifrada no Keychain. Valide conexão, execução, Parar e revogação de chave nas duas arquiteturas. Não há atualização automática. Esse caminho ainda depende de aceite real. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.

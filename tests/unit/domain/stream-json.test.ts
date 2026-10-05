@@ -121,6 +121,25 @@ describe("classificarResultado (ADR-009: estado de protocolo, nunca string de er
     }
   });
 
+  it("NOD-174: na falha, o result do CLI e o assistant sintético não entram no texto; os blocos do modelo ficam", () => {
+    const erro = "Credit balance is too low";
+    const linhas = [
+      { type: "system", subtype: "init", session_id: "s", tools: [], model: "m" },
+      { type: "assistant", message: { model: "claude-sonnet", content: [{ type: "text", text: "Vou conferir." }] } },
+      { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: erro }] } },
+      { type: "result", subtype: "success", is_error: true, result: erro, session_id: "s", num_turns: 1 },
+    ].map((l) => interpretarLinhaStreamJson(JSON.stringify(l)));
+    expect(linhas[2]).toEqual({ tipo: "ignorado", razao: "sintetico", tipoBruto: "assistant" });
+    const r = classificarResultado({ eventos: linhas, exitCode: 1, signal: null, stderr: "" });
+    expect(r).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao", texto: "Vou conferir." });
+    expect(r.erroCru).toBe(`success | ${erro}`);
+    // Sem nada do modelo antes do erro, a fala fica vazia (o servidor escreve só o aviso).
+    expect(classificarResultado({ eventos: [linhas[0]!, linhas[2]!, linhas[3]!], exitCode: 1, signal: null, stderr: "" }).texto).toBe("");
+    // O sucesso continua usando o result como fala.
+    const ok = interpretarLinhaStreamJson(JSON.stringify({ type: "result", subtype: "success", result: "Pronto.", session_id: "s", num_turns: 1 }));
+    expect(classificarResultado({ eventos: [linhas[0]!, ok], exitCode: 0, signal: null, stderr: "" }).texto).toBe("Pronto.");
+  });
+
   it("result com subtype error_max_turns → falha erro_max_turns; outro erro → erro_execucao", () => {
     const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
     const res = (subtype: string): EventoStream => ({ tipo: "result", sucesso: false, subtype, sessaoCli: "s", texto: "", custoUsd: 0.01, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [], erroCru: null });

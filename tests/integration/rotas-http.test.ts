@@ -52,14 +52,14 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
   it("ErroDeDominio vira status e texto da tabela fixa (nunca err.message)", async () => {
     const naoEncontrado = await srv.chamar(marlon, "GET", `conversas/${UUID}/mensagens`);
     expect(naoEncontrado.status).toBe(404);
-    expect(await naoEncontrado.json()).toEqual({ codigo: "nao_encontrado", mensagem: "não encontrado" });
+    expect(await naoEncontrado.json()).toEqual({ codigo: "nao_encontrado", mensagem: "Não encontramos o que você pediu. Talvez tenha sido apagado; atualize a página." });
     // ADR-045: "Entendi" num aviso que não existe (ou de outra pessoa, invisível pela RLS) é 404, nunca 500.
     const aviso = await srv.chamar(marlon, "POST", `incidentes/${UUID}/dispensar`, {});
     expect(aviso.status).toBe(404);
-    expect(await aviso.json()).toEqual({ codigo: "nao_encontrado", mensagem: "não encontrado" });
+    expect(await aviso.json()).toEqual({ codigo: "nao_encontrado", mensagem: "Não encontramos o que você pediu. Talvez tenha sido apagado; atualize a página." });
     const fuso = await srv.chamar(marlon, "POST", "rotinas", { agenteId: UUID, cron: "0 8 * * *", fusoIana: "+03:00" });
     expect(fuso.status).toBe(400);
-    expect(await fuso.json()).toEqual({ codigo: "fuso_invalido", mensagem: "fuso inválido: use um nome IANA, nunca offset" });
+    expect(await fuso.json()).toEqual({ codigo: "fuso_invalido", mensagem: "Fuso horário inválido. Use o nome de uma região, como America/Sao_Paulo, e não uma diferença de horas." });
     const tamanho = await srv.chamar(marlon, "POST", "salas", { nome: "x", agenteIds: [UUID] });
     expect(tamanho.status).toBe(400);
     expect(((await tamanho.json()) as { codigo: string }).codigo).toBe("sala_tamanho");
@@ -73,7 +73,7 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
     const corpo = await srv.chamar(marlon, "GET", "trilha?agente=valor-que-nao-e-uuid");
     expect(corpo.status).toBe(400);
     const texto = await corpo.text();
-    expect(JSON.parse(texto)).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+    expect(JSON.parse(texto)).toEqual({ codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." });
     expect(texto).not.toContain("valor-que-nao-e-uuid");
   });
 
@@ -100,7 +100,7 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
       body: JSON.stringify({ argumentos: { tipo: "fato", texto: "x" }, remetente: { pessoaId: PESSOA_ANA, agenteId: UUID, turnoId: UUID } }),
     });
     expect(r.status).toBe(404);
-    expect(await r.json()).toEqual({ codigo: "nao_encontrado", mensagem: "não encontrado" });
+    expect(await r.json()).toEqual({ codigo: "nao_encontrado", mensagem: "Não encontramos o que você pediu. Talvez tenha sido apagado; atualize a página." });
     expect((await fetch(`${srv.url}/api/interno/plano`, { headers: { authorization: `Bearer ${token}`, origin: "http://evil" } })).status).toBe(403);
     expect((await fetch(`${srv.url}/api/interno/plano`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
     app.tokens.revogar(turnoId);

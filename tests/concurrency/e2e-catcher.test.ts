@@ -39,7 +39,7 @@ type Sessao = { cookie: string; tenantId: string; pessoaId: string };
 /** definido em 2026-09-16: 60 s por jornada — cada uma encadeia vários turnos do catcher (20 ms/evento) e espera laços de fundo a 200 ms. */
 const JORNADA_MS = 60_000;
 
-describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CLI e sem custo", () => {
+describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CLI e sem custo", () => {
   let srv: ServidorCompleto;
   let dirTmp: string;
   let arquivoEmails: string;
@@ -473,6 +473,31 @@ describeIntegracao("e2e com catcher: as onze jornadas do fluxo de aceite, sem CL
     );
     expect(aviso.texto).toMatch(/^Tuca não concluiu: /);
     await esperarTurno(aviso.turnoId ?? "");
+  });
+
+  it("falha do fornecedor (NOD-174): o erro do CLI em inglês não vira fala; a conversa ganha o aviso em pt-BR e o erro cru fica só no diagnóstico do turno", { timeout: JORNADA_MS }, async () => {
+    const bot = await criarBot("Fornecedor");
+    const casos = [
+      { erro: "Credit balance is too low", aviso: "Turno interrompido: a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem." },
+      { erro: "API Error: 529 overloaded", aviso: "Turno interrompido: o serviço da sua IA está sobrecarregado; tente de novo em alguns minutos." },
+    ];
+    for (const c of casos) {
+      const { turnoId } = await enviar(bot.conversa.id, `veja a planilha [[delta: Vou olhar a planilha.]] [[falha: ${c.erro}]]`);
+      const t = await esperarOu(bot.conversa.id, () => esperarTurno(turnoId, ["interrompido"]));
+      expect(t.motivoFalha).toBe("erro_execucao");
+      const doTurno = await esperarOu(bot.conversa.id, () =>
+        srv.esperar(async () => {
+          const ms = (await conversa(bot.conversa.id)).mensagens.filter((m) => m.turnoId === turnoId);
+          return ms.some((m) => m.kind === "sistema") ? ms : null;
+        }, { nome: `aviso do turno ${turnoId}` }),
+      );
+      expect(doTurno.map((m) => [m.kind, m.parcial])).toEqual([["texto", true], ["sistema", false]]);
+      expect(doTurno[0]?.texto).toBe("Vou olhar a planilha.");
+      expect(doTurno[1]?.texto).toContain(c.aviso);
+      expect(JSON.stringify(doTurno)).not.toContain(c.erro);
+      const [diag] = await comoPessoa((trx) => trx<{ erro_cru: string | null }[]>`select erro_cru from turno_diagnosticos where turno_id = ${turnoId}`);
+      expect(diag?.erro_cru).toContain(c.erro);
+    }
   });
 
   it("parar: durante o streaming, POST parar interrompe em < 2 s com faixa {interrompidas:1}, fala parcial e motivo parado_pela_pessoa; sem nada rodando → nadaRodando; máquina some (lease vencido) → 'maquina_sem_contato' + decisão retomar → turno novo", { timeout: JORNADA_MS }, async () => {

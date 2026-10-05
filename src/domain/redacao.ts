@@ -1,3 +1,5 @@
+import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
+
 export type ChaveRedacao =
   | "capacidade-desligada"
   | "rotina-sem-resposta"
@@ -76,10 +78,11 @@ const CATALOGO: Record<ChaveRedacao, string> = {
 };
 
 /**
- * definido em 2026-09-18: a frase interpolava o código cru e a pessoa lia "erro_max_turns". Motivo
- * sem tradução continua saindo como está — é dado técnico visível, não um buraco silencioso.
+ * definido em 2026-09-18: a frase interpolava o código cru e a pessoa lia "erro_max_turns".
+ * definido em 2026-10-05 (NOD-174): o mapa é TOTAL sobre os enums de contracts/motivos.ts — um motivo novo sem
+ * tradução quebra o typecheck, em vez de aparecer cru na conversa ("Turno interrompido: erro_execucao.").
  */
-const MOTIVO_EM_PORTUGUES: Readonly<Record<string, string>> = {
+const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, string>> = {
   turno_travado: "o agente ficou sem responder",
   trabalho_incompleto: "o agente não chegou ao fim da tarefa",
   sem_progresso: "o agente não chegou a produzir nada",
@@ -89,10 +92,18 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<string, string>> = {
   maquina_sem_contato: "seu Mac parou de responder (repouso, sem rede ou nod fechado)",
   reinicio_servidor: "o servidor reiniciou",
   executor_indisponivel: "a inteligência não estava disponível",
+  lancamento_falhou: "a IA não conseguiu abrir neste Mac",
+  sessao_rejeitada: "a IA recusou a conversa antes de começar",
+  absorvido: "a mensagem foi lida junto com a seguinte",
+  erro_max_turns: "o agente chegou ao limite de passos deste turno",
+  erro_execucao: "a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem",
+  motor_ausente: "a IA não está instalada neste Mac",
+  nao_autenticado: "a conta da IA não está conectada neste Mac",
 };
 
+/** Aceita string: o banco guarda motivos que saíram do enum. Motivo legado sem tradução sai como está, sem quebrar. */
 export function motivoEmPortugues(motivo: string): string {
-  return MOTIVO_EM_PORTUGUES[motivo] ?? motivo;
+  return Object.hasOwn(MOTIVO_EM_PORTUGUES, motivo) ? MOTIVO_EM_PORTUGUES[motivo as keyof typeof MOTIVO_EM_PORTUGUES] : motivo;
 }
 
 export function redigir(chave: ChaveRedacao, _agora: number, params: Readonly<Record<string, string>> = {}): string {

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import { RESPOSTA_TESTE_IA_MAX } from "../../../contracts/desktop.ts";
-import type { Inventario } from "../../../contracts/inventario.ts";
+import { MOTIVO_DA_CAUSA, type Inventario } from "../../../contracts/inventario.ts";
 import type { EventoStream, SinaisTurno } from "../../../contracts/turno.ts";
 import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
@@ -128,7 +128,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
           if (resposta) return { inventario, resposta };
           // A sonda de login passou e o turno não respondeu: a conta está logada e não serve agora.
           inv = null;
-          return { inventario: { estado: "nao_autenticado", motivo: "teste_falhou", versao: inventario.versao, causa: "teste_falhou", em: Date.now() }, resposta: null };
+          return { inventario: { estado: "nao_autenticado", motivo: MOTIVO_DA_CAUSA.teste_falhou, versao: inventario.versao, causa: "teste_falhou", em: Date.now() }, resposta: null };
         } finally { await rm(dir, { recursive: true, force: true }); }
       }
       return {

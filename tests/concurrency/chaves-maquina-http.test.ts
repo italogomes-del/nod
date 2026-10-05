@@ -103,7 +103,7 @@ describeIntegracao("chaves de máquina: emitir, listar, validar, revogar (HTTP r
   it("nome inválido é 400 e não grava; sem sessão é 401", async () => {
     const r = await srv.chamar(sessao(dona), "POST", "maquinas/chaves", { nome: "   " });
     expect(r.status).toBe(400);
-    expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "entrada inválida" });
+    expect(await r.json()).toEqual({ codigo: "entrada_invalida", mensagem: "Algum dado do pedido não está certo. Confira e tente de novo." });
     expect((await fetch(`${srv.url}/api/t/${TENANT_PADRAO}/maquinas/chaves`)).status).toBe(401);
   });
 });

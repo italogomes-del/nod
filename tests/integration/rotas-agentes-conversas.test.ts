@@ -68,10 +68,10 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
 
       const dono = await servidor.chamar(marlon, "PATCH", `agentes/${agente.id}`, { dono: "empresa" });
       expect(dono.status).toBe(403);
-      expect(await dono.json()).toEqual({ codigo: "dono_imutavel", mensagem: "o dono do agente não muda" });
+      expect(await dono.json()).toEqual({ codigo: "dono_imutavel", mensagem: "O dono do agente não pode ser trocado." });
       const vazio = await servidor.chamar(marlon, "POST", `agentes/${agente.id}/memoria`, { tipo: "fato", texto: "" });
       expect(vazio.status).toBe(400);
-      expect(await vazio.json()).toEqual({ codigo: "texto_vazio", mensagem: "texto vazio" });
+      expect(await vazio.json()).toEqual({ codigo: "texto_vazio", mensagem: "Escreva algo antes de enviar." });
       trxAtual = null;
     });
   });
