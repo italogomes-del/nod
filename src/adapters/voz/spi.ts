@@ -59,12 +59,19 @@ export type CapacidadesTts = {
   velocidade: boolean;
 };
 
+/**
+ * Quem passa na frente quando a cota do TTS aperta (limitador-tts.ts): conteúdo > leitura de aprovação > espera e
+ * prévia da voz. Ausente = conteúdo.
+ */
+export type PrioridadeTts = "conteudo" | "leitura" | "espera" | "previa";
+
 export type PedidoTts = {
   texto: string;
   /** Id neutro do catálogo VOZES_NOD (src/contracts/vozes.ts). */
   voz: string;
   velocidade: number;
   sinal?: AbortSignal;
+  prioridade?: PrioridadeTts;
 };
 
 export interface Sintetizador {
@@ -72,6 +79,8 @@ export interface Sintetizador {
   readonly capacidades: CapacidadesTts;
   /** PCM16 mono 24 kHz, em pedaços. Cancelável pelo `sinal`. */
   sintetizar(p: PedidoTts): AsyncIterable<Int16Array>;
+  /** Só com o limitador da cota: mede o pico de pedidos por minuto; a função devolvida lê o pico e para de medir. */
+  medirPico?(): () => number;
 }
 
 export type ProvedoresVoz = { stt: Transcritor; tts: Sintetizador; encerrar(): Promise<void> };

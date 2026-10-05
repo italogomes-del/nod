@@ -72,7 +72,7 @@ export function criarCacheDeFalas(p: OpcoesCacheDeFalas): CacheDeFalas {
     if (doArquivo) return doArquivo;
     const pedacos: Int16Array[] = [];
     try {
-      for await (const pedaco of p.tts.sintetizar({ texto: fala.texto, voz, velocidade })) pedacos.push(pedaco.slice());
+      for await (const pedaco of p.tts.sintetizar({ texto: fala.texto, voz, velocidade, prioridade: "espera" })) pedacos.push(pedaco.slice());
     } catch (e) {
       log("aviso", "voz_espera_tts_falhou", { chave, codigo: e instanceof ErroDeDominio ? e.codigo : "desconhecido" });
       return null;

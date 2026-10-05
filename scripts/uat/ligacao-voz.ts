@@ -7,12 +7,17 @@
  * Uso: node scripts/uat/ligacao-voz.ts --url http://127.0.0.1:8890 --saida /tmp/uat-voz "Oi, tudo bem?" "Cria uma rotina"
  * Exige NOD_LOGIN=stub no servidor e macOS (para o `say`). Custo zero com NOD_EXECUTOR=catcher; com claude-cli, gasta a
  * assinatura (o modelo da ligação do servidor).
+ *
+ * --paralelas N (definido em 2026-10-05, NOD-166): N ligações ao mesmo tempo, cada uma com uma pessoa do login stub
+ * (uma pessoa só tem uma ligação por vez), para ver o pico de pedidos de TTS por minuto contra a cota do Google: o
+ * `tts_pico_min` de cada `voz_ligacao_encerrada` e os `voz_tts_limitado` no log do servidor.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
+import { encerrarComFalha, inteiroPositivo, UsoInvalido } from "../voz/falha-de-script.ts";
 
 type Msg = { t: string; [k: string]: unknown };
 
@@ -24,14 +29,22 @@ const url = arg("url", "http://127.0.0.1:8890");
 const saida = arg("saida", join(tmpdir(), "uat-voz"));
 const voz = arg("voz", "Luciana");
 const nomeBot = arg("bot", "Nina");
+// NaN ou 0 faria o slice das pessoas sair vazio e o script terminar sem ligar nada
+const paralelas = (() => {
+  try {
+    return process.argv.includes("--paralelas") ? inteiroPositivo("paralelas", process.argv[process.argv.indexOf("--paralelas") + 1]) : 1;
+  } catch (e) {
+    return encerrarComFalha(e);
+  }
+})();
 const frases = process.argv.slice(2).filter((a, i, all) => !a.startsWith("--") && !all[i - 1]?.startsWith("--"));
 if (frases.length === 0) frases.push("Oi, tudo bem?", "Me conta o que você sabe fazer.");
 mkdirSync(saida, { recursive: true });
 
-const escrever = (s: string) => process.stdout.write(`${s}\n`);
+const escreverNoTerminal = (s: string) => process.stdout.write(`${s}\n`);
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function wavDoSay(texto: string): Int16Array {
+function wavDoSay(texto: string, saida: string): Int16Array {
   const arquivo = join(saida, `entrada-${Date.now()}.wav`);
   execFileSync("say", ["-v", voz, "--file-format=WAVE", "--data-format=LEI16@16000", "-o", arquivo, texto]);
   const b = readFileSync(arquivo);
@@ -53,10 +66,10 @@ function wav(pcm: Int16Array, taxa: number): Buffer {
   return Buffer.concat([h, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)]);
 }
 
-async function main(): Promise<void> {
-  const modo = (await (await fetch(`${url}/api/sessao/modo`)).json()) as { pessoas?: { id: string }[] };
-  const pessoaId = modo.pessoas?.[0]?.id;
-  if (!pessoaId) throw new Error("servidor sem login stub ou sem pessoas");
+async function ligar(pessoaId: string, indice: number): Promise<void> {
+  const escrever = (s: string) => escreverNoTerminal(paralelas > 1 ? s.replace(/^/gm, `[${indice + 1}] `) : s);
+  const saidaDaLigacao = paralelas > 1 ? join(saida, String(indice + 1)) : saida;
+  mkdirSync(saidaDaLigacao, { recursive: true });
   const entrar = await fetch(`${url}/api/sessao/entrar`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pessoaId }) });
   const cookie = (entrar.headers.get("set-cookie") ?? "").split(";")[0]!;
   const { tenantId } = (await entrar.json()) as { tenantId: string };
@@ -125,7 +138,7 @@ async function main(): Promise<void> {
   let seq = 0;
   const relatorio: string[] = [];
   for (const frase of frases) {
-    const pcm = wavDoSay(frase);
+    const pcm = wavDoSay(frase, saidaDaLigacao);
     const quadros = Math.ceil(pcm.length / 320);
     let fimDaFala = 0;
     for (let q = 0; q < quadros + 75; q++) {
@@ -161,16 +174,25 @@ async function main(): Promise<void> {
   const tudo = new Int16Array(total);
   let o = 0;
   for (const p of todasAsVozes) { tudo.set(p, o); o += p.length; }
-  writeFileSync(join(saida, "voz-do-bot.wav"), wav(tudo, 24_000));
+  writeFileSync(join(saidaDaLigacao, "voz-do-bot.wav"), wav(tudo, 24_000));
   const falas = await api<{ falas: { autor: string; texto: string }[] }>("GET", `ligacoes/${ligacao.id}/falas`);
   escrever("\n— latências (do fim da fala da pessoa) —");
   for (const l of relatorio) escrever(l);
   escrever(`\n— transcrição (${falas.falas.length} falas) —`);
   for (const f of falas.falas) escrever(`${f.autor === "pessoa" ? "🎤" : "🤖"} ${f.texto}`);
-  escrever(`\náudio do bot: ${join(saida, "voz-do-bot.wav")} (${(total / 24_000).toFixed(1)} s)`);
+  escrever(`\náudio do bot: ${join(saidaDaLigacao, "voz-do-bot.wav")} (${(total / 24_000).toFixed(1)} s)`);
 }
 
-main().catch((e: unknown) => {
-  process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  const modo = (await (await fetch(`${url}/api/sessao/modo`)).json()) as { pessoas?: { id: string }[] };
+  const pessoas = modo.pessoas ?? [];
+  if (pessoas.length === 0) throw new UsoInvalido("servidor sem login stub ou sem pessoas");
+  if (pessoas.length < paralelas) throw new UsoInvalido(`--paralelas ${paralelas} pede ${paralelas} pessoas no login stub (uma ligação por pessoa); o servidor tem ${pessoas.length}`);
+  // as ligações começam com 1 s de diferença, como pessoas ligando quase juntas
+  await Promise.all(pessoas.slice(0, paralelas).map(async (p, i) => {
+    await dormir(i * 1000);
+    await ligar(p.id, i);
+  }));
+}
+
+main().catch(encerrarComFalha);

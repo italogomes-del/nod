@@ -21,7 +21,8 @@ import type { PedidoTts, Sintetizador } from "./spi.ts";
  * 5 a 8 vezes mais rápido que a fala, com no máximo ~120 ms entre pedaços.
  *
  * A confirmar: `speaking_rate` honrado no streaming (o campo existe no proto) e se cada fluxo conta na cota de 200
- * pedidos por minuto.
+ * pedidos por minuto. Enquanto isso, o limitador (limitador-tts.ts) conta cada fluxo e cada pedido REST como um
+ * pedido, o caso mais conservador; a sonda `scripts/voz/sonda-google.ts --cota` responde a dúvida.
  */
 export const URL_TTS_GOOGLE = "https://texttospeech.googleapis.com/v1/text:synthesize";
 
@@ -51,6 +52,12 @@ export type OpcoesGoogleVoz = {
   projeto: string | null;
   fetchImpl?: typeof fetch;
   url?: string;
+  /**
+   * Com o limitador da cota (limitador-tts.ts): o decorator já pegou a vaga do primeiro pedido HTTP; cada pedido a
+   * mais dentro do mesmo `sintetizar` (o REST depois do streaming, a nova tentativa) pede outra aqui. `false`: o pedido
+   * foi cancelado ou descartado na fila.
+   */
+  vagaExtra?: (p: PedidoTts) => Promise<boolean>;
   /** Liga o caminho de streaming; sem isto, só REST. */
   streaming?: { transporte: TransporteGrpc; prazoPrimeiroAudioMs?: number; folgaInicialMs?: number; agora?: () => number };
 };
@@ -101,6 +108,7 @@ export function criarSintetizadorGoogle(o: OpcoesGoogleVoz): Sintetizador {
     capacidades: { streaming: o.streaming !== undefined, velocidade: true },
     async *sintetizar(p: PedidoTts) {
       if (p.sinal?.aborted) return;
+      let pedidos = 0;
       if (o.streaming && agora() >= soRestAte) {
         let token: string | null = null;
         try {
@@ -110,6 +118,7 @@ export function criarSintetizadorGoogle(o: OpcoesGoogleVoz): Sintetizador {
         }
         if (p.sinal?.aborted) return;
         if (token !== null) {
+          pedidos++;
           try {
             yield* sintetizarEmStreaming(o.streaming.transporte, {
               texto: p.texto,
@@ -139,6 +148,8 @@ export function criarSintetizadorGoogle(o: OpcoesGoogleVoz): Sintetizador {
       }
       let bytes: Buffer | null = null;
       for (let tentativa = 1; bytes === null; tentativa++) {
+        if (pedidos > 0 && o.vagaExtra && !(await o.vagaExtra(p))) return;
+        pedidos++;
         try {
           bytes = await pedir(p);
         } catch (e) {

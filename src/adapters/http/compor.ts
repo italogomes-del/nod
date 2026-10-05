@@ -555,7 +555,7 @@ export function comporApp(o: OpcoesCompor): App {
     if (!p) {
       p = (async () => {
         const pedacos: Int16Array[] = [];
-        for await (const pcm of provedoresVoz.tts.sintetizar({ texto: `Oi! Esta é a voz ${vozNod.nome}. É assim que eu falo nas ligações.`, voz: idVoz, velocidade })) pedacos.push(pcm);
+        for await (const pcm of provedoresVoz.tts.sintetizar({ texto: `Oi! Esta é a voz ${vozNod.nome}. É assim que eu falo nas ligações.`, voz: idVoz, velocidade, prioridade: "previa" })) pedacos.push(pcm);
         return montarWav(concatenar(pedacos), 24_000);
       })().catch((e: unknown) => {
         amostras.delete(chave);

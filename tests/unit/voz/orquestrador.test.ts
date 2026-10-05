@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MsgCerebroServidor, MsgMidiaServidor } from "../../../src/contracts/voz.ts";
-import { criarServicoVoz, type FalaParaGravar, type FonteDeEsperas, type MetricasVoz, type RegistroLigacao } from "../../../src/adapters/voz/orquestrador.ts";
+import { criarServicoVoz, prioridadeTts, type FalaParaGravar, type FonteDeEsperas, type MetricasVoz, type RegistroLigacao } from "../../../src/adapters/voz/orquestrador.ts";
 import { criarProvedoresFalsos } from "../../../src/adapters/voz/voz-falsa.ts";
-import type { OpcoesSessaoStt, Sintetizador, Transcritor } from "../../../src/adapters/voz/spi.ts";
+import type { OpcoesSessaoStt, PedidoTts, Sintetizador, Transcritor } from "../../../src/adapters/voz/spi.ts";
 import type { CanalVoz } from "../../../src/adapters/voz/ws.ts";
 import type { MotivoFimLigacao } from "../../../src/contracts/voz.ts";
 
@@ -887,5 +887,32 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     await ate(() => m.fins.length > 0);
     const fim = logDe(linhas, m.id).find((l) => l.evento === "voz_ligacao_encerrada");
     expect(fim?.quadros_perdidos).toBe(5);
+  });
+
+  it("cota do TTS: cada tipo de fala chega ao sintetizador com a sua prioridade, e o pico vai no voz_ligacao_encerrada", async () => {
+    expect((["conteudo", "aviso", "leitura", "espera"] as const).map(prioridadeTts)).toEqual(["conteudo", "conteudo", "leitura", "espera"]);
+    const linhas: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
+    const pedidos: PedidoTts[] = [];
+    const tts: Sintetizador = {
+      id: "prioridades",
+      capacidades: { streaming: false, velocidade: true },
+      medirPico: () => () => 7,
+      async *sintetizar(p) {
+        pedidos.push(p);
+        yield new Int16Array(2400);
+      },
+    };
+    const m = montar({ tts, ligacaoId: "l-prioridade" });
+    await atender(m);
+    m.voz.pedirAprovacao(m.id, { decisaoId: "d1", leitura: "Mandar 1 e-mail. Para aprovar, diga 'eu aprovo'.", perfil: "estrito" });
+    await ate(() => msgs(m.midia, "bot-fala").find((x) => x.tipo === "leitura"));
+    m.midia.receber({ t: "tchau" });
+    await ate(() => m.fins.length > 0);
+    expect(pedidos.map((p) => [p.texto, p.prioridade])).toEqual([
+      ["Oi! Aqui é Nina.", "conteudo"],
+      ["Mandar 1 e-mail. Para aprovar, diga 'eu aprovo'.", "leitura"],
+    ]);
+    expect(logDe(linhas, m.id).find((l) => l.evento === "voz_ligacao_encerrada")?.tts_pico_min).toBe(7);
   });
 });

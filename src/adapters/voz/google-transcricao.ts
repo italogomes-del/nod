@@ -29,12 +29,18 @@ import type { OpcoesSessaoStt, SessaoStt, Transcritor } from "./spi.ts";
  * API): o id é "gemini-3.5-transcribe-live-preview" (`NOD_VOZ_STT_MODELO`) e só existe em `global` (`NOD_VOZ_REGIAO`);
  * em us-central1 o setup fecha com 1008 "Publisher model … was not found".
  *
- * A CONFIRMAR NA FASE 0:
+ * A CONFIRMAR (NOD-166, com o ADC de produção; cada item tem a medição pronta, e o resultado vai para
+ * docs/uat-modo-ligacao.md e para cá):
  * - se o modelo de transcrição pede `responseModalities` (mandamos ["TEXT"]) e se responde algo além da transcrição
- *   (o que vier em `modelTurn` é ignorado);
- * - se o vocabulário influencia a transcrição pela `systemInstruction` (é o único lugar que a Live API oferece);
- * - se `inputTranscription` vem em pedaços (somamos) ou acumulado, e qual sinal fecha o trecho (`finished`?);
- * - o limite real da sessão só de áudio no Vertex (10 min, pela documentação) e o formato do `goAway`.
+ *   (o que vier em `modelTurn` é ignorado): `node scripts/voz/sonda-google.ts` conta as mensagens com `modelTurn`;
+ * - se o vocabulário influencia a transcrição pela `systemInstruction` (é o único lugar que a Live API oferece):
+ *   `scripts/teste-cego-voz.ts stt --so google` com e sem `--sem-vocabulario`, comparando a taxa de nomes de bots;
+ * - se `inputTranscription` vem em pedaços (somamos) ou acumulado, e qual sinal fecha o trecho (`finished`?): a sonda
+ *   classifica a forma e conta os `finished`;
+ * - o limite real da sessão só de áudio no Vertex (10 min, pela documentação) e o formato do `goAway`:
+ *   `sonda-google.ts --duracao 11m --sem-rotacao` grava o `goAway` e o código e a idade de cada fechamento; a rotação
+ *   aos 9 min é provada por `--duracao 12m` (um `voz_stt_rotacao`, nenhum `voz_stt_rotacao_falhou`, nenhum final
+ *   perdido).
  */
 
 export const MODELO_STT_GOOGLE_PADRAO = "gemini-3.5-transcribe-live-preview";

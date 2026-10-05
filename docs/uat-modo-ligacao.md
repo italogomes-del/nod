@@ -150,3 +150,49 @@ Ressalvas:
 - Um app desktop sem `--effort` roda o 5.5 com o esforço padrão (sai o log `ligacao_sem_effort`). É mais um motivo para
   trocar a config só junto com a versão nova do app.
 - Os apps são sintéticos, e a sonda não fala nem ouve. A ligação real com microfone (UAT do Marlon) confirma a 1ª fala.
+
+## Voz do Google ao vivo e teste cego em pt-BR (NOD-166, 2026-10-05)
+
+**Estado: roteiro pronto, medições pendentes.** As medições precisam do ADC do projeto de produção (`gcloud auth
+application-default login` com a conta do projeto) e, no STT, do whisper `base` baixado (`scripts/voz/preparar-local.sh`).
+O PR da NOD-166 entregou os scripts e o limitador da cota; os números entram nas tabelas abaixo quando rodarem.
+
+Preparação, uma vez:
+
+```sh
+gcloud auth application-default login
+export NOD_VOZ_PROJETO=<projeto de produção> NOD_VOZ_GCLOUD_BIN=$(which gcloud)
+bash scripts/voz/preparar-local.sh   # whisper base, para a linha de base do STT
+```
+
+O corpus de voz fica **fora do repositório** (vozes com consentimento): uma pasta com os WAVs e um `esperado.json`, uma
+lista de `{ "arquivo", "texto", "nomes"?: ["Nina"], "comando"?: { "perfil": "estrito"|"proposta", "acao":
+"aprovar"|"recusar"|…, "nomeBot"? } }` (formato em `scripts/voz/medidas-teste-cego.ts`). Inclua recusas parecidas com
+aprovação ("não aprovo", "não, pode não"): são elas que medem o pior erro.
+
+| # | O quê | Comando | Passa se |
+|---|---|---|---|
+| 1 | STT: Google contra whisper `base`, mesmo corpus em tempo real | `node scripts/teste-cego-voz.ts stt --corpus ~/corpus-voz` | Google com nomes de bots ≥ 90%, comandos ≥ 95% e zero recusa → aprovação |
+| 2 | O vocabulário pela `systemInstruction` ajuda? | `node scripts/teste-cego-voz.ts stt --corpus ~/corpus-voz --so google --sem-vocabulario` | comparar a taxa de nomes com a do item 1 |
+| 3 | TTS: 25 frases × 8 vozes, cego, ≥ 5 ouvintes | `node scripts/teste-cego-voz.ts tts --saida ~/teste-cego-tts` e, com as notas de volta, `node scripts/teste-cego-voz.ts apurar --gabarito ~/teste-cego-tts/gabarito.json --notas a.csv b.csv …` | voz com MOS < 3,5 sai do catálogo da Release 1 |
+| 4 | Rotação da sessão do STT aos 9 min | `NOD_CORPUS_VOZ=~/corpus-voz node scripts/voz/sonda-google.ts --duracao 12m` | um `voz_stt_rotacao`, nenhum `voz_stt_rotacao_falhou`, um final por trecho; sai com código 0 |
+| 5 | Limite real da sessão e formato do `goAway` | `node scripts/voz/sonda-google.ts --duracao 11m --sem-rotacao` | anotar a idade e o código do fechamento e o `goAway` (do diagnóstico em `$TMPDIR/sonda-google-diagnostico.json`) |
+| 6 | O fluxo de streaming conta na cota de 200/min? (fora do horário de uso) | `node scripts/voz/sonda-google.ts --cota 220` | algum `grpc_8`/`http_429`: conta (o limitador já conta assim); todos `ok`: não conta |
+| 7 | Pico de TTS com 3 ligações ao mesmo tempo | servidor com voz `google`, catcher e 3 pessoas no login stub (o seed tem 2: crie a terceira com um insert em `pessoas` no banco efêmero); `node scripts/uat/ligacao-voz.ts --url http://127.0.0.1:8890 --paralelas 3 "frase" …` | o `tts_pico_min` (pico do processo, somando as 3) fica abaixo de 180 e nenhum `voz_tts_limitado` com `descartado:false` |
+| 8 | "A CONFIRMAR" do transcritor (`modelTurn`, `inputTranscription` em pedaços ou acumulado, `finished`) | `node scripts/voz/sonda-google.ts clara` | o resumo no fim da sonda; atualizar o comentário de `src/adapters/voz/google-transcricao.ts` |
+
+Custo estimado: centavos de STT e de TTS nos itens 1, 2, 4, 5 e 8; o item 3 sintetiza ~200 frases (~12 mil caracteres, ~US$ 0,40 no Chirp 3
+HD); o item 6 são 220 frases curtas.
+
+### Resultados
+
+| Medição | Valor |
+|---|---|
+| STT Google: nomes / comandos / recusa → aprovação | a medir |
+| STT whisper `base`: nomes / comandos / recusa → aprovação | a medir |
+| Vocabulário na `systemInstruction` (nomes com / sem) | a medir |
+| MOS por voz (8 vozes) e quais saem | a medir |
+| Rotação aos 9 min | a medir |
+| Limite da sessão sem rotação e `goAway` | a medir |
+| Fluxo de streaming conta na cota | a medir |
+| `tts_pico_min` com 3 ligações | a medir |

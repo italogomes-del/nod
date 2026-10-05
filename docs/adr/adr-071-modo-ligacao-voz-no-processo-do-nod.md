@@ -120,3 +120,41 @@ padrão do Node (`process.once`).
 (rollback depois do `cunhar`) segura a drenagem até o prazo, sem perder turno. A medida é
 `pos_restart{desfecho="perdido",origem="restart_servidor"}` por deploy, antes e depois, junto com
 `drenagem_concluida.duracao_ms`.
+
+## Emenda 2026-10-05 — provedor de produção e limitador da cota do TTS (NOD-166)
+
+**Provedor padrão de produção: Google.** Definido em 2026-10-05: em produção a voz é o Google (Transcribe Live + Chirp
+3 HD), que já é o padrão da fábrica com `NODE_ENV=production`. O `local` segue só para dev no Mac. A decisão fica
+condicionada ao teste cego em pt-BR abaixo; se o Google reprovar, o gatilho de reversão vale.
+
+**Limitador da cota do TTS.** O projeto tem 200 pedidos de TTS por minuto, somando todas as ligações. Passar disso
+faz o Google recusar (`RESOURCE_EXHAUSTED`) e a fala some. Agora cada processo segura os pedidos num limitador
+(`src/adapters/voz/limitador-tts.ts`), que decora o sintetizador do Google:
+
+- **Teto:** `NOD_VOZ_TTS_TETO_MIN`, padrão **180** por minuto (sobram 20 para sondas e para o REST de reserva de
+  outro processo). `0` desliga. Valor inválido é recusado no boot como os outros erros de configuração da voz: o servidor sobe, a
+  ligação fica indisponível ("voz fora do ar") e o log `voz_tts_teto_invalido` explica em pt-BR. Janela deslizante
+  de 60 s.
+- **Fila por prioridade:** conteúdo (e aviso) > leitura de aprovação > espera e prévia de voz, por ordem de chegada
+  dentro do nível (`PedidoTts.prioridade`, posta pelo orquestrador, pelas falas de espera e pela prévia).
+- **Fala de espera não envelhece:** com mais de 2 s na fila, é descartada (a resposta já deve estar chegando).
+  Pedido cancelado sai da fila sem gastar vaga.
+- **O fallback REST conta:** se o streaming falha antes do áudio e o REST entra, o REST pede uma vaga extra
+  (`vagaExtra` do `criarSintetizadorGoogle`). Até a sonda dizer o contrário, cada fluxo de streaming conta como um
+  pedido.
+- **Logs:** `voz_tts_limitado {prioridade, espera_ms, descartado}` quando um pedido esperou vaga, e `tts_pico_min`
+  (o maior número de pedidos em 60 s durante a ligação) no `voz_ligacao_encerrada`.
+
+**Por que no processo e não no Google.** Uma fila central (Redis, tabela) pagaria uma ida e volta por frase para
+um único processo de produção. Com mais de um processo, o teto de cada um precisa somar menos de 200.
+
+**Números (a medir com o ADC de produção).** As medições ao vivo saem pelos scripts e entram aqui e em
+docs/uat-modo-ligacao.md: o teste cego de STT (`scripts/teste-cego-voz.ts stt`, Google contra whisper `base`; metas
+≥ 90% nos nomes de bots, ≥ 95% nos comandos, zero recusa transcrita como aprovação), o MOS do TTS (25 frases × 8
+vozes, voz abaixo de 3,5 sai do catálogo da Release 1), a rotação de 12 min (`scripts/voz/sonda-google.ts --duracao
+12m`), a cota do streaming (`--cota 220`) e o pico com 3 ligações (`scripts/uat/ligacao-voz.ts --paralelas 3`).
+
+**Gatilho de reversão.** O Google reprovar no teste cego de STT (a escolha do provedor de STT de produção volta à mesa),
+`voz_tts_limitado` com `descartado:false` e `espera_ms` acima de 1 s em mais de 1 em cada 50 ligações (subir a cota
+no GCP ou o teto) ou a sonda mostrar que o fluxo não conta na cota (o teto sobe e o streaming deixa de pedir vaga
+extra).

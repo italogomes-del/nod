@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { criarProvedoresVoz, provedorPadrao } from "../../../src/adapters/voz/fabrica.ts";
+import { criarProvedoresVoz, lerTetoTts, provedorPadrao } from "../../../src/adapters/voz/fabrica.ts";
 
 describe("voz: fábrica de provedores", () => {
   beforeEach(() => {
@@ -42,5 +42,22 @@ describe("voz: fábrica de provedores", () => {
   it("valor inválido e TTS local fora do Mac falham no boot", () => {
     expect(() => criarProvedoresVoz({ NOD_VOZ_STT: "azure" }, "darwin")).toThrow("entrada_invalida");
     expect(() => criarProvedoresVoz({ NOD_VOZ_TTS: "local" }, "linux")).toThrow("integracao_nao_configurada");
+  });
+
+  it("NOD_VOZ_TTS_TETO_MIN: padrão 180, 0 desliga, inválido derruba a voz no boot com a explicação em pt-BR", async () => {
+    expect([lerTetoTts(undefined), lerTetoTts(" "), lerTetoTts("120"), lerTetoTts("0")]).toEqual([180, 180, 120, 0]);
+    const saida = vi.spyOn(console, "log").mockImplementation(() => {});
+    for (const v of ["-1", "1.5", "muito", "180/min"]) expect(() => criarProvedoresVoz({ NOD_VOZ_TTS: "google", NOD_VOZ_PROJETO: "p", NOD_VOZ_TTS_TETO_MIN: v }, "linux")).toThrow("entrada_invalida");
+    expect(String(saida.mock.calls.at(-1)?.[0])).toContain("NOD_VOZ_TTS_TETO_MIN precisa ser um número inteiro");
+
+    const comLimite = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "google", NOD_VOZ_PROJETO: "p" }, "linux");
+    expect([comLimite.tts.id, typeof comLimite.tts.medirPico, comLimite.tts.capacidades.streaming]).toEqual(["google", "function", true]);
+    const desligado = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "google", NOD_VOZ_PROJETO: "p", NOD_VOZ_TTS_TETO_MIN: "0" }, "linux");
+    expect(desligado.tts.medirPico).toBeUndefined();
+    // a cota é do Google: local e falso não passam pelo limitador
+    const local = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "local" }, "darwin");
+    const falso = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "falso", NOD_VOZ_TTS_TETO_MIN: "5" }, "linux");
+    expect([local.tts.medirPico, falso.tts.medirPico]).toEqual([undefined, undefined]);
+    await Promise.all([comLimite.encerrar(), desligado.encerrar(), local.encerrar(), falso.encerrar()]);
   });
 });

@@ -12,7 +12,7 @@ import { sugestoesDoOnboarding } from "../../domain/roteiro-onboarding.ts";
 import type { CamposEntrevista, EtapaOnboarding, PassoConfiguracao } from "../../contracts/onboarding.ts";
 import { randomUUID } from "node:crypto";
 import { log } from "../../obs/log.ts";
-import type { ProvedoresVoz, ResultadoStt, SessaoStt } from "./spi.ts";
+import type { PrioridadeTts, ProvedoresVoz, ResultadoStt, SessaoStt } from "./spi.ts";
 import { lerJson, type CanalVoz } from "./ws.ts";
 
 /**
@@ -222,6 +222,11 @@ export type PedidoAprovacaoVoz = { decisaoId: string; leitura: string; perfil: P
  * pessoa).
  */
 type Utt = { utt: number; tipo: TipoFalaBot; texto: string; duracaoMs: number; tocadoMs: number; fim: boolean; n: number | null; enviadoEm: number; inicioPrevisto: number | null; fimPrevisto: number; fimEm?: number; aoTerminar?: () => void };
+/** Prioridade na fila da cota do TTS (limitador-tts.ts): o aviso é conteúdo, a leitura de aprovação vem logo atrás. */
+export function prioridadeTts(tipo: TipoFalaBot): PrioridadeTts {
+  return tipo === "aviso" ? "conteudo" : tipo;
+}
+
 type ItemFila = { tipo: TipoFalaBot; texto: string; n: number | null; pcm?: Int16Array; aoTerminar?: () => void; preparo?: Preparo };
 
 /** A síntese de um item da fila já em curso: os pedaços vão chegando enquanto o item da frente toca. */
@@ -315,6 +320,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     const latencias: number[] = [];
     const historicoEspera: EsperaTocada[] = [];
     const utts = new Map<number, Utt>();
+    const lerPicoTts = deps.provedores.tts.medirPico?.() ?? null;
     const fila: ItemFila[] = [];
     let tocandoFila = false;
     let abortTts: AbortController | null = null;
@@ -492,7 +498,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       };
       void (async () => {
         try {
-          for await (const pcm of deps.provedores.tts.sintetizar({ texto: item.texto, voz: r.voz, velocidade: r.velocidade, sinal: p.ac.signal })) {
+          for await (const pcm of deps.provedores.tts.sintetizar({ texto: item.texto, voz: r.voz, velocidade: r.velocidade, sinal: p.ac.signal, prioridade: prioridadeTts(item.tipo) })) {
             if (p.ac.signal.aborted) break;
             p.pedacos.push(pcm);
             acordar();
@@ -1777,6 +1783,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         trocas,
         interrupcoes,
         latencia_p50_ms: metricas.latenciaP50Ms,
+        // pico de pedidos ao TTS num minuto, no processo inteiro, durante esta ligação (null sem o limitador da cota)
+        tts_pico_min: lerPicoTts?.() ?? null,
         voz_a_voz_p50_ms: percentilMs(vozAVoz, 50),
         voz_a_voz_p95_ms: percentilMs(vozAVoz, 95),
         audio_recebido_ms: Math.round(audioRecebidoMs),

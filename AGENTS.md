@@ -291,6 +291,9 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
   ninguém falando, há sempre uma decisão agendada (`agendarDecisao`/`retomarDecisao` no orquestrador).
 - A voz do Google sai em streaming (emenda da ADR-071), com o REST de rede de segurança; `NOD_VOZ_TTS_STREAMING=0` volta ao
   REST puro. `scripts/voz/sonda-tts-streaming.ts` compara os dois (centavos do GCP).
+- Todo pedido de TTS do Google passa pelo limitador da cota (`limitador-tts.ts`, `NOD_VOZ_TTS_TETO_MIN`, padrão 180/min,
+  emenda da ADR-071). Quem cria uma fala nova põe a `prioridade` no `PedidoTts` (conteúdo, leitura, espera ou prévia); sem
+  ela, a fala conta como conteúdo e passa à frente das esperas.
 - No laço do Claude, o texto pertence à vez da última mensagem que o CLI **leu** (o eco de `--replay-user-messages`),
   não da última escrita (emenda da ADR-072). `scripts/sonda-voltas-ligacao.ts` mede isso contra o CLI real (centavos).
 - A IA do Mac pode cair no meio (emenda de 2026-10-05 da ADR-072): o turno-cérebro que termina com a ligação viva vira
