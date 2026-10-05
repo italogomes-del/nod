@@ -5,6 +5,8 @@ import { INTERVALO_SONDA_IA_MS } from "../../../desktop/ia-mac.ts";
 import { criarVigiaDasIas, INTERVALO_COM_REPROVADA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
 
 type Ia = "claude-cli" | "codex-cli";
+/** O que o teste de verdade devolve: um resultado, uma promessa dele (teste pendurado) ou o CLI morrendo. */
+type Roteiro = TesteDoMotor | "explode" | (() => Promise<TesteDoMotor>);
 const T0 = 1_800_000_000_000;
 const pronto = (): Inventario => ({ estado: "pronto", versao: "1.0", em: T0 });
 const semLogin = (): Inventario => ({ estado: "nao_autenticado", motivo: "entre", em: T0 });
@@ -14,16 +16,17 @@ const ausente = (): Inventario => ({ estado: "ausente", motivo: "instale", em: T
  * Um Mac de mentira: o login de cada IA (a sonda grátis), o que o teste de verdade devolve, a "impressão" da conta e o
  * que foi anunciado ao servidor. O timer é manual: `tique()` roda a passada agendada.
  */
-function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, TesteDoMotor | "explode">>; impressao?: Partial<Record<Ia, string>>; disco?: unknown }) {
+function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown }) {
   const m = {
     login: { ...o.login },
-    teste: { ...(o.teste ?? {}) } as Partial<Record<Ia, TesteDoMotor | "explode">>,
+    teste: { ...(o.teste ?? {}) } as Partial<Record<Ia, Roteiro>>,
     impressao: { "claude-cli": "conta-a", "codex-cli": "conta-x", ...(o.impressao ?? {}) } as Record<Ia, string>,
     agora: T0,
     disco: o.disco as unknown,
     anuncios: [] as { estados: Record<string, string>; causas: Record<string, string | null>; principal: string }[],
     testes: [] as { ia: Ia; pergunta: string }[],
     sondas: 0,
+    gravacoes: 0,
     lacos: 0,
     agendado: null as { fn: () => void; ms: number } | null,
   };
@@ -39,6 +42,7 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Test
           m.testes.push({ ia, pergunta });
           const t = m.teste[ia];
           if (t === "explode") throw new Error("cli morreu");
+          if (typeof t === "function") return t();
           return t ?? { inventario: pronto(), resposta: "Oi." };
         },
       } };
@@ -58,7 +62,7 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Test
     },
     aoRegistry: (_r, algumaPronta) => { if (algumaPronta && !jaSubiu) { jaSubiu = true; m.lacos++; } },
     ler: async () => { if (m.disco === undefined) throw new Error("ENOENT"); return m.disco; },
-    gravar: async (v: Veredito[]) => { m.disco = JSON.parse(JSON.stringify(v)); },
+    gravar: async (v: Veredito[]) => { m.gravacoes++; m.disco = JSON.parse(JSON.stringify(v)); },
     agora: () => m.agora,
     agendar: (fn, ms) => { const a = { fn, ms }; m.agendado = a; return { cancelar: () => { if (m.agendado === a) m.agendado = null; } }; },
   };
@@ -126,6 +130,22 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     const [a, b] = await Promise.all([vigia.testar({}), vigia.testar({})]);
     expect(a).toBe(b);
     expect(m.testes).toHaveLength(1);
+  });
+
+  it("as duas IAs são testadas ao mesmo tempo (medido: ~13 s cada), e o arquivo é gravado uma vez no fim", async () => {
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": pronto() } });
+    await vigia.iniciar(sondagem());
+    // O teste do Claude fica pendurado até o do Codex ter começado: em fila, o do Codex nunca começaria.
+    let soltar!: (t: TesteDoMotor) => void;
+    m.teste["claude-cli"] = () => new Promise<TesteDoMotor>((r) => { soltar = r; });
+    m.teste["codex-cli"] = SEM_ACESSO;
+    const espera = vigia.testar({});
+    await new Promise((r) => setTimeout(r, 0));
+    expect(m.testes.map((t) => t.ia)).toEqual(["claude-cli", "codex-cli"]);
+    expect(m.gravacoes).toBe(0);
+    soltar({ inventario: pronto(), resposta: "Oi." });
+    expect(await espera).toEqual([{ ia: "claude-cli", estado: "pronto", resposta: "Oi." }, { ia: "codex-cli", estado: "nao_autenticado", causa: "conta_sem_acesso" }]);
+    expect(m.gravacoes).toBe(1);
   });
 
   it("o veredito sobrevive a reabrir o app: com a mesma conta, a IA já é anunciada como fora, sem teste", async () => {

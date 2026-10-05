@@ -223,6 +223,18 @@ Revisto em 2026-10-05 (primeiro uso real do Codex em produção: nove turnos, ze
 servidor MCP de prova e diz se o `tools/call` chegou. Rode-a quando o Codex mudar de versão. O erro que o Codex devolve
 (`turn.failed`, item `error`, última linha do stderr) vai para `erroCru`, só no diagnóstico.
 
+Conta logada que não responde (2026-10-05, emenda da ADR-019). Login conferido não prova que a conta serve: uma
+organização pode ter desativado o uso por assinatura. `nao_autenticado` leva um código `causa` (`conta_sem_acesso` |
+`teste_falhou`); a frase que a pessoa lê é sempre do servidor (`MOTIVO_DA_CAUSA`). Regras:
+- O teste de verdade é `Instance.testar(pergunta)` nos drivers, pedido pela tela (`nodDesktop.iaTestar`). É pago: não o
+  chame no boot, em sonda periódica nem em teste automatizado contra CLI real.
+- O veredito mora em `desktop/vigia-ias.ts` (sem Electron, deps injetadas) e é preso à conta logada. Não guarde
+  veredito no servidor: o inventário da máquina é o que o app anuncia.
+- A recusa do fornecedor é reconhecida em um lugar só, `src/domain/conta-da-ia.ts`. Não espalhe regex de texto de
+  fornecedor; frase nova entra lá, com teste.
+- Texto do Mac não vira motivo, e o nome que entra na pergunta do teste passa por `nomeParaOTeste`.
+- `erroCru` remoto atravessa a ponte com teto e vai só ao diagnóstico gravado; nunca ao log do servidor.
+
 Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila só entrega a uma máquina
 tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro

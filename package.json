@@ -27,6 +27,7 @@
     "sonda": "node scripts/sonda.ts",
     "sonda:mcp-timeout": "node scripts/sonda-mcp-timeout.ts",
     "sonda:codex": "node scripts/sonda-codex-ferramentas.ts",
+    "sonda:teste-ia": "node scripts/sonda-teste-ia.ts",
     "typecheck": "tsc -p tsconfig.domain.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.desktop.json --noEmit",
     "lint": "eslint .",
     "fence:domain": "bash scripts/prove-domain-fence.sh",

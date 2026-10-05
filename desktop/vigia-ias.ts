@@ -113,7 +113,7 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     if (t.inventario.estado === "pronto") vereditos.delete(ia);
     else if (t.inventario.estado === "nao_autenticado" && t.inventario.causa) vereditos.set(ia, { ia, causa: t.inventario.causa, impressao: await d.impressao(ia).catch(() => null), em: d.agora() });
     else vereditos.delete(ia);
-    await guardar();
+    // Quem chama grava o arquivo uma vez no fim: dois testes rodam ao mesmo tempo e não podem disputar a escrita.
     return t;
   }
 
@@ -133,7 +133,7 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
       const impressao = await d.impressao(ia).catch(() => null);
       const vale = d.agora() - v.em <= VALIDADE_VEREDITO_MS && impressao === v.impressao;
       if (vale) saida[ia] = reprovado(v.causa, inv, d.agora());
-      else if (opcoes.retestar) saida[ia] = (await testarUma(ia, s, perguntaDoTeste(null))).inventario;
+      else if (opcoes.retestar) { saida[ia] = (await testarUma(ia, s, perguntaDoTeste(null))).inventario; mudou = true; }
       else { vereditos.delete(ia); mudou = true; }
     }
     if (mudou) await guardar();
@@ -192,18 +192,20 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
         const s = await d.sondar();
         const inventarios: Inventarios = { ...s.inventarios };
         const respostas = new Map<IaDesktop, string>();
-        for (const ia of IAS_DESKTOP) {
-          if (s.inventarios[ia]?.estado !== "pronto") { vereditos.delete(ia); continue; }
+        // medido em 2026-10-05 com os CLIs reais: ~13 s por IA (Claude Code 2.1.289 e Codex 0.147.0). As IAs são
+        // testadas ao mesmo tempo para a tela do "olá" esperar uma vez só.
+        await Promise.all(IAS_DESKTOP.map(async (ia) => {
+          if (s.inventarios[ia]?.estado !== "pronto") { vereditos.delete(ia); return; }
           if (so && so !== ia) {
             // Fora do pedido: vale o veredito que já existe, sem teste novo.
             const v = vereditos.get(ia);
             if (v) inventarios[ia] = reprovado(v.causa, s.inventarios[ia], d.agora());
-            continue;
+            return;
           }
           const t = await testarUma(ia, s, pergunta);
           inventarios[ia] = t.inventario;
           if (t.resposta) respostas.set(ia, t.resposta);
-        }
+        }));
         await guardar();
         await publicar(s, inventarios);
         reagendar(inventarios);
