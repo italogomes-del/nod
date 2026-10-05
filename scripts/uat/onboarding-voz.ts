@@ -2,7 +2,7 @@
  * UAT do onboarding por ligação com voz de verdade (definido em 2026-10-04, ADR-077): a Nina liga, o roteiro "atende"
  * (consentimento + etapa entrevista), responde às perguntas falando (frases do `say` em tempo real) e confere que o
  * cérebro anotou os campos (GET onboarding) e que a ligação encolheu para a configuração. Com NOD_EXECUTOR=claude-cli,
- * gasta a assinatura (Haiku).
+ * gasta a assinatura (o modelo da ligação do servidor).
  * Uso: node scripts/uat/onboarding-voz.ts --url http://127.0.0.1:8890
  */
 import { execFileSync } from "node:child_process";

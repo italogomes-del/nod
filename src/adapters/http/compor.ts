@@ -18,6 +18,7 @@ import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
+import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
@@ -202,6 +203,9 @@ function numero(v: string | undefined, padrao: number): number {
 
 export function comporApp(o: OpcoesCompor): App {
   const { db, env } = o;
+  // NOD-164: o modelo da ligação vem do env do servidor. O boot já validou; aqui lança antes de qualquer efeito se
+  // alguém compôs sem o boot.
+  const modelosLigacao = lerModelosLigacao(env);
   const compartilhado = env.NOD_MODO === "compartilhado";
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
@@ -332,7 +336,7 @@ export function comporApp(o: OpcoesCompor): App {
         const d = depsSobre(trx);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null });
+          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },

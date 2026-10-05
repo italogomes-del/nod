@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import { criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { PEDIDO_DE_RESUMO, uuidDoEco } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
@@ -67,19 +67,19 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function planoLigacao(): PlanoTurno {
+function planoLigacao(voz: Partial<NonNullable<PlanoTurno["ligacaoVoz"]>> = {}): PlanoTurno {
   const plano = planoHarness();
   plano.tokenDeTurno = "segredo-do-turno";
   plano.modoTurno = "ligacao";
   plano.promptSistema = "Você é a Vera, numa ligação. Fale curto.";
-  plano.ligacaoVoz = { ligacaoId: "lig-1", modelo: "claude-haiku-4-5-20251001", nomeBot: "Vera", generoVoz: "feminina" };
+  plano.ligacaoVoz = { ligacaoId: "lig-1", modelo: "claude-haiku-4-5-20251001", nomeBot: "Vera", generoVoz: "feminina", ...voz };
   return plano;
 }
 
 const falaDe = (msgs: MsgCerebroCliente[], n: number) => msgs.flatMap((m) => (m.t === "fala" && m.n === n ? [m.delta] : [])).join("");
 const finsDe = (msgs: MsgCerebroCliente[]) => msgs.flatMap((m) => (m.t === "fala-fim" ? [m.n] : []));
 
-async function iniciar(help = HELP_COM_ECO) {
+async function iniciar(help = HELP_COM_ECO, o: { plano?: PlanoTurno; envDoMac?: Record<string, string> } = {}) {
   // As variáveis NOD_FALSO_* têm prefixo NOD_ e a denylist do executor as apagaria: vão fixas no shim.
   const bin = join(dir, "claude");
   const registro = join(dir, "registro.json");
@@ -90,7 +90,7 @@ async function iniciar(help = HELP_COM_ECO) {
     `import { spawn } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
-if (args.includes("-p")) writeFileSync(${JSON.stringify(registro)}, JSON.stringify({ argv: args }));
+if (args.includes("-p")) writeFileSync(${JSON.stringify(registro)}, JSON.stringify({ argv: args, env: process.env }));
 const filho = spawn(process.execPath, [${JSON.stringify(FALSO)}, ...args], { stdio: ["pipe", "inherit", "inherit"], env: process.env });
 process.stdin.on("data", (c) => { appendFileSync(${JSON.stringify(stdin)}, c); filho.stdin.write(c); });
 process.stdin.on("end", () => filho.stdin.end());
@@ -100,18 +100,61 @@ filho.on("exit", (code) => process.exit(code ?? 143));
   );
   await writeFile(bin, `#!/bin/sh\nexport NOD_FALSO_CENARIO="ligacao-voz"\nexport NOD_FALSO_HELP=${JSON.stringify(help)}\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(wrapper)} "$@"\n`);
   await chmod(bin, 0o755);
-  const base = await configDosDrivers({ HOME: dir, PATH: process.env.PATH, NOD_HOME: join(dir, ".nod"), NOD_SESSAO_SEGREDO: "s" }, { shellDeLogin: false, home: dir });
+  const base = await configDosDrivers({ HOME: dir, PATH: process.env.PATH, NOD_HOME: join(dir, ".nod"), NOD_SESSAO_SEGREDO: "s", ...o.envDoMac }, { shellDeLogin: false, home: dir });
   const cfg: ConfigDriver = { ...base, bin };
   const instance = await criarClaudeCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50 }).create(cfg);
-  const adapter = instance.adapter(planoLigacao());
+  const adapter = instance.adapter(o.plano ?? planoLigacao());
   const resultado = adapter.rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
   const canal = await cerebro;
   const escritas = async () => (await readFile(stdin, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { type: string; uuid?: string; message?: { content: { text: string }[] } });
   const argv = async () => (JSON.parse(await readFile(registro, "utf8")) as { argv: string[] }).argv;
-  return { adapter, resultado, canal, escritas, argv };
+  // O shim grava o env que o filho recebeu (NOD-164): é o que prova a variável do thinking e a denylist.
+  const envDoFilho = async () => (JSON.parse(await readFile(registro, "utf8")) as { env: Record<string, string> }).env;
+  return { adapter, resultado, canal, escritas, argv, envDoFilho };
 }
 
 describe("laço de voz do Claude contra o CLI falso", { timeout: 30_000 }, () => {
+  it("NOD-164: --model e --effort vêm do plano, o thinking adaptativo sai pelo env do filho e a NOD_MODELO_LIGACAO_CLAUDE do Mac não muda nada", async () => {
+    const plano = planoLigacao({ modelo: "claude-sonnet-4-6", esforco: "low", pensamentoAdaptativo: false });
+    const { resultado, canal, argv, envDoFilho } = await iniciar(`${HELP_COM_ECO} --effort`, { plano, envDoMac: { NOD_MODELO_LIGACAO_CLAUDE: "claude-haiku-do-mac" } });
+    await canal.esperar((m) => m.t === "ola");
+    canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+    await resultado;
+    const a = await argv();
+    expect(a[a.indexOf("--model") + 1]).toBe("claude-sonnet-4-6");
+    expect(a[a.indexOf("--effort") + 1]).toBe("low");
+    expect(a.join(" ")).not.toContain("haiku-do-mac");
+    const env = await envDoFilho();
+    expect(env).toMatchObject({ CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "1", MAX_THINKING_TOKENS: "0", ENABLE_TOOL_SEARCH: "false" });
+    expect(env.NOD_MODELO_LIGACAO_CLAUDE).toBeUndefined();
+  });
+
+  it("NOD-164: CLI sem --effort no help segue sem a flag e avisa no log; plano sem as opções (servidor antigo) não liga a variável do thinking", async () => {
+    const linhas: string[] = [];
+    const espiao = vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
+    try {
+      const { resultado, canal } = await iniciar(HELP_COM_ECO, { plano: planoLigacao({ esforco: "low" }) });
+      await canal.esperar((m) => m.t === "ola");
+      canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+      await resultado;
+    } finally {
+      espiao.mockRestore();
+    }
+    const aviso = linhas.find((l) => l.includes('"evento":"ligacao_sem_effort"'));
+    expect(aviso && JSON.parse(aviso)).toMatchObject({ nivel: "aviso", esforco: "low" });
+  });
+
+  it("NOD-164: o CLI sem --effort no help não recebe a flag; sem pensamentoAdaptativo no plano a variável do thinking não vai", async () => {
+    const { resultado, canal, argv, envDoFilho } = await iniciar(HELP_COM_ECO, { plano: planoLigacao({ esforco: "low" }) });
+    await canal.esperar((m) => m.t === "ola");
+    canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+    await resultado;
+    expect(await argv()).not.toContain("--effort");
+    const env = await envDoFilho();
+    expect(env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING).toBeUndefined();
+    expect(env.MAX_THINKING_TOKENS).toBe("0");
+  });
+
   it("vez vira fala e fala-fim; a vez 0 não é falada; cada mensagem leva um uuid; o fim entrega o resumo", async () => {
     const { resultado, canal, escritas, argv } = await iniciar();
     expect(await canal.esperar((m) => m.t === "ola")).toEqual({ t: "ola", ligacaoId: "lig-1", capacidades: { interrupcao: true, harness: "claude-cli" } });

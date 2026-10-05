@@ -10,6 +10,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../src/contracts/agente.ts";
+import { MODELO_AGENTE_PADRAO } from "../src/contracts/modelos.ts";
 import { criarDb } from "../src/db/client.ts";
 import { PESSOA_MARLON } from "../src/db/seed/index.ts";
 import { abrirTxEscopada } from "../src/db/tx.ts";
@@ -55,7 +56,7 @@ const criados = await emTransacao(async (trx) => {
   async function bot(nome: string, cor: Agente["cor"]): Promise<{ agenteId: string; conversaId: string }> {
     const agenteId = randomUUID();
     const conversaId = randomUUID();
-    const a = await repos.agentes.criar({ id: agenteId, nome, dono: "pessoa", forma: "shape-hex", cor, modelo: "claude-haiku-4-5-20251001" });
+    const a = await repos.agentes.criar({ id: agenteId, nome, dono: "pessoa", forma: "shape-hex", cor, modelo: MODELO_AGENTE_PADRAO });
     if (!a) throw new Error(`agente ${nome} não criado`);
     const c = await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
     if (!c) throw new Error(`conversa de ${nome} não criada`);

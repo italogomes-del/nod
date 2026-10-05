@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Autoria } from "../src/contracts/evento.ts";
+import { MODELO_AGENTE_PADRAO } from "../src/contracts/modelos.ts";
 import { criarDb } from "../src/db/client.ts";
 import { PESSOA_MARLON } from "../src/db/seed/index.ts";
 import { abrirTxEscopada } from "../src/db/tx.ts";
@@ -64,7 +65,7 @@ async function bot(nome: string, titulo: string, forma: "shape-square" | "shape-
   const agenteId = randomUUID();
   const conversaId = randomUUID();
   await passo(async (repos) => {
-    await repos.agentes.criar({ id: agenteId, nome, titulo, dono: "pessoa", forma, cor, modelo: "claude-haiku-4-5-20251001", confirmado: true });
+    await repos.agentes.criar({ id: agenteId, nome, titulo, dono: "pessoa", forma, cor, modelo: MODELO_AGENTE_PADRAO, confirmado: true });
     await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
   });
   return { agenteId, conversaId };

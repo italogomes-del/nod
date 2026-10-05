@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLAUDE_MD_DAS_PASTAS, FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { ambienteDaLigacao, montarArgsLigacao } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
 import { FLAG_FLOORS } from "../../../src/adapters/executor/flag-floors.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { NATIVAS_DE_ARQUIVO } from "../../../src/domain/nativas.ts";
@@ -205,5 +206,33 @@ describe("pisos das flags de confinamento", () => {
   it("não entram no gate de todo turno: um CLI antigo sem elas ainda atende quem não usa pasta", () => {
     expect(FLAGS_DO_TURNO).not.toContain("--restricted");
     expect(FLAGS_DO_TURNO).not.toContain("--add-dir");
+  });
+});
+
+describe("laço de voz: --effort e ambiente (NOD-164)", () => {
+  const ligacao = (voz: Partial<NonNullable<PlanoTurno["ligacaoVoz"]>> = {}): PlanoTurno => ({
+    ...planoDeTeste(),
+    modoTurno: "ligacao",
+    ligacaoVoz: { ligacaoId: "l", modelo: "claude-sonnet-4-6", nomeBot: "Vera", generoVoz: "feminina", ...voz },
+  });
+  const args = (plano: PlanoTurno, flagsNoHelp: readonly string[]) => montarArgsLigacao({ plano, mcpJson: "/tmp/mcp.json", sessaoId: "s", flagsNoHelp });
+
+  it("--model é o do plano; --effort só com a flag no help E pedido no plano", () => {
+    const a = args(ligacao({ esforco: "low" }), ["--effort"]);
+    expect(a[a.indexOf("--model") + 1]).toBe("claude-sonnet-4-6");
+    expect(a[a.indexOf("--effort") + 1]).toBe("low");
+    expect(args(ligacao({ esforco: "low" }), [])).not.toContain("--effort");
+    expect(args(ligacao(), ["--effort"])).not.toContain("--effort");
+    expect(FLAG_FLOORS["--effort"].piso).toBe("2.1.284");
+  });
+
+  it("CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1 só com pensamentoAdaptativo:false; MAX_THINKING_TOKENS=0 e ENABLE_TOOL_SEARCH=false sempre", () => {
+    const base = { PATH: "/usr/bin" };
+    expect(ambienteDaLigacao(base, { pensamentoAdaptativo: false })).toEqual({ PATH: "/usr/bin", MAX_THINKING_TOKENS: "0", ENABLE_TOOL_SEARCH: "false", CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "1" });
+    for (const voz of [{ pensamentoAdaptativo: true }, {}, undefined]) {
+      const env = ambienteDaLigacao(base, voz);
+      expect(env).toMatchObject({ MAX_THINKING_TOKENS: "0", ENABLE_TOOL_SEARCH: "false" });
+      expect(env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING).toBeUndefined();
+    }
   });
 });

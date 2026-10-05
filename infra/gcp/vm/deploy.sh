@@ -5,6 +5,11 @@
 set -euo pipefail
 TAG="${1:?uso: deploy.sh <tag>}"
 cd /opt/nod
+# Sem aspas, `NOD_MODELO_LIGACAO_CLAUDE=modelo esforco=low` são duas atribuições no `source`: as opções cairiam em silêncio.
+if grep -Eq "^NOD_MODELO_LIGACAO_[A-Z]+=[^\"' #]+[[:blank:]]+[^[:blank:]#]" config.env; then
+  echo "NOD_MODELO_LIGACAO_* com opções precisa estar entre aspas no config.env (ex.: \"claude-sonnet-5-5 esforco=low\")" >&2
+  exit 1
+fi
 source ./config.env
 : "${SQL_IP:?SQL_IP vazio no config.env}"
 
@@ -47,6 +52,8 @@ NOD_VOZ_PROJETO=$PROJETO
 NOD_LIGACAO=${NOD_LIGACAO:-admins}
 NOD_ADMINS=${NOD_ADMINS:-}
 NOD_ONBOARDING_VOZ=${NOD_ONBOARDING_VOZ:-0}
+NOD_MODELO_LIGACAO_CLAUDE=${NOD_MODELO_LIGACAO_CLAUDE:-}
+NOD_MODELO_LIGACAO_CODEX=${NOD_MODELO_LIGACAO_CODEX:-}
 NOD_DRENAGEM_MAX_MS=600000
 EOF
 mv nod.env.novo nod.env

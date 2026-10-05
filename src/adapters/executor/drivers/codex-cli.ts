@@ -95,7 +95,6 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                   plano, sinks, bin, flagsNoHelp, env, cwdBase: cfg.cwdBase,
                   urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
                   sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
-                  modelo: cfg.env.NOD_MODELO_LIGACAO_CODEX ?? plano.ligacaoVoz.modelo,
                   aoProcesso: (p) => {
                     proc = p;
                     if (p && parado) void p.interromper();

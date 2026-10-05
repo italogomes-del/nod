@@ -315,7 +315,6 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   nodePath: lig.nodePath,
                   electronComoNode: lig.electronComoNode,
                   sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
-                  modelo: cfg.env.NOD_MODELO_LIGACAO_CLAUDE ?? plano.ligacaoVoz.modelo,
                   aoProcesso: (p) => {
                     processo = p;
                     if (p && interromperPedido) void p.interromper();

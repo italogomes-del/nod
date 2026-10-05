@@ -16,9 +16,9 @@ npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-pos
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
 npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
 npm run e2e:fumaca          # onze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
-npm run e2e:haiku           # scripts/e2e-aceite.sh com o CLI real (haiku); imprime o custo somado — rode UMA vez, custa assinatura
+npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou NOD_MODELO); imprime o custo somado — rode UMA vez, custa assinatura
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
-npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno haiku (~US$ 0,01). sonda:mcp-timeout mede o teto do tools/call
+npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test)
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
@@ -152,7 +152,7 @@ usa o modelo do agente (padrão `sonnet`, configurável por `NOD_MODELO`), `--st
 (denylist `^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|ANTHROPIC_.*)$`) — sem isso o custo
 de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura errada.
 
-Definido em 2026-09-17: as sondas usam `NOD_MODELO_SONDA` (default `claude-haiku-4-5-20251001`), separado do modelo dos agentes. `e2e:haiku` mantém o modelo barato explícito.
+Definido em 2026-09-17: as sondas usam `NOD_MODELO_SONDA` (default `MODELO_SONDA_PADRAO`, `claude-sonnet-4-6` desde a NOD-164, quando saíram do Haiku 4.5), separado do modelo dos agentes. `e2e:aceite` (antes `e2e:haiku`) usa `NOD_MODELO`, padrão `sonnet`. O modelo da ligação é do servidor: `NOD_MODELO_LIGACAO_CLAUDE`/`_CODEX` (ADR-072, emenda de 2026-10-05).
 
 Definido em 2026-09-18 (ADR-040): o turno **não** passa `--max-turns` — o teto de 12 passos cortava
 tarefa de código no meio. `--max-turns` fica em `FLAG_FLOORS` porque `sonda.ts` ainda a usa com valor 1.
@@ -199,7 +199,7 @@ Claude Code e Codex estão integrados; Cursor e Hermes são somente entradas ind
 `NOD_EXECUTOR=auto` descobre contas conectadas sem turno pago; produção sem variável também usa auto.
 Desenvolvimento continua com catcher. `NOD_MODELO=auto` permite o padrão por harness; `sonnet` fixa
 Claude para os agentes criados com esse override. Boot/desktop usam sondagem de login sem inferência;
-`scripts/sonda.ts` e `e2e:haiku` continuam explicitamente separados e pagos.
+`scripts/sonda.ts` e `e2e:aceite` continuam explicitamente separados e pagos.
 
 Codex exige flags de isolamento verificadas no help, usa apenas o proxy nod para integrações, não
 herda chaves OpenAI nem configuração de plugins/apps e não põe o token de turno no argv. Seu launcher

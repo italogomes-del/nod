@@ -190,7 +190,7 @@ Pedido do Marlon em 2026-10-04: em dev, a voz tem que funcionar sem custo, mesmo
 
 **Claude Code** (`montarArgsLigacao`, ao lado de `montarArgs` em `claude-cli.ts:145`). O argv completo tem teste unitário:
 - `-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`
-- `--model claude-haiku-4-5-20251001` (fixo, como `MODELO_SONDA_PADRAO`, `src/contracts/modelos.ts:3`)
+- `--model <plano.ligacaoVoz.modelo>` (resolvido no servidor; padrão `claude-sonnet-4-6` desde a NOD-164) e `--effort <nível>` se a config pedir e o `--help` listar
 - `--system-prompt <voz>`, com `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__` antes de memória e contexto (exige CLI ≥2.1.275; piso geral hoje 2.1.272)
 - `--tools "" --strict-mcp-config --mcp-config <proxy> --allowedTools "mcp__nod__*"`
 - `--setting-sources project --no-session-persistence`
@@ -228,7 +228,7 @@ Pedido do Marlon em 2026-10-04: em dev, a voz tem que funcionar sem custo, mesmo
 - Nega sempre `item/commandExecution/requestApproval`, `item/permissions/requestApproval` e `mcpServer/elicitation/request`; sem resposta, o turno trava.
 - Conferência de flags própria, reaproveitando `-c features.*` (`:36-45`) e o filtro de ambiente (`:62`). Usa o menor esforço do Luna listado em `model/list`; atualizar `src/contracts/harness.ts:21` (sol e luna).
 
-**Modelo por env:** `NOD_MODELO_LIGACAO_CLAUDE` (Haiku 4.5; B: Sonnet 4.6 com `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` injetado; C: Sonnet 5.5 `--effort low`). `NOD_MODELO_LIGACAO_CODEX` (Luna, menor esforço).
+**Modelo por config do servidor** (NOD-164, emenda à ADR-072): `NOD_MODELO_LIGACAO_CLAUDE` (padrão Sonnet 4.6 com `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` injetado; o Haiku 4.5 saiu do padrão; C: Sonnet 5.5 `esforco=low`, só pela config). `NOD_MODELO_LIGACAO_CODEX` (Luna, menor esforço).
 
 ### Camada de conversa pt-BR (`src/domain/ligacao-*.ts`, puras, `agora` por parâmetro)
 
@@ -486,7 +486,7 @@ Todas as migrações são só de adição (expand-only), porque o código velho 
 
 | Risco | Mitigação |
 |---|---|
-| Haiku 4.5 aposentado (a partir de 2026-10-15) | Env troca o modelo: Sonnet 4.6 sem thinking adaptativo, depois Sonnet 5.5 low com esperas mais cedo |
+| Haiku 4.5 aposentado (não antes de 2026-10-15) | Feito na NOD-164: o padrão é o Sonnet 4.6 sem thinking adaptativo; Sonnet 5.5 low pela config do servidor se a sonda medir dentro do corte |
 | Interrupção in-band falha com ferramenta | Só modo suave: calar a voz e mandar "ouviu até" |
 | Transcribe Live sem SLA, sessão de 10 min | Rotação desde a fase 1; Chirp 3 (gRPC) pela mesma SPI |
 | TTS REST lento ou cota de 200/min | Limitador com prioridade, streaming gRPC, aumento de cota, clipes em cache |

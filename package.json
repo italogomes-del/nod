@@ -23,7 +23,7 @@
     "test:conformidade": "vitest run --project conformidade",
     "test:concurrency": "vitest run --project concurrency",
     "e2e:fumaca": "NOD_EXECUTOR=catcher vitest run --project concurrency tests/concurrency/e2e-catcher.test.ts",
-    "e2e:haiku": "bash scripts/e2e-aceite.sh",
+    "e2e:aceite": "bash scripts/e2e-aceite.sh",
     "sonda": "node scripts/sonda.ts",
     "sonda:mcp-timeout": "node scripts/sonda-mcp-timeout.ts",
     "typecheck": "tsc -p tsconfig.domain.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.desktop.json --noEmit",

@@ -1,6 +1,6 @@
 /**
  * Sonda do laço de voz: quando o `claude -p` em stream-json LÊ uma mensagem escrita com uma volta em curso (definido em
- * 2026-10-04). PAGA: usa a assinatura do Claude Code (Haiku por padrão, centavos). Roda o CLI com os argumentos do laço
+ * 2026-10-04). PAGA: usa a assinatura do Claude Code (o modelo padrão da ligação, centavos). Roda o CLI com os argumentos do laço
  * de voz, `--replay-user-messages` e um MCP de uma ferramenta lenta (este mesmo arquivo com `--mcp`), e mostra a linha
  * do tempo de cada caso:
  *  1. falar antes da ferramenta: o texto sai antes do `tool_use`? o que o CLI faz se o modelo não escreve nada depois?
@@ -10,7 +10,8 @@
  *  5. `interrupt` e, na hora, outra mensagem: ela é respondida?
  * O eco (`user` com `isReplay`) marca o instante em que o CLI leu cada mensagem; o driver (claude-ligacao.ts) usa esse
  * eco para saber de qual vez é o texto que segue.
- * Uso: node scripts/sonda-voltas-ligacao.ts [--modelo claude-haiku-4-5-20251001]
+ * NOD-164: modelo e opções no formato do servidor (lerModelosLigacao), ambiente do driver (ambienteDaLigacao).
+ * Uso: node scripts/sonda-voltas-ligacao.ts [--modelo claude-sonnet-4-6] [--esforco low] [--pensamento adaptativo|desligado]
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { MODELOS_LIGACAO_PADRAO } from "../src/contracts/modelos.ts";
+import { lerModelosLigacao } from "../src/domain/modelo-ligacao.ts";
+import { ambienteDaLigacao } from "../src/adapters/executor/drivers/claude-ligacao.ts";
+import { lerFlagsDoHelp } from "../src/adapters/executor/sonda.ts";
+import { montarAmbiente } from "../src/domain/ambiente-executor.ts";
 
 type Json = Record<string, unknown>;
 const obj = (x: unknown): Json | null => (typeof x === "object" && x !== null && !Array.isArray(x) ? (x as Json) : null);
@@ -46,18 +52,26 @@ function servirMcp(): void {
 }
 
 async function sondar(): Promise<void> {
-  const i = process.argv.indexOf("--modelo");
-  const modelo = i >= 0 ? process.argv[i + 1]! : "claude-haiku-4-5-20251001";
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|ANTHROPIC_.*)$/.test(k)) env[k] = v;
-  env.MAX_THINKING_TOKENS = "0";
-  env.ENABLE_TOOL_SEARCH = "false";
+  const arg = (nome: string) => {
+    const i = process.argv.indexOf(nome);
+    return i >= 0 ? process.argv[i + 1] : undefined;
+  };
+  const opcoes = [["esforco", arg("--esforco")], ["pensamento", arg("--pensamento")]].filter(([, v]) => v).map(([k, v]) => `${k}=${v}`);
+  const cfg = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: [arg("--modelo") ?? MODELOS_LIGACAO_PADRAO["claude-cli"].modelo, ...opcoes].join(" ") })["claude-cli"];
+  // A mesma denylist do driver (CLAUDE_EFFORT, CLAUDE_CODE_*, ANTHROPIC_*, NOD_*…): rodada de dentro do Claude Code, o
+  // esforço herdado mudaria o que a sonda mede.
+  const envBase = montarAmbiente("local", process.env);
+  const env = ambienteDaLigacao(envBase, cfg);
+  // Mesmo gate do driver: `--effort` só se o `--help` do CLI listar a flag.
+  const flags = await lerFlagsDoHelp("claude", env);
+  if (cfg.esforco && !flags?.includes("--effort")) escrever(`aviso: o CLI não lista --effort; esforco=${cfg.esforco} ignorado`);
   const cwd = mkdtempSync(join(tmpdir(), "sonda-voltas-"));
   const mcpJson = join(cwd, "mcp.json");
   writeFileSync(mcpJson, JSON.stringify({ mcpServers: { lento: { command: process.execPath, args: [fileURLToPath(import.meta.url), "--mcp"] } } }));
   const prompt =
     'Você é a Nina, numa ligação de voz. Responda em português do Brasil, curto, falado, sem markdown. Quando a pessoa disser como quer ser chamada, responda falando primeiro (uma reação curta e a pergunta "Como você conheceu o nod?") e só então chame a ferramenta anotar com campo=apelido, na mesma resposta. Não anuncie a ferramenta. Depois da ferramenta, não escreva mais nada.';
-  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--replay-user-messages", "--model", modelo,
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--replay-user-messages", "--model", cfg.modelo,
+    ...(cfg.esforco && flags?.includes("--effort") ? ["--effort", cfg.esforco] : []),
     "--setting-sources", "project", "--strict-mcp-config", "--mcp-config", mcpJson, "--tools", "", "--allowedTools", "mcp__lento__anotar", "--permission-mode", "default",
     "--system-prompt", prompt, "--no-session-persistence", "--session-id", randomUUID()];
   const proc = spawn("claude", args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
@@ -141,7 +155,7 @@ async function sondar(): Promise<void> {
   const temFerramenta = (o: Json) => resumir(o)?.startsWith("tool_use") === true;
   const temTexto = (o: Json) => textoDoDelta(o) !== null;
 
-  escrever(`modelo: ${modelo}`);
+  escrever(`modelo: ${cfg.modelo} · esforço: ${cfg.esforco ?? "padrão"} · adaptativo: ${cfg.pensamentoAdaptativo ? "ligado" : "desligado"}`);
   await caso("0. aquecimento", async (desde) => {
     mandar("[nod] A ligação começou. Não responda nada além de ok.");
     await esperarResults(1, desde);

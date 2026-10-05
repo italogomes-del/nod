@@ -6,7 +6,7 @@
  *
  * Uso: node scripts/uat/ligacao-voz.ts --url http://127.0.0.1:8890 --saida /tmp/uat-voz "Oi, tudo bem?" "Cria uma rotina"
  * Exige NOD_LOGIN=stub no servidor e macOS (para o `say`). Custo zero com NOD_EXECUTOR=catcher; com claude-cli, gasta a
- * assinatura (Haiku).
+ * assinatura (o modelo da ligação do servidor).
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -1,33 +1,50 @@
 /**
  * Sonda da fase 0 do modo ligação (definido em 2026-10-04, docs/plano-modo-ligacao.md "Fase 0"). PAGA: usa a assinatura
- * do Claude Code (Haiku, poucas centenas de tokens). Roda o `claude -p` com os mesmos argumentos do laço de voz
- * (montarArgsLigacao, sem MCP) e mede:
+ * do Claude Code (poucas centenas de tokens). Roda o `claude -p` com os argumentos e o ambiente REAIS do laço de voz
+ * (montarArgsLigacao + ambienteDaLigacao, MCP vazio) e mede:
  *  - as capacidades do `system/init` (interrupt_receipt_v1, interrupt_cancel_queued_v1);
  *  - o tempo até o primeiro texto, frio (1ª mensagem) e quente (2ª);
  *  - a interrupção in-band: um `control_request interrupt` no meio de uma resposta longa — chega `control_response`?
  *    o `result` sai, e o processo segue vivo para a próxima mensagem?
  *  - o pedido escrito com uma volta em curso: entra na mesma volta (um `result`) ou abre outra?
- * Uso: node scripts/sonda-ligacao-claude.ts [--modelo claude-haiku-4-5-20251001]
+ * NOD-164: o modelo e as opções vêm no mesmo formato do servidor (lerModelosLigacao); sem opções, vale o padrão
+ * (MODELOS_LIGACAO_PADRAO). `--effort` só entra se o `--help` do CLI listar a flag, como no driver.
+ * Uso: node scripts/sonda-ligacao-claude.ts [--modelo claude-sonnet-4-6] [--esforco low] [--pensamento adaptativo|desligado]
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MODELOS_LIGACAO_PADRAO } from "../src/contracts/modelos.ts";
+import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
+import { lerModelosLigacao } from "../src/domain/modelo-ligacao.ts";
+import { ambienteDaLigacao, montarArgsLigacao } from "../src/adapters/executor/drivers/claude-ligacao.ts";
+import { lerFlagsDoHelp } from "../src/adapters/executor/sonda.ts";
+import { montarAmbiente } from "../src/domain/ambiente-executor.ts";
 
-const i = process.argv.indexOf("--modelo");
-const modelo = i >= 0 ? process.argv[i + 1]! : "claude-haiku-4-5-20251001";
+const arg = (nome: string) => {
+  const i = process.argv.indexOf(nome);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+};
+const opcoes = [["esforco", arg("--esforco")], ["pensamento", arg("--pensamento")]].filter(([, v]) => v).map(([k, v]) => `${k}=${v}`);
+const cfg = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: [arg("--modelo") ?? MODELOS_LIGACAO_PADRAO["claude-cli"].modelo, ...opcoes].join(" ") })["claude-cli"];
 const escrever = (s: string) => process.stdout.write(`${s}\n`);
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const env: Record<string, string> = {};
-for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|ANTHROPIC_.*)$/.test(k)) env[k] = v;
-env.MAX_THINKING_TOKENS = "0";
-env.ENABLE_TOOL_SEARCH = "false";
-
-const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", modelo,
-  "--setting-sources", "project", "--strict-mcp-config", "--tools", "", "--permission-mode", "default",
-  "--system-prompt", "Você está numa ligação de voz. Responda em português do Brasil, curto, sem markdown.", "--no-session-persistence", "--session-id", randomUUID()];
-const proc = spawn("claude", args, { cwd: mkdtempSync(join(tmpdir(), "sonda-ligacao-")), env, stdio: ["pipe", "pipe", "pipe"] });
+// A mesma denylist do driver (CLAUDE_EFFORT, CLAUDE_CODE_*, ANTHROPIC_*, NOD_*…): rodada de dentro do Claude Code, o
+// esforço herdado mudaria o que a sonda mede.
+const envBase = montarAmbiente("local", process.env);
+const voz = { ligacaoId: "sonda", modelo: cfg.modelo, nomeBot: "Sonda", generoVoz: "feminina" as const, pensamentoAdaptativo: cfg.pensamentoAdaptativo, ...(cfg.esforco ? { esforco: cfg.esforco } : {}) };
+const env = ambienteDaLigacao(envBase, voz);
+const dir = mkdtempSync(join(tmpdir(), "sonda-ligacao-"));
+const mcpJson = join(dir, "mcp.json");
+writeFileSync(mcpJson, JSON.stringify({ mcpServers: {} }));
+// Só os campos que montarArgsLigacao lê: voz, catálogo (vazio) e o prompt de sistema.
+const plano = { ligacaoVoz: voz, catalogo: { ferramentas: [] }, promptSistema: "Você está numa ligação de voz. Responda em português do Brasil, curto, sem markdown." } as unknown as PlanoTurno;
+const flagsNoHelp = (await lerFlagsDoHelp("claude", env)) ?? [];
+const args = montarArgsLigacao({ plano, mcpJson, sessaoId: randomUUID(), flagsNoHelp });
+escrever(`modelo: ${cfg.modelo} · esforço: ${args.includes("--effort") ? cfg.esforco : cfg.esforco ? `${cfg.esforco} (CLI sem --effort: ignorado)` : "padrão"} · adaptativo: ${cfg.pensamentoAdaptativo ? "ligado" : "desligado"}`);
+const proc = spawn("claude", args, { cwd: dir, env, stdio: ["pipe", "pipe", "pipe"] });
 const linhas: { em: number; o: Record<string, unknown> }[] = [];
 let resto = "";
 proc.stdout.on("data", (b: Buffer) => {

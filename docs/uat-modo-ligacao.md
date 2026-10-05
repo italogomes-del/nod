@@ -2,7 +2,8 @@
 
 Feito na madrugada de 2026-10-04 num MacBook M1 (macOS 26.0) com o branch `feat/modo-ligacao`, banco efêmero (porta
 5438), servidor em `:8890` e web em `:5276`. Voz `local` (whisper.cpp `ggml-base-q5_1` + `say` do macOS); cérebro ora o
-catcher (custo zero), ora o Claude Code 2.1.289 real (Haiku 4.5, assinatura). Os roteiros estão no repositório e podem
+catcher (custo zero), ora o Claude Code 2.1.289 real (Haiku 4.5, assinatura; desde a NOD-164 o padrão da ligação é o Sonnet 4.6, a
+medir nos roteiros pagos). Os roteiros estão no repositório e podem
 ser repetidos:
 
 - `node scripts/uat/ligacao-voz.ts --url http://127.0.0.1:8890 "frase" …` — liga, fala frases geradas com o `say` em

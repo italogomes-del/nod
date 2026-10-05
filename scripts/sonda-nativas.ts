@@ -10,7 +10,7 @@ import { log } from "../src/obs/log.ts";
 
 /**
  * Sonda do kit do terminal (ADR-052, 4.0; revista pela ADR-055): mede no CLI REAL, em `-p` e com `--settings` por
- * turno, o que o nod precisa para ligar as nativas com ele decidindo. Cada ponto custa UM turno (haiku). Rode a
+ * turno, o que o nod precisa para ligar as nativas com ele decidindo. Cada ponto custa UM turno (MODELO_SONDA_PADRAO). Rode a
  * cada versão nova do CLI (flag-floors.ts) e registre o resultado na tabela da ADR-055.
  *
  *   node scripts/sonda-nativas.ts

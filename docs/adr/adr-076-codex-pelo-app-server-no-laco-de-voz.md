@@ -33,7 +33,7 @@ protocolo fica num parser puro (`src/domain/codex-app-server.ts`).
   `--ignore-rules` e `--strict-config` só entram se `codex app-server --help` as listar. O piso de versão é esse help
   responder; sem ele, `executor_indisponivel`.
 - **Handshake:** `initialize` → `initialized` → `thread/start` com `ephemeral:true`, `approvalPolicy:"never"`,
-  `sandbox:"read-only"`, o modelo de voz (`plano.ligacaoVoz.modelo`, trocado por `NOD_MODELO_LIGACAO_CODEX`) e as
+  `sandbox:"read-only"`, o modelo de voz (`plano.ligacaoVoz.modelo`, resolvido no servidor por `NOD_MODELO_LIGACAO_CODEX`, ADR-072 emenda de 2026-10-05) e as
   instruções de voz em `developerInstructions` (o mesmo canal do `codex exec`). Prazo de 30 s só para subir; depois,
   nenhum relógio de trabalho (ADR-067).
 - **Ida e volta:** cada `vez` vira `turn/start` com esforço `low`; com turno em curso, vira `turn/steer` com

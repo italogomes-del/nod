@@ -75,8 +75,6 @@ export type ContextoLigacaoCodex = {
   nodePath?: string;
   electronComoNode?: boolean;
   sigtermParaSigkillMs?: number;
-  /** Modelo do laço de voz: o do plano, ou o do app (NOD_MODELO_LIGACAO_CODEX). */
-  modelo: string;
   versaoNod?: string;
   fabricaSocket?: FabricaSocket;
   aoProcesso(p: Processo | null): void;
@@ -297,7 +295,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
         (async () => {
           await pedir((id) => pedidoInitialize(id, { nome: "nod", versao: c.versaoNod ?? "0" }));
           proc.escrever(notificacaoInitialized());
-          const r = await pedir((id) => pedidoThreadStart(id, { modelo: c.modelo, instrucoes: plano.promptSistema, cwd }));
+          const r = await pedir((id) => pedidoThreadStart(id, { modelo: lig.modelo, instrucoes: plano.promptSistema, cwd }));
           const id = idDaThread(r);
           if (!id) throw new Error("thread_sem_id");
           threadId = id;
@@ -314,7 +312,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     } finally {
       if (prazo) clearTimeout(prazo);
     }
-    emitir({ tipo: "init", sessaoCli: null, ferramentas: plano.catalogo.ferramentas.map((f) => f.nomeMcp), modelo: c.modelo, versaoCli: "codex-app-server", apiKeySource: "none" }, true);
+    emitir({ tipo: "init", sessaoCli: null, ferramentas: plano.catalogo.ferramentas.map((f) => f.nomeMcp), modelo: lig.modelo, versaoCli: "codex-app-server", apiKeySource: "none" }, true);
 
     // ADR-009: promptSubmitted antes da primeira fala no stdin (o init acima já o marca; aqui é awaited).
     await Promise.all(pendentes);

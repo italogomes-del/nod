@@ -40,7 +40,7 @@ Para rodar com o Claude Code real (custa a assinatura da pessoa):
 
 ```bash
 NOD_EXECUTOR=claude-cli npm run sonda             # ~US$ 0,01: {estado:'pronto', versao:'2.1.272'} sem email
-NOD_EXECUTOR=claude-cli npm run dev               # o boot sonda uma vez (um turno haiku) e só usa o CLI se a sonda disser 'pronto'
+NOD_EXECUTOR=claude-cli npm run dev               # o boot sonda uma vez (um turno de MODELO_SONDA_PADRAO) e só usa o CLI se a sonda disser 'pronto'
 ```
 
 Contra-prova: `NOD_CLAUDE_BIN=/bin/false NOD_EXECUTOR=claude-cli npm run dev` → inventário `ausente`, a web escreve "claude ausente (…) desde HH:MM" e uma mensagem cria um turno interrompido `executor_indisponivel` com negação escrita — fail-closed renderizado (ADR-029), nunca silêncio.
@@ -51,10 +51,10 @@ Contra-prova: `NOD_CLAUDE_BIN=/bin/false NOD_EXECUTOR=claude-cli npm run dev` �
 npm run check          # lint → typecheck (3 tsconfigs) → cerca do domínio → unit → integration → conformidade → concurrency
 npm run e2e:fumaca     # as onze jornadas do aceite sobre o servidor COMPLETO com catcher (tests/concurrency/e2e-catcher.test.ts) — custo zero, roda no CI
 npm run uat:regressao  # 16 testes de apoio ao aceite: produto, MCP, revogação e isolamento Composio
-npm run e2e:haiku      # scripts/e2e-aceite.sh: o mesmo roteiro com o CLI real e curl+jq; imprime o custo somado
+npm run e2e:aceite     # scripts/e2e-aceite.sh: o mesmo roteiro com o CLI real e curl+jq; imprime o custo somado
 ```
 
-Medido em 2026-09-16 (esta máquina, Postgres em Docker): `npm run check` = 141 arquivos, 564 testes (300 unit + 188 integration + 49 conformidade + 27 concurrency); três execuções seguidas verdes em 92 s, 88 s e 86 s (critério da EMENDA-L9 §11). `e2e:fumaca` = 10 jornadas em ~26 s. `e2e:haiku` = rodada única verde (exit 0), US$ 0,1131 somados, cabeçalho de `scripts/e2e-aceite.sh`.
+Medido em 2026-09-16 (esta máquina, Postgres em Docker): `npm run check` = 141 arquivos, 564 testes (300 unit + 188 integration + 49 conformidade + 27 concurrency); três execuções seguidas verdes em 92 s, 88 s e 86 s (critério da EMENDA-L9 §11). `e2e:fumaca` = 10 jornadas em ~26 s. `e2e:aceite` (então `e2e:haiku`) = rodada única verde (exit 0), US$ 0,1131 somados, cabeçalho de `scripts/e2e-aceite.sh`.
 
 Quatro modos de teste (ADR-011 refinado): `tests/unit` (sem banco), `tests/integration` (Postgres real sob `withRollback`), `tests/conformidade` (gates que leem `pg_catalog`), `tests/concurrency` (duas conexões, commit real, limpeza própria por id — é onde o e2e mora, porque ele commita).
 
@@ -75,7 +75,7 @@ Um pacote TypeScript (ADR-018) no esqueleto das práticas herdadas (`docs/pratic
 
 ## Custo
 
-Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (configurável por `NOD_MODELO`); sondas usam Haiku (`NOD_MODELO_SONDA`). Todo turno mantém `--strict-mcp-config --tools ""` e ambiente limpo. Custos históricos medidos com **Haiku**, não estimativas de Sonnet, em 2026-09-16: ~US$ 0,02 por turno com MCP, ~US$ 0,003 por resume, ~US$ 0,01 por sonda. O roteiro `e2e:haiku` custou **US$ 0,1131** na rodada única de 2026-09-16 (1 sonda US$ 0,0129 + 8 turnos US$ 0,1001; detalhe no cabeçalho do script) — meta era < US$ 0,50. O custo de cada turno é gravado em `gastos` (ADR-015) e aparece em `GET turnos/:id`.
+Dev e CI: **zero** — o catcher é o default. Agentes novos usam `sonnet` (configurável por `NOD_MODELO`); sondas usam o Sonnet 4.6 pelo id (`NOD_MODELO_SONDA`; Haiku 4.5 até a NOD-164). Todo turno mantém `--strict-mcp-config --tools ""` e ambiente limpo. Custos históricos medidos com **Haiku**, não estimativas de Sonnet, em 2026-09-16: ~US$ 0,02 por turno com MCP, ~US$ 0,003 por resume, ~US$ 0,01 por sonda. O roteiro de aceite (`e2e:aceite`, então `e2e:haiku`, com Haiku) custou **US$ 0,1131** na rodada única de 2026-09-16 (1 sonda US$ 0,0129 + 8 turnos US$ 0,1001; detalhe no cabeçalho do script) — meta era < US$ 0,50. O custo de cada turno é gravado em `gastos` (ADR-015) e aparece em `GET turnos/:id`.
 
 ## O que NÃO existe (registrado)
 

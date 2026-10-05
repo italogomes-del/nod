@@ -1,14 +1,26 @@
-/** definido em 2026-09-17: agentes usam o alias Sonnet do CLI; sondas mantêm Haiku para limitar o custo. */
-export const MODELO_AGENTE_PADRAO = "sonnet";
-export const MODELO_SONDA_PADRAO = "claude-haiku-4-5-20251001";
+import type { EsforcoAgente } from "./agente.ts";
 
 /**
- * definido em 2026-10-04 (ADR-072): o modelo do laço de voz, por harness — rápido e sem raciocínio longo. Fixo pelo id
- * (o alias "haiku" pode mudar de modelo sem aviso). O app troca por `NOD_MODELO_LIGACAO_CLAUDE`/`_CODEX` (plano B
- * para a aposentadoria do Haiku 4.5, cuja janela abre em 2026-10-15).
+ * definido em 2026-09-17: agentes usam o alias Sonnet do CLI. NOD-164 (2026-10-05): as sondas saem do Haiku 4.5
+ * (aposentadoria não antes de 2026-10-15) e usam o Sonnet 4.6 pelo id, o mesmo modelo da ligação.
  */
-export const MODELO_LIGACAO_CLAUDE = "claude-haiku-4-5-20251001";
-export const MODELO_LIGACAO_CODEX = "gpt-6-luna";
+export const MODELO_AGENTE_PADRAO = "sonnet";
+export const MODELO_SONDA_PADRAO = "claude-sonnet-4-6";
+
+/**
+ * NOD-164 (emenda à ADR-072): o modelo da ligação, por harness, resolvido no SERVIDOR (`NOD_MODELO_LIGACAO_CLAUDE`/
+ * `_CODEX`, lidas por `lerModelosLigacao`) e levado no plano; a troca por env no app saiu (a denylist `NOD_` a
+ * apagava). Fixo pelo id (um alias pode mudar de modelo sem aviso). As opções de voz só existem no Claude: `esforco`
+ * vira `--effort` e `pensamentoAdaptativo:false` vira `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` no driver. O padrão é
+ * o Sonnet 4.6 sem thinking — na família 4.6 o adaptativo ignora MAX_THINKING_TOKENS=0. Trocar ou reverter é uma
+ * linha no `infra/gcp/config.env` mais o redeploy.
+ */
+export type ConfigModeloLigacaoClaude = { modelo: string; esforco?: EsforcoAgente; pensamentoAdaptativo: boolean };
+export type ModelosLigacao = { "claude-cli": ConfigModeloLigacaoClaude; "codex-cli": { modelo: string } };
+export const MODELOS_LIGACAO_PADRAO: ModelosLigacao = {
+  "claude-cli": { modelo: "claude-sonnet-4-6", pensamentoAdaptativo: false },
+  "codex-cli": { modelo: "gpt-6-luna" },
+};
 
 /**
  * definido em 2026-10-04: a guia do onboarding no "auto" roda no modelo mais potente do harness, no chat e na ligação.

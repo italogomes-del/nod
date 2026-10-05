@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
 import { PEDIDO_DE_RESUMO } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
+import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
@@ -60,11 +61,12 @@ beforeEach(async () => {
       });
     });
   });
-  cfg = {
-    bins: { "codex-cli": bin },
-    env: { HOME: dir, PATH: process.env.PATH ?? "", TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar", NOD_MODELO_LIGACAO_CODEX: "gpt-6-luna-teste" },
-    cwdBase: join(dir, "turnos"),
-  };
+  // NOD-164: o cfg nasce como no boot (configDosDrivers, com a denylist): a NOD_MODELO_LIGACAO_CODEX do env do Mac não
+  // chega ao driver, e o modelo da ligação é o do plano. Antes o env era montado à mão e mascarava o override morto.
+  cfg = await configDosDrivers(
+    { HOME: dir, PATH: process.env.PATH ?? "", NOD_HOME: join(dir, "nod"), NOD_CODEX_BIN: bin, TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar", NOD_MODELO_LIGACAO_CODEX: "gpt-6-do-mac" },
+    { home: dir, shellDeLogin: false },
+  );
 });
 
 afterEach(async () => {
@@ -78,7 +80,7 @@ function planoLigacao(): PlanoTurno {
   plano.tokenDeTurno = "segredo-do-turno";
   plano.modoTurno = "ligacao";
   plano.promptSistema = "Você é a Vera, numa ligação. Fale curto.";
-  plano.ligacaoVoz = { ligacaoId: "lig-1", modelo: "gpt-6-luna", nomeBot: "Vera", generoVoz: "feminina" };
+  plano.ligacaoVoz = { ligacaoId: "lig-1", modelo: "gpt-6-luna-do-plano", nomeBot: "Vera", generoVoz: "feminina" };
   return plano;
 }
 
@@ -120,7 +122,9 @@ it("vez vira fala e fala-fim; a aprovação pedida pelo app-server é negada; o 
   const registro = JSON.parse(await readFile(join(dir, "registro.json"), "utf8"));
   // Negou o pedido de aprovação no formato do método (sem resposta, o turno travaria).
   expect(registro.aprovacao).toEqual({ decision: "decline" });
-  expect(registro.thread).toMatchObject({ model: "gpt-6-luna-teste", ephemeral: true, approvalPolicy: "never", sandbox: "read-only", developerInstructions: "Você é a Vera, numa ligação. Fale curto." });
+  // O modelo é o do plano (resolvido no servidor); a NOD_MODELO_LIGACAO_CODEX do Mac não muda nada nem chega ao filho.
+  expect(registro.env.NOD_MODELO_LIGACAO_CODEX).toBeUndefined();
+  expect(registro.thread).toMatchObject({ model: "gpt-6-luna-do-plano", ephemeral: true, approvalPolicy: "never", sandbox: "read-only", developerInstructions: "Você é a Vera, numa ligação. Fale curto." });
   expect(registro.turnos.map((t: { texto: string }) => t.texto)).toEqual(["aquecimento", "oi [[ferramenta]]", PEDIDO_DE_RESUMO]);
   expect(registro.turnos.every((t: { effort: string }) => t.effort === "low")).toBe(true);
   // Isolamento: o token só no launcher 0600, nunca no argv; nenhuma chave da OpenAI nem do banco no ambiente.

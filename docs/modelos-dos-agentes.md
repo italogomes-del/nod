@@ -14,7 +14,7 @@ A escolha vale para novas tarefas, rotinas e pedidos a colegas. Cada colega usa 
 - `NOD_MODELO=auto`: padrão para novos agentes. Um alias Claude como `sonnet` mantém a compatibilidade anterior, mas fixa esse fornecedor para esses agentes.
 - `NOD_CLAUDE_BIN` e `NOD_CODEX_BIN`: caminhos opcionais para instalação fora do PATH.
 
-A descoberta normal verifica instalação e login sem executar turnos pagos. `NOD_MODELO_SONDA` continua restrito aos scripts de sonda empírica; `e2e:haiku` continua pago e separado.
+A descoberta normal verifica instalação e login sem executar turnos pagos. `NOD_MODELO_SONDA` continua restrito aos scripts de sonda empírica; `e2e:aceite` (antes `e2e:haiku`) continua pago e separado. O modelo da ligação não sai daqui: é do servidor (`NOD_MODELO_LIGACAO_CLAUDE`/`_CODEX`, ADR-072, emenda de 2026-10-05).
 
 A API aceita `PATCH /api/t/:tenant/agentes/:id` com `{"harness":"codex-cli","modelo":"gpt-6-astra"}` ou `{"harness":"auto","modelo":"auto"}`. O escopo e as permissões do agente continuam obrigatórios. Combinações incompatíveis retornam entrada inválida.
 

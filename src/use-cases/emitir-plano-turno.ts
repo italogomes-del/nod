@@ -1,7 +1,7 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import { modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
-import { MODELO_LIGACAO_CLAUDE, MODELO_LIGACAO_CODEX } from "../contracts/modelos.ts";
+import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
 import { generoDaVoz } from "../domain/vozes.ts";
 import { montarPromptLigacao, MENSAGENS_NO_PROMPT_LIGACAO } from "../domain/prompt-ligacao.ts";
 import { linhasDoPromptOnboarding } from "../domain/roteiro-onboarding.ts";
@@ -40,6 +40,11 @@ export type EntradaEmitirPlano = {
    * As ferramentas do GitHub nativo DELA vão marcadas para rodar na máquina (o proxy executa).
    */
   ghNaMaquina?: boolean;
+  /**
+   * NOD-164 (emenda à ADR-072): o modelo da ligação por harness, já lido e validado pelo compositor
+   * (`lerModelosLigacao` sobre o env do servidor). Ausente = MODELOS_LIGACAO_PADRAO. O caso de uso não lê `process.env`.
+   */
+  modelosLigacao?: ModelosLigacao;
 };
 
 /**
@@ -251,13 +256,17 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     const lig = ligacaoDoTurno;
     if (!lig || (lig.estado !== "chamando" && lig.estado !== "em_curso")) throw new ErroDeDominio("estado_invalido", { cause: "ligação do turno não está viva" });
     const harnessDoPlano = escolha?.harness ?? "claude-cli";
-    const modeloRapido = harnessDoPlano === "codex-cli" ? MODELO_LIGACAO_CODEX : MODELO_LIGACAO_CLAUDE;
-    parcial.ligacaoVoz = {
-      ligacaoId: lig.id,
-      modelo: (guiaNoMaisPotente ? modeloMaisPotente(harnessDoPlano) : null) ?? modeloRapido,
-      nomeBot: agente.nome,
-      generoVoz: generoDaVoz(lig.voz),
-    };
+    const modelos = input.modelosLigacao ?? MODELOS_LIGACAO_PADRAO;
+    const maisPotente = guiaNoMaisPotente ? modeloMaisPotente(harnessDoPlano) : null;
+    const base = { ligacaoId: lig.id, nomeBot: agente.nome, generoVoz: generoDaVoz(lig.voz) };
+    if (harnessDoPlano === "codex-cli") {
+      parcial.ligacaoVoz = { ...base, modelo: maisPotente ?? modelos["codex-cli"].modelo };
+    } else {
+      // NOD-164: o pensamento adaptativo vale para toda ligação do Claude (inclusive no `fable` da guia); o esforço é da
+      // configuração e só acompanha o modelo dela, nunca o mais potente.
+      const cfg = modelos["claude-cli"];
+      parcial.ligacaoVoz = { ...base, modelo: maisPotente ?? cfg.modelo, pensamentoAdaptativo: cfg.pensamentoAdaptativo, ...(!maisPotente && cfg.esforco ? { esforco: cfg.esforco } : {}) };
+    }
     // O prompt de voz (prompt-ligacao.ts) substitui o de texto: curto, falado, sem "Formatação:".
     parcial.promptSistema = montarPromptLigacao({
       nomeBot: agente.nome,

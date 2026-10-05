@@ -4,6 +4,8 @@ import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
 import { ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
+import { MODELOS_LIGACAO_PADRAO } from "../../src/contracts/modelos.ts";
+import { lerModelosLigacao } from "../../src/domain/modelo-ligacao.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -63,6 +65,44 @@ describeIntegracao("harness por agente", () => {
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const naLigacao = (await emitirPlanoTurno(deps, { turnoId: turno.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).data;
       expect(naLigacao.ligacaoVoz?.modelo).toBe("fable");
+    });
+  });
+});
+
+describeIntegracao("modelo da ligação resolvido no servidor (NOD-164)", () => {
+  const contexto: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
+  it("sem config vale o padrão; com config vale a configurada; a guia explícita recebe a config e a guia no auto segue no mais potente", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos, agenteId } = await agenteComConversa(trx, escopo);
+      const guia = await agenteComConversa(trx, escopo);
+      const codex = await agenteComConversa(trx, escopo);
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      await editarPerfil(deps, { agenteId: codex.agenteId, harness: "codex-cli", modelo: "auto" });
+      await repos.onboarding.definirGuia(guia.agenteId);
+      const configurada = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: "claude-sonnet-5-5 esforco=low", NOD_MODELO_LIGACAO_CODEX: "gpt-6-astra" });
+      // "produto" dispensa o consentimento de voz (ADR-077); o modelo não depende de quem iniciou.
+      const voz = async (id: string, modelosLigacao?: typeof configurada) => {
+        const { turno, ligacao } = (await ligar(deps, { agenteId: id, contexto, executor: "local", iniciadaPor: "produto" })).data;
+        const plano = (await emitirPlanoTurno(deps, { turnoId: turno.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto }, ...(modelosLigacao ? { modelosLigacao } : {}) })).data;
+        await repos.ligacoes.encerrar(ligacao.id, { motivo: "pessoa_desligou", agora: agora() });
+        return plano.ligacaoVoz;
+      };
+
+      expect(await voz(agenteId)).toEqual(expect.objectContaining({ modelo: MODELOS_LIGACAO_PADRAO["claude-cli"].modelo, pensamentoAdaptativo: false }));
+      expect((await voz(agenteId))?.esforco).toBeUndefined();
+      expect(await voz(agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }));
+      expect(await voz(codex.agenteId)).toEqual(expect.objectContaining({ modelo: "gpt-6-luna" }));
+      expect(await voz(codex.agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "gpt-6-astra" }));
+      expect((await voz(codex.agenteId, configurada))?.pensamentoAdaptativo).toBeUndefined();
+
+      // A guia com modelo explícito recebe a config; no "auto", o `fable` — sem o esforço da config, com o pensamento dela.
+      await editarPerfil(deps, { agenteId: guia.agenteId, harness: "claude-cli", modelo: "sonnet" });
+      expect(await voz(guia.agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "claude-sonnet-5-5", esforco: "low" }));
+      await editarPerfil(deps, { agenteId: guia.agenteId, harness: "auto", modelo: "auto" });
+      const naGuia = await voz(guia.agenteId, configurada);
+      expect(naGuia).toEqual(expect.objectContaining({ modelo: "fable", pensamentoAdaptativo: false }));
+      expect(naGuia?.esforco).toBeUndefined();
     });
   });
 });

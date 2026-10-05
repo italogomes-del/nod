@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Roteiro MANUAL de aceite com o CLI REAL (haiku) — `npm run e2e:haiku` (EMENDA 30: o e2e automatizado
+# Roteiro MANUAL de aceite com o CLI REAL — `npm run e2e:aceite` (EMENDA 30: o e2e automatizado
 # sem custo é tests/concurrency/e2e-catcher.test.ts; este script percorre o fluxo_e2e_de_aceite do
 # plano com curl+jq contra um servidor NOD_EXECUTOR=claude-cli e IMPRIME o custo somado).
 #
-# CUSTO — medido em 2026-09-16 (rodada única, claude-haiku-4-5-20251001, macOS, CLI 2.1.272):
+# CUSTO — medido em 2026-09-16 (rodada única, Haiku 4.5, macOS, CLI 2.1.272; NOD-164: o padrão agora é o alias
+# `sonnet` dos agentes, a medir na próxima rodada):
 #   ver o bloco "CUSTO MEDIDO" no fim deste cabeçalho (preenchido pela rodada real).
 #
 # Sobe o compose, migra, roda o seed, sobe o servidor em 8888 com env LIMPO (denylist
@@ -15,7 +16,7 @@
 # e não derrubam a rodada (o e2e com catcher é quem prova a mecânica; aqui prova-se o contrato com o
 # CLI real). Zero `claude -p` fora do que o servidor dispara.
 #
-# CUSTO MEDIDO (2026-09-16): US$ 0,1131 — 1 sonda (US$ 0,012949) + 8 turnos haiku (US$ 0,100106):
+# CUSTO MEDIDO (2026-09-16): US$ 0,1131 — 1 sonda (US$ 0,012949) + 8 turnos Haiku 4.5 (US$ 0,100106):
 #   turno 1 (criar bot, atualizar_perfil + lembrar, com MCP) US$ 0,0230; os demais entre US$ 0,003 (resume)
 #   e ~US$ 0,02 (com chamada de ferramenta). Meta < US$ 0,50. Rodada única: exit 0, todos os passos
 #   determinísticos verdes; o modelo chamou atualizar_perfil, lembrar, criar_rotina, listar_contatos +
@@ -26,7 +27,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export NOD_EXECUTOR=claude-cli
 export NOD_LOGIN="${NOD_LOGIN:-stub}"
-export NOD_MODELO="${NOD_MODELO:-claude-haiku-4-5-20251001}"
+export NOD_MODELO="${NOD_MODELO:-sonnet}"
 export NOD_API_PORT="${NOD_API_PORT:-8888}"
 export NOD_LONGPOLL_MS="${NOD_LONGPOLL_MS:-8000}"
 API="http://127.0.0.1:${NOD_API_PORT}"
@@ -198,7 +199,7 @@ FX=$(api POST "conversas/$C/parar"); echo "   faixa: $FX"
 E5=$(esperar_turno "$T5" 30); T1MS=$(ms)
 [ "$E5" = "interrompido" ] && ok "turno 5 interrompido em $(( T1MS - T0 )) ms ($(api GET "turnos/$T5" | jq -r .turno.motivoInterrupcao))"
 sleep 1 # o driver dá SIGTERM e só depois SIGKILL; um segundo basta para o processo sumir
-# só os `claude -p` do nod (modelo haiku): outras ferramentas na máquina também rodam `claude -p` (visto em 2026-09-16)
+# só os `claude -p` do nod (modelo $NOD_MODELO): outras ferramentas na máquina também rodam `claude -p` (visto em 2026-09-16)
 pgrep -f "claude -p.*--model ${NOD_MODELO}" >/dev/null && obs "ainda há 'claude -p' do nod vivo" || ok "nenhum 'claude -p' do nod vivo"
 api POST "conversas/$C/parar" | jq -e '.nadaRodando==true' >/dev/null && ok "de novo → nadaRodando:true"
 
@@ -243,4 +244,4 @@ kill "$(cat "$SSE.pid")" 2>/dev/null || true
 echo "   sonda: US\$ $CUSTO_SONDA · $N_TURNOS turno(s): US\$ $CUSTO_TURNOS · TOTAL: US\$ $TOTAL (meta < 0,50)"
 if [ ${#OBS[@]} -gt 0 ]; then printf '\n== OBSERVAÇÕES (dependem do modelo; o e2e com catcher prova a mecânica):\n'; printf '   - %s\n' "${OBS[@]}"; fi
 echo
-echo "ACEITE COM HAIKU: verde (passos determinísticos) · log do servidor: $LOG"
+echo "ACEITE COM ${NOD_MODELO}: verde (passos determinísticos) · log do servidor: $LOG"

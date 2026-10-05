@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
+import type { LigacaoVozPlano, PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import type { MsgCerebroServidor } from "../../../contracts/voz.ts";
 import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais } from "../../../domain/stream-json.ts";
@@ -45,10 +45,15 @@ export function uuidDoEco(linha: string): string | null {
   }
 }
 
-/** Flags que o laço de voz usa sempre (o piso é o mesmo do turno; as opcionais entram só se o help as listar). */
-export function montarArgsLigacao(p: { plano: PlanoTurno; mcpJson: string; modelo: string; sessaoId: string; flagsNoHelp: readonly string[] }): string[] {
+/**
+ * Flags que o laço de voz usa sempre (o piso é o mesmo do turno; as opcionais entram só se o help as listar). O modelo
+ * e o esforço são os do plano (NOD-164: resolvidos no servidor); o `--effort` segue a regra do chat — só com a flag no
+ * `--help` (piso em FLAG_FLOORS) e só se o plano pedir.
+ */
+export function montarArgsLigacao(p: { plano: PlanoTurno; mcpJson: string; sessaoId: string; flagsNoHelp: readonly string[] }): string[] {
   const { plano, flagsNoHelp } = p;
   const temFlag = (f: string) => flagsNoHelp.includes(f);
+  const voz = plano.ligacaoVoz!;
   const permitidas = plano.catalogo.ferramentas.map((f) => f.nomeMcp).join(",");
   return [
     "-p",
@@ -59,7 +64,8 @@ export function montarArgsLigacao(p: { plano: PlanoTurno; mcpJson: string; model
     "--verbose",
     "--include-partial-messages",
     "--model",
-    p.modelo,
+    voz.modelo,
+    ...(voz.esforco && temFlag("--effort") ? ["--effort", voz.esforco] : []),
     "--setting-sources",
     "project",
     "--strict-mcp-config",
@@ -82,9 +88,13 @@ export function montarArgsLigacao(p: { plano: PlanoTurno; mcpJson: string; model
   ];
 }
 
-/** Ambiente do laço de voz: sem raciocínio longo e sem busca de ferramentas (catálogo pequeno, carregado de cara). */
-export function ambienteDaLigacao(envBase: Record<string, string>): Record<string, string> {
-  return { ...envBase, MAX_THINKING_TOKENS: "0", ENABLE_TOOL_SEARCH: "false" };
+/**
+ * Ambiente do laço de voz: sem raciocínio longo e sem busca de ferramentas (catálogo pequeno, carregado de cara). NOD-164:
+ * na família 4.6 o pensamento adaptativo ignora MAX_THINKING_TOKENS=0; com `pensamentoAdaptativo:false` no plano, a
+ * variável do CLI o desliga. Plano de servidor antigo (campo ausente) não muda nada.
+ */
+export function ambienteDaLigacao(envBase: Record<string, string>, voz?: Pick<LigacaoVozPlano, "pensamentoAdaptativo">): Record<string, string> {
+  return { ...envBase, MAX_THINKING_TOKENS: "0", ENABLE_TOOL_SEARCH: "false", ...(voz?.pensamentoAdaptativo === false ? { CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: "1" } : {}) };
 }
 
 /** Texto da vez com o aviso de interrupção, quando houve: o modelo sabe até onde a pessoa ouviu. */
@@ -105,8 +115,6 @@ export type ContextoLigacaoClaude = {
   nodePath?: string;
   electronComoNode?: boolean;
   sigtermParaSigkillMs?: number;
-  /** Modelo do laço de voz: o do plano, ou o do app (NOD_MODELO_LIGACAO_CLAUDE). */
-  modelo: string;
   fabricaSocket?: FabricaSocket;
   aoProcesso(p: Processo | null): void;
 };
@@ -123,7 +131,9 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
   let cerebro: CerebroLigacao | null = null;
   try {
     const mcpJson = await escreverMcpConfig(tmp, { url: c.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: c.proxyPath, nodePath: c.nodePath, electronComoNode: c.electronComoNode });
-    const args = montarArgsLigacao({ plano, mcpJson, modelo: c.modelo, sessaoId: randomUUID(), flagsNoHelp: c.flagsNoHelp });
+    const args = montarArgsLigacao({ plano, mcpJson, sessaoId: randomUUID(), flagsNoHelp: c.flagsNoHelp });
+    // CLI abaixo do piso do --effort: a ligação segue sem a flag, e o log diz por quê.
+    if (lig.esforco && !c.flagsNoHelp.includes("--effort")) log("aviso", "ligacao_sem_effort", { turno_id: plano.turnoId, esforco: lig.esforco });
     cerebro = await conectarCerebro({ urlNod: c.urlNod, token: plano.tokenDeTurno, ligacaoId: lig.ligacaoId, harness: "claude-cli", interrupcao: true, fabrica: c.fabricaSocket });
 
     const eventos: EventoStream[] = [];
@@ -150,7 +160,7 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
     const proc = iniciarProcesso({
       bin: c.bin,
       args,
-      env: ambienteDaLigacao(c.env),
+      env: ambienteDaLigacao(c.env, lig),
       cwd,
       sigtermParaSigkillMs: c.sigtermParaSigkillMs,
       aoLinha(linha) {

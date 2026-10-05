@@ -1,6 +1,7 @@
 # ADR-072 — O laço de voz: turno `ligacao` próprio, fora da serialização
 
-**Status** novo · decidido em 2026-10-04 (plano em docs/plano-modo-ligacao.md)
+**Status** novo · decidido em 2026-10-04 (plano em docs/plano-modo-ligacao.md) · emendada em 2026-10-05 (NOD-164: o
+modelo da ligação)
 
 ## Decisão
 
@@ -9,7 +10,7 @@
   `reivindicar` ignoram `ligacao`), passa na frente da fila e só vai para máquina que anunciou `ligacao` no `conectar`.
 - O plano tem modo `ligacao`: catálogo da conversa sem `pedir_a_pessoa` nem artefatos, mais `iniciar_tarefa` e
   `desligar`; sem terminal; sem a sessão da conversa; prompt de voz (`montarPromptLigacao`) e `ligacaoVoz` com o modelo
-  rápido (`MODELO_LIGACAO_CLAUDE` = Haiku 4.5 pelo id; Codex: `gpt-6-luna`; trocáveis por `NOD_MODELO_LIGACAO_*`).
+  rápido (resolvido no servidor; ver a emenda de 2026-10-05: hoje `claude-sonnet-4-6` sem thinking; Codex: `gpt-6-luna`).
 - **Claude Code:** `claude -p` com stream-json e stdin aberto a ligação inteira, `--system-prompt` de voz,
   `--tools ""`, `--no-session-persistence`, `MAX_THINKING_TOKENS=0`. A vez 0 aquece o cache e não é falada. No `fim`,
   pede um resumo de até 5 linhas. Mensagem escrita com uma volta em curso **abre outra volta** (dois `result`); o laço
@@ -61,3 +62,31 @@ da volta antiga saía como `fala-fim` da vez nova: o servidor dava a vez por res
 verdade — a ligação ficava muda. Agora cada mensagem leva um `uuid` e o driver só troca de vez quando o eco dela
 chega. Sem a flag (CLI antigo) ou até o primeiro eco aparecer, vale a regra antiga. O `fim` usa o mesmo eco para saber
 qual `result` é o do resumo.
+
+## Emenda 2026-10-05 — o modelo da ligação é do servidor (NOD-164)
+
+O Haiku 4.5 sai do ar, não antes de 2026-10-15, e o plano B desta ADR (trocar por `NOD_MODELO_LIGACAO_*` no app) nunca
+funcionou: a denylist `NOD_` de `montarAmbiente("local")` apaga essas variáveis antes de os drivers lerem. O teste do
+Codex que deveria provar a troca passava com ou sem o override, porque montava o `cfg` à mão.
+
+- **Onde se escolhe:** no servidor. `NOD_MODELO_LIGACAO_CLAUDE="<modelo> [esforco=<nível>] [pensamento=adaptativo|desligado]"`
+  e `NOD_MODELO_LIGACAO_CODEX="<modelo>"`, lidas por `lerModelosLigacao` (`src/domain/modelo-ligacao.ts`). Vazio vale o
+  padrão (`MODELOS_LIGACAO_PADRAO`); valor fora do formato impede o boot, com erro em pt-BR citando a variável. Só o
+  formato é validado: um id inexistente passa pelo boot e falha na primeira ligação.
+- **O plano leva tudo:** `ligacaoVoz.modelo`, mais `esforco` e `pensamentoAdaptativo` (só Claude, opcionais; app antigo
+  ignora). Os drivers não escolhem modelo: o override por env saiu do Claude e do Codex.
+- **Padrão:** `claude-sonnet-4-6` com `pensamentoAdaptativo:false`, sem esforço. Na família 4.6 o thinking adaptativo
+  ignora `MAX_THINKING_TOKENS=0`; com `false`, o driver injeta `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` no filho.
+  `esforco` vira `--effort` só se o `--help` do CLI listar a flag (mesmo gate do chat); sem ela, a ligação segue e sai
+  o log `ligacao_sem_effort`. Codex: `gpt-6-luna`, só o modelo.
+- **A guia no "auto"** continua no `fable` (ADR-077), com o `pensamentoAdaptativo` da config e sem o `esforco` dela.
+- **Trocar ou reverter** é uma linha no `infra/gcp/config.env` e o deploy (`deploy.sh` leva as duas ao `nod.env`). Enquanto
+  o Haiku 4.5 estiver no ar (pelo menos até 2026-10-15), vale voltar para `claude-haiku-4-5-20251001`; depois, para o 4.6. O Sonnet 5.5 low só entra pela config,
+  se a sonda medir dentro do corte: TTFT quente ≤ 1,0 s, 1ª fala ≤ 2,5 s e custo ≤ 3x o do Haiku.
+- **Sondas:** `MODELO_SONDA_PADRAO` também passa ao Sonnet 4.6. `scripts/sonda-ligacao-claude.ts` usa o
+  `montarArgsLigacao` e o `ambienteDaLigacao` reais e aceita `--modelo`, `--esforco` e `--pensamento`.
+
+**Riscos aceitos.** App desktop antigo não injeta a variável do thinking: no 4.6 a ligação fica mais lenta, não
+quebra (soltar a candidata do desktop antes do deploy, ou segurar o Haiku na config até lá). O 4.6 custa perto de 3x
+o Haiku pela tabela. `turno_despachado.dados.modelo` não registra o modelo de voz; a comparação em produção usa a
+janela do deploy (`primeiro_delta_ms`/`primeiro_tocado_ms` do log `ligacao_vez`).

@@ -15,7 +15,16 @@ export type ModoTurno = "criacao" | "conversa" | "sala" | "rotina" | "peer" | "d
  * definido em 2026-10-04 (ADR-072): o turno é o cérebro de uma ligação por voz. O executor abre o canal do cérebro
  * (`/api/interno/voz/v1/cerebro`) com o token do turno e conversa por ele até a ligação acabar.
  */
-export type LigacaoVozPlano = { ligacaoId: string; modelo: string; nomeBot: string; generoVoz: "feminina" | "masculina" };
+export type LigacaoVozPlano = {
+  ligacaoId: string;
+  modelo: string;
+  nomeBot: string;
+  generoVoz: "feminina" | "masculina";
+  /** NOD-164: só Claude; vira `--effort` (se o `--help` listar). Ausente = o padrão do modelo. App antigo ignora. */
+  esforco?: EsforcoAgente;
+  /** NOD-164: só Claude; `false` => `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` no filho. App antigo ignora. */
+  pensamentoAdaptativo?: boolean;
+};
 
 export type FerramentaPlano = {
   /** 'lembrar' | 'exemplo__enviar_email' (conector = `${slug}__${tool}`). */

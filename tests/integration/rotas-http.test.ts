@@ -131,3 +131,11 @@ describeIntegracao("rotas-http: o app composto responde como a tabela ROTAS prom
     }
   });
 });
+
+describeIntegracao("comporApp valida o modelo da ligação (NOD-164)", () => {
+  it("valor inválido em NOD_MODELO_LIGACAO_* lança erro em pt-BR antes de compor", () => {
+    const env = { NOD_EXECUTOR: "catcher", NOD_CREDENTIAL_KEY: "0".repeat(63) + "3" };
+    expect(() => comporApp({ db, env: { ...env, NOD_MODELO_LIGACAO_CLAUDE: "claude-sonnet-4-6 esforco=turbo" }, listarPessoas: async () => [] })).toThrow(/^NOD_MODELO_LIGACAO_CLAUDE inválida: /);
+    expect(() => comporApp({ db, env: { ...env, NOD_MODELO_LIGACAO_CODEX: "gpt-6-luna esforco=low" }, listarPessoas: async () => [] })).toThrow(/^NOD_MODELO_LIGACAO_CODEX inválida: /);
+  });
+});

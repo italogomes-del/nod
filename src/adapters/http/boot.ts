@@ -21,6 +21,7 @@ import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
+import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
 import { listen } from "./servidor.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
@@ -102,6 +103,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
     pessoas: () => listarTodas(db),
   });
+  // NOD-164: o modelo da ligação (NOD_MODELO_LIGACAO_CLAUDE/_CODEX) inválido também impede o boot, antes de qualquer efeito.
+  lerModelosLigacao(env);
   const donoEmprestado = o.dbDono !== undefined;
   const dbEmprestado = o.db !== undefined;
   const agora = () => Date.now();

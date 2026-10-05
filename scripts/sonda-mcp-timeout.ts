@@ -12,7 +12,7 @@ import { log } from "../src/obs/log.ts";
  * Mede o TETO REAL de um tools/call do CLI (quanto tempo uma ferramenta MCP pode ficar aberta antes
  * de o CLI desistir), com uma ferramenta que dorme. É o número que sustenta LONGPOLL_APROVACAO_MS
  * (src/shared/constantes.ts, L1): a aprovação em long-poll segura o tools/call enquanto a pessoa
- * decide, e o proxy precisa fatiar abaixo do teto. Cada ponto custa UM turno real (haiku).
+ * decide, e o proxy precisa fatiar abaixo do teto. Cada ponto custa UM turno real (MODELO_SONDA_PADRAO).
  *
  *   node scripts/sonda-mcp-timeout.ts --segundos 30,90,200 [--mcp-tool-timeout-ms 600000]
  *

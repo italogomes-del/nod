@@ -8,7 +8,7 @@ Implementados: app Electron, configuração do endereço, chave cifrada com `saf
 
 ## Mudanças e validação desta candidata
 
-Integra o desktop à main atual, incluindo gestão e exclusão recuperável de agentes (migrações 0011 e 0012), decisões diretamente no chat, cooperação iniciada por agentes acordados por rotinas e Sonnet como modelo padrão. As sondas continuam em Haiku. Candidatas `-rc.N` são reconhecidas pela verificação de compatibilidade do app.
+Integra o desktop à main atual, incluindo gestão e exclusão recuperável de agentes (migrações 0011 e 0012), decisões diretamente no chat, cooperação iniciada por agentes acordados por rotinas e Sonnet como modelo padrão. As sondas usavam Haiku; desde a NOD-164 usam o Sonnet 4.6. Candidatas `-rc.N` são reconhecidas pela verificação de compatibilidade do app.
 
 Servidor compatível: código da tag `desktop-v0.2.0-rc.1`, protocolo de máquina 1, migrações 0001–0012. A URL HTTPS de produção ainda não foi informada. Não use o snapshot da preview anterior como servidor desta candidata. Permanece a versão mínima de cliente 0.1.0; não houve aumento forçado dessa versão mínima.
 
