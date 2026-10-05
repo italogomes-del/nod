@@ -18,7 +18,7 @@ import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executo
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, lerIaDesktop, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, lerIaDesktop, textoDaImpressao, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
@@ -388,6 +388,8 @@ async function entrarNaIa(ia: IaDesktop): Promise<ResultadoIaDesktop> {
     try {
       const filho = spawn(bin, args, { cwd: home || undefined, env: ambienteDoLogin(cfg.env), detached: true, stdio: "ignore", shell: false });
       filho.once("spawn", () => { filho.unref(); resolver({ ok: true }); });
+      // definido em 2026-10-05: o login terminou bem — se esta IA estava reprovada, a conta nova é testada agora.
+      filho.once("exit", (codigo) => { if (codigo === 0) void vigiaIas?.contaMudou(ia).catch(() => undefined); });
       filho.once("error", () => resolver({ ok: false, motivo: "falhou" }));
     } catch { resolver({ ok: false, motivo: "falhou" }); }
   });
@@ -402,7 +404,7 @@ async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<strin
   const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
   if (!bin) return null;
   const r = await executarColetando({ bin, args, env: ambienteDoLogin(cfg.env), cwd: home || tmpdir(), timeoutMs: 10_000 });
-  return r.exitCode === 0 ? createHash("sha256").update(`${r.stdout.trim()}\n${r.stderr.trim()}`).digest("hex") : null;
+  return r.exitCode === 0 ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null;
 }
 function validarRemetente(event: IpcMainInvokeEvent) {
   if (event.senderFrame?.url !== setupUrl || event.sender !== janela?.webContents) throw new Error("origem_invalida");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Registry, TesteDoMotor } from "../../../src/adapters/executor/spi.ts";
 import { INTERVALO_SONDA_IA_MS } from "../../../desktop/ia-mac.ts";
-import { criarVigiaDasIas, INTERVALO_COM_REPROVADA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
+import { criarVigiaDasIas, ESPERA_RETESTE_MS, INTERVALO_COM_REPROVADA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
 
 type Ia = "claude-cli" | "codex-cli";
 /** O que o teste de verdade devolve: um resultado, uma promessa dele (teste pendurado) ou o CLI morrendo. */
@@ -171,6 +171,43 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.disco).toEqual([]);
     expect(m.lacos).toBe(1);
     expect(m.agendado).toBeNull();
+  });
+
+  it("impressão que muda sozinha não vira teste pago a cada volta: depois do primeiro reteste, a espera é de 1 min e dobra", async () => {
+    const disco = [{ ia: "claude-cli", causa: "conta_sem_acesso", impressao: "conta-a", em: T0 - 60_000 }];
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": ausente() }, disco, teste: { "claude-cli": SEM_ACESSO } });
+    await vigia.iniciar(sondagem());
+    // Um CLI que põe algo variável na saída: a impressão nunca repete.
+    const volta = async (ms: number) => { m.agora += ms; m.impressao["claude-cli"] = `muda-${m.agora}`; await tique(); };
+    await volta(3_000);
+    expect(m.testes).toHaveLength(1);
+    for (let i = 0; i < 10; i++) await volta(3_000);
+    expect(m.testes).toHaveLength(1);
+    await volta(ESPERA_RETESTE_MS);
+    expect(m.testes).toHaveLength(2);
+    // A espera dobrou: um minuto depois ainda não testa; dois, testa.
+    await volta(ESPERA_RETESTE_MS);
+    expect(m.testes).toHaveLength(2);
+    await volta(ESPERA_RETESTE_MS);
+    expect(m.testes).toHaveLength(3);
+    // Em todo esse tempo a IA seguiu anunciada como fora, uma vez só.
+    expect(m.anuncios).toHaveLength(1);
+    expect(m.anuncios[0]).toMatchObject({ estados: { "claude-cli": "nao_autenticado" } });
+  });
+
+  it("o login terminou (o Codex não diz qual é a conta): a IA reprovada é testada na hora, sem esperar impressão nem freio", async () => {
+    const disco = [{ ia: "codex-cli", causa: "teste_falhou", impressao: "conta-x", em: T0 - 60_000 }];
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": ausente(), "codex-cli": pronto() }, disco });
+    await vigia.iniciar(sondagem());
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "codex-cli": "nao_autenticado" }, principal: "nao_autenticado" });
+    await vigia.contaMudou("codex-cli");
+    expect(m.testes.map((t) => t.ia)).toEqual(["codex-cli"]);
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "codex-cli": "pronto" }, principal: "pronto" });
+    expect(m.disco).toEqual([]);
+    expect(m.lacos).toBe(1);
+    // IA sem veredito: o fim do login só confere o estado de novo, sem teste.
+    await vigia.contaMudou("codex-cli");
+    expect(m.testes).toHaveLength(1);
   });
 
   it("ao abrir o app, veredito de outra conta ou vencido cai sem gastar teste (a IA volta a valer pelo login)", async () => {

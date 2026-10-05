@@ -23,6 +23,14 @@ export type Veredito = { ia: IaDesktop; causa: CausaSemIa; impressao: string | n
 export const VALIDADE_VEREDITO_MS = 24 * 3_600_000;
 /** definido em 2026-10-05: com outra IA pronta e uma reprovada, basta olhar a cada 30 s se a conta dela mudou. */
 export const INTERVALO_COM_REPROVADA_MS = 30_000;
+/**
+ * definido em 2026-10-05: o reteste AUTOMÁTICO de uma IA reprovada custa um turno da assinatura. Depois do primeiro, o
+ * próximo espera 1 min, e a espera dobra até 1 h. Medido nesse dia: a saída de `claude auth status` e de
+ * `codex login status` não muda entre chamadas; o freio existe para o dia em que uma versão do CLI puser ali algo que
+ * mude sozinho (sem ele, a vigia testaria a cada 3 s). O teste pedido pela tela e o fim de um login não esperam.
+ */
+export const ESPERA_RETESTE_MS = 60_000;
+export const ESPERA_RETESTE_MAX_MS = 3_600_000;
 
 type Inventarios = Partial<Record<IdDriver, Inventario>>;
 export type Sondagem = { registry: Registry; inventarios: Inventarios };
@@ -50,6 +58,11 @@ export type VigiaDasIas = {
   testar(pedido: unknown): Promise<TesteDeIa[]>;
   /** Um turno voltou dizendo que a conta desta IA não serve. */
   reprovar(ia: IaDesktop, causa: CausaSemIa): Promise<void>;
+  /**
+   * O login desta IA acabou de terminar: a pessoa pode ter entrado com outra conta. Se a IA estava reprovada, é testada
+   * de novo agora (o `codex login status` não diz qual é a conta, então a impressão sozinha não perceberia).
+   */
+  contaMudou(ia: IaDesktop): Promise<void>;
   parar(): void;
 };
 
@@ -88,6 +101,10 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
   let parado = false;
   let ocupado: Promise<unknown> = Promise.resolve();
   let testeEmCurso: Promise<TesteDeIa[]> | null = null;
+  /** O freio do reteste automático, por IA: quando foi o último e quanto esperar até o próximo. */
+  const retestes = new Map<IaDesktop, { em: number; espera: number }>();
+  /** IAs cujo login acabou de terminar: o veredito delas não vale até o próximo teste. */
+  const forcadas = new Set<IaDesktop>();
 
   async function carregar(): Promise<void> {
     if (carregados) return;
@@ -110,7 +127,8 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     // Driver sem teste (app montado sem ele): vale o que a conferência de login disse.
     if (!testar) return { inventario: s.inventarios[ia] ?? AUSENTE(d.agora()), resposta: null };
     const t = await testar(pergunta).catch((): { inventario: Inventario; resposta: null } => ({ inventario: reprovado("teste_falhou", s.inventarios[ia], d.agora()), resposta: null }));
-    if (t.inventario.estado === "pronto") vereditos.delete(ia);
+    forcadas.delete(ia);
+    if (t.inventario.estado === "pronto") { vereditos.delete(ia); retestes.delete(ia); }
     else if (t.inventario.estado === "nao_autenticado" && t.inventario.causa) vereditos.set(ia, { ia, causa: t.inventario.causa, impressao: await d.impressao(ia).catch(() => null), em: d.agora() });
     else vereditos.delete(ia);
     // Quem chama grava o arquivo uma vez no fim: dois testes rodam ao mesmo tempo e não podem disputar a escrita.
@@ -129,19 +147,30 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
       if (!v) continue;
       const inv = s.inventarios[ia];
       // Sem login não há o que reprovar: o estado de login já diz tudo, e o veredito antigo perde o sentido.
-      if (inv?.estado !== "pronto") { vereditos.delete(ia); mudou = true; continue; }
+      if (inv?.estado !== "pronto") { vereditos.delete(ia); forcadas.delete(ia); mudou = true; continue; }
       const impressao = await d.impressao(ia).catch(() => null);
-      const vale = d.agora() - v.em <= VALIDADE_VEREDITO_MS && impressao === v.impressao;
-      if (vale) saida[ia] = reprovado(v.causa, inv, d.agora());
-      else if (opcoes.retestar) { saida[ia] = (await testarUma(ia, s, perguntaDoTeste(null))).inventario; mudou = true; }
-      else { vereditos.delete(ia); mudou = true; }
+      const forcada = forcadas.has(ia);
+      const vale = !forcada && d.agora() - v.em <= VALIDADE_VEREDITO_MS && impressao === v.impressao;
+      if (vale) { saida[ia] = reprovado(v.causa, inv, d.agora()); continue; }
+      if (!opcoes.retestar) { vereditos.delete(ia); mudou = true; continue; }
+      const freio = retestes.get(ia);
+      // Dentro da espera, a IA continua reprovada sem gastar outro turno; o fim de um login não espera.
+      if (!forcada && freio && d.agora() - freio.em < freio.espera) { saida[ia] = reprovado(v.causa, inv, d.agora()); continue; }
+      retestes.set(ia, { em: d.agora(), espera: freio ? Math.min(freio.espera * 2, ESPERA_RETESTE_MAX_MS) : ESPERA_RETESTE_MS });
+      saida[ia] = (await testarUma(ia, s, perguntaDoTeste(null))).inventario;
+      mudou = true;
     }
     if (mudou) await guardar();
     return saida;
   }
 
   async function publicar(s: Sondagem, inventarios: Inventarios): Promise<void> {
-    const principal = Object.values(inventarios).find((i) => i?.estado === "pronto") ?? inventarios["claude-cli"] ?? AUSENTE(d.agora());
+    // A principal é a pronta; sem nenhuma, a que melhor explica a falta: a reprovada no teste, depois a sem login.
+    const todos = Object.values(inventarios);
+    const principal = todos.find((i) => i?.estado === "pronto")
+      ?? todos.find((i) => i?.estado === "nao_autenticado" && i.causa)
+      ?? todos.find((i) => i?.estado === "nao_autenticado")
+      ?? inventarios["claude-cli"] ?? AUSENTE(d.agora());
     // Só o que muda a decisão do servidor entra na chave: o instante de cada sonda não é novidade.
     const chave = JSON.stringify(IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado === "nao_autenticado" ? i.causa ?? null : null]; }));
     ultima = s;
@@ -230,6 +259,11 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
         await publicar(ultima, inventarios);
         reagendar(inventarios);
       });
+    },
+
+    contaMudou(ia) {
+      forcadas.add(ia);
+      return emFila(async () => { await carregar(); await passada(); });
     },
 
     parar() {
