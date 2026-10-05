@@ -93,7 +93,9 @@ export function validarAcaoComputador(valor: unknown): AcaoComputador {
     return c || ".";
   };
   switch (a.tipo) {
-    case "observar": return { tipo: a.tipo };
+    case "observar":
+      if (a.forcar !== undefined && typeof a.forcar !== "boolean") throw new ErroDeDominio("entrada_invalida");
+      return a.forcar === undefined ? { tipo: a.tipo } : { tipo: a.tipo, forcar: a.forcar };
     case "navegar": {
       const url = texto("url", 4000);
       // definido em 2026-09-18: DNS/endereço de destino são validados novamente no proxy de saída.

@@ -24,7 +24,8 @@ export type Computador = {
   indisponivelDesde: EpochMs | null;
 };
 export type AcaoComputador =
-  | { tipo: "observar" }
+  /** `forcar` (NOD-161): devolve imagem e texto mesmo se iguais à última entrega; não vai ao runtime. */
+  | { tipo: "observar"; forcar?: boolean }
   | { tipo: "navegar"; url: string }
   | { tipo: "clicar"; x: number; y: number; quadro: string; botao?: number; vezes?: number }
   | { tipo: "arrastar"; x: number; y: number; destinoX: number; destinoY: number; quadro: string }

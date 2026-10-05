@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
+import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo } from "../../domain/modo-aprovacao.ts";
 import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
@@ -20,7 +21,7 @@ import type { Deps } from "../../use-cases/tipos.ts";
 
 type Dentro = <T>(escopo: Escopo, fn: (d: Deps) => Promise<T>) => Promise<T>;
 /** `saude`: o computador entrou ou saiu do ar — a frota (lateral, cabeçalho, painel) precisa reler. */
-type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void };
+type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void; agora?: () => number };
 type Reserva = { computador: Computador; operacao: string; acao: AcaoComputador; registroId: string; turnoId?: string; aprovado: boolean };
 
 // definido em 2026-09-18: reserva confirmada ANTES do efeito; watchdog do runtime encerra em 55 s.
@@ -36,6 +37,8 @@ function livre(c: Computador, agora: number): void {
 async function reservar(d: Deps, c: Computador, acao: AcaoComputador, autor: "bot" | "pessoa", turnoId?: string, registroId?: string): Promise<Reserva> {
   livre(c, d.agora());
   const operacao = randomUUID();
+  // NOD-161: `forcar` é decisão do servidor; o runtime recebe o observar de sempre.
+  if (acao.tipo === "observar") acao = { tipo: "observar" };
   const registro = registroId ?? (await d.repos.computadores.registrar({ computadorId: c.id, turnoId, autor, tipo: acao.tipo, estado: "executando" })).id;
   if (registroId) await d.repos.computadores.concluir(registroId, "executando");
   await d.repos.computadores.ocupar(c.id, operacao, d.agora() + LEASE_MS);
@@ -70,6 +73,16 @@ function comoErroDeDominio(e: unknown): unknown {
   return ehFalhaComputador(e) ? new ErroDeDominio("estado_invalido", { cause: e.motivo }) : e;
 }
 
+/**
+ * definido em 2026-10-05 (NOD-161): a última tela entregue ao modelo vive 30 min por turno+computador,
+ * no máximo 500 entradas (sai a mais antiga). Não há gancho de fim de turno aqui; turno novo traz
+ * turnoId novo, e um restart só faz a próxima observação ir completa.
+ */
+const OBSERVACAO_TTL_MS = 30 * 60_000;
+const OBSERVACOES_MAX = 500;
+const AVISO_TELA_IGUAL = "Tela igual à anterior; use computador_observar com forcar: true para vê-la de novo.";
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
 /** "O computador está fora do ar desde …" para o agente, sem tocar no Docker (falha rápida). */
 function foraDoArParaAgente(c: Computador): { erro: MotivoFalhaComputador; instrucao: string } {
   const motivo = c.falhaMotivo ?? "sem_resposta";
@@ -77,6 +90,24 @@ function foraDoArParaAgente(c: Computador): { erro: MotivoFalhaComputador; instr
 }
 
 export function criarComputadores(o: Opcoes) {
+  const agora = o.agora ?? Date.now;
+  const observacoes = new Map<string, HashesObservacao & { em: number }>();
+  const chaveObservacao = (turnoId: string, computadorId: string) => `${turnoId}:${computadorId}`;
+  /** O modelo pode não ter a tela no contexto (aprovação, pessoa no controle): a próxima vai completa. */
+  const esquecerObservacao = (turnoId: string, computadorId: string) => { observacoes.delete(chaveObservacao(turnoId, computadorId)); };
+  /** A pessoa mexeu no controle (assumir/devolver/parar) sem turno à mão: esquece o computador em todos os turnos. */
+  const esquecerComputador = (computadorId: string) => { for (const k of observacoes.keys()) if (k.endsWith(`:${computadorId}`)) observacoes.delete(k); };
+  function lembrarObservacao(chave: string, hashes: HashesObservacao): void {
+    observacoes.delete(chave);
+    observacoes.set(chave, { ...hashes, em: agora() });
+    for (const [k, v] of observacoes) if (observacoes.size > OBSERVACOES_MAX || agora() - v.em > OBSERVACAO_TTL_MS) observacoes.delete(k); else break;
+  }
+  function ultimaObservacao(chave: string): HashesObservacao | undefined {
+    const v = observacoes.get(chave);
+    if (v && agora() - v.em > OBSERVACAO_TTL_MS) { observacoes.delete(chave); return undefined; }
+    return v;
+  }
+
   /**
    * A MENSAGEM ÚNICA da transição para fora do ar (a web a mostra como cartão, com a hora local). Na
    * conversa própria do bot; as execuções seguintes saem sem as ferramentas de computador.
@@ -186,6 +217,8 @@ export function criarComputadores(o: Opcoes) {
         registroId = (await d.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: operacao, estado: operacao === "iniciar" || operacao === "parar" ? "executando" : "concluida" })).id;
         return c;
       });
+      // NOD-161: a tela mudou fora do bot; a próxima observação do turno vai completa.
+      if (operacao === "assumir" || operacao === "devolver" || operacao === "parar") esquecerComputador(c.id);
       let sucesso = false;
       let falha: FalhaComputador | null = null;
       let ligou = false;
@@ -224,6 +257,7 @@ export function criarComputadores(o: Opcoes) {
       return executar(escopo, r).catch((e: unknown) => { throw comoErroDeDominio(e); });
     },
     async chamar(escopo: Escopo, plano: PlanoTurno, nome: string, argumentos: unknown): Promise<ResultadoChamada> {
+      let forcar = false;
       const resultado = await o.dentro(escopo, async (d): Promise<ResultadoChamada | Reserva> => {
         const negar = async (motivo: "parada_ativa" | "fora_do_catalogo" | "args_invalidos" | "capacidade_desligada" | "plano_expirado") => {
           const n = await registrarNegacao(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, nome, motivo, classe: "ferramenta_negada", autoria: plano.autoria });
@@ -240,7 +274,7 @@ export function criarComputadores(o: Opcoes) {
         // definido em 2026-09-24 (emenda da ADR-037): fora do ar, a ferramenta responde na hora — sem
         // Docker, sem reserva. O plano seguinte já sai sem as ferramentas computador_*.
         if (c.indisponivelDesde !== null) return { ok: true, isError: true, conteudo: JSON.stringify(foraDoArParaAgente(c)), confianca: "confiavel" };
-        if (c.controle !== "bot") return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" };
+        if (c.controle !== "bot") { esquecerObservacao(plano.turnoId, c.id); return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" }; }
         const args = argumentos as Record<string, unknown>;
         if (nome === "computador_pedir_ajuda") {
           livre(c, d.agora());
@@ -249,6 +283,7 @@ export function criarComputadores(o: Opcoes) {
           await d.repos.computadores.configurar(c.id, { controle: "aguardando_pessoa", ajuda: motivo, ajudaDecisaoId: ajuda.data.decisao_id });
           if (ajuda.events?.length) await d.repos.events.gravarComOutbox(ajuda.events);
           await d.repos.computadores.registrar({ computadorId: c.id, turnoId: plano.turnoId, autor: "bot", tipo: "pedir_ajuda", estado: "concluida" });
+          esquecerObservacao(plano.turnoId, c.id);
           return { ok: true, conteudo: JSON.stringify(ajuda.data), confianca: "confiavel" };
         }
         let acao: AcaoComputador;
@@ -270,16 +305,32 @@ export function criarComputadores(o: Opcoes) {
           const pedido = await pedirAprovacaoComputador(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, resumo: "Ação no computador do bot", itens: [{ texto: resumoAcaoComputador(acao), destino: { conector: "computador", ferramenta: "executar", argumentos: { acaoId: registro.id } } }] });
           if (pedido.events?.length) await d.repos.events.gravarComOutbox(pedido.events);
           if (pedido.data.estado !== "pendente") throw new ErroDeDominio("estado_invalido");
+          esquecerObservacao(plano.turnoId, c.id);
           return { aguardar: pedido.data.decisao_id };
         }
+        forcar = acao.tipo === "observar" && acao.forcar === true;
         return reservar(d, c, acao, "bot", plano.turnoId);
       });
       o.mudou(escopo, plano.agenteId);
       if (!("operacao" in resultado)) return resultado;
       try {
         const r = await executar(escopo, resultado);
-        const imagem = r.tela?.imagem;
-        return { ok: true, isError: r.codigoSaida !== undefined && r.codigoSaida !== 0, conteudo: JSON.stringify({ ...r, audio: undefined, ...(r.tela ? { tela: { ...r.tela, imagem: undefined } } : {}) }), confianca: "nao_confiavel", ...(r.audio ? { audio: r.audio } : {}), ...(imagem ? { imagem: { mimeType: "image/png" as const, data: imagem } } : {}) };
+        const isError = r.codigoSaida !== undefined && r.codigoSaida !== 0;
+        let imagem = r.tela?.imagem;
+        let tela: Record<string, unknown> | undefined = r.tela ? { ...r.tela, imagem: undefined } : undefined;
+        let aviso: string | undefined;
+        // NOD-161: a tela igual à última entregue no turno sai sem imagem/texto. Resultado com erro não
+        // conta como entregue e sai inteiro; quadro, url, título, abas e diálogo saem sempre.
+        if (r.tela && !isError) {
+          const chave = chaveObservacao(plano.turnoId, resultado.computador.id);
+          const dedup = deduplicarObservacao(ultimaObservacao(chave), { imagem: sha256(r.tela.imagem), texto: sha256(r.tela.texto) }, forcar);
+          if (dedup.omitirImagem) { imagem = undefined; aviso = AVISO_TELA_IGUAL; tela = { ...tela, tela_igual_a_anterior: true }; }
+          if (dedup.omitirTexto) tela = { ...tela, texto: "", texto_igual_ao_anterior: true };
+          // `texto` é descartado pelo log (dado pessoal); por isso imagem_igual/texto_igual.
+          if (dedup.omitirImagem || dedup.omitirTexto) log("info", "computador_observacao_deduplicada", { computador_id: resultado.computador.id, imagem_igual: dedup.omitirImagem, texto_igual: dedup.omitirTexto, bytes_poupados: (dedup.omitirImagem ? r.tela.imagem.length : 0) + (dedup.omitirTexto ? r.tela.texto.length : 0) });
+          if (r.tela.imagem) lembrarObservacao(chave, dedup.entregue);
+        }
+        return { ok: true, isError, conteudo: JSON.stringify({ ...r, audio: undefined, ...(tela ? { tela } : {}), ...(aviso ? { aviso } : {}) }), confianca: "nao_confiavel", ...(r.audio ? { audio: r.audio } : {}), ...(imagem ? { imagem: { mimeType: "image/png" as const, data: imagem } } : {}) };
       } catch (e) {
         return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
@@ -292,6 +343,8 @@ export function criarComputadores(o: Opcoes) {
         const a = await d.repos.computadores.buscarAcao(p.acaoId);
         if (!a || a.computadorId !== c.id || a.turnoId !== p.turnoId || a.estado !== "pendente" || !a.argumentosCifrados) throw new ErroDeDominio("estado_invalido");
         const acao = validarAcaoComputador(JSON.parse(o.decifrar(a.argumentosCifrados)));
+        // O resultado aprovado volta sem imagem (guardar abaixo): o modelo não viu esta tela.
+        esquecerObservacao(p.turnoId, c.id);
         return { r: await reservar(d, c, acao, "bot", p.turnoId, a.id), tipo: acao.tipo };
       });
       // definido em 2026-09-28 (0032): o resultado volta ao turno que esperava a aprovação — antes era jogado
