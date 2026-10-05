@@ -38,7 +38,7 @@ function montar(estado: EstadoVozOnboarding, prazos: { naoAtendidaMs?: number } 
   const voz = criarServicoVoz({ provedores: criarProvedoresFalsos({ silencioso: true }), persistencia, prazos });
   const r: RegistroLigacao = {
     ligacaoId: "l1", tenantId: "t", pessoaId: "p", agenteId: "a", conversaId: "c", turnoId: "tu", voz: "clara", velocidade: 1, nomeBot: "Nina", genero: "feminina", maxS: 600,
-    onboarding: true, aguardandoConsentimento: true, saudacao: "Oi! Eu sou a Nina, sua primeira bot aqui no nod. Antes de tudo: como você quer que eu te chame?",
+    onboarding: true, aguardandoConsentimento: true, saudacao: "Oi! Eu sou a Nina, sua primeira bot aqui no nod. Como você quer que eu te chame?",
   };
   voz.registrar(r);
   return { voz, encerradas };
@@ -56,7 +56,7 @@ describe("orquestrador na ligação de onboarding", () => {
     expect(voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.canal })).toBeNull();
     await esperar(() => m.json.some((x) => x.t === "sugestoes"));
     const msgs = m.json as MsgMidiaServidor[];
-    expect(msgs.find((x) => x.t === "bot-fala")).toMatchObject({ texto: "Oi! Eu sou a Nina, sua primeira bot aqui no nod. Antes de tudo: como você quer que eu te chame?" });
+    expect(msgs.find((x) => x.t === "bot-fala")).toMatchObject({ texto: "Oi! Eu sou a Nina, sua primeira bot aqui no nod. Como você quer que eu te chame?" });
     expect(msgs.find((x) => x.t === "onboarding")).toMatchObject({ etapa: "entrevista" });
     expect(msgs.find((x) => x.t === "sugestoes")).toEqual({ t: "sugestoes", itens: ["Me chama de Ana"] });
     await voz.fechar();

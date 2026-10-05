@@ -508,6 +508,83 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     expect((await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 2))).texto).toBe("sim");
   });
 
+  it("a guia fala antes de anotar: o 'ok' depois da ferramenta não é falado nem vai para a transcrição, e a pergunta conta como pergunta", async () => {
+    const m = montar();
+    await atender(m);
+    m.midia.receber({ t: "texto", conteudo: "pode me chamar de Marlon" });
+    await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 1));
+    m.cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Prazer, Marlon! Como você conheceu o nod?" });
+    m.cerebro.receber({ t: "atividade", tipo: "inicio", nome: "mcp__nod__anotar_entrevista" });
+    await ate(() => conteudos(m.midia).includes("Como você conheceu o nod?"));
+    m.cerebro.receber({ t: "atividade", tipo: "fim", nome: "mcp__nod__anotar_entrevista" });
+    m.cerebro.receber({ t: "fala", n: 1, seq: 1, delta: "ok" });
+    m.cerebro.receber({ t: "fala-fim", n: 1 });
+    const gravada = await ate(() => m.falas.find((f) => f.autor === "bot" && f.texto.includes("conheceu")));
+    expect(gravada.texto).toBe("Prazer, Marlon! Como você conheceu o nod?");
+    await dormir(600);
+    expect(conteudos(m.midia)).toEqual(["Oi! Aqui é Nina.", "Prazer, Marlon!", "Como você conheceu o nod?"]);
+    // Com a fala ainda saindo, a tela não pulou para "trabalhando" nem "pensando".
+    const fases = msgs(m.midia, "estado").map((e) => e.fase);
+    expect(fases.slice(fases.lastIndexOf("pensando") + 1)).not.toContain("trabalhando");
+    // A resposta curta a seguir é resposta à pergunta, não "uhum".
+    tocouTudo(m.midia);
+    m.provedores.stt.empurrarTexto("sim");
+    const seq = { n: 0 };
+    for (let i = 0; i < 12; i++) m.midia.receber(quadro(seq.n++, true));
+    for (let i = 0; i < 40; i++) m.midia.receber(quadro(seq.n++, false));
+    expect((await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 2))).texto).toBe("sim");
+  });
+
+  it("se a guia repete depois da ferramenta a pergunta que já tinha feito, ela não é falada de novo; pergunta nova é", async () => {
+    const m = montar();
+    await atender(m);
+    m.midia.receber({ t: "texto", conteudo: "pode me chamar de Marlon" });
+    await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 1));
+    m.cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Prazer, Marlon! Como você conheceu o nod?" });
+    m.cerebro.receber({ t: "atividade", tipo: "inicio", nome: "mcp__nod__anotar_entrevista" });
+    m.cerebro.receber({ t: "atividade", tipo: "fim", nome: "mcp__nod__anotar_entrevista" });
+    m.cerebro.receber({ t: "fala", n: 1, seq: 1, delta: "Como você conheceu o nod? E quem te indicou? " });
+    m.cerebro.receber({ t: "fala-fim", n: 1 });
+    await ate(() => conteudos(m.midia).includes("E quem te indicou?"));
+    expect(conteudos(m.midia).filter((t) => t === "Como você conheceu o nod?")).toHaveLength(1);
+  });
+
+  it("sem fala antes da ferramenta, o que vem depois dela é falado inteiro — inclusive um 'ok' de outra ferramenta", async () => {
+    const m = montar();
+    await atender(m);
+    m.midia.receber({ t: "texto", conteudo: "lembra que eu prefiro café" });
+    await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 1));
+    m.cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Vou anotar isso." });
+    m.cerebro.receber({ t: "atividade", tipo: "inicio", nome: "mcp__nod__lembrar" });
+    m.cerebro.receber({ t: "atividade", tipo: "fim", nome: "mcp__nod__lembrar" });
+    m.cerebro.receber({ t: "fala", n: 1, seq: 1, delta: "Ok." });
+    m.cerebro.receber({ t: "fala-fim", n: 1 });
+    await ate(() => conteudos(m.midia).includes("Ok."));
+    expect(conteudos(m.midia).slice(1)).toEqual(["Vou anotar isso.", "Ok."]);
+  });
+
+  it("a saudação é sintetizada no registro da ligação, antes de a mídia anexar; ligação nunca atendida cancela a síntese", async () => {
+    const { tts, log } = ttsLento(200);
+    const m = montar({ tts });
+    // Ninguém atendeu ainda e a síntese já começou.
+    await ate(() => log.length === 1);
+    expect(log[0]!.texto).toBe("Oi! Aqui é Nina.");
+    await ate(() => log[0]!.fim);
+    const t0 = Date.now();
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+    await ate(() => m.midia.binarios > 0);
+    // O áudio sai na hora: não espera outra síntese de 200 ms.
+    expect(Date.now() - t0).toBeLessThan(150);
+    expect(log).toHaveLength(1);
+    await m.voz.encerrar("l1", "pessoa_desligou");
+
+    const outra = ttsLento(5000);
+    const n = montar({ tts: outra.tts });
+    await ate(() => outra.log.length === 1);
+    await n.voz.encerrar("l1", "nao_atendida");
+    await ate(() => outra.log[0]!.abortada);
+  });
+
   it("anúncio sem ponto antes da ferramenta também sai, e o texto depois dela é outro trecho", async () => {
     const m = montar();
     await atender(m);

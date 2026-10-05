@@ -12,14 +12,14 @@ export const NOME_DA_GUIA = "Nina";
 
 /** A primeira fala da ligação de onboarding (o orquestrador fala sem esperar o cérebro). */
 export function saudacaoDoOnboarding(nomeGuia: string): string {
-  return `Oi! Eu sou a ${nomeGuia}, sua primeira bot aqui no nod. Antes de tudo: como você quer que eu te chame?`;
+  return `Oi! Eu sou a ${nomeGuia}, sua primeira bot aqui no nod. Como você quer que eu te chame?`;
 }
 
 export const PERGUNTAS_ENTREVISTA: Record<CampoEntrevista, string> = {
   apelido: "Como você quer que eu te chame?",
   como_conheceu: "Como você conheceu o nod?",
   objetivo: "E o que te fez baixar o nod? O que você quer que os bots façam por você?",
-  tamanho_time: "Última: quantas pessoas trabalham com você?",
+  tamanho_time: "Última pergunta, quantas pessoas trabalham com você?",
 };
 
 const ORDEM: readonly CampoEntrevista[] = ["apelido", "como_conheceu", "objetivo", "tamanho_time"];
@@ -170,13 +170,13 @@ export function rotuloTamanho(t: TamanhoTime): string {
   return ROTULO_TAMANHO[t];
 }
 
-/** "Então: você é Marlon, chegou por indicação, quer responder clientes mais rápido e trabalha com 2 a 10 pessoas. Certo?" */
+/** "Então, você é Marlon, chegou por indicação, quer responder clientes mais rápido e trabalha com 2 a 10 pessoas. Certo?" */
 export function resumoDaEntrevista(c: CamposEntrevista): string {
   const quem = c.apelido ?? "você";
   const origem = (c.comoConheceu ?? "").toLowerCase();
   const quer = modeloDoObjetivo(c.objetivo).curto;
   const time = c.tamanhoTime === "so_eu" || !c.tamanhoTime ? "ninguém, por enquanto" : `${ROTULO_TAMANHO[c.tamanhoTime].toLowerCase()} pessoas`;
-  return `Então: você é ${quem}${origem ? `, chegou por ${origem}` : ""}, quer ${quer} e trabalha com ${time}. Certo?`;
+  return `Então, você é ${quem}${origem ? `, chegou por ${origem}` : ""}, quer ${quer} e trabalha com ${time}. Certo?`;
 }
 
 /** O primeiro nome da pessoa, para o chip "Me chama de …". */
@@ -224,6 +224,11 @@ export function textoTudoMontado(nomeGuia: string): string {
 /**
  * As linhas do prompt de voz da primeira ligação (prompt-ligacao.ts junta às fixas): o roteiro das quatro perguntas,
  * o resumo e a configuração guiada com as ferramentas do onboarding.
+ *
+ * definido em 2026-10-04 (emenda da ADR-077): a guia FALA primeiro (a reação e a próxima pergunta) e só então anota.
+ * Antes o roteiro mandava anotar e depois perguntar: duas respostas do modelo antes do primeiro som. Medido no UAT
+ * com a voz do Google e o `fable`: o primeiro texto saía 2,1–3,2 s depois da vez (a ferramenta em si levava ~45 ms);
+ * na sonda com o roteiro novo, em ~0,7 s. Depois da ferramenta ela escreve só "ok" (ver `ehSoOk` em ligacao-frases.ts).
  */
 export function linhasDoPromptOnboarding(p: { nomeGuia: string; campos: CamposEntrevista; etapa: EtapaOnboarding | null }): string[] {
   const falta = camposQueFaltam(p.campos);
@@ -236,8 +241,8 @@ export function linhasDoPromptOnboarding(p: { nomeGuia: string; campos: CamposEn
   const modelo = modeloDoObjetivo(p.campos.objetivo);
   const linhas = [
     `Esta é a primeira ligação da pessoa com o nod, e você é ${p.nomeGuia}, a guia. Primeiro uma entrevista curta, uma pergunta por vez, nesta ordem: 1) ${PERGUNTAS_ENTREVISTA.apelido} 2) ${PERGUNTAS_ENTREVISTA.como_conheceu} 3) ${PERGUNTAS_ENTREVISTA.objetivo} 4) ${PERGUNTAS_ENTREVISTA.tamanho_time}`,
-    "Assim que ela responder uma pergunta, chame anotar_entrevista com o campo e o valor curto, e já faça a próxima pergunta. Use o apelido dela daí em diante.",
-    `Com as quatro respondidas, leia o resumo e termine com "Certo?". Se ela confirmar, chame concluir_entrevista e diga: "Perfeito. Agora vou te mostrar o nod. Não desliga: a gente continua conversando enquanto eu monto tudo." Se ela quiser corrigir, pergunte de novo o que estiver errado.`,
+    "Quando ela responder uma pergunta, fale primeiro: uma reação curta e a próxima pergunta. Só depois, na mesma resposta, chame anotar_entrevista com o campo e o valor curto. Não anuncie essa ferramenta. Depois dela, siga o que a ferramenta devolver. Use o apelido dela daí em diante.",
+    `Na resposta à última pergunta, diga só uma ponte curta ("Deixa eu juntar tudo.") antes de anotar_entrevista: a ferramenta devolve o resumo, que você lê terminando com "Certo?". Se ela confirmar, diga "Perfeito. Agora vou te mostrar o nod. Não desliga, a gente continua conversando enquanto eu monto tudo." e só depois chame concluir_entrevista. Se ela quiser corrigir, pergunte de novo o que estiver errado.`,
     `Depois, guie a configuração em três passos: (1) propor_bot com um bot para "${modelo.curto}" (sugestão: ${modelo.nome}, "${modelo.descricao}"), e espere ela confirmar; (2) pedir_acesso ao ${modelo.app.nome} (slug ${modelo.app.slug}, nivel leitura, capacidades []) com para_bot igual ao nome do bot novo; (3) criar_rotina com para_bot igual ao nome do bot novo, com o horário que ela escolher. No fim, diga "${textoTudoMontado(p.nomeGuia)}" e pergunte se pode desligar.`,
   ];
   if (ja.length) linhas.push(`Ela já respondeu: ${ja.join("; ")}.`);

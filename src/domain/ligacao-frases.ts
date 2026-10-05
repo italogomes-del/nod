@@ -459,6 +459,21 @@ export function criarSegmentador(): Segmentador {
   };
 }
 
+/**
+ * O "ok" que fecha a volta depois de uma ferramenta (definido em 2026-10-04). Medido no CLI 2.1.289
+ * (scripts/sonda-voltas-ligacao.ts): se o modelo fala, chama a ferramenta e não escreve mais nada, o CLI injeta "Your
+ * previous response had no visible output" e ele repete a fala e a ferramenta. Então quem já falou antes da ferramenta
+ * escreve só "ok" depois dela — e esse "ok" não é fala nem entra na transcrição.
+ */
+export function ehSoOk(texto: string): boolean {
+  return /^\s*ok\s*[.!]?\s*$/iu.test(texto);
+}
+
+/** A resposta sem o "ok" de fecho (ver `ehSoOk`). */
+export function semOkDeFecho(texto: string): string {
+  return texto.replace(/(?:^|\s)ok\s*[.!]?\s*$/iu, "").trimEnd();
+}
+
 /** Aberturas que repetem um reconhecimento recém-tocado. */
 const ABERTURA_REPETIDA = /^\s*(?:certo|beleza|entendi|t[aá](?:\s+bom|\s+certo)?|ok(?:ay)?|claro|perfeito)\s*[,.!…—–-]+\s*/iu;
 
