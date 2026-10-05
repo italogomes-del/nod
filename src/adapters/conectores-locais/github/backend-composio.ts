@@ -31,7 +31,9 @@ export function criarBackendComposio(o: OpcoesBackendComposio): BackendGithub {
   let cliente: ClienteMcp | null = null;
   // definido em 2026-09-24: 6 s por ferramenta — pr_comentarios faz duas (o cliente MCP serializa) e
   // as duas cabem nos 12 s da capacidade, abaixo dos 15 s de CHAMADA_CONECTOR_MS do servidor.
-  const mcp = () => (cliente ??= criarClienteMcp({ nome: "github-composio", transporte: "http", url: o.url, env: { "x-api-key": o.chave }, timeoutMs: o.timeoutMs ?? 6_000, fetchImpl: o.fetchImpl }));
+  // Sem nova tentativa (NOD-157, orcamentoMs: null): o orçamento de 30 s não cabe nesses 12 s, e uma
+  // escrita repetida depois que o servidor desistiu duplicaria o efeito (ADR-009).
+  const mcp = () => (cliente ??= criarClienteMcp({ nome: "github-composio", transporte: "http", url: o.url, env: { "x-api-key": o.chave }, timeoutMs: o.timeoutMs ?? 6_000, orcamentoMs: null, fetchImpl: o.fetchImpl }));
   return {
     disponiveis: TODAS.filter((c: NomeCapacidadeGithub) => GITHUB_PELO_COMPOSIO[c] !== null),
     async executar(args: ArgsGithub) {

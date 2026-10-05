@@ -60,6 +60,7 @@ export type EntradaRegistrarNegacao = {
   conectorId?: string | null;
   /** EMENDA 15: alcance_insuficiente vindo do gate de rotina é transitória. */
   viaGateDeRotina?: boolean;
+  causa?: Negacao["causa"];
   autoria?: Autoria;
 };
 
@@ -84,7 +85,7 @@ export const registrarNegacao: CasoDeUso<EntradaRegistrarNegacao, Negacao> = asy
     em: agora,
   });
   if (terminal) await deps.repos.turnos.pedirInterrupcao([input.turnoId], agora);
-  const negacao: Negacao = { classe: input.classe, nome: input.nome, motivo: input.motivo, desde: agora, terminal };
+  const negacao: Negacao = { classe: input.classe, nome: input.nome, motivo: input.motivo, desde: agora, terminal, ...(input.causa ? { causa: input.causa } : {}) };
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,
     id: randomUUID(),

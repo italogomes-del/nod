@@ -17,7 +17,11 @@ import type { Relogio } from "../shared/types.ts";
  * composição (L9) com repos + src/db/cifra.ts. Uma chamada por vez por conector (o cliente
  * serializa); cliente que cai é descartado e a próxima chamada respawna.
  */
-export type ContextoChamada = { rotina: boolean };
+export type ContextoChamada = {
+  rotina: boolean;
+  /** NOD-157: o readOnlyHint da ferramenta decide se uma falha transitória pode ser repetida. Ausente = escrita. */
+  somenteLeitura?: boolean;
+};
 
 export type ConfigConectorVivo = ConfigSonda & {
   /**
@@ -120,7 +124,7 @@ export function criarConectoresVivos(opcoes: OpcoesConectoresVivos): ConectoresV
       if (e instanceof ErroArquivoDoMac) return erro(e.message);
       throw e;
     }
-    const c = criarClienteMcp({ nome: cfg.nome, transporte: cfg.transporte, comando: null, args: [], url: cfg.url ?? null, env: { ...(cfg.env ?? {}) }, timeoutMs: opcoes.timeoutComArquivoMs ?? CHAMADA_COM_ARQUIVO_MS, fetchImpl: opcoes.fetchImpl });
+    const c = criarClienteMcp({ nome: cfg.nome, transporte: cfg.transporte, comando: null, args: [], url: cfg.url ?? null, env: { ...(cfg.env ?? {}) }, timeoutMs: opcoes.timeoutComArquivoMs ?? CHAMADA_COM_ARQUIVO_MS, orcamentoMs: null, fetchImpl: opcoes.fetchImpl });
     try {
       return await c.chamar(tool, trocarArquivos(args, subidos));
     } catch (e) {
@@ -137,9 +141,10 @@ export function criarConectoresVivos(opcoes: OpcoesConectoresVivos): ConectoresV
       if (arquivos.length) return chamarComArquivos(conectorId, tool, args, contexto, arquivos);
       const c = await clienteDe(conectorId, contexto);
       try {
-        return await c.chamar(tool, args);
+        return await c.chamar(tool, args, { somenteLeitura: contexto.somenteLeitura === true });
       } catch (e) {
-        log("aviso", "conector_chamada_falhou", { conector_id: conectorId, ferramenta: tool, motivo: e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica" });
+        // Só chega aqui depois de esgotar as tentativas (o cliente repete por dentro): descartar e marcar falha é o fim.
+        log("aviso", "conector_chamada_falhou", { conector_id: conectorId, ferramenta: tool, motivo: e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica", status: e instanceof ErroTransporteMcp ? e.status : undefined });
         await descartarChave(chave(conectorId, contexto));
         throw e;
       }

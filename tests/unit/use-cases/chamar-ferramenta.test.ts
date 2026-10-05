@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ErroTransporteMcp } from "../../../src/adapters/mcp-proxy/cliente-mcp.ts";
 import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { FerramentaPlano, PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { chamarFerramenta, errosDoSchema, validarArgsNod } from "../../../src/use-cases/chamar-ferramenta.ts";
@@ -11,7 +12,7 @@ const AGORA = 1_758_000_000_000;
 const nod = (nome: keyof typeof FERRAMENTAS_NOD): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD[nome] });
 
 async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno> = {}) {
-  const { deps, banco, chamadas } = depsFalsos({ agora: AGORA, ...opcoes });
+  const { deps, banco, chamadas, contextos } = depsFalsos({ agora: AGORA, ...opcoes });
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const conector = await deps.repos.conectores.criar({ nome: "Exemplo", slug: "exemplo", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
@@ -51,7 +52,7 @@ async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno>
   const chamar = (nome: string, argumentos: unknown, p: PlanoTurno | null = planoBase) => chamarFerramenta(deps as Deps, { turnoId, agenteId, nome, argumentos, plano: p });
   const trilha = () => banco.trilha.map((l) => [l.kind, l.ferramenta, l.motivo] as const);
   const turnoAtual = () => banco.turnos.find((t) => t.id === turnoId);
-  return { deps, banco, chamadas, chamar, trilha, turnoAtual, turnoId, agenteId, conversaId, conectorId, consentimentoId: consentimento?.id ?? "", plano: planoBase };
+  return { deps, banco, chamadas, contextos, chamar, trilha, turnoAtual, turnoId, agenteId, conversaId, conectorId, consentimentoId: consentimento?.id ?? "", plano: planoBase };
 }
 
 describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA 5/10/16; sem o gate da EMENDA 15 desde a ADR-066)", () => {
@@ -249,6 +250,42 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     const invalido = await c.chamar("exemplo__somar", { a: "um" });
     expect(invalido.data).toMatchObject({ ok: false, negacao: { motivo: "args_invalidos" } });
     expect(c.chamadas).toHaveLength(1);
+  });
+
+  it("NOD-157: o readOnlyHint chega ao serviço como somenteLeitura; ferramenta sem o hint é tratada como escrita", async () => {
+    const c = await cenario();
+    await c.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(c.contextos).toEqual([{ rotina: false, somenteLeitura: true }]);
+    // Escrita (hint falso) e ferramenta sem o hint: as duas chegam como escrita, que só repete em 429.
+    await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+    await c.deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+    await c.chamar("exemplo__enviar", { para: "x" });
+    expect(c.contextos[1]).toEqual({ rotina: false, somenteLeitura: false });
+    const semHint = { ...c.plano, catalogo: { ...c.plano.catalogo, ferramentas: c.plano.catalogo.ferramentas.map((f) => (f.nome === "exemplo__enviar" ? { ...f, readOnlyHint: undefined as unknown as boolean } : f)) } };
+    await c.chamar("exemplo__enviar", { para: "x" }, semHint);
+    expect(c.contextos[2]).toEqual({ rotina: false, somenteLeitura: false });
+  });
+
+  it("NOD-157: chamada que recupera dentro do serviço não marca falha; a que esgota marca UMA vez e nega com conector_indisponivel", async () => {
+    const ok = await cenario();
+    await ok.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect((await ok.deps.repos.conectores.buscar(ok.conectorId))?.ultimaFalha).toBeNull();
+
+    const c = await cenario({ responder: () => { throw new Error("conector_indisponivel"); } });
+    const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+    const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(marcar).toHaveBeenCalledTimes(1);
+    expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "conector_indisponivel", terminal: false } });
+    expect(r.data).not.toHaveProperty("negacao.causa");
+  });
+
+  it("NOD-157: 401/403 do conector nega com causa acesso_recusado (falha_tecnica), sem enum novo e sem dizer 'servidor fora'", async () => {
+    for (const status of [401, 403]) {
+      const c = await cenario({ responder: () => { throw new ErroTransporteMcp("conector_indisponivel", `http ${status}`, { status }); } });
+      const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
+      expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "falha_tecnica", causa: "acesso_recusado", terminal: false } });
+      expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toEqual({ motivo: "falha_tecnica", em: AGORA });
+    }
   });
 });
 

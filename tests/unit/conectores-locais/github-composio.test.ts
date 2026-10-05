@@ -65,4 +65,19 @@ describe("conector github pelo Composio (ADR-048)", () => {
     expect(r).toContain("não encontrado");
     expect(r).not.toContain("segredo interno");
   });
+
+  it("sem nova tentativa: 429 com Retry-After em escrita faz uma chamada só (cabe nos 12 s da capacidade)", async () => {
+    let chamadas = 0;
+    const f: typeof fetch = async (_url, init) => {
+      const m = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (m.id === undefined) return new Response(null, { status: 202 });
+      if (m.method === "initialize") return Response.json({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: "2025-06-18", capabilities: {} } });
+      chamadas++;
+      return new Response("limite", { status: 429, headers: { "retry-after": "5" } });
+    };
+    const s = criarServidorGithub(criarBackendComposio({ url: "https://backend.composio.dev/tool_router/v3/trs/mcp", chave: "ak_x", fetchImpl: f }));
+    const r = await chamar(s, "tools/call", { name: "pr_comentar", arguments: { repositorio: "acme/nod", numero: 7, texto: "oi" } });
+    expect(r).toMatchObject({ isError: true });
+    expect(chamadas).toBe(1);
+  });
 });

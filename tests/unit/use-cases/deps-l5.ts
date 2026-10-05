@@ -31,10 +31,11 @@ export type OpcoesDepsFalsos = {
  * chamadas ao conector (para "exatamente N chamadas"), os três casos nod da L5 de verdade e stubs
  * para os das outras lanes.
  */
-export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: BancoMemoria; chamadas: ChamadaConector[] } {
+export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: BancoMemoria; chamadas: ChamadaConector[]; contextos: unknown[] } {
   const escopo = opcoes.escopo ?? MARLON;
   const { banco, repos } = criarBancoMemoria();
   const chamadas: ChamadaConector[] = [];
+  const contextos: unknown[] = [];
   const agora = () => opcoes.agora ?? 1_700_000_000_000;
   const services: Services = {
     relogio: agora,
@@ -42,9 +43,10 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     planos: { emitir: async () => { throw new Error("planos.emitir não é usado nos unitários"); }, buscar: () => null },
     rotinas: { ativar: async () => { throw new Error("rotinas.ativar é da L7"); } },
     conectores: {
-      async chamar(conectorId, tool, args) {
+      async chamar(conectorId, tool, args, contexto) {
         const c = { conectorId, tool, args };
         chamadas.push(c);
+        contextos.push(contexto);
         return opcoes.responder ? opcoes.responder(c) : { conteudo: `ok:${tool}`, isError: false };
       },
       async sondar(c) {
@@ -91,5 +93,5 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
   };
   const tx: Transacao = (fn) => fn({} as Tx);
   const deps: Deps = { repos: repos(escopo), services, useCases, tx, escopo, agora };
-  return { deps, banco, chamadas };
+  return { deps, banco, chamadas, contextos };
 }

@@ -38,6 +38,7 @@ export function descreverNegacao(n: Negacao, agora: number, fusoIana = "UTC"): s
     case "conector_indisponivel":
       // definido em 2026-09-24: tempo esgotado não é "servidor fora" — a Nina leu "fora há menos de
       // 1 min" como queda de infraestrutura e desistiu de uma chamada que só estava lenta.
+      if (n.causa === "acesso_recusado") return `conector ${n.nome} recusou o acesso: o app precisa ser reconectado`;
       if (n.motivo === "timeout_transporte") return `conector ${n.nome} não respondeu a tempo: a chamada pode ser grande demais; tente pedir menos itens ou só metadados`;
       return `conector ${n.nome} indisponível: servidor fora ${haQuanto(n.desde, agora)}`;
     case "ferramenta_negada":

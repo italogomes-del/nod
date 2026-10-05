@@ -62,8 +62,8 @@ export interface ServicesNod<Trx> {
    */
   rotinas: { ativar(trx: Trx, propostaId: string, opcoes?: { semMensagem?: boolean }): Promise<Rotina> };
   conectores: {
-    /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. */
-    chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean }): Promise<{ conteudo: string; isError: boolean }>;
+    /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. `somenteLeitura` (NOD-157): readOnlyHint da ferramenta; ausente = escrita, que só repete em 429. */
+    chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean; somenteLeitura?: boolean }): Promise<{ conteudo: string; isError: boolean }>;
     sondar(conector: Conector): Promise<ResultadoSonda>;
   };
   interruptor: {

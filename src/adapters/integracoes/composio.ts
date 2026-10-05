@@ -2,6 +2,9 @@ import { COMPOSIO_POR_CAPACIDADE_GITHUB } from "../../contracts/github.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import type { ArgsGithub } from "../../domain/github.ts";
 import type { AppGerenciado } from "../../domain/catalogo-marketplace.ts";
+import { classificarFalhaHttp, ehRedirecionamentoRecusado, esperaAntes, lerRetryAfterMs, podeRepetir, prazoDaTentativa, type FalhaHttp } from "../../domain/nova-tentativa.ts";
+import { log } from "../../obs/log.ts";
+import { CHAMADA_CONECTOR_MS, ORCAMENTO_CONECTOR_MS } from "../../shared/constantes.ts";
 
 export type ChamadaComposio = { slug: string; argumentos: Record<string, unknown> };
 
@@ -59,11 +62,77 @@ function logoDoProvedor(bruto: unknown): string | null {
  */
 const PAGINAS_TOOLKITS = 5;
 
+export type OpcoesClienteComposio = {
+  /** Relógio, espera e aleatório da nova tentativa (NOD-157) entram injetados para os testes serem determinísticos. */
+  agora?: () => number;
+  dormir?: (ms: number) => Promise<void>;
+  aleatorio?: () => number;
+};
+
 /** definido em 2026-09-17: URLs e erros do provedor nunca transportam a chave para a web ou para o modelo. */
-export function criarClienteComposio(chave: string, f: typeof fetch = fetch) {
+export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opcoes: OpcoesClienteComposio = {}) {
+  const agora = opcoes.agora ?? Date.now;
+  const dormir = opcoes.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const aleatorio = opcoes.aleatorio ?? Math.random;
+
+  /**
+   * NOD-157 (emenda à ADR-009): GET é leitura (repete em 429, 5xx e rede); POST e PATCH são escrita (só 429, a
+   * recusa do limitador antes de executar). Timeout, 401/403 e 4xx nunca repetem. Devolve a última resposta
+   * (que pode ser !ok: quem chama classifica); só erro de rede sem resposta lança. O prazo de cada tentativa é
+   * cortado ao que sobra dos 30 s e cobre também a leitura do corpo (o timer não é limpo no retorno).
+   */
+  async function requisitar(metodo: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<Response> {
+    const inicio = agora();
+    const rotulo = `${metodo} /${path.split("?")[0]?.split("/")[1] ?? ""}`;
+    let anterior: { status: number | "rede"; espera: number } | null = null;
+    for (let tentativa = 1; ; tentativa++) {
+      const campos = (desfecho: string) => ({ conector: "composio", ferramenta: rotulo, status: anterior?.status, tentativa, espera_ms: anterior?.espera, desfecho });
+      let resposta: Response | null = null;
+      let falha: FalhaHttp;
+      // setTimeout e não AbortSignal.timeout: o relógio falso dos testes controla este, e unref não segura o processo.
+      const ctrl = new AbortController();
+      const prazo = setTimeout(() => ctrl.abort(new DOMException("prazo", "TimeoutError")), prazoDaTentativa(CHAMADA_CONECTOR_MS, ORCAMENTO_CONECTOR_MS - (agora() - inicio)));
+      prazo.unref?.();
+      try {
+        resposta = await f(`${BASE}${path}`, { method: metodo, headers: { "x-api-key": chave, "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: ctrl.signal, redirect: "error" });
+        if (resposta.ok) {
+          if (anterior) log("info", "conector_nova_tentativa", campos("recuperou"));
+          return resposta;
+        }
+        falha = resposta.status;
+      } catch (e) {
+        if (ehRedirecionamentoRecusado(e)) {
+          clearTimeout(prazo);
+          throw new ErroDeDominio("conector_indisponivel");
+        }
+        falha = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError") ? "timeout" : "rede";
+      }
+      const retryAfterMs = resposta ? lerRetryAfterMs(resposta.headers.get("retry-after"), agora()) : undefined;
+      const repetir = podeRepetir({
+        classe: classificarFalhaHttp(falha),
+        ...(typeof falha === "number" ? { status: falha } : {}),
+        somenteLeitura: metodo === "GET",
+        tentativa,
+        restanteMs: ORCAMENTO_CONECTOR_MS - (agora() - inicio),
+        prazoMs: CHAMADA_CONECTOR_MS,
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      });
+      if (anterior) log("aviso", "conector_nova_tentativa", campos(repetir ? "repetindo" : "esgotou"));
+      if (!repetir || falha === "timeout") {
+        if (resposta) return resposta;
+        throw new ErroDeDominio("conector_indisponivel");
+      }
+      clearTimeout(prazo);
+      await resposta?.body?.cancel().catch(() => undefined);
+      const espera = esperaAntes(tentativa, aleatorio(), retryAfterMs);
+      anterior = { status: falha, espera };
+      await dormir(espera);
+    }
+  }
+
   async function pedir(path: string, body?: unknown): Promise<Record<string, unknown>> {
     try {
-      const r = await f(`${BASE}${path}`, { method: body ? "POST" : "GET", headers: { "x-api-key": chave, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15_000), redirect: "error" });
+      const r = await requisitar(body ? "POST" : "GET", path, body);
       if (!r.ok) throw new ErroDeDominio(r.status === 401 || r.status === 403 ? "integracao_autenticacao" : "conector_indisponivel");
       const data: unknown = await r.json();
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new ErroDeDominio("conector_indisponivel");
@@ -160,10 +229,8 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch) {
       return r.status === "ACTIVE" && r.is_disabled !== true && r.user_id === userId && t?.slug === toolkit;
     },
     async fixarConta(sessaoId: string, toolkit: string, contaId: string) {
-      try {
-        const r = await f(`${BASE}/tool_router/session/${encodeURIComponent(sessaoId)}`, { method: "PATCH", headers: { "x-api-key": chave, "content-type": "application/json" }, body: JSON.stringify({ connected_accounts: { [toolkit]: [contaId] } }), signal: AbortSignal.timeout(15_000), redirect: "error" });
-        if (!r.ok) throw new ErroDeDominio("conector_indisponivel");
-      } catch { throw new ErroDeDominio("conector_indisponivel"); }
+      const r = await requisitar("PATCH", `/tool_router/session/${encodeURIComponent(sessaoId)}`, { connected_accounts: { [toolkit]: [contaId] } }).catch(() => null);
+      if (!r?.ok) throw new ErroDeDominio("conector_indisponivel");
     },
   };
 }

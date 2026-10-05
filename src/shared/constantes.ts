@@ -88,5 +88,18 @@ export const CHAMADA_CONECTOR_MS = 15_000;
  * chamou GMAIL_FETCH_EMAILS (20 e-mails, verbose; 3 e-mails já levaram 4,7 s no Composio), o proxy
  * abortou aos 5 s e respondeu "servidor fora há menos de 1 min" sem o servidor registrar nada.
  * Fica abaixo do MCP_TOOL_TIMEOUT do filho (>= 60 s, montarEnvDoFilho).
+ * revisto em 2026-10-05 (NOD-157): com nova tentativa, o pior caso do servidor é ORCAMENTO_CONECTOR_MS (30 s,
+ * initialize, tentativas e esperas incluídos), que cabe nestes 35 s com 5 s de folga.
  */
 export const PRAZO_FERRAMENTA_PROXY_MS = 2 * CHAMADA_CONECTOR_MS + 5_000;
+
+/**
+ * Nova tentativa nos conectores HTTP (NOD-157, emenda à ADR-009). definido em 2026-10-05: no máximo 3
+ * tentativas por chamada, espera de ~1 s e ~3 s (jitter de ±25%), `Retry-After` acima de 5 s não é
+ * esperado, e tudo cabe em 30 s — abaixo dos 35 s de PRAZO_FERRAMENTA_PROXY_MS, que o proxy do Mac espera.
+ */
+export const TENTATIVAS_MAX_CONECTOR = 3;
+export const ESPERAS_NOVA_TENTATIVA_MS: readonly number[] = [1_000, 3_000];
+export const JITTER_NOVA_TENTATIVA = 0.25;
+export const ORCAMENTO_CONECTOR_MS = 30_000;
+export const RETRY_AFTER_MAX_MS = 5_000;

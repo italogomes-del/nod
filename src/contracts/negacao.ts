@@ -13,4 +13,9 @@ export type Negacao = {
   motivo: MotivoNegacao;
   desde: EpochMs;
   terminal: boolean;
+  /**
+   * definido em 2026-10-05 (NOD-157): causa que muda a redação sem criar motivo novo no enum (ADR-029). O MCP que
+   * responde 401/403 não está "fora": o acesso ao app foi recusado e repetir não adianta.
+   */
+  causa?: "acesso_recusado";
 };

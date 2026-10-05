@@ -10,7 +10,8 @@ import { criarClienteMcp, ErroTransporteMcp, type FerramentaDescoberta } from ".
  * Sonda de conector (ADR-013): descobre o catálogo por tools/list e captura readOnlyHint AQUI, na
  * DESCOBERTA — nunca em tempo de chamada. Roda no servidor com ambiente de REGIME SERVIDOR
  * (allowlist, ADR-015 B) mais o env decifrado do conector; stderr só vai ao log (cliente-mcp).
- * Teto PROBE_MS (definido em 2026-09-16, src/shared/constantes.ts).
+ * Teto PROBE_MS por requisição (definido em 2026-09-16, src/shared/constantes.ts). No http, a sonda é leitura
+ * e tem nova tentativa (NOD-157): a operação inteira cabe em ORCAMENTO_CONECTOR_MS.
  */
 export type ConfigSonda = {
   nome: string;

@@ -135,7 +135,7 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   const events: RuntimeEvent[] = [];
   const plano = input.plano;
 
-  const negar = async (motivo: MotivoNegacao, classe: Negacao["classe"], conectorId: string | null = null, viaGateDeRotina = false): Promise<{ data: ResultadoChamada; events: RuntimeEvent[] }> => {
+  const negar = async (motivo: MotivoNegacao, classe: Negacao["classe"], conectorId: string | null = null, viaGateDeRotina = false, causa?: Negacao["causa"]): Promise<{ data: ResultadoChamada; events: RuntimeEvent[] }> => {
     const n = await registrarNegacao(deps, {
       turnoId: input.turnoId,
       agenteId: input.agenteId,
@@ -145,6 +145,7 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
       classe,
       conectorId,
       viaGateDeRotina,
+      ...(causa ? { causa } : {}),
       autoria: plano?.autoria,
     });
     return { data: { ok: false, negacao: n.data }, events: [...events, ...(n.events ?? [])] };
@@ -216,13 +217,16 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   // O GitHub App da organização só atende turno de rotina (ADR-048): ninguém olhando, nada em nome da pessoa.
   const rotina = (await rotinaDoTurno(deps.repos, input.turnoId)) !== null;
   try {
-    const r = await deps.services.conectores.chamar(conectorId, tool, (input.argumentos ?? {}) as Record<string, unknown>, { rotina });
+    const r = await deps.services.conectores.chamar(conectorId, tool, (input.argumentos ?? {}) as Record<string, unknown>, { rotina, somenteLeitura: ferramenta.readOnlyHint === true });
     const conteudo = r.isError ? `erro do conector ${conector.slug}: ${r.conteudo}` : r.conteudo;
     return { data: { ok: true, conteudo, confianca: "nao_confiavel" }, events };
   } catch (e) {
-    const motivo: MotivoNegacao = e instanceof Error && e.message === "timeout_transporte" ? "timeout_transporte" : "conector_indisponivel";
+    // definido em 2026-10-05 (NOD-157): 401/403 do conector não é "servidor fora" — o acesso ao app foi recusado. Sem enum novo:
+    // falha_tecnica com `causa`, que muda só a redação. A chamada que chega aqui já esgotou as tentativas do cliente.
+    const recusado = e instanceof Error && "status" in e && (e.status === 401 || e.status === 403);
+    const motivo: MotivoNegacao = recusado ? "falha_tecnica" : e instanceof Error && e.message === "timeout_transporte" ? "timeout_transporte" : "conector_indisponivel";
     await deps.repos.conectores.marcarFalha(conectorId, motivo, agora);
-    return negar(motivo, "conector_indisponivel", conectorId);
+    return negar(motivo, "conector_indisponivel", conectorId, false, recusado ? "acesso_recusado" : undefined);
   }
 };
 

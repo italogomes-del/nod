@@ -18,6 +18,13 @@ describe("negacao renderizada (ADR-029) e classificada (E5.1)", () => {
     expect(negacaoConectorIndisponivel("x", agora, "timeout_transporte").motivo).toBe("timeout_transporte");
   });
 
+  it("NOD-157: 401/403 do MCP gera texto de acesso recusado, transitório, sem 'servidor fora'", () => {
+    const n = { ...negacaoConectorIndisponivel("gmail__GMAIL_FETCH_EMAILS", agora, "falha_tecnica"), causa: "acesso_recusado" as const };
+    const texto = redigirNegacao(n, agora - 0);
+    expect(texto).toBe("negado (transitório): conector gmail__GMAIL_FETCH_EMAILS recusou o acesso: o app precisa ser reconectado. Você pode seguir por outro caminho.");
+    expect(texto).not.toContain("servidor fora");
+  });
+
   it("ferramenta negada: terminal manda não tentar outro caminho; alcance_insuficiente via gate de rotina é transitória (EMENDA 15)", () => {
     const t = negacaoFerramenta("exemplo__enviar", "capacidade_desligada", agora);
     expect(t.terminal).toBe(true);
