@@ -111,7 +111,7 @@ com a ligação viva é "a IA caiu" (`src/domain/ligacao-sem-ia.ts`), e a ligaç
 
 - **Como o orquestrador sabe.** O evento do turno-cérebro (`turno_encerrado`/`turno_interrompido`, `origem: "ligacao"`)
   passa a levar por que ele parou, só em código: `motivo`, `motivo_falha`, `harness` e `causa_sem_ia` (o `causaSemIa` do
-  resultado, quando o driver o preenche). A composição entrega o frame a `voz.cerebroTerminou`. Fica de fora quem não é
+  resultado, quando o driver o preenche; com ele o turno assenta como `executor_indisponivel`/`nao_autenticado`). A composição entrega o frame a `voz.cerebroTerminou`. Fica de fora quem não é
   queda da IA: `parado_pela_pessoa`, `maquina_sem_contato`, `reinicio_servidor` e `absorvido` seguem o caminho antigo
   (reconexão e `cerebro_caiu`). Um turno que termina "com sucesso" com a ligação viva também conta.
 - **A frase.** "Não consegui usar a IA deste Mac. As opções estão na tela." é roteiro (categoria `sem_ia` da biblioteca
@@ -149,8 +149,16 @@ aberta à força.
 
 **Não verificado com voz e IA reais.** Coberto por `tests/unit/voz/orquestrador-sem-ia.test.ts`,
 `tests/integration/ligacao-sem-ia.test.ts` e pelo caso "o cérebro cai no meio" de
-`tests/concurrency/ligacao-catcher.test.ts` (duas IAs falsas sobre o laço de voz do catcher). O `causaSemIa` ainda não
-é preenchido por nenhum driver neste commit: até lá, toda queda sai com a causa genérica.
+`tests/concurrency/ligacao-catcher.test.ts` (duas IAs falsas sobre o laço de voz do catcher). O `causaSemIa` é
+preenchido só pelo laço de voz do Claude (`comContaSemAcesso`, pelo texto da recusa); queda do Codex sai com a causa
+genérica. A repetição automática "na outra IA" de `assentar-turno.ts` não vale para o turno-cérebro: na ligação quem
+escolhe é a pessoa, pelo aviso.
+
+**Lacuna conhecida (modo local).** Com o servidor rodando no próprio Mac, o orquestrador anuncia um inventário só, sem
+`harnesses`. A reprovação da IA que caiu (`reprovarHarness`, ponte interna) deixa então a máquina sem nenhuma IA pronta
+até o próximo anúncio (60 s), e o turno do Codex não é reivindicado nesse intervalo: a ligação volta ao aviso depois de
+`cerebroPrimeiroMs`. Com o Mac anunciando as IAs por harness (app desktop, modo compartilhado) isso não acontece; o e2e
+anuncia as duas.
 
 **Gatilho de reversão.** Se `ligacao_cerebro_reaberto` seguido de outra `ligacao_cerebro_caiu` na mesma ligação passar
 de 1 em cada 3, continuar na mesma ligação não está funcionando: o aviso passa a oferecer só encerrar e ligar de novo.

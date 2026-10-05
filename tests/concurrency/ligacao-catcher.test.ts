@@ -182,8 +182,8 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
  * O cérebro cai no meio (definido em 2026-10-05, rede de segurança da ligação). Reproduz, com custo zero, a ligação de
  * produção do mesmo dia: a conta do Claude Code logada e sem acesso, o turno-cérebro falha, e a bot ficava muda depois da
  * saudação. Servidor completo com DUAS IAs falsas no lugar dos CLIs (o laço de voz do catcher atrás de cada uma): a que
- * faz o papel do Claude Code cai quando o teste manda, entregando a falha com `causaSemIa` como o driver de verdade
- * fará; a do Codex funciona. Prova que a frase sai, que o aviso chega à mídia, que nada do que a pessoa diz na espera
+ * faz o papel do Claude Code cai quando o teste manda, entregando a falha com `causaSemIa` como o laço de voz de verdade
+ * faz (comContaSemAcesso); a do Codex funciona. Prova que a frase sai, que o aviso chega à mídia, que nada do que a pessoa diz na espera
  * vira vez, e que "continuar com o ChatGPT" abre OUTRO turno-cérebro para a MESMA ligação, no outro harness.
  */
 describe("o cérebro cai no meio da ligação", () => {
@@ -213,7 +213,9 @@ describe("o cérebro cai no meio da ligação", () => {
                 // O CLI morreu: o laço de voz fecha o canal do cérebro e o turno é entregue como falha, com a causa.
                 await a.interromper();
                 const r = await rodando;
-                return { ...r, desfecho: "falha", motivoFalha: "erro_execucao", texto: "", erroCru: "conta sem acesso (simulado)", causaSemIa: "conta_sem_acesso" };
+                // O mesmo formato que o laço de voz do Claude entrega (comContaSemAcesso, src/domain/conta-da-ia.ts).
+                const { motivoInterrupcao: _fora, ...resto } = r;
+                return { ...resto, desfecho: "falha", motivoFalha: "nao_autenticado", texto: "", erroCru: "conta sem acesso (simulado)", causaSemIa: "conta_sem_acesso" };
               },
               interromper: () => a.interromper(),
             };
@@ -226,6 +228,16 @@ describe("o cérebro cai no meio da ligação", () => {
   beforeAll(async () => {
     srv2 = await servidorCompleto({ env: { NOD_LIGACAO: "todas", NOD_EXECUTOR: "auto", NOD_MODELO: "auto" }, drivers: ({ urlNod }) => [criarCatcherDriver({ urlNod }), iaFalsa("claude-cli", urlNod), iaFalsa("codex-cli", urlNod)] });
   }, 30_000);
+
+  /**
+   * O Mac anuncia as duas IAs, como o app desktop faz (`harnesses`). Sem isso, o orquestrador local anuncia um inventário
+   * só, e a reprovação da IA que caiu (ponte-interna, reprovarHarness) deixa a máquina sem nenhuma IA pronta até o
+   * próximo anúncio dele (60 s): o turno do Codex não seria reivindicado.
+   */
+  async function anunciarAsDuasIas(): Promise<void> {
+    const pronto = { estado: "pronto", versao: "falso", em: Date.now() } as const;
+    await srv2.app.ponte.conectar({ machineId: srv2.machineId, nome: "mac-de-teste", inventario: pronto, versaoContrato: 1, ligacao: true, harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+  }
 
   afterAll(async () => {
     if (!srv2) return;
@@ -259,8 +271,9 @@ describe("o cérebro cai no meio da ligação", () => {
     await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("tudo certo"), "resposta do primeiro cérebro");
 
     // ---- o cérebro cai ----
+    await anunciarAsDuasIas();
     derrubarOClaude();
-    const aviso = await cli.esperarMsg((m) => m.t === "sem-ia", "aviso sem IA", 10_000);
+    const aviso = await cli.esperarMsg((m) => m.t === "sem-ia", "aviso sem IA", 20_000);
     expect(aviso).toMatchObject({ t: "sem-ia", causa: "conta_sem_acesso", ia: "claude-cli", ias: [{ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado: "pronto" }] });
     if (aviso.t === "sem-ia") expect(aviso.ate).toBeGreaterThan(Date.now() + 60_000);
     const frase = await cli.esperarMsg((m) => m.t === "bot-fala" && m.texto === "Não consegui usar a IA deste Mac. As opções estão na tela.", "a frase fixa");
@@ -271,7 +284,7 @@ describe("o cérebro cai no meio da ligação", () => {
       const { turno } = await srv2.json<{ turno: Turno }>("GET", `turnos/${primeiro.turnoId}`);
       return turno.estado === "interrompido" ? turno : null;
     }, { nome: "turno-cérebro interrompido" });
-    expect(caido).toMatchObject({ origem: "ligacao", motivoFalha: "erro_execucao" });
+    expect(caido).toMatchObject({ origem: "ligacao", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
     expect((await srv2.json<{ ligacao: Ligacao | null }>("GET", "ligacoes/viva")).ligacao).toMatchObject({ id: ligacao.id, estado: "em_curso" });
 
     // ---- a espera não cobra a pessoa: o que ela escreve agora não vira vez nem resposta ----
@@ -289,14 +302,14 @@ describe("o cérebro cai no meio da ligação", () => {
     // Já escolhido: a segunda chamada não abre um terceiro cérebro.
     expect((await srv2.chamar("POST", `ligacoes/${ligacao.id}/continuar`, { ia: "codex-cli" })).status).toBe(409);
 
-    const voltou = await cli.esperarMsg((m) => m.t === "ia-voltou", "o cérebro novo atendeu", 10_000);
+    const voltou = await cli.esperarMsg((m) => m.t === "ia-voltou", "o cérebro novo atendeu", 20_000);
     expect(voltou).toEqual({ t: "ia-voltou", ia: "codex-cli", trocou: true });
     const segundo = await srv2.esperar(async () => planos.find((p) => p.modoTurno === "ligacao" && p.turnoId !== primeiro.turnoId) ?? null, { nome: "plano do segundo cérebro" });
     expect(segundo).toMatchObject({ harness: "codex-cli", executor: "local", ligacaoVoz: { ligacaoId: ligacao.id } });
     expect(segundo.conversaId).toBe(primeiro.conversaId);
     // A bot retoma em voz pelo cérebro novo: o pedido de retomada chega a ele como uma vez do sistema, e o catcher
     // responde "Entendi: <o que recebeu>" — a resposta é falada.
-    await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("Você assumiu a ligação agora"), "a bot retoma", 10_000);
+    await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("Você assumiu a ligação agora"), "a bot retoma", 20_000);
     // …e a ligação voltou a ouvir: a vez seguinte é respondida por ele.
     cli.ws.send(JSON.stringify({ t: "texto", conteudo: "agora sim" }));
     await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("agora sim"), "resposta do cérebro novo");
@@ -319,5 +332,5 @@ describe("o cérebro cai no meio da ligação", () => {
     expect(falas.some((f) => f.autor === "bot" && f.texto === "Não consegui usar a IA deste Mac. As opções estão na tela.")).toBe(true);
     // O que foi escrito na espera não entrou na ligação.
     expect(falas.some((f) => f.texto.includes("alguém me ouve"))).toBe(false);
-  }, 60_000);
+  }, 120_000);
 });

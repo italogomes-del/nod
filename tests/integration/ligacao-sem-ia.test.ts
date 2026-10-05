@@ -91,12 +91,21 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const machineId = randomUUID();
       expect((await repos.turnos.reivindicar({ machineId, agora: agora(), aceitaLigacao: true }))?.id).toBe(turno.id);
-      const r = await assentarTurno(deps, { turnoId: turno.id, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: { ...FALHA, causaSemIa: "conta_sem_acesso", erroCru: "Your organization has disabled Claude subscription access" }, executor: "local", harness: "claude-cli" });
-      expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoFalha: "erro_execucao" });
-      const ev = r.events?.find((e) => e.kind === "turno_interrompido");
-      expect(ev?.dados).toMatchObject({ origem: "ligacao", estado: "interrompido", motivo: "sem_progresso", motivo_falha: "erro_execucao", harness: "claude-cli", causa_sem_ia: "conta_sem_acesso" });
+      // O resultado como o laço de voz do Claude o entrega (comContaSemAcesso, src/domain/conta-da-ia.ts).
+      const r = await assentarTurno(deps, { turnoId: turno.id, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: { ...FALHA, motivoFalha: "nao_autenticado", causaSemIa: "conta_sem_acesso", erroCru: "Your organization has disabled Claude subscription access" }, executor: "local", harness: "claude-cli", outraIa: "codex-cli" });
+      expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
+      // Um evento só para o turno, o da ligação (com `origem`): é ele que o orquestrador de voz lê.
+      const eventos = r.events?.filter((e) => e.kind === "turno_interrompido") ?? [];
+      expect(eventos).toHaveLength(1);
+      const ev = eventos[0];
+      expect(ev?.dados).toMatchObject({ origem: "ligacao", estado: "interrompido", motivo: "executor_indisponivel", motivo_falha: "nao_autenticado", harness: "claude-cli", causa_sem_ia: "conta_sem_acesso" });
       // O texto do fornecedor nunca entra no evento (vai só para o log de diagnóstico do executor).
       expect(JSON.stringify(ev?.dados)).not.toContain("organization");
+      // O turno-cérebro não é repetido sozinho na outra IA nem ganha negação na conversa: quem decide é a pessoa, pelo
+      // aviso da ligação (a repetição automática de assentar-turno é só da fala escrita a um bot em automático).
+      expect(r.events?.some((e) => e.kind === "turno_criado")).toBe(false);
+      expect((await repos.mensagens.listarDaConversa(turno.conversaId, 20)).filter((m) => m.kind === "negacao" || m.payload?.kind === "ia_trocada")).toEqual([]);
+      expect((await repos.turnos.listarDaConversa(turno.conversaId, 20)).filter((t) => t.origem !== "ligacao")).toEqual([]);
     });
   });
 
