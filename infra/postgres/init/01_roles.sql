@@ -1,7 +1,8 @@
 -- Roles e bancos do nod (ADR-003, Práticas §5). Roda como superusuário no primeiro boot do container
 -- e, no CI, via psql contra o service container. Idempotente.
 --
--- nod_dono: dono dos bancos; só a migração conecta com ele.
+-- nod_dono: dono dos bancos; só a migração conecta com ele. CREATEDB (2026-10-05) para a suíte criar o
+--           banco de teste de cada worktree (tests/setup/banco-por-worktree.ts); não dá RLS nem superuser.
 -- nod_app:  a aplicação e a suíte de testes. NOBYPASSRLS e não-dono, para que FORCE ROW LEVEL SECURITY
 --           valha de verdade (o gate tests/conformidade/rls.test.ts assere rolbypassrls = false).
 -- nod_poda: apaga prosa da trilha (trilha_prosa) — nunca a trilha (ADR-004). Sem LOGIN nesta rodada.
@@ -17,6 +18,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nod_poda') THEN
     CREATE ROLE nod_poda NOLOGIN NOBYPASSRLS;
   END IF;
+  ALTER ROLE nod_dono CREATEDB;
 END
 $$;
 

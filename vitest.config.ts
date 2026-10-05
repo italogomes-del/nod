@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { apontarParaBancoDaWorktree } from "./tests/setup/banco-por-worktree.ts";
 
 // Lê .env quando existe (Node 24 nativo, sem dependência). Sob CI as variáveis vêm do workflow.
 try {
@@ -6,6 +7,10 @@ try {
 } catch {
   // sem .env: ambiente já configurado (CI) ou testes de integração vão pular fora do CI
 }
+
+// definido em 2026-10-05: fora do CI cada worktree usa o próprio banco de teste (nod_test_<hash>), para
+// bots rodando a suíte ao mesmo tempo não se contaminarem; o globalSetup cria e migra sob demanda.
+apontarParaBancoDaWorktree();
 
 // Quatro modos de teste (ADR-011 refinado): unit sem banco, integration sob withRollback,
 // conformidade lendo pg_catalog, concurrency com DUAS conexões e limpeza própria.
@@ -25,7 +30,11 @@ const raiz = { exclude: ["node_modules", "dist", "prototypes", ".claude"] };
  * teste típico; `npm run check` continua serializando os projetos (opção a), então o número só vale
  * para quem roda tudo junto.
  */
-const BANCO = { testTimeout: 20_000, hookTimeout: 30_000 };
+const BANCO = {
+  testTimeout: 20_000,
+  hookTimeout: 30_000,
+  globalSetup: ["tests/setup/banco-por-worktree.ts"],
+};
 
 export default defineConfig({
   test: {

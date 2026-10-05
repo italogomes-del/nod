@@ -38,6 +38,7 @@
     "db:efemero:status": "bash scripts/db-efemero.sh status",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate:test": "tsx scripts/migrate.ts --banco nod_test",
+    "db:test:limpar": "tsx scripts/limpar-bancos-teste.ts",
     "db:seed": "tsx scripts/seed.ts",
     "prepare": "simple-git-hooks",
     "uat:gestao": "vitest run --project integration tests/integration/gestao-agentes.test.ts && vitest run --project concurrency tests/concurrency/gestao-agentes-http.test.ts && vitest run --project unit tests/unit/use-cases/duplicar-agente.test.ts",

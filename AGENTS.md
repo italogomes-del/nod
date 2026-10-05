@@ -20,6 +20,7 @@ npm run e2e:haiku           # scripts/e2e-aceite.sh com o CLI real (haiku); impr
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno haiku (~US$ 0,01). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
+npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test)
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
 npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
 npm start                   # node src/adapters/http/server.ts → boot.ts (partições, compor, listen, registry, laços); é o mesmo CMD do Dockerfile
@@ -105,6 +106,14 @@ não sobrevive ao reinício (NOD_HOME guarda só `machine-id`, EMENDA 11).
 `tests/helpers/servidor-completo.ts` sobe o mesmo app em porta 0 sobre `nod_test` (commita: por isso o
 e2e mora em `tests/concurrency` e limpa por id). Serviço chamado fora de uma tx escopada lança
 `escopo_vazio` — o escopo dos `Services` vem do `AsyncLocalStorage` que `abrirTxEscopada` preenche.
+
+**Banco de teste por worktree** (2026-10-05). Fora do CI, o `vitest.config.ts` troca o banco de
+`DATABASE_URL_TEST` por `nod_test_<hash do caminho da worktree>`, e o globalSetup dos projetos com banco
+o cria e migra sob demanda como `nod_dono` (que precisa de `CREATEDB`; num Postgres criado antes desta
+data, rode uma vez `docker exec nod-postgres psql -U postgres -c 'ALTER ROLE nod_dono CREATEDB'`). Assim
+vários bots rodam `npm run check` ao mesmo tempo sem um contaminar o tenant padrão do outro. O CI fica no
+`nod_test` do próprio job; `NOD_BANCO_TESTE_COMPARTILHADO=1` volta ao banco da URL. Onde este arquivo diz
+`nod_test` sobre a suíte local, leia o banco da worktree.
 
 ## Desvios registrados
 
