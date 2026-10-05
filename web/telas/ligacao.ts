@@ -9,6 +9,7 @@ import type { EstadoLocalLigacao, MotivoAvaliacaoLigacao } from "../lib/ligacao-
 import type { EstadoMascote } from "../lib/mascote.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoRelogio } from "../lib/relogio.ts";
+import { htmlIaVoltou, htmlSemIa, type EstadoIaVoltou, type EstadoSemIa } from "./ligacao-sem-ia.ts";
 
 /**
  * A tela da ligação (definido em 2026-10-04, ADR-071; protótipo "HiFiMac" aprovado em 2026-10-03): região própria
@@ -61,6 +62,10 @@ export type EstadoTelaLigacao = {
   audioSuspenso: boolean;
   /** "Diga algo como" (protótipo do onboarding): cada chip manda o texto como uma vez da pessoa. */
   sugestoes: string[];
+  /** Rede de segurança (2026-10-05): a IA do Mac caiu e a ligação espera a escolha (web/telas/ligacao-sem-ia.ts). */
+  semIa?: EstadoSemIa | null;
+  /** A escolha foi feita e o cérebro novo atendeu: o aviso neutro, até a próxima novidade. */
+  iaVoltou?: EstadoIaVoltou | null;
 };
 
 export type AvaliacaoLigacao = { ligacaoId: string; agenteNome: string; duracaoMs: number; motivoFim: string | null; passo: "nota" | "motivo" | "obrigado" };
@@ -102,6 +107,8 @@ export function textoFase(fase: FaseLigacao, rotulo: string | null): string {
       return rotulo ? `Trabalhando · ${rotulo}` : "Trabalhando";
     case "reconectando":
       return "Reconectando…";
+    case "aguardando_escolha":
+      return "Esperando você escolher";
     case "encerrada":
       return "Ligação encerrada";
   }
@@ -124,6 +131,7 @@ export function textoFim(motivo: MotivoFimLigacao, bot: string): string | null {
     ociosidade: "A ligação foi encerrada por falta de conversa.",
     limite_da_assinatura: "Sua assinatura de IA chegou ao limite. A ligação foi encerrada.",
     erro: "A ligação caiu por um erro.",
+    sem_ia: "A ligação foi encerrada: a IA deste Mac parou de responder e nenhuma saída foi escolhida em 2 minutos.",
   };
   return textos[motivo];
 }
@@ -226,7 +234,19 @@ function estadoDoMascote(t: EstadoTelaLigacao): EstadoMascote {
   return "disponivel";
 }
 
+/** O gênero da voz do bot decide o artigo do aviso ("A Nina", "O Bento"). */
+function botDoAviso(t: EstadoTelaLigacao): { nome: string; genero: "feminina" | "masculina" } {
+  return { nome: t.agente.nome, genero: VOZES.find((v) => v.id === t.voz)?.genero ?? "feminina" };
+}
+
 function htmlAviso(t: EstadoTelaLigacao): string {
+  // Esperando a escolha, o aviso da rede de segurança é o único: ele explica o silêncio e traz as saídas.
+  if (t.semIa) return htmlSemIa(t.semIa, botDoAviso(t)) + (t.audioSuspenso ? avisoDeEstado({ tom: "alerta", texto: "O navegador segurou o som da ligação.", acao: botao("ligacao-retomar-audio", "Ouvir", { classe: "pri sm" }), classe: "aviso-compacto" }) : "");
+  const voltou = t.iaVoltou ? htmlIaVoltou(t.iaVoltou, botDoAviso(t)) : "";
+  return voltou + htmlAvisoComum(t);
+}
+
+function htmlAvisoComum(t: EstadoTelaLigacao): string {
   const aviso = t.aviso ? avisoDeEstado({ tom: t.aviso.tom, texto: t.aviso.texto, papel: t.aviso.tom === "erro" ? "alert" : "status", classe: "aviso-compacto" }) : "";
   const audio = t.audioSuspenso ? avisoDeEstado({ tom: "alerta", texto: "O navegador segurou o som da ligação.", acao: botao("ligacao-retomar-audio", "Ouvir", { classe: "pri sm" }), classe: "aviso-compacto" }) : "";
   return aviso + audio;
@@ -234,6 +254,8 @@ function htmlAviso(t: EstadoTelaLigacao): string {
 
 /** "Diga algo como" (ADR-077): cada chip manda o texto como uma vez da pessoa; na pílula, embaixo dela. */
 function htmlSugestoes(t: EstadoTelaLigacao): string {
+  // Sem IA, um chip viraria uma vez sem resposta: eles voltam quando a ligação voltar a ouvir.
+  if (t.semIa) return "";
   return t.sugestoes.length ? `<div class="lc-sugestoes"><span>Diga algo como</span>${t.sugestoes.map((s) => botao("ligacao-sugestao", esc(s), { classe: "chip-sugestao", dados: { texto: s } })).join("")}</div>` : "";
 }
 
@@ -262,7 +284,7 @@ export function htmlCardJanela(card: CardJanela | null, nomeBot: string): string
 }
 
 function htmlTeclado(t: EstadoTelaLigacao): string {
-  if (!t.teclado) return "";
+  if (!t.teclado || t.semIa) return "";
   return `<form class="lc-teclado" data-form="ligacao-texto"><input id="ligacao-texto" name="texto" maxlength="2000" autocomplete="off" placeholder="Escreva para ${esc(t.agente.nome)}…" aria-label="Mensagem para ${esc(t.agente.nome)} durante a ligação" /><button type="submit" class="bt pri" aria-label="Enviar">${ICONE_LIGACAO.enviar()}</button></form>`;
 }
 

@@ -110,6 +110,8 @@ import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboa
 import type { IaNoMac } from "../../contracts/onboarding.ts";
 import { criarRotasOnboarding } from "./rotas/onboarding.ts";
 import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz } from "../voz/orquestrador.ts";
+import type { EstadoIaDaLigacao } from "../../contracts/voz.ts";
+import { ehIaDaLigacao } from "../../domain/ligacao-sem-ia.ts";
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
 import type { ProvedoresVoz } from "../voz/spi.ts";
 import { concatenar, montarWav } from "../voz/audio.ts";
@@ -486,7 +488,11 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-077: a etapa e os campos do onboarding, para o painel, a pílula e os chips da ligação de onboarding.
     async estadoOnboarding(ref) { return rodarCaso(escopoDaRef(ref), estadoOnboardingParaVoz, {}); },
   };
-  const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio });
+  // Rede de segurança da ligação (2026-10-05): as IAs do Mac da pessoa, pelo inventário anunciado (catalogoHarness).
+  // Com NOD_LIGACAO_CODEX=0 o Codex não atende ligação neste servidor: fica fora da lista, e o aviso não o oferece.
+  const iasDoMacParaVoz = (pessoaId: string): EstadoIaDaLigacao[] =>
+    catalogoHarness(pessoaId).opcoes.flatMap((h) => (ehIaDaLigacao(h.id) && !(h.id === "codex-cli" && env.NOD_LIGACAO_CODEX === "0") ? [{ id: h.id, estado: h.inventario.estado }] : []));
+  const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio, iasDoMac: (ref) => iasDoMacParaVoz(ref.pessoaId) });
   // ADR-074: os cards da conversa da ligação viram leitura + janela de aprovação por voz. O orquestrador não lê banco:
   // a composição escuta os frames da pessoa e monta a leitura (leituraDaDecisao) numa tx dela.
   const inscricoesVoz = new Map<string, () => void>();
@@ -518,6 +524,9 @@ export function comporApp(o: OpcoesCompor): App {
         else if (f.tipo === "decisao.decidida" && de.has(id) && !decididasPorVoz.has(id)) voz.decisaoDecidida(ligacaoId, { decisaoId: id, resultado: f.dados.recusada === true ? "recusado" : "decidido", porVoz: false });
         return;
       }
+      // Rede de segurança (2026-10-05): o turno-cérebro desta ligação terminou com ela viva — a ligação avisa e espera a escolha.
+      if ((f.tipo === "turno.encerrado" || f.tipo === "turno.interrompido") && typeof f.dados.turnoId === "string"
+        && voz.cerebroTerminou(ligacaoId, { turnoId: f.dados.turnoId, sucesso: f.tipo === "turno.encerrado", motivo: typeof f.dados.motivo === "string" ? f.dados.motivo : null, causaSemIa: typeof f.dados.causa_sem_ia === "string" ? f.dados.causa_sem_ia : null, ia: typeof f.dados.harness === "string" ? f.dados.harness : null })) return;
       // ADR-072: tarefa pedida na ligação (iniciar_tarefa) terminou — o bot avisa falando, numa brecha.
       if ((f.tipo === "turno.encerrado" || f.tipo === "turno.interrompido") && typeof f.dados.turnoId === "string" && f.dados.origem !== "ligacao") {
         rodarCaso(escopo, resultadoDaTarefaDaLigacao, { turnoId: f.dados.turnoId, ligacaoId })
@@ -784,6 +793,9 @@ export function comporApp(o: OpcoesCompor): App {
         acompanharDecisoes(escopo, l.ligacaoId, l.conversaId);
       },
       encerrarViva: (id) => voz.encerrar(id, "pessoa_desligou"),
+      aguardandoEscolha: (escopo, ligacaoId) => voz.aguardandoEscolha({ pessoaId: escopo.pessoaId, ligacaoId }),
+      iasProntas: (escopo) => (!compartilhado && executorAtual === "catcher" ? null : iasDoMacParaVoz(escopo.pessoaId).filter((i) => i.estado === "pronto").map((i) => i.id)),
+      reabrirCerebro: (escopo, p) => voz.reabrirCerebro({ pessoaId: escopo.pessoaId, ...p }),
       amostra: amostraDeVoz,
     }),
     ...criarRotasOnboarding({

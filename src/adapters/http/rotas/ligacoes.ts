@@ -1,5 +1,8 @@
 import type { Escopo } from "../../../shared/types.ts";
+import type { IaDaLigacao } from "../../../contracts/voz.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { ehIaDaLigacao } from "../../../domain/ligacao-sem-ia.ts";
+import { cancelarTurno } from "../../../use-cases/cancelar-turno.ts";
 import {
   apagarTranscricao,
   avaliarLigacao,
@@ -10,6 +13,7 @@ import {
   falasDaLigacao,
   ligacaoViva,
   ligar,
+  reabrirCerebroDaLigacao,
   type ContextoLigacao,
 } from "../../../use-cases/ligacoes.ts";
 import type { Rota } from "../roteador.ts";
@@ -23,6 +27,12 @@ export type DepsRotasLigacoes = DepsRotas & {
   /** Depois do commit do POST: registra a ligação no orquestrador de voz (memória). */
   registrar(escopo: Escopo, l: { ligacaoId: string; agenteId: string; conversaId: string; turnoId: string; voz: string; velocidade: number; nomeBot: string; genero: "feminina" | "masculina" }): void;
   encerrarViva(ligacaoId: string): Promise<void>;
+  /** Rede de segurança (2026-10-05): a ligação desta pessoa espera a escolha depois de a IA cair? (memória do orquestrador) */
+  aguardandoEscolha(escopo: Escopo, ligacaoId: string): boolean;
+  /** As IAs prontas no Mac da pessoa agora; null = simulação (catcher), em que qualquer uma serve. */
+  iasProntas(escopo: Escopo): readonly IaDaLigacao[] | null;
+  /** Depois do commit: o orquestrador passa a aceitar o turno-cérebro novo. false = a ligação já não esperava. */
+  reabrirCerebro(escopo: Escopo, p: { ligacaoId: string; turnoId: string; ia: IaDaLigacao }): boolean;
   /** A prévia de uma voz (WAV) para escolher a voz do bot; null = voz desconhecida ou fora do ar. */
   amostra(voz: string, velocidade: number): Promise<Buffer | null>;
   maxS: number;
@@ -30,8 +40,8 @@ export type DepsRotasLigacoes = DepsRotas & {
 
 /**
  * Rotas da ligação por voz (definido em 2026-10-04, ADR-072/075). O áudio não passa por aqui: vai pelo WebSocket de
- * mídia (src/adapters/voz/ws.ts). Aqui ficam disponibilidade, ligar, desligar, a transcrição, a avaliação, o
- * consentimento e a voz do bot.
+ * mídia (src/adapters/voz/ws.ts). Aqui ficam disponibilidade, ligar, desligar, continuar com outra IA (a rede de
+ * segurança de 2026-10-05), a transcrição, a avaliação, o consentimento e a voz do bot.
  */
 export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
   const executar = criarExecutor(d);
@@ -75,6 +85,26 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
         const l = await executar(ctx.escopo, encerrarLigacao, { ligacaoId: id, motivo: "pessoa_desligou" });
         if (!l) throw new ErroDeDominio("nao_encontrado");
         ctx.json(200, { ligacao: l });
+      },
+    },
+    {
+      // Rede de segurança (definido em 2026-10-05): a IA do Mac caiu e a pessoa escolheu com qual continuar. Abre um
+      // turno-cérebro novo para a MESMA ligação. Só vale com a ligação esperando a escolha: fora disso (409) ninguém
+      // abre um segundo cérebro numa ligação que tem um.
+      metodo: "POST",
+      padrao: new RegExp(`^/ligacoes/${ID}/continuar$`),
+      async handler(ctx) {
+        const id = ctx.params.id ?? "";
+        const ia = corpoObjeto(await ctx.corpo()).ia;
+        if (!ehIaDaLigacao(ia)) throw new ErroDeDominio("entrada_invalida", { cause: "ia" });
+        if (!d.aguardandoEscolha(ctx.escopo, id)) throw new ErroDeDominio("estado_invalido", { cause: "a ligação não espera escolha" });
+        const r = await executar(ctx.escopo, reabrirCerebroDaLigacao, { ligacaoId: id, ia, iasProntas: d.iasProntas(ctx.escopo), executor: d.executor });
+        if (!d.reabrirCerebro(ctx.escopo, { ligacaoId: id, turnoId: r.turno.id, ia })) {
+          // A ligação acabou entre a conferência e o commit: o turno recém-criado sai da fila em vez de ficar órfão.
+          await executar(ctx.escopo, cancelarTurno, { turnoId: r.turno.id }).catch(() => undefined);
+          throw new ErroDeDominio("estado_invalido", { cause: "a ligação não espera escolha" });
+        }
+        ctx.json(200, { ligacao: r.ligacao });
       },
     },
     {

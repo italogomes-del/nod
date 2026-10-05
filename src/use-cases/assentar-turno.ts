@@ -213,7 +213,11 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (turno.origem === "ligacao") {
     // ADR-072: o turno-cérebro não ganha aviso de interrupção nem card "Retomar" — quem conta como a ligação acabou é a
     // linha "Chat de voz" (e o resumo, quando houve). O evento sai para a tela soltar o turno.
-    events.push(evento(deps.escopo, { kind: desfecho.estado === "interrompido" ? "turno_interrompido" : "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: desfecho.estado, origem: "ligacao", custo_usd: custoUsd } }));
+    // definido em 2026-10-05 (rede de segurança da ligação): o evento leva POR QUE o cérebro parou, só em código — o
+    // motivo, a IA que rodava e a causa "conta sem acesso" quando o driver a reconheceu. É o que o orquestrador de voz
+    // usa para não deixar a ligação muda (src/domain/ligacao-sem-ia.ts). Nunca o texto do fornecedor.
+    const porQueParou = { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, harness: entrega.harness ?? null, ...(resultado.causaSemIa ? { causa_sem_ia: resultado.causaSemIa } : {}) };
+    events.push(evento(deps.escopo, { kind: desfecho.estado === "interrompido" ? "turno_interrompido" : "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: desfecho.estado, origem: "ligacao", custo_usd: custoUsd, ...porQueParou } }));
     if (mensagem && turno.ligacaoId) await deps.repos.ligacoes.marcarResumida(turno.ligacaoId);
   } else if (quedaDaMaquina) {
     // A MESMA regra do varredor (interromper-por-maquina.ts): sem a linha 'sistema' e o evento daqui,

@@ -1,5 +1,11 @@
 import type {
   AcaoComandoVoz,
+  CAUSAS_CEREBRO_CAIU as CausasCerebroCaiu,
+  CausaCerebroCaiu,
+  ESTADOS_IA_DA_LIGACAO as EstadosIa,
+  EstadoIaDaLigacao,
+  IAS_DA_LIGACAO as IasDaLigacao,
+  IaDaLigacao,
   CABECALHO_MICROFONE_BYTES as CabMicrofone,
   CABECALHO_VOZ_BYTES as CabVoz,
   FaseLigacao,
@@ -107,7 +113,28 @@ const MOTIVOS_FIM: typeof MotivosFim = [
   "ociosidade",
   "limite_da_assinatura",
   "erro",
+  "sem_ia",
 ];
+
+/** Rede de segurança (definido em 2026-10-05): os códigos do aviso "a IA caiu", conferidos um a um como o resto. */
+const CAUSAS_CEREBRO: typeof CausasCerebroCaiu = ["conta_sem_acesso", "falhou"];
+const IAS_LIGACAO: typeof IasDaLigacao = ["claude-cli", "codex-cli"];
+const ESTADOS_IA: typeof EstadosIa = ["pronto", "nao_autenticado", "ausente"];
+const ehIa = (v: unknown): v is IaDaLigacao => typeof v === "string" && (IAS_LIGACAO as readonly string[]).includes(v);
+
+/** O estado das IAs do Mac: no máximo uma linha por IA conhecida; qualquer linha fora do formato invalida a lista. */
+function lerIas(v: unknown): EstadoIaDaLigacao[] | null {
+  if (!Array.isArray(v) || v.length > IAS_LIGACAO.length) return null;
+  const ias: EstadoIaDaLigacao[] = [];
+  for (const x of v) {
+    if (typeof x !== "object" || x === null) return null;
+    const i = x as Record<string, unknown>;
+    const estado = ESTADOS_IA.find((e) => e === i.estado);
+    if (!ehIa(i.id) || !estado || ias.some((y) => y.id === i.id)) return null;
+    ias.push({ id: i.id, estado });
+  }
+  return ias;
+}
 
 /** Fechamentos depois dos quais reconectar não adianta: a sessão, a ligação ou a versão não valem mais. */
 /**
@@ -151,7 +178,7 @@ export function mensagemCliente(m: MsgMidiaCliente): string {
   return JSON.stringify(m);
 }
 
-const FASES: Record<FaseLigacao, true> = { chamando: true, conectando: true, ouvindo: true, pensando: true, falando: true, trabalhando: true, reconectando: true, encerrada: true };
+const FASES: Record<FaseLigacao, true> = { chamando: true, conectando: true, ouvindo: true, pensando: true, falando: true, trabalhando: true, reconectando: true, aguardando_escolha: true, encerrada: true };
 const TIPOS_FALA: Record<TipoFalaBot, true> = { conteudo: true, espera: true, leitura: true, aviso: true };
 const ACOES: Record<AcaoComandoVoz, true> = { aprovar: true, recusar: true };
 
@@ -202,6 +229,16 @@ export function lerMsgServidor(texto: string): MsgMidiaServidor | null {
     }
     case "sugestoes":
       return Array.isArray(m.itens) && m.itens.length <= SUGESTOES_MAX && m.itens.every((x) => str(x, SUGESTAO_MAX_CHARS) && x.trim() !== "") ? { t: "sugestoes", itens: m.itens as string[] } : null;
+    case "sem-ia": {
+      const ias = lerIas(m.ias);
+      const causa = CAUSAS_CEREBRO.find((c) => c === m.causa);
+      const ia = m.ia === null || m.ia === undefined ? null : ehIa(m.ia) ? m.ia : undefined;
+      return causa && ias && ia !== undefined && num(m.ate) ? { t: "sem-ia", causa: causa satisfies CausaCerebroCaiu, ia, ias, ate: m.ate } : null;
+    }
+    case "ia-voltou": {
+      const ia = m.ia === null || m.ia === undefined ? null : ehIa(m.ia) ? m.ia : undefined;
+      return ia !== undefined && typeof m.trocou === "boolean" ? { t: "ia-voltou", ia, trocou: m.trocou } : null;
+    }
     case "pong":
       return { t: "pong" };
     default:

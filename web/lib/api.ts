@@ -20,6 +20,7 @@ import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
+import type { IaDaLigacao } from "../../src/contracts/voz.ts";
 import type { AcaoComandoVoz } from "../../src/contracts/voz.ts";
 import type { IdVozNod, VelocidadeVoz } from "../../src/contracts/vozes.ts";
 import type { MotivoAvaliacaoLigacao } from "./ligacao-protocolo.ts";
@@ -203,6 +204,8 @@ export function criarApi(escopo: Escopo) {
     criarLigacao: (agenteId: string) => post<LigacaoCriada>("ligacoes", { agenteId }),
     ligacaoViva: () => get<{ ligacao: Ligacao | null }>("ligacoes/viva"),
     encerrarLigacao: (id: string) => post<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/encerrar`),
+    /** Rede de segurança (2026-10-05): a IA do Mac caiu no meio da ligação e a pessoa escolheu com qual continuar. */
+    continuarLigacao: (id: string, ia: IaDaLigacao) => post<{ ligacao: Ligacao }>(`ligacoes/${encodeURIComponent(id)}/continuar`, { ia }),
     avaliarLigacao: (id: string, nota: "boa" | "ruim", motivo?: MotivoAvaliacaoLigacao) => post<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/avaliacao`, motivo ? { nota, motivo } : { nota }),
     falasLigacao: (id: string) => get<{ falas: FalaLigacao[] }>(`ligacoes/${encodeURIComponent(id)}/falas`),
     apagarFalasLigacao: (id: string) => del<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/falas`),

@@ -93,6 +93,41 @@
 .lp-aviso .aviso-compacto { margin: 0; box-shadow: var(--shadow-pop); }
 .lp-card .ligacao-janela { box-shadow: var(--shadow-pop); }
 
+/* ---- rede de segurança: a IA do Mac caiu no meio da ligação (definido em 2026-10-05; protótipos 2A, 2B e 2C) ----
+   O aviso é o componente de estado do design system (tom alerta); aqui só o que a ligação acrescenta: o título numa
+   linha própria, o texto em tinta, a linha de botões e os cards de IA. O botão principal é a ação da tela (--action),
+   não a cor do alerta: continuar é o caminho, não o problema. */
+.aviso-estado.lig-sem-ia { align-items: flex-start; padding: 14px 16px; font-size: 14px; line-height: 21px; }
+.lig-sem-ia .aviso-estado-ic { margin-top: 2px; }
+.lig-sem-ia .aviso-estado-txt { color: var(--ink); }
+.lig-sem-ia .aviso-estado-txt > b { display: block; }
+.lsi-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.lsi-acoes .bt, .lsi-card .bt { height: 36px; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 500; }
+.lsi-acoes .bt:not(.pri):not(.link), .lsi-card .bt { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.aviso-estado.lig-sem-ia .bt.pri { display: inline-flex; align-items: center; gap: 8px; padding-left: 8px; background: var(--action); border-color: var(--action); color: var(--on-action); }
+.aviso-estado.lig-sem-ia .bt.link { height: 36px; padding: 0 10px; border: 0; background: none; color: var(--ink-2); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.aviso-estado.lig-sem-ia .bt:disabled { opacity: .55; cursor: default; }
+.lsi-logo { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--surface); color: var(--ink); display: grid; place-items: center; }
+.lsi-logo svg { width: 15px; height: 15px; }
+.lsi-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.lsi-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.lsi-card-cab { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 18px; }
+.lsi-card-cab b { font-weight: 500; }
+.lsi-card-txt { margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-2); }
+.lsi-rodape { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.aviso-estado.lig-sem-ia .lsi-rodape .bt.link { padding: 0; }
+.lsi-rodape > span, .lsi-nota { font-size: 12px; line-height: 16px; color: var(--ink-3); }
+.lsi-nota { margin: 8px 0 0; color: var(--ink-2); }
+/* O aviso neutro depois da escolha: o logo da IA que assumiu no lugar do ícone. */
+.lig-ia-voltou { align-items: center; }
+.lig-ia-voltou .lsi-logo { width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 7px; }
+.lig-ia-voltou .lsi-logo svg { width: 16px; height: 16px; }
+.lc-aviso .aviso-estado.lig-sem-ia, .lc-aviso .lig-ia-voltou { margin: 0; }
+/* Na pílula a coluna é estreita: os cards empilham. */
+.lp-aviso .aviso-estado.lig-sem-ia { margin: 0; box-shadow: var(--shadow-pop); }
+.lp-aviso .lsi-cards { grid-template-columns: minmax(0, 1fr); }
+.lp-aviso .lig-ia-voltou { box-shadow: var(--shadow-pop); }
+
 /* Quem fala: cinco barras em cinza; andam enquanto alguém fala (o bot ou a pessoa). */
 .lp-onda { display: inline-flex; align-items: center; gap: 3px; height: 18px; width: 26px; }
 .lp-onda i { display: block; width: 3px; height: 16px; border-radius: 2px; background: var(--line-strong); transform: scaleY(.3); transform-origin: center; }
@@ -180,4 +215,5 @@
   .lc-fala.lc-pessoa { padding-left: 48px; }
   .lc-fala { font-size: 20px; }
   .lp-nome { display: none; }
+  .lsi-cards { grid-template-columns: minmax(0, 1fr); }
 }

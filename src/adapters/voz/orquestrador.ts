@@ -1,9 +1,10 @@
-import { FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, type FaseLigacao, type MotivoFimLigacao, type MsgCerebroServidor, type MsgMidiaServidor, type RotaSaida, type TipoFalaBot } from "../../contracts/voz.ts";
+import { ESPERA_DA_ESCOLHA_MS, FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, type CausaCerebroCaiu, type EstadoIaDaLigacao, type FaseLigacao, type IaDaLigacao, type MotivoFimLigacao, type MsgCerebroServidor, type MsgMidiaServidor, type RotaSaida, type TipoFalaBot } from "../../contracts/voz.ts";
 import { ehEco } from "../../domain/ligacao-eco.ts";
 import { escolherFala, FALAS_DE_ESPERA, TEMPOS_ESPERA, type CategoriaEspera, type EsperaTocada, type FalaDeEspera } from "../../domain/ligacao-espera.ts";
 import { criarSegmentador, ehSoOk, removerAberturaRepetida, semOkDeFecho, textoFalavel } from "../../domain/ligacao-frases.ts";
 import { novasMarcas, percentilMs, resumoDaVez, type DesfechoDaVez, type MarcasDaVez, type OrigemDaVez, type QuemFechouTrecho } from "../../domain/ligacao-medicao.ts";
 import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
+import { aberturaDoCerebroNovo, causaDoCerebroCaido, comFalaRecente, ehIaDaLigacao, iaQuePodeAssumir, mesmasIas, transcricaoParaOCerebroNovo, vezDeRetomada, type FalaRecente, type FimDoTurnoCerebro } from "../../domain/ligacao-sem-ia.ts";
 import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, FATOR_VAD_BOT_FALANDO, modoDeInterrupcao, normalizarFala } from "../../domain/ligacao-turno.ts";
 import { criarVad, VOZ_MINIMA_MS } from "../../domain/ligacao-vad.ts";
 import { interpretarComando, validarComando, type PerfilComando } from "../../domain/comando-de-voz.ts";
@@ -80,6 +81,11 @@ export type DepsVoz = {
   provedores: ProvedoresVoz;
   persistencia: PersistenciaVoz;
   esperas?: FonteDeEsperas;
+  /**
+   * definido em 2026-10-05 (rede de segurança): as IAs do Mac da pessoa agora, pelo inventário que o Mac anunciou
+   * (`catalogoHarness` na composição). Síncrono e em memória; ausente = o aviso sai sem "continuar com outra IA".
+   */
+  iasDoMac?: (ref: RefLigacao) => EstadoIaDaLigacao[];
   relogio?: () => number;
   aleatorio?: () => number;
   /** Prazos (testes encurtam). */
@@ -106,7 +112,20 @@ export const PRAZOS_PADRAO = {
   ociosidadeMs: 180_000,
   /** ADR-077: a ligação do onboarding toca por até 2 min esperando o "Atender"; depois vira não atendida. */
   naoAtendidaMs: 120_000,
+  /** definido em 2026-10-05: a IA do Mac caiu — a ligação espera a escolha da pessoa por 2 min e encerra com `sem_ia`. */
+  escolhaSemIaMs: ESPERA_DA_ESCOLHA_MS,
+  /** definido em 2026-10-05: enquanto espera a escolha, relê o estado das IAs do Mac (o app ressonda a cada 3 s). */
+  vigiaDasIasMs: 3_000,
+  /**
+   * definido em 2026-10-05: a frase "perdi a conexão com o seu Mac" espera 1,5 s depois de o canal do cérebro fechar.
+   * Quando o canal fecha porque o turno-cérebro falhou, o desfecho do turno chega logo depois (o outbox sai a cada
+   * 250 ms) e a frase certa é a da rede de segurança, não a de queda de conexão.
+   */
+  quedaCerebroFalaMs: 1_500,
 };
+
+/** definido em 2026-10-05: quantas vezes o `resolvendo` da tela recomeça a espera da escolha, por queda. */
+const RENOVACOES_DA_ESCOLHA = 5;
 
 /** definido em 2026-10-04: a pessoa que volta a falar até 3 s depois da vez, sem o bot ter dito nada, refaz a vez. */
 const JANELA_REFAZER_VEZ_MS = 3_000;
@@ -155,6 +174,18 @@ export interface ServicoVoz {
   conferirComando(p: { pessoaId: string; ligacaoId: string; comandoId: string; decisaoId: string; acao: "aprovar" | "recusar" }): boolean;
   /** A decisão foi decidida (por voz ou clique): fecha a janela e conta o resultado. */
   decisaoDecidida(ligacaoId: string, p: { decisaoId: string; resultado: "aprovado" | "recusado" | "decidido"; porVoz: boolean }): void;
+  /**
+   * definido em 2026-10-05 (rede de segurança): um turno desta conversa terminou. Devolve true quando era o turno-cérebro
+   * ATUAL da ligação; com a ligação viva, ela fala a frase fixa, avisa a tela e espera a escolha da pessoa.
+   */
+  cerebroTerminou(ligacaoId: string, p: FimDoTurnoCerebro & { turnoId: string; ia?: string | null }): boolean;
+  /** A ligação desta pessoa está esperando a escolha (a IA caiu)? É o que a rota confere antes de abrir outro turno. */
+  aguardandoEscolha(p: { pessoaId: string; ligacaoId: string }): boolean;
+  /**
+   * A pessoa escolheu continuar: `turnoId` é o turno-cérebro novo da MESMA ligação, já enfileirado para a IA `ia`.
+   * false = a ligação não estava esperando (nada muda). O cérebro novo tem `cerebroPrimeiroMs` para aparecer.
+   */
+  reabrirCerebro(p: { pessoaId: string; ligacaoId: string; turnoId: string; ia: IaDaLigacao }): boolean;
   /** A ligação viva de uma conversa (para ligar os frames da conversa à ligação). */
   daConversa(pessoaId: string, conversaId: string): string | null;
   /** Para de aceitar ligação nova e encerra as vivas com aviso (deploy). */
@@ -202,6 +233,9 @@ type Preparo = { pedacos: Int16Array[]; acabou: boolean; erro: unknown; ac: Abor
  * da anterior terminar.
  */
 const ITENS_ANTECIPADOS = 2;
+
+/** A frase fixa da rede de segurança: texto da biblioteca de esperas, para sair do cache de clipes quando houver. */
+const FALA_SEM_IA = FALAS_DE_ESPERA.find((f) => f.categoria === "sem_ia") ?? null;
 
 export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
   const relogio = deps.relogio ?? (() => Date.now());
@@ -295,6 +329,19 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     const notasPendentes: string[] = [];
     const vezesSemCerebro: { n: number; texto: string; ouvidoAte?: string }[] = [];
     let saudou = false;
+    // ---- rede de segurança (definido em 2026-10-05): a IA do Mac caiu com a ligação em curso ----
+    /** A IA do cérebro conectado (do `ola` dele); null = catcher ou ainda não se sabe. */
+    let iaDoCerebro: IaDaLigacao | null = null;
+    /** Esperando a pessoa escolher o que fazer. `falou`: a frase fixa já saiu (sai uma vez por queda, com mídia). */
+    let semIa: { causa: CausaCerebroCaiu; ia: IaDaLigacao | null; ias: EstadoIaDaLigacao[]; ate: number; prazo: ReturnType<typeof setTimeout> | null; vigia: ReturnType<typeof setTimeout> | null; falou: boolean; renovacoes: number } | null = null;
+    /** A pessoa escolheu; o turno-cérebro novo ainda não discou. */
+    let reabrindo: { ia: IaDaLigacao; antes: IaDaLigacao | null; prazo: ReturnType<typeof setTimeout> | null } | null = null;
+    let quedasDoCerebro = 0;
+    /** As últimas falas (memória da ligação, nunca log): o fio da conversa para o cérebro que assumir. */
+    let falasRecentes: FalaRecente[] = [];
+    let timerFalaDeQueda: ReturnType<typeof setTimeout> | null = null;
+    /** Sem cérebro por queda da IA: nada do que a pessoa disser vira vez (não há quem responda). */
+    const semCerebroPorQueda = () => semIa !== null || reabrindo !== null;
     let liberada = r.aguardandoConsentimento !== true;
     const saudacao = r.saudacao ?? `Oi! Aqui é ${r.nomeBot}.`;
     const itemDaSaudacao: ItemFila = { tipo: "conteudo", texto: saudacao, n: null };
@@ -319,9 +366,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     };
     const paraMidia = (m: MsgMidiaServidor) => midia?.enviarJson(m);
     const paraCerebro = (m: MsgCerebroServidor) => cerebro?.enviarJson(m);
-    const mudarFase = (f: FaseLigacao, rotulo?: string) => {
+    const mudarFase = (pedida: FaseLigacao, rotulo?: string) => {
+      // definido em 2026-10-05: esperando a escolha, a tela nunca diz "Ouvindo" nem "Pensando" — ninguém vai responder.
+      const f: FaseLigacao = semIa && pedida !== "falando" && pedida !== "encerrada" ? "aguardando_escolha" : pedida;
       fase = f;
-      paraMidia({ t: "estado", fase: f, ...(rotulo ? { rotulo } : {}) });
+      paraMidia({ t: "estado", fase: f, ...(rotulo && f === pedida ? { rotulo } : {}) });
     };
     const msDesdeInicio = () => relogio() - inicio;
     const seguro = (p: Promise<unknown>, evento: string) => {
@@ -355,6 +404,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     function gravarFala(f: Omit<FalaParaGravar, "seq">): void {
       if (f.texto.trim() === "") return;
+      falasRecentes = comFalaRecente(falasRecentes, { autor: f.autor, texto: f.texto });
       const fala = { ...f, seq: seqFala++ };
       seguro(deps.persistencia.gravarFala(ref, fala), "voz_gravar_fala_falhou");
     }
@@ -372,7 +422,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       ultimaAtividadeEm = relogio();
       cancelar(timerOciosidade);
       timerOciosidade = agendar(prazos.ociosidadeMs, () => {
-        if (encerrada) return;
+        // Esperando a escolha, quem encerra é o prazo dela (`sem_ia`), não a falta de conversa.
+        if (encerrada || semCerebroPorQueda()) return;
         tocarEspera("ociosidade_final");
         agendar(4_000, () => void encerrar("ociosidade"));
       });
@@ -382,6 +433,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
 
     function tocarEspera(categoria: CategoriaEspera, ferramenta?: string): boolean {
       if (!deps.esperas || encerrada || !midia || janela || lendo) return false;
+      // Esperando a escolha, a única fala é a frase fixa da rede de segurança (nem "ainda tá aí?", nem "perdi a conexão").
+      if (semIa) return false;
       const fala = escolherFala(categoria, historicoEspera, relogio(), aleatorio, ferramenta);
       if (!fala) return false;
       const pcm = deps.esperas.obterPronto(fala, r.voz, r.velocidade);
@@ -707,7 +760,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     function proximaDecisao(): void {
-      if (encerrada || lendo || janela || filaDecisoes.length === 0 || !midia) return;
+      // Esperando a escolha (a IA caiu), a ligação não ouve: o card segue na tela e a leitura volta depois.
+      if (encerrada || lendo || janela || filaDecisoes.length === 0 || !midia || semCerebroPorQueda()) return;
       if (!emBrecha()) {
         agendar(400, proximaDecisao);
         return;
@@ -724,6 +778,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function abrirJanela(pedido: PedidoAprovacaoVoz): void {
       if (encerrada || lendo !== pedido) return;
       lendo = null;
+      if (semCerebroPorQueda()) {
+        // A leitura acabou com a ligação já sem ouvir: a janela não abre agora; o pedido volta para a fila.
+        filaDecisoes.unshift(pedido);
+        return;
+      }
       const ate = relogio() + 20_000;
       janela = { pedido, abertaEm: relogio(), pediuDeNovo: false, timer: agendar(20_000, () => fecharJanela(pedido.decisaoId)) };
       paraMidia({ t: "janela", decisaoId: pedido.decisaoId, ate });
@@ -931,6 +990,17 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     function aoResultadoStt(res: ResultadoStt): void {
       if (encerrada) return;
       const texto = res.texto.trim();
+      if (semCerebroPorQueda()) {
+        // O final de um trecho que fechou logo antes da queda: fica na legenda e na transcrição (o cérebro que assumir
+        // recebe as falas recentes), mas não vira vez — não há quem responda, e a vez ficaria pendurada.
+        if (!res.final) return;
+        const id = legendaId++;
+        const trecho = trechos.shift();
+        if (texto === "") return;
+        paraMidia({ t: "legenda", id, texto, final: true });
+        gravarFala({ autor: "pessoa", tipo: "fala", texto, inicioMs: (trecho?.inicio ?? inicioFalaEm) - inicio, fimMs: (trecho && trecho.fim > 0 ? trecho.fim : fimFalaEm) - inicio, interrompida: false, confianca: res.confianca });
+        return;
+      }
       if (!res.final) {
         if (texto === "") return;
         paraMidia({ t: "legenda", id: legendaId, texto, final: false });
@@ -1125,7 +1195,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       // O app descarta quadros quando a rede dele represa: o buraco aparece aqui como salto na sequência.
       if (seqEsperado !== null && seq > seqEsperado) cont.quadrosPerdidos += seq - seqEsperado;
       seqEsperado = seq + 1;
-      if (mudo || encerrada) return;
+      // definido em 2026-10-05: esperando a escolha (ou o cérebro novo), a ligação não ouve — como no mudo. O áudio não
+      // vai ao STT e nenhuma vez nasce sem ter quem responda.
+      if (mudo || encerrada || semCerebroPorQueda()) return;
       const tocando = botTocando();
       vad.definirBotFalando(tocando);
       const ev = vad.passo(pcm, agora);
@@ -1231,13 +1303,15 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         if (maxMs > 90_000) agendar(maxMs - 60_000, () => tocarEspera("limite_proximo"));
         agendar(maxMs, () => void encerrar("tempo_maximo"));
         atualizarOnboarding();
-        timerCerebroPrimeiro = cerebro ? null : agendar(prazos.cerebroPrimeiroMs, () => {
-          if (!cerebro && !encerrada) {
+        timerCerebroPrimeiro = cerebro || semCerebroPorQueda() ? null : agendar(prazos.cerebroPrimeiroMs, () => {
+          if (!cerebro && !encerrada && !semCerebroPorQueda()) {
             tocarEspera("queda_cerebro");
             agendar(3_000, () => void encerrar("cerebro_caiu"));
           }
         });
       }
+      // A IA caiu antes de a mídia abrir (ou a página recarregou no meio da espera): o aviso e a frase saem agora.
+      if (semIa) anunciarSemIa();
       return null;
     }
 
@@ -1270,6 +1344,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         case "texto": {
           const conteudo = typeof msg.conteudo === "string" ? msg.conteudo.trim().slice(0, 4000) : "";
           if (conteudo === "") return;
+          // Sem cérebro por queda da IA, o texto digitado também não teria resposta: não vira vez.
+          if (semCerebroPorQueda()) return;
           if (botTocando()) interromperBot(conteudo);
           gravarFala({ autor: "pessoa", tipo: "texto", texto: conteudo, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
           reiniciarOciosidade();
@@ -1297,6 +1373,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
             retomarDecisao();
           }
           return;
+        case "resolvendo":
+          renovarEscolha();
+          return;
         case "ping":
           paraMidia({ t: "pong" });
           return;
@@ -1314,6 +1393,14 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       cerebro = canal;
       cancelar(timerCerebroCaido);
       cancelar(timerCerebroPrimeiro);
+      cancelar(timerFalaDeQueda);
+      // O cérebro que disca depois de uma queda da IA é o turno novo (o token do que caiu já foi revogado): ele assume.
+      // Chegou com a ligação de volta ao aviso (o prazo dele tinha vencido)? Assume do mesmo jeito.
+      const assumindo = reabrindo ?? (semIa ? { ia: semIa.ia, antes: semIa.ia, prazo: null } : null);
+      if (reabrindo) cancelar(reabrindo.prazo);
+      reabrindo = null;
+      sairDoSemIa();
+      iaDoCerebro = assumindo?.ia ?? null;
       canal.aoMensagem((m) => {
         if ("texto" in m) aoControleCerebro(m.texto);
       });
@@ -1325,17 +1412,199 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           return;
         }
         paraMidia({ t: "cerebro", online: false });
+        // O desfecho do turno chegou antes de o canal fechar: a ligação já espera a escolha, não há o que reconectar.
+        if (semCerebroPorQueda()) return;
         mudarFase("reconectando");
-        tocarEspera("queda_cerebro");
+        timerFalaDeQueda = agendar(prazos.quedaCerebroFalaMs, () => { if (!cerebro && !encerrada) tocarEspera("queda_cerebro"); });
         timerCerebroCaido = agendar(prazos.cerebroReconexaoMs, () => void encerrar("cerebro_caiu"));
       });
       paraMidia({ t: "cerebro", online: true });
       // A primeira mensagem aquece o cache do CLI e conta o que o bot já disse; a resposta a ela não é falada.
-      paraCerebro({ t: "vez", n: 0, texto: `[nod] A ligação começou. Você já disse à pessoa: "${saudacao}" Não responda nada a esta mensagem além de "ok". Espere a pessoa falar.` });
+      if (assumindo) {
+        paraCerebro({ t: "vez", n: 0, texto: aberturaDoCerebroNovo(FALA_SEM_IA?.texto ?? "") });
+        const dito = transcricaoParaOCerebroNovo(falasRecentes, r.nomeBot);
+        if (dito) paraCerebro({ t: "nota", texto: dito, confiavel: false });
+      } else paraCerebro({ t: "vez", n: 0, texto: `[nod] A ligação começou. Você já disse à pessoa: "${saudacao}" Não responda nada a esta mensagem além de "ok". Espere a pessoa falar.` });
       for (const v of vezesSemCerebro.splice(0)) paraCerebro({ t: "vez", ...v });
       for (const t of notasPendentes.splice(0)) paraCerebro({ t: "nota", texto: t, confiavel: true });
       if (midia && fase !== "falando" && fase !== "pensando") mudarFase("ouvindo");
+      if (assumindo) retomarComCerebroNovo(assumindo);
       return null;
+    }
+
+    // ---- rede de segurança: a IA do Mac caiu com a ligação em curso (definido em 2026-10-05) ------------------------------
+
+    function iasAgora(): EstadoIaDaLigacao[] {
+      try {
+        return deps.iasDoMac?.(ref) ?? [];
+      } catch {
+        return [];
+      }
+    }
+
+    /** A vez em curso e o que estava pendente não terão resposta: nada fica esperando um cérebro que caiu. */
+    function soltarAVez(): void {
+      cancelar(pendente.timer);
+      pendente.timer = null;
+      pendente.textos = [];
+      vezesSemCerebro.length = 0;
+      vezRefeita = false;
+      proximoOuvido = null;
+      cancelarEsperas();
+      cancelar(timerVencer);
+      if (vezAtual > 0 && !vezRespondida) {
+        fecharMedicao("cerebro_caiu");
+        // O resto da resposta cortada que ainda estava na fila não é falado.
+        vezCancelada = vezAtual;
+        vezRespondida = true;
+      }
+      ferramentaRodando = null;
+      // Um `desligar` que o cérebro caído começou e não terminou morre com ele: senão a fala do próximo seria ignorada.
+      desligando = false;
+      if (janela) fecharJanela(janela.pedido.decisaoId);
+      // O trecho que a pessoa está falando agora sai como no mudo: sem final, e o VAD recomeça do zero.
+      if (falando) {
+        falando = false;
+        trechoSuspeito = false;
+        vad.encerrarTrecho();
+        const abertoIdx = trechos.findIndex((x) => x.fim === 0);
+        if (abertoIdx >= 0) trechos.splice(abertoIdx, 1);
+        stt?.descartar();
+      }
+      cancelar(barge.timer);
+      barge.ativa = false;
+    }
+
+    /**
+     * A frase fixa: roteiro, não vem do cérebro (que é justamente quem caiu). Sai do cache de clipes quando o clipe já
+     * existe e, se não, é sintetizada na hora — aqui calar é pior que esperar a síntese. Entra na transcrição.
+     */
+    function falarSemIa(): void {
+      if (!FALA_SEM_IA) return;
+      const pcm = deps.esperas?.obterPronto(FALA_SEM_IA, r.voz, r.velocidade) ?? null;
+      gravarFala({ autor: "bot", tipo: "fala", texto: FALA_SEM_IA.texto, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
+      enfileirar({ tipo: "aviso", texto: FALA_SEM_IA.texto, n: null, ...(pcm ? { pcm } : {}) });
+    }
+
+    function mandarSemIa(): void {
+      if (semIa) paraMidia({ t: "sem-ia", causa: semIa.causa, ia: semIa.ia, ias: semIa.ias, ate: semIa.ate });
+    }
+
+    function armarPrazoDaEscolha(): void {
+      if (!semIa) return;
+      const esta = semIa;
+      cancelar(esta.prazo);
+      esta.ate = relogio() + prazos.escolhaSemIaMs;
+      esta.prazo = agendar(prazos.escolhaSemIaMs, () => {
+        if (semIa === esta && !encerrada) void encerrar("sem_ia");
+      });
+    }
+
+    /** O Mac reanuncia o inventário quando uma IA fica pronta (login feito, instalação): o aviso acompanha. */
+    function vigiarIas(): void {
+      if (!semIa || semIa.vigia !== null || !deps.iasDoMac) return;
+      const esta = semIa;
+      esta.vigia = agendar(prazos.vigiaDasIasMs, () => {
+        esta.vigia = null;
+        if (semIa !== esta || encerrada) return;
+        const ias = iasAgora();
+        if (!mesmasIas(ias, esta.ias)) {
+          esta.ias = ias;
+          mandarSemIa();
+        }
+        vigiarIas();
+      });
+    }
+
+    /** Com mídia: o prazo da escolha começa a contar, o aviso vai para a tela e a frase é dita (uma vez por queda). */
+    function anunciarSemIa(): void {
+      if (!semIa || encerrada) return;
+      if (semIa.prazo === null) armarPrazoDaEscolha();
+      mandarSemIa();
+      if (!semIa.falou) {
+        semIa.falou = true;
+        falarSemIa();
+      }
+      if (!botTocando()) mudarFase("aguardando_escolha");
+      vigiarIas();
+    }
+
+    function sairDoSemIa(): void {
+      if (!semIa) return;
+      cancelar(semIa.prazo);
+      cancelar(semIa.vigia);
+      semIa = null;
+    }
+
+    function entrarSemIa(causa: CausaCerebroCaiu, ia: IaDaLigacao | null): void {
+      quedasDoCerebro++;
+      cancelar(timerCerebroCaido);
+      cancelar(timerCerebroPrimeiro);
+      cancelar(timerFalaDeQueda);
+      cancelar(timerOciosidade);
+      if (reabrindo) cancelar(reabrindo.prazo);
+      reabrindo = null;
+      sairDoSemIa();
+      // O turno acabou: o canal dele, se ainda estiver aberto, não serve mais (e não é "queda de conexão").
+      const velho = cerebro;
+      cerebro = null;
+      velho?.fechar(1000, "fim");
+      const vezSemResposta = vezAtual > 0 && !vezRespondida;
+      soltarAVez();
+      const ias = iasAgora();
+      semIa = { causa, ia, ias, ate: 0, prazo: null, vigia: null, falou: false, renovacoes: 0 };
+      // Só códigos e contagens: nem o texto do fornecedor, nem o que foi dito.
+      log("aviso", "ligacao_cerebro_caiu", { ligacao_id: r.ligacaoId, causa, harness: ia, outra_pronta: iaQuePodeAssumir(ia, ias) !== null, vez_sem_resposta: vezSemResposta, quedas: quedasDoCerebro, atendida, onboarding: r.onboarding === true });
+      if (midia) anunciarSemIa();
+    }
+
+    /** A tela avisou que a pessoa abriu o login ou a instalação de uma IA: a espera recomeça (com teto). */
+    function renovarEscolha(): void {
+      if (!semIa || encerrada || semIa.renovacoes >= RENOVACOES_DA_ESCOLHA) return;
+      semIa.renovacoes++;
+      armarPrazoDaEscolha();
+      mandarSemIa();
+    }
+
+    function cerebroTerminou(p: FimDoTurnoCerebro & { turnoId: string; ia?: string | null }): boolean {
+      if (p.turnoId !== ref.turnoId) return false;
+      // Ligação encerrada: o turno acabou porque a ligação acabou (o `fim` pediu o resumo). Já esperando: nada novo.
+      if (encerrada || semIa) return true;
+      const causa = causaDoCerebroCaido(p);
+      if (causa === null) return true;
+      entrarSemIa(causa, ehIaDaLigacao(p.ia) ? p.ia : reabrindo?.ia ?? iaDoCerebro);
+      return true;
+    }
+
+    function reabrirCerebro(novoTurnoId: string, ia: IaDaLigacao): boolean {
+      if (encerrada || !semIa) return false;
+      const antes = semIa.ia;
+      sairDoSemIa();
+      // Daqui em diante o cérebro desta ligação é o turno novo: é o token dele que o canal do cérebro aceita.
+      ref.turnoId = novoTurnoId;
+      iaDoCerebro = null;
+      const esta = { ia, antes, prazo: null as ReturnType<typeof setTimeout> | null };
+      esta.prazo = agendar(prazos.cerebroPrimeiroMs, () => {
+        // O cérebro novo não apareceu: a ligação volta ao aviso (a pessoa escolhe de novo) em vez de cair.
+        if (reabrindo === esta && !cerebro && !encerrada) entrarSemIa("falhou", ia);
+      });
+      reabrindo = esta;
+      log("info", "ligacao_cerebro_reaberto", { ligacao_id: r.ligacaoId, harness: ia, trocou: antes !== null && antes !== ia, quedas: quedasDoCerebro });
+      mudarFase("conectando");
+      return true;
+    }
+
+    /** O cérebro novo atendeu: a tela troca o aviso, a ligação volta a ouvir e o bot retoma em voz. */
+    function retomarComCerebroNovo(a: { ia: IaDaLigacao | null; antes: IaDaLigacao | null }): void {
+      const trocou = a.ia !== null && a.antes !== null && a.antes !== a.ia;
+      paraMidia({ t: "ia-voltou", ia: a.ia, trocou });
+      log("info", "ligacao_cerebro_voltou", { ligacao_id: r.ligacaoId, harness: a.ia, trocou });
+      reiniciarOciosidade();
+      // A frase de retomada do roteiro ("Voltei!") sai do cache; o que vem depois é do cérebro novo, numa brecha.
+      const avisou = tocarEspera("voltou");
+      notasParaFalar.push({ texto: vezDeRetomada(avisou), confiavel: true, comoVez: true });
+      proximaNota();
+      agendar(300, proximaDecisao);
     }
 
     let segmentador = criarSegmentador();
@@ -1421,6 +1690,12 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           // ADR-072: o bot chamou `desligar` — encerra depois da última frase dele.
           if (msg.tipo === "inicio" && /(^|__)desligar$/.test(nome)) desligando = true;
           if (msg.tipo === "fim" && /(^|__)desligar$/.test(nome)) desligarDepoisDeFalar();
+          return;
+        }
+        case "ola": {
+          // Qual IA está respondendo (o `harness` do laço de voz): é o que o aviso da queda nomeia.
+          const caps = typeof msg.capacidades === "object" && msg.capacidades !== null ? (msg.capacidades as Record<string, unknown>) : {};
+          if (ehIaDaLigacao(caps.harness)) iaDoCerebro = caps.harness;
           return;
         }
         case "ping":
@@ -1528,7 +1803,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
      * Aviso do sistema ao cérebro. `falar=false`: só contexto (ex.: decisão já dita). `falar=true`: o bot fala a
      * resposta numa brecha (pessoa calada, bot calado, fora da janela) — é assim que "terminei a tarefa" chega à ligação.
      */
-    const notasParaFalar: { texto: string; confiavel: boolean }[] = [];
+    /** `comoVez` (2026-10-05): vai como `vez` do sistema em vez de `nota` — ver `vezDeRetomada` (ligacao-sem-ia.ts). */
+    const notasParaFalar: { texto: string; confiavel: boolean; comoVez?: boolean }[] = [];
     function nota(texto: string, falar = false, confiavel = true): void {
       const linha = texto.startsWith("[nod]") ? texto : `[nod] ${texto}`;
       if (!falar) {
@@ -1545,7 +1821,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
         agendar(500, proximaNota);
         return;
       }
-      const { texto, confiavel } = notasParaFalar.shift()!;
+      const { texto, confiavel, comoVez } = notasParaFalar.shift()!;
       const n = ++nVez;
       abrirMedicao(n, "nota", relogio());
       vezAtual = n;
@@ -1559,7 +1835,8 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       okNaoEFala = false;
       ditosNaVez.clear();
       segmentador = criarSegmentador();
-      paraCerebro({ t: "nota", texto, confiavel, n });
+      if (comoVez) paraCerebro({ t: "vez", n, texto });
+      else paraCerebro({ t: "nota", texto, confiavel, n });
       mudarFase("pensando");
     }
     function silencioDaPessoaMs(): number {
@@ -1583,6 +1860,10 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       pedirAprovacao,
       conferirComando,
       decisaoDecidida,
+      cerebroTerminou,
+      aguardandoEscolha: () => semIa !== null && !encerrada,
+      reabrirCerebro,
+      turnoAtual: () => ref.turnoId,
       avisar: (texto: string) => falarAviso(texto),
       encerrada: () => encerrada,
       ultimaAtividadeEm: () => ultimaAtividadeEm,
@@ -1606,8 +1887,20 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     },
     anexarCerebro({ turnoId, ligacaoId, canal }) {
       const l = ligacoes.get(ligacaoId);
-      if (!l || l.registro.turnoId !== turnoId) return FECHAMENTOS_VOZ.naoEncontrada;
+      // O turno-cérebro ATUAL: depois de uma queda da IA, é o turno que a pessoa mandou abrir (reabrirCerebro).
+      if (!l || l.turnoAtual() !== turnoId) return FECHAMENTOS_VOZ.naoEncontrada;
       return l.anexarCerebro(canal);
+    },
+    cerebroTerminou(ligacaoId, p) {
+      return ligacoes.get(ligacaoId)?.cerebroTerminou(p) ?? false;
+    },
+    aguardandoEscolha({ pessoaId, ligacaoId }) {
+      const l = ligacoes.get(ligacaoId);
+      return !!l && l.registro.pessoaId === pessoaId && l.aguardandoEscolha();
+    },
+    reabrirCerebro({ pessoaId, ligacaoId, turnoId, ia }) {
+      const l = ligacoes.get(ligacaoId);
+      return !!l && l.registro.pessoaId === pessoaId && l.reabrirCerebro(turnoId, ia);
     },
     async encerrar(ligacaoId, motivo) {
       await ligacoes.get(ligacaoId)?.encerrar(motivo);

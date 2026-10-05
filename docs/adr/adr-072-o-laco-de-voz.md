@@ -1,7 +1,7 @@
 # ADR-072 — O laço de voz: turno `ligacao` próprio, fora da serialização
 
 **Status** novo · decidido em 2026-10-04 (plano em docs/plano-modo-ligacao.md) · emendada em 2026-10-05 (NOD-164: o
-modelo da ligação)
+modelo da ligação; rede de segurança: a IA cai no meio da ligação)
 
 ## Decisão
 
@@ -97,3 +97,60 @@ Codex que deveria provar a troca passava com ou sem o override, porque montava o
 quebra (soltar a candidata do desktop antes do deploy, ou segurar o Haiku na config até lá). O 4.6 custa perto de 3x
 o Haiku pela tabela. `turno_despachado.dados.modelo` não registra o modelo de voz; a comparação em produção usa a
 janela do deploy (`primeiro_delta_ms`/`primeiro_tocado_ms` do log `ligacao_vez`).
+
+## Emenda 2026-10-05 — rede de segurança: a IA do Mac cai com a ligação em curso
+
+**Medido em produção em 2026-10-05.** A conta do Claude Code da pessoa estava logada e sem acesso (a organização
+desativou o uso por assinatura). O turno-cérebro falhou em segundos; a bot disse a saudação (que é roteiro) e ficou
+muda: a pessoa falou 4 vezes em 30 s (`primeiro_delta_ms: null` nas quatro linhas de `ligacao_vez`), nada na tela dizia
+o motivo, e ela desligou. O teste da IA antes da ligação (emenda da ADR-019/077) cobre o começo; esta emenda cobre o
+que sobra: a IA cair com a ligação já aberta.
+
+**O que muda.** Uma ligação pode ter mais de um turno-cérebro, um de cada vez. O turno `origem='ligacao'` que termina
+com a ligação viva é "a IA caiu" (`src/domain/ligacao-sem-ia.ts`), e a ligação não fica muda nem cai:
+
+- **Como o orquestrador sabe.** O evento do turno-cérebro (`turno_encerrado`/`turno_interrompido`, `origem: "ligacao"`)
+  passa a levar por que ele parou, só em código: `motivo`, `motivo_falha`, `harness` e `causa_sem_ia` (o `causaSemIa` do
+  resultado, quando o driver o preenche). A composição entrega o frame a `voz.cerebroTerminou`. Fica de fora quem não é
+  queda da IA: `parado_pela_pessoa`, `maquina_sem_contato`, `reinicio_servidor` e `absorvido` seguem o caminho antigo
+  (reconexão e `cerebro_caiu`). Um turno que termina "com sucesso" com a ligação viva também conta.
+- **A frase.** "Não consegui usar a IA deste Mac. As opções estão na tela." é roteiro (categoria `sem_ia` da biblioteca
+  de esperas, para sair do cache de clipes; sem clipe, é sintetizada na hora). Sai como `aviso` e entra na transcrição.
+  A frase "perdi a conexão com o seu Mac" passa a esperar 1,5 s depois de o canal fechar, para não sair antes dela.
+- **A espera.** Fase nova `aguardando_escolha`. A ligação para de ouvir, como no mudo: o áudio não vai ao STT, o texto
+  digitado é descartado e nenhuma vez nasce sem ter quem responda; a vez que estava aberta é solta (desfecho
+  `cerebro_caiu` no `ligacao_vez`). Esperas, ociosidade e a leitura de aprovações ficam suspensas. Sem escolha em 2 min
+  (`ESPERA_DA_ESCOLHA_MS`), a ligação encerra com o motivo novo `sem_ia` (0055; o CHECK de `ligacoes.motivo_fim` é
+  conferido por `tests/conformidade/ligacao-motivo-fim.test.ts`).
+- **Protocolo de mídia** (só adição): servidor → `{t:"sem-ia", causa, ia, ias, ate}` (reenviada quando o estado de uma IA
+  do Mac muda e quando a página reconecta) e `{t:"ia-voltou", ia, trocou}`; cliente → `{t:"resolvendo"}` (a pessoa abriu
+  o login ou a instalação: a espera recomeça, até 5 vezes por queda). As frases do aviso são da web
+  (`web/telas/ligacao-sem-ia.ts`); o servidor manda códigos.
+- **Continuar.** `POST ligacoes/:id/continuar {ia}` só vale com a ligação esperando (409 fora disso; 400 para IA
+  desconhecida). `reabrirCerebroDaLigacao` enfileira outro turno `ligacao` para a MESMA ligação com o harness forçado e
+  o modelo em "auto" (o da voz é do servidor), conta em `ligacoes.religacoes` e não mexe na preferência do bot. O
+  orquestrador troca o turno que o canal do cérebro aceita; o cérebro novo recebe na vez 0 que chegou no meio e, como
+  nota não confiável, as últimas 12 falas (memória da ligação viva, nunca log). A bot retoma com "Voltei!" (clipe
+  `voltou`) e um pedido de retomada mandado como `vez` do sistema, com número próprio — não como `nota`, porque o laço
+  do Codex responde a uma nota com o número da vez mais recente, que num cérebro recém-chegado é a 0 (nunca falada). Cérebro novo que cai, ou que não aparece em `cerebroPrimeiroMs`, devolve a
+  ligação ao aviso em vez de derrubá-la.
+- **Log** (sem fala e sem texto do fornecedor): `ligacao_cerebro_caiu {causa, harness, outra_pronta, vez_sem_resposta,
+  quedas}`, `ligacao_cerebro_reaberto`, `ligacao_cerebro_voltou`.
+
+**Por quê na mesma ligação.** Nada no banco nem no protocolo de mídia prendia a ligação a um turno só (o índice
+`turnos_por_ligacao` não é único, o plano só exige a ligação viva, a mídia não conhece turnos); o único vínculo era o
+`turnoId` guardado no registro do orquestrador. Encerrar e ligar de novo faria a pessoa recomeçar a ligação (outra
+saudação; no onboarding, outro "Atender") por um problema que ela resolve com um clique.
+
+**Custo aceito.** O harness é forçado só no turno-cérebro: o trabalho que a bot iniciar na ligação (`iniciar_tarefa`)
+segue a preferência dela. O cérebro novo só conhece as últimas 12 falas e o que o plano já leva (memórias, as últimas
+mensagens da conversa, o roteiro do onboarding no estado atual). Na pílula o aviso aparece embaixo dela; a tela não é
+aberta à força.
+
+**Não verificado com voz e IA reais.** Coberto por `tests/unit/voz/orquestrador-sem-ia.test.ts`,
+`tests/integration/ligacao-sem-ia.test.ts` e pelo caso "o cérebro cai no meio" de
+`tests/concurrency/ligacao-catcher.test.ts` (duas IAs falsas sobre o laço de voz do catcher). O `causaSemIa` ainda não
+é preenchido por nenhum driver neste commit: até lá, toda queda sai com a causa genérica.
+
+**Gatilho de reversão.** Se `ligacao_cerebro_reaberto` seguido de outra `ligacao_cerebro_caiu` na mesma ligação passar
+de 1 em cada 3, continuar na mesma ligação não está funcionando: o aviso passa a oferecer só encerrar e ligar de novo.
