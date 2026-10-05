@@ -3,6 +3,7 @@ import type { IdHarness } from "../../contracts/harness.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
+import { redigirECortar } from "../../domain/segredos.ts";
 import { log } from "../../obs/log.ts";
 import { metricas as registroPadrao } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
@@ -175,7 +176,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           // Best-effort: um SAVEPOINT isola a escrita para que ela NUNCA derrube o assentamento.
           // erro_cru vem do fornecedor sem teto de tamanho, e um timeout no insert do toast levaria
           // junto a mensagem do agente, o gasto e o outbox — o observador não pode destruir o
-          // observado. Truncado em 8 KiB, o mesmo teto do corte de resultado do proxy.
+          // observado. Truncado em 8 KiB, o mesmo teto do corte de resultado do proxy, e redigido
+          // antes do corte (NOD-158): o relato e a exportação do diagnóstico leem daqui.
           if (e.resultado.desfecho !== "sucesso" && !r.data.duplicada) {
             try {
               await d.tx(async (t) => {
@@ -183,7 +185,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
                 try {
                   await criarRepos(t, escopo).relatos.registrarDiagnostico({
                     turnoId: e.turnoId,
-                    erroCru: e.resultado.erroCru ? e.resultado.erroCru.slice(0, 8000) : null,
+                    erroCru: redigirECortar(e.resultado.erroCru, 8000),
                     ferramentas: e.resultado.ferramentasChamadas,
                     negacoes: e.resultado.negacoesPermissao,
                     sessaoCli: e.resultado.sessaoCli,

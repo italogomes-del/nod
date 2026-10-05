@@ -1,6 +1,7 @@
 import type { Mensagem } from "../contracts/mensagem.ts";
 import { JANELA_RELATO_MS, type EntradaRelato, type Relato } from "../contracts/relato.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { redigirSegredos } from "../domain/segredos.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -66,11 +67,12 @@ export const registrarRelato: CasoDeUso<EntradaRelato, SaidaRegistrarRelato> = a
 
   // Aparado aqui também, não só no validador da borda: quem chamar o caso de uso por outro caminho
   // não grava espaço em branco como se fosse complemento da pessoa.
+  // NOD-158: a prosa é uma cópia que sai do contexto vivo, então vai redigida; a mensagem gravada não muda.
   const textoPessoa = input.texto?.trim() ?? "";
   await deps.repos.relatos.gravarProsa({
     relatoId: relato.id,
-    textoPessoa: textoPessoa === "" ? null : textoPessoa,
-    trecho: { mensagens: anexadas.map((m) => ({ id: m.id, autor: autorDe(m), kind: m.kind, texto: m.texto, em: m.criadoEm })) },
+    textoPessoa: textoPessoa === "" ? null : redigirSegredos(textoPessoa),
+    trecho: { mensagens: anexadas.map((m) => ({ id: m.id, autor: autorDe(m), kind: m.kind, texto: redigirSegredos(m.texto), em: m.criadoEm })) },
   });
 
   // Só escalares no evento (DadosEvento): o texto do relato NUNCA sai daqui (ADR-004).

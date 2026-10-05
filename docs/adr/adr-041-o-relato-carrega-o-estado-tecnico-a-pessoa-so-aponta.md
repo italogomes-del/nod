@@ -90,3 +90,16 @@ desfecho não está filtrando o suficiente; (c) a janela de 15 minutos provar-se
 se a maioria dos relatos úteis precisar de contexto anterior à janela, a constante muda, e se ninguém
 usar o alcance `janela`, ele sai; ou (d) a promoção manual para o Linear virar gargalo, momento em que
 a integração adiada volta à mesa com o formato real dos relatos já conhecido.
+
+## Emenda (2026-10-05, NOD-158) — o snapshot sai redigido
+
+O snapshot do relato continua fiel: formato, tamanho e o **nome** do segredo são preservados, e só o
+valor some (`ANTHROPIC_API_KEY=«redigido: 51 caracteres»`). Passam pelo redator único
+`src/domain/segredos.ts` o `erro_cru` de `turno_diagnosticos` (redigido antes do corte de 8 KiB), o
+texto da pessoa e o trecho em `relato_prosa`, os valores do log e o `cause` da recusa HTTP (`erros.ts`,
+redigido antes do corte de 200). A mensagem gravada na conversa não
+muda. Os padrões são de alta precisão (prefixos de chave, Bearer, JWT, PEM, `chave=valor` com nome de
+segredo, `--token`, senha em URL), então UUID, sha e código continuam legíveis.
+
+Contrato para quem exporta (NOD-138, diagnóstico; NOD-44, conversa): use `redigirECortar` antes de
+qualquer corte. Cortar primeiro parte o segredo, e o pedaço que sobra não é mais reconhecido.

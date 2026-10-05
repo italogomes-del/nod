@@ -1,4 +1,5 @@
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../contracts/turno.ts";
+import { redigirECortar } from "./segredos.ts";
 
 /**
  * Parser PURO do `claude -p --output-format stream-json --verbose --include-partial-messages`
@@ -170,7 +171,7 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       erroCru:
         subtype === "success" && o["is_error"] !== true
           ? null
-          : [subtype, str(o["error"]), Array.isArray(o["errors"]) ? o["errors"].map(String).join("; ") : "", str(o["result"])].filter(Boolean).join(" | ").slice(0, 500) || null,
+          : redigirECortar([subtype, str(o["error"]), Array.isArray(o["errors"]) ? o["errors"].map(String).join("; ") : "", str(o["result"])].filter(Boolean).join(" | "), 500),
       sessaoCli: typeof o["session_id"] === "string" ? o["session_id"] : null,
       texto: str(o["result"]),
       custoUsd: num(o["total_cost_usd"]),

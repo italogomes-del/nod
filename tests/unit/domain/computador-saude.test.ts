@@ -60,8 +60,14 @@ describe("saúde do computador do bot (emenda da ADR-037)", () => {
 
   it("o detalhe do log é a 1ª linha, curta e sem nada com cara de segredo", () => {
     expect(resumirDetalhe("\n  Error response from daemon: No such container: nod-computador-x\nstack…")).toBe("Error response from daemon: No such container: nod-computador-x");
-    expect(resumirDetalhe(`token=${"a".repeat(64)} e Bearer abc.def`)).toBe("token=[redigido] e Bearer [redigido]");
-    expect(resumirDetalhe(`chave ${"0f".repeat(32)} vazou`)).toBe("chave [redigido] vazou");
+    expect(resumirDetalhe(`token=${"a".repeat(64)} e Bearer abc.def.ghi.jkl`)).toBe("token=«redigido: 64 caracteres» e Bearer «redigido: 15 caracteres»");
+    expect(resumirDetalhe(`chave ${"0f".repeat(32)} vazou`)).toBe("chave «redigido: 64 caracteres» vazou");
+    // Regression: ISSUE-001 — o resumirDetalhe antigo pegava `senha=` curta; o redator novo deixava passar
+    expect(resumirDetalhe("Error: senha=hunter2 recusada")).toBe("Error: senha=«redigido: 7 caracteres» recusada");
+    // o teto de 200 nunca parte o marcador
+    const cortada = resumirDetalhe(`${"x ".repeat(95)}token=${"b".repeat(30)}`)!;
+    expect(cortada.length).toBeLessThanOrEqual(200);
+    expect(cortada).not.toContain("«");
     expect(resumirDetalhe("x".repeat(500))?.length).toBeLessThanOrEqual(200);
     expect(resumirDetalhe(null)).toBeNull();
     expect(resumirDetalhe("  \n ")).toBeNull();

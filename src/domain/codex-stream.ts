@@ -1,4 +1,5 @@
 import type { EventoStream } from "../contracts/turno.ts";
+import { redigirECortar } from "./segredos.ts";
 
 /**
  * definido em 2026-09-18: normaliza eventos de codex exec --json; custo desconhecido permanece null.
@@ -28,10 +29,8 @@ export function interpretarCodex(linha: string): EventoStream[] {
 /** definido em 2026-10-05: o motivo cru cabe numa linha de diagnóstico; o resto de um erro longo não ajuda. */
 export const ERRO_CODEX_MAX_CHARS = 500;
 
-const aparar = (texto: string): string | null => {
-  const t = texto.trim();
-  return t === "" ? null : t.slice(0, ERRO_CODEX_MAX_CHARS);
-};
+/** NOD-158: redige antes de cortar; o stderr do Codex chega a ecoar `OPENAI_API_KEY=…`. */
+const aparar = (texto: string): string | null => redigirECortar(texto.trim(), ERRO_CODEX_MAX_CHARS);
 
 /** `{ message }` ou texto solto, como o Codex manda em `turn.failed.error`, `item.error` e no evento `error`. */
 function mensagemDe(erro: unknown): string | null {

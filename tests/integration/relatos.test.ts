@@ -193,4 +193,30 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
       expect(naLista?.diagnostico).toEqual({ erroCru: "causa real", ferramentas: ["Read"], negacoes: [], sessaoCli: "s1" });
     });
   });
+
+  it("o relato sobre uma mensagem com ghp_… guarda o marcador na prosa e deixa a mensagem intacta (NOD-158)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      // Montado em tempo de execução para não parecer chave real ao secret scanning.
+      const ghp = `ghp_${"a1B2".repeat(9)}`;
+      const texto = `o push falhou com ${ghp}`;
+      const mensagem = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, turnoId: null, autoria: autoriaPessoa(PESSOA_MARLON),
+        kind: "texto", texto, confianca: "confiavel", parcial: false,
+      });
+      const r = await registrarRelato(deps(trx, escopo, agora), {
+        mensagemId: mensagem!.id, categoria: "outro", alcance: "mensagem", texto: `colei a chave ${ghp} sem querer`,
+      });
+
+      const prosa = await a.repos.relatos.prosaDe(r.data.relato.id);
+      const marcador = `«redigido: ${ghp.length} caracteres»`;
+      expect(prosa?.trecho?.mensagens[0]?.texto).toBe(`o push falhou com ${marcador}`);
+      expect(prosa?.textoPessoa).toBe(`colei a chave ${marcador} sem querer`);
+      expect(JSON.stringify(prosa)).not.toContain(ghp);
+      // A conversa não muda: só a cópia que sai do contexto vivo é redigida.
+      expect((await a.repos.mensagens.buscar(mensagem!.id))?.texto).toBe(texto);
+    });
+  });
 });
+

@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { ehErroDeDominio, ErroDeDominio, type CodigoErro } from "../../domain/erro.ts";
+import { redigirECortar } from "../../domain/segredos.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
 import { json } from "./util.ts";
@@ -60,7 +61,8 @@ function logarRecusa(err: ErroDeDominio, status: number, origem: OrigemRequisica
     status,
     metodo: origem?.metodo,
     rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"),
-    causa: bruta?.slice(0, 200),
+    // NOD-158: redige antes de cortar; cortar primeiro deixaria um pedaço de segredo que o log não reconhece.
+    causa: redigirECortar(bruta, 200) ?? undefined,
   });
 }
 

@@ -1,6 +1,7 @@
 import type { AcaoComputador } from "../contracts/computador.ts";
 import type { MotivoFalhaComputador } from "../contracts/motivos.ts";
 import { ErroDeDominio } from "./erro.ts";
+import { mascarar, redigirECortar, redigirSegredos } from "./segredos.ts";
 
 /**
  * definido em 2026-09-24 (emenda da ADR-037): a falha do computador do bot com código FECHADO. Antes o
@@ -79,16 +80,17 @@ export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDe
 /**
  * A 1ª linha não vazia do stderr, com até 200 caracteres e sem nada com cara de segredo. Só vai para
  * o log (computador_falhou) — nunca para a pessoa, o agente ou o banco.
+ *
+ * NOD-158: usa o redator único. A heurística de string longa fica SÓ aqui, depois do redator: este
+ * texto é stderr do Docker e nunca traz código da pessoa, então reescrever um hash longo não custa nada.
  */
 export function resumirDetalhe(texto: string | null | undefined): string | null {
   const linha = (texto ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l !== "");
   if (!linha) return null;
-  return linha
-    .replace(/(bearer\s+)\S+/gi, "$1[redigido]")
-    .replace(/\b(senha|password|passwd|token|secret|segredo|chave|key|authorization|cookie)(\s*[=:]\s*)\S+/gi, "$1$2[redigido]")
-    .replace(/[A-Za-z0-9+_=-]{40,}/g, "[redigido]")
-    .replace(/\b[a-f0-9]{32,}\b/gi, "[redigido]")
-    .slice(0, 200);
+  const redigida = redigirSegredos(linha)
+    .replace(/[A-Za-z0-9+_=-]{40,}/g, mascarar)
+    .replace(/\b[a-f0-9]{32,}\b/gi, mascarar);
+  return redigirECortar(redigida, 200);
 }
 
 export function validarAcaoComputador(valor: unknown): AcaoComputador {

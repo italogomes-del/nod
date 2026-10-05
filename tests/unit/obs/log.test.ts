@@ -23,6 +23,13 @@ describe("log JSON único", () => {
     expect(obj).toMatchObject({ tenant_id: null, pessoa_id: null, correlation_id: null });
   });
 
+  it("os valores string saem redigidos: erro_cru com token=… grava o marcador (NOD-158)", () => {
+    const linha = log("erro", "turno_nao_concluiu", { erro_cru: "token=abc12345678", turno_id: "t" });
+    expect(JSON.parse(linha).erro_cru).toBe("token=«redigido: 11 caracteres»");
+    expect(linha).not.toContain("abc12345678");
+    expect(JSON.parse(linha).turno_id).toBe("t");
+  });
+
   it("nunca ecoa o campo texto (canal de vazamento, ADR-002/004)", () => {
     const linha = log("erro", "mensagem_falhou", { texto: "cpf do cliente 123", conversa_id: "c" });
     expect(linha).not.toContain("cpf");

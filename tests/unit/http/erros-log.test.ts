@@ -47,6 +47,14 @@ describe("responderErro registra a recusa no log", () => {
     expect(b?.causa).toBe("json_malformado");
   });
 
+  it("o cause é redigido ANTES do corte de 200 (NOD-158): nenhum pedaço do segredo sobra", () => {
+    const tok = "ghp_" + "a1B2".repeat(9);
+    responderErro(resposta().res, new ErroDeDominio("entrada_invalida", { cause: `${"x".repeat(190)} ${tok}` }));
+    const causa = String(linhas()[0]?.causa);
+    expect(causa.length).toBeLessThanOrEqual(200);
+    expect(causa).not.toContain("ghp_");
+  });
+
   it("id malformado do Postgres (22P02) também deixa rastro", () => {
     const r = resposta();
     responderErro(r.res, Object.assign(new Error("invalid input syntax for type uuid: \"abc\""), { code: "22P02" }), { metodo: "GET", caminho: "/api/x" });
