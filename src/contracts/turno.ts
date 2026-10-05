@@ -1,5 +1,6 @@
 import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
+import type { CausaSemIa } from "./inventario.ts";
 import type { Confianca } from "./mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoSemNovidade } from "./motivos.ts";
 import type { CatalogoDeComandos } from "./comandos.ts";
@@ -104,6 +105,11 @@ export type ResultadoTurno = {
   negacoesPermissao: string[];
   /** Motivo cru da falha, só para diagnóstico em log (0005: antes o `erro_execucao` chegava sem causa). */
   erroCru?: string | null;
+  /**
+   * definido em 2026-10-05: o turno falhou porque a CONTA da IA não serve (logada e sem acesso). O servidor marca essa
+   * IA como fora para a pessoa e, no bot em automático, repete o pedido na outra IA pronta (src/contracts/inventario.ts).
+   */
+  causaSemIa?: CausaSemIa;
   /** Modo dev (0036): cada chamada à API e as compactações do turno. Ausente no Codex e no catcher. */
   execucao?: ExecucaoRaioX;
   /** O "/" do chat (0038): o catálogo do Mac, só quando mudou desde a última entrega deste app. */

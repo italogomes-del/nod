@@ -1,3 +1,5 @@
+import type { CausaSemIa } from "./inventario.ts";
+
 /**
  * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela
  * (desktop/preload-web.ts) expõe como `window.nodDesktop`. Só tipos e `as const` (EMENDA 26): a web
@@ -38,6 +40,16 @@ export type IaDesktop = (typeof IAS_DESKTOP)[number];
 /** "iniciado": o login (ou a página) abriu no navegador; o app sonda de novo a cada 3 s e reanuncia quando ficar pronto. */
 export type ResultadoIaDesktop = { ok: true } | { ok: false; motivo: "nao_instalado" | "falhou" };
 
+/**
+ * O teste de verdade de uma IA do Mac (definido em 2026-10-05, emenda da ADR-019/077): um turno de uma frase, pago pela
+ * assinatura da pessoa. `resposta` é o que a IA disse (até RESPOSTA_TESTE_IA_MAX caracteres), só quando ficou pronta;
+ * `causa` só quando a IA está logada e mesmo assim não serviu. O Mac reanuncia o inventário ao servidor com o veredito.
+ */
+export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa; resposta?: string };
+export const RESPOSTA_TESTE_IA_MAX = 200;
+/** O nome que entra na pergunta do teste ("Diga oi para {nome}…"): só letras, espaço, ponto e hífen, até este tamanho. */
+export const NOME_TESTE_IA_MAX = 40;
+
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
   avisar(aviso: AvisoDesktop): Promise<boolean>;
@@ -67,6 +79,12 @@ export type NodDesktop = {
    */
   iaEntrar?(ia: IaDesktop): Promise<ResultadoIaDesktop>;
   iaInstalar?(ia: IaDesktop): Promise<ResultadoIaDesktop>;
+  /**
+   * Testa de verdade as IAs do Mac que têm login (ou só `ia`, quando dada) e devolve o veredito de cada uma das duas.
+   * `nome` personaliza a pergunta. Chamadas simultâneas esperam o mesmo teste. Opcional: o app instalado antes de
+   * 2026-10-05 não tem, e a web segue então com o que a sonda de login disse.
+   */
+  iaTestar?(pedido?: { nome?: string; ia?: IaDesktop }): Promise<TesteDeIa[]>;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -83,6 +101,7 @@ export const CANAIS_DESKTOP = {
   emLigacao: "nod:em-ligacao",
   iaEntrar: "nod:ia-entrar",
   iaInstalar: "nod:ia-instalar",
+  iaTestar: "nod:ia-testar",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */
