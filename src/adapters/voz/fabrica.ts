@@ -2,6 +2,7 @@ import { ErroDeDominio } from "../../domain/erro.ts";
 import { log } from "../../obs/log.ts";
 import type { ProvedorVoz } from "./catalogo-vozes.ts";
 import { criarTranscritorGoogle } from "./google-transcricao.ts";
+import { criarTransporteHttp2 } from "./google-voz-streaming.ts";
 import { criarSintetizadorGoogle } from "./google-voz.ts";
 import { criarSintetizadorSay } from "./local-say.ts";
 import { criarTranscritorWhisperLocal } from "./local-whisper.ts";
@@ -62,14 +63,21 @@ export function criarProvedoresVoz(env: Record<string, string | undefined>, plat
   let tts: Sintetizador;
   if (qualTts === "google") {
     const f = token();
-    tts = criarSintetizadorGoogle({ token: () => f.token(), projeto: f.projeto });
+    // definido em 2026-10-04: a voz do Google sai em streaming (o REST fica de rede de segurança); NOD_VOZ_TTS_STREAMING=0
+    // volta ao REST puro.
+    if (env.NOD_VOZ_TTS_STREAMING === "0") tts = criarSintetizadorGoogle({ token: () => f.token(), projeto: f.projeto });
+    else {
+      const transporte = criarTransporteHttp2();
+      encerrar.push(async () => transporte.fechar());
+      tts = criarSintetizadorGoogle({ token: () => f.token(), projeto: f.projeto, streaming: { transporte } });
+    }
   } else if (qualTts === "local") {
     tts = criarSintetizadorSay();
   } else {
     tts = criarSintetizadorFalso();
   }
 
-  log("info", "voz_provedores", { stt: qualStt, tts: qualTts });
+  log("info", "voz_provedores", { stt: qualStt, tts: qualTts, tts_streaming: tts.capacidades.streaming });
   return {
     stt,
     tts,

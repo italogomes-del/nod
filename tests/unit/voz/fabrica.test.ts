@@ -30,6 +30,15 @@ describe("voz: fábrica de provedores", () => {
     await Promise.all([a.encerrar(), b.encerrar(), c.encerrar(), d.encerrar()]);
   });
 
+  it("a voz do Google sai em streaming por padrão; NOD_VOZ_TTS_STREAMING=0 volta ao REST puro", async () => {
+    const padrao = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "google", NOD_VOZ_PROJETO: "p" }, "linux");
+    expect(padrao.tts.capacidades.streaming).toBe(true);
+    const rest = criarProvedoresVoz({ NOD_VOZ_STT: "falso", NOD_VOZ_TTS: "google", NOD_VOZ_PROJETO: "p", NOD_VOZ_TTS_STREAMING: "0" }, "linux");
+    expect(rest.tts.capacidades.streaming).toBe(false);
+    // Encerrar fecha a sessão HTTP/2 (nenhuma foi aberta: ela só nasce no primeiro pedido).
+    await Promise.all([padrao.encerrar(), rest.encerrar()]);
+  });
+
   it("valor inválido e TTS local fora do Mac falham no boot", () => {
     expect(() => criarProvedoresVoz({ NOD_VOZ_STT: "azure" }, "darwin")).toThrow("entrada_invalida");
     expect(() => criarProvedoresVoz({ NOD_VOZ_TTS: "local" }, "linux")).toThrow("integracao_nao_configurada");

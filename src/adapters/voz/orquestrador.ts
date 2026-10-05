@@ -124,6 +124,8 @@ const VIGIA_SEM_TEXTO_MS = 1_500;
  * cancelava a decisão de novo, e a vez nunca saía.
  */
 const JANELA_RUIDO_MS = 5_000;
+/** definido em 2026-10-04: ver `conteudoParaSoar` (a faixa lenta do streaming medido fica em ~1,2 s). */
+const CONTEUDO_PARA_SOAR_MS = 1_500;
 /** definido em 2026-10-04: a medição da vez respondida espera 10 s pelo `tocado` do app e pelos buracos de áudio. */
 const MEDICAO_ESPERA_MS = 10_000;
 /** definido em 2026-10-04: pedaço de voz mandado ao cliente (100 ms a 24 kHz). */
@@ -399,13 +401,22 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       timersEspera = [];
     }
 
+    /**
+     * definido em 2026-10-04: com a voz em streaming, o áudio de um trecho chega em ~0,35–1,2 s (medido). Se o conteúdo
+     * já está sendo sintetizado há menos de 1,5 s, o "Hum, deixa eu ver…" só atrasaria a resposta que está para soar.
+     * Com a voz que sintetiza a frase inteira (REST, `say`), vale a regra antiga: a espera toca enquanto o áudio não vem.
+     */
+    function conteudoParaSoar(): boolean {
+      return deps.provedores.tts.capacidades.streaming && emSintese !== null && !emSintese.comAudio && relogio() - emSintese.desde < CONTEUDO_PARA_SOAR_MS;
+    }
+
     function agendarEsperasDaVez(n: number, texto: string): void {
       cancelarEsperas();
       const social = texto.split(/\s+/).length <= 3;
       const reconhecer = !r.onboarding && !social && aleatorio() < 0.4;
       if (reconhecer) timersEspera.push(agendar(TEMPOS_ESPERA.reconhecimentoMs, () => { if (vezAtual === n && primeiroSomDaVez) tocarEspera("reconhecimento"); }));
-      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando) tocarEspera("pensando"); }));
-      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoLongoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando) tocarEspera("pensando_longo"); }));
+      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando && !conteudoParaSoar()) tocarEspera("pensando"); }));
+      timersEspera.push(agendar(TEMPOS_ESPERA.pensandoLongoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando && !conteudoParaSoar()) tocarEspera("pensando_longo"); }));
     }
 
     // ---- voz do bot: fila e TTS -------------------------------------------------------------------------------------
@@ -496,7 +507,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let vezRespondida = true;
     /** Até quando o app ainda tem voz do bot para tocar (a fila de reprodução do cliente). */
     let tocaAte = 0;
-    let emSintese: { comAudio: boolean } | null = null;
+    let emSintese: { comAudio: boolean; desde: number } | null = null;
 
     async function tocarItem(item: ItemFila): Promise<void> {
       const utt = ++uttSeq;
@@ -543,7 +554,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       const preparo = preparar(item);
       const ac = preparo.ac;
       abortTts = ac;
-      const sintese = { comAudio: false };
+      const sintese = { comAudio: false, desde: relogio() };
       emSintese = sintese;
       anteciparFila();
       try {

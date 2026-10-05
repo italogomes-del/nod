@@ -52,7 +52,7 @@ function quadro(seq: number, voz: boolean): Uint8Array {
   return b;
 }
 
-function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, number>; tts?: Sintetizador; esperas?: FonteDeEsperas; aleatorio?: () => number; parciais?: boolean; stt?: Transcritor } = {}) {
+function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, number>; tts?: Sintetizador; esperas?: FonteDeEsperas; aleatorio?: () => number; parciais?: boolean; stt?: Transcritor; ligacaoId?: string } = {}) {
   const falsos = criarProvedoresFalsos({ roteiro: o.roteiro ?? [], silencioso: true, parciais: o.parciais === true });
   const provedores = o.tts ? { ...falsos, tts: o.tts } : falsos;
   const falas: FalaParaGravar[] = [];
@@ -68,11 +68,12 @@ function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, 
     ...(o.esperas ? { esperas: o.esperas } : {}),
     prazos: { midiaReconexaoMs: 100, cerebroReconexaoMs: 150, cerebroPrimeiroMs: 5000, confirmarInterrupcaoMs: 300, resumoMs: 50, ...o.prazos },
   });
-  const reg: RegistroLigacao = { ligacaoId: "l1", tenantId: "t", pessoaId: "p", agenteId: "a", conversaId: "c", turnoId: "turno", voz: "clara", velocidade: 1, nomeBot: "Nina", genero: "feminina", maxS: o.maxS ?? 600 };
+  const id = o.ligacaoId ?? "l1";
+  const reg: RegistroLigacao = { ligacaoId: id, tenantId: "t", pessoaId: "p", agenteId: "a", conversaId: "c", turnoId: "turno", voz: "clara", velocidade: 1, nomeBot: "Nina", genero: "feminina", maxS: o.maxS ?? 600 };
   voz.registrar(reg);
   const midia = canalFalso();
   const cerebro = canalFalso();
-  return { voz, provedores, falas, fins, midia, cerebro };
+  return { voz, provedores, falas, fins, midia, cerebro, id };
 }
 
 /** O "alto-falante" do teste: relata que tudo o que já foi mandado terminou de tocar. */
@@ -83,11 +84,11 @@ function tocouTudo(midia: CanalFalso): void {
 const msgs = (c: CanalFalso, t: string) => c.json.filter((m) => m.t === t) as (MsgMidiaServidor & MsgCerebroServidor & Record<string, unknown>)[];
 
 /** TTS lento (como o Google, ~1,2 s por frase) que anota quando cada síntese começou e terminou. */
-function ttsLento(ms: number) {
+function ttsLento(ms: number, streaming = false) {
   const log: { texto: string; inicio: number; fim: number | null; abortada: boolean }[] = [];
   const tts: Sintetizador = {
     id: "lento",
-    capacidades: { streaming: false, velocidade: true },
+    capacidades: { streaming, velocidade: true },
     async *sintetizar(p) {
       const reg = { texto: p.texto, inicio: Date.now(), fim: null as number | null, abortada: false };
       log.push(reg);
@@ -479,11 +480,13 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
   });
 
   const atender = async (m: ReturnType<typeof montar>) => {
-    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
-    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: m.id, retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: m.id, canal: m.cerebro });
     await dormir(30);
     tocouTudo(m.midia);
   };
+  /** As linhas de log desta ligação (outras ligações de teste ainda vivas também escrevem no mesmo console). */
+  const logDe = (linhas: string[], id: string) => linhas.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.ligacao_id === id);
   const conteudos = (midia: CanalFalso) => msgs(midia, "bot-fala").filter((m) => m.tipo === "conteudo").map((m) => m.texto);
 
   it("o que o bot diz logo antes de uma ferramenta é falado (antes o trecho era jogado fora)", async () => {
@@ -585,6 +588,27 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     await ate(() => outra.log[0]!.abortada);
   });
 
+  it("com a voz em streaming, o 'Hum, deixa eu ver…' não toca quando o conteúdo já está para soar; com a voz de frase inteira, toca", async () => {
+    const esperas: FonteDeEsperas = { obterPronto: () => new Int16Array(2400), aquecer: () => undefined };
+    for (const streaming of [true, false]) {
+      const { tts, log } = ttsLento(1200, streaming);
+      const m = montar({ tts, esperas });
+      m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+      m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+      await ate(() => log[0]?.fim);
+      tocouTudo(m.midia);
+      m.midia.receber({ t: "texto", conteudo: "me conta o que você faz" });
+      await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 1));
+      // O texto chega 0,8 s depois da vez; o relógio do "pensando" vence aos 1,6 s, com o áudio ainda por vir (aos 2,0 s).
+      await dormir(800);
+      m.cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Eu organizo suas tarefas do dia a dia. " });
+      m.cerebro.receber({ t: "fala-fim", n: 1 });
+      await ate(() => log.find((x) => x.texto.includes("organizo"))?.fim, 4000);
+      expect(msgs(m.midia, "bot-fala").some((x) => x.tipo === "espera"), `streaming=${streaming}`).toBe(!streaming);
+      await m.voz.encerrar("l1", "pessoa_desligou");
+    }
+  }, 15_000);
+
   it("anúncio sem ponto antes da ferramenta também sai, e o texto depois dela é outro trecho", async () => {
     const m = montar();
     await atender(m);
@@ -658,7 +682,7 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
   it("ruído segurando o VAD: a vigia fecha o trecho quando a transcrição para de andar, a vez sai e o ruído seguinte não a refaz", async () => {
     const linhas: string[] = [];
     vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
-    const m = montar({ parciais: true });
+    const m = montar({ parciais: true, ligacaoId: "ruido" });
     await atender(m);
     m.provedores.stt.empurrarTexto("Quero uma rotina nova");
     const seq = { n: 0 };
@@ -676,10 +700,10 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     await ate(() => conteudos(m.midia).includes("Vamos criar."));
     m.midia.receber({ t: "tchau" });
     await ate(() => m.fins.length > 0);
-    const fim = linhas.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.evento === "voz_ligacao_encerrada");
+    const fim = logDe(linhas, m.id).find((l) => l.evento === "voz_ligacao_encerrada");
     expect(Number(fim?.fechados_pela_vigia)).toBeGreaterThanOrEqual(2);
     expect(Number(fim?.trechos_descartados)).toBeGreaterThanOrEqual(1);
-    const medida = linhas.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.evento === "ligacao_vez" && l.n === 1);
+    const medida = logDe(linhas, m.id).find((l) => l.evento === "ligacao_vez" && l.n === 1);
     expect(medida).toMatchObject({ origem: "voz", fechou: "vigia", desfecho: "respondida" });
   }, 20_000);
 
@@ -801,7 +825,7 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
   it("ligacao_vez: uma linha por vez, com os tempos de cada etapa e nenhum texto falado", async () => {
     const linhas: string[] = [];
     vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
-    const m = montar();
+    const m = montar({ ligacaoId: "medida" });
     await atender(m);
     m.provedores.stt.empurrarTexto("quero saber da minha agenda");
     const seq = { n: 0 };
@@ -818,10 +842,10 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     m.midia.receber({ t: "tocado", utt: fala.utt, ms: 100 });
     m.midia.receber({ t: "tchau" });
     await ate(() => m.fins.length > 0);
-    const eventos = linhas.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const eventos = logDe(linhas, m.id);
     const vezes = eventos.filter((l) => l.evento === "ligacao_vez");
     expect(vezes).toHaveLength(1);
-    expect(vezes[0]).toMatchObject({ ligacao_id: "l1", n: 1, origem: "voz", desfecho: "respondida", trechos: 1, fechou: "vad", espera_fim_de_turno_ms: 600, ferramenta_antes_do_texto: true, texto_depois_da_ferramenta: true, onboarding: false, tts_streaming: false });
+    expect(vezes[0]).toMatchObject({ ligacao_id: "medida", n: 1, origem: "voz", desfecho: "respondida", trechos: 1, fechou: "vad", espera_fim_de_turno_ms: 600, ferramenta_antes_do_texto: true, texto_depois_da_ferramenta: true, onboarding: false, tts_streaming: false });
     for (const campo of ["trecho_fechado_ms", "stt_final_ms", "vez_ms", "primeiro_delta_ms", "primeiro_trecho_ms", "primeiro_audio_ms", "primeiro_tocado_ms", "voz_a_voz_ms", "ferramenta_ms"]) expect(typeof vezes[0]![campo], campo).toBe("number");
     expect(Number(vezes[0]!.ferramenta_ms)).toBeGreaterThanOrEqual(30);
     const fim = eventos.find((l) => l.evento === "voz_ligacao_encerrada");
@@ -854,14 +878,14 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
   it("quadros que o app descartou aparecem como salto na sequência", async () => {
     const linhas: string[] = [];
     vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
-    const m = montar();
+    const m = montar({ ligacaoId: "saltos" });
     await atender(m);
     m.midia.receber(quadro(0, false));
     m.midia.receber(quadro(1, false));
     m.midia.receber(quadro(7, false));
     m.midia.receber({ t: "tchau" });
     await ate(() => m.fins.length > 0);
-    const fim = linhas.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.evento === "voz_ligacao_encerrada");
+    const fim = logDe(linhas, m.id).find((l) => l.evento === "voz_ligacao_encerrada");
     expect(fim?.quadros_perdidos).toBe(5);
   });
 });
