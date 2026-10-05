@@ -2,7 +2,7 @@
  * Instância única e estado da janela web (definido em 2026-10-05, NOD-137). Abrir o nod de novo (segunda cópia, Dock,
  * clique no aviso) traz a janela atual para a frente, inclusive minimizada; a janela web reabre onde a pessoa deixou,
  * sempre inteira numa tela que existe. Sem Electron: tipos estruturais, testável no vitest
- * (tests/unit/desktop/janela.test.ts). Tela cheia não é lembrada; maximizada é.
+ * (tests/unit/desktop/janela.test.ts). Tela cheia não é lembrada (reabre em janela normal); maximizada é.
  */
 
 export type EstadoJanela = { x: number; y: number; largura: number; altura: number; maximizada: boolean };
@@ -23,14 +23,21 @@ export function focarJanela(w: JanelaFocavel | null | undefined): void {
 }
 
 /**
- * O estado a gravar agora, ou null quando não se grava: destruída (getNormalBounds lança), em tela cheia ou minimizada.
- * Os bounds normais valem também maximizada: reabre no tamanho de antes e maximiza. Passa pela mesma regra da leitura:
- * um tamanho zerado (getNormalBounds sem estado normal guardado) não entra na memória e reabriria a janela sem altura.
+ * O estado a gravar agora, ou null quando não se grava: destruída (getNormalBounds lança) ou minimizada. `anterior` é o
+ * último estado gravado.
+ * - Em tela cheia (UAT da NOD-137, 2026-10-05): o anterior sem maximizada. Fechou em tela cheia, abre em janela normal no
+ *   tamanho de antes, mesmo que tenha entrado na tela cheia maximizada; sair da tela cheia mede de novo.
+ * - Maximizada: os bounds normais do anterior. No macOS o getNormalBounds() só anda com maximize()/setBounds()/minimizar
+ *   do próprio Electron; depois do zoom da pessoa (duplo clique na barra, Option+verde) ele devolve os bounds da criação.
+ * Passa pela mesma regra da leitura: um tamanho zerado não entra na memória e reabriria a janela sem altura.
  */
-export function medirEstadoJanela(w: JanelaMedivel): EstadoJanela | null {
-  if (w.isDestroyed() || w.isFullScreen() || w.isMinimized()) return null;
+export function medirEstadoJanela(w: JanelaMedivel, anterior: EstadoJanela | null): EstadoJanela | null {
+  if (w.isDestroyed() || w.isMinimized()) return null;
+  if (w.isFullScreen()) return anterior && { ...anterior, maximizada: false };
+  const maximizada = w.isMaximized();
+  if (maximizada && anterior) return { ...anterior, maximizada };
   const b = w.getNormalBounds();
-  return lerEstadoJanela({ x: b.x, y: b.y, largura: b.width, altura: b.height, maximizada: w.isMaximized() });
+  return lerEstadoJanela({ x: b.x, y: b.y, largura: b.width, altura: b.height, maximizada });
 }
 
 const inteiro =(v: unknown): v is number => typeof v === "number" && Number.isInteger(v);

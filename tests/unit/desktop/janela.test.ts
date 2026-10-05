@@ -51,21 +51,60 @@ describe("medirEstadoJanela", () => {
     };
   }
 
-  it("normal: os bounds normais e maximizada false", () => {
-    expect(medirEstadoJanela(medivel())).toStrictEqual({ x: 120, y: 60, largura: 1300, altura: 820, maximizada: false });
+  const anterior: EstadoJanela = { x: 300, y: 200, largura: 1100, altura: 750, maximizada: false };
+
+  it("normal: os bounds normais e maximizada false, mesmo com um anterior", () => {
+    expect(medirEstadoJanela(medivel(), null)).toStrictEqual({ x: 120, y: 60, largura: 1300, altura: 820, maximizada: false });
+    expect(medirEstadoJanela(medivel(), anterior)).toStrictEqual({ x: 120, y: 60, largura: 1300, altura: 820, maximizada: false });
   });
 
-  it("maximizada: os bounds de antes de maximizar, com maximizada true", () => {
-    expect(medirEstadoJanela(medivel({ maximizada: true }))).toStrictEqual({ x: 120, y: 60, largura: 1300, altura: 820, maximizada: true });
+  it("maximizada sem anterior: os bounds de antes de maximizar (getNormalBounds), com maximizada true", () => {
+    expect(medirEstadoJanela(medivel({ maximizada: true }), null)).toStrictEqual({ x: 120, y: 60, largura: 1300, altura: 820, maximizada: true });
+  });
+
+  // UAT da NOD-137: no macOS o zoom da pessoa não atualiza o getNormalBounds(), que fica nos bounds da criação.
+  it("maximizada com anterior: os bounds normais do anterior, não os do getNormalBounds", () => {
+    expect(medirEstadoJanela(medivel({ maximizada: true }), anterior)).toStrictEqual({ ...anterior, maximizada: true });
+  });
+
+  // UAT da NOD-137: maximizar, pôr em tela cheia, sair e abrir reabria maximizada; deve abrir em janela normal.
+  it("em tela cheia: o anterior como janela normal, mesmo que tenha entrado maximizada", () => {
+    expect(medirEstadoJanela(medivel({ telaCheia: true }), { ...anterior, maximizada: true })).toStrictEqual(anterior);
+    expect(medirEstadoJanela(medivel({ telaCheia: true }), anterior)).toStrictEqual(anterior);
+  });
+
+  it("maximizar, tela cheia, sair da tela cheia: volta a gravar maximizada", () => {
+    const maximizada = medirEstadoJanela(medivel({ maximizada: true }), anterior);
+    const emTelaCheia = medirEstadoJanela(medivel({ telaCheia: true }), maximizada);
+    expect(emTelaCheia?.maximizada).toBe(false);
+    expect(medirEstadoJanela(medivel({ maximizada: true }), emTelaCheia)).toStrictEqual({ ...anterior, maximizada: true });
   });
 
   it.each([
     ["destruída", { destruida: true }],
-    ["em tela cheia", { telaCheia: true }],
+    ["em tela cheia sem anterior", { telaCheia: true }],
     ["minimizada", { minimizada: true }],
     ["bounds normais zerados", { maximizada: true, bounds: { x: 0, y: 0, width: 0, height: 0 } }],
   ])("%s: não grava (null) e não lança", (_caso, o) => {
-    expect(medirEstadoJanela(medivel(o))).toBeNull();
+    expect(medirEstadoJanela(medivel(o), null)).toBeNull();
+  });
+
+  it("destruída ou minimizada com anterior: não grava", () => {
+    expect(medirEstadoJanela(medivel({ destruida: true }), anterior)).toBeNull();
+    expect(medirEstadoJanela(medivel({ minimizada: true }), anterior)).toBeNull();
+  });
+
+  // O conectar() do main.ts: a memória começa nos bounds da criação, mesmo sem janela.json ou com ele inválido.
+  it.each([
+    ["sem janela.json", null],
+    ["janela.json inválido", "{x: 1"],
+  ])("%s: maximizar e pôr em tela cheia usam os bounds da criação", (_caso, bruto) => {
+    const tela: Area = { x: 0, y: 25, width: 1440, height: 875 };
+    const criacao = resolverEstadoJanela(lerEstadoJanela(bruto), { principal: tela, todas: [tela] }, { largura: 1280, altura: 860 });
+    expect(criacao).toStrictEqual({ x: 80, y: 33, largura: 1280, altura: 860, maximizada: false });
+    const maximizada = medirEstadoJanela(medivel({ maximizada: true }), criacao);
+    expect(maximizada).toStrictEqual({ ...criacao, maximizada: true });
+    expect(medirEstadoJanela(medivel({ telaCheia: true }), maximizada)).toStrictEqual(criacao);
   });
 });
 

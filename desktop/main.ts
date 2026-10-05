@@ -113,8 +113,9 @@ async function gravarPreferencias() {
 }
 // ---- Estado da janela web (definido em 2026-10-05, NOD-137) ---------------------------------------------------------
 // Posição, tamanho e maximizada em userData/janela.json, lidos uma vez no boot e mantidos em memória: a reconexão recria a
-// janela no mesmo lugar sem reler o disco. Tela cheia e minimizada não gravam. As escritas entram numa fila (sem corrida
-// no rename) e o before-quit espera a última; escrita cortada deixa só o .tmp, e o janela.json anterior fica intacto.
+// janela no mesmo lugar sem reler o disco. Minimizada não grava; tela cheia grava o último estado como janela normal. As
+// escritas entram numa fila (sem corrida no rename) e o before-quit espera a última; escrita cortada deixa só o .tmp, e o
+// janela.json anterior fica intacto.
 let estadoJanela: EstadoJanela | null = null;
 let gravacaoJanela: Promise<void> = Promise.resolve();
 const ESPERA_ESTADO_JANELA_MS = 250;
@@ -132,7 +133,7 @@ async function gravarEstadoJanela(estado: EstadoJanela) {
 function telas() { return { principal: screen.getPrimaryDisplay().workArea, todas: screen.getAllDisplays().map((d) => d.workArea) }; }
 /** Síncrono: mede a janela agora (medirEstadoJanela) e enfileira a escrita. */
 function capturarEstadoJanela(w: BrowserWindow) {
-  const estado = medirEstadoJanela(w);
+  const estado = medirEstadoJanela(w, estadoJanela);
   if (!estado) return;
   estadoJanela = estado;
   gravacaoJanela = gravacaoJanela.then(() => gravarEstadoJanela(estado)).catch(() => undefined);
@@ -338,10 +339,12 @@ async function conectar(c: Config) {
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
   // NOD-137: nasce onde a pessoa deixou, inteira numa tela que existe; o mínimo de 900 cede numa tela mais estreita.
   const bounds = resolverEstadoJanela(estadoJanela, telas(), TAMANHO_PADRAO_JANELA);
+  // Os bounds normais da janela maximizada vêm da memória (medirEstadoJanela): valem os da criação, já ajustados à tela.
+  estadoJanela = bounds;
   const nova = new BrowserWindow({ x: bounds.x, y: bounds.y, width: bounds.largura, height: bounds.altura, minWidth: Math.min(LARGURA_MINIMA, bounds.largura), title: "nod", backgroundColor: fundoDaJanela(), webPreferences: { partition: "nod-web", preload: join(dir, "preload-web.cjs"), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   if (bounds.maximizada) nova.maximize();
   janela = nova; proteger(nova, c.url);
-  // Os resize da animação de tela cheia do macOS chegam com isFullScreen() ainda false: a checagem é no disparo do timer.
+  // A checagem de tela cheia é no disparo do timer; no Electron 43 isFullScreen() já é true desde o 1º resize da animação.
   let esperaEstado: ReturnType<typeof setTimeout> | null = null;
   const cancelarEstado = () => { if (esperaEstado) clearTimeout(esperaEstado); esperaEstado = null; };
   const agendarEstado = () => { cancelarEstado(); esperaEstado = setTimeout(() => { esperaEstado = null; capturarEstadoJanela(nova); }, ESPERA_ESTADO_JANELA_MS); };
@@ -349,7 +352,7 @@ async function conectar(c: Config) {
   nova.on("resize", agendarEstado);
   nova.on("maximize", agendarEstado);
   nova.on("unmaximize", agendarEstado);
-  nova.on("enter-full-screen", cancelarEstado);
+  nova.on("enter-full-screen", () => { cancelarEstado(); capturarEstadoJanela(nova); });
   nova.on("close", (e) => {
     cancelarEstado(); capturarEstadoJanela(nova);
     if (!emLigacao) return;
