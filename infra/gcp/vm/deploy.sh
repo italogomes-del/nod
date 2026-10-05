@@ -47,6 +47,8 @@ NOD_CREDENTIAL_KEY=$(segredo nod-credential-key)
 NOD_GOOGLE_CLIENT_ID=$GOOGLE_ID
 NOD_GOOGLE_CLIENT_SECRET=$GOOGLE_SEGREDO
 NOD_GOOGLE_REDIRECT_URI=https://$NOD_DOMINIO/api/sessao/google/callback
+# Emenda de 2026-10-05 da ADR-030: contas Workspace destes domínios viram pessoa na primeira entrada (config.env).
+NOD_ADMISSAO_DOMINIOS=${NOD_ADMISSAO_DOMINIOS:-}
 # Modo ligação (ADR-071): voz pelo Google pago pelos créditos do projeto; só admins na fase 1 (NOD_ADMINS no config.env).
 NOD_VOZ_PROJETO=$PROJETO
 NOD_LIGACAO=${NOD_LIGACAO:-admins}

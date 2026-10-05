@@ -44,6 +44,19 @@ export async function buscarPorEmail(conn: Conn, email: string): Promise<Pessoa 
   return l ? paraPessoa(l) : null;
 }
 
+/**
+ * Primeira entrada por domínio admitido (emenda de 2026-10-05 da ADR-030). SEM escopo, como buscarPorEmail:
+ * roda antes de existir sessão. nod_app não escreve em `pessoas`; quem insere é a função do dono
+ * `nod_admitir_pessoa` (0052), e só quando o domínio do e-mail está em `dominios_admitidos`.
+ * null = não admitido (domínio fora da lista, e-mail ou nome fora da forma).
+ */
+export async function admitirPorDominio(conn: Conn, p: { email: string; nome: string; iniciais: string }): Promise<{ tenantId: string; id: string; criada: boolean } | null> {
+  const linhas = await conn<{ o_tenant_id: string; o_pessoa_id: string; o_criada: boolean }[]>`
+    select o_tenant_id, o_pessoa_id, o_criada from nod_admitir_pessoa(${p.email}, ${p.nome}, ${p.iniciais})`;
+  const l = linhas[0];
+  return l ? { tenantId: l.o_tenant_id, id: l.o_pessoa_id, criada: l.o_criada } : null;
+}
+
 export function pessoasRepo(conn: Conn, escopo: Escopo) {
   return {
     async buscar(id: string): Promise<Pessoa | null> {

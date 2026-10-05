@@ -16,6 +16,8 @@ export const EXCECOES: Record<string, string> = {
   schema_migrations: "controle do runner de migração; só nod_dono toca; sem tenant_id",
   tenants: "catálogo de identidade sem dado pessoal; lido para enumerar donos dos laços de fundo",
   pessoas: "catálogo de identidade sem dado pessoal; lido para enumerar donos dos laços de fundo",
+  dominios_admitidos:
+    "lista de domínios do login (0052), sem dado de pessoa; nod_app não tem privilégio nenhum nela (tests/conformidade/admissao-por-dominio.test.ts): só nod_dono escreve e só a função nod_admitir_pessoa lê",
 };
 
 /**

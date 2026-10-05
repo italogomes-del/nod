@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimsDoIdToken, cunharState, googleEhAutoridade, STATE_VALIDADE_MS, stateValido, validarClaims } from "../../../src/adapters/http/sessao-google.ts";
+import { claimsDoIdToken, contaDoWorkspace, cunharState, googleEhAutoridade, STATE_VALIDADE_MS, stateValido, validarClaims } from "../../../src/adapters/http/sessao-google.ts";
 import { exigirConfiguracaoSegura, opcoesSessaoDoEnv } from "../../../src/adapters/http/sessao.ts";
 import { CLIENT_ID, claimsBoas, idTokenFalso } from "../../helpers/google-falso.ts";
 
@@ -82,6 +82,16 @@ describe("claims sem NOD_GOOGLE_DOMINIO: a allowlist decide, o Google precisa re
     expect(googleEhAutoridade("a@acme.com.br", "")).toBe(false);
     expect(googleEhAutoridade("a@acme.com.br", undefined)).toBe(false);
   });
+
+  it("contaDoWorkspace: só com hd, e hd igual ao domínio do e-mail; Gmail nunca é (emenda de 2026-10-05)", () => {
+    expect(contaDoWorkspace("a@acme.com.br", "ACME.com.br")).toBe(true);
+    expect(contaDoWorkspace("a@gmail.com", undefined)).toBe(false);
+    expect(contaDoWorkspace("a@acme.com.br", "")).toBe(false);
+    expect(contaDoWorkspace("a@acme.com.br", "outra.com.br")).toBe(false);
+    // Sufixo parecido não basta: o "@" faz parte da comparação.
+    expect(contaDoWorkspace("a@naoacme.com.br", "acme.com.br")).toBe(false);
+    expect(contaDoWorkspace("a@acme.com.br", 42)).toBe(false);
+  });
 });
 
 describe("configuração segura da sessão (E1.5/E1.6, ADR-030)", () => {
@@ -108,5 +118,14 @@ describe("configuração segura da sessão (E1.5/E1.6, ADR-030)", () => {
     expect(opcoesSessaoDoEnv({ NOD_LOGIN: "stub" }, fontes).modo).toBe("stub");
     const g = opcoesSessaoDoEnv({ NOD_LOGIN: "google", NOD_GOOGLE_CLIENT_ID: "a", NOD_GOOGLE_CLIENT_SECRET: "b", NOD_GOOGLE_REDIRECT_URI: "https://nod/cb" }, fontes);
     expect(g.modo).toBe("google");
+  });
+
+  it("a admissão por domínio chega ao login só quando o boot a fornece", () => {
+    const envGoogle = { NOD_LOGIN: "google", NOD_GOOGLE_CLIENT_ID: "a", NOD_GOOGLE_CLIENT_SECRET: "b", NOD_GOOGLE_REDIRECT_URI: "https://nod/cb" };
+    const admitirPorDominio = async () => null;
+    const sem = opcoesSessaoDoEnv(envGoogle, { pessoaPorEmail: async () => null, pessoas: async () => [] });
+    const com = opcoesSessaoDoEnv(envGoogle, { pessoaPorEmail: async () => null, admitirPorDominio, pessoas: async () => [] });
+    expect(sem.modo === "google" && sem.google.admitirPorDominio).toBeUndefined();
+    expect(com.modo === "google" && com.google.admitirPorDominio).toBe(admitirPorDominio);
   });
 });

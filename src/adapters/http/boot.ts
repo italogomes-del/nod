@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { criarDb } from "../../db/client.ts";
 import { log } from "../../obs/log.ts";
-import { buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts";
+import { admitirPorDominio, buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts";
 import type { Db } from "../../shared/types.ts";
 import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../executor/drivers/claude-cli.ts";
@@ -17,6 +17,7 @@ import type { Driver, Registry } from "../executor/spi.ts";
 import { iniciarDespachanteOutbox, type DespachanteOutbox } from "../fundo/despachar-outbox.ts";
 import { iniciarOrquestrador, type Orquestrador } from "../fundo/orquestrador-turnos.ts";
 import { garantirParticoes } from "../fundo/particoes.ts";
+import { sincronizarDominiosAdmitidos } from "../fundo/dominios-admitidos.ts";
 import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
@@ -24,6 +25,8 @@ import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
+import { lerDominiosAdmitidos } from "../../domain/dominios-admitidos.ts";
+import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
 import { listen } from "./servidor.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
@@ -103,10 +106,19 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       const p = await buscarPorEmail(db, email);
       return p ? { tenantId: p.tenantId, pessoaId: p.id } : null;
     },
+    // Emenda de 2026-10-05 da ADR-030: quem decide se o domínio entra é a função do dono (0052), não este processo.
+    admitirPorDominio: async (email) => {
+      const identidade = identidadeDoEmail(email);
+      if (!identidade) return null;
+      const p = await admitirPorDominio(db, { email, ...identidade });
+      return p ? { tenantId: p.tenantId, pessoaId: p.id, criada: p.criada } : null;
+    },
     pessoas: () => listarTodas(db),
   });
   // NOD-164: o modelo da ligação (NOD_MODELO_LIGACAO_CLAUDE/_CODEX) inválido também impede o boot, antes de qualquer efeito.
   lerModelosLigacao(env);
+  // NOD_ADMISSAO_DOMINIOS inválido também impede o boot (um domínio digitado errado deixaria o time de fora em silêncio).
+  const dominiosAdmitidos = lerDominiosAdmitidos(env);
   const donoEmprestado = o.dbDono !== undefined;
   const dbEmprestado = o.db !== undefined;
   const agora = () => Date.now();
@@ -116,6 +128,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 1. partições do mês corrente até 12 à frente, como nod_dono (ADR-006).
   await garantirParticoes(dbDono, agora());
+  // 1b. a lista de domínios admitidos no login, também como nod_dono (emenda de 2026-10-05 da ADR-030).
+  await sincronizarDominiosAdmitidos(dbDono, dominiosAdmitidos);
   if (!donoEmprestado) await dbDono.end({ timeout: 2 });
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).

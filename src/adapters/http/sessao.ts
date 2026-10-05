@@ -72,7 +72,7 @@ export function segredoEfetivo(modo: ModoLogin, segredo: string | undefined): st
  */
 export function opcoesSessaoDoEnv(
   env: Readonly<Record<string, string | undefined>>,
-  fontes: { pessoaPorEmail: ConfigGoogle["pessoaPorEmail"]; pessoas: () => Promise<PessoaDoStub[]> },
+  fontes: { pessoaPorEmail: ConfigGoogle["pessoaPorEmail"]; admitirPorDominio?: ConfigGoogle["admitirPorDominio"]; pessoas: () => Promise<PessoaDoStub[]> },
 ): OpcoesSessao {
   const modo = env.NOD_LOGIN;
   if (modo === "stub") return { modo: "stub", pessoas: fontes.pessoas };
@@ -83,7 +83,7 @@ export function opcoesSessaoDoEnv(
     if (!clientId || !clientSecret || !redirectUri) {
       throw new Error("NOD_LOGIN=google exige NOD_GOOGLE_CLIENT_ID, NOD_GOOGLE_CLIENT_SECRET e NOD_GOOGLE_REDIRECT_URI");
     }
-    return { modo: "google", google: { clientId, clientSecret, redirectUri, dominio: env.NOD_GOOGLE_DOMINIO || undefined, pessoaPorEmail: fontes.pessoaPorEmail } };
+    return { modo: "google", google: { clientId, clientSecret, redirectUri, dominio: env.NOD_GOOGLE_DOMINIO || undefined, pessoaPorEmail: fontes.pessoaPorEmail, admitirPorDominio: fontes.admitirPorDominio } };
   }
   throw new Error(`NOD_LOGIN=${modo ?? "(ausente)"} recusado: use NOD_LOGIN=google (login real) ou NOD_LOGIN=stub (só desenvolvimento, só em 127.0.0.1)`);
 }

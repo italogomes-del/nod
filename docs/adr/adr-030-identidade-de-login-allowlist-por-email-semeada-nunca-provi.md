@@ -86,3 +86,37 @@ específico amarrava o produto a uma organização e impedia o uso por quem não
 
 **Consequência.** Sem `NOD_GOOGLE_DOMINIO`, a defesa em profundidade do `hd` some e a allowlist fica
 sozinha como fronteira. Quem opera o nod para uma organização com Workspace deve configurar o domínio.
+
+## Emenda (2026-10-05): admissão por domínio
+
+**Contexto.** O nod de produção passou a ser usado por um time inteiro de um mesmo domínio Workspace. Cada pessoa
+nova exigia uma linha no seed e um deploy, e o primeiro teste de alguém de fora do núcleo ficou esperando por isso.
+É o cenário do primeiro e do segundo gatilhos de reversão, decidido pelo mantenedor antes de eles serem medidos.
+
+**Decisão.**
+- `NOD_ADMISSAO_DOMINIOS` lista domínios Google Workspace. A primeira entrada de uma conta desses domínios **cria a
+  pessoa**; das seguintes em diante ela entra pela consulta de sempre. Vazio (o padrão) mantém a regra original:
+  login vira `pessoa` só por consulta.
+- Só conta Workspace é admitida: a claim `hd` precisa existir e ser o domínio do e-mail, com `email_verified`.
+  Gmail não tem `hd` e nunca é admitido por domínio; a leitura da variável recusa provedores de e-mail aberto.
+- `nod_app` continua **sem** `GRANT INSERT` em `pessoas`. Quem insere é a função `nod_admitir_pessoa` (0052),
+  `SECURITY DEFINER` do dono, e quem diz se o domínio entra é a tabela `dominios_admitidos`, em que `nod_app` não
+  tem privilégio nenhum. O boot iguala a tabela à variável na conexão curta de `nod_dono`, a mesma das partições.
+  Uma conexão `nod_app` comprometida só cria pessoa com e-mail de domínio admitido, o que qualquer conta desse
+  domínio já consegue entrando.
+- A pessoa nova entra no tenant único, com nome e iniciais tirados do endereço (o login pede só `openid email`);
+  o onboarding pergunta o apelido (ADR-077).
+- Toda recusa continua a mesma resposta. O log ganha `pessoa_admitida` (tenant, pessoa e domínio, sem e-mail).
+
+**Diferença para a forma prevista em "Gatilho de reversão".** Lá a forma escolhida era uma rota administrativa em
+que alguém já admitido cadastra a pessoa. Aqui não há esse passo humano: o domínio inteiro entra. O que se preserva
+é o que motivou aquela forma: nenhum `INSERT` de `nod_app` em tabela sem RLS e nenhuma credencial de `nod_dono` nas
+requisições.
+
+**Consequência.** Dentro de um domínio admitido, a allowlist por pessoa deixa de ser a fronteira: quem administra o
+Workspace decide quem entra no nod, inclusive contas de serviço e de ex-colaboradores ainda ativas. Tirar o acesso
+de alguém passa a ser desativar a conta no Workspace; o nod ainda não tem como bloquear uma pessoa já admitida.
+
+**Gatilho de reversão desta emenda.** Voltar à lista por pessoa (esvaziar a variável) se entrar no nod uma conta
+que o time não reconhece, ou quando o nod atender mais de uma organização no mesmo servidor: o domínio aponta para
+um tenant só.

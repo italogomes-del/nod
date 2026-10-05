@@ -49,7 +49,9 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
 - **Chave de máquina carrega o próprio escopo** (ADR-031): validar busca o hash DENTRO da tx escopada
   pelo escopo alegado (`autorizarChaveMaquina`). Busca pelo hash sem escopo nunca acha a linha (falha
   como nod_app; volta vazia em silêncio como nod_dono). A chave crua não vai para banco, log nem listagem.
-- **`tenants`/`pessoas` são só leitura para nod_app.** Quem escreve identidade é o seed (nod_dono).
+- **`tenants`/`pessoas` são só leitura para nod_app.** Quem escreve identidade é o seed (nod_dono) e, na primeira
+  entrada de uma conta de domínio admitido, a função do dono `nod_admitir_pessoa` (0052, `NOD_ADMISSAO_DOMINIOS`).
+  Não dê `GRANT INSERT` em `pessoas` nem privilégio em `dominios_admitidos` a nod_app: `tests/conformidade/admissao-por-dominio.test.ts` acusa.
   Teste que precisa de pessoas usa `withRollbackDono` de `tests/helpers/db-dono.ts` — e esse helper
   nunca lê tabela escopada.
 - **Toda tabela nova passa por `nod_escopar_tabela(tbl, perna_extra)`** na migração, senão
@@ -131,8 +133,9 @@ vários bots rodam `npm run check` ao mesmo tempo sem um contaminar o tenant pad
   sem lógica; a web importa dali só com `import type`. Gatilho de revisão: um arquivo passando de
   200 linhas.
 - **Login por `NOD_LOGIN`, obrigatório** (ADR-030; o épico E1 dizia "o stub some" — revisto em
-  2026-09-16). `google` = OAuth Google só para e-mails do cadastro (o seed lê `NOD_SEED_EMAIL`; `NOD_GOOGLE_DOMINIO`
-  restringe a um domínio Workspace — emenda 2026-10-02), pode escutar fora de 127.0.0.1 e
+  2026-09-16). `google` = OAuth Google para e-mails do cadastro (o seed lê `NOD_SEED_EMAIL`; `NOD_GOOGLE_DOMINIO`
+  restringe a um domínio Workspace — emenda 2026-10-02) e para contas Workspace dos domínios em
+  `NOD_ADMISSAO_DOMINIOS`, que viram pessoa na primeira entrada (emenda 2026-10-05); pode escutar fora de 127.0.0.1 e
   RECUSA segredo de sessão curto ou o de exemplo; `stub` = login de desenvolvimento que lista as pessoas
   do cadastro, só em 127.0.0.1. Sem `NOD_LOGIN` o servidor não sobe. Os testes nunca usam nenhum dos
   dois: cunham o cookie com `cunharCookie` (`servidorDeTeste.entrar`, `servidorCompleto.sessaoDe`).
