@@ -18,8 +18,11 @@ import { lerCookies } from "./util.ts";
  *     ├─ email_verified = true                                       não → recusa
  *     ├─ Google responde pelo e-mail (ver googleEhAutoridade); com    não → recusa
  *     │  NOD_GOOGLE_DOMINIO, hd e e-mail precisam ser desse domínio
- *     ├─ e-mail casa uma pessoa (cfg.pessoaPorEmail; o boot liga em   não → recusa
+ *     ├─ e-mail casa uma pessoa (cfg.pessoaPorEmail; o boot liga em   não → tenta admitir
  *     │  buscarPorEmail, SEM escopo)
+ *     ├─ sem pessoa: conta Workspace (`hd` = domínio do e-mail) de um    não → recusa
+ *     │  domínio admitido vira pessoa (cfg.admitirPorDominio, emenda de
+ *     │  2026-10-05 da ADR-030; quem decide o domínio é o banco)
  *     └─ 302 /  + Set-Cookie nod_sessao (Strict; Secure se o redirect for https)
  *
  * TODA recusa é a MESMA resposta, byte a byte: 302 para /?entrar=recusado. Dizer "domínio errado"
@@ -43,6 +46,11 @@ export type ConfigGoogle = {
   dominio?: string;
   /** E-mail → pessoa do cadastro, sem escopo (buscarPorEmail). null = recusa. */
   pessoaPorEmail(email: string): Promise<Escopo | null>;
+  /**
+   * Primeira entrada de uma conta Workspace sem pessoa (NOD_ADMISSAO_DOMINIOS). Devolve a pessoa criada, ou
+   * null quando o domínio não é admitido. Ausente = só entra quem já está no cadastro.
+   */
+  admitirPorDominio?(email: string): Promise<(Escopo & { criada: boolean }) | null>;
   /** Injetáveis para o teste nunca falar com o Google. */
   fetchImpl?: typeof fetch;
   agora?: () => number;
@@ -105,6 +113,11 @@ export function claimsDoIdToken(idToken: unknown): Record<string, unknown> | nul
  */
 export function googleEhAutoridade(email: string, hd: unknown): boolean {
   if (email.endsWith("@gmail.com")) return true;
+  return contaDoWorkspace(email, hd);
+}
+
+/** Conta de um Google Workspace: a claim `hd` existe e é o domínio do próprio e-mail. Gmail não tem `hd`. */
+export function contaDoWorkspace(email: string, hd: unknown): hd is string {
   return typeof hd === "string" && hd !== "" && email.endsWith(`@${hd.toLowerCase()}`);
 }
 
@@ -198,7 +211,17 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
         const v = validarClaims(claims, { clientId: cfg.clientId, dominio, agora: agora() });
         if (!v.ok) return recusar(v.motivo);
 
-        const escopo = await cfg.pessoaPorEmail(v.email);
+        let escopo = await cfg.pessoaPorEmail(v.email);
+        const hd = claims.hd;
+        if (!escopo && cfg.admitirPorDominio && contaDoWorkspace(v.email, hd)) {
+          // Só conta Workspace: no Gmail o "domínio" é de todo mundo, e a claim `hd` é o que diz que o
+          // Google responde por aquele domínio. A lista de domínios admitidos mora no banco (0052).
+          const admitida = await cfg.admitirPorDominio(v.email);
+          if (admitida) {
+            if (admitida.criada) log("info", "pessoa_admitida", { tenant_id: admitida.tenantId, pessoa_id: admitida.pessoaId, dominio: hd.toLowerCase() });
+            escopo = { tenantId: admitida.tenantId, pessoaId: admitida.pessoaId };
+          }
+        }
         if (!escopo) return recusar("sem_pessoa");
 
         log("info", "login_google", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId });

@@ -17,7 +17,9 @@ Medido em 2026-09-17, nesta candidata: `npm ci`, `npm run check` (684 testes: 37
 ## Preparar o servidor
 
 1. Disponibilize Postgres com os roles e todas as migrações 0001–0012 desta versão. Migre como `nod_dono`; execute a aplicação como `nod_app`.
-2. Cadastre as pessoas na allowlist, incluindo seus emails (`NOD_SEED_EMAIL` para o dono no seed). O login Google não cria pessoas automaticamente.
+2. Decida quem entra. O seed cadastra o dono (`NOD_SEED_EMAIL`). Para o time, liste o domínio Google Workspace da
+   organização em `NOD_ADMISSAO_DOMINIOS`: a primeira entrada de uma conta desse domínio cria a pessoa (emenda de
+   2026-10-05 da ADR-030). Sem essa variável, o login Google não cria pessoas e só entra quem o seed cadastrou.
 3. Configure um domínio HTTPS e o cliente OAuth Google, com callback `https://SEU-DOMINIO/api/sessao/google/callback`.
 4. Gere segredos próprios para sessão e cifra, conforme `.env.example`. Configure `DATABASE_URL`, `DATABASE_URL_DONO`, `NOD_LOGIN=google`, `NOD_GOOGLE_CLIENT_ID`, `NOD_GOOGLE_CLIENT_SECRET`, `NOD_GOOGLE_REDIRECT_URI`, `NOD_SESSAO_SEGREDO` e `NOD_CREDENTIAL_KEY`.
 5. Use `NOD_MODO=compartilhado`. Na imagem Docker este é o padrão; o Dockerfile já compila e serve a web. Fora de Docker: `npm run build`, `NOD_STATIC_DIR=dist/web`. Defina `NOD_HOST=0.0.0.0` dentro do container e encaminhe 8888 pelo proxy HTTPS.

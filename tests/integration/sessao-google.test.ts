@@ -159,6 +159,96 @@ describe("login Google: servidor real, Google falso", () => {
   });
 });
 
+/**
+ * Admissão por domínio (emenda de 2026-10-05 da ADR-030), no mesmo servidor real com o Google falso. A decisão
+ * "este domínio entra" é do banco (tests/concurrency/admissao-por-dominio.test.ts); aqui ela é injetada, e o que
+ * se prova é QUANDO o login a consulta e o que ele faz com a resposta.
+ */
+describe("login Google: conta nova de domínio admitido", () => {
+  const PESSOA_NOVA = "5f0e7c1a-3b62-4f0e-9d0a-6f2f1c7d9a11";
+  let base: string;
+  let close: () => Promise<void>;
+  let resposta: () => Response | Promise<Response> = () => respostaComIdToken(claimsBoas(Date.now()));
+  const google = googleFalso(() => resposta());
+  const consultas: string[] = [];
+  let jaCriada = false;
+  const pessoaPorEmail = async (email: string): Promise<Escopo | null> => (email === EMAIL_CADASTRADO ? { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON } : null);
+  const admitirPorDominio = async (email: string): Promise<(Escopo & { criada: boolean }) | null> => {
+    consultas.push(email);
+    if (!email.endsWith("@admitido.com.br")) return null;
+    const criada = !jaCriada;
+    jaCriada = true;
+    return { tenantId: TENANT_PADRAO, pessoaId: PESSOA_NOVA, criada };
+  };
+
+  beforeAll(async () => {
+    const srv = await listen(0, "127.0.0.1", {
+      segredoSessao: SEGREDO,
+      sessao: {
+        modo: "google",
+        google: { clientId: CLIENT_ID, clientSecret: "segredo-do-cliente-oauth", redirectUri: "http://127.0.0.1:5274/api/sessao/google/callback", fetchImpl: google.fetchImpl, pessoaPorEmail, admitirPorDominio },
+      },
+    });
+    base = `http://127.0.0.1:${srv.port}`;
+    close = srv.close;
+  });
+  afterAll(() => close());
+
+  async function entrarCom(claims: Record<string, unknown>): Promise<Response> {
+    resposta = () => respostaComIdToken(claimsBoas(Date.now(), claims));
+    const a = await fetch(`${base}/api/sessao/google`, { redirect: "manual" });
+    const state = new URL(a.headers.get("location") ?? "").searchParams.get("state") ?? "";
+    const cookie = (a.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    return fetch(`${base}/api/sessao/google/callback?code=x&state=${encodeURIComponent(state)}`, { redirect: "manual", headers: { cookie } });
+  }
+  const sessaoDe = (r: Response) => lerCookieSessao((r.headers.getSetCookie().find((k) => k.startsWith("nod_sessao=")) ?? "").split(";")[0]?.split("=").slice(1).join("="), SEGREDO);
+
+  it("a primeira entrada cria a pessoa e já volta logada; o log diz quem foi admitido sem o e-mail", async () => {
+    const saida = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const r = await entrarCom({ hd: "admitido.com.br", email: "marcelo.silva@admitido.com.br" });
+      expect(r.headers.get("location")).toBe("/");
+      expect(sessaoDe(r)).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_NOVA });
+      expect(consultas).toEqual(["marcelo.silva@admitido.com.br"]);
+      const linhas = saida.mock.calls.map((c) => JSON.parse(String(c[0])) as { evento: string; pessoa_id?: string; dominio?: string });
+      expect(linhas.filter((l) => l.evento === "pessoa_admitida")).toMatchObject([{ pessoa_id: PESSOA_NOVA, dominio: "admitido.com.br" }]);
+      expect(saida.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("marcelo.silva");
+
+      // Corrida de duas primeiras entradas: quem chega em segundo recebe a mesma pessoa, sem um segundo "admitida".
+      saida.mockClear();
+      const r2 = await entrarCom({ hd: "admitido.com.br", email: "marcelo.silva@admitido.com.br" });
+      expect(sessaoDe(r2)).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_NOVA });
+      expect(saida.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("pessoa_admitida"))).toEqual([]);
+    } finally {
+      saida.mockRestore();
+    }
+  });
+
+  it("quem já está no cadastro entra pela consulta: a admissão nem é consultada", async () => {
+    consultas.length = 0;
+    const r = await entrarCom({ hd: "acme.com.br", email: EMAIL_CADASTRADO });
+    expect(sessaoDe(r)).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON });
+    expect(consultas).toEqual([]);
+  });
+
+  it("Gmail (sem hd) e hd diferente do domínio do e-mail nunca chegam à admissão; domínio não admitido é a recusa de sempre", async () => {
+    consultas.length = 0;
+    const recusas = [
+      await entrarCom({ hd: undefined, email: "alguem@gmail.com" }),
+      await entrarCom({ hd: "outra.com.br", email: "alguem@admitido.com.br" }),
+      await entrarCom({ hd: "", email: "alguem@admitido.com.br" }),
+      await entrarCom({ hd: "admitido.com.br", email: "alguem@admitido.com.br", email_verified: false }),
+    ];
+    expect(consultas).toEqual([]);
+    recusas.push(await entrarCom({ hd: "fora.com.br", email: "alguem@fora.com.br" }));
+    expect(consultas).toEqual(["alguem@fora.com.br"]);
+    for (const r of recusas) {
+      expect(r.headers.get("location")).toBe(DESTINO_RECUSA);
+      expect(r.headers.getSetCookie().some((k) => k.startsWith("nod_sessao="))).toBe(false);
+    }
+  });
+});
+
 describe("login Google atrás de HTTPS", () => {
   it("com redirect https, o cookie de state e o de sessão levam Secure; e pode escutar fora de 127.0.0.1", async () => {
     const srv = await listen(0, "0.0.0.0", {

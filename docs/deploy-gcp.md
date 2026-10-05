@@ -113,7 +113,10 @@ printf %s 'ID.apps.googleusercontent.com' | gcloud secrets versions add nod-goog
 printf %s 'SEGREDO' | gcloud secrets versions add nod-google-client-secret --data-file=- --project=nod-producao
 ```
 
-Só entra quem tem e-mail na tabela `pessoas`. `NOD_GOOGLE_DOMINIO` não é usado em produção.
+Entra quem tem e-mail na tabela `pessoas` e, desde 2026-10-05, qualquer conta Google Workspace dos domínios em
+`NOD_ADMISSAO_DOMINIOS` (no `config.env`): a primeira entrada cria a pessoa, com o nome tirado do endereço. Para
+abrir ou fechar um domínio, edite a linha e rode o deploy; o boot iguala a tabela `dominios_admitidos` à variável.
+Fechar um domínio não tira quem já entrou. `NOD_GOOGLE_DOMINIO` não é usado em produção.
 
 ## Trocar para o domínio definitivo
 
