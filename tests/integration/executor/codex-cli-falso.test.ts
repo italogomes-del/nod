@@ -53,8 +53,58 @@ it("interrupção encerra o processo e limpa o diretório", async () => {
   const resultado = await adapter.rodarTurno({ sinal: async () => {}, delta: () => {}, evento: (e) => { if (e.tipo === "init") void adapter.interromper(); } });
   expect(resultado.desfecho).toBe("interrompido"); expect(await readdir(cfg.cwdBase)).toEqual([]);
 });
-it("erro do fornecedor vira falha sem vazar a mensagem crua", async () => {
+it("erro do fornecedor vira falha: a mensagem crua vai só para o diagnóstico (erroCru), nunca para a fala", async () => {
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const resultado = await instance.adapter(planoHarness({ texto: "falhar" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
-  expect(resultado.desfecho).toBe("falha"); expect(JSON.stringify(resultado)).not.toContain("segredo");
+  expect(resultado.desfecho).toBe("falha");
+  // definido em 2026-10-05: antes o erro do Codex era jogado fora e um turno que falhava não deixava pista nenhuma.
+  expect(resultado.erroCru).toBe("segredo que não deve escapar");
+  expect(JSON.stringify({ ...resultado, erroCru: null })).not.toContain("segredo");
+});
+it("as ferramentas do nod rodam sem aprovação do Codex, e o host de code mode não é desligado (2026-10-05)", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  await instance.adapter(planoHarness()).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  const { args } = JSON.parse(await readFile(join(dir, "registro.json"), "utf8")) as { args: string[] };
+  const mcp = args.find((a) => a.startsWith("mcp_servers=")) ?? "";
+  expect(mcp).toContain('default_tools_approval_mode = "approve"');
+  expect(mcp).toContain("required = true");
+  // Com o host desligado o 0.147.0 recusava toda chamada MCP ("code-mode host is disabled"): ver codex-comum.ts.
+  expect(args.filter((a) => a.startsWith("features.code_mode"))).toEqual([]);
+  expect(args).toContain('approval_policy="never"');
+});
+it("versão que não conhece uma chave: a sonda a descobre sem gastar turno, e o turno roda sem ela", async () => {
+  cfg.env.TESTE_NOD_CHAVES_DESCONHECIDAS = "features.skip_host_skill_discovery,features.remote_plugin,mcp_servers.nod.default_tools_approval_mode";
+  cfg.env.TESTE_NOD_NEGOCIACOES = join(dir, "negociacoes");
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  expect((await instance.sondar()).estado).toBe("pronto");
+  // Três chaves recusadas, uma por rodada, e a rodada que passou parou em "No prompt provided": nenhum modelo chamado.
+  expect(await readFile(join(dir, "negociacoes"), "utf8")).toBe("x");
+  const resultado = await instance.adapter(planoHarness()).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  expect(resultado).toMatchObject({ desfecho: "sucesso", texto: "Resposta de teste." });
+  const { args } = JSON.parse(await readFile(join(dir, "registro.json"), "utf8")) as { args: string[] };
+  expect(args.some((a) => a.startsWith("features.skip_host_skill_discovery") || a.startsWith("features.remote_plugin"))).toBe(false);
+  expect(args.find((a) => a.startsWith("mcp_servers="))).not.toContain("default_tools_approval_mode");
+  // O resto do isolamento continua lá.
+  expect(args).toEqual(expect.arrayContaining(["features.shell_tool=false", "features.unified_exec=false", "features.plugins=false", 'web_search="disabled"']));
+});
+it("versão que recusa uma chave que não pode cair: o Codex fica indisponível em vez de rodar mais solto", async () => {
+  cfg.env.TESTE_NOD_CHAVES_DESCONHECIDAS = "features.shell_tool";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  expect(await instance.sondar()).toMatchObject({ estado: "ausente", motivo: expect.stringContaining("Atualize o Codex") });
+  await expect(instance.adapter(planoHarness()).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} })).rejects.toThrow("executor_indisponivel");
+});
+it("chamada de ferramenta que o Codex cancela chega como erro com o motivo dele", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const resultados: { isError: boolean; texto: string }[] = [];
+  const resultado = await instance.adapter(planoHarness({ texto: "aviso-e-ferramenta-cancelada" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: (e) => { if (e.tipo === "tool_result") resultados.push({ isError: e.isError, texto: e.texto }); } });
+  expect(resultados).toEqual([{ isError: true, texto: "user cancelled MCP tool call" }]);
+  // O turno "deu certo" para o Codex (o modelo respondeu): o aviso dele não vira erro de um turno concluído.
+  expect(resultado).toMatchObject({ desfecho: "sucesso", texto: "A ferramenta está indisponível." });
+  expect(resultado.erroCru ?? null).toBeNull();
+});
+it("turno que morre sem result leva a última linha do stderr, sem o carimbo de hora, para o diagnóstico", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const resultado = await instance.adapter(planoHarness({ texto: "morrer-sem-evento" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  expect(resultado.desfecho).not.toBe("sucesso");
+  expect(resultado.erroCru).toBe("ERROR codex_core: algo quebrou antes do primeiro evento");
 });
