@@ -28,7 +28,7 @@ export const FERRAMENTAS_LIGACAO = {
   anotar_entrevista: {
     type: "object",
     description:
-      "Só na primeira ligação: guarda o que a pessoa respondeu numa das quatro perguntas. Chame assim que ela responder, uma vez por campo, com o valor curto (o apelido, de onde conheceu, o que quer que os bots façam, o tamanho do time). Não diga que anotou.",
+      "Só na primeira ligação: guarda o que a pessoa respondeu numa das quatro perguntas. Chame depois de falar a reação e a próxima pergunta, na mesma resposta, uma vez por campo, com o valor curto (o apelido, de onde conheceu, o que quer que os bots façam, o tamanho do time). Não diga que anotou.",
     properties: {
       campo: { type: "string", enum: ["apelido", "como_conheceu", "objetivo", "tamanho_time"], description: "Qual pergunta ela respondeu." },
       valor: {
@@ -43,7 +43,7 @@ export const FERRAMENTAS_LIGACAO = {
   },
   concluir_entrevista: {
     type: "object",
-    description: "Só na primeira ligação: a pessoa confirmou o resumo (\"Certo?\"). A ligação vira a pílula e você guia a configuração. Chame uma vez, depois do sim dela.",
+    description: "Só na primeira ligação: a pessoa confirmou o resumo (\"Certo?\"). A ligação vira a pílula e você guia a configuração. Chame uma vez, depois do sim dela e de dizer a frase de transição.",
     properties: {},
     required: [],
     additionalProperties: false,

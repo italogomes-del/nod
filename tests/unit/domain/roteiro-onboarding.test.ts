@@ -3,7 +3,7 @@ import type { CamposEntrevista } from "../../../src/contracts/onboarding.ts";
 import { FERRAMENTAS_NOD_ONBOARDING } from "../../../src/domain/plano-turno.ts";
 import { MARCADOR_PARTE_DINAMICA, montarPromptLigacao } from "../../../src/domain/prompt-ligacao.ts";
 import {
-  camposQueFaltam, linhasDoPromptOnboarding, MODELOS_DE_BOT, modeloDoObjetivo, normalizarCampo, objetivoDoTexto, passoDaConfiguracao, resumoDaEntrevista,
+  camposQueFaltam, linhasDoPromptOnboarding, MODELOS_DE_BOT, modeloDoObjetivo, normalizarCampo, objetivoDoTexto, passoDaConfiguracao, PERGUNTAS_ENTREVISTA, resumoDaEntrevista,
   saudacaoDoOnboarding, sugestoesDoOnboarding, tamanhoDoTexto, textoTudoMontado,
 } from "../../../src/domain/roteiro-onboarding.ts";
 import { nomeLivreDaGuia } from "../../../src/use-cases/onboarding.ts";
@@ -13,8 +13,9 @@ const CHEIO: CamposEntrevista = { apelido: "Ana", comoConheceu: "Indicação", o
 
 /** O roteiro do onboarding por ligação (definido em 2026-10-04, ADR-077; textos do protótipo HiFiMac). */
 describe("roteiro do onboarding", () => {
-  it("a primeira fala é a do protótipo, com o nome da guia", () => {
-    expect(saudacaoDoOnboarding("Nina")).toBe("Oi! Eu sou a Nina, sua primeira bot aqui no nod. Antes de tudo: como você quer que eu te chame?");
+  it("a primeira fala leva o nome da guia e não tem dois-pontos (é falada)", () => {
+    expect(saudacaoDoOnboarding("Nina")).toBe("Oi! Eu sou a Nina, sua primeira bot aqui no nod. Como você quer que eu te chame?");
+    for (const fala of [saudacaoDoOnboarding("Nina"), resumoDaEntrevista(CHEIO), ...Object.values(PERGUNTAS_ENTREVISTA)]) expect(fala).not.toContain(":");
     expect(textoTudoMontado("Nina")).toBe("Tudo montado. Quando quiser, é só chamar a Nina por aqui.");
   });
 
@@ -61,7 +62,7 @@ describe("roteiro do onboarding", () => {
   });
 
   it("o resumo termina em Certo? e usa o modelo do objetivo", () => {
-    expect(resumoDaEntrevista(CHEIO)).toBe("Então: você é Ana, chegou por indicação, quer responder clientes mais rápido e trabalha com 2 a 10 pessoas. Certo?");
+    expect(resumoDaEntrevista(CHEIO)).toBe("Então, você é Ana, chegou por indicação, quer responder clientes mais rápido e trabalha com 2 a 10 pessoas. Certo?");
     expect(resumoDaEntrevista({ ...CHEIO, tamanhoTime: "so_eu" })).toContain("trabalha com ninguém, por enquanto. Certo?");
   });
 
@@ -95,6 +96,17 @@ describe("roteiro do onboarding", () => {
     expect(comRoteiro.indexOf("anotar_entrevista")).toBeGreaterThan(comRoteiro.indexOf(MARCADOR_PARTE_DINAMICA));
     expect(montarPromptLigacao({ ...base, roteiroOnboarding: roteiro })).not.toContain("anotar_entrevista");
     expect(linhasDoPromptOnboarding({ nomeGuia: "Nina", campos: CHEIO, etapa: "configurando" }).join("\n")).toContain("para_bot");
+  });
+
+  it("o roteiro manda falar antes de anotar, sem anunciar a ferramenta, e dizer a transição antes de concluir", () => {
+    const roteiro = linhasDoPromptOnboarding({ nomeGuia: "Nina", campos: VAZIO, etapa: "entrevista" }).join("\n");
+    expect(roteiro).toContain("fale primeiro: uma reação curta e a próxima pergunta. Só depois, na mesma resposta, chame anotar_entrevista");
+    expect(roteiro).toContain("Não anuncie essa ferramenta");
+    expect(roteiro).toContain("siga o que a ferramenta devolver");
+    expect(roteiro).toContain('diga só uma ponte curta ("Deixa eu juntar tudo.") antes de anotar_entrevista');
+    expect(roteiro).toContain("e só depois chame concluir_entrevista");
+    // A ordem antiga (anotar e depois perguntar) custava duas respostas do modelo antes do primeiro som.
+    expect(roteiro).not.toContain("Assim que ela responder uma pergunta, chame anotar_entrevista");
   });
 
   it("as três ferramentas do onboarding e o nome livre da guia", () => {

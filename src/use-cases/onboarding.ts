@@ -236,7 +236,10 @@ export async function anotarEntrevista(deps: Deps, input: ContextoFerramenta & A
   log("info", "onboarding_campo", { campo: input.campo, ...(input.campo === "tamanho_time" ? { tamanho_time: valor } : {}) });
   const falta = camposQueFaltam(linha.campos);
   const proxima = falta[0];
-  const instrucao = proxima ? `Anotado. Agora pergunte: ${PERGUNTAS_ENTREVISTA[proxima]}` : `Tudo respondido. Leia o resumo e espere o sim: "${resumoDaEntrevista(linha.campos)}"`;
+  // A guia fala antes de anotar: se a pergunta já saiu, ela fecha com "ok" (que não é falado); se não, pergunta agora.
+  const instrucao = proxima
+    ? `Anotado. Se você já fez a próxima pergunta nesta resposta, escreva só "ok". Senão, pergunte: ${PERGUNTAS_ENTREVISTA[proxima]}`
+    : `Tudo respondido. Leia o resumo e espere o sim: "${resumoDaEntrevista(linha.campos)}"`;
   return { data: { ok: true, campos: linha.campos, falta, instrucao } };
 }
 
@@ -247,7 +250,7 @@ export async function concluirEntrevista(deps: Deps, input: ContextoFerramenta):
   if (falta.length > 0) return { data: { ok: false, erro: "entrevista_incompleta", falta, instrucao: `Ainda falta perguntar: ${falta.map((c) => PERGUNTAS_ENTREVISTA[c]).join(" ")}` } };
   await deps.repos.onboarding.definirEtapa("configurando");
   const modelo = modeloDoObjetivo(ctx.linha.campos.objetivo);
-  return { data: { ok: true, instrucao: `A tela virou a configuração. Diga a frase de transição e já chame propor_bot (sugestão: ${modelo.nome}).` } };
+  return { data: { ok: true, instrucao: `A tela virou a configuração. Se você já disse a frase de transição, não repita; senão, diga agora. Em seguida chame propor_bot (sugestão: ${modelo.nome}).` } };
 }
 
 export async function proporBot(deps: Deps, input: ContextoFerramenta & ArgsProporBot): Promise<SaidaCasoDeUso<ResultadoProporBot>> {

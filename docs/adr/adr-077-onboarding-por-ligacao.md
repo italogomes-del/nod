@@ -93,3 +93,33 @@ rápido da ADR-072, só para a guia. Medido no mesmo dia: `--model fable` com `M
 1,8 s, como o Haiku. Um modelo escolhido no perfil da guia vale como em qualquer bot. Custo aceito: cada vez da
 ligação custa no preço do Fable e pode esbarrar no limite de uso de Fable da assinatura da pessoa; nesse caso o turno
 da guia falha, porque ainda não há modelo reserva (R7 do ROADMAP).
+
+## Emenda 2026-10-04 — a guia fala antes de anotar, e fala como gente
+
+**O que muda.** O roteiro mandava anotar a resposta e depois perguntar. Agora a guia fala primeiro (uma reação curta e
+a próxima pergunta), chama `anotar_entrevista` na mesma resposta e fecha com "ok", que o servidor não fala nem grava.
+Na última pergunta ela diz só uma ponte ("Deixa eu juntar tudo.") antes de anotar, e lê o resumo que a ferramenta
+devolve. A frase de transição vem antes de `concluir_entrevista`. O servidor segue conduzindo: a ordem das perguntas
+está no prompt, e a ferramenta devolve "se você já fez a próxima pergunta, escreva só ok; senão, pergunte: …".
+
+**Por quê.** Medido no UAT (`scripts/uat/onboarding-voz.ts`, voz do Google, `fable`, 5 vezes cada, uma rodada): com a
+ordem antiga, o primeiro texto do modelo saía 2,1–3,2 s depois da vez — são duas respostas do modelo antes do primeiro
+som, porque a ferramenta em si levou 36–53 ms. Com a ordem nova, 0,7–0,8 s (1,5 s na primeira vez, a frio). O silêncio
+do fim da fala até o primeiro som de conteúdo caiu de p50 5,2 s para 4,1 s. O que sobra é a síntese: 1,0–1,9 s entre o
+primeiro trecho e o primeiro áudio, com a voz do Google por REST.
+
+**Por que o "ok".** Medido no CLI 2.1.289 (`scripts/sonda-voltas-ligacao.ts`): se o modelo fala, chama a ferramenta e
+não escreve mais nada, o CLI injeta "Your previous response had no visible output" e ele repete a fala e a ferramenta.
+O "ok" só deixa de ser fala quando a guia já tinha falado antes de `anotar_entrevista` ou `concluir_entrevista`; um
+"Ok." depois de outra ferramenta é falado. Se ela repetir depois da ferramenta uma frase que já disse antes dela, a
+repetição não é falada.
+
+**Fala oral.** O prompt de voz de todo bot passa a pedir o jeito falado: reação curta primeiro, "tá", "pra", "tô",
+perguntas de até ~12 palavras com no máximo duas opções, sem dois-pontos nem parênteses. Os textos fixos do roteiro
+perderam os dois-pontos ("Antes de tudo: como…" virou "Como…"; "Última: quantas…" virou "Última pergunta,
+quantas…"; "Então: você é…" virou "Então, você é…").
+
+**Saudação adiantada.** A primeira fala é sintetizada no registro da ligação (enquanto ela toca), não no atender.
+
+**Gatilho de reversão.** Se a guia passar a repetir perguntas, pular a anotação de campos ou falar o "ok" em ligações
+reais, volta a ordem antiga (anotar e depois perguntar) e o ganho fica só com a voz em streaming.

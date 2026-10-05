@@ -1,10 +1,10 @@
 import { FECHAMENTOS_VOZ, QUADRO_MICROFONE, QUADRO_MS, QUADRO_VOZ, TAXA_VOZ_HZ, type FaseLigacao, type MotivoFimLigacao, type MsgCerebroServidor, type MsgMidiaServidor, type RotaSaida, type TipoFalaBot } from "../../contracts/voz.ts";
 import { ehEco } from "../../domain/ligacao-eco.ts";
 import { escolherFala, FALAS_DE_ESPERA, TEMPOS_ESPERA, type CategoriaEspera, type EsperaTocada, type FalaDeEspera } from "../../domain/ligacao-espera.ts";
-import { criarSegmentador, removerAberturaRepetida, textoFalavel } from "../../domain/ligacao-frases.ts";
+import { criarSegmentador, ehSoOk, removerAberturaRepetida, semOkDeFecho, textoFalavel } from "../../domain/ligacao-frases.ts";
 import { novasMarcas, percentilMs, resumoDaVez, type DesfechoDaVez, type MarcasDaVez, type OrigemDaVez, type QuemFechouTrecho } from "../../domain/ligacao-medicao.ts";
 import { ouvidoAte } from "../../domain/ligacao-ouvido.ts";
-import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, FATOR_VAD_BOT_FALANDO, modoDeInterrupcao } from "../../domain/ligacao-turno.ts";
+import { confirmaInterrupcao, ehBackchannel, esperaDeFimDeTurno, FATOR_VAD_BOT_FALANDO, modoDeInterrupcao, normalizarFala } from "../../domain/ligacao-turno.ts";
 import { criarVad, VOZ_MINIMA_MS } from "../../domain/ligacao-vad.ts";
 import { interpretarComando, validarComando, type PerfilComando } from "../../domain/comando-de-voz.ts";
 import { sugestoesDoOnboarding } from "../../domain/roteiro-onboarding.ts";
@@ -263,6 +263,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let primeiroTrechoDaVez = true;
     let respostaTexto = "";
     let respostaFoiProChat = false;
+    // A resposta em curso passou por uma ferramenta: o que o modelo repetir depois dela não é falado de novo; e se ele
+    // já tinha falado antes de anotar (roteiro do onboarding), o "ok" que fecha a volta não é fala.
+    let houveFerramentaNaVez = false;
+    let okNaoEFala = false;
+    const ditosNaVez = new Set<string>();
     let botPerguntou = false;
     let ultimaAtividadeEm = relogio();
     let audioRecebidoMs = 0;
@@ -290,6 +295,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     let saudou = false;
     let liberada = r.aguardandoConsentimento !== true;
     const saudacao = r.saudacao ?? `Oi! Aqui é ${r.nomeBot}.`;
+    const itemDaSaudacao: ItemFila = { tipo: "conteudo", texto: saudacao, n: null };
 
     const agendar = (ms: number, fn: () => void): ReturnType<typeof setTimeout> => {
       const t = setTimeout(() => {
@@ -572,6 +578,13 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     function falarConteudo(texto: string, n: number | null, tipo: TipoFalaBot = "conteudo"): void {
+      const daVez = n !== null && n === vezAtual;
+      if (daVez && houveFerramentaNaVez) {
+        if (okNaoEFala && ehSoOk(texto)) return;
+        // O modelo às vezes repete, depois da ferramenta, a pergunta que já tinha feito antes dela.
+        if (ditosNaVez.has(normalizarFala(texto))) return;
+      }
+      if (daVez) ditosNaVez.add(normalizarFala(texto));
       const { falavel, foiProChat } = textoFalavel(texto);
       if (foiProChat) respostaFoiProChat = true;
       // Só a primeira frase da mesma vez em que tocou o "Entendi." perde o "Beleza," repetido (antes valia para qualquer
@@ -819,6 +832,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezRespondida = false;
       respostaTexto = "";
       respostaFoiProChat = false;
+      houveFerramentaNaVez = false;
+      okNaoEFala = false;
+      ditosNaVez.clear();
       segmentador = criarSegmentador();
       trocas++;
       const ouvido = proximoOuvido ?? undefined;
@@ -1161,7 +1177,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       saudou = true;
       const texto = saudacao;
       gravarFala({ autor: "bot", tipo: "fala", texto, inicioMs: msDesdeInicio(), fimMs: msDesdeInicio(), interrompida: false });
-      enfileirar({ tipo: "conteudo", texto, n: null });
+      // A síntese adiantada que falhou ou foi cancelada não vale: o item volta a ser sintetizado ao vivo.
+      if (itemDaSaudacao.preparo && (itemDaSaudacao.preparo.erro || itemDaSaudacao.preparo.ac.signal.aborted)) itemDaSaudacao.preparo = undefined;
+      enfileirar(itemDaSaudacao);
       botPerguntou = true;
     }
 
@@ -1339,7 +1357,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
           cancelar(timerVencer);
           for (const trecho of segmentador.fechar()) falarConteudo(trecho, msg.n);
           vezRespondida = true;
-          const resposta = respostaTexto.trim();
+          const resposta = (okNaoEFala ? semOkDeFecho(respostaTexto) : respostaTexto).trim();
           // Sem nada a dizer, nenhuma espera toca depois; com texto, elas param quando o áudio começar.
           if (resposta === "" || !primeiroSomDaVez) cancelarEsperas();
           botPerguntou = resposta.endsWith("?");
@@ -1368,15 +1386,23 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
               marcas.ferramentaInicioEm = relogio();
               marcas.ferramentaAntesDoTexto = respostaTexto === "";
             }
+            if (vezAberta) {
+              houveFerramentaNaVez = true;
+              // ADR-077 (emenda): a guia fala primeiro e anota depois; o "ok" que ela escreve depois de anotar não é fala.
+              if (respostaTexto.trim() !== "" && /(^|__)(anotar_entrevista|concluir_entrevista)$/.test(nome)) okNaoEFala = true;
+            }
             if (respostaTexto !== "" && !/\s$/.test(respostaTexto)) respostaTexto += " ";
             ferramentaRodando = nome;
-            mudarFase("trabalhando", nome);
             const n = vezAtual;
+            // A tela segue o que a pessoa percebe: com o bot ainda falando o que disse antes da ferramenta, a fase fica
+            // "falando"; só vira "trabalhando" se a ferramenta ainda estiver rodando quando a fala acabar.
+            if (!botTocando()) mudarFase("trabalhando", nome);
+            else agendar(Math.max(0, tocaAte - relogio()) + 100, () => { if (ferramentaRodando === nome && vezAtual === n && !vezRespondida && !botTocando()) mudarFase("trabalhando", nome); });
             timersEspera.push(agendar(TEMPOS_ESPERA.ferramentaMs, () => { if (ferramentaRodando === nome && vezAtual === n && !botTocando()) tocarEspera("ferramenta", nome); }));
             timersEspera.push(agendar(TEMPOS_ESPERA.tarefaLongaMs[0], () => { if (ferramentaRodando === nome && vezAtual === n && !botTocando()) tocarEspera("tarefa_longa"); }));
           } else if (ferramentaRodando === nome) {
             ferramentaRodando = null;
-            if (!vezRespondida) mudarFase("pensando");
+            if (!vezRespondida && !botTocando()) mudarFase("pensando");
           }
           if (msg.tipo === "fim" && vezAberta && marcas && marcas.n === vezAtual && marcas.ferramentaFimEm === null) marcas.ferramentaFimEm = relogio();
           // ADR-077: uma ferramenta que mexe no onboarding terminou — o painel, a pílula e os chips acompanham.
@@ -1426,6 +1452,7 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     async function encerrar(motivo: MotivoFimLigacao): Promise<void> {
       if (encerrada) return;
       encerrada = true;
+      if (!saudou) itemDaSaudacao.preparo?.ac.abort();
       fecharMedicao(vezRespondida ? "respondida" : "encerrada");
       for (const t of timers) clearTimeout(t);
       timers.clear();
@@ -1517,6 +1544,9 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       vezRespondida = false;
       respostaTexto = "";
       respostaFoiProChat = false;
+      houveFerramentaNaVez = false;
+      okNaoEFala = false;
+      ditosNaVez.clear();
       segmentador = criarSegmentador();
       paraCerebro({ t: "nota", texto, confiavel, n });
       mudarFase("pensando");
@@ -1526,6 +1556,11 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
     }
 
     deps.esperas?.aquecer(FALAS_DE_ESPERA, r.voz, r.velocidade);
+    // definido em 2026-10-04: a saudação é sintetizada já no registro da ligação (enquanto o app abre o microfone, ou
+    // enquanto a ligação do onboarding toca), para soar assim que a mídia anexar. Antes a síntese começava no atender,
+    // e a pessoa esperava ~1–2 s de silêncio (a voz do Google sintetiza a frase inteira antes de devolver áudio). É só
+    // o texto fixo do bot: nada da pessoa sai antes do consentimento.
+    preparar(itemDaSaudacao);
 
     return {
       registro: r,

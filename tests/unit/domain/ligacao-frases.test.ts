@@ -1,4 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { ehSoOk, semOkDeFecho } from "../../../src/domain/ligacao-frases.ts";
+
+describe('o "ok" que fecha a volta depois de uma ferramenta', () => {
+  it("ehSoOk: só o ok sozinho, com ou sem ponto", () => {
+    for (const t of ["ok", "Ok.", " OK ", "ok!", "Ok ."]) expect(ehSoOk(t), t).toBe(true);
+    for (const t of ["", "ok, anotado", "Tudo ok", "okay", "Ok. E agora?"]) expect(ehSoOk(t), t).toBe(false);
+  });
+
+  it("semOkDeFecho tira só o ok do fim da resposta", () => {
+    expect(semOkDeFecho("Prazer, Marlon! Como você conheceu o nod? ok")).toBe("Prazer, Marlon! Como você conheceu o nod?");
+    expect(semOkDeFecho("Perfeito. Agora vou te mostrar o nod. Ok.")).toBe("Perfeito. Agora vou te mostrar o nod.");
+    expect(semOkDeFecho("ok")).toBe("");
+    expect(semOkDeFecho("Como você conheceu o nod?")).toBe("Como você conheceu o nod?");
+    expect(semOkDeFecho("Ok, vamos lá. Qual o seu nome?")).toBe("Ok, vamos lá. Qual o seu nome?");
+  });
+});
 import { criarSegmentador, FRASE_CHAT, FRASE_RESTO_CHAT, removerAberturaRepetida, textoFalavel } from "../../../src/domain/ligacao-frases.ts";
 
 const falavel = (md: string) => textoFalavel(md).falavel;

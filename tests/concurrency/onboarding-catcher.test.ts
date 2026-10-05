@@ -118,26 +118,33 @@ it("a Nina liga, entrevista, encolhe, propõe o bot aprovado por voz, pede o app
   await cli.esperarMsg((m) => m.t === "sugestoes" && m.itens.includes("Me chama de Ana"), "chip do apelido");
   await cli.esperarMsg((m) => m.t === "cerebro" && m.online, "cérebro online", 10_000);
 
+  // A guia fala primeiro (a reação e a próxima pergunta), anota depois e fecha a volta com "ok", que não é falado.
   const responder = (fala: string, campo: string, valor: string, proxima: string) =>
-    cli.ws.send(JSON.stringify({ t: "texto", conteudo: `${fala} [[tool: anotar_entrevista ${JSON.stringify({ campo, valor })}]] [[delta: ${proxima}]]` }));
+    cli.ws.send(JSON.stringify({ t: "texto", conteudo: `${fala} [[delta: ${proxima}]] [[tool: anotar_entrevista ${JSON.stringify({ campo, valor })}]] [[delta: ok]]` }));
 
   responder("Me chama de Ana", "apelido", "Ana", "Prazer, Ana. Como você conheceu o nod?");
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto === "Como você conheceu o nod?", "a pergunta dita antes da ferramenta é falada", 10_000);
   await cli.esperarMsg((m) => m.t === "onboarding" && m.etapa === "entrevista" && m.campos.apelido === "Ana", "painel com o apelido", 10_000);
   await cli.esperarMsg((m) => m.t === "sugestoes" && m.itens.includes("Um amigo me indicou"), "chips de como conheceu");
   responder("Um amigo me indicou", "como_conheceu", "Indicação", "E o que te fez baixar o nod?");
   await cli.esperarMsg((m) => m.t === "onboarding" && m.campos.comoConheceu === "Indicação", "painel com a origem", 10_000);
-  responder("Responder clientes mais rápido", "objetivo", "Responder clientes mais rápido", "Última: quantas pessoas trabalham com você?");
+  responder("Responder clientes mais rápido", "objetivo", "Responder clientes mais rápido", "Última pergunta, quantas pessoas trabalham com você?");
   await cli.esperarMsg((m) => m.t === "onboarding" && m.campos.objetivo === "Responder clientes mais rápido", "painel com o objetivo", 10_000);
-  responder("Somos uns cinco", "tamanho_time", "uns cinco", "Então: você é Ana. Certo?");
+  // Na última pergunta, só a ponte antes da ferramenta; o resumo vem depois dela.
+  cli.ws.send(JSON.stringify({ t: "texto", conteudo: `Somos uns cinco [[delta: Deixa eu juntar tudo.]] [[tool: anotar_entrevista ${JSON.stringify({ campo: "tamanho_time", valor: "uns cinco" })}]] [[delta: Então, você é Ana. Certo?]]` }));
   await cli.esperarMsg((m) => m.t === "onboarding" && m.campos.tamanhoTime === "2_10", "painel com o time", 10_000);
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto === "Certo?", "o resumo depois da ferramenta é falado", 10_000);
   await cli.esperarMsg((m) => m.t === "sugestoes" && m.itens.includes("Isso mesmo"), "chips do resumo");
 
   const meio = await srv.json<EstadoOnboarding>("GET", "onboarding");
   expect(meio.campos).toEqual({ apelido: "Ana", comoConheceu: "Indicação", objetivo: "Responder clientes mais rápido", tamanhoTime: "2_10" });
+  // O "ok" que fecha cada volta depois de anotar nunca foi falado.
+  expect(cli.msgs.some((m) => m.t === "bot-fala" && /^ok[.!]?$/i.test(m.texto))).toBe(false);
 
   // "Isso mesmo" → concluir_entrevista: a mídia recebe a etapa nova (a tela encolhe para a pílula).
-  cli.ws.send(JSON.stringify({ t: "texto", conteudo: "Isso mesmo [[tool: concluir_entrevista {}]] [[delta: Perfeito. Agora vou te mostrar o nod.]]" }));
+  cli.ws.send(JSON.stringify({ t: "texto", conteudo: "Isso mesmo [[delta: Perfeito. Agora vou te mostrar o nod.]] [[tool: concluir_entrevista {}]] [[delta: ok]]" }));
   await cli.esperarMsg((m) => m.t === "onboarding" && m.etapa === "configurando", "encolhe para a configuração", 10_000);
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("Agora vou te mostrar o nod"), "a transição dita antes de concluir é falada", 10_000);
   expect((await srv.json<EstadoOnboarding>("GET", "onboarding")).etapa).toBe("configurando");
 
   // propor_bot → card "Novo bot" → leitura e janela → "pode criar" → o bot nasce.

@@ -27,7 +27,11 @@ describe("montarPromptLigacao", () => {
     const fala = p.split("\n").find((l) => l.startsWith("Fala:")) ?? "";
     expect(fala).toContain("até ~20 palavras");
     expect(fala).toContain("No máximo ~60 palavras por resposta");
-    expect(fala).toContain("Sem markdown e sem listas");
+    expect(fala).toContain("Sem markdown, sem listas, sem dois-pontos e sem parênteses");
+    // Fala oral: reação curta primeiro, jeito falado, pergunta curta com no máximo duas opções.
+    expect(fala).toContain("Fale como gente fala ao telefone");
+    expect(fala).toContain("comece por uma reação curta");
+    expect(fala).toContain("cada pergunta com até ~12 palavras e no máximo duas opções");
     expect(fala).toContain('Não comece com "certo", "beleza" nem "deixa eu ver"');
     expect(fala).toContain('não responda a "uhum"');
     const ligacao = p.split("\n").find((l) => l.startsWith("Ligação:")) ?? "";

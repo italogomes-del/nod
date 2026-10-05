@@ -50,9 +50,12 @@ function linhaDeFala(genero: GeneroVoz): string {
   const concordancia = genero === "feminina" ? 'sua voz é feminina, então fale de si no feminino ("pronta", "obrigada")' : 'sua voz é masculina, então fale de si no masculino ("pronto", "obrigado")';
   return [
     "Fala: tudo o que você escreve é falado em voz alta.",
-    "Frases de até ~20 palavras, uma ideia por vez.",
+    // definido em 2026-10-04: fala oral. Na ligação do Marlon a guia soava como texto lido ("Muita gente começa por
+    // três coisas: responder e-mails, organizar a agenda ou…"): frases curtas não bastam, o jeito tem de ser falado.
+    'Fale como gente fala ao telefone: comece por uma reação curta e natural e use o jeito falado ("tá", "pra", "tô").',
+    "Frases de até ~20 palavras, uma ideia por vez; cada pergunta com até ~12 palavras e no máximo duas opções.",
     `No máximo ~${MAX_PALAVRAS_FALADAS} palavras por resposta; o que passar disso, e qualquer código, tabela ou link, vai para o chat.`,
-    "Sem markdown e sem listas; números, datas e horários escritos como se falam.",
+    "Sem markdown, sem listas, sem dois-pontos e sem parênteses; números, datas e horários escritos como se falam.",
     'Não comece com "certo", "beleza" nem "deixa eu ver", e não responda a "uhum", "tá" ou "aham": isso é a pessoa ouvindo.',
     `Concordância: ${concordancia}.`,
   ].join(" ");
