@@ -643,6 +643,22 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .ac-grupo input{width:17px;height:17px;margin:1px 0 0;accent-color:var(--ink)}
 .ac-grupo b{display:block;font-size:13px;font-weight:600}.ac-grupo small{display:block;font-size:12px;color:var(--ink-3);margin-top:1px}
 .acesso-card .ap-detalhe{margin-bottom:12px;font-size:12px;color:var(--ink-3)}
+/* definido em 2026-10-05: o cartão que oferece liberar apps recém-conectados para o bot da conversa, no molde do card
+   de acesso — canvas "Acesso: você conectou pelo Marketplace e o nod oferece liberar". Uma linha por app: checkbox,
+   logo, nome, "Conectado" e o seletor de nível. */
+.liberar-card .ac-cab .mascote{flex:none}
+.liberar-card .lib-apps{margin:0 20px 12px 74px;display:flex;flex-direction:column}
+.liberar-card .lib-app{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.liberar-card .lib-app:first-child{border-top:0}
+.liberar-card .lib-marca{display:flex;gap:12px;align-items:center;flex:1;min-width:0;cursor:pointer}
+.liberar-card .lib-marca input{width:17px;height:17px;margin:0;flex:none;accent-color:var(--ink)}
+.liberar-card .lib-marca .app-logo{width:32px;height:32px;min-width:32px;border-radius:8px;font-size:16px;background:var(--surface)}
+.liberar-card .lib-nome{display:flex;flex-direction:column;gap:1px;min-width:0}
+.liberar-card .lib-nome b{font-size:13px;font-weight:600;line-height:18px}
+.liberar-card .lib-nome small{display:flex;align-items:center;gap:5px;font-size:12px;line-height:16px;color:var(--success)}
+.liberar-card .lib-nivel{height:32px;padding:0 8px 0 10px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer}
+.liberar-card .lib-nivel:disabled{color:var(--ink-3);cursor:default}
+@media(max-width:760px){.liberar-card .lib-apps{margin-left:20px}}
 .esperando{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:var(--surface-raised);font-size:13px;margin-bottom:14px}
 .esperando b{display:block;font-weight:600}.esperando p{margin:2px 0 4px;color:var(--ink-3);font-size:12px}
 .esperando a{font-size:12px;display:inline-flex;gap:5px;align-items:center}
