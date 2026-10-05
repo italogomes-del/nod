@@ -56,8 +56,11 @@ async function sondar(): Promise<void> {
     const i = process.argv.indexOf(nome);
     return i >= 0 ? process.argv[i + 1] : undefined;
   };
-  const opcoes = [["esforco", arg("--esforco")], ["pensamento", arg("--pensamento")]].filter(([, v]) => v).map(([k, v]) => `${k}=${v}`);
-  const cfg = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: [arg("--modelo") ?? MODELOS_LIGACAO_PADRAO["claude-cli"].modelo, ...opcoes].join(" ") })["claude-cli"];
+  // Sem --modelo, o padrão vai inteiro (com o esforço dele); com --modelo, vale como no config.env: só as opções dadas.
+  const padrao = MODELOS_LIGACAO_PADRAO["claude-cli"];
+  const esforco = arg("--esforco") ?? (arg("--modelo") ? undefined : padrao.esforco);
+  const opcoes = [["esforco", esforco], ["pensamento", arg("--pensamento")]].filter(([, v]) => v).map(([k, v]) => `${k}=${v}`);
+  const cfg = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: [arg("--modelo") ?? padrao.modelo, ...opcoes].join(" ") })["claude-cli"];
   // A mesma denylist do driver (CLAUDE_EFFORT, CLAUDE_CODE_*, ANTHROPIC_*, NOD_*…): rodada de dentro do Claude Code, o
   // esforço herdado mudaria o que a sonda mede.
   const envBase = montarAmbiente("local", process.env);

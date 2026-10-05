@@ -94,6 +94,9 @@ rápido da ADR-072, só para a guia. Medido no mesmo dia: `--model fable` com `M
 ligação custa no preço do Fable e pode esbarrar no limite de uso de Fable da assinatura da pessoa; nesse caso o turno
 da guia falha, porque ainda não há modelo reserva (R7 do ROADMAP).
 
+**Revisto em 2026-10-05 (NOD-164, decisão do Marlon):** na ligação a exceção acabou. A guia fala no mesmo modelo de
+voz das outras ligações (`modeloDeVoz`, emenda de 2026-10-05 da ADR-072); o mais potente continua só no chat dela.
+
 ## Emenda 2026-10-04 — a guia fala antes de anotar, e fala como gente
 
 **O que muda.** O roteiro mandava anotar a resposta e depois perguntar. Agora a guia fala primeiro (uma reação curta e

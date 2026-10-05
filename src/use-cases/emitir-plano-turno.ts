@@ -2,6 +2,7 @@ import type { IdHarness } from "../contracts/harness.ts";
 import { modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
+import { modeloDeVoz } from "../domain/modelo-ligacao.ts";
 import { generoDaVoz } from "../domain/vozes.ts";
 import { montarPromptLigacao, MENSAGENS_NO_PROMPT_LIGACAO } from "../domain/prompt-ligacao.ts";
 import { linhasDoPromptOnboarding } from "../domain/roteiro-onboarding.ts";
@@ -199,8 +200,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const pessoaNome = onb.campos.apelido ?? pessoa?.nome ?? "a pessoa";
   const ligacaoDoTurno = modo === "ligacao" && turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
   const onboarding = ligacaoDoTurno?.iniciadaPor === "produto" && onb.guiaId === agente.id && (onb.etapa === "chamando" || onb.etapa === "entrevista" || onb.etapa === "configurando");
-  // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE), no chat e na
-  // ligação; um modelo escolhido no perfil dela vale como em qualquer bot.
+  // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE) no chat; um modelo
+  // escolhido no perfil dela vale como em qualquer bot. revisto em 2026-10-05 (NOD-164): na ligação, não — ver abaixo.
   const guiaNoMaisPotente = onb.guiaId === agente.id && turno.modelo === "auto";
   const modeloEscolhido = escolha ? (guiaNoMaisPotente ? modeloMaisPotente(escolha.harness) : null) ?? escolha.modelo : null;
   const parcial = montarPlano({
@@ -255,18 +256,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   if (modo === "ligacao") {
     const lig = ligacaoDoTurno;
     if (!lig || (lig.estado !== "chamando" && lig.estado !== "em_curso")) throw new ErroDeDominio("estado_invalido", { cause: "ligação do turno não está viva" });
-    const harnessDoPlano = escolha?.harness ?? "claude-cli";
-    const modelos = input.modelosLigacao ?? MODELOS_LIGACAO_PADRAO;
-    const maisPotente = guiaNoMaisPotente ? modeloMaisPotente(harnessDoPlano) : null;
     const base = { ligacaoId: lig.id, nomeBot: agente.nome, generoVoz: generoDaVoz(lig.voz) };
-    if (harnessDoPlano === "codex-cli") {
-      parcial.ligacaoVoz = { ...base, modelo: maisPotente ?? modelos["codex-cli"].modelo };
-    } else {
-      // NOD-164: o pensamento adaptativo vale para toda ligação do Claude (inclusive no `fable` da guia); o esforço é da
-      // configuração e só acompanha o modelo dela, nunca o mais potente.
-      const cfg = modelos["claude-cli"];
-      parcial.ligacaoVoz = { ...base, modelo: maisPotente ?? cfg.modelo, pensamentoAdaptativo: cfg.pensamentoAdaptativo, ...(!maisPotente && cfg.esforco ? { esforco: cfg.esforco } : {}) };
-    }
+    // NOD-164 (2026-10-05): a guia no "auto" também — o mais potente fica no chat dela (modeloEscolhido, acima).
+    parcial.ligacaoVoz = { ...base, ...modeloDeVoz(escolha?.harness ?? "claude-cli", input.modelosLigacao ?? MODELOS_LIGACAO_PADRAO) };
     // O prompt de voz (prompt-ligacao.ts) substitui o de texto: curto, falado, sem "Formatação:".
     parcial.promptSistema = montarPromptLigacao({
       nomeBot: agente.nome,

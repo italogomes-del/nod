@@ -1,4 +1,6 @@
 import { ESFORCOS_AGENTE, type EsforcoAgente } from "../contracts/agente.ts";
+import type { IdHarness } from "../contracts/harness.ts";
+import type { LigacaoVozPlano } from "../contracts/plano-turno.ts";
 import { MODELOS_LIGACAO_PADRAO, type ConfigModeloLigacaoClaude, type ModelosLigacao } from "../contracts/modelos.ts";
 
 /**
@@ -71,4 +73,15 @@ function lerCodex(valor: string | undefined): { modelo: string } {
 /** Puro: lê e valida as duas variáveis. Lança Error em pt-BR no primeiro valor inválido. */
 export function lerModelosLigacao(env: Readonly<Record<string, string | undefined>>): ModelosLigacao {
   return { "claude-cli": lerClaude(env[VAR_MODELO_LIGACAO_CLAUDE]), "codex-cli": lerCodex(env[VAR_MODELO_LIGACAO_CODEX]) };
+}
+
+/**
+ * O modelo de voz do plano da ligação, pelo harness e pela configuração. Decisão do Marlon (2026-10-05, NOD-164): vale
+ * para TODA ligação, inclusive a da guia do onboarding no "auto" — ela fala no mesmo modelo de voz das outras, não mais
+ * no mais potente (`fable`/`gpt-6-astra`), que segue só no chat dela. O Codex leva só o modelo.
+ */
+export function modeloDeVoz(harness: IdHarness, modelos: ModelosLigacao): Pick<LigacaoVozPlano, "modelo" | "esforco" | "pensamentoAdaptativo"> {
+  if (harness === "codex-cli") return { modelo: modelos["codex-cli"].modelo };
+  const cfg = modelos["claude-cli"];
+  return { modelo: cfg.modelo, pensamentoAdaptativo: cfg.pensamentoAdaptativo, ...(cfg.esforco ? { esforco: cfg.esforco } : {}) };
 }

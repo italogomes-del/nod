@@ -42,7 +42,7 @@ describeIntegracao("harness por agente", () => {
       expect(p).toMatchObject({ harness: "codex-cli", entrada: { modelo: "gpt-5.6-sol" } });
     });
   });
-  it("a guia do onboarding no automático roda no mais potente do harness, no chat e na ligação; outro bot e modelo escolhido não mudam", async () => {
+  it("a guia do onboarding no automático roda no mais potente do harness no chat, e na ligação no modelo de voz (NOD-164); outro bot e modelo escolhido não mudam", async () => {
     await withRollback(escopo, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
       const outro = await agenteComConversa(trx, escopo);
@@ -64,14 +64,15 @@ describeIntegracao("harness por agente", () => {
       const contexto: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const naLigacao = (await emitirPlanoTurno(deps, { turnoId: turno.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).data;
-      expect(naLigacao.ligacaoVoz?.modelo).toBe("fable");
+      expect(naLigacao.ligacaoVoz?.modelo).toBe(MODELOS_LIGACAO_PADRAO["claude-cli"].modelo);
+      expect(naLigacao.entrada.modelo).toBe("fable");
     });
   });
 });
 
 describeIntegracao("modelo da ligação resolvido no servidor (NOD-164)", () => {
   const contexto: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
-  it("sem config vale o padrão; com config vale a configurada; a guia explícita recebe a config e a guia no auto segue no mais potente", async () => {
+  it("sem config vale o padrão; com config vale a configurada; a guia, explícita ou no auto, recebe a config", async () => {
     await withRollback(escopo, async (trx) => {
       const { repos, agenteId } = await agenteComConversa(trx, escopo);
       const guia = await agenteComConversa(trx, escopo);
@@ -89,20 +90,20 @@ describeIntegracao("modelo da ligação resolvido no servidor (NOD-164)", () => 
         return plano.ligacaoVoz;
       };
 
-      expect(await voz(agenteId)).toEqual(expect.objectContaining({ modelo: MODELOS_LIGACAO_PADRAO["claude-cli"].modelo, pensamentoAdaptativo: false }));
-      expect((await voz(agenteId))?.esforco).toBeUndefined();
+      const padrao = MODELOS_LIGACAO_PADRAO["claude-cli"];
+      expect(await voz(agenteId)).toEqual(expect.objectContaining({ modelo: padrao.modelo, esforco: padrao.esforco, pensamentoAdaptativo: false }));
+      expect((await voz(agenteId, lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: "claude-sonnet-4-6" })))?.esforco).toBeUndefined();
       expect(await voz(agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }));
       expect(await voz(codex.agenteId)).toEqual(expect.objectContaining({ modelo: "gpt-6-luna" }));
       expect(await voz(codex.agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "gpt-6-astra" }));
       expect((await voz(codex.agenteId, configurada))?.pensamentoAdaptativo).toBeUndefined();
 
-      // A guia com modelo explícito recebe a config; no "auto", o `fable` — sem o esforço da config, com o pensamento dela.
+      // A guia recebe a config, com modelo explícito ou no "auto" (decisão de 2026-10-05: o mesmo modelo de voz das outras).
       await editarPerfil(deps, { agenteId: guia.agenteId, harness: "claude-cli", modelo: "sonnet" });
       expect(await voz(guia.agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "claude-sonnet-5-5", esforco: "low" }));
       await editarPerfil(deps, { agenteId: guia.agenteId, harness: "auto", modelo: "auto" });
-      const naGuia = await voz(guia.agenteId, configurada);
-      expect(naGuia).toEqual(expect.objectContaining({ modelo: "fable", pensamentoAdaptativo: false }));
-      expect(naGuia?.esforco).toBeUndefined();
+      expect(await voz(guia.agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }));
+      expect(await voz(guia.agenteId)).toEqual(expect.objectContaining({ modelo: padrao.modelo, esforco: padrao.esforco, pensamentoAdaptativo: false }));
     });
   });
 });

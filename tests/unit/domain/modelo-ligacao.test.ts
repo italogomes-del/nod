@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MODELOS_LIGACAO_PADRAO } from "../../../src/contracts/modelos.ts";
-import { lerModelosLigacao } from "../../../src/domain/modelo-ligacao.ts";
+import { MODELO_MAIS_POTENTE, MODELOS_LIGACAO_PADRAO } from "../../../src/contracts/modelos.ts";
+import { lerModelosLigacao, modeloDeVoz } from "../../../src/domain/modelo-ligacao.ts";
 
 describe("lerModelosLigacao (NOD-164)", () => {
   it.each([
@@ -11,8 +11,8 @@ describe("lerModelosLigacao (NOD-164)", () => {
     expect(lerModelosLigacao(env)).toEqual(MODELOS_LIGACAO_PADRAO);
   });
 
-  it("o padrão é o Sonnet 4.6 pelo id, sem thinking e sem esforço; o Codex segue no gpt-6-luna", () => {
-    expect(MODELOS_LIGACAO_PADRAO).toEqual({ "claude-cli": { modelo: "claude-sonnet-4-6", pensamentoAdaptativo: false }, "codex-cli": { modelo: "gpt-6-luna" } });
+  it("o padrão é o Sonnet 5.5 pelo id, com esforço low e sem thinking adaptativo (sonda de 2026-10-05); o Codex segue no gpt-6-luna", () => {
+    expect(MODELOS_LIGACAO_PADRAO).toEqual({ "claude-cli": { modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }, "codex-cli": { modelo: "gpt-6-luna" } });
   });
 
   it.each([
@@ -44,5 +44,26 @@ describe("lerModelosLigacao (NOD-164)", () => {
   ])("recusa %s com erro em pt-BR citando a variável", (_, variavel, valor, motivo) => {
     expect(() => lerModelosLigacao({ [variavel]: valor })).toThrow(new RegExp(`^${variavel} inválida: `));
     expect(() => lerModelosLigacao({ [variavel]: valor })).toThrow(motivo);
+  });
+});
+
+describe("modeloDeVoz (NOD-164, decisão de 2026-10-05)", () => {
+  const configurada = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: "claude-sonnet-5-5 esforco=low", NOD_MODELO_LIGACAO_CODEX: "gpt-6-astra" });
+
+  it("Claude: modelo, esforço e pensamento da configuração; sem esforço configurado, sem o campo", () => {
+    expect(modeloDeVoz("claude-cli", configurada)).toEqual({ modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false });
+    const semEsforco = lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: "claude-sonnet-4-6" });
+    expect(modeloDeVoz("claude-cli", semEsforco)).toEqual({ modelo: "claude-sonnet-4-6", pensamentoAdaptativo: false });
+  });
+
+  it("Codex: só o modelo da configuração", () => {
+    expect(modeloDeVoz("codex-cli", configurada)).toEqual({ modelo: "gpt-6-astra" });
+    expect(modeloDeVoz("codex-cli", MODELOS_LIGACAO_PADRAO)).toEqual({ modelo: "gpt-6-luna" });
+  });
+
+  it("nunca devolve o mais potente: a guia do onboarding fala no mesmo modelo de voz das outras ligações", () => {
+    for (const harness of ["claude-cli", "codex-cli"] as const) {
+      expect(Object.values(MODELO_MAIS_POTENTE)).not.toContain(modeloDeVoz(harness, MODELOS_LIGACAO_PADRAO).modelo);
+    }
   });
 });

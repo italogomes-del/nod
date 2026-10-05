@@ -2,8 +2,8 @@
 
 Feito na madrugada de 2026-10-04 num MacBook M1 (macOS 26.0) com o branch `feat/modo-ligacao`, banco efêmero (porta
 5438), servidor em `:8890` e web em `:5276`. Voz `local` (whisper.cpp `ggml-base-q5_1` + `say` do macOS); cérebro ora o
-catcher (custo zero), ora o Claude Code 2.1.289 real (Haiku 4.5, assinatura; desde a NOD-164 o padrão da ligação é o Sonnet 4.6, a
-medir nos roteiros pagos). Os roteiros estão no repositório e podem
+catcher (custo zero), ora o Claude Code 2.1.289 real (Haiku 4.5, assinatura; desde a NOD-164 o padrão da ligação é o Sonnet 5.5 low,
+escolhido pela sonda de 2026-10-05 abaixo). Os roteiros estão no repositório e podem
 ser repetidos:
 
 - `node scripts/uat/ligacao-voz.ts --url http://127.0.0.1:8890 "frase" …` — liga, fala frases geradas com o `say` em
@@ -109,3 +109,44 @@ local (apelido "Marlon", "indicação de um amigo", "responder e-mails dos clien
 "Diga algo como" mudaram a cada pergunta, ela leu o resumo e pediu "Certo?", e com "Isso mesmo, pode seguir" a ligação
 foi para a configuração e propôs o bot "Atendente". Achado corrigido: "Marlon,." no resumo falado (o trecho cortado
 na vírgula ganhava ponto).
+
+## Sonda de modelos (NOD-164, 2026-10-05)
+
+Pergunta: que modelo do Claude Code fala na ligação, já que a guia no "auto" passou a usar o mesmo modelo de voz das
+outras ligações. Corte combinado com o Marlon: **TTFT quente ≤ 1,0 s e custo ≤ 3x o do Haiku 4.5**.
+
+Método: `node scripts/sonda-ligacao-claude.ts --modelo <id> [--esforco low] [--pensamento adaptativo|desligado] --apps <0|2>`, com
+Claude Code 2.1.289 e assinatura. A sonda usa o `montarArgsLigacao` e o `ambienteDaLigacao` reais e um MCP falso com o
+kit real da ligação (16 ferramentas de `FERRAMENTAS_NOD_POR_MODO.ligacao`). `--apps 2` soma 2 apps sintéticos de 20
+ferramentas (56 no total), para o catálogo pesar como num bot com conectores. Foram 3 rodadas por combinação, e 8 para
+os dois finalistas. A tabela traz medianas. O custo é o `total_cost_usd` da sessão inteira da sonda em regime, ou seja,
+sem a 1ª rodada de cada modelo, que paga a escrita do cache (4.6: US$ 0,047 e 0,124; 5.5 low: US$ 0,040 e 0,108;
+Haiku com 2 apps: US$ 0,046).
+
+| Apps | Modelo | n | 1º texto frio | 1º texto quente | Quentes ≤ 1 s | Custo da sessão | x Haiku |
+|---|---|---|---|---|---|---|---|
+| 0 (16 ferr.) | Haiku 4.5 (base) | 3 | 1,52 s | 0,54 s | 3/3 | US$ 0,0060 | 1x |
+| 0 | Sonnet 4.6, adaptativo desligado | 8 | 2,23 s | 1,10 s | 1/8 | US$ 0,0160 | 2,7x |
+| 0 | Sonnet 4.6, adaptativo ligado | 3 | 2,83 s | 1,03 s | 0/3 | US$ 0,0159 | 2,7x |
+| 0 | **Sonnet 5.5 low** | 8 | 2,45 s | 1,05 s | 3/8 | US$ 0,0129 | 2,2x |
+| 2 (56 ferr.) | Haiku 4.5 (base) | 3 | 2,38 s | 0,58 s | 3/3 | US$ 0,0117 | 1x |
+| 2 | Sonnet 4.6, adaptativo desligado | 8 | 2,38 s | 1,34 s | 1/8 | US$ 0,0320 | 2,7x |
+| 2 | Sonnet 4.6, adaptativo ligado | 3 | 4,04 s | 1,34 s | 0/3 | US$ 0,0320 | 2,7x |
+| 2 | **Sonnet 5.5 low** | 8 | 2,67 s | 0,80 s | 5/8 | US$ 0,0272 | 2,3x |
+
+Custo até a 2ª volta (alô + "tudo bem"), em regime, com 0 e 2 apps: Haiku US$ 0,0029 e 0,0052; Sonnet 4.6 US$ 0,0081
+e 0,0145; Sonnet 5.5 low US$ 0,0050 e 0,0106. A interrupção respondeu em todos (`control_response` em ≤ 7 ms).
+
+**Decisão: Sonnet 5.5 com esforço low e sem thinking adaptativo** (`MODELOS_LIGACAO_PADRAO`). Entre os Sonnet, é o
+mais rápido no quente e o mais barato. Passa no corte com 2 apps e passa no custo nos dois casos. Sem apps, a mediana
+ficou 45 ms acima de 1,0 s. O 4.6 não passa no TTFT em nenhum dos casos e custa mais. O Haiku continua no
+`infra/gcp/config.env` de produção até a próxima versão do app desktop.
+
+Ressalvas:
+- Numa das 9 execuções do 5.5 low (rodada 1, sem apps), o 1º texto quente demorou 25,9 s e o frio não chegou a sair.
+  Repetida isoladamente com `--bruto`, a sonda mediu 2,6 s frio e 0,98 s quente. Ficou como ponto fora da curva, mas
+  vale vigiar no `primeiro_delta_ms` do log `ligacao_vez` depois do deploy.
+- Com prompts curtos, ligar ou desligar o thinking adaptativo não mudou o 4.6 de forma mensurável.
+- Um app desktop sem `--effort` roda o 5.5 com o esforço padrão (sai o log `ligacao_sem_effort`). É mais um motivo para
+  trocar a config só junto com a versão nova do app.
+- Os apps são sintéticos, e a sonda não fala nem ouve. A ligação real com microfone (UAT do Marlon) confirma a 1ª fala.
