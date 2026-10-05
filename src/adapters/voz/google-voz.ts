@@ -3,14 +3,25 @@ import { ErroDeDominio } from "../../domain/erro.ts";
 import { log } from "../../obs/log.ts";
 import { fatiar, lerWav, misturarParaMono, reamostrar, bytesParaPcm } from "./audio.ts";
 import { vozDoProvedor } from "./catalogo-vozes.ts";
+import { FalhaAntesDoAudio, sintetizarEmStreaming, type TransporteGrpc } from "./google-voz-streaming.ts";
 import type { PedidoTts, Sintetizador } from "./spi.ts";
 
 /**
- * TTS Chirp 3 HD pelo REST `text:synthesize` (definido em 2026-10-04, ADR-071). Uma frase por pedido (o orquestrador
- * já fatia em trechos). O streaming do Chirp é gRPC: a fase 0 decide se vale `@grpc/grpc-js`; até lá `streaming:false`.
+ * TTS Chirp 3 HD (definido em 2026-10-04, ADR-071). Uma frase por pedido (o orquestrador já fatia em trechos).
  *
- * A confirmar na fase 0 (sem credencial nesta máquina em 2026-10-04): `speakingRate` aceito pelas vozes Chirp 3 HD
- * (a documentação diz que sim) e a latência por frase no e2-medium.
+ * Dois caminhos: o streaming (gRPC sobre HTTP/2, google-voz-streaming.ts), que devolve áudio conforme sintetiza, e o
+ * REST `text:synthesize`, que só devolve a frase inteira. Com `streaming` nas opções, o REST vira a rede de segurança:
+ * entra quando o streaming falha antes de entregar qualquer áudio, e direto por 5 min depois de 3 falhas seguidas.
+ *
+ * Medido em 2026-10-04 (scripts/voz/sonda-tts-streaming.ts, de um Mac no Brasil, voz Erinome): primeiro áudio do REST
+ * em 1,2–2,8 s; do streaming, metade das vezes em ~0,35 s e metade em ~1,2 s — o endpoint global alterna entre dois
+ * grupos de servidores, e não há como escolher (o endpoint `us-` fica fixo em ~0,87 s, o `eu-` em ~1,7 s, e não existe
+ * um regional de São Paulo para este método). Pedidos simultâneos na mesma sessão não mudam isso de forma estável:
+ * com 6 juntos, duas rodadas deram 36/48 e 11/24 na faixa rápida, e 2/48 e 0/24 acima de 2 s. A síntese inteira sai
+ * 5 a 8 vezes mais rápido que a fala, com no máximo ~120 ms entre pedaços.
+ *
+ * A confirmar: `speaking_rate` honrado no streaming (o campo existe no proto) e se cada fluxo conta na cota de 200
+ * pedidos por minuto.
  */
 export const URL_TTS_GOOGLE = "https://texttospeech.googleapis.com/v1/text:synthesize";
 
@@ -19,12 +30,29 @@ const AMOSTRAS_POR_PEDACO = (100 * TAXA_VOZ_HZ) / 1000;
 /** definido em 2026-10-04: uma nova tentativa em 429/5xx/rede, depois de 300 ms; depois erro (plano, "Operação"). */
 const ESPERA_NOVA_TENTATIVA_MS = 300;
 const TIMEOUT_PEDIDO_MS = 15_000;
+/**
+ * definido em 2026-10-04: sem áudio do streaming em 3 s, cai no REST. Com pedidos simultâneos a sonda viu o primeiro
+ * áudio chegar a 2,1 s, e no UAT um fluxo estourou os 2,5 s que valiam antes; esperar um fluxo lento custa menos que
+ * desistir dele e pedir tudo de novo pelo REST.
+ */
+export const PRAZO_PRIMEIRO_AUDIO_MS = 3_000;
+/**
+ * definido em 2026-10-04: o primeiro pedaço do streaming só sai com 400 ms de áudio juntos. O app dá a fala por
+ * terminada com 200 ms de fila vazia, e o UAT viu um intervalo de 332 ms entre dois pedaços. Como a síntese anda 5 a
+ * 8 vezes mais rápido que a fala, juntar 400 ms custa ~70 ms de espera.
+ */
+export const FOLGA_INICIAL_MS = 400;
+/** definido em 2026-10-04: 3 falhas seguidas do streaming antes do áudio → só REST por 5 min. */
+const FALHAS_PARA_ABRIR = 3;
+const DISJUNTOR_MS = 5 * 60_000;
 
 export type OpcoesGoogleVoz = {
   token: () => Promise<string>;
   projeto: string | null;
   fetchImpl?: typeof fetch;
   url?: string;
+  /** Liga o caminho de streaming; sem isto, só REST. */
+  streaming?: { transporte: TransporteGrpc; prazoPrimeiroAudioMs?: number; folgaInicialMs?: number; agora?: () => number };
 };
 
 class Transitorio extends Error {}
@@ -64,11 +92,51 @@ export function criarSintetizadorGoogle(o: OpcoesGoogleVoz): Sintetizador {
     return Buffer.from(b64, "base64");
   }
 
+  const agora = o.streaming?.agora ?? Date.now;
+  let falhasSeguidas = 0;
+  let soRestAte = 0;
+
   return {
     id: "google",
-    capacidades: { streaming: false, velocidade: true },
+    capacidades: { streaming: o.streaming !== undefined, velocidade: true },
     async *sintetizar(p: PedidoTts) {
       if (p.sinal?.aborted) return;
+      if (o.streaming && agora() >= soRestAte) {
+        let token: string | null = null;
+        try {
+          token = await o.token();
+        } catch {
+          // sem token o REST abaixo falha do mesmo jeito, e é ele que classifica e registra o erro
+        }
+        if (p.sinal?.aborted) return;
+        if (token !== null) {
+          try {
+            yield* sintetizarEmStreaming(o.streaming.transporte, {
+              texto: p.texto,
+              voz: vozDoProvedor("google", p.voz),
+              velocidade: p.velocidade,
+              token,
+              projeto: o.projeto,
+              sinal: p.sinal,
+              prazoPrimeiroAudioMs: o.streaming.prazoPrimeiroAudioMs ?? PRAZO_PRIMEIRO_AUDIO_MS,
+              folgaInicialMs: o.streaming.folgaInicialMs ?? FOLGA_INICIAL_MS,
+              amostrasPorPedaco: AMOSTRAS_POR_PEDACO,
+            });
+            falhasSeguidas = 0;
+            return;
+          } catch (e) {
+            if (abortado(p.sinal, e)) return;
+            if (!(e instanceof FalhaAntesDoAudio)) {
+              // Já saiu áudio: refazer o trecho repetiria o que a pessoa ouviu.
+              log("aviso", "voz_tts_falhou", { provedor: "google", codigo: "streaming_interrompido" });
+              throw new ErroDeDominio("conector_indisponivel", { cause: e });
+            }
+            falhasSeguidas++;
+            if (falhasSeguidas >= FALHAS_PARA_ABRIR) soRestAte = agora() + DISJUNTOR_MS;
+            log("aviso", "voz_tts_streaming_falhou", { provedor: "google", motivo: e.motivo, falhas_seguidas: falhasSeguidas, so_rest: falhasSeguidas >= FALHAS_PARA_ABRIR });
+          }
+        }
+      }
       let bytes: Buffer | null = null;
       for (let tentativa = 1; bytes === null; tentativa++) {
         try {
