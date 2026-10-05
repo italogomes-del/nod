@@ -34,7 +34,11 @@ a frase em inglês como se o bot a tivesse dito. A conferência de login (sem tu
   `causaSemIa`, sem a frase como fala (`comContaSemAcesso`). O servidor marca aquela IA da máquina como fora na hora.
 - **O veredito mora no app do Mac** (`desktop/vigia-ias.ts`), preso à conta: guarda um hash do que o CLI diz sobre o
   login. Mudou a conta, ou passaram 24 h, a IA é testada de novo sozinha. Enquanto vale, a IA é anunciada como
-  `nao_autenticado` com a causa, mesmo depois de reabrir o app.
+  `nao_autenticado` com a causa, mesmo depois de reabrir o app. O `codex login status` não diz qual é a conta, então
+  o fim de um login aberto pelo app também dispara o teste. O reteste automático tem freio (1 min, dobrando até 1 h):
+  medido em 2026-10-05, a saída do estado do login não muda entre chamadas, e o freio cobre o dia em que mudar.
+- **Medido com os CLIs reais** (2026-10-05, Claude Code 2.1.289 e Codex 0.147.0, `npm run sonda:teste-ia`): o teste
+  responde em ~13 s por IA; as duas são testadas ao mesmo tempo.
 - **Bot em automático troca de IA sozinho.** Turno de conversa com `harness=auto` e `modelo=auto`, reprovado por
   `causaSemIa`, com outra IA pronta na mesma máquina: o pedido é repetido nela e a conversa ganha uma linha dizendo por
   quem o bot passou a responder. IA ou modelo escolhidos à mão e turnos de rotina não trocam: recebem o aviso.
