@@ -1,6 +1,7 @@
 import type { SuaVezDto } from "../../src/contracts/api.ts";
 import type { Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { CamposEntrevista, EtapaOnboarding } from "../../src/contracts/onboarding.ts";
+import type { IaDaLigacao } from "../../src/contracts/voz.ts";
 import type { IdVozNod, VelocidadeVoz } from "../../src/contracts/vozes.ts";
 import { ErroApi, type Api } from "../lib/api.ts";
 import type { EventoMotor, MotorLigacao, OpcoesMotor } from "../lib/ligacao.ts";
@@ -9,6 +10,7 @@ import { esquecerRegiao, regiao, regiaoMudaria } from "../lib/regioes.ts";
 import { esc } from "../lib/render.ts";
 import { duracaoRelogio } from "../lib/relogio.ts";
 import { dialogo } from "./gestao-agentes.ts";
+import { nomeDaIa, notaNoTerminal, type EstadoSemIa } from "./ligacao-sem-ia.ts";
 import {
   avisoDoEstadoLocal, comLegenda, partesDaLigacao, renderAvaliacao, renderRecusa, renderTranscricao, textoFim,
   TEXTO_CONSENTIMENTO, TEXTO_SEM_MAC, VELOCIDADES, VOZES,
@@ -43,7 +45,15 @@ export type DepsTelaLigacao = {
   aoEncerrar: (ligacao: Ligacao) => void;
   /** ADR-077: a entrevista do onboarding anotou um campo ou terminou (`configurando`: a tela encolhe para a pílula). */
   aoOnboarding?: (etapa: EtapaOnboarding, campos: CamposEntrevista) => void;
+  /**
+   * Rede de segurança (2026-10-05): "Configurar sem voz" no aviso "a IA caiu" da ligação do onboarding. Quem sabe sair
+   * da ligação para o caminho sem voz é o onboarding (o servidor encerra a ligação como recusada).
+   */
+  configurarSemVoz?: () => Promise<void> | void;
 };
+
+/** definido em 2026-10-05: o aviso neutro "agora usa o …" some sozinho depois de 12 s. */
+const IA_VOLTOU_MS = 12_000;
 
 export type TelaLigacao = ReturnType<typeof criarTelaLigacao>;
 
@@ -56,6 +66,8 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
   let iniciando = false;
   let falaPessoaAte = 0;
   let textosEnviados = 0;
+  /** A pessoa saiu pelo "Configurar sem voz" do aviso: o fim `recusada` que vem em seguida não precisa de explicação. */
+  let saindoSemVoz = false;
   const noApp = typeof window !== "undefined" && !!window.nodDesktop;
 
   function mudar(fn: (e: EstadoTelaLigacao) => EstadoTelaLigacao, foraDaRegiao = false): void {
@@ -138,13 +150,29 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
         mudar((e) => (e.janela?.decisaoId === ev.decisaoId ? { ...e, janela: null } : e));
         return;
       case "cerebro":
-        mudar((e) => ({ ...e, aviso: ev.online ? (e.aviso?.texto === TEXTO_SEM_MAC ? null : e.aviso) : { tom: "alerta", texto: TEXTO_SEM_MAC } }));
+        // Esperando a escolha, quem explica a falta do cérebro é o aviso da rede de segurança, não "perdi a conexão".
+        mudar((e) => ({ ...e, aviso: ev.online ? (e.aviso?.texto === TEXTO_SEM_MAC ? null : e.aviso) : e.semIa ? e.aviso : { tom: "alerta", texto: TEXTO_SEM_MAC } }));
         return;
+      case "sem-ia":
+        // A IA do Mac caiu: o aviso com o motivo e as saídas. Reenviado quando uma IA fica pronta (o que a pessoa já
+        // clicou continua valendo) e quando a página reconecta.
+        mudar((e) => ({
+          ...e, teclado: false, janela: null, iaVoltou: null,
+          aviso: e.aviso?.texto === TEXTO_SEM_MAC ? null : e.aviso,
+          semIa: { causa: ev.causa, ia: ev.ia, ias: ev.ias, ate: ev.ate, entrando: e.semIa?.entrando ?? null, nota: e.semIa?.nota ?? null, ocupado: false, ponte: ponteDeIa(), onboarding: e.ligacao.iniciadaPor === "produto" },
+        }));
+        return;
+      case "ia-voltou": {
+        const voltou = { ia: ev.ia, trocou: ev.trocou };
+        mudar((e) => ({ ...e, semIa: null, iaVoltou: voltou }));
+        window.setTimeout(() => mudar((e) => (e.iaVoltou === voltou ? { ...e, iaVoltou: null } : e)), IA_VOLTOU_MS);
+        return;
+      }
       case "aviso":
         mudar((e) => ({ ...e, aviso: { tom: "info", texto: ev.texto } }));
         return;
       case "fim":
-        terminar(textoFim(ev.motivo, t.agente.nome), ev.motivo !== "nao_atendida" && ev.motivo !== "recusada");
+        terminar(ev.motivo === "recusada" && saindoSemVoz ? null : textoFim(ev.motivo, t.agente.nome), ev.motivo !== "nao_atendida" && ev.motivo !== "recusada");
         return;
       case "voz-local":
         if (ev.quem === "pessoa" && ev.ativo) falaPessoaAte = Date.now() + 15_000;
@@ -181,6 +209,63 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     if (aviso) mudar((e) => ({ ...e, aviso }));
   }
 
+  // ---- rede de segurança: a IA do Mac caiu (definido em 2026-10-05) -------------------------------------------------
+  function ponteDeIa(): EstadoSemIa["ponte"] {
+    const ponte = typeof window !== "undefined" ? window.nodDesktop : undefined;
+    return { entrar: typeof ponte?.iaEntrar === "function", instalar: typeof ponte?.iaInstalar === "function" };
+  }
+
+  function mudarSemIa(fn: (s: EstadoSemIa) => EstadoSemIa): void {
+    mudar((e) => (e.semIa ? { ...e, semIa: fn(e.semIa) } : e));
+  }
+
+  /** "Continuar com o …" e "Tentar de novo": o servidor abre outro cérebro para esta mesma ligação. */
+  async function continuarCom(ia: IaDaLigacao): Promise<void> {
+    const api = deps.api();
+    if (!api || !t?.semIa || t.semIa.ocupado) return;
+    const id = t.ligacao.id;
+    mudarSemIa((s) => ({ ...s, ocupado: true, nota: null }));
+    try {
+      await api.continuarLigacao(id, ia);
+      // O aviso sai quando o cérebro novo atender (`ia-voltou`); até lá a tela diz "Conectando…".
+      mudarSemIa((s) => ({ ...s, nota: `Chamando o ${nomeDaIa(ia)}…` }));
+    } catch {
+      mudarSemIa((s) => ({ ...s, ocupado: false, nota: `Não deu para continuar com o ${nomeDaIa(ia)} agora. Tente de novo ou escolha outra saída.` }));
+    }
+  }
+
+  /** "Entrar com outra conta" e "Instalar e entrar": a ponte do app do Mac; sem ela, o que fazer no Terminal. */
+  async function iaNoMac(ia: IaDaLigacao, acao: "entrar" | "instalar"): Promise<void> {
+    if (!t?.semIa || t.semIa.ocupado) return;
+    const ponte = window.nodDesktop;
+    const fn = acao === "entrar" ? ponte?.iaEntrar : ponte?.iaInstalar;
+    if (!ponte || !fn) { mudarSemIa((s) => ({ ...s, nota: notaNoTerminal(ia, acao) })); return; }
+    // O login acontece no navegador, fora desta tela: a ligação espera mais um prazo inteiro.
+    motor?.resolvendo();
+    mudarSemIa((s) => ({ ...s, ocupado: true, nota: null }));
+    const nome = nomeDaIa(ia);
+    try {
+      const r = await fn.call(ponte, ia);
+      if (r.ok) mudarSemIa((s) => ({ ...s, ocupado: false, entrando: acao === "entrar" ? ia : s.entrando, nota: acao === "entrar" ? `Abrimos o navegador. Entre no ${nome} e volte aqui para tentar de novo.` : `Abrimos a instalação do ${nome}. A ligação percebe quando ele ficar pronto.` }));
+      else mudarSemIa((s) => ({ ...s, ocupado: false, nota: r.motivo === "nao_instalado" ? notaNoTerminal(ia, "instalar") : `Não deu para abrir o login do ${nome}. ${notaNoTerminal(ia, "entrar")}` }));
+    } catch {
+      mudarSemIa((s) => ({ ...s, ocupado: false, nota: notaNoTerminal(ia, acao) }));
+    }
+  }
+
+  /** "Configurar sem voz" (só no onboarding): o onboarding encerra a ligação e abre o caminho sem voz. */
+  async function semVoz(): Promise<void> {
+    if (!t?.semIa || t.semIa.ocupado || !deps.configurarSemVoz) return;
+    saindoSemVoz = true;
+    mudarSemIa((s) => ({ ...s, ocupado: true, nota: null }));
+    try {
+      await deps.configurarSemVoz();
+    } finally {
+      // Se a ligação continuou viva (o servidor não a encerrou), os botões voltam.
+      mudarSemIa((s) => ({ ...s, ocupado: false }));
+    }
+  }
+
   /** A ligação acabou (desligada aqui, pelo servidor ou caída): fecha o motor e oferece "Como foi a ligação?". */
   function terminar(motivo: string | null, avaliar: boolean): void {
     if (!t) return;
@@ -205,6 +290,7 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     motor?.fechar();
     avaliacao = null;
     recusa = null;
+    saindoSemVoz = false;
     const agora = Date.now();
     t = {
       ligacao, agente, modo,
@@ -213,7 +299,7 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
       desde: ligacao.atendidaEm ?? (ligacao.estado === "em_curso" ? ligacao.iniciadaEm : agora),
       agora, legendas: [], janela: null, mudo: false, teclado: false,
       voz: VOZES.find((v) => v.id === ligacao.voz)?.id ?? "clara", velocidade: 1,
-      aviso: null, quemFala: null, audioSuspenso: false, sugestoes: [],
+      aviso: null, quemFala: null, audioSuspenso: false, sugestoes: [], semIa: null, iaVoltou: null,
     };
     motor = deps.iniciarMotor({ tenantId, ligacaoId: ligacao.id, retomar, aoEvento });
     if (tique !== null) window.clearInterval(tique);
@@ -346,13 +432,17 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
       mudar((e) => ({ ...e, mudo: ativo }));
     },
     alternarTeclado(): void {
-      mudar((e) => ({ ...e, teclado: !e.teclado }));
+      // Esperando a escolha, o que fosse escrito não teria resposta: o teclado volta com a ligação.
+      mudar((e) => (e.semIa ? e : { ...e, teclado: !e.teclado }));
     },
+    continuarCom,
+    iaNoMac,
+    semVoz,
     abrirAjustes,
     enviarTexto(texto: string): boolean {
       if (!t || !motor) return false;
       const limpo = texto.trim();
-      if (!limpo || !motor.enviarTexto(limpo)) return false;
+      if (!limpo || t.semIa || !motor.enviarTexto(limpo)) return false;
       textosEnviados += 1;
       mudar((e) => ({ ...e, legendas: comLegenda(e.legendas, { chave: `t:${textosEnviados}`, autor: "pessoa", texto: limpo, final: true, espera: false }) }));
       return true;

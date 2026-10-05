@@ -35,7 +35,7 @@ export const FECHAMENTOS_VOZ = {
   vozFora: 4503,
 } as const;
 
-/** Por que a ligação acabou (CHECK `ligacao_motivo_fim` da 0048). */
+/** Por que a ligação acabou (CHECK `ligacao_motivo_fim` da 0048, refeito na 0055). */
 export const MOTIVOS_FIM_LIGACAO = [
   "pessoa_desligou",
   "bot_desligou",
@@ -51,11 +51,29 @@ export const MOTIVOS_FIM_LIGACAO = [
   "ociosidade",
   "limite_da_assinatura",
   "erro",
+  // definido em 2026-10-05 (0055): a IA do Mac caiu no meio da ligação e a pessoa não escolheu o que fazer no prazo.
+  "sem_ia",
 ] as const;
 export type MotivoFimLigacao = (typeof MOTIVOS_FIM_LIGACAO)[number];
 
 /** Fase que a tela mostra (a pílula e a tela cheia leem daqui). */
-export type FaseLigacao = "chamando" | "conectando" | "ouvindo" | "pensando" | "falando" | "trabalhando" | "reconectando" | "encerrada";
+export type FaseLigacao = "chamando" | "conectando" | "ouvindo" | "pensando" | "falando" | "trabalhando" | "reconectando" | "aguardando_escolha" | "encerrada";
+
+/**
+ * A IA do Mac caiu com a ligação em curso (definido em 2026-10-05, rede de segurança da ligação): o turno-cérebro
+ * terminou sem a ligação ter acabado. A ligação não fica muda nem cai: o bot diz uma frase fixa, a tela mostra as saídas
+ * e a ligação espera a escolha (`aguardando_escolha`).
+ */
+export const IAS_DA_LIGACAO = ["claude-cli", "codex-cli"] as const;
+export type IaDaLigacao = (typeof IAS_DA_LIGACAO)[number];
+/** Código fechado, nunca o texto do fornecedor: `conta_sem_acesso` vem do `causaSemIa` do turno; o resto é `falhou`. */
+export const CAUSAS_CEREBRO_CAIU = ["conta_sem_acesso", "falhou"] as const;
+export type CausaCerebroCaiu = (typeof CAUSAS_CEREBRO_CAIU)[number];
+export const ESTADOS_IA_DA_LIGACAO = ["pronto", "nao_autenticado", "ausente"] as const;
+/** Como cada IA está neste Mac agora (o inventário que o Mac anunciou): é o que decide os botões do aviso. */
+export type EstadoIaDaLigacao = { id: IaDaLigacao; estado: (typeof ESTADOS_IA_DA_LIGACAO)[number] };
+/** definido em 2026-10-05: sem escolha em 2 min a ligação encerra com `sem_ia`. */
+export const ESPERA_DA_ESCOLHA_MS = 120_000;
 
 /** De onde veio uma fala do bot: o cérebro, uma espera gravada, uma leitura de aprovação montada pelo servidor ou um aviso. */
 export type TipoFalaBot = "conteudo" | "espera" | "leitura" | "aviso";
@@ -85,6 +103,11 @@ export type MsgMidiaCliente =
   | { t: "mudo"; ativo: boolean }
   /** A saída de áudio padrão, ao abrir e a cada troca de aparelho. */
   | { t: "saida"; rota: RotaSaida }
+  /**
+   * Com o aviso "sem IA" na tela, a pessoa abriu o login ou a instalação de uma IA: a espera pela escolha recomeça
+   * (até 5 vezes por queda; o login acontece no navegador, fora da tela da ligação).
+   */
+  | { t: "resolvendo" }
   | { t: "ping" }
   | { t: "tchau" };
 
@@ -113,6 +136,13 @@ export type MsgMidiaServidor =
   | { t: "onboarding"; etapa: EtapaOnboarding; campos: CamposEntrevista }
   /** ADR-077: os chips "Diga algo como" da etapa; lista vazia some com eles. Cada chip vira um `texto` da pessoa. */
   | { t: "sugestoes"; itens: string[] }
+  /**
+   * A IA do Mac caiu: `ia` é a que respondia (null = não se sabe), `ias` o estado das IAs do Mac agora e `ate` (epoch
+   * ms) até quando a ligação espera a escolha. Reenviada quando o estado de uma IA muda e quando a mídia reconecta.
+   */
+  | { t: "sem-ia"; causa: CausaCerebroCaiu; ia: IaDaLigacao | null; ias: EstadoIaDaLigacao[]; ate: number }
+  /** A pessoa escolheu e o cérebro novo atendeu: `trocou` = é outra IA (o aviso neutro "agora usa o …"). */
+  | { t: "ia-voltou"; ia: IaDaLigacao | null; trocou: boolean }
   | { t: "fim"; motivo: MotivoFimLigacao }
   | { t: "pong" };
 

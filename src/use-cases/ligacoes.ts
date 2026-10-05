@@ -2,7 +2,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao, PayloadLinhaLigacao } from "../contracts/ligacao.ts";
 import { VERSAO_CONSENTIMENTO_VOZ } from "../contracts/ligacao.ts";
 import type { Turno } from "../contracts/turno.ts";
-import type { MotivoFimLigacao } from "../contracts/voz.ts";
+import type { IaDaLigacao, MotivoFimLigacao } from "../contracts/voz.ts";
 import { VELOCIDADES_VOZ, VOZES_NOD } from "../contracts/vozes.ts";
 import { ehIdVoz, generoDaVoz } from "../domain/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -160,6 +160,48 @@ export const ligar: CasoDeUso<{ agenteId: string; contexto: ContextoLigacao; exe
       evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId, dados: { mensagem_id: linha.id, kind: "sistema" } }),
       evento(deps.escopo, { kind: "ligacao_mudou", autoria, agora, conversaId, turnoId: turno.id, dados: { ligacao_id: ligacao.id, estado: "chamando" } }),
     ],
+  };
+};
+
+/**
+ * Rede de segurança (definido em 2026-10-05, emenda da ADR-072): a IA do Mac caiu com a ligação em curso e a pessoa
+ * escolheu continuar. Abre um turno-cérebro NOVO para a MESMA ligação, com o harness forçado para a IA escolhida — a
+ * linha em `ligacoes` e a mensagem "Chat de voz" são as mesmas; o turno que caiu fica como está (interrompido).
+ *
+ * O modelo vai como "auto": o da voz é do servidor (`modeloDeVoz`, por harness), e "auto" evita casar um modelo do
+ * Claude escolhido no perfil do bot com o Codex (ou o contrário), que o plano recusaria. A preferência do bot não muda.
+ * `iasProntas`: o inventário que o Mac anunciou, já resolvido pela rota; null = simulação (catcher), sem conferência.
+ * Quem garante que a ligação está de fato esperando a escolha é o orquestrador de voz, antes e depois deste caso.
+ */
+export const reabrirCerebroDaLigacao: CasoDeUso<{ ligacaoId: string; ia: IaDaLigacao; iasProntas: readonly IaDaLigacao[] | null; executor?: Executor }, { ligacao: Ligacao; turno: Turno }> = async (deps, input) => {
+  const l = await deps.repos.ligacoes.buscar(input.ligacaoId);
+  if (!l) throw new ErroDeDominio("nao_encontrado");
+  if (l.estado !== "chamando" && l.estado !== "em_curso") throw new ErroDeDominio("estado_invalido", { cause: "ligação encerrada" });
+  if (input.iasProntas !== null && !input.iasProntas.includes(input.ia)) throw new ErroDeDominio("estado_invalido", { cause: "sem_ia" });
+  const agente = await deps.repos.agentes.buscar(l.agenteId);
+  if (!agente || agente.excluidoEm !== null) throw new ErroDeDominio("nao_encontrado");
+  const agora = deps.agora();
+  // Como no ligar: uma parada aberta na conversa não pode segurar o turno da ligação.
+  await deps.repos.paradas.encerrarAbertas({ conversaId: l.conversaId, agora });
+  const turno = await deps.repos.turnos.enfileirar({
+    conversaId: l.conversaId,
+    agenteId: agente.id,
+    origem: "ligacao",
+    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: 0,
+    entradaTexto: "[nod] A ligação continua com outra IA.",
+    entradaConfianca: "confiavel",
+    modelo: "auto",
+    harness: input.ia,
+    executor: input.executor ?? "catcher",
+    ligacaoId: l.id,
+  });
+  if (!turno) throw new ErroDeDominio("nao_permitido");
+  await deps.repos.ligacoes.religou(l.id);
+  const autoria = autoriaPessoa(deps.escopo, input.executor ?? "catcher");
+  return {
+    data: { ligacao: { ...l, religacoes: l.religacoes + 1 }, turno },
+    events: [evento(deps.escopo, { kind: "ligacao_mudou", autoria, agora, conversaId: l.conversaId, turnoId: turno.id, dados: { ligacao_id: l.id, estado: l.estado, cerebro_reaberto: true, harness: input.ia } })],
   };
 };
 

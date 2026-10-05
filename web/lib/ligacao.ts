@@ -29,6 +29,8 @@ export type MotorLigacao = {
   mudo(ativo: boolean): void;
   /** O composer durante a ligação: vira uma vez da pessoa sem passar pelo STT. false = o canal não está aberto. */
   enviarTexto(texto: string): boolean;
+  /** Com o aviso "a IA caiu" na tela, a pessoa abriu o login ou a instalação de uma IA: a espera da escolha recomeça. */
+  resolvendo(): void;
   /** Manda `tchau` e fecha. O POST de encerrar é da tela (o motor não conhece a rota da ligação). */
   desligar(): void;
   /** Fecha tudo sem `tchau` (a ligação acabou do outro lado, ou a página está saindo). */
@@ -321,6 +323,9 @@ export function iniciarMotorLigacao(o: OpcoesMotor): MotorLigacao {
     enviarTexto(texto) {
       const conteudo = texto.trim().slice(0, TEXTO_MAX);
       return conteudo !== "" && enviar({ t: "texto", conteudo });
+    },
+    resolvendo() {
+      enviar({ t: "resolvendo" });
     },
     desligar() {
       enviar({ t: "tchau" });
