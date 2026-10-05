@@ -1,5 +1,6 @@
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { IdHarness } from "../../contracts/harness.ts";
+import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
@@ -33,6 +34,12 @@ export type DepsPonte = {
    * turno peer entrega a resposta (entregarRespostaPeer), sem a ponte importar casos de uso da L7.
    */
   depoisDeAssentar?: (deps: Deps, p: { entrega: Entrega; saida: SaidaAssentarTurno }) => Promise<RuntimeEvent[]>;
+  /**
+   * definido em 2026-10-05: `false` na ponte das máquinas remotas — o motivo cru que o Mac manda vai para o diagnóstico
+   * gravado da pessoa e NUNCA para o log do servidor (decisão de 2026-09-17 em ponte-validacao.ts). Padrão: loga (o
+   * executor do próprio processo, em desenvolvimento).
+   */
+  erroCruNoLog?: boolean;
 };
 
 export type PonteInternaNod = PonteInterna & {
@@ -67,6 +74,23 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     }
     const tenantId = tenantsPorPessoa.get(pessoaId);
     return tenantId ? { tenantId, pessoaId } : null;
+  }
+
+  /**
+   * definido em 2026-10-05: o turno voltou dizendo que a CONTA desta IA não serve (logada e sem acesso). A IA sai do
+   * inventário desta máquina na hora — o próximo despacho já não a escolhe — e a resposta é a outra IA pronta, se
+   * houver (o turno em "automático" é repetido nela, assentar-turno.ts). O app do Mac reanuncia com o veredito dele;
+   * isto cobre o intervalo e o app antigo, que continuaria anunciando "pronto" pela conferência de login.
+   */
+  function reprovarHarness(machineId: string, harness: IdHarness, causa: CausaSemIa): IdHarness | null {
+    const m = maquinas.get(machineId);
+    if (!m) return null;
+    const reprovado: Inventario = { estado: "nao_autenticado", causa, motivo: MOTIVO_DA_CAUSA[causa], em: agora() };
+    const todos: Partial<Record<IdHarness, Inventario>> = { ...(m.harnesses ?? { "claude-cli": m.inventario }), [harness]: reprovado };
+    const outra = (Object.entries(todos) as [IdHarness, Inventario][]).find(([id, i]) => id !== harness && i.estado === "pronto");
+    maquinas.set(machineId, { ...m, harnesses: todos, inventario: outra ? outra[1] : reprovado });
+    log("aviso", "ia_reprovada_no_turno", { machine_id: machineId, harness, causa, outra: outra?.[0] ?? null });
+    return outra?.[0] ?? null;
   }
 
   function depsDe(trx: Tx, escopo: Escopo): Deps {
@@ -161,15 +185,18 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           turno_id: e.turnoId,
           desfecho: e.resultado.desfecho,
           motivo: e.resultado.motivoFalha ?? e.resultado.motivoInterrupcao ?? null,
-          erro_cru: e.resultado.erroCru ?? null,
+          erro_cru: deps.erroCruNoLog === false ? null : (e.resultado.erroCru ?? null),
+          causa: e.resultado.causaSemIa ?? null,
           sessao_cli: e.resultado.sessaoCli,
           executor,
         });
       }
+      const harnessDoTurno = harnesses.get(e.turnoId) ?? null;
+      const outraIa = e.resultado.causaSemIa && harnessDoTurno ? reprovarHarness(e.machineId, harnessDoTurno, e.resultado.causaSemIa) : null;
       try {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await assentarTurno(d, { ...e, executor, harness: harnesses.get(e.turnoId) ?? null });
+          const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa });
           // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
           // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
           // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { LigacaoVozPlano, PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import type { MsgCerebroServidor } from "../../../contracts/voz.ts";
+import { comContaSemAcesso } from "../../../domain/conta-da-ia.ts";
 import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais } from "../../../domain/stream-json.ts";
 import { log } from "../../../obs/log.ts";
 import { mensagemClaude } from "../anexos-turno.ts";
@@ -296,7 +297,8 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
       rodadasJaFaladas: pedindoResumo ? Math.max(0, rodadas - 1) : rodadas,
     });
     // Sessão efêmera: o CLI não guarda (--no-session-persistence); nada de `--resume` depois.
-    return { ...resultado, sessaoCli: null };
+    // definido em 2026-10-05: a recusa da conta chega ao servidor com a causa em código (a ligação diz por que ficou muda).
+    return { ...comContaSemAcesso(resultado), sessaoCli: null };
   } finally {
     cerebro?.fechar();
     c.aoProcesso(null);

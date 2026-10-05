@@ -1,6 +1,8 @@
 import type { AnexoMeta } from "./anexo.ts";
 import type { PayloadLinhaLigacao } from "./ligacao.ts";
 import type { Autoria } from "./evento.ts";
+import type { IdHarness } from "./harness.ts";
+import type { CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
@@ -41,7 +43,13 @@ export type PayloadMensagem =
    * decisão sem reler o texto redigido; as mensagens gravadas antes não os têm.
    */
   | { kind: "resultado_aprovacao"; decisaoId: string; frase?: string; itens: { idx: number; desfecho: DesfechoItem; texto?: string }[] }
-  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean }
+  /** `causa` (definido em 2026-10-05): a IA estava logada e a conta não serviu (src/contracts/inventario.ts). */
+  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa }
+  /**
+   * definido em 2026-10-05: o bot em "automático" passou a responder por outra IA porque a conta da primeira não
+   * serviu. Linha de sistema, dita uma vez por troca; o turno que falhou foi repetido na outra IA.
+   */
+  | { kind: "ia_trocada"; de: IdHarness; para: IdHarness; causa: CausaSemIa }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   /**
    * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não

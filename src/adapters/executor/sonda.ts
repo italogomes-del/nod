@@ -1,9 +1,11 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Inventario } from "../../contracts/inventario.ts";
+import { RESPOSTA_TESTE_IA_MAX } from "../../contracts/desktop.ts";
+import type { CausaSemIa, Inventario } from "../../contracts/inventario.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
+import { causaDaFalhaDeConta, respostaDoTeste } from "../../domain/conta-da-ia.ts";
 import { interpretarLinhaStreamJson } from "../../domain/stream-json.ts";
 import { caminhoAumentado, homeDaPessoa, resolverBinario } from "./caminho.ts";
 import { extrairVersao, flagsListadasNoHelp } from "./flag-floors.ts";
@@ -29,6 +31,13 @@ export type OpcoesSonda = {
   /** Base do cwd descartável da sonda (nunca o repo — mapa-cli: o cwd decide qual CLAUDE.md o CLI lê). */
   cwdBase?: string;
   relogio?: () => number;
+  /** definido em 2026-10-05: a frase do turno de teste (padrão "responda só OK"); o onboarding manda "Diga oi para…". */
+  pergunta?: string;
+  /**
+   * definido em 2026-10-05: quem chama já conferiu que há login (o app do Mac, antes do teste). Então uma falha do turno
+   * não é "falta entrar": o inventário sai com `causa` (`teste_falhou`, ou `conta_sem_acesso` quando o texto diz).
+   */
+  loginConferido?: boolean;
 };
 
 export type SondaDetalhada = {
@@ -39,6 +48,8 @@ export type SondaDetalhada = {
   flagsNoHelp: string[] | null;
   /** total_cost_usd do turno de sonda (null quando não houve turno ou result). */
   custoUsd: number | null;
+  /** O que a IA respondeu ao teste, pronto para a tela; null quando ela não ficou pronta. */
+  resposta: string | null;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -70,15 +81,18 @@ export async function lerFlagsDoHelp(binario: string, env: Record<string, string
  * do stream-json traz — por isso a sonda usa stream-json e lê o init. Sem init, ou com
  * apiKeySource ausente, é fail-closed (nao_autenticado), nunca "assume assinatura".
  */
-export function lerTurnoDeSonda(stdout: string): { init: Extract<EventoStream, { tipo: "init" }> | null; result: Extract<EventoStream, { tipo: "result" }> | null } {
+export function lerTurnoDeSonda(stdout: string): { init: Extract<EventoStream, { tipo: "init" }> | null; result: Extract<EventoStream, { tipo: "result" }> | null; texto: string } {
   let init: Extract<EventoStream, { tipo: "init" }> | null = null;
   let result: Extract<EventoStream, { tipo: "result" }> | null = null;
+  // definido em 2026-10-05: o texto do assistente também é lido — a recusa da conta chega como "resposta".
+  const blocos: string[] = [];
   for (const linha of stdout.split("\n")) {
     const ev = interpretarLinhaStreamJson(linha);
     if (ev.tipo === "init") init = ev;
     else if (ev.tipo === "result") result = ev;
+    else if (ev.tipo === "texto_bloco") blocos.push(ev.texto);
   }
-  return { init, result };
+  return { init, result, texto: blocos.join("\n") };
 }
 
 export async function sondarDetalhado(bin: string | undefined, env: Env, modelo: string, o: OpcoesSonda = {}): Promise<SondaDetalhada> {
@@ -86,10 +100,10 @@ export async function sondarDetalhado(bin: string | undefined, env: Env, modelo:
   const agora = o.relogio ?? Date.now;
   const ambiente = ambienteDaSonda(env, home);
   const binario = await resolverBinario(bin, ambiente.PATH ?? "", home);
-  if (!binario) return { inventario: { estado: "ausente", motivo: bin ? "binario_nao_encontrado" : "claude_fora_do_path", em: agora() }, binario: null, flagsNoHelp: null, custoUsd: null };
+  if (!binario) return { inventario: { estado: "ausente", motivo: bin ? "binario_nao_encontrado" : "claude_fora_do_path", em: agora() }, binario: null, flagsNoHelp: null, custoUsd: null, resposta: null };
 
   const versao = await lerVersao(binario, ambiente, o.timeoutVersaoMs);
-  if ("erro" in versao) return { inventario: { estado: "ausente", motivo: versao.erro, em: agora() }, binario, flagsNoHelp: null, custoUsd: null };
+  if ("erro" in versao) return { inventario: { estado: "ausente", motivo: versao.erro, em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
   const flagsNoHelp = await lerFlagsDoHelp(binario, ambiente, o.timeoutVersaoMs);
 
   const dir = await mkdtemp(join(o.cwdBase ?? tmpdir(), "nod-sonda-"));
@@ -98,14 +112,20 @@ export async function sondarDetalhado(bin: string | undefined, env: Env, modelo:
     await writeFile(mcpVazio, `${JSON.stringify({ mcpServers: {} })}\n`, { mode: 0o600 });
     const r = await executarColetando({
       bin: binario,
-      args: ["-p", "responda só OK", "--model", modelo, "--max-turns", "1", "--tools", "", "--strict-mcp-config", "--mcp-config", mcpVazio, "--output-format", "stream-json", "--verbose"],
+      args: ["-p", o.pergunta ?? "responda só OK", "--model", modelo, "--max-turns", "1", "--tools", "", "--strict-mcp-config", "--mcp-config", mcpVazio, "--output-format", "stream-json", "--verbose"],
       env: ambiente,
       cwd: dir,
       timeoutMs: o.timeoutTurnoMs ?? 90_000,
     });
-    const { init, result } = lerTurnoDeSonda(r.stdout);
+    const { init, result, texto } = lerTurnoDeSonda(r.stdout);
     const custoUsd = result?.custoUsd ?? null;
-    const naoAutenticado = (motivo: string): SondaDetalhada => ({ inventario: { estado: "nao_autenticado", motivo, versao: versao.versao, em: agora() }, binario, flagsNoHelp, custoUsd });
+    // A recusa da conta vale em qualquer desfecho do turno, inclusive num `result` "de sucesso" cuja resposta é a recusa.
+    const semAcesso = causaDaFalhaDeConta(result?.erroCru) ?? causaDaFalhaDeConta(result?.texto) ?? causaDaFalhaDeConta(texto);
+    const naoAutenticado = (motivo: string): SondaDetalhada => {
+      const causa: CausaSemIa | undefined = semAcesso ?? (o.loginConferido ? "teste_falhou" : undefined);
+      return { inventario: { estado: "nao_autenticado", motivo, versao: versao.versao, ...(causa ? { causa } : {}), em: agora() }, binario, flagsNoHelp, custoUsd, resposta: null };
+    };
+    if (semAcesso) return naoAutenticado("conta_sem_acesso");
     if (r.estourouTempo) return naoAutenticado("turno_de_sonda_sem_resposta");
     if (r.erroSpawn) return naoAutenticado("turno_de_sonda_nao_lancou");
     // ADR-009: o motivo é o código de saída, nunca o texto do stderr ("Not logged in" não é lido).
@@ -115,7 +135,7 @@ export async function sondarDetalhado(bin: string | undefined, env: Env, modelo:
     if (!result.sucesso) return naoAutenticado("turno_de_sonda_com_erro");
     // Cobrança fora da assinatura claude.ai (chave de API, helper) não é 'pronto': cairia na fatura errada (ADR-015).
     if (init.apiKeySource !== "none") return naoAutenticado(`api_key_source_${init.apiKeySource}`);
-    return { inventario: { estado: "pronto", versao: versao.versao, em: agora() }, binario, flagsNoHelp, custoUsd };
+    return { inventario: { estado: "pronto", versao: versao.versao, em: agora() }, binario, flagsNoHelp, custoUsd, resposta: respostaDoTeste(result.texto || texto, RESPOSTA_TESTE_IA_MAX) };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

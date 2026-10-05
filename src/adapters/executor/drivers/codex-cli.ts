@@ -1,11 +1,13 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
+import { RESPOSTA_TESTE_IA_MAX } from "../../../contracts/desktop.ts";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { EventoStream, SinaisTurno } from "../../../contracts/turno.ts";
 import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { classificarResultado, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
+import { respostaDoTeste } from "../../../domain/conta-da-ia.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
 import { resolverBinario } from "../caminho.ts";
@@ -55,6 +57,11 @@ const PLANO_DE_SONDA = {
   politicaExecucao: { prazoMs: 60_000 },
 } as unknown as PlanoTurno;
 
+/** definido em 2026-10-05: o modelo do teste é o que o "automático" usa no Codex (src/domain/harness.ts). */
+const MODELO_TESTE_CODEX = "gpt-5.6-sol";
+/** definido em 2026-10-05: o mesmo teto do turno de sonda do Claude (sonda.ts). */
+const TIMEOUT_TESTE_MS = 90_000;
+
 export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
   return {
     meta: { id: "codex-cli", locality: "local" },
@@ -97,8 +104,36 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         flagsAppServer = { bin: b, flags: help.exitCode === 0 ? [...new Set(help.stdout.match(/--[a-z][a-z0-9-]*/g) ?? [])] : null };
         return flagsAppServer.flags;
       }
+      /**
+       * O teste de verdade (definido em 2026-10-05, emenda da ADR-019): um `codex exec` de uma frase, SEM servidor MCP,
+       * com as mesmas chaves de isolamento do turno. `login status` diz só que há conta; isto diz que ela responde.
+       * Custa um turno da assinatura do Codex.
+       */
+      async function testar(pergunta: string): Promise<{ inventario: Inventario; resposta: string | null }> {
+        inv = null;
+        const inventario = await sondar();
+        if (inventario.estado !== "pronto" || !bin) return { inventario, resposta: null };
+        await mkdir(cfg.cwdBase, { recursive: true });
+        const dir = await mkdtemp(join(cfg.cwdBase, "codex-teste-"));
+        try {
+          const plano = { ...PLANO_DE_SONDA, entrada: { modelo: MODELO_TESTE_CODEX } } as unknown as PlanoTurno;
+          const eventos: EventoStream[] = [];
+          const proc = iniciarProcesso({ bin, args: argsCodex(plano, "{}", [], recusadas), env, cwd: dir, sigtermParaSigkillMs: lig.sigtermParaSigkillMs, aoLinha(linha) { eventos.push(...interpretarCodex(linha)); } });
+          proc.escrever(pergunta); proc.fecharStdin();
+          const relogio = setTimeout(() => { void proc.interromper(); }, TIMEOUT_TESTE_MS);
+          const fim = await proc.fim.finally(() => clearTimeout(relogio));
+          const r = classificarResultado({ eventos, ...fim, sinais: { ...SINAIS_ZERADOS, attempted: true }, interrompidoPeloDriver: proc.interrompido() });
+          const resposta = r.desfecho === "sucesso" ? respostaDoTeste(r.texto, RESPOSTA_TESTE_IA_MAX) : null;
+          log("info", "teste_codex_cli", { estado: resposta ? "pronto" : "nao_autenticado", causa: resposta ? null : "teste_falhou" });
+          if (resposta) return { inventario, resposta };
+          // A sonda de login passou e o turno não respondeu: a conta está logada e não serve agora.
+          inv = null;
+          return { inventario: { estado: "nao_autenticado", motivo: "teste_falhou", versao: inventario.versao, causa: "teste_falhou", em: Date.now() }, resposta: null };
+        } finally { await rm(dir, { recursive: true, force: true }); }
+      }
       return {
         sondar,
+        testar,
         adapter(plano) {
           let proc: Processo | null = null;
           let parado = false;

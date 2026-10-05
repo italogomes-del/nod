@@ -40,6 +40,8 @@ export type OpcoesLaco = {
    */
   aoIniciarTurno?: (plano: PlanoTurno, adapter: Adapter) => void;
   aoTerminarTurno?: (plano: PlanoTurno) => void;
+  /** definido em 2026-10-05: o resultado que o driver devolveu, antes da entrega (o app do Mac lê `causaSemIa`). */
+  aoResultado?: (plano: PlanoTurno, resultado: ResultadoTurno) => void;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
 };
@@ -229,6 +231,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           return false;
         },
       });
+      o.aoResultado?.(plano, resultado);
       await entregar({ ...resultado, sinais: { ...resultado.sinais, ...sinais } });
     } catch (erro) {
       log("erro", "laco_turno_excecao", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });

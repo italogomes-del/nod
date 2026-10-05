@@ -30,6 +30,16 @@ export function comandoDeLogin(ia: IaDesktop): { nome: "claude" | "codex"; args:
 }
 
 /**
+ * O comando que diz QUAL conta está logada (definido em 2026-10-05): o app faz um hash da saída e o guarda com o
+ * veredito do teste da IA (vigia-ias.ts); a saída em si nunca é guardada nem enviada. Medido em 2026-10-05: o
+ * `claude auth status` devolve um JSON com a conta e a organização, então o hash muda quando a pessoa troca de conta;
+ * o `codex login status` só diz "Logged in using ChatGPT", e o hash dele não muda (a IA é testada de novo pelo prazo).
+ */
+export function comandoDeEstadoDoLogin(ia: IaDesktop): { nome: "claude" | "codex"; args: string[] } {
+  return ia === "claude-cli" ? { nome: "claude", args: ["auth", "status"] } : { nome: "codex", args: ["login", "status"] };
+}
+
+/**
  * O ambiente do processo de login: o mesmo regime local dos drivers (sem CLAUDE_CODE_*, ANTHROPIC_*, NOD_*) e também
  * sem OPENAI_* — com uma chave herdada, o login viraria cobrança por API sem a pessoa saber.
  */

@@ -29,6 +29,7 @@ import type { Conector } from "../../contracts/conector.ts";
 import { COMANDO_GITHUB_NATIVO } from "../../contracts/github.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
 import { concluirItemNaMaquina, itensParaAMaquina } from "../../use-cases/itens-na-maquina.ts";
+import { repetirBarradosPorIa } from "../../use-cases/repetir-barrados-por-ia.ts";
 import { configGithubNativo, criarDetectorGh, sondaGithubNativa, type DetectorGh } from "../conectores-locais/github/nativo.ts";
 import { criarSubidaComposio } from "../integracoes/arquivo-composio.ts";
 import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
@@ -422,7 +423,7 @@ export function comporApp(o: OpcoesCompor): App {
   const ponte = criarPonteInterna(db, depsPonte);
   const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
   const ponteHttp = criarPonteHttpServidor({
-    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }] }),
+    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }] }),
     persistir: (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }),
     autorizar: autorizarMaquina,
     segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
@@ -435,6 +436,11 @@ export function comporApp(o: OpcoesCompor): App {
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
     itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
+    // definido em 2026-10-05: uma IA ficou pronta no Mac — as falas barradas por falta de IA são repetidas sozinhas.
+    repetirBarrados: (escopo) => dentro(escopo, async (d) => {
+      const r = await repetirBarradosPorIa(d, { executor: "local" });
+      if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+    }),
     concluirItemLocal: (escopo, itemId, desfecho) => dentro(escopo, async (d) => {
       const r = await concluirItemNaMaquina(d, { itemId, desfecho });
       if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
@@ -732,7 +738,7 @@ export function comporApp(o: OpcoesCompor): App {
   /** ADR-077: a IA dos bots no Mac da pessoa, para os cards de IA do onboarding (o catcher conta como pronto). */
   function executorDoMac(pessoaId: string): { pronto: boolean; ias: IaNoMac[] } {
     const catalogo = catalogoHarness(pessoaId);
-    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}) }));
+    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado === "nao_autenticado" && h.inventario.causa ? { causa: h.inventario.causa } : {}) }));
     return { pronto: (!compartilhado && executorAtual === "catcher") || ias.some((i) => i.estado === "pronto"), ias };
   }
 

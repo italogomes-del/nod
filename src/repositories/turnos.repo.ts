@@ -502,6 +502,20 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return new Map(linhas.map((l) => [l.conversa_id, l.n]));
     },
 
+    /**
+     * definido em 2026-10-05: as falas da pessoa barradas por falta de IA desde `desde`, uma por conversa — só a mais
+     * nova, e só quando nada veio depois dela na conversa (repetir-barrados-por-ia.ts).
+     */
+    async barradosPorFaltaDeIa(desde: number): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos t
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.origem = 'conversa' and t.estado = 'interrompido'
+          and t.motivo_interrupcao = 'executor_indisponivel' and t.criado_em >= ${data(desde)}
+          and not exists (select 1 from turnos n where n.tenant_id = t.tenant_id and n.conversa_id = t.conversa_id and n.criado_em > t.criado_em)
+        order by t.criado_em`;
+      return linhas.map(paraTurno);
+    },
+
     async listarDaConversa(conversaId: string, limite = 50): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select * from (

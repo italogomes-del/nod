@@ -1,4 +1,5 @@
 import type { CausaSemIa } from "../contracts/inventario.ts";
+import type { ResultadoTurno } from "../contracts/turno.ts";
 
 /**
  * A conta da IA responde? (definido em 2026-10-05, emenda da ADR-019.)
@@ -44,4 +45,17 @@ export function respostaDoTeste(texto: string | null | undefined, max: number): 
   const semAspas = linha.replace(/^["“”'`]+|["“”'`]+$/g, "").trim();
   if (semAspas === "") return null;
   return semAspas.length > max ? `${semAspas.slice(0, max - 1).trimEnd()}…` : semAspas;
+}
+
+/**
+ * O turno que NÃO deu certo e cujo texto é a recusa da conta vira falha por `nao_autenticado`, com a causa em código e
+ * SEM a frase do fornecedor como fala do bot (em produção ela entrava na conversa, em inglês, como se o bot a tivesse
+ * dito). Turno bem-sucedido nunca é reclassificado: um bot pode citar a frase numa resposta de verdade.
+ */
+export function comContaSemAcesso(r: ResultadoTurno): ResultadoTurno {
+  if (r.desfecho === "sucesso") return r;
+  const causa = causaDaFalhaDeConta(r.erroCru) ?? causaDaFalhaDeConta(r.texto);
+  if (!causa) return r;
+  const { motivoInterrupcao: _fora, ...resto } = r;
+  return { ...resto, desfecho: "falha", motivoFalha: "nao_autenticado", causaSemIa: causa, texto: "" };
 }

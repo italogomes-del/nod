@@ -1,4 +1,4 @@
-import type { Inventario } from "../../../contracts/inventario.ts";
+import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, FalaIntermediaria, TrechoVivo } from "../../../contracts/ponte.ts";
 import { TETO_COMANDOS, TETO_DESCRICAO_COMANDO, TETO_SO_DO_TERMINAL, type CatalogoDeComandos, type ComandoDoMac } from "../../../contracts/comandos.ts";
@@ -80,8 +80,17 @@ export function inventario(v: unknown, agora: number): Inventario {
   const i = objeto(v);
   if (i.estado === "pronto") { exigir(texto(i.versao, 100)); return { estado: "pronto", versao: i.versao, em: agora }; }
   exigir(i.estado === "ausente" || i.estado === "nao_autenticado");
-  return { estado: i.estado, motivo: i.estado === "ausente" ? "Harness não encontrado neste computador" : "Entre na conta do harness neste computador", em: agora };
+  if (i.estado === "ausente") return { estado: "ausente", motivo: "Harness não encontrado neste computador", em: agora };
+  // definido em 2026-10-05: a causa é código fechado e a frase é do servidor — texto do Mac nunca vira motivo.
+  const causa = causaSemIa(i.causa);
+  return { estado: "nao_autenticado", motivo: causa ? MOTIVO_DA_CAUSA[causa] : "Entre na conta do harness neste computador", ...(causa ? { causa } : {}), em: agora };
 }
+/** Só os códigos conhecidos passam; app antigo (sem o campo) ou valor estranho = sem causa. */
+export function causaSemIa(v: unknown): CausaSemIa | undefined {
+  return CAUSAS_SEM_IA.find((c) => c === v);
+}
+/** definido em 2026-10-05: o motivo cru do executor remoto é diagnóstico da pessoa; cabe em 8 KiB ou não entra. */
+const ERRO_CRU_MAX_CHARS = 8_000;
 const inteiro = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
 const inteiroOuNull = (v: unknown): v is number | null => v === null || inteiro(v);
 
@@ -154,7 +163,12 @@ export function entrega(v: unknown, machineId: string): Entrega {
   const validados = sinais(r.sinais);
   const raioX = execucao(r.execucao);
   const catalogo = comandos(r.comandos);
+  const causa = causaSemIa(r.causaSemIa);
   // definido em 2026-09-17: erroCru remoto não entra no log; só os campos do contrato validado atravessam HTTP.
+  // revisto em 2026-10-05: ele passa a ATRAVESSAR, com teto, só para o diagnóstico gravado da pessoa (ADR-041) — em
+  // produção o diagnóstico de todo turno falho vinha vazio, porque o campo morria aqui. Continua fora do log
+  // (ponte-interna, `erroCruNoLog: false` na ponte das máquinas).
+  const erroCru = typeof r.erroCru === "string" && r.erroCru.length <= ERRO_CRU_MAX_CHARS ? r.erroCru : null;
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
@@ -162,5 +176,7 @@ export function entrega(v: unknown, machineId: string): Entrega {
     motivoFalha: r.motivoFalha as Entrega["resultado"]["motivoFalha"], motivoInterrupcao: r.motivoInterrupcao as Entrega["resultado"]["motivoInterrupcao"],
     ...(raioX ? { execucao: raioX } : {}),
     ...(catalogo ? { comandos: catalogo } : {}),
+    ...(erroCru ? { erroCru } : {}),
+    ...(causa ? { causaSemIa: causa } : {}),
   } };
 }
