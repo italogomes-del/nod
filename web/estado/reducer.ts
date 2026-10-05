@@ -122,9 +122,10 @@ export type Estado = {
   naoLidos: NaoLidosDto | null;
   /**
    * Onde a linha "Novas" entra em cada conversa: a primeira não lida quando a pessoa abriu a conversa (ou voltou
-   * para a janela com ela aberta). Fica até ela sair da conversa; o servidor já conta tudo como lido.
+   * para a janela com ela aberta). Fica até ela sair da conversa; o servidor já conta tudo como lido. `total` =
+   * quantas estavam não lidas quando a linha entrou (a pílula da base diz "3 novas", 2026-10-05).
    */
-  novasDesde: Record<string, { mensagemId: string; em: number }>;
+  novasDesde: Record<string, { mensagemId: string; em: number; total: number }>;
   rotinas: RotinaDto[];
   /**
    * O que já chegou do servidor ao menos uma vez (definido em 2026-09-30): lista vazia é resposta, não falta.
@@ -217,7 +218,7 @@ export type Acao =
   | { tipo: "hidratar-conversa"; conversa: ConversaDto; agora: number }
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
   | { tipo: "hidratar-nao-lidos"; naoLidos: NaoLidosDto }
-  | { tipo: "novas-desde"; conversaId: string; mensagemId: string; em: number }
+  | { tipo: "novas-desde"; conversaId: string; mensagemId: string; em: number; total: number }
   | { tipo: "hidratar-rotinas"; rotinas: RotinaDto[] }
   | { tipo: "hidratar-execucoes"; rotinaId: string; execucoes: ExecucaoRotina[] }
   | { tipo: "alternar-historico"; rotinaId: string }
@@ -590,7 +591,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-nao-lidos":
       return { ...estado, naoLidos: acao.naoLidos };
     case "novas-desde":
-      return { ...estado, novasDesde: { ...estado.novasDesde, [acao.conversaId]: { mensagemId: acao.mensagemId, em: acao.em } } };
+      return { ...estado, novasDesde: { ...estado.novasDesde, [acao.conversaId]: { mensagemId: acao.mensagemId, em: acao.em, total: acao.total } } };
     case "hidratar-chaves":
       return { ...estado, chaves: acao.chaves };
     case "hidratar-relatos":
