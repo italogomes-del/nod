@@ -150,9 +150,11 @@ export type TesteNaTela = {
  * tests/unit/web/onboarding.test.ts compara as duas cópias.
  */
 const FORMA_NOME_TESTE = /^[\p{L}][\p{L} .'-]{0,39}$/u;
+const PALAVRAS_NOME_MAX = 4;
 export function nomeParaOTeste(v: string | null | undefined): string | null {
-  const nome = (v ?? "").trim().replace(/\s+/g, " ");
-  return FORMA_NOME_TESTE.test(nome) ? nome : null;
+  // Só espaço comum é normalizado: quebra de linha e tabulação reprovam o nome; uma frase inteira não é nome.
+  const nome = (v ?? "").trim().replace(/ +/g, " ");
+  return FORMA_NOME_TESTE.test(nome) && nome.split(" ").length <= PALAVRAS_NOME_MAX ? nome : null;
 }
 export function perguntaDoTeste(nome: string | null): string {
   return nome ? `Diga oi para ${nome} em uma frase curta, em português. Só a frase.` : "Diga oi em uma frase curta, em português. Só a frase.";
