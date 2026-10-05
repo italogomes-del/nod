@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import WebSocket from "ws";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
@@ -7,9 +8,11 @@ import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { Ligacao } from "../../src/contracts/ligacao.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { Entrega } from "../../src/contracts/ponte.ts";
+import { criarDb } from "../../src/db/client.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
+import { urlDonoDeTeste } from "../helpers/db-dono.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
@@ -130,6 +133,63 @@ describeIntegracao("NOD-175: drenagem com o prazo vencido", () => {
   });
 });
 
+describeIntegracao("NOD-176: drenagem com uma reserva em voo", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "5000" });
+  });
+  afterAll(async () => {
+    await m?.limpar();
+  });
+
+  it("puxar em voo segura a drenagem antes de o token existir; a reserva é entregue e a entrega libera", async () => {
+    const { srv, pedir, bot, machineId } = m;
+    const conversa = await bot("Bot em voo");
+    const enviada = await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Reservado no deploy" });
+
+    // O puxar lento: uma tx do teste trava `turnos` em EXCLUSIVE (leitura passa, o UPDATE ... FOR UPDATE SKIP LOCKED da
+    // reivindicação espera). O puxar fica parado ANTES de cunhar o token — só `reservasEmVoo()` conta o turno.
+    const trava = criarDb(urlDonoDeTeste(), { max: 1 });
+    let soltar: () => void = () => undefined;
+    let travou: () => void = () => undefined;
+    const travada = new Promise<void>((r) => { travou = r; });
+    const segurando = trava.begin(async (tx) => {
+      await tx`lock table turnos in exclusive mode`;
+      travou();
+      await new Promise<void>((r) => { soltar = r; });
+    });
+    try {
+      await travada;
+      const puxando = pedir("puxar");
+      await srv.esperar(async () => srv.app.reservasEmVoo() === 1, { nome: "reserva em voo", intervaloMs: 10 });
+      expect(srv.app.tokens.ativos()).toBe(0);
+      // Nenhuma ligação viva: só a reserva pode segurar a drenagem.
+      expect(srv.app.voz.vivas()).toBe(0);
+
+      let resultado: Awaited<ReturnType<typeof srv.drenar>> | null = null;
+      const drenagem = srv.drenar({ prazoMs: 5_000, intervaloMs: 20 }).then((r) => (resultado = r));
+      expect(await Promise.race([drenagem.then(() => "resolveu"), new Promise((r) => setTimeout(() => r("pendente"), 200))])).toBe("pendente");
+
+      // A reserva que começou antes da drenagem é ENTREGUE: o token nasce e passa a segurar a drenagem no lugar dela.
+      soltar();
+      await segurando;
+      const { plano } = (await (await puxando).json()) as { plano: PlanoTurno };
+      expect(plano.turnoId).toBe(enviada.ids.turno);
+      expect(srv.app.reservasEmVoo()).toBe(0);
+      expect(srv.app.tokens.ativos()).toBe(1);
+      expect(resultado).toBeNull();
+
+      expect((await pedir("entregar", entregaDe(plano, machineId, 1))).status).toBe(200);
+      expect(await drenagem).toMatchObject({ vivas: 0, turnos: 0, prazo_vencido: false });
+      expect(srv.app.tokens.ativos()).toBe(0);
+    } finally {
+      soltar();
+      await segurando.catch(() => undefined);
+      await trava.end({ timeout: 2 });
+    }
+  });
+});
+
 describeIntegracao("NOD-175: modo local", () => {
   let srv: ServidorCompleto;
   const criados = { agentes: [] as string[], conversas: [] as string[] };
@@ -176,5 +236,35 @@ describeIntegracao("NOD-175: modo local", () => {
     ws.send(JSON.stringify({ t: "tchau" }));
     expect(await drenagem).toMatchObject({ vivas: 0, turnos: 0, prazo_vencido: false });
     ws.close();
+  });
+});
+
+describeIntegracao("NOD-176: modo local com token vivo", () => {
+  let srv: ServidorCompleto;
+  beforeAll(async () => {
+    srv = await servidorCompleto();
+  });
+  afterAll(async () => {
+    if (!srv) return;
+    await srv.fechar();
+    await limparPessoaE2E(srv.db, srv.dbDono, srv.pessoa, { agentes: [], conversas: [] });
+    await srv.desligar();
+  });
+
+  it("token vivo sem ligação: drenar resolve na primeira verificação com turnos 0", async () => {
+    // O modo local não tem a ponte HTTP de máquina: o token nasce pelo serviço, como o despacho local o cunharia.
+    const turnoId = randomUUID();
+    srv.app.tokens.cunhar(turnoId, { tenantId: srv.pessoa.tenantId, pessoaId: srv.pessoa.pessoaId, agenteId: randomUUID() });
+    try {
+      expect(srv.app.tokens.ativos()).toBe(1);
+      expect(srv.app.voz.vivas()).toBe(0);
+      const r = await srv.drenar({ prazoMs: 5_000, intervaloMs: 1_000 });
+      expect(r).toMatchObject({ vivas: 0, turnos: 0, prazo_vencido: false });
+      // Abaixo de um intervalo: resolveu na primeira verificação, sem dormir esperando o token.
+      expect(r.duracao_ms).toBeLessThan(1_000);
+      expect(srv.app.tokens.ativos()).toBe(1);
+    } finally {
+      srv.app.tokens.revogar(turnoId);
+    }
   });
 });
