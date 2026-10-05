@@ -40,8 +40,8 @@ describe("não lidos no estado da web", () => {
   });
 
   it("a linha Novas vale enquanto a pessoa está na conversa: navegar para qualquer lugar a apaga", () => {
-    const e = reduzir(base, { tipo: "novas-desde", conversaId: "c1", mensagemId: "m1", em: AS_8 });
-    expect(e.novasDesde.c1).toEqual({ mensagemId: "m1", em: AS_8 });
+    const e = reduzir(base, { tipo: "novas-desde", conversaId: "c1", mensagemId: "m1", em: AS_8, total: 2 });
+    expect(e.novasDesde.c1).toEqual({ mensagemId: "m1", em: AS_8, total: 2 });
     expect(reduzir(e, { tipo: "navegar", tela: { tipo: "nao-lidos" } }).novasDesde).toEqual({});
   });
 
@@ -103,8 +103,10 @@ describe("a linha Novas na conversa", () => {
   }
 
   it("entra logo acima da primeira não lida, com a hora", () => {
-    const html = renderTimeline(comConversa({ c1: { mensagemId: "m1", em: AS_8 } }).conversas.c1!, comConversa({ c1: { mensagemId: "m1", em: AS_8 } }));
-    expect(html).toContain('<div class="linha-novas" role="separator" aria-label="Mensagens novas"><span>Novas · desde 08:00</span></div>');
+    const e = comConversa({ c1: { mensagemId: "m1", em: AS_8, total: 2 } });
+    const html = renderTimeline(e.conversas.c1!, e);
+    // Os data-* são da pílula da base (web/lib/rolagem.ts): qual linha a pessoa já viu, quantas e desde quando.
+    expect(html).toContain(`<div class="linha-novas" role="separator" aria-label="Mensagens novas" data-novas="m1" data-total="2" data-desde="${AS_8}"><span>Novas · desde 08:00</span></div>`);
     expect(html.indexOf("Começando pelo #420.")).toBeLessThan(html.indexOf("linha-novas"));
     expect(html.indexOf("linha-novas")).toBeLessThan(html.indexOf("Os três pareceres"));
   });

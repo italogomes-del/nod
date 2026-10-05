@@ -28,6 +28,7 @@ import { estadoMascoteNaConversa } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
+import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
@@ -78,6 +79,8 @@ let composerDe: string | null = null;
  * perdia o texto. Agora ele fica com a conversa de onde ela saiu e volta quando ela volta — também depois de recarregar.
  */
 const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { return null; } });
+/** A conversa acompanha o fim e a pílula da base sobe às não lidas (definido em 2026-10-05, web/lib/rolagem-na-tela.ts). */
+const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 let reidratando = false;
 let ambienteBanco: AmbienteBancoDto | null = null;
 /** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
@@ -85,7 +88,14 @@ let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, r
 
 // definido em 2026-09-24 (revisão da interface): a tela principal é o chat; quem esconde o painel do
 // bot espera achá-lo escondido na próxima conversa e no próximo carregamento.
-const CHAVE_PAINEL_OCULTO = "nod.painelOculto";
+// definido em 2026-10-05 ("direto eu me vejo fechando a gaveta"): a gaveta nasce FECHADA e só fica aberta quando a
+// pessoa a abre pelo ícone do painel. Antes, sem nada guardado, ela nascia aberta (o app do Mac apaga o localStorage
+// a cada conexão), e abrir um nível pelo menu ou pela barra gravava "aberta" para sempre. Agora abrir um nível mostra
+// a gaveta só até a pessoa trocar de conversa. A chave mudou de nome para que ninguém herde o "aberta" antigo.
+const CHAVE_PAINEL_ABERTO = "nod.painelAberto";
+let painelAberto = ((): boolean => { try { return localStorage.getItem(CHAVE_PAINEL_ABERTO) === "1"; } catch { return false; } })();
+/** Aberta para mostrar um nível (abrirNivel), sem virar preferência: fecha de novo ao trocar de conversa. */
+let painelAbertoNaHora = false;
 // A busca da sidebar fica fechada até ser pedida (ícone ou ⌘K); aberta, fecha no Esc ou ao perder o foco vazia.
 let buscaAberta = false;
 const termoBusca = (): string => (document.getElementById("busca-bots") as HTMLInputElement | null)?.value ?? "";
@@ -108,7 +118,7 @@ const LOJA = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke
 let secoesRecolhidas: ReadonlySet<string> = lerSecoesRecolhidas();
 
 function painelOculto(): boolean {
-  try { return localStorage.getItem(CHAVE_PAINEL_OCULTO) === "1"; } catch { return false; }
+  return !painelAberto && !painelAbertoNaHora;
 }
 
 /**
@@ -225,9 +235,13 @@ function naFrente(): boolean {
 /**
  * Não lidos (definido em 2026-09-29, 0039): a conversa na tela, com a janela na frente, é lida. A linha "Novas"
  * só entra quando a pessoa acabou de abrir a conversa, voltou para a janela ou abriu o Nod (`linhaEm`); a fala que
- * chega enquanto ela olha é lida sem linha.
+ * chega enquanto ela olha é lida sem linha. Voltar com outra leva de novas muda a linha de lugar se a pessoa já viu a
+ * linha de antes (2026-10-05): antes ela ficava na primeira leva da visita, e a pílula da base levava a um ponto já
+ * lido. Sem ter visto, a linha fica onde estava e soma as novas, para a pílula levar ao começo de tudo.
  */
 let linhaEm: string | null = null;
+/** A leva de não lidas (a primeiraId dela) já contada na linha de cada conversa: a mesma leva nunca soma duas vezes. */
+const levaContada = new Map<string, string>();
 let primeiraLeitura = true;
 /** A conversa que a pessoa marcou como não lida com ela aberta: continua não lida até ela sair. */
 let deixarNaoLida: string | null = null;
@@ -242,7 +256,12 @@ function lerConversaDaTela(): void {
   primeiraLeitura = false;
   const nova = naoLidaDe(estado, conversaId);
   if (!nova || deixarNaoLida === conversaId || lendo.has(conversaId)) return;
-  if (comLinha && !estado.novasDesde[conversaId]) dispatch({ tipo: "novas-desde", conversaId, mensagemId: nova.primeiraId, em: nova.desde });
+  const atual = estado.novasDesde[conversaId];
+  if (comLinha && atual?.mensagemId !== nova.primeiraId && levaContada.get(conversaId) !== nova.primeiraId) {
+    levaContada.set(conversaId, nova.primeiraId);
+    const linha = !atual || rolagem.jaViu(atual.mensagemId) ? { mensagemId: nova.primeiraId, em: nova.desde, total: nova.total } : { ...atual, total: atual.total + nova.total };
+    dispatch({ tipo: "novas-desde", conversaId, ...linha });
+  }
   lendo.add(conversaId);
   void api
     .marcarLida(conversaId)
@@ -689,7 +708,6 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   const t = estado.tela;
   const timeline = document.getElementById("timeline");
   const escopo: ParentNode = muda.historicoMuda ? document : document.getElementById("timeline-ao-vivo") ?? document;
-  const noFim = timeline ? timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 40 : true;
   const abertos = [...escopo.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure);
   const buscas = muda.cascaMuda ? ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" })) : [];
   // A pasta marcada no card de pasta sobrevive a um frame que re-renderiza a conversa no meio da escolha.
@@ -741,7 +759,7 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   }
   for (const el of escopo.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
   if (muda.historicoMuda) artefatos.hidratar(timeline ?? document);
-  if (timeline && (t.tipo === "conversa" || t.tipo === "sala") && noFim) timeline.scrollTop = timeline.querySelector(".welcome-options") ? 0 : timeline.scrollHeight;
+  rolagem.depoisDeDesenhar(t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null, muda.historicoMuda || muda.cascaMuda);
 }
 
 const PLACEHOLDER_SALA = "Mensagem para a sala — @Nome dirige a pergunta";
@@ -855,6 +873,7 @@ function render(): void {
     regiao("cabecalho", "");
     regiao("timeline", renderEntrada());
     regiao("composer", "");
+    rolagem.depoisDeDesenhar(null, true);
     return;
   }
   document.querySelector(".app")?.classList.remove("sem-sessao");
@@ -1024,8 +1043,16 @@ function propostaDoEstado(id: string): Proposta | null {
 // Ações (delegação por data-act e data-form). A web só pede; o servidor decide.
 
 function navegar(tela: Tela): void {
+  const antes = estado.tela;
+  // A gaveta aberta só para um nível (ou a sobreposta, na janela estreita) fecha quando a conversa muda.
+  if (tela.tipo !== "conversa" || antes.tipo !== "conversa" || antes.conversaId !== tela.conversaId) {
+    painelAbertoNaHora = false;
+    document.querySelector(".app")?.classList.remove("detalhes-abertos");
+  }
   linhaEm = tela.tipo === "conversa" || tela.tipo === "sala" ? tela.conversaId : null;
   deixarNaoLida = null;
+  // A linha "Novas" some ao navegar (reducer); a conta das levas vai junto.
+  levaContada.clear();
   dispatch({ tipo: "navegar", tela });
   lerConversaDaTela();
   if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
@@ -1278,6 +1305,8 @@ async function enviarComposer(): Promise<void> {
   if (fila.some((i) => i.estado === "enviando")) return;
   const ids = fila.flatMap((i) => (i.estado === "pronto" && i.meta ? [i.meta.id] : []));
   if (!texto && ids.length === 0) return;
+  // Quem manda mensagem quer ver a própria mensagem e a resposta: a conversa volta a acompanhar o fim.
+  rolagem.colar();
   // definido em 2026-09-24 (emenda da ADR-045): com pergunta aberta, a mensagem RESPONDE por
   // POST decisoes/:id/responder (a retomada nasce lá), salvo "Outro assunto".
   if (ids.length === 0 && (await comandoDoNod(texto, alvo))) {
@@ -1380,6 +1409,7 @@ function escolherNoComposer(outroAssunto: boolean, alvoId?: string): void {
 function verPergunta(decisaoId: string): void {
   const balao = document.querySelector<HTMLElement>(`[data-pergunta="${CSS.escape(decisaoId)}"]`);
   if (!balao) return;
+  rolagem.soltar();
   balao.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   balao.classList.add("realce");
   window.setTimeout(() => balao.classList.remove("realce"), 1600);
@@ -1390,6 +1420,7 @@ function verDecisao(decisaoId: string): void {
   const id = CSS.escape(decisaoId);
   const card = document.querySelector<HTMLElement>(`[data-decisao="${id}"], [data-proposta="${id}"]`);
   if (!card) return;
+  rolagem.soltar();
   card.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   card.classList.add("realce");
   window.setTimeout(() => card.classList.remove("realce"), 1600);
@@ -1639,6 +1670,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   anexar: () => document.getElementById("composer-arquivos")?.click(),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),
+  // O botão some ao ser usado: o foco vai para o campo, e não para o <body>.
+  "rolar-para-novas": () => {
+    rolagem.irParaNovas();
+    document.getElementById("composer-texto")?.focus({ preventScroll: true });
+  },
   "alternar-detalhes": () => {
     const app = document.querySelector(".app");
     if (!app) return;
@@ -1646,7 +1682,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); return; }
     const oculto = !app.classList.contains("detalhes-ocultos");
     app.classList.toggle("detalhes-ocultos", oculto);
-    try { localStorage.setItem(CHAVE_PAINEL_OCULTO, oculto ? "1" : "0"); } catch { /* sem storage, vale só nesta aba */ }
+    painelAberto = !oculto;
+    painelAbertoNaHora = false;
+    try { localStorage.setItem(CHAVE_PAINEL_ABERTO, oculto ? "0" : "1"); } catch { /* sem storage, vale só nesta aba */ }
   },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
@@ -2439,7 +2477,7 @@ function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
   gavetaSuja = null;
   const app = document.querySelector(".app");
   if (window.matchMedia("(max-width: 1099px)").matches) app?.classList.add("detalhes-abertos");
-  else if (painelOculto()) { try { localStorage.setItem(CHAVE_PAINEL_OCULTO, "0"); } catch { /* sem storage, vale só nesta aba */ } }
+  else if (painelOculto()) painelAbertoNaHora = true;
   dispatch({ tipo: "gaveta", agenteId: a.id, nivel });
   document.querySelector<HTMLElement>("#detalhes .gv-voltar")?.focus();
 }

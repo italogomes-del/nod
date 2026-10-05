@@ -527,9 +527,9 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   }
   const mostrados = new Set<string>();
   // definido em 2026-09-29 (0039, canvas "Não lidos"): a linha "Novas" entra acima da primeira não lida de quando a
-  // pessoa abriu a conversa, e fica até ela sair.
+  // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair.
   const novas = mensagens[0] ? estado.novasDesde[mensagens[0].conversaId] : undefined;
-  const pedacos = mensagens.map((m) => (novas?.mensagemId === m.id ? linhaNovas(novas.em) : "") + pedaco(m));
+  const pedacos = mensagens.map((m) => (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + pedaco(m));
   function pedaco(m: Mensagem): string {
     const k = grupoDe(m);
     if (!k) return renderMensagem(m, estado, sala);
@@ -552,8 +552,9 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas).filter((b) => b.html !== "");
 }
 
-function linhaNovas(em: number): string {
-  return `<div class="linha-novas" role="separator" aria-label="Mensagens novas"><span>Novas · desde ${esc(hora(em))}</span></div>`;
+/** Os data-* são da pílula da base (web/lib/rolagem.ts): ela sabe qual linha a pessoa já viu e o que dizer. */
+function linhaNovas(novas: { mensagemId: string; em: number; total: number }): string {
+  return `<div class="linha-novas" role="separator" aria-label="Mensagens novas" data-novas="${esc(novas.mensagemId)}" data-total="${novas.total}" data-desde="${novas.em}"><span>Novas · desde ${esc(hora(novas.em))}</span></div>`;
 }
 
 /** definido em 2026-09-24: a partir de quantas linhas de sistema SEGUIDAS a conversa as recolhe. */
