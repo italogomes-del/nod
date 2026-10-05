@@ -86,6 +86,8 @@ export type BancoMemoria = {
   comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
   /** 0039: o "lido até" de cada pessoa em cada conversa (chave tenant:pessoa:conversa). */
   leituras: Map<string, number>;
+  /** 0054: o "Agora não" do cartão de liberar apps (chave tenant:pessoa:agente:conector → instante). */
+  liberacoesDispensadas: Map<string, number>;
   /** 0033: turnos que trouxeram conteúdo da web pelas nativas. */
   contaminados: Set<string>;
   githubApp: Map<string, ConfigGithubApp>;
@@ -140,6 +142,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     onboarding: new Map(),
     comandos: new Map(),
     leituras: new Map(),
+    liberacoesDispensadas: new Map(),
     contaminados: new Set(),
     githubApp: new Map(),
     composioSessoes: new Map(),
@@ -1962,6 +1965,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         async consentimento() { return consentimento; },
         async consentir(versao: number, em: number) { consentimento = { versao, em }; },
         async atualizarLinha() { /* a linha vive em mensagens; o teste de unidade não a confere */ },
+      };
+    })(),
+    liberacoesDispensadas: (() => {
+      const prefixo = (agenteId: string) => `${escopo.tenantId}:${escopo.pessoaId}:${agenteId}:`;
+      return {
+        async doAgente(agenteId: string) {
+          return Object.fromEntries([...b.liberacoesDispensadas].filter(([k]) => k.startsWith(prefixo(agenteId))).map(([k, em]) => [k.slice(prefixo(agenteId).length), em]));
+        },
+        async dispensar(agenteId: string, conectorIds: readonly string[], em: number) {
+          const ids = [...new Set(conectorIds)];
+          for (const id of ids) b.liberacoesDispensadas.set(prefixo(agenteId) + id, Math.max(b.liberacoesDispensadas.get(prefixo(agenteId) + id) ?? -Infinity, em));
+          return ids.length;
+        },
       };
     })(),
   } satisfies Repos;

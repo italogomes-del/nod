@@ -17,6 +17,7 @@ import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
+import { renderCardLiberar } from "./card-liberar.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
@@ -652,6 +653,9 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     { chave: "acolhimento", html: acolhimento },
     ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
+    // definido em 2026-10-05: a oferta de liberar apps recém-conectados fica no fim do histórico — é o que a pessoa
+    // acabou de fazer fora da conversa. Chave por bot: o cartão guarda no DOM o que ela marcou (card-liberar.ts).
+    { chave: `liberar:${c.conversa.agenteId ?? ""}`, html: renderCardLiberar(c, estado) },
   ].filter((b) => b.html !== "");
 }
 

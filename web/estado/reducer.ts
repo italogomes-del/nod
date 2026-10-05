@@ -154,6 +154,12 @@ export type Estado = {
   gaveta: { agenteId: string; nivel: NivelGaveta } | null;
   avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
+  /**
+   * O "Agora não" do cartão de liberar apps (definido em 2026-10-05, 0054): por bot, o instante em que a pessoa
+   * dispensou cada app (conectorId → ms). Chega junto com as concessões; ausente = ainda não carregou, e o cartão
+   * não aparece (web/telas/card-liberar.ts).
+   */
+  liberacoesDispensadas: Record<string, Record<string, number>>;
   memorias: Record<string, Memoria[]>;
   /**
    * O "a fazer" de cada bot (definido em 2026-09-30, ADR-064): as pendências abertas, da mais nova para a mais antiga;
@@ -224,7 +230,7 @@ export type Acao =
   | { tipo: "alternar-historico"; rotinaId: string }
   | { tipo: "lista-de-pasta"; propostaId: string; lista: "curta" | "todas" }
   | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
-  | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[] }
+  | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[]; liberacoesDispensadas?: Record<string, number> }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
   | { tipo: "hidratar-pendencias"; agenteId: string; pendencias: Pendencia[] }
   | { tipo: "a-fazer"; agenteId: string; aberto: boolean }
@@ -273,6 +279,7 @@ export const estadoInicial: Estado = {
   gaveta: null,
   avisoConexao: null,
   concessoes: {},
+  liberacoesDispensadas: {},
   memorias: {},
   pendencias: {},
   aFazerAberto: {},
@@ -576,7 +583,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-conectores":
       return { ...estado, conectores: acao.conectores, marketplace: acao.marketplace ?? estado.marketplace, composioConfigurado: acao.composioConfigurado ?? estado.composioConfigurado, carregado: estado.carregado.conectores ? estado.carregado : { ...estado.carregado, conectores: true } };
     case "hidratar-concessoes":
-      return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes } };
+      // Sem as dispensas na resposta, o que havia fica: sem saber o que a pessoa dispensou, o cartão de liberar não aparece.
+      return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes }, liberacoesDispensadas: acao.liberacoesDispensadas ? { ...estado.liberacoesDispensadas, [acao.agenteId]: acao.liberacoesDispensadas } : estado.liberacoesDispensadas };
     case "hidratar-memorias":
       return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
     case "hidratar-pendencias": {

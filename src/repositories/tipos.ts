@@ -37,6 +37,7 @@ import type { onboardingRepo } from "./onboarding.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
 import type { leiturasRepo } from "./leituras.repo.ts";
 import type { ligacoesRepo } from "./ligacoes.repo.ts";
+import type { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
 
 /**
  * Regras de repositório (Práticas §1, ADR-018 refinado): factory `xRepo(conn: Conn, escopo: Escopo)`
@@ -88,4 +89,5 @@ export interface Repos {
   comandos: ReturnType<typeof comandosRepo>;
   leituras: ReturnType<typeof leiturasRepo>;
   ligacoes: ReturnType<typeof ligacoesRepo>;
+  liberacoesDispensadas: ReturnType<typeof liberacoesDispensadasRepo>;
 }

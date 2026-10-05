@@ -188,7 +188,10 @@ export function criarApi(escopo: Escopo) {
     registrarConector: (c: Record<string, unknown>) => post<{ ok: true; ids: { conector: string }; conector: Conector }>("conectores", c),
     sondarConector: (id: string) => post<{ ok: boolean; conector: Conector }>(`conectores/${id}/sondar`),
     habilitarConector: (id: string, habilitado: boolean) => post<{ conector: Conector }>(`conectores/${id}/${habilitado ? "habilitar" : "desabilitar"}`),
-    concessoes: (agenteId: string) => get<{ concessoes: Concessao[] }>(`agentes/${agenteId}/concessoes`),
+    concessoes: (agenteId: string) => get<{ concessoes: Concessao[]; liberacoesDispensadas?: Record<string, number> }>(`agentes/${agenteId}/concessoes`),
+    // definido em 2026-10-05: o cartão da conversa que oferece liberar apps recém-conectados (web/telas/card-liberar.ts).
+    liberarApps: (agenteId: string, apps: { conectorId: string; nivel: "leitura" | "escrita" }[]) => post<RespostaMutacao>(`agentes/${agenteId}/acessos/liberar`, { apps }),
+    dispensarLiberacao: (agenteId: string, conectorIds: string[]) => post<RespostaMutacao>(`agentes/${agenteId}/acessos/dispensar`, { conectorIds }),
     conceder: (agenteId: string, conectorId: string, capacidade: string) => post<{ ok: true; ids: { concessao: string; mensagem: string }; naoInclui: string[] }>(`agentes/${agenteId}/concessoes`, { conectorId, capacidade }),
     revogar: (concessaoId: string) => del<RespostaMutacao>(`concessoes/${concessaoId}`),
     // definido em 2026-09-25: Nenhum / Ler / Ler e alterar por bot e app (marketplace e painel do bot).

@@ -38,6 +38,7 @@ import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
 import { leiturasRepo } from "./leituras.repo.ts";
 import { ligacoesRepo } from "./ligacoes.repo.ts";
+import { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
 
 /** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Práticas §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
@@ -80,6 +81,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     comandos: comandosRepo(conn, escopo),
     leituras: leiturasRepo(conn, escopo),
     ligacoes: ligacoesRepo(conn, escopo),
+    liberacoesDispensadas: liberacoesDispensadasRepo(conn, escopo),
     onboarding: onboardingRepo(conn, escopo),
   };
 }

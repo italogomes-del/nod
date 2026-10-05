@@ -1,6 +1,7 @@
 import "./lib/mascote-elemento.ts";
 import { abrirComputador } from "./telas/computador.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
+import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
 import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
@@ -391,7 +392,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   }
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
   if (q.startsWith("pendencias:")) return { tipo: "hidratar-pendencias", agenteId: q.slice(11), pendencias: (await api.pendencias(q.slice(11))).pendencias };
-  if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), concessoes: (await api.concessoes(q.slice(11))).concessoes };
+  if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), ...(await api.concessoes(q.slice(11))) };
   if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
   return null;
 }
@@ -1441,6 +1442,28 @@ function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; tex
   });
 }
 
+/** O que está marcado no cartão de liberar apps (card-liberar.ts): cada app marcado com o nível do seletor dele. */
+function escolhasDoCardLiberar(card: HTMLElement | null): (EscolhaLiberar & { conectorId: string })[] {
+  if (!card) return [];
+  return [...card.querySelectorAll<HTMLInputElement>("input[data-liberar-app]:checked")].map((cb) => {
+    const conectorId = cb.dataset.liberarApp ?? "";
+    const nivel = card.querySelector<HTMLSelectElement>(`select[data-liberar-nivel="${CSS.escape(conectorId)}"]`)?.value;
+    return { conectorId, slug: cb.dataset.slug ?? "", nivel: nivel === "escrita" ? "escrita" : "leitura" };
+  });
+}
+
+/**
+ * O botão e a lista pode/não pode do cartão seguem o que a pessoa marca, no lugar: o cartão não é redesenhado (o foco
+ * fica no controle que ela acabou de mexer) e o HTML do bloco continua o mesmo para o render por blocos.
+ */
+function atualizarCardLiberar(card: HTMLElement): void {
+  const escolhas = escolhasDoCardLiberar(card);
+  const permitir = card.querySelector<HTMLElement>('[data-act="liberar-apps"]');
+  if (permitir) permitir.textContent = rotuloPermitir(escolhas);
+  const lista = card.querySelector(".pode-nao");
+  if (lista) lista.outerHTML = listaDoQuePodem(estado, escolhas);
+}
+
 function filtrarApps(texto: string): void {
   const cards = [...document.querySelectorAll<HTMLElement>("[data-app-busca]")];
   for (const el of cards) el.hidden = !el.dataset.appBusca?.includes(texto.trim().toLowerCase());
@@ -1621,6 +1644,21 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "conectores", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
   "dar-acesso": (el) => abrirNivel(el.dataset.id ?? "", { tipo: "dar-acesso" }),
+  // definido em 2026-10-05: o cartão que oferece liberar apps recém-conectados (card-liberar.ts). Permitir leva os apps
+  // marcados com o nível do seletor de cada um; o servidor concede pela rota de pessoa e chama o bot de volta.
+  "liberar-apps": (el) => agir(async () => {
+    const agenteId = el.dataset.id ?? "";
+    const escolhas = escolhasDoCardLiberar(el.closest<HTMLElement>("[data-liberar]"));
+    if (escolhas.length === 0) { dispatch({ tipo: "erro", erro: { codigo: "entrada_invalida", mensagem: "Marque pelo menos um app para permitir." } }); return; }
+    await api!.liberarApps(agenteId, escolhas.map((e) => ({ conectorId: e.conectorId, nivel: e.nivel })));
+    dispatch({ tipo: "invalidar", quais: [`concessoes:${agenteId}`, "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  }),
+  // "Agora não": a dispensa fica no servidor (0054) e sobrevive a recarregar; o cartão sai quando as concessões voltam.
+  "dispensar-liberar": (el) => agir(async () => {
+    const agenteId = el.dataset.id ?? "";
+    await api!.dispensarLiberacao(agenteId, (el.dataset.conectores ?? "").split(",").filter(Boolean));
+    dispatch({ tipo: "invalidar", quais: [`concessoes:${agenteId}`] });
+  }),
   // definido em 2026-09-25: a rotina que lê um app ainda desconectado — um botão conecta e, quando o login
   // termina, cria a rotina (o confirmar concede o que ela declarou, conceder-acessos-da-rotina.ts).
   "conectar-e-confirmar": (el) => {
@@ -2047,6 +2085,11 @@ document.addEventListener("change", (ev) => {
     const horario = cb.closest("form")?.querySelector<HTMLInputElement>('input[name="horario"]');
     const intervalo = cb.value.startsWith("intervalo:") || cb.value === "hora";
     if (horario) { horario.disabled = intervalo; horario.required = !intervalo; horario.closest("label")!.hidden = intervalo; }
+    return;
+  }
+  if (cb.matches("[data-liberar-app], [data-liberar-nivel]")) {
+    const card = cb.closest<HTMLElement>("[data-liberar]");
+    if (card) atualizarCardLiberar(card);
     return;
   }
   if (!cb.matches("input[data-item]")) return;
