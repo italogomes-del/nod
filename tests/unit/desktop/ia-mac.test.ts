@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IAS_DESKTOP } from "../../../src/contracts/desktop.ts";
-import { ambienteDoLogin, comandoDeLogin, INTERVALO_SONDA_IA_MS, lerIaDesktop, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, INTERVALO_SONDA_IA_MS, lerIaDesktop, textoDaImpressao, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
 
 /**
  * Os cards de IA do onboarding no Mac (definido em 2026-10-04, ADR-077): a página remota só escolhe UMA das IAs
@@ -30,6 +30,31 @@ describe("ambienteDoLogin", () => {
   it("tira as chaves de fornecedor e as do nod; mantém o resto", () => {
     const env = ambienteDoLogin({ PATH: "/usr/bin", HOME: "/Users/x", ANTHROPIC_API_KEY: "a", CLAUDE_CODE_ENTRYPOINT: "b", CLAUDECODE: "1", OPENAI_API_KEY: "c", OPENAI_BASE_URL: "d", CODEX_API_KEY: "e", NOD_SESSAO_SEGREDO: "f", LANG: "pt_BR.UTF-8", VAZIA: undefined });
     expect(env).toEqual({ PATH: "/usr/bin", HOME: "/Users/x", LANG: "pt_BR.UTF-8" });
+  });
+});
+
+describe("impressão da conta logada (2026-10-05)", () => {
+  const status = (extra: Record<string, unknown> = {}) => JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: "ana@exemplo.com", orgId: "org-1", orgName: "Exemplo", subscriptionType: "team", ...extra });
+
+  it("o comando só pergunta o estado do login, sem argumento vindo da página", () => {
+    expect(comandoDeEstadoDoLogin("claude-cli")).toEqual({ nome: "claude", args: ["auth", "status"] });
+    expect(comandoDeEstadoDoLogin("codex-cli")).toEqual({ nome: "codex", args: ["login", "status"] });
+  });
+
+  it("do JSON do Claude entram só os campos da conta: outra conta ou organização muda o texto; campo novo ou variável, não", () => {
+    const base = textoDaImpressao("claude-cli", status(), "");
+    expect(textoDaImpressao("claude-cli", status({ email: "bia@exemplo.com" }), "")).not.toBe(base);
+    expect(textoDaImpressao("claude-cli", status({ orgId: "org-2" }), "")).not.toBe(base);
+    expect(textoDaImpressao("claude-cli", status({ subscriptionType: "max" }), "")).not.toBe(base);
+    expect(textoDaImpressao("claude-cli", status({ conferidoEm: "2026-10-05T20:00:00Z", orgName: "Outro nome" }), "aviso qualquer")).toBe(base);
+  });
+
+  it("saída que não é o JSON esperado entra inteira (o Codex, ou um Claude diferente)", () => {
+    expect(textoDaImpressao("codex-cli", "Logged in using ChatGPT\n", "")).toBe("Logged in using ChatGPT\n");
+    expect(textoDaImpressao("claude-cli", "Logged in as ana\n", "x")).toBe("Logged in as ana\nx");
+    expect(textoDaImpressao("claude-cli", "[1,2]", "")).toBe("[1,2]\n");
+    // O JSON do Codex, se um dia vier, não é lido como o do Claude.
+    expect(textoDaImpressao("codex-cli", status(), "")).toBe(`${status()}\n`);
   });
 });
 

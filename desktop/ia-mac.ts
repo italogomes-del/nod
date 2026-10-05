@@ -30,6 +30,34 @@ export function comandoDeLogin(ia: IaDesktop): { nome: "claude" | "codex"; args:
 }
 
 /**
+ * O comando que diz QUAL conta está logada (definido em 2026-10-05): o app faz um hash da saída e o guarda com o
+ * veredito do teste da IA (vigia-ias.ts); a saída em si nunca é guardada nem enviada. Medido em 2026-10-05: o
+ * `claude auth status` devolve um JSON com a conta e a organização, então o hash muda quando a pessoa troca de conta;
+ * o `codex login status` só diz "Logged in using ChatGPT", e o hash dele não muda (a IA é testada de novo pelo prazo).
+ */
+export function comandoDeEstadoDoLogin(ia: IaDesktop): { nome: "claude" | "codex"; args: string[] } {
+  return ia === "claude-cli" ? { nome: "claude", args: ["auth", "status"] } : { nome: "codex", args: ["login", "status"] };
+}
+
+/** Os campos do `claude auth status` que dizem QUAL conta está logada (medido em 2026-10-05, Claude Code 2.1.289). */
+const CAMPOS_DA_CONTA_CLAUDE = ["loggedIn", "authMethod", "apiProvider", "email", "orgId", "subscriptionType"] as const;
+
+/**
+ * O texto que vira a impressão da conta (o hash é feito por quem chama). Do JSON do Claude entram só os campos da
+ * conta: um campo novo que mude sozinho numa versão futura não derruba o veredito. Saída que não é o JSON esperado
+ * (o Codex, ou um Claude diferente) entra inteira.
+ */
+export function textoDaImpressao(ia: IaDesktop, stdout: string, stderr: string): string {
+  if (ia === "claude-cli") {
+    try {
+      const d = JSON.parse(stdout) as unknown;
+      if (d && typeof d === "object" && !Array.isArray(d)) return JSON.stringify(CAMPOS_DA_CONTA_CLAUDE.map((c) => [c, (d as Record<string, unknown>)[c] ?? null]));
+    } catch { /* não é JSON: vale a saída inteira */ }
+  }
+  return `${stdout.trim()}\n${stderr.trim()}`;
+}
+
+/**
  * O ambiente do processo de login: o mesmo regime local dos drivers (sem CLAUDE_CODE_*, ANTHROPIC_*, NOD_*) e também
  * sem OPENAI_* — com uma chave herdada, o login viraria cobrança por API sem a pessoa saber.
  */

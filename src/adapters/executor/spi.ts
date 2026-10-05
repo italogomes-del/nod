@@ -57,8 +57,17 @@ export interface Adapter {
   aceitaMensagens?(): boolean;
 }
 
+/** O veredito do teste de verdade de uma IA e o que ela respondeu (null quando não ficou pronta). */
+export type TesteDoMotor = { inventario: Inventario; resposta: string | null };
+
 export interface Instance {
   sondar(): Promise<Inventario>;
+  /**
+   * definido em 2026-10-05 (emenda da ADR-019): o TESTE de verdade — um turno de uma frase com `pergunta`, pago pela
+   * assinatura da pessoa. `sondar()` pode ser só a conferência do login (o app do Mac); isto é o que prova que a conta
+   * responde. Ausente no catcher.
+   */
+  testar?(pergunta: string): Promise<TesteDoMotor>;
   adapter(plano: PlanoTurno): Adapter;
   dispose(): Promise<void>;
 }

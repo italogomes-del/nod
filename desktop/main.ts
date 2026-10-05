@@ -1,12 +1,14 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
-import { iniciarLaco } from "../src/adapters/executor/laco.ts";
+import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
+import { executarColetando } from "../src/adapters/executor/processo.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
@@ -15,8 +17,9 @@ import type { ConfigDriver, Driver } from "../src/adapters/executor/spi.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
-import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
-import { ambienteDoLogin, comandoDeLogin, INTERVALO_SONDA_IA_MS, lerIaDesktop, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, lerIaDesktop, textoDaImpressao, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
@@ -43,8 +46,11 @@ let conectando = false;
 let encerrando = false;
 let falhando = false;
 let itensGithub: ReturnType<typeof setInterval> | null = null;
-/** Sem IA pronta (onboarding, ADR-077): a sonda de 3 em 3 s até alguma ficar pronta. */
-let sondaIa: ReturnType<typeof setInterval> | null = null;
+/**
+ * A vigia das IAs da conexão atual (vigia-ias.ts; revisto em 2026-10-05): sem IA pronta ela olha de novo a cada 3 s
+ * (ADR-077), guarda o veredito do teste de verdade e reanuncia o inventário ao servidor quando ele muda.
+ */
+let vigiaIas: VigiaDasIas | null = null;
 /** A config dos drivers da conexão atual (ambiente limpo + PATH aumentado): a sonda e o login da IA a reaproveitam. */
 let cfgExecutor: ConfigDriver | null = null;
 /**
@@ -264,8 +270,8 @@ async function mostrarSetup() {
 async function parar() {
   if (itensGithub) clearInterval(itensGithub);
   itensGithub = null;
-  if (sondaIa) clearInterval(sondaIa);
-  sondaIa = null;
+  vigiaIas?.parar();
+  vigiaIas = null;
   const anterior = laco; laco = null;
   cliente?.cancelar();
   if (anterior) await anterior.parar().catch(() => undefined);
@@ -300,41 +306,45 @@ async function conectar(c: Config) {
   const cfg = await configDosDrivers(envExecutor);
   cfgExecutor = cfg;
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
-  registry = criado.registry;
-  const inv = Object.values(criado.inventarios).find((i) => i?.estado === "pronto") ?? criado.inventarios["claude-cli"] ?? { estado: "ausente" as const, motivo: "Conecte sua conta de IA", em: Date.now() };
+  // Um objeto só, atualizado no lugar a cada sondagem: o laço lê `registry[driver]` a cada turno, então uma IA que
+  // fica pronta depois (ou um driver recriado) passa a valer sem reiniciar o laço.
+  const registryDoLaco: Registry = criado.registry;
+  registry = registryDoLaco;
   const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
   cliente = ponteHttp;
   // ADR-048: o gh já logado neste Mac vira o jeito de conectar o GitHub da pessoa, sem ela configurar nada.
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true } as const;
-  await ponteHttp.ponte.conectar({ ...anuncio, inventario: inv, harnesses: criado.inventarios });
   if (gh) vigiarItensGithub(ponteHttp);
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId) }), ponteHttp.ponte);
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId),
+      // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.
+      aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigia.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
   };
-  if (inv.estado === "pronto") subirLaco(criado.registry);
-  else {
-    // definido em 2026-10-04 (ADR-077, onboarding): sem IA pronta a janela abre do mesmo jeito — a web mostra os cards de
-    // IA (Entrar/Instalar) — e o app sonda de novo a cada 3 s. Um registry novo a cada volta: os drivers recriados não
-    // guardam o cache de 5 min da sonda do Codex. Pronta, o laço sobe e o Mac reanuncia o inventário ao servidor.
-    let sondando = false;
-    sondaIa = setInterval(() => {
-      if (sondando || cliente !== ponteHttp) return;
-      sondando = true;
-      void (async () => {
-        const novo = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
-        const pronto = Object.values(novo.inventarios).find((i) => i?.estado === "pronto");
-        if (!pronto || cliente !== ponteHttp || !sondaIa) return;
-        clearInterval(sondaIa);
-        sondaIa = null;
-        registry = novo.registry;
-        await ponteHttp.ponte.conectar({ ...anuncio, inventario: pronto, harnesses: novo.inventarios });
-        subirLaco(novo.registry);
-      })().catch(() => undefined).finally(() => { sondando = false; });
-    }, INTERVALO_SONDA_IA_MS);
-  }
+  // definido em 2026-10-04 (ADR-077) e revisto em 2026-10-05: sem IA pronta a janela abre do mesmo jeito — a web mostra
+  // os cards de IA — e a vigia olha de novo a cada 3 s, com um registry novo a cada volta (os drivers recriados não
+  // guardam o cache de 5 min da sonda do Codex). O que vai ao servidor é a conferência de login JÁ com o veredito do
+  // teste de verdade aplicado: IA logada e reprovada é anunciada como fora, com a causa.
+  let lacoNoAr = false;
+  const arquivoVereditos = join(app.getPath("userData"), "ias-testadas.json");
+  const vigia = criarVigiaDasIas({
+    sondar: () => criarRegistryDetalhado(envExecutor, drivers, { cfg }),
+    impressao: (ia) => impressaoDoLogin(ia, cfg),
+    anunciar: async (inventarios, principal) => { if (cliente === ponteHttp) await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios }); },
+    aoRegistry: (novo, algumaPronta) => {
+      if (cliente !== ponteHttp) return;
+      Object.assign(registryDoLaco, novo);
+      if (algumaPronta && !lacoNoAr) { lacoNoAr = true; subirLaco(registryDoLaco); }
+    },
+    ler: async () => JSON.parse(await readFile(arquivoVereditos, "utf8")) as unknown,
+    gravar: (vereditos: Veredito[]) => writeFile(arquivoVereditos, `${JSON.stringify(vereditos)}\n`, { mode: 0o600 }),
+    agora: Date.now,
+    agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; },
+  });
+  vigiaIas = vigia;
+  await vigia.iniciar(criado);
   const anterior = janela;
   // definido em 2026-09-24 ("aviso no Mac"): preload próprio da janela web — só `nodDesktop` (preload-web.ts).
   // NOD-137: nasce onde a pessoa deixou, inteira numa tela que existe; o mínimo de 900 cede numa tela mais estreita.
@@ -378,9 +388,23 @@ async function entrarNaIa(ia: IaDesktop): Promise<ResultadoIaDesktop> {
     try {
       const filho = spawn(bin, args, { cwd: home || undefined, env: ambienteDoLogin(cfg.env), detached: true, stdio: "ignore", shell: false });
       filho.once("spawn", () => { filho.unref(); resolver({ ok: true }); });
+      // definido em 2026-10-05: o login terminou bem — se esta IA estava reprovada, a conta nova é testada agora.
+      filho.once("exit", (codigo) => { if (codigo === 0) void vigiaIas?.contaMudou(ia).catch(() => undefined); });
       filho.once("error", () => resolver({ ok: false, motivo: "falhou" }));
     } catch { resolver({ ok: false, motivo: "falhou" }); }
   });
+}
+/**
+ * A impressão da conta logada numa IA (definido em 2026-10-05): o hash do que o CLI diz sobre o login. Fica só neste
+ * Mac, junto do veredito do teste (vigia-ias.ts); null quando o CLI não responde.
+ */
+async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<string | null> {
+  const home = cfg.env.HOME ?? "";
+  const { nome, args } = comandoDeEstadoDoLogin(ia);
+  const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
+  if (!bin) return null;
+  const r = await executarColetando({ bin, args, env: ambienteDoLogin(cfg.env), cwd: home || tmpdir(), timeoutMs: 10_000 });
+  return r.exitCode === 0 ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null;
 }
 function validarRemetente(event: IpcMainInvokeEvent) {
   if (event.senderFrame?.url !== setupUrl || event.sender !== janela?.webContents) throw new Error("origem_invalida");
@@ -456,6 +480,12 @@ else {
       const lida = lerIaDesktop(ia);
       if (!lida) throw new Error("entrada_invalida");
       try { await shell.openExternal(URL_INSTALAR_IA[lida]); return { ok: true }; } catch { return { ok: false, motivo: "falhou" }; }
+    });
+    // definido em 2026-10-05: o teste de verdade das IAs. O pedido vem de uma página remota: a vigia só aceita os ids
+    // conhecidos e um nome com forma de nome (src/domain/conta-da-ia.ts). Sem conexão não há o que testar.
+    ipcMain.handle(CANAIS_DESKTOP.iaTestar, (e, pedido: unknown): Promise<TesteDeIa[]> => {
+      validarRemetenteWeb(e);
+      return vigiaIas ? vigiaIas.testar(pedido) : Promise.resolve([]);
     });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).

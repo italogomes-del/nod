@@ -34,6 +34,22 @@ describe("desktop: fronteiras HTTP", () => {
     expect(() => sinais({ attempted: "true" })).toThrow();
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
   });
+  it("conta sem acesso (2026-10-05): a causa é código fechado, a frase é do servidor, e o erro cru atravessa só até o teto", () => {
+    expect(inventario({ estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "texto do Mac", versao: "9" }, 7)).toEqual({ estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "A conta entrou, mas está sem acesso: a organização dela desativou o uso por assinatura.", em: 7 });
+    // App antigo (sem o campo) ou valor inventado: sem causa, com a frase de sempre.
+    for (const causa of [undefined, "porque sim", 3, ["conta_sem_acesso"]]) expect(inventario({ estado: "nao_autenticado", causa }, 7)).toEqual({ estado: "nao_autenticado", motivo: "Entre na conta do harness neste computador", em: 7 });
+    // A causa não muda uma IA pronta.
+    expect(inventario({ estado: "pronto", versao: "1", causa: "conta_sem_acesso" }, 7)).toEqual({ estado: "pronto", versao: "1", em: 7 });
+
+    const base = { turnoId: "11111111-1111-4111-8111-111111111111", seqLocal: 1, fala: { tipo: "texto", texto: "" } };
+    const resultado = { desfecho: "falha", motivoFalha: "nao_autenticado", texto: "", sessaoCli: null, custoUsd: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    const ok = entrega({ ...base, resultado: { ...resultado, causaSemIa: "conta_sem_acesso", erroCru: "success | Your organization has disabled…" } }, "maq");
+    expect(ok.resultado).toMatchObject({ causaSemIa: "conta_sem_acesso", erroCru: "success | Your organization has disabled…", motivoFalha: "nao_autenticado" });
+    const estranho = entrega({ ...base, resultado: { ...resultado, causaSemIa: "inventada", erroCru: "x".repeat(8_001) } }, "maq").resultado;
+    expect("causaSemIa" in estranho).toBe(false);
+    expect("erroCru" in estranho).toBe(false);
+    expect("erroCru" in entrega({ ...base, resultado: { ...resultado, erroCru: { texto: "objeto" } } }, "maq").resultado).toBe(false);
+  });
   it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, esvazia a fila e não mistura turnos", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });

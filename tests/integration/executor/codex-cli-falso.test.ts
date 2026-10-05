@@ -108,3 +108,31 @@ it("turno que morre sem result leva a última linha do stderr, sem o carimbo de 
   expect(resultado.desfecho).not.toBe("sucesso");
   expect(resultado.erroCru).toBe("ERROR codex_core: algo quebrou antes do primeiro evento");
 });
+it("teste da conta: uma frase sem servidor MCP, com o isolamento do turno; a resposta volta pronta para a tela (2026-10-05)", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const pergunta = "Diga oi para Marcelo em uma frase curta, em português. Só a frase.";
+  const t = await instance.testar!(pergunta);
+  expect(t).toMatchObject({ inventario: { estado: "pronto" }, resposta: "Oi, Marcelo. Tudo pronto." });
+  const registro = JSON.parse(await readFile(join(dir, "registro.json"), "utf8")) as { args: string[]; env: Record<string, string>; arquivos: string[]; prompt: string };
+  expect(registro.prompt).toBe(pergunta);
+  // Nenhum proxy, nenhum token: o teste não fala com o nod.
+  expect(registro.arquivos).toEqual([]);
+  expect(registro.args).toEqual(expect.arrayContaining(["mcp_servers={}", "--ignore-user-config", "--ephemeral", "features.shell_tool=false", "read-only"]));
+  expect(registro.env.OPENAI_API_KEY).toBeUndefined();
+  expect(await readdir(cfg.cwdBase)).toEqual([]);
+});
+it("teste da conta: logada e sem responder é 'nao_autenticado' com a causa 'teste_falhou', e o erro do fornecedor não sai do driver", async () => {
+  cfg.env.TESTE_NOD_TESTE_FALHA = "1";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const t = await instance.testar!("Diga oi em uma frase curta, em português. Só a frase.");
+  expect(t).toEqual({ inventario: { estado: "nao_autenticado", motivo: "teste_falhou", versao: "codex-cli teste", causa: "teste_falhou", em: expect.any(Number) }, resposta: null });
+  expect(JSON.stringify(t)).not.toContain("conta sem uso");
+  // O login continua valendo: a sonda grátis segue dizendo "pronto" (quem guarda o veredito é a vigia do app).
+  expect((await instance.sondar()).estado).toBe("pronto");
+});
+it("teste da conta sem login não gasta turno: devolve o estado da sonda", async () => {
+  cfg.env.TESTE_NOD_SEM_LOGIN = "1";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  expect(await instance.testar!("Diga oi.")).toMatchObject({ inventario: { estado: "nao_autenticado" }, resposta: null });
+  await expect(readFile(join(dir, "registro.json"), "utf8")).rejects.toThrow();
+});

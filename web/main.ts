@@ -45,6 +45,7 @@ import { blocosAoVivo, blocosDoHistorico, htmlComposer, renderCabecalhoConversa,
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso } from "./telas/frota.ts";
+import { ehIa, inventarioDaIa } from "./telas/ia-fora.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
@@ -58,7 +59,7 @@ import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } 
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
-import { criarTelaOnboarding } from "./telas/onboarding-controle.ts";
+import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
@@ -165,6 +166,8 @@ const telaLigacao = criarTelaLigacao({
     void telaOnboarding.aoLigacaoEncerrada();
   },
   aoOnboarding: (etapa, campos) => telaOnboarding.aoOnboarding(etapa, campos),
+  // Rede de segurança da ligação (2026-10-05): o "Configurar sem voz" do aviso é o mesmo do onboarding.
+  configurarSemVoz: () => telaOnboarding.acoes["onboarding-sem-voz"]?.(document.body),
 });
 /**
  * Onboarding por ligação (definido em 2026-10-04, ADR-077): a camada `#onboarding` (olá, a IA do Mac, "está te
@@ -884,7 +887,9 @@ function render(): void {
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
   const camadaOnboarding = telaOnboarding.camada();
+  const devolverFoco = regiaoMudaria("onboarding", camadaOnboarding) ? guardarFocoDaCamada(document.getElementById("onboarding")) : null;
   regiao("onboarding", camadaOnboarding);
+  devolverFoco?.();
   document.getElementById("onboarding")?.toggleAttribute("hidden", camadaOnboarding === "");
   document.querySelector(".app")?.toggleAttribute("inert", !!estado.espaco || telaLigacao.cheia() || telaOnboarding.cobre());
   document.getElementById("espaco")?.toggleAttribute("inert", telaLigacao.cheia());
@@ -1482,6 +1487,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "ligacao-recusar": (el) => agir(() => telaLigacao.decidir(el.dataset.id ?? "", false)),
   "ligacao-retomar-audio": () => telaLigacao.retomarAudio(),
   "ligacao-sugestao": (el) => { telaLigacao.enviarTexto(el.dataset.texto ?? ""); },
+  // Rede de segurança (2026-10-05): a IA do Mac caiu no meio da ligação.
+  "ligacao-continuar-ia": (el) => telaLigacao.continuarCom(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli"),
+  "ligacao-ia-entrar": (el) => telaLigacao.iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "entrar"),
+  "ligacao-ia-instalar": (el) => telaLigacao.iaNoMac(el.dataset.ia === "codex-cli" ? "codex-cli" : "claude-cli", "instalar"),
+  "ligacao-sem-voz": () => telaLigacao.semVoz(),
   "ligacao-avaliar": (el) => telaLigacao.avaliar(el.dataset.nota === "ruim" ? "ruim" : "boa"),
   "ligacao-motivo": (el) => telaLigacao.motivo((el.dataset.motivo ?? "outro") as MotivoAvaliacaoLigacao),
   "ligacao-fechar-avaliacao": () => telaLigacao.fecharAvaliacao(),
@@ -1548,6 +1558,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, onboarding: () => void telaOnboarding.deNovo() }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
+  // definido em 2026-10-05 (ia-fora.ts): os botões do aviso "a conta da IA não serve". Só existem dentro do app do Mac;
+  // o login abre no navegador e o app percebe sozinho quando termina (testa a conta nova e reanuncia).
+  "ia-entrar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void window.nodDesktop?.iaEntrar?.(ia).catch(() => undefined); },
+  "ia-conectar": (el) => {
+    const ia = el.dataset.ia;
+    if (!ehIa(ia)) return;
+    const mac = window.nodDesktop;
+    void (inventarioDaIa(estado, ia)?.estado === "ausente" ? mac?.iaInstalar?.(ia) : mac?.iaEntrar?.(ia))?.catch(() => undefined);
+  },
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
   // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha

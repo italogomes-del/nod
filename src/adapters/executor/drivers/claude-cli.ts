@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
+import { comContaSemAcesso } from "../../../domain/conta-da-ia.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { montarExecucao } from "../../../domain/raio-x.ts";
 import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
@@ -276,6 +277,18 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           return s.inventario;
         },
 
+        // definido em 2026-10-05 (emenda da ADR-019): o teste de verdade, mesmo quando `sondar()` só confere o login (o
+        // app do Mac). Quem chama já viu o login passar, então a falha sai com a causa. Custa um turno da assinatura.
+        async testar(pergunta: string) {
+          await mkdir(cfg.cwdBase, { recursive: true });
+          const s = await sondarDetalhado(cfg.bin, cfg.env, lig.modeloSonda ?? MODELO_SONDA_PADRAO, { home, cwdBase: cfg.cwdBase, pergunta, loginConferido: true });
+          if (s.binario) binario = s.binario;
+          if (s.flagsNoHelp) flagsNoHelp = s.flagsNoHelp;
+          if ("versao" in s.inventario && s.inventario.versao) versao = s.inventario.versao;
+          log("info", "teste_claude_cli", { estado: s.inventario.estado, causa: "causa" in s.inventario ? s.inventario.causa ?? null : null, custo_usd: s.custoUsd });
+          return { inventario: s.inventario, resposta: s.resposta };
+        },
+
         adapter(plano: PlanoTurno): Adapter {
           let processo: Processo | null = null;
           let interromperPedido = false;
@@ -360,7 +373,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     catalogoEntregue = chave;
                   }
                 }
-                return { ...r, ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}) };
+                // definido em 2026-10-05: a recusa da conta não vira fala do bot; vira falha com a causa em código.
+                return { ...comContaSemAcesso(r), ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}) };
               };
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });

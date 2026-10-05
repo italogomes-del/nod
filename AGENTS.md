@@ -223,6 +223,18 @@ Revisto em 2026-10-05 (primeiro uso real do Codex em produção: nove turnos, ze
 servidor MCP de prova e diz se o `tools/call` chegou. Rode-a quando o Codex mudar de versão. O erro que o Codex devolve
 (`turn.failed`, item `error`, última linha do stderr) vai para `erroCru`, só no diagnóstico.
 
+Conta logada que não responde (2026-10-05, emenda da ADR-019). Login conferido não prova que a conta serve: uma
+organização pode ter desativado o uso por assinatura. `nao_autenticado` leva um código `causa` (`conta_sem_acesso` |
+`teste_falhou`); a frase que a pessoa lê é sempre do servidor (`MOTIVO_DA_CAUSA`). Regras:
+- O teste de verdade é `Instance.testar(pergunta)` nos drivers, pedido pela tela (`nodDesktop.iaTestar`). É pago: não o
+  chame no boot, em sonda periódica nem em teste automatizado contra CLI real.
+- O veredito mora em `desktop/vigia-ias.ts` (sem Electron, deps injetadas) e é preso à conta logada. Não guarde
+  veredito no servidor: o inventário da máquina é o que o app anuncia.
+- A recusa do fornecedor é reconhecida em um lugar só, `src/domain/conta-da-ia.ts`. Não espalhe regex de texto de
+  fornecedor; frase nova entra lá, com teste.
+- Texto do Mac não vira motivo, e o nome que entra na pergunta do teste passa por `nomeParaOTeste`.
+- `erroCru` remoto atravessa a ponte com teto e vai só ao diagnóstico gravado; nunca ao log do servidor.
+
 Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila só entrega a uma máquina
 tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro
@@ -281,3 +293,8 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
   REST puro. `scripts/voz/sonda-tts-streaming.ts` compara os dois (centavos do GCP).
 - No laço do Claude, o texto pertence à vez da última mensagem que o CLI **leu** (o eco de `--replay-user-messages`),
   não da última escrita (emenda da ADR-072). `scripts/sonda-voltas-ligacao.ts` mede isso contra o CLI real (centavos).
+- A IA do Mac pode cair no meio (emenda de 2026-10-05 da ADR-072): o turno-cérebro que termina com a ligação viva vira
+  `voz.cerebroTerminou`, a ligação fala a frase fixa, manda `{t:"sem-ia"}` à mídia e espera a escolha sem ouvir
+  (`aguardando_escolha`; sem escolha em 2 min, fim `sem_ia`). `POST ligacoes/:id/continuar {ia}` abre OUTRO turno-cérebro
+  para a mesma ligação. Quem criar um caminho novo que encerre o turno `ligacao` mantém o evento com `origem: "ligacao"`
+  e o motivo em código, senão a ligação volta a ficar muda. Log: `ligacao_cerebro_caiu` (causa e contagens, nunca fala).

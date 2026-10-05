@@ -6,6 +6,7 @@ import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { log } from "../../../obs/log.ts";
 import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
@@ -47,6 +48,8 @@ export function criarPonteHttpServidor(d: {
   /** ADR-048: itens aprovados que esperam o gh do Mac desta pessoa, e o desfecho que o Mac relata. */
   itensLocais?(escopo: Escopo): Promise<ItemLocal[]>;
   concluirItemLocal?(escopo: Escopo, itemId: string, desfecho: DesfechoLocal): Promise<void>;
+  /** definido em 2026-10-05: o Mac anunciou uma IA pronta — repete as falas que ficaram sem resposta por falta de IA. */
+  repetirBarrados?(escopo: Escopo): Promise<void>;
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
@@ -102,6 +105,8 @@ export function criarPonteHttpServidor(d: {
       }
       await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true });
       await persistir(c);
+      // Melhor esforço: a conexão não pode falhar porque a repetição falhou.
+      if (c.inv.estado === "pronto" && d.repetirBarrados) await d.repetirBarrados(ctx.escopo).catch(() => log("aviso", "repetir_barrados_falhou", {}));
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),
     rota("puxar", async (ctx) => {
@@ -153,6 +158,12 @@ export function criarPonteHttpServidor(d: {
       if (!c.planos.has(e.turnoId)) throw new ErroDeDominio("nao_permitido");
       c.ultimo = d.agora();
       await c.ponte.entregar(e);
+      // definido em 2026-10-05: o turno reprovou a conta da IA (ponte-interna, reprovarHarness) — o inventário desta
+      // conexão acompanha, para a tela e o banco não continuarem dizendo "pronta".
+      if (e.resultado.causaSemIa) {
+        const m = c.ponte.maquinasConectadas().find((x) => x.machineId === e.machineId);
+        if (m) { c.inv = m.inventario; await persistir(c); }
+      }
       c.recebidas.set(e.turnoId, e.seqLocal);
       if (c.recebidas.size > RECEBIDAS_GUARDADAS) c.recebidas.delete(c.recebidas.keys().next().value!);
       c.planos.delete(e.turnoId);

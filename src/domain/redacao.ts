@@ -17,6 +17,7 @@ export type ChaveRedacao =
   | "passe"
   | "consentimento"
   | "executor-indisponivel"
+  | "ia-trocada"
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
@@ -51,6 +52,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-09-24 (ADR-044): {escopo} é a lista `slug.capacidade` do lote; com uma só, o texto é o de antes.
   consentimento: "Concedido por {pessoa} em {quando}: {escopo}; não inclui: {naoInclui}.",
   "executor-indisponivel": "Nenhum trabalho começa: executor indisponível ({motivo}) desde {desde}.",
+  // definido em 2026-10-05: o bot em automático repetiu o pedido na outra IA (assentar-turno.ts, aposContaSemAcesso).
+  "ia-trocada": "Respondendo pelo {para}: a conta do {de} neste computador está sem acesso.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",

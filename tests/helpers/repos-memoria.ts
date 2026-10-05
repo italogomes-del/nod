@@ -964,6 +964,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return saida;
       },
+      async barradosPorFaltaDeIa(desde) {
+        const meus = doTenant(b.turnos);
+        return meus
+          .filter((t) => t.ownerId === escopo.pessoaId && t.origem === "conversa" && t.estado === "interrompido" && t.motivoInterrupcao === "executor_indisponivel" && t.criadoEm >= desde)
+          .filter((t) => !meus.some((n) => n.conversaId === t.conversaId && n.criadoEm > t.criadoEm))
+          .sort((x, y) => x.criadoEm - y.criadoEm);
+      },
       async listarDaConversa(conversaId, limite = 50) {
         const todos = doTenant(b.turnos).filter((t) => t.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todos.slice(Math.max(0, todos.length - limite));

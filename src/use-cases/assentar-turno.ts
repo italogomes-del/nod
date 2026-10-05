@@ -1,5 +1,6 @@
-import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { IdHarness } from "../contracts/harness.ts";
+import type { Autoria, Executor, RuntimeEvent } from "../contracts/evento.ts";
+import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
+import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
@@ -12,14 +13,18 @@ import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
-import { autoriaAgente, evento } from "./autoria-evento.ts";
+import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null };
+/**
+ * `outraIa` (definido em 2026-10-05): quando o turno voltou com `causaSemIa`, a outra IA que a máquina tem pronta
+ * (quem sabe é a ponte, que guarda o inventário anunciado); null = nenhuma.
+ */
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -44,6 +49,9 @@ type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: Motiv
  */
 export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm" | "leaseAte">, resultado: Entrega["resultado"], agora: number): Desfecho {
   if (resultado.desfecho === "sucesso") return { estado: "concluido", motivoInterrupcao: null, motivoFalha: null };
+  // definido em 2026-10-05: a conta da IA não serviu — o mesmo desfecho de quando o inventário já barra o despacho
+  // (despachar-turno.ts, recusarPorExecutor): nenhum trabalho começou.
+  if (resultado.causaSemIa) return { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" };
   if (turno.pararSolicitadoEm === null && turno.leaseAte !== null && turno.leaseAte < agora) return { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato", motivoFalha: resultado.motivoFalha ?? null };
   // definido em 2026-09-18: quem produziu saída e não concluiu NÃO é 'sem_progresso' — o rótulo
   // mentia num turno que tinha lido arquivos e escrito no chat antes de acabar. producedOutput é o
@@ -96,7 +104,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // /compactar não tem resposta para a pessoa: medido ao vivo em 28/09, o CLI devolveu como resultado a saída do
   // /contexto anterior (o último texto que sobra na sessão compactada). Vale só a linha com os números, abaixo.
   const comandoDoTurno = comandoDaConversa(turno.entradaTexto)?.comando.nome;
-  const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto) : "";
+  // definido em 2026-10-05: com `causaSemIa` não há fala — o que veio é a recusa do fornecedor, nunca texto do bot.
+  const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" && !resultado.causaSemIa ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto) : "";
   let mensagem: Mensagem | null = null;
   if (entrega.fala.tipo === "passe") {
     const agente = await deps.repos.agentes.buscar(turno.agenteId);
@@ -204,13 +213,19 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (turno.origem === "ligacao") {
     // ADR-072: o turno-cérebro não ganha aviso de interrupção nem card "Retomar" — quem conta como a ligação acabou é a
     // linha "Chat de voz" (e o resumo, quando houve). O evento sai para a tela soltar o turno.
-    events.push(evento(deps.escopo, { kind: desfecho.estado === "interrompido" ? "turno_interrompido" : "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: desfecho.estado, origem: "ligacao", custo_usd: custoUsd } }));
+    // definido em 2026-10-05 (rede de segurança da ligação): o evento leva POR QUE o cérebro parou, só em código — o
+    // motivo, a IA que rodava e a causa "conta sem acesso" quando o driver a reconheceu. É o que o orquestrador de voz
+    // usa para não deixar a ligação muda (src/domain/ligacao-sem-ia.ts). Nunca o texto do fornecedor.
+    const porQueParou = { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, harness: entrega.harness ?? null, ...(resultado.causaSemIa ? { causa_sem_ia: resultado.causaSemIa } : {}) };
+    events.push(evento(deps.escopo, { kind: desfecho.estado === "interrompido" ? "turno_interrompido" : "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: desfecho.estado, origem: "ligacao", custo_usd: custoUsd, ...porQueParou } }));
     if (mensagem && turno.ligacaoId) await deps.repos.ligacoes.marcarResumida(turno.ligacaoId);
   } else if (quedaDaMaquina) {
     // A MESMA regra do varredor (interromper-por-maquina.ts): sem a linha 'sistema' e o evento daqui,
     // que dariam à rotina uma mensagem no chat e à conversa duas linhas para a mesma queda.
     const q = await aposQuedaDaMaquina(deps, assentado, { perdidoDesde });
     events.push(...q.events);
+  } else if (resultado.causaSemIa) {
+    events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
@@ -233,3 +248,69 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };
 };
+
+/**
+ * O turno falhou porque a CONTA da IA não serve (definido em 2026-10-05; medido em produção nesse dia: conta do Claude
+ * Code logada, de uma organização que desativou o uso por assinatura).
+ *
+ * - Fala da pessoa a um bot em "automático" (harness e modelo `auto`) com OUTRA IA pronta na máquina: o pedido é
+ *   repetido nela, e a conversa ganha uma linha dizendo por quem o bot passou a responder. A fila só entrega o turno
+ *   novo à outra IA: a reprovada já saiu do inventário da máquina (ponte-interna, reprovarHarness), e o despacho de um
+ *   turno `auto/auto` aceita qualquer IA pronta (turnos.repo, reivindicar).
+ * - Em qualquer outro caso (IA escolhida à mão, nenhuma outra pronta, rotina, sala, pedido entre bots): a mesma negação
+ *   "nenhum trabalho começou" de quando o inventário já barra o despacho, agora com a causa. Rotina e pedido entre bots
+ *   não são repetidos aqui porque carregam vínculos próprios (execução, tarefa) que este caminho não reconstrói.
+ */
+const nomeDaIa = (id: IdHarness): string => HARNESSES.find((h) => h.id === id)?.nome ?? id;
+
+async function aposContaSemAcesso(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; harness: IdHarness | null; outraIa: IdHarness | null; causa: CausaSemIa; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[]> {
+  const { turno, causa, autoria, agora } = p;
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "nao_autenticado", causa, custo_usd: p.custoUsd } }),
+  ];
+  const repete = turno.origem === "conversa" && turno.harness === "auto" && turno.modelo === "auto" && p.harness !== null && p.outraIa !== null && p.outraIa !== p.harness;
+  if (repete && p.harness && p.outraIa) {
+    const linha = await deps.repos.mensagens.criar({
+      conversaId: turno.conversaId,
+      turnoId: turno.id,
+      autoria,
+      kind: "sistema",
+      texto: redigir("ia-trocada", agora, { de: nomeDaIa(p.harness), para: nomeDaIa(p.outraIa) }),
+      payload: { kind: "ia_trocada", de: p.harness, para: p.outraIa, causa },
+      confianca: "confiavel",
+    });
+    if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+    const novo = await deps.repos.turnos.enfileirar({
+      conversaId: turno.conversaId,
+      agenteId: turno.agenteId,
+      origem: "conversa",
+      prazoEm: turno.prazoEm,
+      profundidade: turno.profundidade,
+      entradaTexto: turno.entradaTexto,
+      mensagemOrigemId: turno.mensagemOrigemId,
+      entradaAnexos: turno.entradaAnexos,
+      entradaConfianca: turno.entradaConfianca,
+      modelo: turno.modelo,
+      harness: turno.harness,
+      reenvios: turno.reenvios + 1,
+      executor: p.executor,
+    });
+    if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
+    return events;
+  }
+  const inventario: Inventario = { estado: "nao_autenticado", causa, motivo: MOTIVO_DA_CAUSA[causa], em: agora };
+  const negacao = await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria: autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" }),
+    kind: "negacao",
+    texto: redigir("executor-indisponivel", agora, { motivo: `${p.harness ?? "ia"} ${inventario.estado}: ${inventario.motivo}`, desde: new Date(agora).toISOString() }),
+    payload: { kind: "negacao", classe: "plano_ausente", nome: p.harness ?? "ia", motivo: "plano_ausente", terminal: true, causa },
+    confianca: "confiavel",
+  });
+  if (negacao) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: negacao.id, kind: "negacao" } }));
+  return events;
+}
