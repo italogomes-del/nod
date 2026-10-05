@@ -26,6 +26,11 @@ type Reserva = { computador: Computador; operacao: string; acao: AcaoComputador;
 
 // definido em 2026-09-18: reserva confirmada ANTES do efeito; watchdog do runtime encerra em 55 s.
 const LEASE_MS = 300_000;
+/**
+ * definido em 2026-10-05 (NOD-170): a reserva do varredor de ociosidade cobre o `parar` (stop da máquina e do
+ * proxy, 20 s cada com 30 s de prazo, mais os inspects). Uma ação que chega no meio recebe estado_invalido (livre()).
+ */
+const LEASE_OCIOSIDADE_MS = 90_000;
 async function obter(d: Deps, agenteId: string): Promise<Computador> {
   const c = await d.repos.computadores.obter(agenteId);
   if (!c) throw new ErroDeDominio("nao_encontrado");
@@ -65,7 +70,7 @@ function erroDaFerramenta(nome: string, e: unknown): { erro: string; instrucao: 
   if (!ehFalhaComputador(e)) log("erro", "computador_erro_inesperado", { ferramenta: nome, erro: e instanceof Error ? e.name : "desconhecido" });
   const motivo = ehFalhaComputador(e) ? e.motivo : "acao_falhou";
   if (motivo === "acao_falhou" && FERRAMENTAS_DE_TEXTO.has(nome)) return { erro: motivo, instrucao: "A operação de texto falhou. Confira caminho, tamanho, UTF-8 e revisão; releia o arquivo antes de editar. Não afirme que gravou." };
-  return { erro: motivo, instrucao: instrucaoDaFalha(motivo) };
+  return { erro: motivo, instrucao: instrucaoDaFalha(motivo, ehFalhaComputador(e) ? e.limite : null) };
 }
 
 /** Para a borda HTTP: a falha da máquina é estado (409), nunca falha interna (500). */
@@ -158,21 +163,63 @@ export function criarComputadores(o: Opcoes) {
     } catch (e) {
       if (ehFalhaComputador(e)) {
         falha = e;
-        // A ação falhou numa máquina que RESPONDEU (tela alterada, ocupado…): ela está viva.
-        respondeu = !CONTA_PARA_SAUDE.has(e.motivo);
+        // A ação falhou numa máquina que RESPONDEU (tela alterada, ocupado…): ela está viva. O teto do host
+        // (NOD-170) não é resposta nem falha da máquina: não zera nem soma falhas_seguidas.
+        respondeu = !CONTA_PARA_SAUDE.has(e.motivo) && e.motivo !== "limite_de_computadores";
       }
       throw e;
     } finally {
       const saude = await o.dentro(escopo, async (d) => {
         const c = await d.repos.computadores.travar(r.computador.id);
         await d.repos.computadores.concluir(r.registroId, estado, falha?.motivo ?? null);
-        await d.repos.computadores.liberar(r.computador.id, r.operacao);
+        await d.repos.computadores.liberar(r.computador.id, r.operacao, d.agora());
         return registrarSaude(d, c, r.acao.tipo, falha, respondeu);
       });
       o.mudou(escopo, r.computador.agenteId, saude);
     }
   }
   return {
+    /** NOD-170: os computadores ligados neste host, lidos UMA vez por volta do varredor e fora de transação. */
+    ligados: (): Promise<Set<string>> => o.driver.ligados(),
+    /**
+     * definido em 2026-10-05 (NOD-170): desliga os computadores desta pessoa que estão LIGADOS e sem atividade há
+     * `limiteMs`. Reserva sob trava (a mesma do `livre()`) para o `parar` fora da transação, e libera sem tocar
+     * a atividade. Não mexe em `habilitado`: a próxima ação do bot religa como antes. Devolve quantos desligou.
+     */
+    async desligarOciosos(escopo: Escopo, ligados: ReadonlySet<string>, limiteMs: number): Promise<number> {
+      if (!ligados.size || limiteMs <= 0) return 0;
+      const operacao = randomUUID();
+      const alvos = await o.dentro(escopo, async (d) => {
+        const agora = d.agora();
+        const reservados: Computador[] = [];
+        for (const c of await d.repos.computadores.ociosos(limiteMs, agora)) {
+          if (!ligados.has(c.id)) continue;
+          // Rechecar DEPOIS da trava: uma ação ou o assumir pode ter chegado entre a leitura e o lock.
+          if (!await d.repos.computadores.travar(c.id)) continue;
+          const [ainda] = await d.repos.computadores.ociosos(limiteMs, agora, c.id);
+          if (!ainda) continue;
+          // Os `parar` vão um depois do outro (até ~70 s cada): a reserva do N-ésimo cobre os N anteriores, senão
+          // venceria antes da vez dele e uma ação do bot entraria na máquina que está sendo desligada.
+          await d.repos.computadores.ocupar(c.id, operacao, agora + LEASE_OCIOSIDADE_MS * (reservados.length + 1));
+          reservados.push(ainda);
+        }
+        return reservados;
+      });
+      let desligados = 0;
+      for (const c of alvos) {
+        try {
+          await o.driver.parar(c.id);
+          desligados++;
+          log("info", "computador_desligado_por_ociosidade", { computador_id: c.id, agente_id: c.agenteId, ocioso_min: Math.round(limiteMs / 60_000) });
+        } catch (e) {
+          log("aviso", "computador_ociosidade_falhou", { computador_id: c.id, agente_id: c.agenteId, motivo: ehFalhaComputador(e) ? e.motivo : "desconhecido" });
+        } finally {
+          await o.dentro(escopo, (d) => d.repos.computadores.liberar(c.id, operacao));
+          o.mudou(escopo, c.agenteId);
+        }
+      }
+      return desligados;
+    },
     async desligarExcluido(escopo: Escopo, agenteId: string): Promise<void> {
       const c = await o.dentro(escopo, async d => {
         const agente = await d.repos.agentes.buscar(agenteId, true);
@@ -197,9 +244,9 @@ export function criarComputadores(o: Opcoes) {
       const c = await o.dentro(escopo, async (d) => {
         const c = await obter(d, agenteId);
         if (operacao !== "parar") livre(c, d.agora());
-        if (operacao === "assumir") await d.repos.computadores.configurar(c.id, { controle: "pessoa" });
+        if (operacao === "assumir") await d.repos.computadores.configurar(c.id, { controle: "pessoa", atividadeEm: d.agora() });
         else if (operacao === "devolver") {
-          await d.repos.computadores.configurar(c.id, { controle: "bot", ajuda: null, ajudaDecisaoId: null });
+          await d.repos.computadores.configurar(c.id, { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: d.agora() });
           if (c.ajudaDecisaoId) {
             const decisao = await d.repos.decisoes.buscar(c.ajudaDecisaoId);
             if (decisao && (decisao.estado === "pendente" || decisao.estado === "reaberta")) {
@@ -211,7 +258,7 @@ export function criarComputadores(o: Opcoes) {
           }
         } else if (operacao === "supervisionado" || operacao === "autonomo") await d.repos.computadores.configurar(c.id, { politica: operacao });
         else if (operacao === "parar") await d.repos.computadores.configurar(c.id, { habilitado: false, controle: "pessoa" });
-        else if (operacao === "iniciar") await d.repos.computadores.configurar(c.id, { habilitado: true });
+        else if (operacao === "iniciar") await d.repos.computadores.configurar(c.id, { habilitado: true, atividadeEm: d.agora() });
         else throw new ErroDeDominio("entrada_invalida");
         if (operacao === "iniciar") await d.repos.computadores.ocupar(c.id, operacaoId, d.agora() + LEASE_MS);
         registroId = (await d.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: operacao, estado: operacao === "iniciar" || operacao === "parar" ? "executando" : "concluida" })).id;
@@ -236,7 +283,7 @@ export function criarComputadores(o: Opcoes) {
         throw comoErroDeDominio(e);
       } finally {
         const saude = await o.dentro(escopo, async d => {
-          if (operacao === "iniciar") await d.repos.computadores.liberar(c.id, operacaoId);
+          if (operacao === "iniciar") await d.repos.computadores.liberar(c.id, operacaoId, d.agora());
           if (registroId) await d.repos.computadores.concluir(registroId, sucesso ? "concluida" : "falhou", falha?.motivo ?? null);
           // "Ligar" e "Tentar de novo" são o mesmo iniciar: ligou zera a saúde; não ligou conta como falha.
           if (operacao !== "iniciar" || (!ligou && !falha)) return false;

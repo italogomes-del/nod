@@ -162,5 +162,7 @@ export const MOTIVOS_FALHA_COMPUTADOR = [
   "acao_falhou",
   "tela_alterada",
   "ocupado",
+  // NOD-170 (0051): o host já tem o máximo de computadores ligados. Não é a máquina nem a ação: neutro para a saúde.
+  "limite_de_computadores",
 ] as const;
 export type MotivoFalhaComputador = (typeof MOTIVOS_FALHA_COMPUTADOR)[number];

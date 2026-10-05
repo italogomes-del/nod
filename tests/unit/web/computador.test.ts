@@ -3,7 +3,7 @@ import type { FrotaDto } from "../../../src/contracts/api.ts";
 import type { ComputadorDto, RegistroComputador } from "../../../src/contracts/computador.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { agruparAtividade, estadoEmPalavras, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
+import { agruparAtividade, estadoEmPalavras, mensagemDoLimite, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 
@@ -35,6 +35,19 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     expect(estadoEmPalavras(dto({ falhasSeguidas: 3, falhaMotivo: "navegador_nao_abriu", indisponivelDesde: T0 }), T0, "iniciar")).toBe("Tentando de novo…");
     expect(estadoEmPalavras(dto({}), T0, null)).toBe("Pronto para o bot");
     expect(estadoEmPalavras(dto({}, { ativo: false }), T0, null)).toBe("Desligado");
+  });
+
+  it("NOD-170: o cartão do teto mostra os números só enquanto a última tentativa bateu no limite e a máquina segue desligada", () => {
+    const limite = { maximo: 3, ociosoMin: 15 };
+    const bateu = registro({ tipo: "iniciar", autor: "pessoa", motivo: "limite_de_computadores", em: T0 });
+    expect(mensagemDoLimite({ ativo: false, atividade: [bateu], limite })).toBe("Este Mac já tem 3 computadores ligados, o limite. Nada foi executado. Os computadores sem uso há 15 min desligam sozinhos.");
+    expect(mensagemDoLimite({ ativo: false, atividade: [bateu] })).toBe("Este Mac já tem o máximo de computadores ligados. Nada foi executado.");
+    // Ligou depois (ou outra ação veio por cima), ou a falha foi outra: sem cartão do limite.
+    expect(mensagemDoLimite({ ativo: true, atividade: [bateu], limite })).toBeNull();
+    expect(mensagemDoLimite({ ativo: false, atividade: [registro({ tipo: "iniciar", estado: "concluida", motivo: null, em: T0 + H }), bateu], limite })).toBeNull();
+    expect(mensagemDoLimite({ ativo: false, atividade: [registro({ em: T0 })], limite })).toBeNull();
+    expect(mensagemDoLimite({ ativo: false, atividade: [], limite })).toBeNull();
+    expect(tituloDaFalha("limite_de_computadores")).toBe("Este Mac já tem o máximo de computadores ligados");
   });
 
   it("painel: o botão Computador do bot (em Ambiente) ganha o chip 'fora do ar'; respondendo, não — e o cabeçalho fica limpo", () => {

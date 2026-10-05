@@ -1,6 +1,6 @@
 import type { AcaoComputador, ComputadorDto, ResultadoComputador, TelaComputador } from "../../src/contracts/computador.ts";
 import type { Api } from "../lib/api.ts";
-import { agruparAtividade, estadoEmPalavras, foraDoAr, MOTIVO_FALHA_TEXTO, rotuloDaAtividade, rotuloDoEstado, tituloDaFalha } from "../lib/computador.ts";
+import { agruparAtividade, estadoEmPalavras, foraDoAr, mensagemDoLimite, MOTIVO_FALHA_TEXTO, rotuloDaAtividade, rotuloDoEstado, tituloDaFalha } from "../lib/computador.ts";
 import { dataHora, esc } from "../lib/render.ts";
 
 export function abrirComputador(api: Api, agente: { id: string; nome: string }): void {
@@ -58,7 +58,7 @@ export function abrirComputador(api: Api, agente: { id: string; nome: string }):
     const fora = foraDoAr(dto);
     q(".computador-status").textContent = estadoEmPalavras(dto, Date.now(), configuracao);
     q(".computador-status").classList.toggle("fora-do-ar", fora);
-    q(".computador-ajuda").textContent = fora ? "Tirei o computador das próximas execuções até você religá-lo." : c.falhasSeguidas > 0 && c.falhaMotivo ? `A última tentativa falhou: ${MOTIVO_FALHA_TEXTO[c.falhaMotivo]}.` : dto.motivo ?? c.ajuda ?? "Entre nos seus apps uma vez neste computador. Use Devolver ao bot quando terminar.";
+    q(".computador-ajuda").textContent = fora ? "Tirei o computador das próximas execuções até você religá-lo." : mensagemDoLimite(dto) ?? (c.falhasSeguidas > 0 && c.falhaMotivo ? `A última tentativa falhou: ${MOTIVO_FALHA_TEXTO[c.falhaMotivo]}.` : dto.motivo ?? c.ajuda ?? "Entre nos seus apps uma vez neste computador. Use Devolver ao bot quando terminar.");
     q<HTMLSelectElement>("select").value = c.politica;
     pintarForaDoAr(dto);
     q<HTMLButtonElement>('.computador-toolbar [data-c="iniciar"]').textContent = fora ? "Tentar de novo" : "Ligar computador";

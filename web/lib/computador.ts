@@ -15,7 +15,24 @@ export const MOTIVO_FALHA_TEXTO: Readonly<Record<MotivoFalhaComputador, string>>
   acao_falhou: "a ação falhou dentro do computador",
   tela_alterada: "a tela mudou desde a última observação",
   ocupado: "outra ação estava em andamento",
+  limite_de_computadores: "este Mac já tem o máximo de computadores ligados",
 };
+
+/**
+ * definido em 2026-10-05 (NOD-170): o cartão do teto de computadores ligados. Mesmo texto de textoDoLimite
+ * (src/domain/computador.ts), sem a parte que fala com o bot — o teste unitário compara as duas.
+ */
+export function textoDoLimite(l: { maximo: number; ociosoMin: number }): string {
+  const ocioso = l.ociosoMin > 0 ? ` Os computadores sem uso há ${l.ociosoMin} min desligam sozinhos.` : "";
+  return `Este Mac já tem ${l.maximo} computadores ligados, o limite. Nada foi executado.${ocioso}`;
+}
+
+/** O cartão do limite enquanto o computador segue desligado e a última tentativa bateu no teto do host. */
+export function mensagemDoLimite(d: Pick<ComputadorDto, "ativo" | "atividade" | "limite">): string | null {
+  const ultima = d.atividade[0];
+  if (d.ativo || ultima?.estado !== "falhou" || ultima.motivo !== "limite_de_computadores") return null;
+  return d.limite ? textoDoLimite(d.limite) : "Este Mac já tem o máximo de computadores ligados. Nada foi executado.";
+}
 
 /** "O navegador do computador não abriu" — o título do cartão de fora do ar. */
 export function tituloDaFalha(motivo: MotivoFalhaComputador): string {

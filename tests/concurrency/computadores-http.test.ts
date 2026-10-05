@@ -25,7 +25,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   let bloquear: (()=>Promise<void>)|undefined;
   const driver: DriverComputador={
     estado:async id=>({disponivel:true,ativo:ativos.has(id),motivo:null}),
-    iniciar:async id=>{ativos.add(id);},parar:async id=>{ativos.delete(id);},
+    iniciar:async id=>{ativos.add(id);},parar:async id=>{ativos.delete(id);},ligados:async()=>new Set(ativos),
     executar:async(id,acao)=>{
       efeitos.push({id,acao});await bloquear?.();
       if (acao.tipo === "ler_texto" || acao.tipo === "gravar_texto") {

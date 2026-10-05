@@ -1,6 +1,6 @@
 import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
-import { criarComputadores } from "../fundo/computadores.ts";
+import { type Computadores, criarComputadores } from "../fundo/computadores.ts";
 import { rotasComputadores } from "./rotas/computadores.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -184,6 +184,8 @@ export type App = {
   drenarPonte(): void;
   /** NOD-175: `puxar` da ponte de máquina em voo — reserva que ainda pode virar token vivo. */
   reservasEmVoo(): number;
+  /** NOD-170: os computadores dos bots, só quando ligados (NOD_COMPUTADORES=docker ou driver injetado); o boot liga o varredor de ociosidade. */
+  computadores: Computadores | null;
   /** Liga os dois canais WebSocket da ligação ao servidor HTTP (boot, depois do listen). */
   anexarVoz(server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null): CanaisVoz;
   fechar(): Promise<void>;
@@ -867,6 +869,7 @@ export function comporApp(o: OpcoesCompor): App {
     services,
     useCases,
     dentro,
+    computadores: o.computador || env.NOD_COMPUTADORES === "docker" ? computadores : null,
     depsDe,
     ponte,
     rotas,

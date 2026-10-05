@@ -77,7 +77,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     db,
     dbDono,
     porta: 0,
-    intervalos: { orquestradorMs: 50, schedulerMs: 200, leaseMs: 200, expiracaoMs: 200, outboxMs: 40, ...(o.intervalos ?? {}) },
+    intervalos: { orquestradorMs: 50, schedulerMs: 200, leaseMs: 200, expiracaoMs: 200, outboxMs: 40, ociosidadeMs: 3_600_000, ...(o.intervalos ?? {}) },
     listarPessoas: async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId })),
     segredoSessao: SEGREDO_DE_TESTE,
     drivers: o.drivers,

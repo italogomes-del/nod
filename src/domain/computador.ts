@@ -12,14 +12,20 @@ export class FalhaComputador extends Error {
   readonly motivo: MotivoFalhaComputador;
   readonly detalhe: string | null;
   readonly reinicios: number | null;
-  constructor(motivo: MotivoFalhaComputador, extra: { detalhe?: string | null; reinicios?: number | null } = {}) {
+  /** Só em limite_de_computadores (NOD-170): o teto do host e a ociosidade, para a instrução dizer os números. */
+  readonly limite: LimiteDeComputadores | null;
+  constructor(motivo: MotivoFalhaComputador, extra: { detalhe?: string | null; reinicios?: number | null; limite?: LimiteDeComputadores | null } = {}) {
     super(motivo);
     this.name = "FalhaComputador";
     this.motivo = motivo;
     this.detalhe = extra.detalhe ?? null;
     this.reinicios = extra.reinicios ?? null;
+    this.limite = extra.limite ?? null;
   }
 }
+
+/** NOD-170: o teto de computadores ligados no host e em quantos minutos o ocioso desliga (0 = não desliga). */
+export type LimiteDeComputadores = { maximo: number; ociosoMin: number };
 
 export function ehFalhaComputador(e: unknown): e is FalhaComputador {
   return e instanceof FalhaComputador;
@@ -46,13 +52,24 @@ export const MOTIVO_FALHA_EM_PORTUGUES: Readonly<Record<MotivoFalhaComputador, s
   acao_falhou: "a ação falhou dentro do computador",
   tela_alterada: "a tela mudou desde a última observação",
   ocupado: "outra ação estava em andamento",
+  limite_de_computadores: "este Mac já tem o máximo de computadores ligados",
 };
+
+/**
+ * definido em 2026-10-05 (NOD-170, microcopy do plano): o teto em palavras, para o bot e para o cartão
+ * (web/lib/computador.ts repete o texto; o teste unitário compara). Sem ociosidade, a frase dela some.
+ */
+export function textoDoLimite(l: LimiteDeComputadores): string {
+  const ocioso = l.ociosoMin > 0 ? ` Os computadores sem uso há ${l.ociosoMin} min desligam sozinhos.` : "";
+  return `Este Mac já tem ${l.maximo} computadores ligados, o limite. Nada foi executado.${ocioso}`;
+}
 
 /**
  * O que a FERRAMENTA devolve ao agente em cada falha (tabela fixa, sem catch-all). Máquina fora do
  * ar: não insistir neste turno. Ação que falhou: observar antes de repetir.
  */
-export function instrucaoDaFalha(motivo: MotivoFalhaComputador): string {
+export function instrucaoDaFalha(motivo: MotivoFalhaComputador, limite: LimiteDeComputadores | null = null): string {
+  if (motivo === "limite_de_computadores") return `${limite ? textoDoLimite(limite) : "Este Mac já tem o máximo de computadores ligados. Nada foi executado."} Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (CONTA_PARA_SAUDE.has(motivo)) return `O computador não respondeu: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.`;
   if (motivo === "tela_alterada") return "A tela mudou desde a sua observação. Observe de novo e reavalie antes de agir; nada foi executado.";
   if (motivo === "ocupado") return "Outra ação estava em andamento no computador. Observe a tela antes de tentar de novo; nada foi executado.";
@@ -149,4 +166,17 @@ export function resumoAcaoComputador(a: AcaoComputador): string {
   if (a.tipo === "tecla") return `Pressionar ${a.tecla}`;
   if ("caminho" in a) return `${a.tipo}: ${a.caminho}`;
   return a.tipo;
+}
+
+/**
+ * definido em 2026-10-05 (NOD-170, padrões da Ada, NÃO medidos): teto de 3 computadores ligados por host
+ * (cada um reserva 2 GiB; o Docker Desktop vem com 8) e desligar depois de 15 min sem atividade.
+ * `NOD_COMPUTADOR_OCIOSO_MIN=0` desliga a ociosidade; valor inválido volta ao padrão.
+ */
+export function limiteDoAmbiente(env: Readonly<Record<string, string | undefined>>): LimiteDeComputadores {
+  const inteiro = (v: string | undefined, min: number, padrao: number) => {
+    const n = Number(v);
+    return v !== undefined && v.trim() !== "" && Number.isInteger(n) && n >= min ? n : padrao;
+  };
+  return { maximo: inteiro(env.NOD_COMPUTADORES_MAX, 1, 3), ociosoMin: inteiro(env.NOD_COMPUTADOR_OCIOSO_MIN, 0, 15) };
 }

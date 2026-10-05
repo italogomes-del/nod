@@ -82,7 +82,7 @@ async function devolverComputador(deps: DepsSuaVez, d: Decisao): Promise<boolean
   const c = await deps.repos.computadores.buscarVinculo(d.agenteId);
   if (!c || c.ajudaDecisaoId !== d.id) return false;
   const devolver = c.controle === "aguardando_pessoa";
-  await deps.repos.computadores.configurar(c.id, devolver ? { controle: "bot", ajuda: null, ajudaDecisaoId: null } : { ajuda: null, ajudaDecisaoId: null });
+  await deps.repos.computadores.configurar(c.id, devolver ? { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: deps.agora() } : { ajuda: null, ajudaDecisaoId: null });
   if (devolver) await deps.repos.computadores.registrar({ computadorId: c.id, autor: "pessoa", tipo: "devolver", estado: "concluida" });
   return devolver;
 }

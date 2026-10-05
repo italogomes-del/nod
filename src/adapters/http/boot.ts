@@ -18,6 +18,8 @@ import { iniciarDespachanteOutbox, type DespachanteOutbox } from "../fundo/despa
 import { iniciarOrquestrador, type Orquestrador } from "../fundo/orquestrador-turnos.ts";
 import { garantirParticoes } from "../fundo/particoes.ts";
 import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
+import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
+import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
 import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
@@ -42,7 +44,7 @@ export type OpcoesBoot = {
   porta?: number;
   host?: string;
   /** Intervalos dos laços (testes encurtam). */
-  intervalos?: { orquestradorMs?: number; schedulerMs?: number; leaseMs?: number; expiracaoMs?: number; outboxMs?: number };
+  intervalos?: { orquestradorMs?: number; schedulerMs?: number; leaseMs?: number; expiracaoMs?: number; outboxMs?: number; ociosidadeMs?: number };
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
   /** Drivers do registry; default: catcher (+ claude-cli quando NOD_EXECUTOR=claude-cli). */
   drivers?: (p: { urlNod: string; app: App }) => Driver[];
@@ -215,6 +217,10 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     aoInterromper: (ids) => { for (const id of ids) app.services.tokenTurno.revogar(id); },
   });
   const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
+  // NOD-170: só com computadores ligados; NOD_COMPUTADOR_OCIOSO_MIN=0 não sobe o laço.
+  const varredorOciosidade = app.computadores
+    ? iniciarVarredorOciosidade({ db, computadores: app.computadores, ociosoMin: limiteDoAmbiente(env).ociosoMin, intervaloMs: iv.ociosidadeMs, opcoes: { listarPessoas: o.listarPessoas } })
+    : { parar: () => undefined };
   const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas });
 
   log("info", "nod_no_ar", { url, machine_id: machineId, executor: app.idDriver, inventario: inventario.estado });
@@ -248,6 +254,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       scheduler.parar();
       varredorLease.parar();
       varredorExpiracao.parar();
+      varredorOciosidade.parar();
       await despachante.parar();
       await orquestrador.parar();
       await app.fechar();

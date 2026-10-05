@@ -47,7 +47,8 @@
     "desktop:dev": "npm run desktop:build && electron .",
     "desktop:mac": "node scripts/desktop/release-preflight.mjs && npm run desktop:build && electron-builder --mac --publish never --config.forceCodeSigning=true",
     "desktop:pack": "npm run desktop:build && electron-builder --mac --dir --publish never",
-    "computador:build": "docker build -t nod-computador:1 infra/computador"
+    "computador:build": "docker build -t nod-computador:1 infra/computador",
+    "computador:orfaos": "node scripts/computadores-orfaos.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "if command -v mise >/dev/null 2>&1; then mise exec -- npx lint-staged; else npx lint-staged; fi"

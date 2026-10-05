@@ -139,3 +139,22 @@ com os volumes preservados é passo de operação, fora do código.
   - não passa para outra tarefa;
   - fica escrita na conversa.
 - "Sempre permitir" continua bloqueado para o computador. A aprovação de cada ação continua vinculada à ação cifrada quando há card.
+
+## Emenda de 2026-10-05 — ciclo de vida no host (NOD-170)
+
+**Contexto.** Na Release 1 o computador roda no Mac de quem usa o nod. Cada um, depois de ligado, ficava de pé para sempre (`--restart unless-stopped`) reservando 2 GiB e 2 CPUs, sem teto. No Docker Desktop (8 GiB) o 4º já disputa memória com o Postgres. Imagem nova não chegava a container criado, e nada via os órfãos. Em 2026-10-05 este host tinha 6 computadores ligados.
+
+**Decisão.**
+- **Ociosidade.** `computadores.ultima_atividade_em` (migração 0051) é gravada ao fim de toda ação (bot ou pessoa, pelo mesmo `executar → liberar`) e em ligar, assumir e devolver. A cada 60 s, por pessoa, o varredor desliga o computador sem atividade há `NOD_COMPUTADOR_OCIOSO_MIN` (padrão 15; `0` não sobe o laço). Pula `controle` diferente de `bot` (inclui `aguardando_pessoa`: o bot deixou a página para a pessoa), e reserva viva. O fora do ar entra: a ação do bot não chega a ele e a saúde não para o container, que seguraria uma vaga do teto para sempre; desligado, segue fora do ar até o "Tentar de novo". Lê o `docker ps` uma vez por tick, fora da transação; Docker fora = não desliga nada. Rechecagem sob `travar` e reserva de 90 s antes do `parar`, para a ação que chega no meio receber `estado_invalido`. Não mexe em `habilitado`: a próxima ação liga de novo.
+- **Teto por host, sem fila.** Só ao ligar uma máquina parada, antes de qualquer `network/create/start`: com `NOD_COMPUTADORES_MAX` (padrão 3) máquinas `nod-computador-*` rodando, falha `limite_de_computadores`. O filtro de nome é obrigatório (o rótulo também marca os proxies `nod-egress-*`). O motivo é neutro para a saúde: nem soma nem zera `falhas_seguidas`. A corrida entre contar e `start` pode passar do teto em 1 (aceito na Release 1).
+- **Imagem nova.** Ao ligar uma máquina parada cuja imagem difere da tag, `docker rm` da máquina e do proxy, **sem `-v`**, e o fluxo recria com os mesmos volumes nomeados. Máquina ligada nunca é tocada.
+- **Órfãos.** `npm run computador:orfaos` lista pela conexão administrativa (a RLS é por pessoa). `--limpar` remove containers e redes, **nunca volumes**, e se recusa quando o banco consultado não tem nenhum computador e o Docker tem (banco errado).
+
+**Alternativas descartadas.** Fila ao atingir o teto (fora de escopo; o bot segue com os outros acessos). `docker update --restart no` em vez de parar (o reinício do host passaria a deixar tudo desligado, e a prova de reinício quebraria). Apagar volume órfão automaticamente (guarda login e arquivos de alguém).
+
+**Gatilho de reversão.**
+- Mais de 10% dos `computador_desligado_por_ociosidade` seguidos de um ligar no mesmo computador em até 2 min, em 14 dias de log: 15 min é pouco, subir o padrão.
+- `computador_limite` em mais de 5% dos dias com uso: o teto de 3 é baixo para o uso real, medir memória e subir, ou fazer a fila.
+- Qualquer relato de login ou arquivo perdido depois de `computador_imagem_recriada`: a recriação não preserva o volume como suposto; voltar a recriar só à mão.
+
+**Validação.** Concorrência `computador-ociosidade`; unit `computador-docker` (teto, proxies, imagem), `computador-saude`, web `computador` e `computadores-orfaos`; conformidade `motivos-enum`; smoke com `docker restart`.

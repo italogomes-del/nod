@@ -31,6 +31,7 @@ describeIntegracao("computador do bot fora do ar: três falhas, um aviso, plano 
       if (quebrado) throw new FalhaComputador("navegador_nao_abriu", { detalhe: "browserType.launchPersistentContext: Timeout 30000ms exceeded.", reinicios: 6 });
     },
     parar: async () => undefined,
+    ligados: async () => new Set<string>(),
     executar: async () => ({ tela: { quadro: "a".repeat(64), imagem: "iVBORw0KGgo=", largura: 1280, altura: 800, titulo: "Teste", url: "https://example.com", texto: "", abas: [] } }),
   };
 

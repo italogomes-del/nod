@@ -102,3 +102,22 @@ describe("dispensar o pedido ABERTO de uma execução de rotina (definido em 202
     expect(d.banco.execucoes.map((e) => [e.desfecho, e.motivo])).toEqual([["passou_em_branco", "pedido_dispensado"]]);
   });
 });
+
+describe("dispensar a pergunta do computador (NOD-170)", () => {
+  it("aguardando a pessoa: devolve ao bot e conta como atividade, como o 'Devolver ao bot' da tela", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const agente = await d.deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
+    const conversa = await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
+    const pergunta = await d.deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", prazoDecisaoEm: AGORA + DIA, frase: "faça o login no Gmail" });
+    const configurar = vi.fn(async () => undefined);
+    const registrar = vi.fn(async () => undefined);
+    Object.assign(d.deps.repos.computadores, {
+      buscarVinculo: async () => ({ id: "c1", controle: "aguardando_pessoa", ajudaDecisaoId: pergunta?.id }),
+      configurar,
+      registrar,
+    });
+    await dispensarDecisao(d.deps, { decisaoId: pergunta?.id ?? "" });
+    expect(configurar).toHaveBeenCalledWith("c1", { controle: "bot", ajuda: null, ajudaDecisaoId: null, atividadeEm: AGORA });
+    expect(registrar).toHaveBeenCalledWith(expect.objectContaining({ computadorId: "c1", tipo: "devolver" }));
+  });
+});

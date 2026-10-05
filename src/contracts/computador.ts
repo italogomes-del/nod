@@ -82,11 +82,15 @@ export type ComputadorDto = {
   motivo: string | null;
   /** Quantas vezes o Docker reiniciou o container (docker inspect); null quando não se sabe. */
   reinicios?: number | null;
+  /** NOD-170: o teto de computadores ligados no host e a ociosidade em minutos (0 = não desliga), para o cartão do limite. */
+  limite?: { maximo: number; ociosoMin: number };
   atividade: RegistroComputador[];
 };
 export interface DriverComputador {
-  estado(id: string): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null }>;
+  estado(id: string): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null; limite?: { maximo: number; ociosoMin: number } }>;
   iniciar(id: string): Promise<void>;
   parar(id: string): Promise<void>;
   executar(id: string, acao: AcaoComputador): Promise<ResultadoComputador>;
+  /** NOD-170: os ids dos computadores ligados NESTE host (de qualquer pessoa; os proxies nod-egress-* não contam). */
+  ligados(): Promise<Set<string>>;
 }

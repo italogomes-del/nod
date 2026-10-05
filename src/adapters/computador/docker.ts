@@ -2,8 +2,9 @@ import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
 import type { AcaoComputador, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import { MOTIVOS_FALHA_COMPUTADOR, type MotivoFalhaComputador } from "../../contracts/motivos.ts";
-import { FalhaComputador } from "../../domain/computador.ts";
+import { FalhaComputador, limiteDoAmbiente } from "../../domain/computador.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { log } from "../../obs/log.ts";
 
 /** Um `docker ...` terminado: a saída, o stderr (limitado) e por que acabou. */
 type Execucao = { codigo: number | null; saida: string; erro: string; esgotou: boolean; semDocker: boolean };
@@ -66,6 +67,7 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
   const habilitado = env.NOD_COMPUTADORES === "docker";
   const chave = env.NOD_CREDENTIAL_KEY ?? "";
   const cofreConfigurado = /^[a-f0-9]{64}$/i.test(chave);
+  const limite = limiteDoAmbiente(env);
   const nomes = (id: string) => {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new ErroDeDominio("entrada_invalida");
     return { maquina: `nod-computador-${id}`, proxy: `nod-egress-${id}`, rede: `nod-rede-${id}` };
@@ -78,6 +80,34 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
     return { rodando: rodando === "true", reinicios: saida && Number.isInteger(n) ? n : null };
   };
   const rodando = async (nome: string) => (await inspecionar(nome)).rodando;
+  /**
+   * definido em 2026-10-05 (NOD-170): UMA chamada, com 5 s de prazo. O rótulo nod.computador=true também
+   * marca os proxies nod-egress-*, que não contam para o teto — daí o filtro de nome (e a conferência aqui).
+   */
+  async function ligados(): Promise<Set<string>> {
+    const saida = await docker(["ps", "--filter", "label=nod.computador=true", "--filter", "name=^nod-computador-", "--format", "{{.Names}}"], undefined, 5000);
+    const ids = new Set<string>();
+    for (const linha of saida.split("\n")) {
+      const m = /^nod-computador-([a-f0-9-]{36})$/.exec(linha.trim());
+      if (m) ids.add(m[1]!);
+    }
+    return ids;
+  }
+  /**
+   * definido em 2026-10-05 (NOD-170): imagem nova só chega à máquina PARADA. Se a imagem do container
+   * difere da tag, remove a máquina e o proxy SEM -v (os volumes -home/-workspace são nomeados e ficam) e
+   * o fluxo normal recria os dois. Devolve se recriou.
+   */
+  async function trocarImagemSeVelha(id: string, n: ReturnType<typeof nomes>, comPrazo: (args: string[], entrada?: string, timeout?: number, padrao?: MotivoFalhaComputador) => Promise<string>): Promise<boolean> {
+    const doContainer = (await comPrazo(["inspect", "--format", "{{.Image}}", n.maquina], undefined, 5000).catch(() => "")).trim();
+    if (!doContainer) return false;
+    const daTag = (await comPrazo(["image", "inspect", "--format", "{{.Id}}", imagem], undefined, 5000, "imagem_ausente")).trim();
+    if (!daTag || daTag === doContainer) return false;
+    await comPrazo(["rm", n.maquina], undefined, 30_000, "nao_iniciou");
+    await comPrazo(["rm", "--force", n.proxy], undefined, 30_000).catch(() => undefined);
+    log("info", "computador_imagem_recriada", { computador_id: id, imagem });
+    return true;
+  }
   async function iniciar(id: string) {
     if (!habilitado || !cofreConfigurado) throw new ErroDeDominio("nao_permitido");
     const prazo = Date.now() + 120_000;
@@ -94,6 +124,17 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
       // De pé, mas parado num código (ex.: navegador_nao_abriu pelo SingletonLock de um container
       // antigo): reiniciar resolve, porque o runtime limpa a trava do perfil ao subir. Volumes ficam.
       if (p?.falha) await comPrazo(["restart", "--time", "10", n.maquina], undefined, 30_000, "nao_iniciou");
+    } else {
+      // NOD-170: o teto vale só para LIGAR uma máquina parada, antes de qualquer network/create/start. Sem fila;
+      // a corrida entre contar e start pode passar do teto em 1 (aceita na Release 1). Docker fora: segue e o
+      // passo seguinte devolve docker_indisponivel, como antes.
+      const ativos = await ligados().catch(() => null);
+      // A própria máquina na lista (inspect que estourou o prazo com o Docker carregado) não conta contra ela.
+      if (ativos && !ativos.has(id) && ativos.size >= limite.maximo) {
+        log("aviso", "computador_limite", { computador_id: id, ligados: ativos.size, maximo: limite.maximo });
+        throw new FalhaComputador("limite_de_computadores", { detalhe: `${ativos.size} ligados, máximo ${limite.maximo}`, limite });
+      }
+      await trocarImagemSeVelha(id, n, comPrazo);
     }
     await comPrazo(["image", "inspect", imagem], undefined, 5000, "imagem_ausente");
     await comPrazo(["network", "inspect", n.rede], undefined, 5000).catch(() => comPrazo(["network", "create", "--internal", "--label", "nod.computador=true", n.rede], undefined, 70_000, "nao_iniciou"));
@@ -127,9 +168,10 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
       if (!cofreConfigurado) return { disponivel: false, ativo: false, motivo: "Configure a chave de credenciais do servidor para proteger os logins." };
       const ok = await docker(["image", "inspect", imagem], undefined, 5000).then(() => true, () => false);
       const maquina = ok ? await inspecionar(nomes(id).maquina) : { rodando: false, reinicios: null };
-      return { disponivel: ok, ativo: maquina.rodando, reinicios: maquina.reinicios, motivo: ok ? null : "Prepare o ambiente com npm run computador:build e Docker em execução." };
+      return { disponivel: ok, ativo: maquina.rodando, reinicios: maquina.reinicios, limite, motivo: ok ? null : "Prepare o ambiente com npm run computador:build e Docker em execução." };
     },
     iniciar,
+    ligados,
     async parar(id) { const n = nomes(id); for (const nome of [n.maquina, n.proxy]) if (await rodando(nome)) await docker(["stop", "--time", "20", nome], undefined, 30000); },
     async executar(id: string, acao: AcaoComputador): Promise<ResultadoComputador> {
       // definido em 2026-09-18: só iniciar explícito cria ou religa ambiente; parar nunca é desfeito por uma ação atrasada.

@@ -3,10 +3,10 @@ import { CODIGOS_RUNTIME, codigoDaAcao, codigoDaSubida, falhaDe, primeiraLinha, 
 import type { Agente } from "../../../src/contracts/agente.ts";
 import { MOTIVOS_FALHA_COMPUTADOR } from "../../../src/contracts/motivos.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
-import { CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe } from "../../../src/domain/computador.ts";
+import { CONTA_PARA_SAUDE, FalhaComputador, ehFalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, limiteDoAmbiente, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, textoDoLimite } from "../../../src/domain/computador.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { redigir } from "../../../src/domain/redacao.ts";
-import { MOTIVO_FALHA_TEXTO } from "../../../web/lib/computador.ts";
+import { MOTIVO_FALHA_TEXTO, textoDoLimite as textoDoLimiteWeb } from "../../../web/lib/computador.ts";
 
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "", descricao: "lê e-mails", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -17,7 +17,7 @@ const doComputador = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferrament
 describe("saúde do computador do bot (emenda da ADR-037)", () => {
   it("só a MÁQUINA sem responder conta; a ação que falhou numa máquina viva não conta", () => {
     expect([...CONTA_PARA_SAUDE].sort()).toEqual(["cofre_invalido", "docker_indisponivel", "imagem_ausente", "nao_iniciou", "navegador_nao_abriu", "sem_resposta"]);
-    for (const m of ["acao_falhou", "tela_alterada", "ocupado"] as const) expect(CONTA_PARA_SAUDE.has(m)).toBe(false);
+    for (const m of ["acao_falhou", "tela_alterada", "ocupado", "limite_de_computadores"] as const) expect(CONTA_PARA_SAUDE.has(m)).toBe(false);
     expect(LIMITE_FALHAS_SEGUIDAS).toBe(3);
     const f = new FalhaComputador("navegador_nao_abriu", { detalhe: "Target page, context or browser has been closed", reinicios: 6 });
     expect(ehFalhaComputador(f)).toBe(true);
@@ -31,6 +31,26 @@ describe("saúde do computador do bot (emenda da ADR-037)", () => {
     expect(instrucaoDaFalha("tela_alterada")).toContain("Observe de novo");
     expect(instrucaoDaFalha("acao_falhou")).toContain("não afirme que executou");
     for (const m of MOTIVOS_FALHA_COMPUTADOR) expect(instrucaoDaFalha(m)).not.toMatch(/indispon[íi]vel ou tela alterada/);
+  });
+
+  it("NOD-170: o teto do host diz os números ao bot, manda não insistir e não fala de máquina quebrada", () => {
+    const limite = { maximo: 3, ociosoMin: 15 };
+    const f = new FalhaComputador("limite_de_computadores", { limite });
+    expect(f.limite).toEqual(limite);
+    expect(new FalhaComputador("sem_resposta").limite).toBeNull();
+    expect(instrucaoDaFalha("limite_de_computadores", limite)).toBe("Este Mac já tem 3 computadores ligados, o limite. Nada foi executado. Os computadores sem uso há 15 min desligam sozinhos. Não tente de novo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.");
+    // Sem ociosidade, a promessa de desligar sozinho some; sem números, o texto genérico.
+    expect(textoDoLimite({ maximo: 2, ociosoMin: 0 })).toBe("Este Mac já tem 2 computadores ligados, o limite. Nada foi executado.");
+    expect(instrucaoDaFalha("limite_de_computadores")).toMatch(/^Este Mac já tem o máximo de computadores ligados\. Nada foi executado\. Não tente de novo/);
+    expect(instrucaoDaFalha("limite_de_computadores")).not.toContain("não respondeu");
+  });
+
+  it("NOD-170: as variáveis do host, com padrão para ausente ou inválido e 0 desligando a ociosidade", () => {
+    expect(limiteDoAmbiente({})).toEqual({ maximo: 3, ociosoMin: 15 });
+    expect(limiteDoAmbiente({ NOD_COMPUTADORES_MAX: "5", NOD_COMPUTADOR_OCIOSO_MIN: "0" })).toEqual({ maximo: 5, ociosoMin: 0 });
+    expect(limiteDoAmbiente({ NOD_COMPUTADORES_MAX: "0", NOD_COMPUTADOR_OCIOSO_MIN: "-1" })).toEqual({ maximo: 3, ociosoMin: 15 });
+    expect(limiteDoAmbiente({ NOD_COMPUTADORES_MAX: "2.5", NOD_COMPUTADOR_OCIOSO_MIN: "abc" })).toEqual({ maximo: 3, ociosoMin: 15 });
+    expect(limiteDoAmbiente({ NOD_COMPUTADORES_MAX: " ", NOD_COMPUTADOR_OCIOSO_MIN: "30" })).toEqual({ maximo: 3, ociosoMin: 30 });
   });
 
   it("a mensagem única diz de quem é o computador, o motivo em palavras e o que foi feito", () => {
@@ -49,6 +69,7 @@ describe("saúde do computador do bot (emenda da ADR-037)", () => {
 
   it("a web fala a mesma língua do servidor: as duas tabelas de motivo são iguais", () => {
     expect(MOTIVO_FALHA_TEXTO).toEqual(MOTIVO_FALHA_EM_PORTUGUES);
+    for (const l of [{ maximo: 3, ociosoMin: 15 }, { maximo: 1, ociosoMin: 0 }]) expect(textoDoLimiteWeb(l)).toBe(textoDoLimite(l));
     expect(Object.keys(MOTIVO_FALHA_EM_PORTUGUES)).toEqual([...MOTIVOS_FALHA_COMPUTADOR]);
   });
 });

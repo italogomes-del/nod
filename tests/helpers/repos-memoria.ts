@@ -180,7 +180,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     computadores: {
       buscarVinculo: async () => null,
       obter: async () => null, travar: async () => null, configurar: async () => undefined,
-      ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [],
+      ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [], ociosos: async () => [],
       buscarAcao: async () => null, concluir: async () => undefined,
       gravarResultado: async () => undefined, tirarResultado: async () => null,
       registrar: async () => { throw new Error("use o banco para testar computadores"); },

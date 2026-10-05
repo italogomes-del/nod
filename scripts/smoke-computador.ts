@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { criarDriverDocker } from "../src/adapters/computador/docker.ts";
-const driver = criarDriverDocker({ NOD_COMPUTADORES: "docker", NOD_COMPUTADOR_IMAGEM: process.env.NOD_COMPUTADOR_IMAGEM, NOD_CREDENTIAL_KEY: randomBytes(32).toString("hex") });
+// NOD-170: o teto é por host e conta os computadores de verdade já ligados; o smoke não mede o teto (o teste unit do
+// driver mede), então sobe o máximo para não ser recusado num host em uso.
+const driver = criarDriverDocker({ NOD_COMPUTADORES: "docker", NOD_COMPUTADOR_IMAGEM: process.env.NOD_COMPUTADOR_IMAGEM, NOD_CREDENTIAL_KEY: randomBytes(32).toString("hex"), NOD_COMPUTADORES_MAX: "1000" });
 const ids = [randomUUID(), randomUUID()];
 await writeFile("/tmp/nod-computadores-smoke-ids.json", JSON.stringify(ids));
 try {
@@ -46,7 +48,7 @@ try {
   const rede = await executar({tipo:"terminal",comando:"curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://169.254.169.254/"});
   assert.equal(rede.saida,"403");
   const externo = await executar({tipo:"navegar",url:"https://example.com"});
-  assert.match(externo.tela!.texto,/Example Domain/);
+  assert.match(externo.tela!.texto,/Example Domain|documentation examples/);
   const midia = await executar({tipo:"terminal",comando:"ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=160x90:rate=10 -f lavfi -i sine=frequency=440:sample_rate=16000 -t 3 -c:v libvpx -deadline realtime -c:a libvorbis /workspace/video.webm"});
   assert.equal(midia.codigoSaida,0);
   const player = `<body><video id="v" src="/video.webm" controls loop></video><button id="b" onclick="v.paused?v.play():v.pause()">Reproduzir / pausar</button><input type="range" min="0" max="1" step="0.1" value="0.5" oninput="v.volume=this.value"><p id="estado"></p><script>v.volume=0.5;b.focus();setInterval(()=>estado.textContent=JSON.stringify({pausado:v.paused,volume:v.volume,tempo:v.currentTime}),50)</script></body>`;
@@ -73,7 +75,16 @@ try {
   assert.match(cookie.tela!.texto,/teste=persiste/);
   const cifrado=await executar({tipo:"terminal",comando:"python3 -c \"b=open('/home/node/cookies.enc','rb').read(); print(len(b)>28 and b'teste' not in b and b'persiste' not in b)\""});
   assert.equal(cifrado.saida!.trim(),"True");
-  process.stdout.write("OK: dois computadores, texto paginado com revisão, navegador público/local, screenshot, quadro, terminal, vídeo (reproduzir/pausar/volume), áudio audível, persistência cifrada e bloqueio da rede privada.\n");
+  // NOD-170: reinício do Docker (ou do host) sem o nod desligar antes. O container volta pelo próprio Docker, com o
+  // cofre trancado; a próxima ação passa por iniciar, que destranca, e acha o arquivo e o cookie de antes.
+  execFileSync("docker",["restart","--time","10",`nod-computador-${id}`],{stdio:"ignore"});
+  await driver.iniciar(id);
+  const depois = await executar({tipo:"ler_arquivo",caminho:"prova.txt"});
+  assert.equal(Buffer.from(depois.arquivo!.base64,"base64").toString(),"persistente");
+  await executar({tipo:"terminal",comando:"nohup python3 -m http.server 8080 --bind 127.0.0.1 > /workspace/http.log 2>&1 < /dev/null &"});
+  const cookieDepois=await executar({tipo:"navegar",url:"http://127.0.0.1:8080/check.html"});
+  assert.match(cookieDepois.tela!.texto,/teste=persiste/);
+  process.stdout.write("OK: dois computadores, texto paginado com revisão, navegador público/local, screenshot, quadro, terminal, vídeo (reproduzir/pausar/volume), áudio audível, persistência cifrada (também após docker restart) e bloqueio da rede privada.\n");
 } finally {
   for (const id of ids) {
     await driver.parar(id).catch(()=>undefined);

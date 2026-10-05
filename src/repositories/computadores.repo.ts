@@ -29,8 +29,10 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<Linha[]>`select c.*, a.id as agente_id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and c.id = ${id} for update of c`;
       return l ? computador(l) : null;
     },
-    async configurar(id: string, c: { habilitado?: boolean; controle?: ControleComputador; politica?: PoliticaComputador; ajuda?: string | null; ajudaDecisaoId?: string | null }): Promise<void> {
+    /** `atividadeEm` (NOD-170): iniciar, assumir e devolver contam como atividade e adiam o desligamento por ociosidade. */
+    async configurar(id: string, c: { habilitado?: boolean; controle?: ControleComputador; politica?: PoliticaComputador; ajuda?: string | null; ajudaDecisaoId?: string | null; atividadeEm?: number }): Promise<void> {
       await conn`update computadores set habilitado = coalesce(${c.habilitado ?? null}, habilitado), controle = coalesce(${c.controle ?? null}, controle), politica = coalesce(${c.politica ?? null}, politica),
+        ultima_atividade_em = coalesce(${c.atividadeEm === undefined ? null : new Date(c.atividadeEm)}::timestamptz, ultima_atividade_em),
         ajuda = case when ${c.ajuda !== undefined} then ${c.ajuda ?? null} else ajuda end,
         ajuda_decisao_id = case when ${c.ajudaDecisaoId !== undefined} then ${c.ajudaDecisaoId ?? null}::uuid else ajuda_decisao_id end
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
@@ -38,8 +40,30 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
     async ocupar(id: string, operacaoId: string, ate: number): Promise<void> {
       await conn`update computadores set operacao_id = ${operacaoId}, ocupado_ate = ${new Date(ate)} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
     },
-    async liberar(id: string, operacaoId: string): Promise<void> {
-      await conn`update computadores set operacao_id = null, ocupado_ate = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and operacao_id = ${operacaoId}`;
+    /**
+     * `atividadeEm` (NOD-170): o fim de uma ação do bot ou da pessoa é atividade. O varredor de ociosidade libera
+     * SEM ela — desligar por ociosidade não pode reiniciar o relógio da ociosidade.
+     */
+    async liberar(id: string, operacaoId: string, atividadeEm?: number): Promise<void> {
+      await conn`update computadores set operacao_id = null, ocupado_ate = null,
+        ultima_atividade_em = coalesce(${atividadeEm === undefined ? null : new Date(atividadeEm)}::timestamptz, ultima_atividade_em)
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and operacao_id = ${operacaoId}`;
+    },
+    /**
+     * definido em 2026-10-05 (NOD-170): os computadores desta pessoa sem atividade há `limiteMs`, que o varredor
+     * pode desligar. Fora: desabilitado, com a pessoa ou esperando por ela, e com reserva viva. `id` restringe a
+     * um: é a rechecagem depois do `travar`. O fora do ar ENTRA (QA 2026-10-05): a ação do bot não chega ao Docker
+     * e a saúde não para o container, então ele ficaria ligado para sempre ocupando uma vaga do teto; desligado,
+     * segue fora do ar e o "Tentar de novo" religa.
+     */
+    async ociosos(limiteMs: number, agora: number, id?: string): Promise<Computador[]> {
+      const linhas = await conn<Linha[]>`select c.*, a.id as agente_id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id
+        where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and (${id ?? null}::uuid is null or c.id = ${id ?? null}::uuid)
+          and c.habilitado and c.controle = 'bot'
+          and (c.ocupado_ate is null or c.ocupado_ate <= ${new Date(agora)})
+          and c.ultima_atividade_em < ${new Date(agora - limiteMs)}
+        order by c.ultima_atividade_em`;
+      return linhas.map(computador);
     },
     async registrar(e: { computadorId: string; turnoId?: string; autor: RegistroComputador["autor"]; tipo: string; estado: RegistroComputador["estado"]; argumentosCifrados?: string }): Promise<RegistroComputador> {
       const [l] = await conn<LinhaAcao[]>`insert into computador_acoes (tenant_id, owner_id, computador_id, turno_id, autor, tipo, estado, argumentos_cifrados)

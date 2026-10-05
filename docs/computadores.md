@@ -48,7 +48,32 @@ node scripts/desktop/smoke-proxy.mjs node_modules/electron/dist/Electron.app/Con
 
 O smoke cria dois computadores descartáveis, usa arquivos/cookies fictícios e não chama modelos pagos. Remove apenas seus próprios containers, redes e volumes. IDs para diagnóstico ficam em `/tmp/nod-computadores-smoke-ids.json`.
 
-Os volumes têm nomes `nod-computador-<id>-home` e `nod-computador-<id>-workspace`. Faça backup com o computador desligado e preserve a chave do servidor separadamente; sem a chave, o cofre não abre. Não monte um mesmo perfil em dois Chromium ativos. Atualizar a tag da imagem não atualiza containers já criados: desligue, recrie somente os containers correspondentes usando a nova imagem e preserve os volumes. Planeje recuperação e retenção antes de remover dados de bots excluídos.
+Os volumes têm nomes `nod-computador-<id>-home` e `nod-computador-<id>-workspace`. Faça backup com o computador desligado e preserve a chave do servidor separadamente; sem a chave, o cofre não abre. Não monte um mesmo perfil em dois Chromium ativos. Planeje recuperação e retenção antes de remover dados de bots excluídos.
+
+### Ciclo de vida no host (NOD-170)
+
+| Variável | Padrão | O que faz |
+|---|---|---|
+| `NOD_COMPUTADORES_MAX` | 3 | Máximo de computadores ligados neste host, somando todas as pessoas. O seguinte não liga: o bot recebe `limite_de_computadores`, nada é executado e não há fila. Não conta para a saúde do computador. |
+| `NOD_COMPUTADOR_OCIOSO_MIN` | 15 | Minutos sem ação do bot nem da pessoa até o computador desligar sozinho (varredura a cada 60 s). `0` desliga a varredura. Pula computador com a pessoa no controle, aguardando a pessoa ou com ação em andamento. O fora do ar também desliga (a ação do bot não chega a ele, e ele seguraria uma vaga do teto) e segue fora do ar até o "Tentar de novo". Os volumes ficam; a próxima ação liga de novo. |
+
+Valor ausente ou inválido usa o padrão. Reinicie o servidor nod depois de mudar. Os eventos no log são `computador_limite`, `computador_desligado_por_ociosidade` e `computador_imagem_recriada`.
+
+**Reinício do Docker ou do host.** Os containers têm `--restart unless-stopped`: voltam sozinhos, com o cofre trancado. A próxima ação destranca e encontra arquivos e cookies (passo do smoke).
+
+**Imagem nova.**
+
+1. `npm run computador:build` (ou fixe outra tag em `NOD_COMPUTADOR_IMAGEM` e reinicie o servidor).
+2. Nada mais. Ao ligar, um computador **parado** cuja imagem difere da tag é removido (máquina e proxy, sem `-v`) e recriado com a imagem nova e os mesmos volumes. Um computador **ligado** nunca é tocado; ele pega a imagem nova na próxima vez que ligar, depois de desligar por ociosidade ou pelo botão.
+
+**Órfãos.** Containers e redes com o rótulo `nod.computador=true`, e volumes `nod-computador-<id>-home|workspace`, cujo `<id>` não está na tabela `computadores`.
+
+```bash
+npm run computador:orfaos              # só lista
+npm run computador:orfaos -- --limpar  # remove containers e redes órfãos; volumes NUNCA
+```
+
+O script usa `DATABASE_URL` (o papel `nod_app`, do `.env` ou do ambiente) e lê `computadores` pessoa por pessoa, com escopo: sob FORCE ROW LEVEL SECURITY o `nod_dono` não tem policy e leria zero linhas. Ele imprime o host e o banco consultados. **Confira que é o banco do servidor que criou os computadores deste Docker**: contra outro banco, todo computador parece órfão. Por isso o `--limpar` se recusa quando o banco não tem nenhum computador e o Docker tem. Volumes órfãos guardam logins e arquivos de alguém; apague à mão (`docker volume rm <nome>`) só depois de decidir a retenção.
 
 Detalhes e limites estão na [ADR-037](adr/adr-037-computadores-por-bot.md).
 
