@@ -25,7 +25,7 @@ import { conectarCerebro, type CerebroLigacao, type FabricaSocket } from "../cer
 import { iniciarProcesso, type Processo } from "../processo.ts";
 import type { SinksTurno } from "../spi.ts";
 import { PEDIDO_DE_RESUMO, textoDaVez } from "./claude-ligacao.ts";
-import { configMcpCodex, escreverLauncherProxy, OVERRIDES_ISOLAMENTO_CODEX } from "./codex-comum.ts";
+import { configMcpCodex, escreverLauncherProxy, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
 
 /**
  * O laço de voz do Codex (definido em 2026-10-04, ADR-076), no molde do de Claude (ADR-072). O turno-cérebro de uma
@@ -52,10 +52,10 @@ const SAIDA_APOS_RESUMO_MS = 2_000;
  * argv do app-server. As chaves `-c` vão ANTES do subcomando (são do `codex` raiz e chegam a qualquer subcomando); a
  * config do MCP aponta para o launcher 0600, e o token do turno nunca entra aqui.
  */
-export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[] }): string[] {
+export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[]; recusadas?: RecusadasCodex }): string[] {
   return [
     "-c", `mcp_servers=${p.configMcp}`, "-c", 'approval_policy="never"', "-c", 'sandbox_mode="read-only"',
-    ...OVERRIDES_ISOLAMENTO_CODEX.flatMap((o) => ["-c", o]),
+    ...overridesIsolamentoCodex(p.recusadas ?? SEM_RECUSADAS).flatMap((o) => ["-c", o]),
     "app-server",
     ...FLAGS_OPCIONAIS_APP_SERVER.filter((f) => p.flagsNoHelp.includes(f)),
   ];
@@ -67,6 +67,8 @@ export type ContextoLigacaoCodex = {
   bin: string;
   /** Flags que `codex app-server --help` listou (as opcionais entram só se estiverem aqui). */
   flagsNoHelp: readonly string[];
+  /** Chaves de config que a versão instalada recusou (negociadas na sonda do driver); ausente = nenhuma. */
+  recusadas?: RecusadasCodex;
   /** Ambiente já filtrado (`ambienteCodex`). */
   env: Record<string, string>;
   cwdBase: string;
@@ -95,8 +97,8 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
   let timerSaida: ReturnType<typeof setTimeout> | null = null;
   try {
     const launcher = await escreverLauncherProxy(dir, { urlNod: c.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: c.proxyPath });
-    const configMcp = configMcpCodex(plano, { urlNod: c.urlNod, proxyPath: launcher, nodePath: c.nodePath, electronComoNode: c.electronComoNode });
-    const args = argsAppServer({ configMcp, flagsNoHelp: c.flagsNoHelp });
+    const configMcp = configMcpCodex(plano, { urlNod: c.urlNod, proxyPath: launcher, nodePath: c.nodePath, electronComoNode: c.electronComoNode }, c.recusadas);
+    const args = argsAppServer({ configMcp, flagsNoHelp: c.flagsNoHelp, recusadas: c.recusadas });
 
     // Só o que compõe a entrega: as ferramentas da ligação inteira e o turno do resumo. As falas já foram ditas.
     const eventos: EventoStream[] = [];

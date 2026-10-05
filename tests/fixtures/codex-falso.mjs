@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { setTimeout, clearTimeout } from "node:timers";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
 const emit = (v) => process.stdout.write(`${JSON.stringify(v)}\n`);
@@ -9,6 +9,25 @@ else if (args.includes("--version")) process.stdout.write("codex-cli teste\n");
 else if (args.includes("--help")) process.stdout.write("--json --ephemeral --ignore-user-config --ignore-rules --strict-config --sandbox --skip-git-repo-check\n");
 else if (args[0] === "login") process.exitCode = process.env.TESTE_NOD_SEM_LOGIN ? 1 : 0;
 else {
+  // Como o Codex real (medido em 2026-10-05 com o 0.147.0): a config é validada ANTES de o prompt ser lido. Uma chave
+  // desconhecida para em "unknown configuration field" (uma por vez), e o stdin vazio para em "No prompt provided".
+  // TESTE_NOD_CHAVES_DESCONHECIDAS lista as chaves que "esta versão" não conhece; TESTE_NOD_NEGOCIACOES conta as rodadas.
+  const config = args.filter((a, i) => args[i - 1] === "-c");
+  const desconhecida = (process.env.TESTE_NOD_CHAVES_DESCONHECIDAS ?? "").split(",").filter(Boolean).find((chave) => {
+    const campoMcp = /^mcp_servers\.nod\.(.+)$/.exec(chave)?.[1];
+    return campoMcp ? config.some((c) => c.startsWith("mcp_servers=") && c.includes(` ${campoMcp} = `)) : config.some((c) => c.startsWith(`${chave}=`));
+  });
+  if (desconhecida) {
+    process.stderr.write(`Error loading config.toml: unknown configuration field \`${desconhecida}\` in -c/--config override\n`);
+    process.exit(1);
+  }
+  let prompt = "";
+  for await (const p of process.stdin) prompt += p;
+  if (prompt === "") {
+    if (process.env.TESTE_NOD_NEGOCIACOES) appendFileSync(process.env.TESTE_NOD_NEGOCIACOES, "x");
+    process.stderr.write("No prompt provided via stdin.\n");
+    process.exit(1);
+  }
   const arquivo = join(process.cwd(), "proxy.mjs");
   const child = spawn(process.execPath, [arquivo], { stdio: ["pipe", "pipe", "inherit"] });
   let resposta = "";
@@ -21,11 +40,20 @@ else {
   if (!JSON.parse(resposta).result?.serverInfo) throw new Error("proxy_invalido");
   const registro = { args, env: process.env, cwd: process.cwd(), arquivos: readdirSync(process.cwd()), proxy: readFileSync(arquivo, "utf8"), modo: statSync(arquivo).mode & 0o777 };
   if (process.env.TESTE_NOD_REGISTRO) writeFileSync(process.env.TESTE_NOD_REGISTRO, JSON.stringify(registro));
-  let prompt = "";
-  for await (const p of process.stdin) prompt += p;
   emit({ type: "thread.started", thread_id: "sessao-codex" });
   if (prompt === "esperar") await new Promise((r) => setTimeout(r, 20_000));
   else if (prompt === "falhar") emit({ type: "turn.failed", error: { message: "segredo que não deve escapar" } });
+  else if (prompt === "aviso-e-ferramenta-cancelada") {
+    // O que o 0.147.0 emitia com a config antiga do nod: um item `error` de aviso e a chamada MCP falhando.
+    emit({ type: "item.completed", item: { id: "e1", type: "error", message: "Code Mode is unavailable because code-mode host is disabled." } });
+    emit({ type: "item.started", item: { id: "t1", type: "mcp_tool_call", server: "nod", tool: "pedir_acesso", arguments: { app: "gmail" } } });
+    emit({ type: "item.completed", item: { id: "t1", type: "mcp_tool_call", status: "failed", error: { message: "user cancelled MCP tool call" } } });
+    emit({ type: "item.completed", item: { type: "agent_message", text: "A ferramenta está indisponível." } });
+    emit({ type: "turn.completed", usage: { input_tokens: 5, output_tokens: 5 } });
+  } else if (prompt === "morrer-sem-evento") {
+    process.stderr.write("2026-10-05T14:46:55.670225Z ERROR codex_core: algo quebrou antes do primeiro evento\n");
+    process.exit(1);
+  }
   else if (prompt === "relatorio") {
     // Relatório longo, depois lembrar, depois "Anotado." — o turn.completed do Codex não traz texto.
     emit({ type: "item.completed", item: { type: "agent_message", text: "Vou consultar as tasks." } });

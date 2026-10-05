@@ -4,14 +4,15 @@ import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { EventoStream, SinaisTurno } from "../../../contracts/turno.ts";
 import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
-import { interpretarCodex } from "../../../domain/codex-stream.ts";
+import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { classificarResultado, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { log } from "../../../obs/log.ts";
 import { resolverBinario } from "../caminho.ts";
 import { executarColetando, iniciarProcesso, type Processo } from "../processo.ts";
 import type { Driver } from "../spi.ts";
 import type { LigacaoClaudeCli } from "./claude-cli.ts";
-import { ambienteCodex, configMcpCodex, escreverLauncherProxy, OVERRIDES_ISOLAMENTO_CODEX } from "./codex-comum.ts";
+import { ambienteCodex, configMcpCodex, escreverLauncherProxy, negociarConfigCodex, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
 import { rodarLigacaoCodex } from "./codex-ligacao.ts";
 
 export { configMcpCodex } from "./codex-comum.ts";
@@ -34,16 +35,25 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * contexto aqui sem sondar o CLI real. revisto em 2026-10-01 (ADR-067): saiu o deadline absoluto por `prazoMs`
  * (setTimeout → interromper) — nenhum relógio de trabalho; o turno acaba quando o Codex termina ou no Parar.
  */
-export function argsCodex(plano: PlanoTurno, config: string, imagens: readonly string[] = []): string[] {
+export function argsCodex(plano: PlanoTurno, config: string, imagens: readonly string[] = [], recusadas: RecusadasCodex = SEM_RECUSADAS): string[] {
   const pastas = plano.workspacePastas ?? null;
   return ["exec", ...FLAGS_CODEX.filter((f) => f !== "--sandbox"), "--sandbox", pastas ? "workspace-write" : "read-only", "--color", "never", "--model", plano.entrada.modelo,
     ...(pastas ? ["--cd", pastas.ativa] : []),
     "-c", `developer_instructions=${JSON.stringify(plano.promptSistema)}`,
     "-c", `mcp_servers=${config}`, "-c", 'approval_policy="never"',
-    ...OVERRIDES_ISOLAMENTO_CODEX.flatMap((o) => ["-c", o]),
+    ...overridesIsolamentoCodex(recusadas).flatMap((o) => ["-c", o]),
     // ADR-046: imagem anexada entra como arquivo do turno; o texto continua pelo stdin ("-").
     ...imagens.flatMap((i) => ["--image", i]), "-"];
 }
+
+/** Só os campos que `argsCodex` e `configMcpCodex` leem: a negociação valida as CHAVES, não este plano. */
+const PLANO_DE_SONDA = {
+  workspacePastas: null,
+  entrada: { modelo: "sonda" },
+  promptSistema: "",
+  catalogo: { ferramentas: [] },
+  politicaExecucao: { prazoMs: 60_000 },
+} as unknown as PlanoTurno;
 
 export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
   return {
@@ -53,6 +63,8 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
       const env = ambienteCodex(cfg.env);
       let bin: string | null = null;
       let inv: Inventario | null = null;
+      // As chaves de config que a versão instalada recusou (negociarConfigCodex); refeito a cada sonda.
+      let recusadas: RecusadasCodex = SEM_RECUSADAS;
       async function sondar(): Promise<Inventario> {
         if (inv && Date.now() - inv.em < 300_000) return inv;
         bin = await resolverBinario(cfg.bins?.["codex-cli"], env.PATH ?? "", home, "codex");
@@ -64,6 +76,17 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         const versao = (await executar(["--version"])).stdout.trim().slice(0, 100);
         const login = await executar(["login", "status"]);
         if (login.exitCode !== 0) return inv = { estado: "nao_autenticado", motivo: "Abra o Codex, entre na sua conta e tente novamente.", versao, em };
+        // definido em 2026-10-05: a config do turno é validada aqui, de graça (stdin vazio, nenhum modelo), com um plano
+        // de prova. O que a versão não conhece cai; o que não pode cair deixa o Codex indisponível com o motivo dito.
+        const negociacao = await negociarConfigCodex(async (r) => {
+          const fim = await executar(argsCodex(PLANO_DE_SONDA, configMcpCodex(PLANO_DE_SONDA, { ...lig, proxyPath: "sonda.mjs" }, r), [], r));
+          return `${fim.stdout}\n${fim.stderr}`;
+        });
+        if (negociacao.recusadas.size > 0 || !negociacao.aceita) {
+          log("aviso", "codex_config_negociada", { versao, aceita: negociacao.aceita, recusadas: [...negociacao.recusadas].join(","), parou_em: negociacao.aceita ? null : negociacao.chave });
+        }
+        if (!negociacao.aceita) return inv = { estado: "ausente", motivo: "Atualize o Codex: esta versão não aceita o isolamento exigido pelo nod.", em };
+        recusadas = negociacao.recusadas;
         return inv = { estado: "pronto", versao, em };
       }
       // ADR-076: piso do laço de voz = `codex app-server --help` responde; as flags listadas ali decidem as opcionais.
@@ -92,7 +115,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 if (!flagsNoHelp) throw new ErroDeDominio("executor_indisponivel", { cause: "codex sem app-server: atualize o Codex para ligar" });
                 await mkdir(cfg.cwdBase, { recursive: true });
                 return await rodarLigacaoCodex({
-                  plano, sinks, bin, flagsNoHelp, env, cwdBase: cfg.cwdBase,
+                  plano, sinks, bin, flagsNoHelp, recusadas, env, cwdBase: cfg.cwdBase,
                   urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
                   sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
                   aoProcesso: (p) => {
@@ -109,9 +132,12 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 // --image, texto de arquivo no prompt, PDF vira linha de "não lido".
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
                 const entrada = anexos.length > 0 ? await entradaCodex(plano.entrada.texto, anexos, dir) : { texto: plano.entrada.texto, imagens: [] };
-                const args = argsCodex(plano, configMcpCodex(plano, { ...lig, proxyPath: launcher }), entrada.imagens);
+                const args = argsCodex(plano, configMcpCodex(plano, { ...lig, proxyPath: launcher }, recusadas), entrada.imagens, recusadas);
                 const pendentes: Promise<void>[] = [];
+                // O que o Codex disse de errado (item `error`, evento `error`): hoje é a única pista de um turno que falha.
+                let ultimoErro: string | null = null;
                 proc = iniciarProcesso({ bin, args, env, cwd: dir, sigtermParaSigkillMs: lig.sigtermParaSigkillMs, aoLinha(linha) {
+                  ultimoErro = erroDoCodex(linha) ?? ultimoErro;
                   for (const ev of interpretarCodex(linha)) {
                     eventos.push(ev); sinks.evento(ev);
                     if (ev.tipo === "delta") sinks.delta(ev.texto);
@@ -127,7 +153,12 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 }
                 const fim = await proc.fim;
                 await Promise.all(pendentes);
-                return { ...classificarResultado({ eventos, ...fim, sinais, interrompidoPeloDriver: proc.interrompido() }), sessaoCli: null };
+                const r = classificarResultado({ eventos, ...fim, sinais, interrompidoPeloDriver: proc.interrompido() });
+                // definido em 2026-10-05: turno que não deu certo leva o motivo cru para o diagnóstico (o `turn.failed`
+                // do Codex, senão o último erro que ele emitiu, senão a última linha do stderr). Antes o `erro_cru`
+                // do Codex era sempre nulo e um turno que morria em 5 s não deixava pista.
+                const erroCru = r.desfecho === "sucesso" ? r.erroCru : r.erroCru ?? ultimoErro ?? ultimaLinhaUtil(fim.stderr);
+                return { ...r, erroCru, sessaoCli: null };
               } finally { if (proc) await proc.interromper(); proc = null; await rm(dir, { recursive: true, force: true }); }
             },
           };

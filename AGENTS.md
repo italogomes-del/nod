@@ -209,6 +209,20 @@ herda chaves OpenAI nem configuração de plugins/apps e não põe o token de tu
 0600 chama `main()` do proxy e é apagado ao encerrar. `desktop/proxy.ts` deve exportar `main` além de
 funcionar como executável direto. Valide ambos os caminhos sem modelos reais.
 
+Revisto em 2026-10-05 (primeiro uso real do Codex em produção: nove turnos, zero ferramentas). Três regras em
+`drivers/codex-comum.ts`, medidas com o codex-cli 0.147.0:
+- **Não desligue `features.code_mode_host`.** O modelo chama as ferramentas MCP por `functions.exec`, que roda nesse
+  host; com ele desligado nenhuma chamada chega ao proxy. O ambiente desse código não tem arquivo nem rede.
+- **O servidor `nod` leva `default_tools_approval_mode = "approve"`.** Sob `approval_policy="never"` o Codex cancela a
+  chamada MCP sozinho. Quem decide se a ferramenta roda é o proxy do nod, como sempre.
+- **As chaves `-c` são negociadas na sonda** (`negociarConfigCodex`): o `codex exec` com o stdin vazio valida a config
+  sem chamar modelo, e a chave que a versão não conhece cai (com `--strict-config` ela derrubava o turno inteiro). O que
+  fecha o terminal e os campos obrigatórios do servidor não caem: se a versão os recusa, o Codex fica indisponível.
+
+`node scripts/sonda-codex-ferramentas.ts` (paga, centavos da assinatura do Codex) roda o driver de verdade contra um
+servidor MCP de prova e diz se o `tools/call` chegou. Rode-a quando o Codex mudar de versão. O erro que o Codex devolve
+(`turn.failed`, item `error`, última linha do stderr) vai para `erroCru`, só no diagnóstico.
+
 Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila só entrega a uma máquina
 tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro
