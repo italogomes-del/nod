@@ -13,6 +13,7 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
 import { resolverBinario } from "../caminho.ts";
 import { executarColetando, iniciarProcesso, type Processo } from "../processo.ts";
+import { extrairVersao, inventarioAbaixoDoPiso } from "../flag-floors.ts";
 import { PRAZO_SONDA_PADRAO_MS } from "../sonda.ts";
 import type { Driver } from "../spi.ts";
 import type { LigacaoClaudeCli } from "./claude-cli.ts";
@@ -83,12 +84,16 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         if (!bin) return inv = { estado: "ausente", motivo: "Instale o Codex e entre na sua conta para usá-lo no nod.", em };
         const executar = (args: string[]) => executarColetando({ bin: bin!, args, env, cwd: home, timeoutMs: prazoSondaMs });
         const lenta = (): Inventario => ({ estado: "ausente", motivo: motivoSondaLenta("Codex"), causa: "sonda_lenta", em });
+        // NOD-171: a versão vem antes do help, para um Codex abaixo do piso ouvir "Atualize para a x.y.z", com as versões.
+        const lida = await executar(["--version"]);
+        if (lida.estourouTempo) return inv = lenta();
+        const lidaLimpa = extrairVersao(lida.stdout);
+        const versao = lidaLimpa ?? lida.stdout.trim().slice(0, 100);
+        const antigo = inventarioAbaixoDoPiso("codex-cli", lidaLimpa ?? "", "Codex", em);
+        if (antigo) return inv = antigo;
         const help = await executar(["exec", "--help"]);
         if (help.estourouTempo) return inv = lenta();
         if (help.exitCode !== 0 || FLAGS_CODEX.some((f) => !help.stdout.includes(f))) return inv = { estado: "ausente", motivo: "Atualize o Codex: esta versão ainda não oferece o isolamento exigido pelo nod.", em };
-        const lida = await executar(["--version"]);
-        if (lida.estourouTempo) return inv = lenta();
-        const versao = lida.stdout.trim().slice(0, 100);
         const login = await executar(["login", "status"]);
         if (login.estourouTempo) return inv = { estado: "nao_autenticado", motivo: motivoSondaLenta("Codex"), versao, causa: "sonda_lenta", em };
         if (login.exitCode !== 0) return inv = { estado: "nao_autenticado", motivo: "Abra o Codex, entre na sua conta e tente novamente.", versao, em };
@@ -163,7 +168,9 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
               const eventos: EventoStream[] = [];
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
               await sinks.sinal("attempted");
-              if ((await sondar()).estado !== "pronto" || !bin) throw new ErroDeDominio("executor_indisponivel");
+              // NOD-171: a causa da sonda (`cli_antigo`, `sonda_lenta`) segue no erro, para o log dizer por que recusou.
+              const sondado = await sondar();
+              if (sondado.estado !== "pronto" || !bin) throw new ErroDeDominio("executor_indisponivel", sondado.estado !== "pronto" && sondado.causa ? { cause: sondado.causa } : undefined);
               // ADR-076: o turno-cérebro de uma ligação é o laço de voz no app-server, não um `codex exec`.
               if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
                 const flagsNoHelp = await sondarAppServer(bin);

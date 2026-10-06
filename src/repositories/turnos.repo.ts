@@ -178,8 +178,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * pg_advisory_xact_lock por (tenant, pessoa) serializa as reivindicações da MESMA pessoa (fila
      * por pessoa, ADR-007); a segunda espera o commit da primeira e então enxerga o 'despachando'.
      * Pessoas diferentes não se bloqueiam. Chamado sobre um pool, abre a própria tx curta.
+     *
+     * NOD-171: com `harnessesProntosPessoa` (os prontos de todas as máquinas vivas da pessoa), pega também o turno
+     * fixado num harness que não está pronto em NENHUMA delas; o despacho o recusa nomeando o harness. Sem isso ele
+     * ficava pendente sem aviso no app do Mac. O fixado que outra máquina tem pronto continua esperando por ela.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; aceitaLigacao?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         const [l] = await trx<Linha[]>`
@@ -187,7 +191,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           where (tenant_id, id) = (
             select t.tenant_id, t.id from turnos t
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
-              ${p.harnessesProntos === undefined ? trx`` : trx`and ((t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[]))`}
+              ${p.harnessesProntos === undefined ? trx`` : trx`and ((t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[])
+                ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then 'claude-cli' else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
               -- definido em 2026-10-04 (ADR-072): o turno da ligação não serializa com o trabalho do bot, nos dois
               -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só

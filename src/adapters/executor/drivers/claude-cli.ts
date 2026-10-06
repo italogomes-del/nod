@@ -18,7 +18,7 @@ import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
 import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
-import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
+import { conferirFloors, conferirPisoCli, inventarioAbaixoDoPiso, type FlagComPiso } from "../flag-floors.ts";
 import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
@@ -269,6 +269,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           if (lig.sondaSemTurno) {
             try {
               const v = await garantirVersao();
+              const antigo = inventarioAbaixoDoPiso("claude-cli", v.versao, "Claude Code", Date.now());
+              if (antigo) return antigo;
               const pisos = conferirFloors({ versao: v.versao, flags: FLAGS_DO_TURNO, flagsNoHelp });
               if (!pisos.ok) return { estado: "ausente", motivo: "Atualize o Claude Code para continuar.", em: Date.now() };
               const r = await executarColetando({ bin: v.binario, args: ["auth", "status"], env: envBase, cwd: home, timeoutMs: prazoSondaMs });
@@ -328,6 +330,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
               await sinks.sinal("attempted");
               const { binario: bin, versao: v } = await garantirVersao();
+              if (!conferirPisoCli("claude-cli", v).ok) throw new ErroDeDominio("executor_indisponivel", { cause: "cli_antigo" });
               const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp });
               if (!floors.ok) throw new ErroDeDominio("executor_indisponivel", { cause: floors.motivo });
 

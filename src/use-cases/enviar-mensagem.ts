@@ -6,6 +6,7 @@ import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import type { IdHarness } from "../contracts/harness.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { motivoHarnessIndisponivel } from "../domain/harness.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
@@ -139,16 +140,18 @@ async function envioRepetido(deps: Deps, existente: Mensagem, texto: string, ane
  */
 export async function mensagemExecutorIndisponivel(
   deps: Deps,
-  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number },
+  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string },
 ): Promise<Mensagem | null> {
-  const motivo = p.inventario.estado === "pronto" ? "motor pronto" : `${motorDe(p.executor)} ${p.inventario.estado}: ${p.inventario.motivo}`;
+  // NOD-171: o harness escolhido e o inventário DELE; sem harness (turno antigo, catcher), o do motor.
+  const nome = p.harness ?? motorDe(p.executor);
+  const motivo = motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido);
   return deps.repos.mensagens.criar({
     conversaId: p.conversaId,
     turnoId: p.turnoId,
     autoria: autoriaAgente({ agenteId: p.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: p.executor, localityReason: "motor_ausente" }),
     kind: "negacao",
     texto: redigir("executor-indisponivel", p.agora, { motivo, desde: new Date(p.inventario.em).toISOString() }),
-    payload: { kind: "negacao", classe: "plano_ausente", nome: motorDe(p.executor), motivo: "plano_ausente", terminal: true },
+    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true },
     confianca: "confiavel",
   });
 }

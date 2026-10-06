@@ -52,7 +52,7 @@ export function criarPonteHttpServidor(d: {
   itensLocais?(escopo: Escopo): Promise<ItemLocal[]>;
   concluirItemLocal?(escopo: Escopo, itemId: string, desfecho: DesfechoLocal): Promise<void>;
   /** definido em 2026-10-05: o Mac anunciou uma IA pronta — repete as falas que ficaram sem resposta por falta de IA. */
-  repetirBarrados?(escopo: Escopo): Promise<void>;
+  repetirBarrados?(escopo: Escopo, prontos: readonly IdHarness[]): Promise<void>;
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
@@ -111,7 +111,10 @@ export function criarPonteHttpServidor(d: {
       await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}) });
       await persistir(c);
       // Melhor esforço: a conexão não pode falhar porque a repetição falhou.
-      if (c.inv.estado === "pronto" && d.repetirBarrados) await d.repetirBarrados(ctx.escopo).catch(() => log("aviso", "repetir_barrados_falhou", {}));
+      if (c.inv.estado === "pronto" && d.repetirBarrados) {
+        const prontos = Object.entries(harnessesDaPessoa(ctx.escopo.pessoaId)).filter(([, i]) => i?.estado === "pronto").map(([h]) => h as IdHarness);
+        await d.repetirBarrados(ctx.escopo, prontos).catch(() => log("aviso", "repetir_barrados_falhou", {}));
+      }
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),
     rota("puxar", async (ctx) => {

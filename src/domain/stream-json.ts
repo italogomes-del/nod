@@ -114,6 +114,7 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
     const janelas = obj(info?.["unifiedWindows"]);
     const cinco = obj(janelas?.["five_hour"]);
     const sete = obj(janelas?.["seven_day"]);
+    const daJanela = obj(janelas?.[str(info?.["rateLimitType"])]);
     return {
       tipo: "rate_limit",
       status: str(info?.["status"], "desconhecido"),
@@ -121,6 +122,8 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
       utilizacaoSeteDias: num(sete?.["utilization"]),
       renovaCincoHorasEm: emMs(cinco?.["resetsAt"]),
       renovaSeteDiasEm: emMs(sete?.["resetsAt"]),
+      voltaEm: emMs(info?.["resetsAt"]) ?? emMs(daJanela?.["resetsAt"]),
+      ...(info?.["isUsingOverage"] === true ? { usandoOverage: true } : {}),
     };
   }
   if (type === "stream_event") {
@@ -249,7 +252,8 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
 /**
  * Classifica pelo ESTADO DE PROTOCOLO (ADR-009), nunca pela string de erro — `stderr` entra na
  * assinatura só para o teste adversarial provar que variá-lo não muda nada (E9.1):
- *  - result presente → sucesso | falha (subtype ≠ success: erro_max_turns | erro_execucao);
+ *  - result presente → sucesso | falha (subtype ≠ success: erro_max_turns | erro_execucao; `rate_limit` `rejected`
+ *    na mesma rodada: limite_do_plano, com `limiteVoltaEm`);
  *  - sem result e (o driver interrompeu OU chegou signal OU houve init) → interrompido com motivo
  *    INDEFINIDO: quem sabe se pediu é o servidor (parado_pela_pessoa se pararSolicitadoEm existe,
  *    senão sem_progresso). A regra é a MESMA antes e depois do init — a sonda de 2026-09-16 mediu
@@ -279,6 +283,9 @@ export function classificarResultado(entrada: {
   let sinais: SinaisTurno = { ...SINAIS_ZERADOS, ...entrada.sinais };
   let init: Extract<EventoStream, { tipo: "init" }> | null = null;
   let result: Extract<EventoStream, { tipo: "result" }> | null = null;
+  // NOD-171: o último `rate_limit` da rodada que o `result` fecha; a rodada seguinte começa sem nenhum.
+  let rateLimit: Extract<EventoStream, { tipo: "rate_limit" }> | null = null;
+  let rateLimitDoResult: Extract<EventoStream, { tipo: "rate_limit" }> | null = null;
   const ferramentasChamadas: string[] = [];
   let textoStream = "";
   // Deltas desde o último bloco completo: o trecho que um SIGTERM deixa sem o `assistant` que o fecharia.
@@ -288,8 +295,12 @@ export function classificarResultado(entrada: {
   for (const [posicao, ev] of entrada.eventos.entries()) {
     sinais = reduzirSinais(sinais, ev);
     if (ev.tipo === "init") init = ev;
-    else if (ev.tipo === "result") result = ev;
-    else if (ev.tipo === "tool_use") {
+    else if (ev.tipo === "rate_limit") rateLimit = ev;
+    else if (ev.tipo === "result") {
+      result = ev;
+      rateLimitDoResult = rateLimit;
+      rateLimit = null;
+    } else if (ev.tipo === "tool_use") {
       ferramentasChamadas.push(ev.nome);
       ultimaFerramenta = posicao;
     } else if (ev.tipo === "delta") {
@@ -322,6 +333,11 @@ export function classificarResultado(entrada: {
       negacoesPermissao: result.negacoesPermissao,
     };
     if (result.sucesso) return { desfecho: "sucesso", ...base };
+    // NOD-171: o CLI barrou pelo plano (`rejected`) e a rodada fechou com erro. Pelo estado, nunca pelo texto do result.
+    // Com o overage em uso o pedido seguiu apesar do `rejected`: o erro é outro. O max_turns diz o próprio motivo.
+    if (rateLimitDoResult?.status === "rejected" && !rateLimitDoResult.usandoOverage && result.subtype !== "error_max_turns") {
+      return { desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: rateLimitDoResult.voltaEm ?? null, erroCru: result.erroCru, ...base };
+    }
     return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base };
   }
 

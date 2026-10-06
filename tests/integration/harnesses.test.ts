@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
+import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { Services } from "../../src/use-cases/tipos.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
 import { disponibilidadeLigacao, ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
@@ -140,7 +143,96 @@ it("fila não deixa um computador com Claude reivindicar um turno fixado no Code
     expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["codex-cli"] })).toMatchObject({ id: turno!.id, harness: "codex-cli" });
   });
 });
+it("NOD-171: com os prontos da pessoa, o computador com Claude reivindica o fixado no Codex só quando nenhuma máquina tem o Codex", async () => {
+  await withRollback(escopo, async (trx) => {
+    const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
+    const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: Date.now() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "codex-cli" });
+    expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["claude-cli"], harnessesProntosPessoa: ["claude-cli", "codex-cli"] })).toBeNull();
+    expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["claude-cli"], harnessesProntosPessoa: ["claude-cli"] })).toMatchObject({ id: turno!.id });
+  });
+});
 
+});
+
+describeIntegracao("NOD-171: harness fixado e indisponível", () => {
+  const codexAusente: Inventario = { estado: "ausente", motivo: "Harness não encontrado neste computador", em: Date.now() };
+  type Harnesses = Partial<Record<"claude-cli" | "codex-cli", Inventario>>;
+  /** Deps cujo `planos.emitir` é o de verdade (emitirPlanoTurno) sobre os harnesses dados; guarda os planos que saíram. */
+  const montar = async (trx: Parameters<Parameters<typeof withRollback>[1]>[0], harnesses: Harnesses) => {
+    const base = await agenteComConversa(trx, escopo);
+    const agora = () => Date.now();
+    const emitidos: string[] = [];
+    const servicos = servicosDeTeste({ agora });
+    const services: Services = { ...servicos, planos: { ...servicos.planos, emitir: async (_t, turnoId, machineId) => {
+      emitidos.push(turnoId);
+      return (await emitirPlanoTurno(deps, { turnoId, machineId, executor: "local", harnesses })).data;
+    } } };
+    const deps = depsSobre(base.repos, escopo, { agora, trx, services });
+    return { ...base, deps, emitidos, agora };
+  };
+  const enfileirar = (b: Awaited<ReturnType<typeof montar>>, harness: "auto" | "codex-cli" | "claude-cli", modelo: string) =>
+    b.repos.turnos.enfileirar({ agenteId: b.agenteId, conversaId: b.conversaId, origem: "conversa", prazoEm: b.agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo, harness });
+  const puxar = (b: Awaited<ReturnType<typeof montar>>, extra: Partial<Parameters<typeof despacharTurno>[1]> = {}) =>
+    despacharTurno(b.deps, { machineId: randomUUID(), executor: "local", inventario: pronto, ...extra });
+
+  it("local: agente no Codex ausente com o Claude pronto termina interrompido com a negação do Codex, sem 'motor pronto'", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto, "codex-cli": codexAusente });
+      const turno = await enfileirar(b, "codex-cli", "auto");
+      expect((await puxar(b)).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+      expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "motor_ausente" });
+      const negacao = await b.repos.mensagens.ultimaDaConversa(b.conversaId);
+      expect(negacao).toMatchObject({ kind: "negacao", payload: { nome: "codex-cli" } });
+      expect(negacao?.texto).toContain("Codex não instalado: Harness não encontrado neste computador");
+      expect(negacao?.texto).not.toContain("motor pronto");
+      expect(negacao?.texto).not.toContain("claude-cli");
+    });
+  });
+
+  it("app do Mac: máquina só com o Claude e nenhuma máquina da pessoa com o Codex — o turno não fica pendente e nenhum plano sai", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto });
+      const turno = await enfileirar(b, "codex-cli", "auto");
+      // Sem os harnesses da pessoa (como antes da NOD-171), o turno fica pendente.
+      expect((await puxar(b, { harnessesProntos: ["claude-cli"] })).data).toMatchObject({ plano: null, turno: null, motivo: "fila_vazia" });
+      expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "pendente" });
+      // Sonda lenta é transitória (NOD-178): o turno espera a re-sonda em vez de ser recusado.
+      const lento: Inventario = { ...codexAusente, causa: "sonda_lenta", motivo: "O Codex demorou a responder" };
+      expect((await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa: { "claude-cli": pronto, "codex-cli": lento } })).data.motivo).toBe("fila_vazia");
+      expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "pendente" });
+      const antigo: Inventario = { ...codexAusente, causa: "cli_antigo", versao: "0.158.0", minima: "0.159.0", motivo: "O Codex deste Mac (0.158.0) é mais antigo que o testado pelo nod. Atualize para a versão 0.159.0 ou mais nova." };
+      const r = await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa: { "claude-cli": pronto, "codex-cli": antigo } });
+      expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+      expect(b.emitidos).toEqual([]);
+      expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
+      expect((await b.repos.mensagens.ultimaDaConversa(b.conversaId))?.texto).toContain("Codex desatualizado: O Codex deste Mac (0.158.0)");
+    });
+  });
+
+  it("app do Mac com duas máquinas: o turno do Codex espera pela máquina que tem o Codex pronto", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto, "codex-cli": pronto });
+      const turno = await enfileirar(b, "codex-cli", "auto");
+      const harnessesDaPessoa = { "claude-cli": pronto, "codex-cli": pronto };
+      expect((await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa })).data.motivo).toBe("fila_vazia");
+      expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "pendente" });
+      expect((await puxar(b, { harnessesProntos: ["codex-cli"], harnessesDaPessoa })).data.plano).toMatchObject({ harness: "codex-cli" });
+    });
+  });
+
+  it("modelo inválido vira recusa escrita e não volta para a fila; modelo antigo continua resolvendo", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto, "codex-cli": pronto });
+      const invalido = await enfileirar(b, "codex-cli", "sonnet");
+      expect((await puxar(b)).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+      expect(await b.repos.turnos.buscar(invalido!.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
+      expect((await b.repos.mensagens.ultimaDaConversa(b.conversaId))?.texto).toContain("Codex: o modelo sonnet não é aceito");
+      // Sem laço: o próximo puxar não acha o mesmo turno.
+      expect((await puxar(b)).data.motivo).toBe("fila_vazia");
+      const antigo = await enfileirar(b, "auto", "haiku");
+      expect((await puxar(b)).data.plano).toMatchObject({ turnoId: antigo!.id, harness: "claude-cli", entrada: { modelo: "haiku" } });
+    });
+  });
 });
 
 describeIntegracao("Codex sem app-server: recusa própria do Ligar (NOD-167)", () => {

@@ -1,4 +1,5 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
+import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, FalaIntermediaria, TrechoVivo, VigiaVivo } from "../../../contracts/ponte.ts";
@@ -110,11 +111,17 @@ export function inventario(v: unknown, agora: number, nome = "harness"): Inventa
   exigir(i.estado === "ausente" || i.estado === "nao_autenticado");
   // NOD-178: a causa atravessa (só o valor conhecido), e o motivo continua reescrito aqui, nunca o texto do Mac.
   if (i.causa === "sonda_lenta") return { estado: i.estado, motivo: motivoSondaLenta(nome), causa: "sonda_lenta", em: agora };
+  // NOD-171: o CLI abaixo do piso atravessa com as duas versões (só no formato x.y.z[-pre]); a frase continua do servidor.
+  if (i.estado === "ausente" && i.causa === "cli_antigo" && versaoSemver(i.versao) && versaoSemver(i.minima)) {
+    return { estado: "ausente", motivo: motivoCliAntigo(nome, i.versao, i.minima), causa: "cli_antigo", versao: i.versao, minima: i.minima, em: agora };
+  }
   if (i.estado === "ausente") return { estado: "ausente", motivo: "Harness não encontrado neste computador", em: agora };
   // definido em 2026-10-05: a causa é código fechado e a frase é do servidor — texto do Mac nunca vira motivo.
   const causa = causaSemIa(i.causa);
   return { estado: "nao_autenticado", motivo: causa ? MOTIVO_DA_CAUSA[causa] : "Entre na conta do harness neste computador", ...(causa ? { causa } : {}), em: agora };
 }
+const SEMVER = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,40})?$/;
+const versaoSemver = (v: unknown): v is string => typeof v === "string" && SEMVER.test(v);
 /** Só os códigos conhecidos passam; app antigo (sem o campo) ou valor estranho = sem causa. */
 export function causaSemIa(v: unknown): CausaSemIa | undefined {
   return CAUSAS_SEM_IA.find((c) => c === v);
@@ -201,6 +208,8 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   // produção o diagnóstico de todo turno falho vinha vazio, porque o campo morria aqui. Continua fora do log
   // (ponte-interna, `erroCruNoLog: false` na ponte das máquinas).
   const erroCru = typeof r.erroCru === "string" && r.erroCru.length <= ERRO_CRU_MAX_CHARS ? r.erroCru : null;
+  // NOD-171: extra como o uso do plano. Só com o limite e até 31 dias à frente; fora disso some (a frase fica sem hora).
+  const voltaEm = r.motivoFalha === "limite_do_plano" && Number.isSafeInteger(r.limiteVoltaEm) && Number(r.limiteVoltaEm) > 0 && Number(r.limiteVoltaEm) <= agora + 31 * 86_400_000 ? Number(r.limiteVoltaEm) : null;
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
@@ -211,5 +220,6 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(erroCru ? { erroCru } : {}),
     ...(causa ? { causaSemIa: causa } : {}),
     ...(uso ? { usoDoPlano: uso } : {}),
+    ...(voltaEm !== null ? { limiteVoltaEm: voltaEm } : {}),
   } };
 }

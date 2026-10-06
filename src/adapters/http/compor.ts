@@ -114,7 +114,7 @@ import type { IaNoMac } from "../../contracts/onboarding.ts";
 import { criarRotasOnboarding } from "./rotas/onboarding.ts";
 import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz } from "../voz/orquestrador.ts";
 import type { EstadoIaDaLigacao } from "../../contracts/voz.ts";
-import { ehIaDaLigacao } from "../../domain/ligacao-sem-ia.ts";
+import { ehIaDaLigacao, estadoIaDaLigacao } from "../../domain/ligacao-sem-ia.ts";
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
 import { ADIANTE_MS_PADRAO, CARACTERES_DIA_PADRAO, criarLeitorDeVoz, lerInteiroDaLeitura } from "./leitura-voz.ts";
 import type { ContextoLeitura } from "../../use-cases/ouvir-mensagem.ts";
@@ -436,7 +436,7 @@ export function comporApp(o: OpcoesCompor): App {
   const ponte = criarPonteInterna(db, depsPonte);
   const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
   const ponteHttp = criarPonteHttpServidor({
-    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }] }),
+    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }], harnessesDaPessoa: (pessoaId) => ponteHttp.harnessesDaPessoa(pessoaId) }),
     persistir: (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }),
     autorizar: autorizarMaquina,
     segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
@@ -451,8 +451,8 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
     itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
     // definido em 2026-10-05: uma IA ficou pronta no Mac — as falas barradas por falta de IA são repetidas sozinhas.
-    repetirBarrados: (escopo) => dentro(escopo, async (d) => {
-      const r = await repetirBarradosPorIa(d, { executor: "local" });
+    repetirBarrados: (escopo, prontos) => dentro(escopo, async (d) => {
+      const r = await repetirBarradosPorIa(d, { executor: "local", prontos });
       if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
     }),
     concluirItemLocal: (escopo, itemId, desfecho) => dentro(escopo, async (d) => {
@@ -503,7 +503,7 @@ export function comporApp(o: OpcoesCompor): App {
   // Rede de segurança da ligação (2026-10-05): as IAs do Mac da pessoa, pelo inventário anunciado (catalogoHarness).
   // Com NOD_LIGACAO_CODEX=0 o Codex não atende ligação neste servidor: fica fora da lista, e o aviso não o oferece.
   const iasDoMacParaVoz = (pessoaId: string): EstadoIaDaLigacao[] =>
-    catalogoHarness(pessoaId).opcoes.flatMap((h) => (ehIaDaLigacao(h.id) && !(h.id === "codex-cli" && env.NOD_LIGACAO_CODEX === "0") ? [{ id: h.id, estado: h.inventario.estado, ...(sondaFoiLenta(h.inventario) ? { causa: "sonda_lenta" as const } : {}) }] : []));
+    catalogoHarness(pessoaId).opcoes.flatMap((h) => (ehIaDaLigacao(h.id) && !(h.id === "codex-cli" && env.NOD_LIGACAO_CODEX === "0") ? [estadoIaDaLigacao(h.id, h.inventario)] : []));
   const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio, iasDoMac: (ref) => iasDoMacParaVoz(ref.pessoaId) });
   // ADR-074: os cards da conversa da ligação viram leitura + janela de aprovação por voz. O orquestrador não lê banco:
   // a composição escuta os frames da pessoa e monta a leitura (leituraDaDecisao) numa tx dela.

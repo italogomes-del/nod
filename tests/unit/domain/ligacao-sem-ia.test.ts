@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MOTIVOS_INTERRUPCAO } from "../../../src/contracts/motivos.ts";
 import { FALAS_DE_ESPERA } from "../../../src/domain/ligacao-espera.ts";
 import {
-  aberturaDoCerebroNovo, causaDoCerebroCaido, comFalaRecente, ehIaDaLigacao, FALA_RECENTE_MAX_CHARS, FALAS_PARA_O_CEREBRO_NOVO, iaQuePodeAssumir, mesmasIas,
+  aberturaDoCerebroNovo, causaDoCerebroCaido, comFalaRecente, ehIaDaLigacao, estadoIaDaLigacao, FALA_RECENTE_MAX_CHARS, FALAS_PARA_O_CEREBRO_NOVO, iaQuePodeAssumir, mesmasIas,
   transcricaoParaOCerebroNovo, vezDeRetomada, type FalaRecente,
 } from "../../../src/domain/ligacao-sem-ia.ts";
 
@@ -58,6 +58,19 @@ describe("qual IA pode assumir", () => {
     expect(mesmasIas([{ id: "codex-cli", estado: "ausente", causa: "sonda_lenta" }], [{ id: "codex-cli", estado: "ausente" }])).toBe(false);
     expect(mesmasIas(a, [{ id: "claude-cli", estado: "pronto" }])).toBe(false);
     expect(mesmasIas([], [])).toBe(true);
+  });
+
+  it("NOD-171 (QA): o CLI abaixo do piso chega ao aviso como `cli_antigo`, com a versão e a mínima, nunca como 'ausente' puro", () => {
+    const em = 1;
+    const antigo = { estado: "ausente", motivo: "Codex 0.147.0 abaixo do piso", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0", em } as const;
+    expect(estadoIaDaLigacao("codex-cli", antigo)).toEqual({ id: "codex-cli", estado: "ausente", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0" });
+    expect(estadoIaDaLigacao("codex-cli", { estado: "ausente", motivo: "lenta", causa: "sonda_lenta", em })).toEqual({ id: "codex-cli", estado: "ausente", causa: "sonda_lenta" });
+    expect(estadoIaDaLigacao("claude-cli", { estado: "ausente", motivo: "não achou", em })).toEqual({ id: "claude-cli", estado: "ausente" });
+    expect(estadoIaDaLigacao("claude-cli", { estado: "pronto", versao: "2.1.300", em })).toEqual({ id: "claude-cli", estado: "pronto" });
+    // Atualizar para outra versão ainda antiga muda a frase do card: o aviso é reenviado.
+    const linha = estadoIaDaLigacao("codex-cli", antigo);
+    expect(mesmasIas([linha], [{ ...linha, versao: "0.150.0" }])).toBe(false);
+    expect(mesmasIas([linha], [{ id: "codex-cli", estado: "ausente" }])).toBe(false);
   });
 });
 

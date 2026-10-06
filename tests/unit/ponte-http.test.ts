@@ -38,6 +38,12 @@ describe("desktop: fronteiras HTTP", () => {
     // Anunciado por harness, a frase diz quem demorou.
     expect(inventario({ estado: "ausente", em: 1, motivo: "Instale", causa: "sonda_lenta" }, 100, "Codex")).toEqual({ estado: "ausente", em: 100, motivo: "O Codex demorou para responder; o Mac está carregado. Tente de novo em instantes.", causa: "sonda_lenta" });
     expect(inventario({ estado: "ausente", em: 1, motivo: "x", causa: "inventada" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });
+    // NOD-171: cli_antigo atravessa com as versões no formato x.y.z[-pre]; a frase é do servidor, nunca do Mac.
+    expect(inventario({ estado: "ausente", em: 1, motivo: "texto do Mac", causa: "cli_antigo", versao: "0.158.9", minima: "0.159.0" }, 100, "Codex")).toEqual({ estado: "ausente", em: 100, causa: "cli_antigo", versao: "0.158.9", minima: "0.159.0", motivo: "O Codex deste Mac (0.158.9) é mais antigo que o testado pelo nod. Atualize para a versão 0.159.0 ou mais nova." });
+    for (const versao of [undefined, "", "2.1", "<script>", "1.2.3 (Claude Code)", 3]) {
+      expect(inventario({ estado: "ausente", em: 1, causa: "cli_antigo", versao, minima: "2.1.290" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });
+    }
+    expect(inventario({ estado: "nao_autenticado", em: 1, causa: "cli_antigo", versao: "2.1.1", minima: "2.1.290" }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "Entre na conta do harness neste computador" });
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
   });
   it("conta sem acesso (2026-10-05): a causa é código fechado, a frase é do servidor, e o erro cru atravessa só até o teto", () => {
@@ -68,6 +74,19 @@ describe("desktop: fronteiras HTTP", () => {
       expect("usoDoPlano" in r).toBe(false);
     }
     expect("usoDoPlano" in entrega({ ...base, resultado }, "maq", agora).resultado).toBe(false);
+  });
+  it("NOD-171: limite_do_plano atravessa com a hora em que volta; hora absurda, ou sem o limite, some", () => {
+    const agora = Date.UTC(2026, 9, 6, 12);
+    const base = { turnoId: "11111111-1111-4111-8111-111111111111", seqLocal: 1, fala: { tipo: "texto", texto: "" } };
+    const resultado = { desfecho: "falha", motivoFalha: "limite_do_plano", texto: "", sessaoCli: null, custoUsd: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    const voltaEm = agora + 3_600_000;
+    expect(entrega({ ...base, resultado: { ...resultado, limiteVoltaEm: voltaEm } }, "maq", agora).resultado).toMatchObject({ motivoFalha: "limite_do_plano", limiteVoltaEm: voltaEm });
+    for (const ruim of [agora + 40 * 86_400_000, -1, 1.5, "amanhã", null]) {
+      const r = entrega({ ...base, resultado: { ...resultado, limiteVoltaEm: ruim } }, "maq", agora).resultado;
+      expect(r.motivoFalha).toBe("limite_do_plano");
+      expect("limiteVoltaEm" in r).toBe(false);
+    }
+    expect("limiteVoltaEm" in entrega({ ...base, resultado: { ...resultado, motivoFalha: "erro_execucao", limiteVoltaEm: voltaEm } }, "maq", agora).resultado).toBe(false);
   });
   it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, esvazia a fila e não mistura turnos", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));

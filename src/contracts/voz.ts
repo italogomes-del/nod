@@ -77,8 +77,13 @@ export const ESTADOS_IA_DA_LIGACAO = ["pronto", "nao_autenticado", "ausente"] as
 export type EstadoIaDaLigacao = {
   id: IaDaLigacao;
   estado: (typeof ESTADOS_IA_DA_LIGACAO)[number];
-  /** NOD-178: o CLI só demorou para responder à sonda; a tela não pede "Instalar" nem "Entrar". */
-  causa?: "sonda_lenta";
+  /**
+   * NOD-178: o CLI só demorou para responder à sonda; a tela não pede "Instalar" nem "Entrar". NOD-171: `cli_antigo` é
+   * o CLI instalado abaixo do piso (`ausente`); `versao` e `minima` vão junto, para o card dizer "Atualize".
+   */
+  causa?: "sonda_lenta" | "cli_antigo";
+  versao?: string;
+  minima?: string;
 };
 /** definido em 2026-10-05: sem escolha em 2 min a ligação encerra com `sem_ia`. */
 export const ESPERA_DA_ESCOLHA_MS = 120_000;

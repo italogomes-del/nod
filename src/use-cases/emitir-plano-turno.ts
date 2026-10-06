@@ -1,5 +1,5 @@
 import type { IdHarness } from "../contracts/harness.ts";
-import { modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
+import { causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
 import { modeloDeVoz } from "../domain/modelo-ligacao.ts";
@@ -112,8 +112,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   const inventarioCli = await deps.repos.inventario.buscar(MOTOR_CLI);
   const executor: Executor = input.executor ?? (inventarioCli?.estado === "pronto" ? "local" : "catcher");
-  const escolha = executor !== "catcher" && input.harnesses ? resolverHarness({ harness: turno.harness, modelo: turno.modelo,
-    prontos: (Object.keys(input.harnesses) as IdHarness[]).filter((id) => input.harnesses?.[id]?.estado === "pronto"), preferido: input.harnessPreferido }) : null;
+  const escolha = executor !== "catcher" && input.harnesses ? escolherHarness(turno, input.harnesses, input.harnessPreferido) : null;
   const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6
@@ -309,3 +308,15 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   };
   return { data: plano, events: [evento] };
 };
+
+/** NOD-171: a recusa leva o inventário do harness que faltou, para a negação falar dele e não do motor. */
+function escolherHarness(turno: Turno, harnesses: Partial<Record<IdHarness, Inventario>>, preferido: IdHarness | null | undefined): { harness: IdHarness; modelo: string } {
+  try {
+    return resolverHarness({ harness: turno.harness, modelo: turno.modelo, prontos: (Object.keys(harnesses) as IdHarness[]).filter((id) => harnesses[id]?.estado === "pronto"), preferido });
+  } catch (e) {
+    const causa = causaHarnessIndisponivel(e);
+    const inventario = causa ? harnesses[causa.harness] : undefined;
+    if (causa && inventario) throw new ErroDeDominio("executor_indisponivel", { cause: { ...causa, inventario } });
+    throw e;
+  }
+}

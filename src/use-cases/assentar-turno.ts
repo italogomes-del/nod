@@ -8,7 +8,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { fraseDoErroFornecedor } from "../domain/erro-fornecedor.ts";
+import { fraseDoErroFornecedor, fraseDoLimiteDoPlano } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
@@ -241,7 +241,13 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
     // NOD-174: falha do fornecedor com classe conhecida ganha a frase com ação ("sua conta do Claude Code saiu deste
     // Mac…"); o motivo gravado continua o do protocolo (ADR-009). O cru fica só no diagnóstico (ADR-041).
-    const fraseFornecedor = desfecho.motivoFalha ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru) : null;
+    // NOD-171: o limite do plano veio do protocolo e diz quando volta; a frase leva a hora.
+    const fraseFornecedor =
+      desfecho.motivoFalha === "limite_do_plano"
+        ? fraseDoLimiteDoPlano(entrega.harness ?? null, resultado.limiteVoltaEm, agora)
+        : desfecho.motivoFalha
+          ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru)
+          : null;
     const aviso = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,

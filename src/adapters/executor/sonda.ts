@@ -9,7 +9,7 @@ import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { causaDaFalhaDeConta, respostaDoTeste } from "../../domain/conta-da-ia.ts";
 import { interpretarLinhaStreamJson } from "../../domain/stream-json.ts";
 import { caminhoAumentado, homeDaPessoa, resolverBinario } from "./caminho.ts";
-import { extrairVersao, flagsListadasNoHelp } from "./flag-floors.ts";
+import { extrairVersao, flagsListadasNoHelp, inventarioAbaixoDoPiso } from "./flag-floors.ts";
 import { executarColetando } from "./processo.ts";
 
 /**
@@ -124,6 +124,9 @@ export async function sondarDetalhado(bin: string | undefined, env: Env, modelo:
   const lenta = (): SondaDetalhada => ({ inventario: { estado: "ausente", motivo: motivoSondaLenta("Claude"), causa: "sonda_lenta", em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null });
   const versao = await lerVersao(binario, ambiente, o.timeoutVersaoMs);
   if ("erro" in versao) return versao.erro === "sonda_lenta" ? lenta() : { inventario: { estado: "ausente", motivo: versao.erro, em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
+  // NOD-171: abaixo do piso testado não gasta turno; a pessoa lê "Atualize", com a versão que tem e a mínima.
+  const antigo = inventarioAbaixoDoPiso("claude-cli", versao.versao, "Claude Code", agora());
+  if (antigo) return { inventario: antigo, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
   const help = await lerFlagsDoHelp(binario, ambiente, o.timeoutVersaoMs);
   if ("erro" in help) return lenta();
   const flagsNoHelp = help.flags;

@@ -195,7 +195,7 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       const { data, events } = await executar(deps, despacharTurno, { machineId: randomUUID(), executor: "local", inventario: { estado: "nao_autenticado", motivo: "faça login no claude", em: 5 } });
       expect(data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
       expect(await deps.repos.turnos.buscar(enviado.turno.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
-      expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("claude-cli nao_autenticado: faça login no claude");
+      expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Claude Code sem conta conectada: faça login no claude");
       expect(events.map((e) => e.kind)).toEqual(["turno_interrompido", "mensagem_criada"]);
     });
   });
@@ -233,6 +233,32 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
         expect(doTurno[1]?.texto).toContain(c.aviso);
         expect(doTurno[1]?.texto).not.toMatch(/[a-z]+_[a-z]+/);
       }
+    });
+  });
+
+  /** NOD-171: o plano do Claude Code no teto. O motivo vem do protocolo (0058) e o aviso diz quando volta. */
+  it("limite do plano: rate_limit rejected vira limite_do_plano gravado e o aviso diz a hora em que volta", async () => {
+    const voltaEm = Date.now() + 2 * 3_600_000;
+    const linhas = [
+      { type: "system", subtype: "init", session_id: randomUUID(), tools: [], model: "m", claude_code_version: "2.1.290", apiKeySource: "none" },
+      { type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(voltaEm / 1000), rateLimitType: "five_hour", unifiedWindows: { five_hour: { utilization: 1 } } } },
+      { type: "result", subtype: "success", is_error: true, result: "Claude AI usage limit reached", session_id: randomUUID(), total_cost_usd: 0, usage: {}, num_turns: 1 },
+    ].map((l) => interpretarLinhaStreamJson(JSON.stringify(l)));
+    const hora = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(Math.floor(voltaEm / 1000) * 1000));
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const maquina = randomUUID();
+      const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+      const resultado = classificarResultado({ eventos: linhas, exitCode: 0, signal: null, stderr: "" });
+      expect(resultado).toMatchObject({ desfecho: "falha", motivoFalha: "limite_do_plano" });
+      const { data } = await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, harness: "claude-cli", fala: { tipo: "texto", texto: resultado.texto }, resultado });
+      expect(data.turno).toMatchObject({ estado: "interrompido", motivoFalha: "limite_do_plano" });
+      const aviso = (await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto ?? "";
+      expect(aviso).toContain("Turno interrompido: seu plano do Claude Code atingiu o limite de uso; volta a funcionar ");
+      expect(aviso).toContain(hora);
+      expect(aviso).not.toContain("usage limit");
     });
   });
 });

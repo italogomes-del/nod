@@ -36,12 +36,13 @@ describe("interpretarLinhaStreamJson", () => {
       utilizacaoSeteDias: 0.03,
       renovaCincoHorasEm: 1789537800000,
       renovaSeteDiasEm: 1789747200000,
+      voltaEm: 1789537800000,
     });
   });
 
   it("NOD-179: rate_limit sem unifiedWindows, ou com resetsAt inválido, vira janelas nulas sem lançar", () => {
     expect(interpretarLinhaStreamJson('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning"}}')).toEqual({
-      tipo: "rate_limit", status: "allowed_warning", utilizacaoCincoHoras: null, utilizacaoSeteDias: null, renovaCincoHorasEm: null, renovaSeteDiasEm: null,
+      tipo: "rate_limit", status: "allowed_warning", utilizacaoCincoHoras: null, utilizacaoSeteDias: null, renovaCincoHorasEm: null, renovaSeteDiasEm: null, voltaEm: null,
     });
     const ruim = '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.5,"resetsAt":0},"seven_day":{"utilization":0.2,"resetsAt":"amanhã"}}}}';
     expect(interpretarLinhaStreamJson(ruim)).toMatchObject({ status: "desconhecido", utilizacaoCincoHoras: 0.5, renovaCincoHorasEm: null, renovaSeteDiasEm: null });
@@ -171,6 +172,49 @@ describe("classificarResultado (ADR-009: estado de protocolo, nunca string de er
  * definido em 2026-09-28: o `result` do CLI traz só a última mensagem. Relatório escrito antes de uma
  * ferramenta (lembrar → "Anotado.") sumia da fala da pessoa e da resposta ao colega.
  */
+describe("NOD-171: limite do plano pelo protocolo (rate_limit rejected + result com erro)", () => {
+  const init = '{"type":"system","subtype":"init","session_id":"ff68ffc2-f8ba-44ed-9f8a-483e3c4b3684","tools":[],"model":"sonnet","claude_code_version":"2.1.290"}';
+  const limite = (status: string, extra = "") =>
+    `{"type":"rate_limit_event","rate_limit_info":{"status":"${status}"${extra},"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":1791306000}}}}`;
+  const erro = '{"type":"result","subtype":"success","is_error":true,"result":"Claude AI usage limit reached","num_turns":1,"usage":{}}';
+  const ok = '{"type":"result","subtype":"success","is_error":false,"result":"feito","num_turns":1,"usage":{}}';
+  const classificar = (...linhas: string[]) => classificarSessao({ eventos: linhas.map(interpretarLinhaStreamJson), exitCode: 0, signal: null, stderr: "" });
+
+  it("rejected e result com erro: limite_do_plano, com a hora em que volta (o resetsAt de cima vence o da janela)", () => {
+    expect(classificar(init, limite("rejected", ',"resetsAt":1791309600'), erro)).toMatchObject({ desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: 1791309600000 });
+    // Sem o resetsAt de cima, vale o da janela do rateLimitType.
+    expect(classificar(init, limite("rejected"), erro)).toMatchObject({ motivoFalha: "limite_do_plano", limiteVoltaEm: 1791306000000 });
+    // O formato do claude-falso: sem resetsAt nenhum, o limite continua, sem hora.
+    const semHora = '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":1}}}}';
+    expect(classificar(init, semHora, erro)).toMatchObject({ motivoFalha: "limite_do_plano", limiteVoltaEm: null });
+  });
+
+  it("allowed e allowed_warning não mudam nada: o erro continua erro_execucao, e o sucesso continua sucesso", () => {
+    for (const status of ["allowed", "allowed_warning"]) {
+      const r = classificar(init, limite(status), erro);
+      expect(r).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao" });
+      expect(r.limiteVoltaEm).toBeUndefined();
+    }
+    expect(classificar(init, limite("rejected"), ok).desfecho).toBe("sucesso");
+  });
+
+  it("rejected com o overage em uso, ou o max_turns, não é limite do plano: o erro é outro", () => {
+    expect(classificar(init, limite("rejected", ',"isUsingOverage":true'), erro)).toMatchObject({ motivoFalha: "erro_execucao" });
+    expect(classificar(init, limite("rejected", ',"isUsingOverage":false'), erro)).toMatchObject({ motivoFalha: "limite_do_plano" });
+    const maxTurns = '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":30,"usage":{}}';
+    expect(classificar(init, limite("rejected"), maxTurns)).toMatchObject({ motivoFalha: "erro_max_turns" });
+  });
+
+  it("o texto do erro não decide: o mesmo result sem rate_limit é erro_execucao (ADR-009)", () => {
+    expect(classificar(init, erro)).toMatchObject({ motivoFalha: "erro_execucao" });
+  });
+
+  it("sessão viva: o rejected de uma rodada anterior não marca a rodada seguinte", () => {
+    const r = classificar(init, limite("rejected"), ok, '{"type":"assistant","message":{"content":[{"type":"text","text":"de novo"}]}}', erro);
+    expect(r).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao" });
+  });
+});
+
 describe("fala inteira: relatório antes da última ferramenta + texto final", () => {
   const init: EventoStream = { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" };
   const ok = (texto: string): EventoStream => ({ tipo: "result", sucesso: true, subtype: "success", sessaoCli: "s", texto, custoUsd: 0.01, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 2, negacoesPermissao: [], erroCru: null });

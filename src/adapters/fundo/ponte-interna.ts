@@ -40,6 +40,11 @@ export type DepsPonte = {
    * executor do próprio processo, em desenvolvimento).
    */
   erroCruNoLog?: boolean;
+  /**
+   * NOD-171: os harnesses de todas as máquinas vivas da pessoa (na ponte HTTP, `harnessesDaPessoa` das conexões).
+   * Somados aos das máquinas desta ponte, deixam o despacho recusar o turno fixado num harness que nenhuma tem pronto.
+   */
+  harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
 };
 
 export type PonteInternaNod = PonteInterna & {
@@ -66,6 +71,16 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const tenantsPorPessoa = new Map<string, string>();
   /** ADR-067: o maior `seq` de fala intermediária já gravado por turno (some na entrega). */
   const falasGravadas = new Map<string, number>();
+
+  /** NOD-171: os harnesses das máquinas desta ponte somados aos da pessoa nas outras conexões; o pronto vence. */
+  function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {
+    const todos: Partial<Record<IdHarness, Inventario>> = { ...(deps.harnessesDaPessoa?.(pessoaId) ?? {}) };
+    for (const m of maquinas.values()) for (const [h, inv] of Object.entries(m.harnesses ?? {})) {
+      const id = h as IdHarness;
+      if (inv && todos[id]?.estado !== "pronto") todos[id] = inv;
+    }
+    return todos;
+  }
 
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
     if (!tenantsPorPessoa.has(pessoaId)) {
@@ -122,7 +137,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
-          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, aceitaLigacao: maquina.ligacao === true });
+          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             escopos.set(r.data.plano.turnoId, escopo);

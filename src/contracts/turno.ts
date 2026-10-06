@@ -117,6 +117,8 @@ export type ResultadoTurno = {
   comandos?: CatalogoDeComandos;
   /** NOD-179: o uso do plano que o CLI informou no turno (último `rate_limit`). Ausente quando o CLI não informou. */
   usoDoPlano?: UsoDoPlano;
+  /** NOD-171: com `motivoFalha` `limite_do_plano`, quando o plano volta a funcionar (epoch ms); `null` se o CLI não disse. */
+  limiteVoltaEm?: number | null;
 };
 
 /** Lista de tarefas do bot (TaskCreate/TaskUpdate do Claude Code), no cartão de atividade (domain/tarefas-do-bot.ts). */
@@ -174,8 +176,8 @@ export type EventoStream =
       /** Texto cru do CLI quando `sucesso` é false (subtype/result/error): vai ao log, nunca à pessoa (ADR-002). */
       erroCru: string | null;
     }
-  /** NOD-179: `renova*Em` é o `resetsAt` de cada janela, já em epoch ms; `null` quando ausente ou inválido. */
-  | { tipo: "rate_limit"; status: string; utilizacaoCincoHoras: number | null; utilizacaoSeteDias: number | null; renovaCincoHorasEm: number | null; renovaSeteDiasEm: number | null }
+  /** NOD-179: `renova*Em` é o `resetsAt` de cada janela, em epoch ms (`null` se inválido); NOD-171: `voltaEm`, o da janela que barrou. */
+  | { tipo: "rate_limit"; status: string; utilizacaoCincoHoras: number | null; utilizacaoSeteDias: number | null; renovaCincoHorasEm: number | null; renovaSeteDiasEm: number | null; voltaEm?: number | null; usandoOverage?: boolean }
   /**
    * Comando em segundo plano do Claude Code (definido em 2026-10-01, ADR-067): `Bash` com run_in_background ou um
    * `Monitor`. Enquanto um estiver "iniciada", a sessão viva não fecha: quando ele termina, o CLI chama o modelo de

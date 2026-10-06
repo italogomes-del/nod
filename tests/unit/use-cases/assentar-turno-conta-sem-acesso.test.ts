@@ -20,7 +20,7 @@ const semAcesso: ResultadoTurno = {
  * definido em 2026-10-05 (medido em produção nesse dia): o turno voltou porque a CONTA da IA não serve. A conversa não
  * pode ganhar a recusa do fornecedor como fala do bot nem "Turno interrompido: erro_execucao".
  */
-async function cenario(o: { harness?: "auto" | "claude-cli"; modelo?: string; origem?: "conversa" | "rotina" } = {}) {
+async function cenario(o: { harness?: "auto" | "claude-cli" | "codex-cli"; modelo?: string; origem?: "conversa" | "rotina" } = {}) {
   let agora = T0;
   const { deps, banco } = depsEmMemoria(MARLON, { relogio: () => agora });
   const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Assistente pessoal" });
@@ -84,6 +84,24 @@ describe("repetirBarradosPorIa: uma IA ficou pronta", () => {
     const r2 = await executar(c.deps, repetirBarradosPorIa, { executor: "local" });
     expect(r2.data).toEqual({ repetidos: 0 });
     expect(c.banco.turnos).toHaveLength(2);
+  });
+
+  it("NOD-171: fixada num harness que não está pronto ou com modelo inválido fica onde está (sem negação a cada anúncio)", async () => {
+    const codex = await cenario({ harness: "codex-cli" });
+    await codex.entregar(null);
+    codex.passar(60_000);
+    expect((await executar(codex.deps, repetirBarradosPorIa, { executor: "local", prontos: ["claude-cli"] })).data).toEqual({ repetidos: 0 });
+    expect((await executar(codex.deps, repetirBarradosPorIa, { executor: "local", prontos: ["claude-cli", "codex-cli"] })).data).toEqual({ repetidos: 1 });
+
+    const invalido = await cenario({ harness: "codex-cli", modelo: "sonnet" });
+    await invalido.entregar(null);
+    invalido.passar(60_000);
+    expect((await executar(invalido.deps, repetirBarradosPorIa, { executor: "local", prontos: ["claude-cli", "codex-cli"] })).data).toEqual({ repetidos: 0 });
+
+    const auto = await cenario();
+    await auto.entregar(null);
+    auto.passar(60_000);
+    expect((await executar(auto.deps, repetirBarradosPorIa, { executor: "local", prontos: ["codex-cli"] })).data).toEqual({ repetidos: 1 });
   });
 
   it("fala barrada há mais de meia hora não é repetida", async () => {

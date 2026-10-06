@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modeloMaisPotente, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
+import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
 
 describe("escolha de inteligência", () => {
   it("escolhe uma conta conectada sem configurar harness ou modelo", () => {
@@ -23,5 +23,40 @@ describe("escolha de inteligência", () => {
     expect(modeloMaisPotente("claude-cli")).toBe("fable");
     expect(modeloMaisPotente("codex-cli")).toBe("gpt-6-astra");
     expect(modeloMaisPotente("hermes")).toBeNull();
+  });
+
+  describe("NOD-171: harness fixado e indisponível", () => {
+    const causaDe = (f: () => unknown) => { try { f(); } catch (e) { return causaHarnessIndisponivel(e); } return null; };
+    it("diz qual harness faltou", () => {
+      expect(causaDe(() => resolverHarness({ harness: "codex-cli", modelo: "auto", prontos: ["claude-cli"] }))).toEqual({ harness: "codex-cli" });
+      expect(causaDe(() => resolverHarness({ modelo: "sonnet", prontos: ["codex-cli"] }))).toEqual({ harness: "claude-cli" });
+      expect(causaDe(() => resolverHarness({ modelo: "auto", prontos: [] }))).toBeNull();
+    });
+    it("modelo inválido vira indisponibilidade com causa, não entrada_invalida (sem laço na fila)", () => {
+      expect(() => resolverHarness({ harness: "codex-cli", modelo: "sonnet", prontos: ["codex-cli"] })).toThrow("executor_indisponivel");
+      expect(causaDe(() => resolverHarness({ harness: "codex-cli", modelo: "sonnet", prontos: ["codex-cli"] }))).toEqual({ harness: "codex-cli", modelo: "sonnet", motivo: "modelo_invalido" });
+      expect(causaDe(() => resolverHarness({ modelo: "gpt-zz", prontos: ["claude-cli"] }))).toEqual({ harness: "claude-cli", modelo: "gpt-zz", motivo: "modelo_invalido" });
+    });
+    it("modelo gravado antes continua resolvendo", () => {
+      expect(resolverHarness({ modelo: "haiku", prontos: ["claude-cli"] })).toEqual({ harness: "claude-cli", modelo: "haiku" });
+      expect(resolverHarness({ harness: "codex-cli", modelo: "gpt-5.6-luna", prontos: ["codex-cli"] })).toEqual({ harness: "codex-cli", modelo: "gpt-5.6-luna" });
+    });
+    it("harnessFixado: auto/auto não fixa; modelo do Claude fixa no Claude", () => {
+      expect(harnessFixado("auto", "auto")).toBeNull();
+      expect(harnessFixado("auto", "opus")).toBe("claude-cli");
+      expect(harnessFixado("codex-cli", "auto")).toBe("codex-cli");
+    });
+    it("a negação nomeia o harness escolhido e o estado dele, nunca 'motor pronto'", () => {
+      const ausente = motivoHarnessIndisponivel("codex-cli", { estado: "ausente", motivo: "Harness não encontrado neste computador", em: 0 });
+      expect(ausente).toBe("Codex não instalado: Harness não encontrado neste computador");
+      expect(motivoHarnessIndisponivel("codex-cli", { estado: "ausente", causa: "cli_antigo", versao: "0.158.0", minima: "0.159.0", motivo: "O Codex deste Mac (0.158.0) é mais antigo", em: 0 })).toContain("Codex desatualizado");
+      expect(motivoHarnessIndisponivel("claude-cli", { estado: "nao_autenticado", motivo: "faça login", em: 0 })).toBe("Claude Code sem conta conectada: faça login");
+      expect(motivoHarnessIndisponivel("codex-cli", { estado: "pronto", versao: "1", em: 0 })).toBe("Codex indisponível");
+      expect(motivoHarnessIndisponivel("codex-cli", { estado: "pronto", versao: "1", em: 0 }, "sonnet")).toContain("modelo sonnet");
+      for (const t of [ausente]) expect(t).not.toContain("motor pronto");
+    });
+    it("sem sonda do harness não afirma 'não instalado'", () => {
+      expect(motivoHarnessIndisponivel("codex-cli", inventarioHarnessSemSonda(0))).toBe("Codex não está pronto em nenhum computador conectado");
+    });
   });
 });

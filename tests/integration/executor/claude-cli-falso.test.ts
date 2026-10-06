@@ -333,16 +333,39 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(espiao.sinais).toEqual(["attempted"]);
   });
 
-  it("sondar() da instância contra o binário falso: pronto 2.1.272 (stream-json, init.apiKeySource none)", async () => {
+  it("sondar() da instância contra o binário falso: pronto 2.1.290 (stream-json, init.apiKeySource none)", async () => {
     const { instance } = await instanciar("s3-mcp-ok");
     const inv = await instance.sondar();
-    expect(inv).toMatchObject({ estado: "pronto", versao: "2.1.272" });
+    expect(inv).toMatchObject({ estado: "pronto", versao: "2.1.290" });
   });
   it("descoberta automática verifica login sem submeter um prompt", async () => {
     const { instance, registro, stdin } = await instanciarCom(criarClaudeCliDriver({ ...lig, sondaSemTurno: true }), "s3-mcp-ok");
-    expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.272" });
+    expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.290" });
     expect((JSON.parse(await readFile(registro, "utf8")) as Registro).argv).toEqual(["auth", "status"]);
     await expect(stat(stdin)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  describe("NOD-171: piso de versão do Claude Code (PISO_CLI)", () => {
+    const ANTIGO = { NOD_FALSO_VERSAO: "2.1.289" };
+    const CLI_ANTIGO = { estado: "ausente", causa: "cli_antigo", versao: "2.1.289", minima: "2.1.290", motivo: "O Claude Code deste Mac (2.1.289) é mais antigo que o testado pelo nod. Atualize para a versão 2.1.290 ou mais nova." };
+    it("sonda completa abaixo do piso: 'ausente' com cli_antigo e as duas versões, sem gastar o turno de sonda", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, ANTIGO);
+      expect(await instance.sondar()).toMatchObject(CLI_ANTIGO);
+      // A última chamada ao CLI foi a leitura da versão: nenhum turno (-p) nem login.
+      expect((JSON.parse(await readFile(registro, "utf8")) as Registro).argv).toEqual(["--version"]);
+    });
+    it("descoberta sem turno abaixo do piso: o mesmo 'ausente', sem perguntar o login", async () => {
+      const { instance, registro } = await instanciarCom(criarClaudeCliDriver({ ...lig, sondaSemTurno: true }), "s3-mcp-ok", ANTIGO);
+      expect(await instance.sondar()).toMatchObject(CLI_ANTIGO);
+      expect((JSON.parse(await readFile(registro, "utf8")) as Registro).argv).not.toContain("auth");
+    });
+    it("turno abaixo do piso: executor_indisponivel com a causa cli_antigo, antes de qualquer prompt", async () => {
+      const { instance, stdin } = await instanciar("s3-mcp-ok", {}, ANTIGO);
+      const espiao = sinksEspiao();
+      await expect(instance.adapter(planoDeTeste(dir)).rodarTurno(espiao.sinks)).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "cli_antigo" });
+      expect(espiao.sinais).toEqual(["attempted"]);
+      await expect(stat(stdin)).rejects.toMatchObject({ code: "ENOENT" });
+    });
   });
 
   describe("sessão viva (ADR-067)", () => {

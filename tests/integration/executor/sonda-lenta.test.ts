@@ -37,7 +37,7 @@ const desligarLentidao = (sh: string) => rm(`${sh}.lento`, { force: true });
 
 /** Claude logado: `--help` lista as flags do turno, para os pisos passarem. */
 const CLAUDE_SH = `case "$*" in
-  --version) echo "2.1.272 (Claude Code)";;
+  --version) echo "2.1.290 (Claude Code)";;
   --help) echo "${FLAGS_DO_TURNO.join(" ")}";;
   "auth status") echo '{"loggedIn":true}';;
 esac
@@ -91,10 +91,10 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
       const bin = await shimLento(dir, "claude-auth-lento", '"auth status"', CLAUDE_SH);
       const instance = await criarClaudeCliDriver(lig).create(cfg(bin));
       const inv = await instance.sondar();
-      expect(inv).toMatchObject({ estado: "nao_autenticado", motivo: FRASE_CLAUDE, causa: "sonda_lenta", versao: "2.1.272" });
+      expect(inv).toMatchObject({ estado: "nao_autenticado", motivo: FRASE_CLAUDE, causa: "sonda_lenta", versao: "2.1.290" });
       expect(JSON.stringify(inv)).not.toContain("entre na sua conta");
       await desligarLentidao(bin);
-      expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.272" });
+      expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.290" });
     });
 
     it("--version lento → ausente com causa, nunca 'Instale ou atualize'; a versão não fica guardada", async () => {
@@ -103,7 +103,7 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
       const inv = await instance.sondar();
       expect(inv).toEqual({ estado: "ausente", motivo: FRASE_CLAUDE, causa: "sonda_lenta", em: expect.any(Number) });
       await desligarLentidao(bin);
-      expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.272" });
+      expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.290" });
     });
 
     it("--help lento → ausente com causa, não 'Atualize o Claude Code'", async () => {

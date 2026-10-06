@@ -259,7 +259,8 @@ export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: I
   if (teste?.testando.includes(ia)) return so("testando");
   if (teste?.rodando && !v) return so(inv?.estado === "pronto" ? "testando" : "procurando");
   if (v?.estado === "pronto") return { situacao: "pronto", resposta: v.resposta ?? null };
-  if (v?.causa) return so(v.causa);
+  // NOD-171: o CLI abaixo do piso aparece como "ausente" (instalar a versão atual resolve) até a tela própria do PR 2.
+  if (v?.causa) return so(v.causa === "cli_antigo" ? "ausente" : v.causa);
   // Sem veredito de conta logada: da instalação e do login quem sabe é o servidor (a sonda do app), que é mais novo
   // que um veredito "falta entrar". Um "pronto" do servidor aqui é só login: com teste, ele ainda vai ser testado.
   const macDizInstalado = v !== undefined && v.estado !== "ausente";
@@ -270,7 +271,7 @@ export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: I
   if (entrando === ia) return so("entrando");
   // NOD-178: o CLI que só demorou não pede "Instalar" nem "Entrar"; o app sonda de novo sozinho a cada 3 s.
   if (inv?.causa === "sonda_lenta") return so("sonda_lenta");
-  if (inv?.estado === "nao_autenticado") return so(inv.causa ?? "falta_entrar");
+  if (inv?.estado === "nao_autenticado") return so(inv.causa && inv.causa !== "cli_antigo" ? inv.causa : "falta_entrar");
   // Um CLI não some no meio do onboarding: se o Mac já o viu, o "ausente" do servidor é que está atrasado.
   return so(macDizInstalado ? "falta_entrar" : "ausente");
 }

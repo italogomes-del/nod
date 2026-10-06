@@ -1,4 +1,6 @@
+import type { Inventario } from "../contracts/inventario.ts";
 import { IAS_DA_LIGACAO, type CausaCerebroCaiu, type EstadoIaDaLigacao, type IaDaLigacao } from "../contracts/voz.ts";
+import { sondaFoiLenta } from "./sonda-lenta.ts";
 
 /**
  * Rede de segurança da ligação (definido em 2026-10-05, emenda da ADR-072). Medido em produção no mesmo dia: a conta do
@@ -40,9 +42,19 @@ export function iaQuePodeAssumir(caiu: IaDaLigacao | null, ias: readonly EstadoI
   return ias.find((i) => i.id !== caiu && i.estado === "pronto")?.id ?? null;
 }
 
+/**
+ * A linha de uma IA no aviso da ligação, do inventário anunciado: só códigos. NOD-178: a sonda lenta segue como causa.
+ * NOD-171: o CLI abaixo do piso segue com a versão e a mínima; sem elas a tela diria "não está neste Mac" e "Instalar".
+ */
+export function estadoIaDaLigacao(id: IaDaLigacao, inv: Inventario): EstadoIaDaLigacao {
+  if (sondaFoiLenta(inv)) return { id, estado: inv.estado, causa: "sonda_lenta" };
+  if (inv.estado === "ausente" && inv.causa === "cli_antigo" && inv.versao && inv.minima) return { id, estado: inv.estado, causa: "cli_antigo", versao: inv.versao, minima: inv.minima };
+  return { id, estado: inv.estado };
+}
+
 /** As duas listas dizem a mesma coisa? (o orquestrador só reenvia o aviso quando o estado de uma IA muda) */
 export function mesmasIas(a: readonly EstadoIaDaLigacao[], b: readonly EstadoIaDaLigacao[]): boolean {
-  return a.length === b.length && a.every((x) => b.some((y) => y.id === x.id && y.estado === x.estado && y.causa === x.causa));
+  return a.length === b.length && a.every((x) => b.some((y) => y.id === x.id && y.estado === x.estado && y.causa === x.causa && y.versao === x.versao));
 }
 
 export type FalaRecente = { autor: "pessoa" | "bot"; texto: string };

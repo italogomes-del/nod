@@ -27,12 +27,12 @@ async function shim(dir: string, nome: string, envDoCenario: Record<string, stri
 /** CLI de mentira que responde --version/--help e, no turno, faz o que `corpo` manda (sh). */
 async function shimProprio(dir: string, nome: string, corpo: string): Promise<string> {
   const sh = join(dir, nome);
-  await writeFile(sh, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.272 (Claude Code)"; exit 0; fi\nif [ "$1" = "--help" ]; then echo "  --strict-mcp-config"; exit 0; fi\n${corpo}\n`);
+  await writeFile(sh, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.290 (Claude Code)"; exit 0; fi\nif [ "$1" = "--help" ]; then echo "  --strict-mcp-config"; exit 0; fi\n${corpo}\n`);
   await chmod(sh, 0o755);
   return sh;
 }
 
-const INIT = (apiKeySource: string) => JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: [], model: "m", claude_code_version: "2.1.272", apiKeySource });
+const INIT = (apiKeySource: string) => JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: [], model: "m", claude_code_version: "2.1.290", apiKeySource });
 const RESULT = JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "s", result: "OK", total_cost_usd: 0.003, num_turns: 1, permission_denials: [] });
 
 const MODELO = "claude-haiku-4-5-20251001";
@@ -60,7 +60,7 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
     const bin = await shim(dir, "claude-pronto");
     const s = await sondarDetalhado(bin, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 123 });
     // env tinha NOD_FALSO_NAO_AUTENTICADO=1: se tivesse chegado ao filho, seria nao_autenticado
-    expect(s.inventario).toEqual({ estado: "pronto", versao: "2.1.272", em: 123 });
+    expect(s.inventario).toEqual({ estado: "pronto", versao: "2.1.290", em: 123 });
     expect(s.binario).toBe(bin);
     expect("email" in s.inventario).toBe(false);
   });
@@ -74,25 +74,25 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
   it("CLI instalado mas deslogado (turno sai 1) → nao_autenticado com a versão e um motivo por código de saída, nunca pelo texto do stderr", async () => {
     const bin = await shimProprio(dir, "claude-deslogado", 'echo "Not logged in · Please run /login" >&2\nexit 1');
     const inv = await sondar(bin, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 3 });
-    expect(inv).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.272", em: 3 });
+    expect(inv).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.290", em: 3 });
   });
 
   it("init.apiKeySource ≠ none (cobraria na chave, não na assinatura) → nao_autenticado com motivo; init sem o campo é fail-closed", async () => {
     const chave = await shimProprio(dir, "claude-chave", `echo '${INIT("apiKeyHelper")}'\necho '${RESULT}'\nexit 0`);
-    expect(await sondar(chave, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 4 })).toEqual({ estado: "nao_autenticado", motivo: "api_key_source_apiKeyHelper", versao: "2.1.272", em: 4 });
+    expect(await sondar(chave, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 4 })).toEqual({ estado: "nao_autenticado", motivo: "api_key_source_apiKeyHelper", versao: "2.1.290", em: 4 });
 
     const semCampo = await shimProprio(dir, "claude-sem-campo", `echo '${JSON.stringify({ type: "system", subtype: "init", session_id: "s" })}'\necho '${RESULT}'\nexit 0`);
     expect((await sondar(semCampo, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS })).estado).toBe("nao_autenticado");
-    expect(await sondar(semCampo, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 41 })).toEqual({ estado: "nao_autenticado", motivo: "api_key_source_desconhecido", versao: "2.1.272", em: 41 });
+    expect(await sondar(semCampo, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 41 })).toEqual({ estado: "nao_autenticado", motivo: "api_key_source_desconhecido", versao: "2.1.290", em: 41 });
   });
 
   it("turno que sai 0 sem init, ou sem result, ou com result de erro → nao_autenticado (nunca 'pronto' por omissão)", async () => {
     const semInit = await shimProprio(dir, "claude-sem-init", `echo '${RESULT}'\nexit 0`);
-    expect(await sondar(semInit, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 5 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_init", versao: "2.1.272", em: 5 });
+    expect(await sondar(semInit, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 5 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_init", versao: "2.1.290", em: 5 });
     const semResult = await shimProprio(dir, "claude-sem-result", `echo '${INIT("none")}'\nexit 0`);
-    expect(await sondar(semResult, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 6 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_result", versao: "2.1.272", em: 6 });
+    expect(await sondar(semResult, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 6 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_result", versao: "2.1.290", em: 6 });
     const comErro = await shimProprio(dir, "claude-erro", `echo '${INIT("none")}'\necho '${JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, session_id: "s" })}'\nexit 0`);
-    expect(await sondar(comErro, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 7 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_com_erro", versao: "2.1.272", em: 7 });
+    expect(await sondar(comErro, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 7 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_com_erro", versao: "2.1.290", em: 7 });
   });
 
   it("binário que existe mas não responde --version (sai 2) → ausente", async () => {
@@ -111,10 +111,10 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
     expect(await sondar(ilegivel, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 6 })).toEqual({ estado: "ausente", motivo: "versao_ilegivel", em: 6 });
 
     const lento = join(dir, "claude-lento");
-    await writeFile(lento, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "1.2.3 (Claude Code)"; exit 0; fi\nif [ "$1" = "--help" ]; then exit 0; fi\nexec sleep 5\n');
+    await writeFile(lento, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.290 (Claude Code)"; exit 0; fi\nif [ "$1" = "--help" ]; then exit 0; fi\nexec sleep 5\n');
     await chmod(lento, 0o755);
     const inv = await sondar(lento, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 8, timeoutTurnoMs: 300 });
-    expect(inv).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_resposta", versao: "1.2.3", em: 8 });
+    expect(inv).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_sem_resposta", versao: "2.1.290", em: 8 });
   });
 
   /**
@@ -125,7 +125,7 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
   const resultCom = (texto: string, erro = false) => JSON.stringify({ type: "result", subtype: erro ? "error_during_execution" : "success", is_error: erro, session_id: "s", result: texto, total_cost_usd: 0, num_turns: 1, permission_denials: [] });
 
   it("a recusa da organização reprova a IA com a causa, venha num result 'de sucesso', num de erro ou só no texto do assistente", async () => {
-    const esperado = { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "2.1.272", em: 9 };
+    const esperado = { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "2.1.290", em: 9 };
     const comoSucesso = await shimProprio(dir, "claude-recusa-sucesso", `echo '${INIT("none")}'\necho '${resultCom(RECUSA)}'\nexit 0`);
     const s = await sondarDetalhado(comoSucesso, env, MODELO, { relogio: () => 9 });
     expect(s.inventario).toEqual(esperado);
@@ -140,8 +140,8 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
 
   it("com o login já conferido, um turno que falha por outro motivo é 'teste_falhou' (não 'falta entrar'); sem isso, nenhuma causa", async () => {
     const quebrou = await shimProprio(dir, "claude-quebrou", 'echo "API Error: 529" >&2\nexit 1');
-    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10, loginConferido: true })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", causa: "teste_falhou", versao: "2.1.272", em: 10 });
-    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.272", em: 10 });
+    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10, loginConferido: true })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", causa: "teste_falhou", versao: "2.1.290", em: 10 });
+    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.290", em: 10 });
   });
 
   it("o teste do onboarding: a pergunta vai inteira num argumento só e a resposta volta pronta para a tela", async () => {
@@ -149,7 +149,7 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
     const bin = await shimProprio(dir, "claude-oi", `printf '%s' "$2" > ${JSON.stringify(visto)}\necho '${INIT("none")}'\necho '${resultCom("“Oi, Marcelo. Tudo pronto por aqui.”\\nsegunda linha")}'\nexit 0`);
     const pergunta = "Diga oi para Marcelo em uma frase curta, em português. Só a frase.";
     const s = await sondarDetalhado(bin, env, MODELO, { relogio: () => 11, pergunta, loginConferido: true });
-    expect(s.inventario).toEqual({ estado: "pronto", versao: "2.1.272", em: 11 });
+    expect(s.inventario).toEqual({ estado: "pronto", versao: "2.1.290", em: 11 });
     expect(s.resposta).toBe("Oi, Marcelo. Tudo pronto por aqui.");
     expect(await readFile(visto, "utf8")).toBe(pergunta);
   });

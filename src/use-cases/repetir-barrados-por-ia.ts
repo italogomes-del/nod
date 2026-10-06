@@ -1,4 +1,6 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { IdHarness } from "../contracts/harness.ts";
+import { harnessFixado, validarInteligencia } from "../domain/harness.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -15,12 +17,17 @@ export const JANELA_REPETIR_BARRADOS_MS = 30 * 60_000;
  *
  * Só a fala mais recente de cada conversa, e só se nada veio depois dela (a própria repetição é um turno mais novo,
  * então uma segunda chamada não repete de novo). Rotina, sala e pedido entre bots ficam de fora: têm vínculos próprios.
+ *
+ * NOD-171: com `prontos` (os harnesses prontos da pessoa), a fala fixada num harness que ainda não está pronto e a de
+ * modelo inválido ficam onde estão: repetidas, seriam recusadas de novo e virariam a barrada mais nova, uma negação
+ * nova a cada anúncio do Mac.
  */
-export const repetirBarradosPorIa: CasoDeUso<{ executor: "local" | "catcher" }, { repetidos: number }> = async (deps, input) => {
+export const repetirBarradosPorIa: CasoDeUso<{ executor: "local" | "catcher"; prontos?: readonly IdHarness[] }, { repetidos: number }> = async (deps, input) => {
   const agora = deps.agora();
   const barrados = await deps.repos.turnos.barradosPorFaltaDeIa(agora - JANELA_REPETIR_BARRADOS_MS);
   const events: RuntimeEvent[] = [];
   for (const turno of barrados) {
+    if (input.prontos && !repeteNosProntos(turno.harness, turno.modelo, input.prontos)) continue;
     const novo = await deps.repos.turnos.enfileirar({
       conversaId: turno.conversaId,
       agenteId: turno.agenteId,
@@ -40,3 +47,13 @@ export const repetirBarradosPorIa: CasoDeUso<{ executor: "local" | "catcher" }, 
   }
   return { data: { repetidos: events.length }, events };
 };
+
+function repeteNosProntos(harness: string | undefined, modelo: string, prontos: readonly IdHarness[]): boolean {
+  try {
+    validarInteligencia(harness ?? "auto", modelo);
+  } catch {
+    return false;
+  }
+  const fixo = harnessFixado(harness, modelo);
+  return fixo === null || prontos.includes(fixo);
+}

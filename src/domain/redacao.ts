@@ -99,6 +99,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   erro_execucao: "a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem",
   motor_ausente: "a IA não está instalada neste Mac",
   nao_autenticado: "a conta da IA não está conectada neste Mac",
+  // NOD-171: sem a hora. O aviso do turno usa fraseDoLimiteDoPlano (erro-fornecedor.ts), que diz quando volta.
+  limite_do_plano: "o plano da IA atingiu o limite de uso; espere o uso renovar e tente de novo",
 };
 
 /** Aceita string: o banco guarda motivos que saíram do enum. Motivo legado sem tradução sai como está, sem quebrar. */

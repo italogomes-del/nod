@@ -137,3 +137,18 @@ it("teste da conta sem login não gasta turno: devolve o estado da sonda", async
   expect(await instance.testar!("Diga oi.")).toMatchObject({ inventario: { estado: "nao_autenticado" }, resposta: null });
   await expect(readFile(join(dir, "registro.json"), "utf8")).rejects.toThrow();
 });
+it("NOD-171: Codex abaixo do piso é 'ausente' com cli_antigo e as duas versões; o turno recusa com a causa, sem rodar", async () => {
+  cfg.env.TESTE_NOD_VERSAO = "0.158.9";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  expect(await instance.sondar()).toMatchObject({ estado: "ausente", causa: "cli_antigo", versao: "0.158.9", minima: "0.159.0", motivo: "O Codex deste Mac (0.158.9) é mais antigo que o testado pelo nod. Atualize para a versão 0.159.0 ou mais nova." });
+  const sinais: (keyof SinaisTurno)[] = [];
+  await expect(instance.adapter(planoHarness()).rodarTurno({ sinal: async (s) => { sinais.push(s); }, delta: () => {}, evento: () => {} })).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "cli_antigo" });
+  expect(sinais).toEqual(["attempted"]);
+  await expect(readFile(join(dir, "registro.json"), "utf8")).rejects.toThrow();
+});
+it("NOD-171: o pré-release do piso fica abaixo dele (semver), e o piso exato passa com a versão limpa", async () => {
+  cfg.env.TESTE_NOD_VERSAO = "0.159.0-alpha.3";
+  expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toMatchObject({ estado: "ausente", causa: "cli_antigo", versao: "0.159.0-alpha.3" });
+  cfg.env.TESTE_NOD_VERSAO = "0.159.0";
+  expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toEqual({ estado: "pronto", versao: "0.159.0", em: expect.any(Number) });
+});

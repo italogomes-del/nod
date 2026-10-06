@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(AQUI, "stream-json");
-const VERSAO = "2.1.272";
+// NOD-171: o padrão é o piso do Claude (PISO_CLI); NOD_FALSO_VERSAO simula um CLI antigo.
+const VERSAO = process.env.NOD_FALSO_VERSAO ?? "2.1.290";
 const CENARIOS = {
   "s3-mcp-ok": "s3-mcp-ok.jsonl",
   "s4b-negado": "s4b-negado.jsonl",

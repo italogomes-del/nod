@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compararVersoes, conferirFloors, extrairVersao, FLAG_FLOORS, flagsListadasNoHelp } from "../../../src/adapters/executor/flag-floors.ts";
+import { compararVersoes, conferirFloors, conferirPisoCli, extrairVersao, FLAG_FLOORS, flagsListadasNoHelp, PISO_CLI } from "../../../src/adapters/executor/flag-floors.ts";
 
 describe("flag floors (ADR-014: 19 versões de CLI, uma tabela de pisos)", () => {
   it("extrairVersao lê x.y.z da saída do --version e null do resto", () => {
@@ -43,5 +43,39 @@ describe("flag floors (ADR-014: 19 versões de CLI, uma tabela de pisos)", () =>
       expect(flag.startsWith("--")).toBe(true);
       expect(regra.piso).toMatch(/^\d+\.\d+\.\d+$/);
     }
+  });
+
+  it("NOD-171: extrairVersao guarda o sufixo de pré-release do Codex", () => {
+    expect(extrairVersao("codex-cli 0.155.0-alpha.2.6\n")).toBe("0.155.0-alpha.2.6");
+    expect(extrairVersao("codex-cli 0.159.2")).toBe("0.159.2");
+  });
+
+  it("NOD-171: pré-release vem antes da versão final (semver), e o número do pré-release é numérico", () => {
+    expect(compararVersoes("0.155.0-alpha.2.6", "0.155.0")).toBe(-1);
+    expect(compararVersoes("0.155.0", "0.155.0-alpha.2.6")).toBe(1);
+    expect(compararVersoes("0.156.0-alpha.1", "0.155.0")).toBe(1);
+    expect(compararVersoes("0.155.0-alpha.10", "0.155.0-alpha.9")).toBe(1);
+    expect(compararVersoes("0.155.0-alpha.2", "0.155.0-beta.1")).toBe(-1);
+    expect(compararVersoes("0.155.0-alpha.2.6", "0.155.0-alpha.2.6")).toBe(0);
+  });
+
+  describe("NOD-171: piso por CLI (a versão em que o UAT passou)", () => {
+    it("igual ou acima passa; abaixo devolve a versão lida e a mínima", () => {
+      const piso = PISO_CLI["codex-cli"];
+      expect(conferirPisoCli("codex-cli", piso)).toEqual({ ok: true });
+      expect(conferirPisoCli("codex-cli", "9.0.0")).toEqual({ ok: true });
+      expect(conferirPisoCli("codex-cli", "0.155.0-alpha.2.6")).toEqual({ ok: false, versao: "0.155.0-alpha.2.6", minima: piso });
+      expect(conferirPisoCli("claude-cli", "2.1.273")).toEqual({ ok: false, versao: "2.1.273", minima: PISO_CLI["claude-cli"] });
+      expect(conferirPisoCli("claude-cli", PISO_CLI["claude-cli"])).toEqual({ ok: true });
+    });
+
+    it("sem versão legível não recusa por piso (a sonda já trata o --version que falhou)", () => {
+      expect(conferirPisoCli("claude-cli", "")).toEqual({ ok: true });
+    });
+
+    it("os pisos são x.y.z e não estão abaixo dos pisos por flag", () => {
+      for (const piso of Object.values(PISO_CLI)) expect(piso).toMatch(/^\d+\.\d+\.\d+$/);
+      for (const regra of Object.values(FLAG_FLOORS)) expect(compararVersoes(PISO_CLI["claude-cli"], regra.piso)).toBeGreaterThanOrEqual(0);
+    });
   });
 });
