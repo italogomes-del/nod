@@ -138,6 +138,11 @@ export function usaSystemPrompt(flagsNoHelp: readonly string[] | null | undefine
   return (flagsNoHelp ?? []).includes("--system-prompt") && compararVersoes(versao, FLAG_FLOORS["--system-prompt"].piso) >= 0;
 }
 
+/** NOD-185: o mesmo gate para desligar o snapshot do prompt de sistema (o `--resume` passa a levar a parte volátil do turno). */
+export function usaSnapshotOff(flagsNoHelp: readonly string[] | null | undefined, versao: string): boolean {
+  return (flagsNoHelp ?? []).includes("--system-prompt-snapshot") && compararVersoes(versao, FLAG_FLOORS["--system-prompt-snapshot"].piso) >= 0;
+}
+
 /** ADR-052: o turno com o kit do terminal — `settings` (o hook do nod) e as pastas além do cwd (ADR-055: a pasta da pessoa). */
 export type TurnoTerminal = { settings: string; dirsExtras: readonly string[] };
 
@@ -181,7 +186,7 @@ export function comandoDoHook(p: { nodePath: string; hookPath: string; config: s
 export const FERRAMENTA_DE_BUSCA = "ToolSearch";
 
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean }): { args: string[]; sessaoCli: string } {
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean; snapshotOff?: boolean }): { args: string[]; sessaoCli: string } {
   const { plano, terminal } = entrada;
   const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
@@ -225,6 +230,10 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     "--permission-mode",
     "default",
     ...argsDoPromptSistema(plano, entrada.systemPrompt === true),
+    // NOD-185: sem o snapshot, o `--resume` leva a parte volátil deste turno, não a gravada no 1º. Vai em todo turno,
+    // para o 1º também não gravar (medido na 2.1.290: cache de 71–72% no 2º e 3º turno; sem a flag, 76–78%, mas do
+    // prompt velho).
+    ...(entrada.snapshotOff ? ["--system-prompt-snapshot", "off"] : []),
     ...(plano.entrada.sessaoCli ? ["--resume", plano.entrada.sessaoCli] : ["--session-id", sessaoCli]),
   ];
   return { args, sessaoCli };
@@ -449,7 +458,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const semKit = pedeTerminal && !terminal ? comAvisoSemTerminal(plano) : {};
                 const esforco = (flagsNoHelp ?? []).includes("--effort");
                 const systemPrompt = usaSystemPrompt(flagsNoHelp, v);
-                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt });
+                const snapshotOff = usaSnapshotOff(flagsNoHelp, v);
+                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];

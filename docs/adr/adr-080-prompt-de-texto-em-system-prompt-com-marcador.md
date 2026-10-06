@@ -62,17 +62,43 @@ novo OK nas duas formas; o turno só de texto leu 15% do cache no append (US$ 0,
 ## Consequências
 
 - Turno de texto no claude-cli ≥ 2.1.290: o 2º turno com outro remetente lê ~75% do contexto do cache em vez de ~16%
-  e custa cerca de 1/4 na medição. A medição é de sessões novas: por causa do snapshot (abaixo), o ganho vale no 1º
-  turno de cada sessão e em cada sessão nova (delegações, rotinas, conversa nova), não em todo `--resume`.
+  e custa cerca de 1/4 na medição. A medição é de sessões novas. No `--resume`, desde a NOD-185 (emenda abaixo), o
+  snapshot desligado faz o 2º e o 3º turno lerem 71–72% do cache com a parte volátil nova; antes, liam 76–78%, mas do
+  prompt gravado no 1º turno.
 - O bot deixa de receber o prompt padrão do Claude Code (orientações gerais de uso de ferramentas, de segurança no git
   como não forçar push nem commitar sem pedido, de estilo). O cwd e a data continuam chegando: o CLI 2.1.290 os manda
   como contexto do usuário, fora do prompt de sistema (conferido na revisão com `claude -p --system-prompt` numa pasta
   vazia: o modelo disse a pasta e a data certas). O nod já informa a pasta do bot e as ferramentas; os quatro
   comportamentos da sonda ficaram iguais. As regras de git do prompt padrão não foram medidas: ficam para o QA.
 - O Codex não muda: segue lendo o `promptSistema` inteiro.
-- Fora do escopo, registrado na NOD-183: o `--system-prompt-snapshot`, ligado por padrão, reenvia no `--resume` o
-  prompt gravado no 1º turno; a parte volátil dos turnos seguintes da mesma sessão não chega ao modelo. Isso já
-  acontecia com o append e vira uma issue à parte.
+- Registrado na NOD-183 e resolvido na NOD-185 (emenda abaixo): o `--system-prompt-snapshot`, ligado por padrão,
+  reenvia no `--resume` o prompt gravado no 1º turno, e a parte volátil dos turnos seguintes da mesma sessão não
+  chegava ao modelo. Já acontecia com o append.
+
+## Emenda — NOD-185: `--system-prompt-snapshot off` (2026-10-06)
+
+No CLI 2.1.290 o snapshot vem ligado: o 1º request da conversa grava o prompt de sistema e todo `--resume` seguinte o
+reenvia como está, mesmo que o launch passe outro texto. A sonda (fases `snapshot`, `snapshotVolatil` e
+`snapshotHistorico` de `scripts/sonda-system-prompt-texto.ts`, sonnet) repetiu a sessão "laranja → azul → verde" com o
+mesmo bot, mudando só a parte volátil:
+
+| 1º turno → seguintes | 2º turno | cachePct 2º | 3º turno | cachePct 3º |
+|---|---|---|---|---|
+| on → on (até aqui) | "laranja" | 78% | "laranja" | 76% |
+| **off → off** | **"azul"** | **72%** | **"verde"** | **71%** |
+| on → off (sessão gravada antes do app novo) | "azul" | 72% | "verde" | 71% |
+
+Em sessões novas, o 2º turno com outro remetente cacheia igual com e sem a flag (75% e 75%). Com um 1º turno de ~15 mil
+tokens, o histórico não cacheava no `--resume` nem com `on` (16% contra 15%, US$ 0,2506 contra 0,2522 no 2º turno):
+desligar o snapshot não encarece a conversa longa.
+
+Decisão: `--system-prompt-snapshot off` em todo turno do claude-cli (no 1º também, para não gravar), com piso 2.1.290
+em `FLAG_FLOORS` e fora de `FLAGS_DO_TURNO`. O gate é o mesmo do `--system-prompt`: a flag no `--help` lido no turno e
+a versão ≥ piso; sem isso, os args saem como antes. Independe da forma do prompt (vale também no append). A ligação não
+muda: é sessão efêmera, sem `--resume`.
+
+Gatilho de revisão: o cache do 2º turno cair abaixo de ~70% com `off` numa versão nova do CLI, ou o histórico passar a
+cachear no `--resume` com `on` (aí o `off` passaria a custar a reescrita do histórico a cada turno).
 
 ## Gatilho de revisão
 

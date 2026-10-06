@@ -53,6 +53,13 @@ export const FLAG_FLOORS = {
    * segue no `--append-system-prompt`.
    */
   "--system-prompt": { piso: "2.1.290", ocultaNoHelp: false },
+  /**
+   * definido em 2026-10-06 (NOD-185, ADR-080): `off` faz o CLI renderizar o prompt de novo a cada request, em vez de
+   * reenviar no `--resume` o gravado no 1º turno. Sondada na 2.1.290: com `off` o 2º e o 3º turno da sessão veem a parte
+   * volátil nova e o cache fica em 71–72%. Condicional como `--system-prompt`: sem ela no help ou abaixo do piso, o
+   * turno sai como antes.
+   */
+  "--system-prompt-snapshot": { piso: "2.1.290", ocultaNoHelp: false },
 } as const satisfies Record<string, { piso: string; ocultaNoHelp: boolean }>;
 
 export type FlagComPiso = keyof typeof FLAG_FLOORS;

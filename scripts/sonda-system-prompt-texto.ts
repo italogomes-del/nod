@@ -10,7 +10,12 @@
  *     prompt novo vale na sessão retomada.
  * Um MCP falso `nod` (sem rede) expõe o kit da delegação e um app `clima` com 20 ferramentas; o hook do terminal é um
  * script local que registra a chamada e deixa passar. Nada sai do Mac além das chamadas ao modelo.
- * Uso: node scripts/sonda-system-prompt-texto.ts [--modelo sonnet] [--fases cache,comportamento,resume] [--bruto dir]
+ * NOD-185 (fases `snapshot`, `snapshotVolatil` e `snapshotHistorico`, fora do padrão): o `--system-prompt-snapshot
+ * on × off` no `--resume` — se o 2º e o 3º turno da mesma sessão veem o prompt novo e quanto cacheiam; `on → off` é a
+ * sessão gravada antes do app atualizado. A `snapshot` troca também o nome do bot (parte estável); a `snapshotVolatil`
+ * muda só a volátil, como no uso real (é a dos números da ADR-080); a `snapshotHistorico` mede um 1º turno longo.
+ * `--formas` filtra só a fase `cache`.
+ * Uso: node scripts/sonda-system-prompt-texto.ts [--modelo sonnet] [--fases cache,comportamento,resume,snapshot,snapshotVolatil,snapshotHistorico] [--formas system,systemOff] [--bruto dir]
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -93,6 +98,8 @@ const FORMAS: Record<string, Forma> = {
   appendExcluir: { nome: "append + --exclude-dynamic-system-prompt-sections", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, v), "--exclude-dynamic-system-prompt-sections"] },
   appendMarcadorExcluir: { nome: "append com marcador + --exclude-dynamic…", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, v), "--exclude-dynamic-system-prompt-sections"] },
   systemMaisAppend: { nome: "--system-prompt (estável) + --append-system-prompt (volátil)", padraoMantido: false, args: (e, v) => ["--system-prompt", e, "--append-system-prompt", v] },
+  // NOD-185: o mesmo --system-prompt com marcador, sem o snapshot (o prompt é renderizado de novo a cada request).
+  systemOff: { nome: "--system-prompt com marcador + snapshot off", padraoMantido: false, args: (e, v) => ["--system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, v), "--system-prompt-snapshot", "off"] },
 };
 
 type Caso = { nome?: string; remetente: string; nativas?: readonly string[]; pastaDoBot?: string; pastas?: { ativa: string; aprovadas: string[] }; terminal?: boolean; memoria?: string };
@@ -149,7 +156,8 @@ escrever(`CLI: modelo ${modelo} · sal ${sal} · bruto ${bruto ?? "(não grava)"
 if (fases.has("cache")) {
   escrever("\n## 1. Cache do 2º turno (sessões novas; o volátil muda de remetente: Cecília → Chico)");
   escrever("| forma | prompt padrão | 1º turno | 2º turno |\n|---|---|---|---|");
-  for (const [chave, forma] of Object.entries(FORMAS)) {
+  const formasCache = arg("--formas")?.split(",");
+  for (const [chave, forma] of Object.entries(FORMAS).filter(([k]) => !formasCache || formasCache.includes(k))) {
     // O nome do bot leva a forma: o prefixo estável de uma forma não aquece o da seguinte.
     const nome = `Sonda ${sal} ${chave}`;
     const t1 = somar(await turno(`cache-${chave}-1`, forma, { nome, remetente: "Cecília" }, "Responda só: ok."));
@@ -195,6 +203,53 @@ if (fases.has("resume")) {
     const t1 = somar(await turno(`resume-${de}-${para}-1`, FORMAS[de]!, { nome: "Ana", remetente: "Cecília", memoria: "A palavra do dia é laranja." }, "Responda só: ok.", { sessao }));
     const t2 = somar(await turno(`resume-${de}-${para}-2`, FORMAS[para]!, { nome: "Bia", remetente: "Chico", memoria: "A palavra do dia é azul." }, "Qual é o seu nome e qual é a palavra do dia, segundo as suas instruções de sistema? Responda só os dois, separados por vírgula.", { sessao, resume: true }));
     escrever(`- ${de} → ${para}: 1º ${t1.ok ? "ok" : `ERRO ${t1.erro}`} · 2º ${t2.ok ? "ok" : `ERRO ${t2.erro}`} · resposta "${t2.texto.trim()}" · 2º turno: ${uso(t2)}`);
+  }
+}
+
+if (fases.has("snapshot")) {
+  escrever("\n## 4. --system-prompt-snapshot no --resume (NOD-185): 1º turno Ana/laranja, 2º e 3º Bia/azul na mesma sessão");
+  escrever("| 1º → seguintes | 2º turno: resposta | 2º turno: uso | 3º turno: resposta | 3º turno: uso |\n|---|---|---|---|---|");
+  const pergunta = "Qual é o seu nome e qual é a palavra do dia, segundo as suas instruções de sistema? Responda só os dois, separados por vírgula.";
+  for (const [de, para] of [["system", "system"], ["systemOff", "systemOff"], ["system", "systemOff"]] as const) {
+    const sessao = randomUUID();
+    const nome = (n: string) => `${n} ${sal}`;
+    const t1 = somar(await turno(`snap-${de}-${para}-1`, FORMAS[de]!, { nome: nome("Ana"), remetente: "Cecília", memoria: "A palavra do dia é laranja." }, "Responda só: ok.", { sessao }));
+    const t2 = somar(await turno(`snap-${de}-${para}-2`, FORMAS[para]!, { nome: nome("Bia"), remetente: "Chico", memoria: "A palavra do dia é azul." }, pergunta, { sessao, resume: true }));
+    const t3 = somar(await turno(`snap-${de}-${para}-3`, FORMAS[para]!, { nome: nome("Bia"), remetente: "Gil", memoria: "A palavra do dia é azul." }, `De novo: ${pergunta}`, { sessao, resume: true }));
+    escrever(`| ${de} → ${para}${t1.ok ? "" : ` (1º ERRO ${t1.erro})`} | "${t2.texto.trim()}" | ${uso(t2)} | "${t3.texto.trim()}" | ${uso(t3)} |`);
+  }
+}
+
+if (fases.has("snapshotVolatil")) {
+  // Como no uso real: o bot é o mesmo (parte estável idêntica) e só a volátil muda — memória e remetente. Cada linha tem
+  // um bot próprio, para o prefixo de uma não aquecer o da seguinte.
+  escrever("\n## 5. --system-prompt-snapshot no --resume, só a parte volátil mudando (memória laranja → azul → verde)");
+  escrever("| 1º → seguintes | 2º turno: resposta | 2º turno: uso | 3º turno: resposta | 3º turno: uso |\n|---|---|---|---|---|");
+  const pergunta = "Qual é a palavra do dia, segundo as suas instruções de sistema? Responda só a palavra.";
+  for (const [de, para] of [["system", "system"], ["systemOff", "systemOff"], ["system", "systemOff"]] as const) {
+    const sessao = randomUUID();
+    const nome = `Vera ${sal} ${de}-${para}`;
+    const t1 = somar(await turno(`snapv-${de}-${para}-1`, FORMAS[de]!, { nome, remetente: "Cecília", memoria: "A palavra do dia é laranja." }, "Responda só: ok.", { sessao }));
+    const t2 = somar(await turno(`snapv-${de}-${para}-2`, FORMAS[para]!, { nome, remetente: "Chico", memoria: "A palavra do dia é azul." }, pergunta, { sessao, resume: true }));
+    const t3 = somar(await turno(`snapv-${de}-${para}-3`, FORMAS[para]!, { nome, remetente: "Gil", memoria: "A palavra do dia é verde." }, `De novo: ${pergunta}`, { sessao, resume: true }));
+    escrever(`| ${de} → ${para}${t1.ok ? "" : ` (1º ERRO ${t1.erro})`} | "${t2.texto.trim()}" | ${uso(t2)} | "${t3.texto.trim()}" | ${uso(t3)} |`);
+  }
+}
+
+if (fases.has("snapshotHistorico")) {
+  // O preço do `off`: o histórico da conversa vem DEPOIS do prompt de sistema; se a volátil muda, o cache dele cai junto.
+  // O 1º turno leva um texto longo (~15 mil tokens) para pesar como uma conversa comprida.
+  escrever("\n## 6. Histórico longo no --resume (1º turno com ~15 mil tokens; a volátil muda a cada turno)");
+  escrever("| 1º → seguintes | 2º turno: resposta | 2º turno: uso | 3º turno: resposta | 3º turno: uso |\n|---|---|---|---|---|");
+  const longo = Array.from({ length: 600 }, (_, i) => `Linha ${i} do relatório ${sal}: a estação ${i % 37} registrou ${(i * 7) % 101} mm de chuva e vento de ${(i * 13) % 61} km/h.`).join("\n");
+  const pergunta = "Qual é a palavra do dia, segundo as suas instruções de sistema? Responda só a palavra.";
+  for (const [de, para] of [["system", "system"], ["systemOff", "systemOff"]] as const) {
+    const sessao = randomUUID();
+    const nome = `Vera ${sal} hist-${de}`;
+    const t1 = somar(await turno(`snaph-${de}-1`, FORMAS[de]!, { nome, remetente: "Cecília", memoria: "A palavra do dia é laranja." }, `Guarde este relatório para depois e responda só: ok.\n\n${longo}`, { sessao }));
+    const t2 = somar(await turno(`snaph-${de}-2`, FORMAS[para]!, { nome, remetente: "Chico", memoria: "A palavra do dia é azul." }, pergunta, { sessao, resume: true }));
+    const t3 = somar(await turno(`snaph-${de}-3`, FORMAS[para]!, { nome, remetente: "Gil", memoria: "A palavra do dia é verde." }, `De novo: ${pergunta}`, { sessao, resume: true }));
+    escrever(`| ${de} → ${para}${t1.ok ? "" : ` (1º ERRO ${t1.erro})`} | "${t2.texto.trim()}" | ${uso(t2)} | "${t3.texto.trim()}" | ${uso(t3)} |`);
   }
 }
 

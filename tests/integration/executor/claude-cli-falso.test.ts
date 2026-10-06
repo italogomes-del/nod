@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -123,14 +124,14 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
-  async function instanciarCom(driver: Driver, cenario: string, extraShim: Record<string, string> = {}, extraEnv: Record<string, string> = {}): Promise<{ instance: Instance; registro: string; stdin: string }> {
+  async function instanciarCom(driver: Driver, cenario: string, extraShim: Record<string, string> = {}, extraEnv: Record<string, string> = {}): Promise<{ instance: Instance; registro: string; stdin: string; sessoes: string }> {
     const sessoes = join(dir, `sessoes-${cenario}-${Math.random().toString(36).slice(2, 8)}`);
     const bin = await shim(dir, `claude-${cenario}-${Math.random().toString(36).slice(2, 6)}`, { NOD_FALSO_CENARIO: cenario, NOD_FALSO_SESSOES: sessoes, ...extraShim });
     const registro = join(dir, `registro-${Math.random().toString(36).slice(2, 8)}.json`);
     const stdin = join(dir, `stdin-${Math.random().toString(36).slice(2, 8)}.txt`);
     const cfg: ConfigDriver = { ...cfgBase, bin, env: { ...cfgBase.env, TESTE_NOD_REGISTRO: registro, TESTE_NOD_STDIN: stdin, ...extraEnv } };
     const instance = await driver.create(cfg);
-    return { instance, registro, stdin };
+    return { instance, registro, stdin, sessoes };
   }
 
   const instanciar = (cenario: string, extraEnv: Record<string, string> = {}, extraShim: Record<string, string> = {}) => instanciarCom(criarClaudeCliDriver(lig), cenario, extraShim, extraEnv);
@@ -392,6 +393,39 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       expect((await instance.adapter(plano).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
       const prompt = valor((JSON.parse(await readFile(registro, "utf8")) as Registro).argv, "--system-prompt")!;
       expect(prompt).toBe(`Você é a sonda do nod.\n${MARCADOR}\nQuem pediu: Ana.\n${AVISO_SEM_TERMINAL}`);
+    });
+
+    // NOD-185: o CLI falso imita o snapshot (on: o --resume reusa o prompt gravado no 1º turno; off: vale o do launch).
+    describe("NOD-185: --system-prompt-snapshot off no --resume", () => {
+      const comVolatil = (volatil: string, sessaoCli?: string | null) => {
+        const base = planoDeTeste(dir, sessaoCli ? { sessaoCli } : {});
+        return { ...base, promptSistema: `Você é a sonda do nod.\n${volatil}`, promptSistemaPartes: { estavel: "Você é a sonda do nod.", volatil } };
+      };
+      const doisTurnos = async (help: string) => {
+        const { instance, registro, sessoes } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: help });
+        const primeiro = await instance.adapter(comVolatil("A palavra do dia é laranja.")).rodarTurno(sinksEspiao().sinks);
+        const segundo = await instance.adapter(comVolatil("A palavra do dia é azul.", primeiro.sessaoCli)).rodarTurno(sinksEspiao().sinks);
+        expect(segundo.desfecho).toBe("sucesso");
+        const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+        expect(valor(r.argv, "--resume")).toBe(primeiro.sessaoCli);
+        // O falso só grava o snapshot (<sessão>.prompt) num launch sem `off`: diz se o 1º turno também foi com `off`.
+        const gravouSnapshot = existsSync(join(sessoes, `${primeiro.sessaoCli}.prompt`));
+        return { argv: r.argv, gravouSnapshot, visto: await readFile(join(sessoes, `${primeiro.sessaoCli}.efetivo`), "utf8") };
+      };
+
+      it("com a flag no help: o modelo vê a parte volátil nova, com off no 1º turno (nada gravado) e no --resume", async () => {
+        const { argv, gravouSnapshot, visto } = await doisTurnos("--output-format --system-prompt --system-prompt-snapshot");
+        expect(visto).toBe(`Você é a sonda do nod.\n${MARCADOR}\nA palavra do dia é azul.`);
+        expect(gravouSnapshot).toBe(false);
+        expect(valor(argv, "--system-prompt-snapshot")).toBe("off");
+      });
+
+      it("sem a flag no help: os args de antes, e o --resume segue com o prompt gravado no 1º turno", async () => {
+        const { argv, gravouSnapshot, visto } = await doisTurnos("--output-format --system-prompt");
+        expect(visto).toContain("laranja");
+        expect(gravouSnapshot).toBe(true);
+        expect(argv).not.toContain("--system-prompt-snapshot");
+      });
     });
   });
 

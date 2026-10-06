@@ -217,6 +217,16 @@ if (resume && !existsSync(join(dirSessoes, `${resume}.usada`)) && process.env.NO
 }
 const sessao = sessionId ?? resume ?? "00000000-0000-4000-8000-000000000000";
 
+// NOD-185: o --system-prompt-snapshot, como a sonda mediu na 2.1.290. Com `on` (o padrão), o 1º request grava o prompt
+// de sistema e o --resume reusa o gravado, seja qual for o do launch; com `off`, vale o prompt deste launch. O prompt
+// que o "modelo" viu fica em <sessão>.efetivo, para o teste conferir.
+const promptDoLaunch = valor("--system-prompt") ?? valor("--append-system-prompt") ?? "";
+const gravado = join(dirSessoes, `${sessao}.prompt`);
+const snapshotOff = valor("--system-prompt-snapshot") === "off";
+const efetivo = !snapshotOff && resume && existsSync(gravado) ? readFileSync(gravado, "utf8") : promptDoLaunch;
+if (!snapshotOff && !existsSync(gravado)) writeFileSync(gravado, promptDoLaunch);
+writeFileSync(join(dirSessoes, `${sessao}.efetivo`), efetivo);
+
 const cenario = process.env.NOD_FALSO_CENARIO ?? "s3-mcp-ok";
 if (cenario === "s2c-session-in-use") {
   process.stderr.write(`Error: Session ID ${sessao} is already in use.\n`);

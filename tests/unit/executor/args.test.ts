@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { argsDoPromptSistema, AVISO_SEM_TERMINAL, CLAUDE_MD_DAS_PASTAS, comAvisoSemTerminal, FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho, usaSystemPrompt } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { argsDoPromptSistema, AVISO_SEM_TERMINAL, CLAUDE_MD_DAS_PASTAS, comAvisoSemTerminal, FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho, usaSnapshotOff, usaSystemPrompt } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { ambienteDaLigacao, montarArgsLigacao } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
-import { FLAG_FLOORS } from "../../../src/adapters/executor/flag-floors.ts";
+import { FLAG_FLOORS, flagsListadasNoHelp } from "../../../src/adapters/executor/flag-floors.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { MARCADOR_PARTE_DINAMICA } from "../../../src/domain/marcador-prompt.ts";
 import { NATIVAS_DE_ARQUIVO } from "../../../src/domain/nativas.ts";
@@ -277,6 +277,65 @@ describe("prompt de texto em --system-prompt com o marcador de cache (NOD-183, A
     expect(usaSystemPrompt(["--output-format"], "2.1.290")).toBe(false);
     expect(usaSystemPrompt(null, "2.1.290")).toBe(false);
     expect(usaSystemPrompt(undefined, "2.1.290")).toBe(false);
+  });
+});
+
+describe("--system-prompt-snapshot off: o --resume leva a parte volátil do turno (NOD-185)", () => {
+  const partes = { estavel: "Você é a Vera.", volatil: "Quem pediu: Bia." };
+  const plano = (sessaoCli?: string): PlanoTurno => {
+    const base = planoDeTeste();
+    return { ...base, promptSistema: `${partes.estavel}\n${partes.volatil}`, promptSistemaPartes: partes, entrada: { ...base.entrada, sessaoCli: sessaoCli ?? null } };
+  };
+  const SESSAO = "11111111-2222-4333-8444-555555555555";
+
+  it("com a flag liberada: off no 1º turno (não grava o snapshot) e no --resume", () => {
+    const primeiro = montarArgs({ plano: plano(), mcpJson: "/m", systemPrompt: true, snapshotOff: true }).args;
+    expect(valor(primeiro, "--system-prompt-snapshot")).toBe("off");
+    expect(primeiro).toContain("--session-id");
+    const resume = montarArgs({ plano: plano(SESSAO), mcpJson: "/m", systemPrompt: true, snapshotOff: true }).args;
+    expect(valor(resume, "--system-prompt-snapshot")).toBe("off");
+    expect(valor(resume, "--resume")).toBe(SESSAO);
+    // O prompt do --resume é o deste turno, com a volátil nova depois do marcador.
+    expect(valor(resume, "--system-prompt")).toBe(`Você é a Vera.\n${MARCADOR_PARTE_DINAMICA}\nQuem pediu: Bia.`);
+  });
+
+  it("vale também no append (CLI com a flag sem --system-prompt liberado): o snapshot independe da forma", () => {
+    const args = montarArgs({ plano: plano(SESSAO), mcpJson: "/m", snapshotOff: true }).args;
+    expect(valor(args, "--append-system-prompt")).toBe(plano().promptSistema);
+    expect(valor(args, "--system-prompt-snapshot")).toBe("off");
+  });
+
+  it("sem a flag (abaixo do piso ou fora do help): os args de antes, sem --system-prompt-snapshot", () => {
+    for (const sessaoCli of [undefined, SESSAO]) {
+      const args = montarArgs({ plano: plano(sessaoCli), mcpJson: "/m", sessaoNova: () => SESSAO, systemPrompt: true }).args;
+      expect(args).not.toContain("--system-prompt-snapshot");
+      expect(montarArgs({ plano: plano(sessaoCli), mcpJson: "/m", sessaoNova: () => SESSAO, systemPrompt: true, snapshotOff: false }).args).toEqual(args);
+    }
+  });
+
+  it("piso na versão sondada, fora do gate de todo turno", () => {
+    expect(FLAG_FLOORS["--system-prompt-snapshot"].piso).toBe("2.1.290");
+    expect(FLAGS_DO_TURNO).not.toContain("--system-prompt-snapshot");
+  });
+
+  it("o help do 2.1.290 lista a flag com o nome inteiro (não só --system-prompt)", () => {
+    const help = "  --system-prompt <prompt>              System prompt to use for the session\n  --system-prompt-snapshot <on|off>     Record the system prompt once per\n";
+    expect(flagsListadasNoHelp(help)).toEqual(expect.arrayContaining(["--system-prompt", "--system-prompt-snapshot"]));
+  });
+
+  it("gate do turno: a flag no help E a versão no piso; o --system-prompt sozinho no help não liga", () => {
+    const help = ["--output-format", "--system-prompt", "--system-prompt-snapshot"];
+    expect(usaSnapshotOff(help, "2.1.290")).toBe(true);
+    expect(usaSnapshotOff(help, "2.1.289")).toBe(false);
+    expect(usaSnapshotOff(["--output-format", "--system-prompt"], "2.1.290")).toBe(false);
+    expect(usaSnapshotOff(null, "2.1.290")).toBe(false);
+  });
+
+  it("a ligação não muda: sessão efêmera, sem --resume, sem a flag mesmo com ela no help", () => {
+    const voz: PlanoTurno = { ...plano(), modoTurno: "ligacao", ligacaoVoz: { ligacaoId: "l", modelo: "claude-sonnet-4-6", nomeBot: "Vera", generoVoz: "feminina" } };
+    const args = montarArgsLigacao({ plano: voz, mcpJson: "/m", sessaoId: "s", flagsNoHelp: ["--system-prompt", "--system-prompt-snapshot"] });
+    expect(args).not.toContain("--system-prompt-snapshot");
+    expect(args).not.toContain("--resume");
   });
 });
 
