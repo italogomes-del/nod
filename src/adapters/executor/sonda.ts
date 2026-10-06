@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RESPOSTA_TESTE_IA_MAX } from "../../contracts/desktop.ts";
 import type { CausaSemIa, Inventario } from "../../contracts/inventario.ts";
+import { motivoSondaLenta } from "../../domain/sonda-lenta.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { causaDaFalhaDeConta, respostaDoTeste } from "../../domain/conta-da-ia.ts";
@@ -21,8 +22,19 @@ import { executarColetando } from "./processo.ts";
  * O turno de sonda custa (medido em 2026-09-16, mapa-cli: US$0,003–0,02 com haiku) — por isso o
  * cache de 5 min em src/services/inventario.ts e o modelo mais barato (EMENDA 35).
  */
+/**
+ * definido em 2026-09-16: 10 s para `--version`/`--help`/`auth status` (local, sem rede). revisto em 2026-10-05 (NOD-178):
+ * configurável por NOD_PRAZO_SONDA_MS; com o Mac carregado (load 260–550 em 12 núcleos) o `--version` passou de 10 s.
+ */
+export const PRAZO_SONDA_PADRAO_MS = 10_000;
+
+/** NOD_PRAZO_SONDA_MS do env do processo (antes da denylist), na convenção de NOD_PRAZO_DECISAO_MS. */
+export function prazoSondaDoEnv(env: Readonly<Record<string, string | undefined>>): number | undefined {
+  return Number(env.NOD_PRAZO_SONDA_MS) || undefined;
+}
+
 export type OpcoesSonda = {
-  /** definido em 2026-09-16: 10 s para `--version`/`--help` (local, sem rede). */
+  /** Prazo de `--version`/`--help`; default PRAZO_SONDA_PADRAO_MS. */
   timeoutVersaoMs?: number;
   /** definido em 2026-09-16: 90 s para o turno de uma palavra — a sonda s3 com MCP levou 8,3 s; folga de 10x. */
   timeoutTurnoMs?: number;
@@ -59,19 +71,25 @@ export function ambienteDaSonda(env: Env, home: string): Record<string, string> 
   return { ...limpo, PATH: caminhoAumentado(env.PATH, home), HOME: limpo.HOME ?? home };
 }
 
-/** Só `--version`: barato e sem rede. Para o driver conferir floors sem gastar turno. */
-export async function lerVersao(binario: string, env: Record<string, string>, timeoutMs = 10_000): Promise<{ versao: string } | { erro: string }> {
+/**
+ * Só `--version`: barato e sem rede. Para o driver conferir floors sem gastar turno.
+ * NOD-178: estouro de prazo é `sonda_lenta` (o CLI existe e só demorou), nunca `version_exit_null`.
+ */
+export async function lerVersao(binario: string, env: Record<string, string>, timeoutMs = PRAZO_SONDA_PADRAO_MS): Promise<{ versao: string } | { erro: string }> {
   const r = await executarColetando({ bin: binario, args: ["--version"], env, cwd: tmpdir(), timeoutMs });
   if (r.erroSpawn) return { erro: "binario_nao_executa" };
+  if (r.estourouTempo) return { erro: "sonda_lenta" };
   if (r.exitCode !== 0) return { erro: `version_exit_${r.exitCode ?? "null"}` };
   const versao = extrairVersao(r.stdout);
   return versao ? { versao } : { erro: "versao_ilegivel" };
 }
 
-export async function lerFlagsDoHelp(binario: string, env: Record<string, string>, timeoutMs = 10_000): Promise<string[] | null> {
+/** Flags do `--help`; `flags: null` quando o help falhou. NOD-178: o estouro de prazo volta à parte, como `sonda_lenta`. */
+export async function lerFlagsDoHelp(binario: string, env: Record<string, string>, timeoutMs = PRAZO_SONDA_PADRAO_MS): Promise<{ flags: string[] | null } | { erro: "sonda_lenta" }> {
   const r = await executarColetando({ bin: binario, args: ["--help"], env, cwd: tmpdir(), timeoutMs });
-  if (r.erroSpawn || r.exitCode !== 0) return null;
-  return flagsListadasNoHelp(r.stdout);
+  if (r.estourouTempo) return { erro: "sonda_lenta" };
+  if (r.erroSpawn || r.exitCode !== 0) return { flags: null };
+  return { flags: flagsListadasNoHelp(r.stdout) };
 }
 
 /**
@@ -102,9 +120,13 @@ export async function sondarDetalhado(bin: string | undefined, env: Env, modelo:
   const binario = await resolverBinario(bin, ambiente.PATH ?? "", home);
   if (!binario) return { inventario: { estado: "ausente", motivo: bin ? "binario_nao_encontrado" : "claude_fora_do_path", em: agora() }, binario: null, flagsNoHelp: null, custoUsd: null, resposta: null };
 
+  // NOD-178: o CLI que só demorou continua 'ausente' (fail-closed), mas com a causa e a frase de lentidão, nunca "não instalado".
+  const lenta = (): SondaDetalhada => ({ inventario: { estado: "ausente", motivo: motivoSondaLenta("Claude"), causa: "sonda_lenta", em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null });
   const versao = await lerVersao(binario, ambiente, o.timeoutVersaoMs);
-  if ("erro" in versao) return { inventario: { estado: "ausente", motivo: versao.erro, em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
-  const flagsNoHelp = await lerFlagsDoHelp(binario, ambiente, o.timeoutVersaoMs);
+  if ("erro" in versao) return versao.erro === "sonda_lenta" ? lenta() : { inventario: { estado: "ausente", motivo: versao.erro, em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
+  const help = await lerFlagsDoHelp(binario, ambiente, o.timeoutVersaoMs);
+  if ("erro" in help) return lenta();
+  const flagsNoHelp = help.flags;
 
   const dir = await mkdtemp(join(o.cwdBase ?? tmpdir(), "nod-sonda-"));
   try {

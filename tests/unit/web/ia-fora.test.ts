@@ -4,7 +4,7 @@ import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { HARNESSES } from "../../../src/contracts/harness.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem } from "../../../web/telas/conversa.ts";
-import { inventarioDaIa, linhaIaTrocada } from "../../../web/telas/ia-fora.ts";
+import { inventarioDaIa, linhaIaTrocada, pedeInstalar } from "../../../web/telas/ia-fora.ts";
 
 /**
  * A conversa quando a conta da IA não serve (definido em 2026-10-05; protótipo "primeira sessão sem tropeços", jornada 3).
@@ -75,6 +75,19 @@ describe("aviso: a conta da IA entrou e não serve", () => {
     expect(html).not.toContain("ia-entrar");
     expect(html).not.toContain("ia-conectar");
     expect(html).not.toContain("Conectar IA");
+  });
+
+  it("NOD-178: a outra IA 'ausente' só porque demorou: o botão conecta, não manda instalar", () => {
+    noApp(true);
+    const lento: Inventario = { estado: "ausente", causa: "sonda_lenta", motivo: "O Codex demorou para responder; o Mac está carregado. Tente de novo em instantes.", em: 0 };
+    const html = renderMensagem(negacao(), com({ claude: SEM_ACESSO, codex: lento }));
+    expect(html).toContain('data-act="ia-conectar"');
+    expect(html).toContain("Conectar o ChatGPT");
+    expect(html).not.toContain("Instalar");
+    expect(pedeInstalar(lento)).toBe(false);
+    expect(pedeInstalar(AUSENTE)).toBe(true);
+    expect(pedeInstalar(PRONTO)).toBe(false);
+    expect(pedeInstalar(null)).toBe(false);
   });
 
   it("negação sem causa (app antigo) segue no aviso de sempre", () => {

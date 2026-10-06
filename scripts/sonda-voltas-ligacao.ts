@@ -66,7 +66,8 @@ async function sondar(): Promise<void> {
   const envBase = montarAmbiente("local", process.env);
   const env = ambienteDaLigacao(envBase, cfg);
   // Mesmo gate do driver: `--effort` só se o `--help` do CLI listar a flag.
-  const flags = await lerFlagsDoHelp("claude", env);
+  const help = await lerFlagsDoHelp("claude", env);
+  const flags = "flags" in help ? help.flags : null;
   if (cfg.esforco && !flags?.includes("--effort")) escrever(`aviso: o CLI não lista --effort; esforco=${cfg.esforco} ignorado`);
   const cwd = mkdtempSync(join(tmpdir(), "sonda-voltas-"));
   const mcpJson = join(cwd, "mcp.json");

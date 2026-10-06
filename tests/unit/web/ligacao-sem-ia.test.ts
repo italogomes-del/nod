@@ -143,6 +143,17 @@ describe("2C · nenhuma outra IA pronta no Mac", () => {
     ]);
   });
 
+  it("NOD-178: a outra IA só demorou para responder: nem 'Instalar' nem 'não está neste Mac', e nenhum botão", () => {
+    for (const estado of ["ausente", "nao_autenticado"] as const) {
+      for (const ponte of [{ entrar: true, instalar: true }, { entrar: false, instalar: false }]) {
+        const html = htmlSemIa(semOutra({ ias: [{ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado, causa: "sonda_lenta" }], ponte }), NINA);
+        expect(html).toContain("O Codex demorou para responder; o Mac está carregado. A ligação percebe quando ficar pronto.");
+        expect(html).not.toMatch(/Instal|não está neste Mac|falta entrar/);
+        expect(botoes(html).map((b) => b.ia)).not.toContain("codex-cli");
+      }
+    }
+  });
+
   it("uma IA que o servidor não listou (não atende ligação neste nod) não ganha card", () => {
     const html = htmlSemIa(semOutra({ ias: [{ id: "claude-cli", estado: "pronto" }] }), NINA);
     expect(html.match(/class="lsi-card"/g)).toHaveLength(1);
@@ -217,6 +228,10 @@ describe("as mensagens novas da mídia, conferidas campo a campo", () => {
     expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: [], ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: [], ate: 1 });
     // Campos a mais (um texto do fornecedor, por exemplo) nunca passam.
     expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: [], ate: 1, erro: "Your organization has disabled…" }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: [], ate: 1 });
+    // NOD-178: a causa de lentidão passa; qualquer outra causa na linha da IA é descartada.
+    const lenta = [{ id: "codex-cli", estado: "ausente", causa: "sonda_lenta" }];
+    expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: lenta, ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: lenta, ate: 1 });
+    expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: [{ id: "codex-cli", estado: "ausente", causa: "binario_nao_encontrado" }], ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: [{ id: "codex-cli", estado: "ausente" }], ate: 1 });
   });
 
   it("`sem-ia` fora do formato é ignorada", () => {

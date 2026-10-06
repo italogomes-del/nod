@@ -32,6 +32,11 @@ describe("desktop: fronteiras HTTP", () => {
   it("não confia no relógio nem em prosa do inventário remoto", () => {
     expect(inventario({ estado: "ausente", em: Infinity, motivo: "segredo" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });
     expect(() => sinais({ attempted: "true" })).toThrow();
+    // NOD-178: a causa conhecida atravessa, com a frase do servidor; causa desconhecida é descartada.
+    expect(inventario({ estado: "nao_autenticado", em: 1, motivo: "segredo", causa: "sonda_lenta" }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "O harness demorou para responder; o Mac está carregado. Tente de novo em instantes.", causa: "sonda_lenta" });
+    // Anunciado por harness, a frase diz quem demorou.
+    expect(inventario({ estado: "ausente", em: 1, motivo: "Instale", causa: "sonda_lenta" }, 100, "Codex")).toEqual({ estado: "ausente", em: 100, motivo: "O Codex demorou para responder; o Mac está carregado. Tente de novo em instantes.", causa: "sonda_lenta" });
+    expect(inventario({ estado: "ausente", em: 1, motivo: "x", causa: "inventada" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
   });
   it("conta sem acesso (2026-10-05): a causa é código fechado, a frase é do servidor, e o erro cru atravessa só até o teto", () => {

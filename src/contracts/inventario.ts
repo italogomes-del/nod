@@ -12,14 +12,21 @@ export const CAUSAS_SEM_IA = ["conta_sem_acesso", "teste_falhou"] as const;
 export type CausaSemIa = (typeof CAUSAS_SEM_IA)[number];
 
 /**
+ * Por que a sonda não chegou a 'pronto' quando a razão não é o binário nem a conta (NOD-178). O estado continua
+ * fail-closed (ADR-019, sem quarto estado); a causa é o que a UI e as mensagens leem para não dizer "Instale".
+ * `sonda_lenta`: o `--version`/`--help`/`auth status` estourou o prazo (Mac carregado). A NOD-171 acrescenta `cli_antigo`.
+ */
+export type CausaInventario = "sonda_lenta";
+
+/**
  * Snapshot da sonda (ADR-019): três estados, motivo escrito, versão do CLI e instante.
  * SEM email nem identidade do fornecedor — proibida para autorização e não gravada.
- * `causa` só existe quando um teste de verdade reprovou uma IA que estava logada; ausente = não há login (ou a sonda
- * de login falhou), que é o `nao_autenticado` de sempre.
+ * `causa` em `nao_autenticado`: um teste de verdade reprovou uma IA logada (CausaSemIa) ou a sonda só demorou
+ * (`sonda_lenta`); sem causa = não há login, que é o `nao_autenticado` de sempre. Em `ausente`, só `sonda_lenta`.
  */
 export type Inventario =
-  | { estado: "ausente"; motivo: string; em: EpochMs }
-  | { estado: "nao_autenticado"; motivo: string; versao?: string; causa?: CausaSemIa; em: EpochMs }
+  | { estado: "ausente"; motivo: string; causa?: CausaInventario; em: EpochMs }
+  | { estado: "nao_autenticado"; motivo: string; versao?: string; causa?: CausaSemIa | CausaInventario; em: EpochMs }
   | { estado: "pronto"; versao: string; em: EpochMs };
 
 /** A frase de cada causa, para quem só tem o código (o servidor, ao receber o anúncio de um Mac). */

@@ -4,7 +4,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import type { Volta } from "../lib/volta.ts";
-import { inventarioEmUso, renderExecutor, textoInventario } from "./frota.ts";
+import { inventarioEmUso, renderExecutor, situacaoMotorFora, textoInventario } from "./frota.ts";
 import { renderChaves } from "./chaves.ts";
 import { renderGestao } from "./gestao.ts";
 import { logoApp } from "./marketplace.ts";
@@ -75,7 +75,7 @@ function renderConexao(estado: Estado): string {
   const inv = inventarioEmUso(estado);
   const pronto = inv?.estado === "pronto";
   const simulacao = estado.executor?.atual === "catcher";
-  const titulo = !inv ? "Verificando conexão…" : !pronto ? (inv.estado === "nao_autenticado" ? "Sua IA não está conectada" : "Sua IA não foi encontrada") : simulacao ? "Modo de simulação" : "Sua IA está conectada";
+  const titulo = !inv ? "Verificando conexão…" : inv.estado !== "pronto" ? situacaoMotorFora(inv) : simulacao ? "Modo de simulação" : "Sua IA está conectada";
   const negacoes = [...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")];
   const fora = negacoes.filter((n) => n.classe === "conector_indisponivel");
   const outras = negacoes.filter((n) => n.classe !== "conector_indisponivel");

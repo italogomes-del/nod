@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import { RESPOSTA_TESTE_IA_MAX } from "../../../contracts/desktop.ts";
 import { MOTIVO_DA_CAUSA, type Inventario } from "../../../contracts/inventario.ts";
+import { motivoSondaLenta, sondaFoiLenta } from "../../../domain/sonda-lenta.ts";
 import type { EventoStream, SinaisTurno } from "../../../contracts/turno.ts";
 import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
@@ -12,6 +13,7 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
 import { resolverBinario } from "../caminho.ts";
 import { executarColetando, iniciarProcesso, type Processo } from "../processo.ts";
+import { PRAZO_SONDA_PADRAO_MS } from "../sonda.ts";
 import type { Driver } from "../spi.ts";
 import type { LigacaoClaudeCli } from "./claude-cli.ts";
 import { ambienteCodex, configMcpCodex, escreverLauncherProxy, negociarConfigCodex, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
@@ -72,23 +74,34 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
       let inv: Inventario | null = null;
       // As chaves de config que a versão instalada recusou (negociarConfigCodex); refeito a cada sonda.
       let recusadas: RecusadasCodex = SEM_RECUSADAS;
+      const prazoSondaMs = lig.prazoSondaMs ?? PRAZO_SONDA_PADRAO_MS;
       async function sondar(): Promise<Inventario> {
-        if (inv && Date.now() - inv.em < 300_000) return inv;
+        // NOD-178: um resultado de sonda lenta não é definitivo; a próxima chamada pergunta de novo ao CLI.
+        if (inv && !sondaFoiLenta(inv) && Date.now() - inv.em < 300_000) return inv;
         bin = await resolverBinario(cfg.bins?.["codex-cli"], env.PATH ?? "", home, "codex");
         const em = Date.now();
         if (!bin) return inv = { estado: "ausente", motivo: "Instale o Codex e entre na sua conta para usá-lo no nod.", em };
-        const executar = (args: string[]) => executarColetando({ bin: bin!, args, env, cwd: home, timeoutMs: 10_000 });
+        const executar = (args: string[]) => executarColetando({ bin: bin!, args, env, cwd: home, timeoutMs: prazoSondaMs });
+        const lenta = (): Inventario => ({ estado: "ausente", motivo: motivoSondaLenta("Codex"), causa: "sonda_lenta", em });
         const help = await executar(["exec", "--help"]);
+        if (help.estourouTempo) return inv = lenta();
         if (help.exitCode !== 0 || FLAGS_CODEX.some((f) => !help.stdout.includes(f))) return inv = { estado: "ausente", motivo: "Atualize o Codex: esta versão ainda não oferece o isolamento exigido pelo nod.", em };
-        const versao = (await executar(["--version"])).stdout.trim().slice(0, 100);
+        const lida = await executar(["--version"]);
+        if (lida.estourouTempo) return inv = lenta();
+        const versao = lida.stdout.trim().slice(0, 100);
         const login = await executar(["login", "status"]);
+        if (login.estourouTempo) return inv = { estado: "nao_autenticado", motivo: motivoSondaLenta("Codex"), versao, causa: "sonda_lenta", em };
         if (login.exitCode !== 0) return inv = { estado: "nao_autenticado", motivo: "Abra o Codex, entre na sua conta e tente novamente.", versao, em };
         // definido em 2026-10-05: a config do turno é validada aqui, de graça (stdin vazio, nenhum modelo), com um plano
         // de prova. O que a versão não conhece cai; o que não pode cair deixa o Codex indisponível com o motivo dito.
+        // NOD-178: a rodada que estoura o prazo não é "aceita" (saída vazia); a sonda inteira volta como lenta.
+        let estourou = false;
         const negociacao = await negociarConfigCodex(async (r) => {
           const fim = await executar(argsCodex(PLANO_DE_SONDA, configMcpCodex(PLANO_DE_SONDA, { ...lig, proxyPath: "sonda.mjs" }, r), [], r));
-          return `${fim.stdout}\n${fim.stderr}`;
+          if (fim.estourouTempo) estourou = true;
+          return estourou ? "" : `${fim.stdout}\n${fim.stderr}`;
         });
+        if (estourou) return inv = lenta();
         if (negociacao.recusadas.size > 0 || !negociacao.aceita) {
           log("aviso", "codex_config_negociada", { versao, aceita: negociacao.aceita, recusadas: [...negociacao.recusadas].join(","), parou_em: negociacao.aceita ? null : negociacao.chave });
         }
@@ -100,7 +113,9 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
       let flagsAppServer: { bin: string; flags: string[] | null } | null = null;
       async function sondarAppServer(b: string): Promise<string[] | null> {
         if (flagsAppServer?.bin === b) return flagsAppServer.flags;
-        const help = await executarColetando({ bin: b, args: ["app-server", "--help"], env, cwd: home, timeoutMs: 10_000 });
+        const help = await executarColetando({ bin: b, args: ["app-server", "--help"], env, cwd: home, timeoutMs: prazoSondaMs });
+        // NOD-178: help lento não é "sem app-server" (que pediria para atualizar) e não fica guardado.
+        if (help.estourouTempo) throw new ErroDeDominio("executor_indisponivel", { cause: "sonda_lenta" });
         flagsAppServer = { bin: b, flags: help.exitCode === 0 ? [...new Set(help.stdout.match(/--[a-z][a-z0-9-]*/g) ?? [])] : null };
         return flagsAppServer.flags;
       }

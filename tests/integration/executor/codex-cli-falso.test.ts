@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
+import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
 import { planoHarness } from "../../helpers/plano-harness.ts";
 import type { SinaisTurno } from "../../../src/contracts/turno.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 let dir: string;
 let cfg: ConfigDriver;
-const lig = { urlNod: "http://127.0.0.1:8888", proxyPath: fileURLToPath(new URL("../../../src/adapters/mcp-proxy/proxy.ts", import.meta.url)), sigtermParaSigkillMs: 50 };
+const lig = { urlNod: "http://127.0.0.1:8888", proxyPath: fileURLToPath(new URL("../../../src/adapters/mcp-proxy/proxy.ts", import.meta.url)), sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) };
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "nod-codex-teste-"));
   const bin = join(dir, "codex");

@@ -45,8 +45,8 @@ import type { Proposta } from "../src/contracts/conversa.ts";
 import { blocosAoVivo, blocosDoHistorico, htmlComposer, renderCabecalhoConversa, renderTimeline, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
-import { inventarioEmUso } from "./telas/frota.ts";
-import { ehIa, inventarioDaIa } from "./telas/ia-fora.ts";
+import { inventarioEmUso, situacaoMotorFora } from "./telas/frota.ts";
+import { ehIa, inventarioDaIa, pedeInstalar } from "./telas/ia-fora.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
@@ -571,9 +571,7 @@ function renderSidebar(estado: Estado): string {
   const situacaoMotor = !estado.executor
     ? "Verificando conexão…"
     : falhaMotor
-      ? inv.estado === "nao_autenticado"
-        ? "Sua IA não está conectada"
-        : "Sua IA não foi encontrada"
+      ? situacaoMotorFora(inv)
       : estado.executor.atual === "catcher"
         ? "Modo de simulação"
         : "Sua IA conectada";
@@ -1589,7 +1587,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const ia = el.dataset.ia;
     if (!ehIa(ia)) return;
     const mac = window.nodDesktop;
-    void (inventarioDaIa(estado, ia)?.estado === "ausente" ? mac?.iaInstalar?.(ia) : mac?.iaEntrar?.(ia))?.catch(() => undefined);
+    void (pedeInstalar(inventarioDaIa(estado, ia)) ? mac?.iaInstalar?.(ia) : mac?.iaEntrar?.(ia))?.catch(() => undefined);
   },
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
@@ -2511,7 +2509,7 @@ function dadosMenuConta(): DadosMenuConta {
   const falha = !!inv && inv.estado !== "pronto";
   const fora = [...new Set((estado.frota?.negacoes ?? []).filter((n) => n.classe === "conector_indisponivel").map((n) => estado.conectores.find((c) => c.slug === n.nome || c.nome === n.nome)?.nome ?? n.nome))];
   const faixa = falha
-    ? { texto: inv.estado === "nao_autenticado" ? "Sua IA não está conectada" : "Sua IA não foi encontrada", botao: "Conectar" }
+    ? { texto: situacaoMotorFora(inv), botao: "Conectar" }
     : fora.length ? { texto: faixaDeConectores(fora), botao: "Ver" } : null;
   const banco = textoAmbiente(ambienteBanco);
   return {

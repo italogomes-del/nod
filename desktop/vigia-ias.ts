@@ -1,5 +1,6 @@
 import { IAS_DESKTOP, type IaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../src/contracts/inventario.ts";
+import { sondaFoiLenta } from "../src/domain/sonda-lenta.ts";
 import type { IdDriver, Registry } from "../src/adapters/executor/spi.ts";
 import { nomeParaOTeste, perguntaDoTeste } from "../src/domain/conta-da-ia.ts";
 import { INTERVALO_SONDA_IA_MS } from "./ia-mac.ts";
@@ -128,8 +129,11 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     if (!testar) return { inventario: s.inventarios[ia] ?? AUSENTE(d.agora()), resposta: null };
     const t = await testar(pergunta).catch((): { inventario: Inventario; resposta: null } => ({ inventario: reprovado("teste_falhou", s.inventarios[ia], d.agora()), resposta: null }));
     forcadas.delete(ia);
+    // NOD-178: sonda lenta não é veredito do teste: não vira reprovação (que acionaria o freio do reteste) nem apaga
+    // a que já existia (a conta reprovada voltaria a "pronto" só porque o Mac estava carregado).
+    if (sondaFoiLenta(t.inventario)) return t;
     if (t.inventario.estado === "pronto") { vereditos.delete(ia); retestes.delete(ia); }
-    else if (t.inventario.estado === "nao_autenticado" && t.inventario.causa) vereditos.set(ia, { ia, causa: t.inventario.causa, impressao: await d.impressao(ia).catch(() => null), em: d.agora() });
+    else if (t.inventario.estado === "nao_autenticado" && t.inventario.causa && t.inventario.causa !== "sonda_lenta") vereditos.set(ia, { ia, causa: t.inventario.causa, impressao: await d.impressao(ia).catch(() => null), em: d.agora() });
     else vereditos.delete(ia);
     // Quem chama grava o arquivo uma vez no fim: dois testes rodam ao mesmo tempo e não podem disputar a escrita.
     return t;
@@ -168,11 +172,12 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     // A principal é a pronta; sem nenhuma, a que melhor explica a falta: a reprovada no teste, depois a sem login.
     const todos = Object.values(inventarios);
     const principal = todos.find((i) => i?.estado === "pronto")
-      ?? todos.find((i) => i?.estado === "nao_autenticado" && i.causa)
+      ?? todos.find((i) => i?.estado === "nao_autenticado" && i.causa && i.causa !== "sonda_lenta")
       ?? todos.find((i) => i?.estado === "nao_autenticado")
       ?? inventarios["claude-cli"] ?? AUSENTE(d.agora());
     // Só o que muda a decisão do servidor entra na chave: o instante de cada sonda não é novidade.
-    const chave = JSON.stringify(IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado === "nao_autenticado" ? i.causa ?? null : null]; }));
+    // NOD-178: a causa conta também em 'ausente': "ausente lento" → "ausente de verdade" tem de chegar ao servidor.
+    const chave = JSON.stringify(IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado !== "pronto" ? i.causa ?? null : null]; }));
     ultima = s;
     d.aoRegistry(s.registry, principal.estado === "pronto");
     if (chave === ultimoAnuncio) return;
@@ -185,7 +190,9 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     timer = null;
     if (parado) return;
     const algumaPronta = Object.values(inventarios).some((i) => i?.estado === "pronto");
-    const ms = !algumaPronta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 ? INTERVALO_COM_REPROVADA_MS : null;
+    // NOD-178: uma IA lenta é sondada de novo mesmo com a outra pronta; sem isso o "tentando de novo" giraria para sempre.
+    const algumaLenta = Object.values(inventarios).some((i) => i !== undefined && sondaFoiLenta(i));
+    const ms = !algumaPronta || algumaLenta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 ? INTERVALO_COM_REPROVADA_MS : null;
     if (ms === null) return;
     timer = d.agendar(() => { void emFila(passada).catch(() => undefined); }, ms);
   }
@@ -241,6 +248,8 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
         return IAS_DESKTOP.map((ia): TesteDeIa => {
           const i = inventarios[ia];
           const resposta = respostas.get(ia);
+          // NOD-178: teste lento sai como "não respondeu ainda" com a causa; como 'ausente' a tela pediria "Instalar".
+          if (i && sondaFoiLenta(i)) return { ia, estado: "nao_autenticado", causa: "sonda_lenta" };
           return { ia, estado: i?.estado ?? "ausente", ...(i?.estado === "nao_autenticado" && i.causa ? { causa: i.causa } : {}), ...(resposta ? { resposta } : {}) };
         });
       });

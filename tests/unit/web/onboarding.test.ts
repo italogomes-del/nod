@@ -9,7 +9,7 @@ import { partesDaLigacao, type EstadoTelaLigacao } from "../../../web/telas/liga
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
 import {
   conexaoDepoisDoLogin, conexaoDepoisDoVeredito, destinoAoFimDoOla, deveTestar, estadoDoCardIa, htmlCamada, htmlChamando, htmlExecutor, htmlGuia, htmlOla, htmlPainelEntrevista,
-  iaDaLigacao, lerTestesDeIa, linhasContou, linhasMontado, nomeParaOTeste, notaForaDoApp, passosDaConexao, perguntaDoTeste, proximoDaConexao, RESPOSTA_TESTE_MAX,
+  iaDaLigacao, lerTestesDeIa, situacaoDaIa, linhasContou, linhasMontado, nomeParaOTeste, notaForaDoApp, passosDaConexao, perguntaDoTeste, proximoDaConexao, RESPOSTA_TESTE_MAX,
   secaoOnboardingDetalhes, servidorDeAcordo, telaDaIa, testeSeAplica, textoComoLiberar, textoTudoMontado, type ConexaoIa, type EstadoTelaOnboarding, type TesteNaTela,
 } from "../../../web/telas/onboarding.ts";
 
@@ -96,6 +96,27 @@ describe("abertura e a IA do Mac", () => {
     expect(estadoDoCardIa("codex-cli", [{ id: "codex-cli", estado: "pronto" }], null)).toMatchObject({ estado: "Conectado", tom: "ok", act: null });
   });
 
+  it("NOD-178: CLI que só demorou não pede Instalar nem Entrar; espera girando", () => {
+    const c = estadoDoCardIa("claude-cli", [{ id: "claude-cli", estado: "ausente", causa: "sonda_lenta" }], null);
+    expect(c).toMatchObject({ acao: "Esperando", act: null, girando: true });
+    expect(c.estado).toContain("demorou");
+    expect(estadoDoCardIa("codex-cli", [{ id: "codex-cli", estado: "nao_autenticado", causa: "sonda_lenta" }], null).acao).toBe("Esperando");
+    expect(estadoDoCardIa("claude-cli", [{ id: "claude-cli", estado: "ausente" }], null).acao).toBe("Instalar e entrar");
+    // A conexão aberta não fecha por lentidão: só a conta reprovada pelo teste faz sair.
+    const c2 = { ia: "codex-cli" as const, outraConta: false, login: "aberto" as const, nota: null };
+    expect(proximoDaConexao(c2, { id: "codex-cli", estado: "nao_autenticado", causa: "sonda_lenta" })).toBeNull();
+    expect(proximoDaConexao(c2, { id: "codex-cli", estado: "nao_autenticado", causa: "conta_sem_acesso" })).toBe("sair");
+  });
+
+  it("NOD-178 (revisão): os passos da conexão não mandam instalar o CLI que só demorou", () => {
+    const c = { ia: "codex-cli" as const, outraConta: false, login: "nao" as const, nota: null };
+    const [instalar, entrar] = passosDaConexao(c, { id: "codex-cli", estado: "ausente", causa: "sonda_lenta" }, false);
+    expect(instalar).toMatchObject({ estado: "ativo", titulo: "Procurando o Codex", acoes: [] });
+    expect(instalar?.texto).toContain("demorou");
+    expect(entrar?.estado).toBe("depois");
+    expect(passosDaConexao(c, { id: "codex-cli", estado: "ausente" }, false)[0]?.titulo).toBe("Instale o Codex");
+  });
+
   it("fora do app do Mac, a orientação diz o comando do próprio CLI", () => {
     expect(notaForaDoApp("claude-cli", "entrar")).toContain("claude auth login");
     expect(notaForaDoApp("codex-cli", "entrar")).toContain("codex login");
@@ -161,6 +182,11 @@ describe("teste de verdade: o que decide a tela", () => {
     // O servidor passou por "não pronto" e voltou: um login novo.
     expect(deveTestar(claudeLogado, SEM_ACESSO, true)).toBe(true);
     expect(deveTestar(claudeLogado, { ia: "claude-cli", estado: "nao_autenticado" }, true)).toBe(true);
+    // NOD-178: "demorou para responder" não é veredito da conta: com o login de volta, testa de novo.
+    const LENTO = { ia: "claude-cli", estado: "nao_autenticado", causa: "sonda_lenta" } as const;
+    expect(deveTestar(claudeLogado, LENTO, false)).toBe(true);
+    expect(lerTestesDeIa([LENTO])).toEqual([LENTO]);
+    expect(situacaoDaIa("claude-cli", [claudeLogado], null, { rodando: false, testando: [], vereditos: { "claude-cli": LENTO } }).situacao).toBe("sonda_lenta");
   });
 
   it("a IA da ligação é a primeira pronta na ordem Claude, ChatGPT; o veredito do teste ganha do servidor", () => {
@@ -343,6 +369,8 @@ describe("teste de verdade: conectar em três passos", () => {
     const aberta: ConexaoIa = { ...nova, login: "aberto" };
     expect(conexaoDepoisDoVeredito(aberta, RESPONDEU)).toBeNull();
     expect(conexaoDepoisDoVeredito(aberta, { ia: "codex-cli", estado: "nao_autenticado", causa: "teste_falhou" })).toBeNull();
+    // NOD-178: o CLI só demorou: a conexão segue aberta como estava.
+    expect(conexaoDepoisDoVeredito(aberta, { ia: "codex-cli", estado: "nao_autenticado", causa: "sonda_lenta" })).toBe(aberta);
     const semLogin = conexaoDepoisDoVeredito(aberta, { ia: "codex-cli", estado: "nao_autenticado" });
     expect(semLogin?.nota).toContain("Ainda não há uma conta do ChatGPT neste Mac.");
     expect(estados(semLogin ?? aberta, { id: "codex-cli", estado: "nao_autenticado" })).toEqual(["feito", "ativo", "depois"]);

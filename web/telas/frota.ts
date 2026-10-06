@@ -9,6 +9,7 @@ export function textoInventario(inv: Inventario | null, agora: number): string {
   if (!inv) return "inventário ainda não sondado";
   if (inv.estado === "pronto") return `${inv.versao === "catcher" ? "catcher (sem custo)" : `harness ${inv.versao}`} pronto desde ${hora(inv.em)}`;
   if (inv.estado === "nao_autenticado") return `harness${inv.versao ? ` ${inv.versao}` : ""} não autenticado (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
+  if (inv.causa === "sonda_lenta") return `harness lento (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
   return `harness ausente (${inv.motivo}) desde ${hora(inv.em)} · ${haQuanto(agora - inv.em)}`;
 }
 
@@ -19,7 +20,16 @@ export function rotuloExecutor(id: IdExecutor): string {
 /** Uma linha por opção do interruptor: o que a sonda disse, escrito (ADR-029) — "pronto" ou o motivo de não estar. */
 function estadoDaOpcao(inv: Inventario): string {
   if (inv.estado === "pronto") return `pronto${inv.versao === "catcher" ? "" : ` (${inv.versao})`}`;
-  return `${inv.estado === "nao_autenticado" ? "não autenticado" : "ausente"} — ${inv.motivo}`;
+  return `${inv.causa === "sonda_lenta" ? "demorou para responder" : inv.estado === "nao_autenticado" ? "não autenticado" : "ausente"} — ${inv.motivo}`;
+}
+
+/**
+ * A faixa curta do motor fora (rodapé, menu da conta, Conexão). NOD-178: o CLI que só demorou não é "não foi encontrada"
+ * nem "não está conectada" — a causa vem antes do estado.
+ */
+export function situacaoMotorFora(inv: Exclude<Inventario, { estado: "pronto" }>): string {
+  if (inv.causa === "sonda_lenta") return "Sua IA está demorando para responder";
+  return inv.estado === "nao_autenticado" ? "Sua IA não está conectada" : "Sua IA não foi encontrada";
 }
 
 /**

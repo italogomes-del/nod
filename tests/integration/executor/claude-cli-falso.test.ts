@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
@@ -108,7 +109,7 @@ const LIMITE_EM_ESCALADAS = 10;
 describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-16)", { timeout: TIMEOUT_MS }, () => {
   let dir: string;
   let cfgBase: ConfigDriver;
-  const lig = { urlNod: "http://127.0.0.1:65000", proxyPath: "/app/src/adapters/mcp-proxy/proxy.ts" };
+  const lig = { urlNod: "http://127.0.0.1:65000", proxyPath: "/app/src/adapters/mcp-proxy/proxy.ts", prazoSondaMs: prazoSondaDoEnv(process.env) };
 
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), "nod-cli-falso-"));

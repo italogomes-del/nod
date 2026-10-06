@@ -94,7 +94,8 @@ function acaoDaQueCaiu(ia: IaDaLigacao, s: EstadoSemIa, curto: boolean): string 
 }
 
 function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
-  const estado = s.ias.find((i) => i.id === ia)?.estado ?? "ausente";
+  const daIa = s.ias.find((i) => i.id === ia);
+  const estado = daIa?.estado ?? "ausente";
   const cli = NOME_CLI[ia];
   let texto: string;
   let acao: string;
@@ -106,6 +107,10 @@ function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
       : `O ${cli} parou de responder nesta ligação. Dá para tentar de novo.`;
     acao = acaoDaQueCaiu(ia, s, true);
     if (s.causa === "conta_sem_acesso" && !s.ponte.entrar) noTerminal = notaNoTerminal(ia, "entrar");
+  } else if (daIa?.causa === "sonda_lenta") {
+    // NOD-178: o CLI só demorou para responder; nem "Instalar" nem "Entrar", o app do Mac sonda de novo sozinho.
+    texto = `O ${cli} demorou para responder; o Mac está carregado. A ligação percebe quando ficar pronto.`;
+    acao = "";
   } else if (estado === "nao_autenticado") {
     texto = s.ponte.entrar ? `O ${cli} está neste Mac; falta entrar na conta.` : `O ${cli} está neste Mac; falta entrar na conta. A ligação percebe quando ficar pronto.`;
     acao = s.ponte.entrar ? botao("ligacao-ia-entrar", "Entrar", { classe: "sm", dados: { ia }, desabilitado: s.ocupado }) : "";

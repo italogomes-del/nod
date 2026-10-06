@@ -42,7 +42,7 @@ export function iaQuePodeAssumir(caiu: IaDaLigacao | null, ias: readonly EstadoI
 
 /** As duas listas dizem a mesma coisa? (o orquestrador só reenvia o aviso quando o estado de uma IA muda) */
 export function mesmasIas(a: readonly EstadoIaDaLigacao[], b: readonly EstadoIaDaLigacao[]): boolean {
-  return a.length === b.length && a.every((x) => b.some((y) => y.id === x.id && y.estado === x.estado));
+  return a.length === b.length && a.every((x) => b.some((y) => y.id === x.id && y.estado === x.estado && y.causa === x.causa));
 }
 
 export type FalaRecente = { autor: "pessoa" | "bot"; texto: string };

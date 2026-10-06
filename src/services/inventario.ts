@@ -1,4 +1,5 @@
 import type { Inventario } from "../contracts/inventario.ts";
+import { sondaFoiLenta } from "../domain/sonda-lenta.ts";
 import { log } from "../obs/log.ts";
 import type { Relogio } from "../shared/types.ts";
 
@@ -44,7 +45,8 @@ export function criarInventario(deps: { sondar: Sondador; persistir?: Persistido
   return {
     async obter(pessoaId, o = {}) {
       const guardado = cache.get(pessoaId);
-      if (!o.forcar && guardado && deps.relogio() - guardado.em < ttl) return guardado;
+      // NOD-178: snapshot de sonda lenta conta como expirado: a lentidão passa, e a próxima consulta sonda de novo.
+      if (!o.forcar && guardado && !sondaFoiLenta(guardado) && deps.relogio() - guardado.em < ttl) return guardado;
       const pendente = emCurso.get(pessoaId);
       if (pendente) return pendente;
       const p = sondarEPersistir(pessoaId).finally(() => emCurso.delete(pessoaId));

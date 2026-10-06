@@ -12,6 +12,7 @@ import type { CatalogoHarness } from "../../contracts/harness.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
+import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
@@ -491,7 +492,7 @@ export function comporApp(o: OpcoesCompor): App {
   // Rede de segurança da ligação (2026-10-05): as IAs do Mac da pessoa, pelo inventário anunciado (catalogoHarness).
   // Com NOD_LIGACAO_CODEX=0 o Codex não atende ligação neste servidor: fica fora da lista, e o aviso não o oferece.
   const iasDoMacParaVoz = (pessoaId: string): EstadoIaDaLigacao[] =>
-    catalogoHarness(pessoaId).opcoes.flatMap((h) => (ehIaDaLigacao(h.id) && !(h.id === "codex-cli" && env.NOD_LIGACAO_CODEX === "0") ? [{ id: h.id, estado: h.inventario.estado }] : []));
+    catalogoHarness(pessoaId).opcoes.flatMap((h) => (ehIaDaLigacao(h.id) && !(h.id === "codex-cli" && env.NOD_LIGACAO_CODEX === "0") ? [{ id: h.id, estado: h.inventario.estado, ...(sondaFoiLenta(h.inventario) ? { causa: "sonda_lenta" as const } : {}) }] : []));
   const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio, iasDoMac: (ref) => iasDoMacParaVoz(ref.pessoaId) });
   // ADR-074: os cards da conversa da ligação viram leitura + janela de aprovação por voz. O orquestrador não lê banco:
   // a composição escuta os frames da pessoa e monta a leitura (leituraDaDecisao) numa tx dela.
@@ -640,6 +641,8 @@ export function comporApp(o: OpcoesCompor): App {
     promessa.then(
       (inv) => {
         inventarioPorDriver[id] = inv;
+        // NOD-178: a sonda lenta não segura a máquina por 5 min; a próxima consulta pergunta de novo ao CLI.
+        if (sondaFoiLenta(inv) && sondaCompartilhada?.promessa === promessa) sondaCompartilhada = null;
       },
       () => undefined,
     );
@@ -747,7 +750,7 @@ export function comporApp(o: OpcoesCompor): App {
   /** ADR-077: a IA dos bots no Mac da pessoa, para os cards de IA do onboarding (o catcher conta como pronto). */
   function executorDoMac(pessoaId: string): { pronto: boolean; ias: IaNoMac[] } {
     const catalogo = catalogoHarness(pessoaId);
-    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado === "nao_autenticado" && h.inventario.causa ? { causa: h.inventario.causa } : {}) }));
+    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado !== "pronto" && h.inventario.causa ? { causa: h.inventario.causa } : {}) }));
     return { pronto: (!compartilhado && executorAtual === "catcher") || ias.some((i) => i.estado === "pronto"), ias };
   }
 

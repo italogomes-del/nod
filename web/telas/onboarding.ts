@@ -163,7 +163,7 @@ export function perguntaDoTeste(nome: string | null): string {
 /** Cópia de RESPOSTA_TESTE_IA_MAX (src/contracts/desktop.ts), pelo mesmo motivo; o teste compara. */
 export const RESPOSTA_TESTE_MAX = 200;
 const ESTADOS_DE_IA: readonly string[] = ["pronto", "nao_autenticado", "ausente"];
-const CAUSAS: readonly string[] = ["conta_sem_acesso", "teste_falhou"];
+const CAUSAS: readonly string[] = ["conta_sem_acesso", "teste_falhou", "sonda_lenta"];
 
 /** O que `iaTestar` devolveu, conferido: null quando não é uma lista de vereditos (a web segue então sem teste). */
 export function lerTestesDeIa(bruto: unknown): TesteDeIa[] | null {
@@ -244,10 +244,12 @@ export function deveTestar(inv: IaNoMac | undefined, veredito: TesteDeIa | undef
   if (inv?.estado !== "pronto") return false;
   if (!veredito) return true;
   if (veredito.estado === "pronto") return false;
+  // NOD-178: "demorou para responder" não é veredito da conta; com o login de volta, testa de novo.
+  if (veredito.causa === "sonda_lenta") return true;
   return vistoNaoPronto;
 }
 
-export type SituacaoIa = "testando" | "procurando" | "pronto" | "entrando" | "conta_sem_acesso" | "teste_falhou" | "falta_entrar" | "ausente";
+export type SituacaoIa = "testando" | "procurando" | "pronto" | "entrando" | "sonda_lenta" | "conta_sem_acesso" | "teste_falhou" | "falta_entrar" | "ausente";
 
 /** Em que pé está uma IA, do que o servidor diz (instalação e login) e do que o teste disse (a conta responde?). */
 export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: IaDesktop | null, teste: Pick<TesteNaTela, "rodando" | "vereditos" | "testando"> | null = null): { situacao: SituacaoIa; resposta: string | null } {
@@ -266,6 +268,8 @@ export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: I
     return so(v ? (macDizInstalado ? "falta_entrar" : "ausente") : "testando");
   }
   if (entrando === ia) return so("entrando");
+  // NOD-178: o CLI que só demorou não pede "Instalar" nem "Entrar"; o app sonda de novo sozinho a cada 3 s.
+  if (inv?.causa === "sonda_lenta") return so("sonda_lenta");
   if (inv?.estado === "nao_autenticado") return so(inv.causa ?? "falta_entrar");
   // Um CLI não some no meio do onboarding: se o Mac já o viu, o "ausente" do servidor é que está atrasado.
   return so(macDizInstalado ? "falta_entrar" : "ausente");
@@ -298,6 +302,8 @@ export function estadoDoCardIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando:
       return card("Termine no navegador…", "mudo", "Esperando", null, true);
     case "testando":
       return card(`${cli} encontrado · testando a resposta`, "mudo", null, null, true);
+    case "sonda_lenta":
+      return card(`${cli} demorou para responder · tentando de novo`, "mudo", "Esperando", null, true);
     case "procurando":
       return card(`Procurando o ${cli} neste Mac…`, "mudo", null, null, true);
     case "conta_sem_acesso":
@@ -337,7 +343,7 @@ export type PassoConexao = {
 
 /** O CLI está neste Mac? O servidor disse, ou o Mac abriu o login dele agora (só abre se achou o binário). */
 function cliInstalado(c: ConexaoIa, inv: IaNoMac | undefined): boolean {
-  return c.outraConta || c.login === "aberto" || (inv !== undefined && inv.estado !== "ausente");
+  return c.outraConta || c.login === "aberto" || (inv !== undefined && (inv.estado !== "ausente" || inv.causa === "sonda_lenta"));
 }
 
 /**
@@ -349,8 +355,12 @@ export function passosDaConexao(c: ConexaoIa, inv: IaNoMac | undefined, testando
   const cli = NOME_CLI[c.ia];
   const nome = NOME_IA[c.ia];
   const instalado = cliInstalado(c, inv);
+  const lento = instalado && !c.outraConta && c.login !== "aberto" && inv?.estado === "ausente" && inv.causa === "sonda_lenta";
   const instalar: PassoConexao = instalado
-    ? { id: "instalar", estado: "feito", titulo: `${cli} instalado`, texto: `O ${cli} está neste Mac.`, acoes: [] }
+    ? lento
+      // NOD-178: ausente só porque o CLI demorou a responder; não manda instalar o que provavelmente está lá.
+      ? { id: "instalar", estado: "ativo", titulo: `Procurando o ${cli}`, texto: `O ${cli} demorou para responder; o Mac está carregado. Isto tenta de novo sozinho.`, acoes: [] }
+      : { id: "instalar", estado: "feito", titulo: `${cli} instalado`, texto: `O ${cli} está neste Mac.`, acoes: [] }
     : {
         id: "instalar", estado: "ativo", titulo: `Instale o ${cli}`,
         texto: c.nota ?? `A página de instalação abriu. Quando o ${cli} estiver instalado neste Mac, isto continua sozinho.`,
@@ -358,7 +368,7 @@ export function passosDaConexao(c: ConexaoIa, inv: IaNoMac | undefined, testando
       };
   const tituloEntrar = c.outraConta ? `Entre com outra conta do ${nome}` : `Entre na sua conta do ${nome}`;
   let entrar: PassoConexao;
-  if (!instalado) entrar = { id: "entrar", estado: "depois", titulo: tituloEntrar, texto: `O login do ${cli} abre no navegador.`, acoes: [] };
+  if (!instalado || lento) entrar = { id: "entrar", estado: "depois", titulo: tituloEntrar, texto: `O login do ${cli} abre no navegador.`, acoes: [] };
   else if (testando) entrar = { id: "entrar", estado: "feito", titulo: "Login feito", texto: `No navegador, direto com a ${EMPRESA_IA[c.ia]}.`, acoes: [] };
   else {
     const padrao = c.login !== "aberto"
@@ -380,7 +390,7 @@ export function passosDaConexao(c: ConexaoIa, inv: IaNoMac | undefined, testando
  * lista explica). O teste em si sai de `deveTestar`, que vale com ou sem conexão aberta.
  */
 export function proximoDaConexao(c: ConexaoIa, inv: IaNoMac | undefined): "abrir_login" | "sair" | null {
-  if (!c.outraConta && inv?.estado === "nao_autenticado" && inv.causa) return "sair";
+  if (!c.outraConta && inv?.estado === "nao_autenticado" && inv.causa && inv.causa !== "sonda_lenta") return "sair";
   if (c.login === "nao" && inv !== undefined && inv.estado !== "ausente") return "abrir_login";
   return null;
 }
@@ -394,6 +404,8 @@ export function conexaoDepoisDoLogin(c: ConexaoIa, r: ResultadoIaDesktop): Conex
 
 /** A conexão depois de um veredito: null = fechou (respondeu, ou entrou e foi reprovada: a lista mostra o porquê). */
 export function conexaoDepoisDoVeredito(c: ConexaoIa, v: TesteDeIa): ConexaoIa | null {
+  // NOD-178: o CLI só demorou; a conexão continua aberta, sem "ainda não apareceu neste Mac".
+  if (v.causa === "sonda_lenta") return c;
   if (v.estado === "pronto" || v.causa) return null;
   if (v.estado === "ausente") return { ...c, outraConta: false, login: "falhou", nota: `O ${NOME_CLI[c.ia]} ainda não apareceu neste Mac.` };
   return { ...c, nota: `Ainda não há uma conta do ${NOME_IA[c.ia]} neste Mac. Termine o login no navegador e teste de novo.` };
@@ -430,7 +442,7 @@ const DEPOIS_EM_AJUSTES = "Dá para trocar ou adicionar outra IA depois, em Ajus
 /** "A IA dos seus bots" enquanto o teste roda e "Falta conectar uma IA" quando nenhuma respondeu. */
 function htmlListaDeIas(e: TelaExecutor, t: TesteNaTela, tela: "testando" | "sem_ia"): string {
   const guia = nomeDaGuia(e.dados);
-  const reprovada = ORDEM_IAS.some((ia) => t.vereditos[ia]?.causa);
+  const reprovada = ORDEM_IAS.some((ia) => { const causa = t.vereditos[ia]?.causa; return causa !== undefined && causa !== "sonda_lenta"; });
   const cabeca = tela === "testando"
     ? cabecaIa("A IA dos seus bots", "Seus bots trabalham com a conta que você já assina, aqui neste Mac. Estou testando cada uma com uma pergunta curta.")
     : cabecaIa("Falta conectar uma IA", `${reprovada ? "Testei as IAs deste Mac e nenhuma respondeu." : "Não achei uma IA conectada neste Mac."} Conecte uma e a ${guia} te liga em seguida.`);

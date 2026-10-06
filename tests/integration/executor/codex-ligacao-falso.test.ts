@@ -8,6 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
 import { PEDIDO_DE_RESUMO } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
+import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
@@ -87,7 +88,7 @@ function planoLigacao(): PlanoTurno {
 const falaDe = (msgs: MsgCerebroCliente[], n: number) => msgs.flatMap((m) => (m.t === "fala" && m.n === n ? [m.delta] : [])).join("");
 
 async function iniciar(plano = planoLigacao()) {
-  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50 }).create(cfg);
+  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
   const sinais: (keyof SinaisTurno)[] = [];
   const eventos: EventoStream[] = [];
   const adapter = instance.adapter(plano);

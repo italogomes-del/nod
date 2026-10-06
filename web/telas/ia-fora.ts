@@ -34,7 +34,12 @@ export function inventarioDaIa(estado: Pick<Estado, "executor">, ia: IdIa): Inve
   return estado.executor?.harnesses?.opcoes.find((o) => o.id === ia)?.inventario ?? null;
 }
 
-const FRASE_DA_CAUSA: Record<CausaSemIa, (cli: string) => string> = {
+/** A IA não está no Mac: o botão instala. NOD-178: o CLI que só demorou ("ausente" por sonda lenta) não pede instalação. */
+export function pedeInstalar(inv: Inventario | null): boolean {
+  return inv?.estado === "ausente" && inv.causa !== "sonda_lenta";
+}
+
+const FRASE_DA_CAUSA:Record<CausaSemIa, (cli: string) => string> = {
   conta_sem_acesso: (cli) => `a conta do ${cli} deste Mac está sem acesso (a organização dela desativou o uso por assinatura)`,
   teste_falhou: (cli) => `a conta do ${cli} deste Mac entrou, mas não respondeu`,
 };
@@ -57,7 +62,7 @@ export function avisoContaSemAcesso(m: Mensagem, estado: Pick<Estado, "executor"
     });
   }
   const entrar = botao("ia-entrar", `${logo(p.ia)}Entrar com outra conta`, { classe: "pri sm com-logo", dados: { ia: p.ia } });
-  const conectarOutra = botao("ia-conectar", `${logo(outra)}${invOutra?.estado === "ausente" ? `Instalar o ${PROVEDOR_DA_IA[outra].cli}` : `Conectar o ${PROVEDOR_DA_IA[outra].nome}`}`, { classe: "sm com-logo", dados: { ia: outra } });
+  const conectarOutra = botao("ia-conectar", `${logo(outra)}${pedeInstalar(invOutra) ? `Instalar o ${PROVEDOR_DA_IA[outra].cli}` : `Conectar o ${PROVEDOR_DA_IA[outra].nome}`}`, { classe: "sm com-logo", dados: { ia: outra } });
   const acao = p.noApp ? `<span class="aviso-estado-acoes">${entrar}${conectarOutra}</span>` : botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } });
   return avisoDeEstado({
     tom: "alerta",

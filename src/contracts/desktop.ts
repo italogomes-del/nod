@@ -1,4 +1,4 @@
-import type { CausaSemIa } from "./inventario.ts";
+import type { CausaInventario, CausaSemIa } from "./inventario.ts";
 
 /**
  * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela
@@ -45,7 +45,8 @@ export type ResultadoIaDesktop = { ok: true } | { ok: false; motivo: "nao_instal
  * assinatura da pessoa. `resposta` é o que a IA disse (até RESPOSTA_TESTE_IA_MAX caracteres), só quando ficou pronta;
  * `causa` só quando a IA está logada e mesmo assim não serviu. O Mac reanuncia o inventário ao servidor com o veredito.
  */
-export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa; resposta?: string };
+/** `causa: "sonda_lenta"` (NOD-178): o CLI só demorou; não é veredito da conta, e a tela testa de novo. */
+export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa | CausaInventario; resposta?: string };
 export const RESPOSTA_TESTE_IA_MAX = 200;
 /** O nome que entra na pergunta do teste ("Diga oi para {nome}…"): só letras, espaço, ponto e hífen, até este tamanho. */
 export const NOME_TESTE_IA_MAX = 40;

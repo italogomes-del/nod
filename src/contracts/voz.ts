@@ -71,7 +71,12 @@ export const CAUSAS_CEREBRO_CAIU = ["conta_sem_acesso", "falhou"] as const;
 export type CausaCerebroCaiu = (typeof CAUSAS_CEREBRO_CAIU)[number];
 export const ESTADOS_IA_DA_LIGACAO = ["pronto", "nao_autenticado", "ausente"] as const;
 /** Como cada IA está neste Mac agora (o inventário que o Mac anunciou): é o que decide os botões do aviso. */
-export type EstadoIaDaLigacao = { id: IaDaLigacao; estado: (typeof ESTADOS_IA_DA_LIGACAO)[number] };
+export type EstadoIaDaLigacao = {
+  id: IaDaLigacao;
+  estado: (typeof ESTADOS_IA_DA_LIGACAO)[number];
+  /** NOD-178: o CLI só demorou para responder à sonda; a tela não pede "Instalar" nem "Entrar". */
+  causa?: "sonda_lenta";
+};
 /** definido em 2026-10-05: sem escolha em 2 min a ligação encerra com `sem_ia`. */
 export const ESPERA_DA_ESCOLHA_MS = 120_000;
 

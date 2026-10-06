@@ -131,7 +131,7 @@ function lerIas(v: unknown): EstadoIaDaLigacao[] | null {
     const i = x as Record<string, unknown>;
     const estado = ESTADOS_IA.find((e) => e === i.estado);
     if (!ehIa(i.id) || !estado || ias.some((y) => y.id === i.id)) return null;
-    ias.push({ id: i.id, estado });
+    ias.push({ id: i.id, estado, ...(i.causa === "sonda_lenta" ? { causa: "sonda_lenta" as const } : {}) });
   }
   return ias;
 }

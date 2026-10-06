@@ -121,6 +121,16 @@ describe("services/inventario: cache da sonda por pessoa com persistência por c
     expect(inv.ultimo("p1")).toBeNull();
   });
 
+  it("NOD-178: snapshot de sonda lenta não fica no cache; a próxima consulta sonda de novo mesmo dentro do TTL", async () => {
+    let sondas = 0;
+    const lenta: Inventario = { estado: "ausente", motivo: "O Claude demorou para responder; o Mac está carregado. Tente de novo em instantes.", causa: "sonda_lenta", em: 1_000 };
+    const inv = criarInventario({ sondar: async () => (++sondas === 1 ? lenta : pronto(1_000)), relogio: () => 1_000, ttlMs: 100 });
+    expect(await inv.obter("p1")).toEqual(lenta);
+    expect(await inv.obter("p1")).toEqual(pronto(1_000));
+    expect(await inv.obter("p1")).toEqual(pronto(1_000));
+    expect(sondas).toBe(2);
+  });
+
   it("chamadas concorrentes da mesma pessoa compartilham UMA sonda; pessoas diferentes não", async () => {
     let sondas = 0;
     const inv = criarInventario({

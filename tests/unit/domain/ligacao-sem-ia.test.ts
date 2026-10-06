@@ -54,6 +54,8 @@ describe("qual IA pode assumir", () => {
     const a = [{ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado: "ausente" }] as const;
     expect(mesmasIas(a, [...a].reverse())).toBe(true);
     expect(mesmasIas(a, [{ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado: "pronto" }])).toBe(false);
+    // NOD-178: "ausente lento" → "ausente de verdade" muda os botões do aviso, então tem de ser reenviado.
+    expect(mesmasIas([{ id: "codex-cli", estado: "ausente", causa: "sonda_lenta" }], [{ id: "codex-cli", estado: "ausente" }])).toBe(false);
     expect(mesmasIas(a, [{ id: "claude-cli", estado: "pronto" }])).toBe(false);
     expect(mesmasIas([], [])).toBe(true);
   });

@@ -90,7 +90,8 @@ process.stdin.on("end", () => process.exit(0));
 writeFileSync(mcpJson, JSON.stringify({ mcpServers: { nod: { type: "stdio", command: process.execPath, args: [mcpFalso] } } }));
 // Só os campos que montarArgsLigacao lê: voz, catálogo e o prompt de sistema.
 const plano = { ligacaoVoz: voz, catalogo: { ferramentas: ferramentas.map((f) => ({ nomeMcp: `mcp__nod__${f.name}` })) }, promptSistema: "Você está numa ligação de voz. Responda em português do Brasil, curto, sem markdown." } as unknown as PlanoTurno;
-const flagsNoHelp = (await lerFlagsDoHelp("claude", env)) ?? [];
+const help = await lerFlagsDoHelp("claude", env);
+const flagsNoHelp = ("flags" in help ? help.flags : null) ?? [];
 const args = montarArgsLigacao({ plano, mcpJson, sessaoId: randomUUID(), flagsNoHelp });
 escrever(`modelo: ${cfg.modelo} · esforço: ${args.includes("--effort") ? cfg.esforco : cfg.esforco ? `${cfg.esforco} (CLI sem --effort: ignorado)` : "padrão"} · adaptativo: ${cfg.pensamentoAdaptativo ? "ligado" : "desligado"} · apps: ${apps} (${ferramentas.length} ferramentas)`);
 const proc = spawn("claude", args, { cwd: dir, env, stdio: ["pipe", "pipe", "pipe"] });

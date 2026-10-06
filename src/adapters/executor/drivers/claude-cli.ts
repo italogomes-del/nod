@@ -4,10 +4,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Inventario } from "../../../contracts/inventario.ts";
+import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contracts/turno.ts";
 import { comContaSemAcesso } from "../../../domain/conta-da-ia.ts";
-import { ErroDeDominio } from "../../../domain/erro.ts";
+import { ehErroDeDominio, ErroDeDominio } from "../../../domain/erro.ts";
 import { montarExecucao } from "../../../domain/raio-x.ts";
 import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
 import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
@@ -19,7 +20,7 @@ import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { conferirFloors, type FlagComPiso } from "../flag-floors.ts";
 import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
-import { lerFlagsDoHelp, lerVersao, sondarDetalhado } from "../sonda.ts";
+import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
 import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
@@ -46,6 +47,11 @@ export type LigacaoClaudeCli = {
   /** definido em 2026-09-16: a sonda usa o modelo mais barato (EMENDA 35). */
   modeloSonda?: string;
   sondaSemTurno?: boolean;
+  /**
+   * Prazo de `--version`/`--help`/`auth status`/`login status` (NOD-178); default PRAZO_SONDA_PADRAO_MS (10 s).
+   * Vem de NOD_PRAZO_SONDA_MS pelo boot: o `cfg.env` do driver já passou pela denylist, que apaga NOD_*.
+   */
+  prazoSondaMs?: number;
   /**
    * Espera entre SIGTERM e SIGKILL na interrupção; default SIGTERM_PARA_SIGKILL_MS (5 s).
    * definido em 2026-09-16: existe para o teste que CRONOMETRA `interromper()` poder afirmar
@@ -227,6 +233,7 @@ export function montarEnvDoFilho(env: Record<string, string>, home: string, praz
 const chavesSinais: readonly (keyof SinaisTurno)[] = ["attempted", "rejected", "promptSubmitted", "producedOutput"];
 
 export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
+  const prazoSondaMs = lig.prazoSondaMs ?? PRAZO_SONDA_PADRAO_MS;
   return {
     meta: { id: "claude-cli", locality: "local" },
     async create(cfg: ConfigDriver): Promise<Instance> {
@@ -244,10 +251,15 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
         if (binario && versao) return { binario, versao };
         binario ??= await resolverBinario(cfg.bin, path, home);
         if (!binario) throw new ErroDeDominio("executor_indisponivel", { cause: "motor_ausente" });
-        const v = await lerVersao(binario, envBase);
+        const v = await lerVersao(binario, envBase, prazoSondaMs);
         if ("erro" in v) throw new ErroDeDominio("executor_indisponivel", { cause: v.erro });
+        if (flagsNoHelp === null) {
+          // NOD-178: help lento não vira "sem flags" (que daria "Atualize"); a versão também não fica guardada, e a próxima chamada lê de novo.
+          const help = await lerFlagsDoHelp(binario, envBase, prazoSondaMs);
+          if ("erro" in help) throw new ErroDeDominio("executor_indisponivel", { cause: help.erro });
+          flagsNoHelp = help.flags;
+        }
         versao = v.versao;
-        flagsNoHelp ??= await lerFlagsDoHelp(binario, envBase);
         return { binario, versao };
       }
 
@@ -258,22 +270,27 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const v = await garantirVersao();
               const pisos = conferirFloors({ versao: v.versao, flags: FLAGS_DO_TURNO, flagsNoHelp });
               if (!pisos.ok) return { estado: "ausente", motivo: "Atualize o Claude Code para continuar.", em: Date.now() };
-              const r = await executarColetando({ bin: v.binario, args: ["auth", "status"], env: envBase, cwd: home, timeoutMs: 10_000 });
+              const r = await executarColetando({ bin: v.binario, args: ["auth", "status"], env: envBase, cwd: home, timeoutMs: prazoSondaMs });
+              // NOD-178: o gate continua fechado, mas a pessoa lê que o Claude demorou, não que precisa entrar na conta.
+              if (r.estourouTempo) return { estado: "nao_autenticado", motivo: motivoSondaLenta("Claude"), versao: v.versao, causa: "sonda_lenta", em: Date.now() };
               let autenticado = false;
               try { const status = JSON.parse(r.stdout) as { loggedIn?: boolean }; autenticado = status.loggedIn === true; } catch { /* Sem resposta estruturada, a sonda fecha o gate. */ }
               return r.exitCode === 0 && autenticado ? { estado: "pronto", versao: v.versao, em: Date.now() } : { estado: "nao_autenticado", motivo: "Abra o Claude Code e entre na sua conta.", versao: v.versao, em: Date.now() };
-            } catch { return { estado: "ausente", motivo: "Instale ou atualize o Claude Code neste computador.", em: Date.now() }; }
+            } catch (erro) {
+              if (ehErroDeDominio(erro) && erro.cause === "sonda_lenta") return { estado: "ausente", motivo: motivoSondaLenta("Claude"), causa: "sonda_lenta", em: Date.now() };
+              return { estado: "ausente", motivo: "Instale ou atualize o Claude Code neste computador.", em: Date.now() };
+            }
           }
 
           // medido em 2026-09-16 (e2e:haiku, primeira rodada): NOD_HOME/turnos ainda não existia na sonda do boot e o
           // mkdtemp falhava com ENOENT — o driver ia para a sombra com "create_falhou". O diretório nasce aqui também.
           await mkdir(cfg.cwdBase, { recursive: true });
-          const s = await sondarDetalhado(cfg.bin, cfg.env, lig.modeloSonda ?? MODELO_SONDA_PADRAO, { home, cwdBase: cfg.cwdBase });
+          const s = await sondarDetalhado(cfg.bin, cfg.env, lig.modeloSonda ?? MODELO_SONDA_PADRAO, { home, cwdBase: cfg.cwdBase, timeoutVersaoMs: prazoSondaMs });
           binario = s.binario;
           flagsNoHelp = s.flagsNoHelp;
           if ("versao" in s.inventario && s.inventario.versao) versao = s.inventario.versao;
           // O turno de sonda custa (assinatura da pessoa): o custo sai no log para o roteiro de aceite somar (L9).
-          log("info", "sonda_claude_cli", { estado: s.inventario.estado, motivo: "motivo" in s.inventario ? s.inventario.motivo : null, custo_usd: s.custoUsd });
+          log("info", "sonda_claude_cli", { estado: s.inventario.estado, motivo: "motivo" in s.inventario ? s.inventario.motivo : null, causa: "causa" in s.inventario ? (s.inventario.causa ?? null) : null, custo_usd: s.custoUsd });
           return s.inventario;
         },
 
@@ -281,7 +298,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
         // app do Mac). Quem chama já viu o login passar, então a falha sai com a causa. Custa um turno da assinatura.
         async testar(pergunta: string) {
           await mkdir(cfg.cwdBase, { recursive: true });
-          const s = await sondarDetalhado(cfg.bin, cfg.env, lig.modeloSonda ?? MODELO_SONDA_PADRAO, { home, cwdBase: cfg.cwdBase, pergunta, loginConferido: true });
+          const s = await sondarDetalhado(cfg.bin, cfg.env, lig.modeloSonda ?? MODELO_SONDA_PADRAO, { home, cwdBase: cfg.cwdBase, pergunta, loginConferido: true, timeoutVersaoMs: prazoSondaMs });
           if (s.binario) binario = s.binario;
           if (s.flagsNoHelp) flagsNoHelp = s.flagsNoHelp;
           if ("versao" in s.inventario && s.inventario.versao) versao = s.inventario.versao;

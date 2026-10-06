@@ -1,6 +1,6 @@
 import type { CorAgente, FormaAgente } from "./agente.ts";
 import type { EpochMs } from "./ids.ts";
-import type { CausaSemIa } from "./inventario.ts";
+import type { CausaInventario, CausaSemIa } from "./inventario.ts";
 import type { Ligacao, MotivoRecusaLigacao } from "./ligacao.ts";
 
 /**
@@ -65,7 +65,7 @@ export type PendentesOnboarding = {
 };
 
 /** `causa` (definido em 2026-10-05): a IA está logada, mas o teste de verdade a reprovou (src/contracts/inventario.ts). */
-export type IaNoMac = { id: "claude-cli" | "codex-cli"; estado: "pronto" | "nao_autenticado" | "ausente"; motivo?: string; causa?: CausaSemIa };
+export type IaNoMac = { id: "claude-cli" | "codex-cli"; estado: "pronto" | "nao_autenticado" | "ausente"; motivo?: string; causa?: CausaSemIa | CausaInventario };
 
 /** GET /api/t/:tenant/onboarding. */
 export type EstadoOnboarding = {

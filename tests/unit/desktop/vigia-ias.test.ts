@@ -242,6 +242,47 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.agendado).toBeNull();
   });
 
+  // NOD-178: o CLI que só demorou não é veredito do teste e não pode ficar "tentando de novo" sem nova sonda.
+  const LENTO = (estado: "ausente" | "nao_autenticado" = "ausente"): Inventario => ({ estado, motivo: "O Codex demorou para responder; o Mac está carregado. Tente de novo em instantes.", causa: "sonda_lenta", em: T0 });
+
+  it("NOD-178: com uma IA pronta e a outra lenta, a vigia sonda de novo a cada 3 s até a lenta responder", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": LENTO("nao_autenticado") } });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_IA_MS);
+    await tique();
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_IA_MS);
+    m.login["codex-cli"] = pronto();
+    await tique();
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" } });
+    expect(m.agendado).toBeNull();
+  });
+
+  it("NOD-178: 'ausente' lento → 'ausente' de verdade é reanunciado (a causa entra na chave do anúncio)", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": LENTO(), "codex-cli": ausente() } });
+    await vigia.iniciar(sondagem());
+    expect(m.anuncios).toHaveLength(1);
+    m.login["claude-cli"] = ausente();
+    await tique();
+    expect(m.anuncios).toHaveLength(2);
+  });
+
+  it("NOD-178: teste lento não apaga a reprovação que existia nem vira veredito; a tela recebe a causa, nunca 'ausente'", async () => {
+    const disco = [{ ia: "claude-cli", causa: "conta_sem_acesso", impressao: "conta-a", em: T0 - 60_000 }];
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": ausente() }, disco, teste: { "claude-cli": { inventario: LENTO(), resposta: null } } });
+    await vigia.iniciar(sondagem());
+    // A conta mudou: o reteste roda e volta lento.
+    m.impressao["claude-cli"] = "conta-b";
+    await tique();
+    expect(m.testes).toHaveLength(1);
+    expect(m.disco).toEqual(disco);
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_IA_MS);
+    // Pedido pela tela: o mesmo teste lento sai como "demorou", sem estado 'ausente' (que pediria "Instalar").
+    const r = await vigia.testar({});
+    expect(r).toEqual([{ ia: "claude-cli", estado: "nao_autenticado", causa: "sonda_lenta" }, { ia: "codex-cli", estado: "ausente" }]);
+    expect(m.disco).toEqual(disco);
+    await tique();
+  });
+
   it("o arquivo de vereditos é lido com desconfiança: forma errada, futuro, vencido e repetido ficam de fora", () => {
     const bom = { ia: "claude-cli", causa: "conta_sem_acesso", impressao: "h", em: T0 - 1 };
     expect(lerVereditos([bom, { ...bom, ia: "codex-cli", impressao: 7 }, { ...bom }, { ia: "gemini", causa: "conta_sem_acesso", em: T0 }, { ...bom, ia: "codex-cli", causa: "porque sim" }, { ...bom, em: T0 + 10 }, { ...bom, em: T0 - VALIDADE_VEREDITO_MS - 1 }, null, "x"], T0))

@@ -13,6 +13,7 @@ import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../executor/drivers/claude-cli.ts";
 import { configDosDrivers, criarRegistryDetalhado, executorPadrao, nodHome, registrarDriver } from "../executor/registry.ts";
 import { homeDaPessoa } from "../executor/caminho.ts";
+import { prazoSondaDoEnv } from "../executor/sonda.ts";
 import type { Driver, Registry } from "../executor/spi.ts";
 import { iniciarDespachanteOutbox, type DespachanteOutbox } from "../fundo/despachar-outbox.ts";
 import { iniciarOrquestrador, type Orquestrador } from "../fundo/orquestrador-turnos.ts";
@@ -152,7 +153,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
   //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
-  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY })];
+  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(env) }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, prazoSondaMs: prazoSondaDoEnv(env) })];
   const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" || env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production"));
   const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });

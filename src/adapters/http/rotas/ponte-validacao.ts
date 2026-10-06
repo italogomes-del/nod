@@ -1,4 +1,5 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
+import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, FalaIntermediaria, TrechoVivo } from "../../../contracts/ponte.ts";
 import { TETO_COMANDOS, TETO_DESCRICAO_COMANDO, TETO_SO_DO_TERMINAL, type CatalogoDeComandos, type ComandoDoMac } from "../../../contracts/comandos.ts";
@@ -76,10 +77,13 @@ export function sinais(v: unknown): SinaisTurno {
   exigir(["attempted", "rejected", "promptSubmitted", "producedOutput"].every((k) => typeof s[k] === "boolean"));
   return { attempted: s.attempted as boolean, rejected: s.rejected as boolean, promptSubmitted: s.promptSubmitted as boolean, producedOutput: s.producedOutput as boolean };
 }
-export function inventario(v: unknown, agora: number): Inventario {
+/** `nome`: o harness anunciado (ex.: "Codex"), para a frase de lentidão dizer quem demorou. */
+export function inventario(v: unknown, agora: number, nome = "harness"): Inventario {
   const i = objeto(v);
   if (i.estado === "pronto") { exigir(texto(i.versao, 100)); return { estado: "pronto", versao: i.versao, em: agora }; }
   exigir(i.estado === "ausente" || i.estado === "nao_autenticado");
+  // NOD-178: a causa atravessa (só o valor conhecido), e o motivo continua reescrito aqui, nunca o texto do Mac.
+  if (i.causa === "sonda_lenta") return { estado: i.estado, motivo: motivoSondaLenta(nome), causa: "sonda_lenta", em: agora };
   if (i.estado === "ausente") return { estado: "ausente", motivo: "Harness não encontrado neste computador", em: agora };
   // definido em 2026-10-05: a causa é código fechado e a frase é do servidor — texto do Mac nunca vira motivo.
   const causa = causaSemIa(i.causa);
