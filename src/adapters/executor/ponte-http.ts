@@ -1,4 +1,4 @@
-import type { AnuncioMaquina, PonteInterna, TrechoVivo } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, PonteInterna, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
@@ -106,6 +106,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     ferramenta(turnoId: string, nome: string) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []), { ferramenta: nome }]); aparar(turnoId); },
     /** A lista inteira substitui a que ainda não saiu: só a mais nova importa. */
     tarefas(turnoId: string, lista: TarefaDoBot[]) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("tarefas" in t)), { tarefas: lista }]); aparar(turnoId); },
+    /** O vigia do turno (NOD-73): como as tarefas, o aviso mais novo substitui o que ainda não saiu — só ele importa. */
+    vigia(turnoId: string, aviso: VigiaVivo) { trechos.set(turnoId, [...(trechos.get(turnoId) ?? []).filter((t) => !("vigia" in t)), { vigia: aviso }]); aparar(turnoId); },
     cancelar() { for (const c of ativos) c.abort(); },
   };
 }

@@ -3,6 +3,7 @@ import type { IdHarness } from "../../../contracts/harness.ts";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
+import type { VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -44,6 +45,8 @@ export function criarPonteHttpServidor(d: {
   tarefas(plano: PlanoTurno, tarefas: TarefaDoBot[]): void;
   /** ADR-067: uma fala da sessão viva foi gravada — a tela troca o texto ao vivo pela mensagem. */
   fala?(plano: PlanoTurno): void;
+  /** NOD-73: o vigia do turno avisou (só nome e números) — publica turno.vigia e registra no log. */
+  vigia?(plano: PlanoTurno, aviso: VigiaVivo): void;
   longpollMs?: number;
   /** ADR-048: itens aprovados que esperam o gh do Mac desta pessoa, e o desfecho que o Mac relata. */
   itensLocais?(escopo: Escopo): Promise<ItemLocal[]>;
@@ -148,6 +151,7 @@ export function criarPonteHttpServidor(d: {
       if (r.ativo) for (const t of trechos(b.trechos)) {
         if ("ferramenta" in t) d.ferramenta(plano, t.ferramenta);
         else if ("tarefas" in t) d.tarefas(plano, t.tarefas);
+        else if ("vigia" in t) d.vigia?.(plano, t.vigia);
         else if (t.texto) d.delta(plano, t.texto);
       }
       ctx.json(200, r);

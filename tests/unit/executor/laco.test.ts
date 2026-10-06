@@ -6,7 +6,7 @@ import { TEXTO_ENTREGA_MAX_CHARS } from "../../../src/shared/constantes.ts";
 import type { Adapter, Driver, Instance, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
-import type { Entrega, PedidoRenovar, PonteInterna } from "../../../src/contracts/ponte.ts";
+import type { Entrega, PedidoRenovar, PonteInterna, VigiaVivo } from "../../../src/contracts/ponte.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../../src/domain/stream-json.ts";
 import { driverFalso } from "../../helpers/driver-falso.ts";
@@ -316,7 +316,7 @@ function ponteDaSessao(o: { fila?: string[]; ativo?: (p: PedidoRenovar) => boole
 }
 
 describe("sessão viva no laço (ADR-067)", () => {
-  async function cenario(d: ReturnType<typeof driverControlado>, ponte: PonteFalsa, extra: { relogio?: () => number; aoFalaGravada?: () => void; checagemMensagensMs?: number } = {}) {
+  async function cenario(d: ReturnType<typeof driverControlado>, ponte: PonteFalsa, extra: { relogio?: () => number; aoFalaGravada?: () => void; checagemMensagensMs?: number; aoVigia?: (p: PlanoTurno, aviso: VigiaVivo) => void; vigiaMs?: number } = {}) {
     const registry = await registryCom(d.driver);
     const laco = iniciarLaco({
       ponte, registry, pessoaId: "p", machineId: "m1",
@@ -324,6 +324,8 @@ describe("sessão viva no laço (ADR-067)", () => {
       renovacaoMs: 10 ** 6,
       checagemMensagensMs: extra.checagemMensagensMs ?? 10 ** 6,
       ...(extra.aoFalaGravada ? { aoFalaGravada: extra.aoFalaGravada } : {}),
+      ...(extra.aoVigia ? { aoVigia: extra.aoVigia } : {}),
+      ...(extra.vigiaMs ? { vigiaMs: extra.vigiaMs } : {}),
       // Ceder o event loop como os demais testes: async () => {} gira em laço fechado.
       dormir: async () => new Promise((r) => setTimeout(r, 1)),
     });
@@ -331,18 +333,60 @@ describe("sessão viva no laço (ADR-067)", () => {
     return laco;
   }
 
-  it("sem vigia: uma ferramenta aberta por horas, sem nenhum evento, não interrompe o turno", async () => {
+  it("vigia só avisa (NOD-73): uma ferramenta aberta por horas, sem nenhum evento, avisa e não interrompe o turno", async () => {
     let t = 0;
     const d = driverControlado();
     const ponte = ponteDaSessao();
-    const laco = await cenario(d, ponte, { relogio: () => t });
+    const avisos: VigiaVivo[] = [];
+    const laco = await cenario(d, ponte, { relogio: () => t, vigiaMs: 5, aoVigia: (_p, a) => avisos.push(a) });
     d.sinks()!.evento({ tipo: "tool_use", id: "u1", nome: "Bash", input: { command: "npm test" } });
     t += 5 * 60 * 60 * 1000;
+    await esperarAte(() => avisos.length >= 1);
     await new Promise((r) => setTimeout(r, 30));
+    expect(avisos[0]).toEqual({ mudoMs: 5 * 60 * 60 * 1000, aberta: "Bash", emFundo: 0 });
+    // Um aviso por nível: o relógio parado não repete o aviso a cada batida.
+    expect(avisos).toHaveLength(1);
     expect(d.interrupcoes()).toBe(0);
     expect(ponte.entregas).toHaveLength(0);
     d.terminar("pronto");
     await esperarAte(() => ponte.entregas.length === 1);
+    expect(ponte.entregas[0]!.resultado.desfecho).toBe("sucesso");
+    await laco.parar();
+  });
+
+  it("vigia: 5 chamadas iguais avisam a repetição uma vez, sem argumento no aviso e sem interromper", async () => {
+    const d = driverControlado();
+    const ponte = ponteDaSessao();
+    const avisos: VigiaVivo[] = [];
+    const laco = await cenario(d, ponte, { aoVigia: (_p, a) => avisos.push(a) });
+    for (let i = 0; i < 6; i++) {
+      d.sinks()!.evento({ tipo: "tool_use", id: `u${i}`, nome: "Bash", input: { command: "git status" } });
+      d.sinks()!.evento({ tipo: "tool_result", toolUseId: `u${i}`, isError: false, texto: "limpo" });
+    }
+    expect(avisos).toEqual([{ mudoMs: 0, aberta: "Bash", emFundo: 0, repeticao: { nome: "Bash", vezes: 5 } }]);
+    expect(JSON.stringify(avisos)).not.toContain("git status");
+    d.terminar("pronto");
+    await esperarAte(() => ponte.entregas.length === 1);
+    expect(d.interrupcoes()).toBe(0);
+    expect(ponte.entregas[0]!.resultado.desfecho).toBe("sucesso");
+    await laco.parar();
+  });
+
+  it("vigia: aoVigia que lança (no evento e no timer) não derruba o turno nem o processo", async () => {
+    let t = 0;
+    const d = driverControlado();
+    const ponte = ponteDaSessao();
+    let chamadas = 0;
+    const laco = await cenario(d, ponte, { relogio: () => t, vigiaMs: 5, aoVigia: () => { chamadas += 1; throw new Error("tela caiu"); } });
+    // Pelo sink do evento: a quinta chamada igual avisa a repetição.
+    for (let i = 0; i < 5; i++) expect(() => d.sinks()!.evento({ tipo: "tool_use", id: `u${i}`, nome: "Bash", input: { command: "ls" } })).not.toThrow();
+    expect(chamadas).toBe(1);
+    // Pelo setInterval: 10 min de silêncio.
+    t += 10 * 60 * 1000;
+    await esperarAte(() => chamadas >= 2);
+    d.terminar("pronto");
+    await esperarAte(() => ponte.entregas.length === 1);
+    expect(d.interrupcoes()).toBe(0);
     expect(ponte.entregas[0]!.resultado.desfecho).toBe("sucesso");
     await laco.parar();
   });

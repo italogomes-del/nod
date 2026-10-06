@@ -1,8 +1,9 @@
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { AnuncioMaquina, Entrega, FalaIntermediaria, PonteInterna } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, Entrega, FalaIntermediaria, PonteInterna, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/turno.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
 import { SINAIS_ZERADOS } from "../../domain/stream-json.ts";
+import { AVALIACAO_VIGIA_MS, criarVigiaTurno } from "../../domain/vigia-turno.ts";
 import { log } from "../../obs/log.ts";
 import { CHECAGEM_MENSAGENS_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
@@ -40,6 +41,13 @@ export type OpcoesLaco = {
    */
   aoIniciarTurno?: (plano: PlanoTurno, adapter: Adapter) => void;
   aoTerminarTurno?: (plano: PlanoTurno) => void;
+  /**
+   * definido em 2026-10-05 (NOD-73): o vigia do turno avisou — silêncio de 10 min ou mais (sobe de nível), fim do
+   * silêncio (mudoMs 0) ou repetição em 5, 10 e 20. Só aviso: o laço nunca interrompe por causa dele.
+   */
+  aoVigia?: (plano: PlanoTurno, aviso: VigiaVivo) => void;
+  /** De quanto em quanto o vigia é avaliado (injetável no teste; o relógio é sempre `relogio`). */
+  vigiaMs?: number;
   /** definido em 2026-10-05: o resultado que o driver devolveu, antes da entrega (o app do Mac lê `causaSemIa`). */
   aoResultado?: (plano: PlanoTurno, resultado: ResultadoTurno) => void;
   dormir?: (ms: number) => Promise<void>;
@@ -89,6 +97,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
   const jitterMs = o.jitterMs ?? 300;
   const renovacaoMs = o.renovacaoMs ?? RENOVACAO_MS;
   const checagemMensagensMs = o.checagemMensagensMs ?? CHECAGEM_MENSAGENS_MS;
+  const vigiaMs = o.vigiaMs ?? AVALIACAO_VIGIA_MS;
   let parado = false;
   let acordar: (() => void) | null = null;
   let adapterAtual: Adapter | null = null;
@@ -162,11 +171,26 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     checagem.unref?.();
 
     /**
-     * revisto em 2026-10-01 (ADR-067): sem vigia de atividade. O watchdog de 2026-09-18 matava o turno depois de 5 min
+     * revisto em 2026-10-01 (ADR-067): nenhum relógio de trabalho. O watchdog de 2026-09-18 matava o turno depois de 5 min
      * em silêncio ou de 8 min com uma ferramenta aberta — e matava testes, CI e QA legítimos (4 turnos dos Devs em 01/10).
      * O turno acaba quando o bot termina, quando a pessoa aperta Parar (a renovação devolve {ativo:false}) ou quando a
-     * máquina some (o lease vence). Nenhum relógio de trabalho.
+     * máquina some (o lease vence).
+     * revisto em 2026-10-05 (NOD-73, emenda à ADR-067): volta um vigia, mas que só OBSERVA e AVISA — "sem novidade há
+     * N min" e "repetiu a mesma ação N vezes" vão à tela por `aoVigia`. Ele nunca chama interromper(): quem decide é a
+     * pessoa, com o Parar.
      */
+    const vigia = criarVigiaTurno(o.relogio());
+    // O aviso nunca derruba o turno (no sink do evento) nem o processo (no setInterval): falha vira log.
+    const avisar = (aviso: VigiaVivo | null) => {
+      if (!aviso || entregue) return;
+      try {
+        o.aoVigia?.(plano, aviso);
+      } catch (erro) {
+        log("aviso", "laco_vigia_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
+      }
+    };
+    const observacao = setInterval(() => avisar(vigia.avaliar(o.relogio())), vigiaMs);
+    observacao.unref?.();
     const entregar = async (bruto: ResultadoTurno): Promise<void> => {
       if (entregue) return;
       // A última fala intermediária vai antes da final: senão a conversa as mostraria fora de ordem.
@@ -211,6 +235,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         },
         evento(ev) {
           o.aoEvento?.(plano, ev);
+          avisar(vigia.registrar(ev, o.relogio()));
         },
         delta(texto) {
           o.aoDelta?.(plano, texto);
@@ -239,6 +264,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     } finally {
       clearInterval(batida);
       clearInterval(checagem);
+      clearInterval(observacao);
       adapterAtual = null;
       turnoAtual = null;
       o.aoTerminarTurno?.(plano);

@@ -19,6 +19,7 @@ import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
+import { criarAvisoDoVigia } from "./aviso-vigia.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
@@ -436,6 +437,7 @@ export function comporApp(o: OpcoesCompor): App {
     ferramenta: (plano, nome) => publicarDoPlano(plano, "turno.atividade", { nome, rotulo: rotuloFerramenta(nome) }),
     tarefas: (plano, tarefas) => publicarDoPlano(plano, "turno.tarefas", { tarefas }),
     fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
+    vigia: (plano, aviso) => avisoDoVigia(plano, aviso),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
     // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
     itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
@@ -852,9 +854,11 @@ export function comporApp(o: OpcoesCompor): App {
     }),
   ];
 
-  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala", dados: Record<string, unknown>): void {
+  function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
+  // NOD-73: o vigia do turno (só avisa), igual para o app do Mac e o modo servidor — frame e log saem do mesmo lugar.
+  const avisoDoVigia = criarAvisoDoVigia((plano, dados) => publicarDoPlano(plano, "turno.vigia", dados));
 
   function aoRegistrarCatcher(r: RegistroCatcher): void {
     const escopo = ponte.escopoDoTurno(r.turnoId);
@@ -877,6 +881,7 @@ export function comporApp(o: OpcoesCompor): App {
       ponte,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
       aoFalaGravada: (plano) => publicarDoPlano(plano, "turno.fala", {}),
+      aoVigia: (plano, aviso) => avisoDoVigia(plano, aviso),
       aoEvento: (plano, ev: EventoStream) => {
         if (ev.tipo === "catcher") aoRegistrarCatcher({ turnoId: plano.turnoId, tipo: ev.subtipo, dados: ev.dados });
         else if (ev.tipo === "tool_use") publicarDoPlano(plano, "turno.atividade", { nome: ev.nome, rotulo: rotuloFerramenta(ev.nome) });

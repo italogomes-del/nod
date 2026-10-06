@@ -1,7 +1,7 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
-import type { Entrega, FalaIntermediaria, TrechoVivo } from "../../../contracts/ponte.ts";
+import type { Entrega, FalaIntermediaria, TrechoVivo, VigiaVivo } from "../../../contracts/ponte.ts";
 import { TETO_COMANDOS, TETO_DESCRICAO_COMANDO, TETO_SO_DO_TERMINAL, type CatalogoDeComandos, type ComandoDoMac } from "../../../contracts/comandos.ts";
 import {
   TETO_CHAMADAS_RAIO_X,
@@ -15,6 +15,7 @@ import {
 } from "../../../contracts/raio-x.ts";
 import { ESTADOS_DA_TAREFA, type SinaisTurno, type TarefaDoBot } from "../../../contracts/turno.ts";
 import { TETO_TAREFAS, TETO_TITULO_TAREFA } from "../../../domain/tarefas-do-bot.ts";
+import { LIMIARES_REPETICAO } from "../../../domain/vigia-turno.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
@@ -42,6 +43,7 @@ export function trechos(v: unknown): TrechoVivo[] {
     if (texto(o.texto, 16_000)) { total += o.texto.length; saida.push({ texto: o.texto }); }
     else if (texto(o.ferramenta, 200) && /^[A-Za-z0-9_.-]+$/.test(o.ferramenta)) saida.push({ ferramenta: o.ferramenta });
     else if (Array.isArray(o.tarefas)) { const t = tarefasDoTrecho(o.tarefas); if (t) saida.push({ tarefas: t }); }
+    else if (o.vigia !== undefined) { const v = vigiaDoTrecho(o.vigia); if (v) saida.push({ vigia: v }); }
   }
   return total > 16_000 ? [] : saida;
 }
@@ -59,6 +61,29 @@ export function falas(v: unknown): FalaIntermediaria[] {
     exigir(typeof o.seq === "number" && Number.isSafeInteger(o.seq) && o.seq >= 1 && texto(o.texto));
     return { seq: o.seq, texto: o.texto };
   });
+}
+const NOME_FERRAMENTA = /^[A-Za-z0-9_.-]+$/;
+const nomeDeFerramenta = (v: unknown): v is string => texto(v, 200) && NOME_FERRAMENTA.test(v);
+const inteiroAte = (v: unknown, max: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= max;
+/**
+ * O vigia do turno (NOD-73), estrito: só as chaves do contrato, nome no padrão de ferramenta, números inteiros e a
+ * repetição num dos limiares. Qualquer coisa a mais (um `input`, um comando) descarta o trecho inteiro.
+ */
+function vigiaDoTrecho(v: unknown): VigiaVivo | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if (Object.keys(o).some((k) => !["mudoMs", "aberta", "emFundo", "repeticao"].includes(k))) return null;
+  if (!inteiroAte(o.mudoMs, 366 * 86_400_000) || !inteiroAte(o.emFundo, 1_000)) return null;
+  if (o.aberta !== undefined && !nomeDeFerramenta(o.aberta)) return null;
+  let repeticao: VigiaVivo["repeticao"];
+  if (o.repeticao !== undefined) {
+    const r = o.repeticao;
+    if (!r || typeof r !== "object" || Array.isArray(r)) return null;
+    const ro = r as Record<string, unknown>;
+    if (Object.keys(ro).length !== 2 || !nomeDeFerramenta(ro.nome) || !(LIMIARES_REPETICAO as readonly unknown[]).includes(ro.vezes)) return null;
+    repeticao = { nome: ro.nome, vezes: ro.vezes as number };
+  }
+  return { mudoMs: o.mudoMs, ...(o.aberta !== undefined ? { aberta: o.aberta } : {}), emFundo: o.emFundo, ...(repeticao ? { repeticao } : {}) };
 }
 /** A lista de tarefas do bot num trecho vivo: fora do formato ou acima dos tetos, o trecho some sozinho. */
 function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {

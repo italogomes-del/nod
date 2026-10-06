@@ -61,7 +61,15 @@ export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensage
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
  * de ferramenta (nunca input/resultado). O servidor republica como turno.delta / turno.atividade.
  */
-export type TrechoVivo = { texto: string } | { ferramenta: string } | { tarefas: TarefaDoBot[] };
+export type TrechoVivo = { texto: string } | { ferramenta: string } | { tarefas: TarefaDoBot[] } | { vigia: VigiaVivo };
+
+/**
+ * O vigia do turno (definido em 2026-10-05, NOD-73; src/domain/vigia-turno.ts): só AVISA, nunca corta. `mudoMs` > 0
+ * é o silêncio desde o último evento do CLI (0 = houve novidade); `aberta` é o NOME da ferramenta sem resultado;
+ * `emFundo` conta os comandos em segundo plano; `repeticao` é o maior limiar (5, 10, 20) já atingido no turno. Só
+ * nome e números: os argumentos nunca saem do Mac. Um trecho novo substitui o anterior no buffer da ponte.
+ */
+export type VigiaVivo = { mudoMs: number; aberta?: string; emFundo: number; repeticao?: { nome: string; vezes: number } };
 
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois

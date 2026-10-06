@@ -170,6 +170,12 @@ token de turno e o `prazoEm` nas pastas e no computador; o Bash do CLI roda sem 
 O turno acaba quando o bot termina, no Parar ou com o lease vencido (a máquina sumiu). **Um processo
 preso fica "trabalhando" até alguém apertar Parar** — a lacuna está na ADR-067.
 
+Revisto em 2026-10-05 (NOD-73, emenda à ADR-067): **vigia que avisa, não corta**. `src/domain/vigia-turno.ts`
+avisa com 10 min sem novidade (sobe em 10, 20, 40… min) e com a mesma chamada 5, 10 e 20 vezes (LRU de 256
+chaves); o laço o consulta a cada 60 s (`aoVigia`). Nenhum caminho do vigia chama `interromper()`. O trecho
+`{ vigia }` da renovação leva só nome e números — argumento de ferramenta nunca sai do Mac — e a validação do
+servidor é estrita. O servidor publica `turno.vigia` e registra `turno_sem_novidade` / `turno_repeticao`.
+
 ## Desktop e servidor compartilhado (2026-09-17)
 
 Produção na GCP (VM + Cloud SQL, deploy pelo workflow `deploy`): [docs/deploy-gcp.md](docs/deploy-gcp.md).

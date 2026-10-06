@@ -393,6 +393,18 @@
 .atividade-cab b { font-weight: 600; color: var(--ink-2); }
 .atividade-pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--mascote-cor, var(--ink-3)); flex: none; animation: pulsa 1.4s ease-in-out infinite; }
 .atividade-agora { margin: 6px 0 0; padding: 0 18px 14px 34px; font-size: 15px; line-height: 1.45; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Vigia do turno (2026-10-05, NOD-73, protótipo do Gil): só aviso, em âmbar, com o Parar; o ponto para de pulsar. */
+.atividade-pulso.parado { animation: none; background: var(--warning); }
+.atividade-vigia { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 18px 14px 34px; padding: 10px 12px; background: var(--warning-soft); border: 1px solid var(--warning-line); border-radius: 10px; color: var(--warning); font-size: 13px; line-height: 1.45; }
+.atividade-vigia p { flex: 1 1 100%; margin: 0; }
+.atividade-vigia p b:first-child { display: block; font-weight: 600; }
+.atividade-vigia p > span { color: var(--ink-2); }
+.vigia-ic { display: inline-flex; vertical-align: -1px; margin-right: 6px; }
+.atividade-vigia .bt { margin-left: auto; }
+.vigia-linha { color: var(--warning); }
+.vigia-linha .bt { margin-left: 4px; vertical-align: baseline; }
+.bt.aviso { color: var(--warning); border-color: var(--warning-line); background: var(--surface); }
+.bt.aviso:hover { border-color: var(--warning); background: var(--warning-soft); }
 .atividade-cartao details { border-top: 1px solid var(--line); background: var(--surface-raised); }
 .atividade-cartao summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; list-style: none; }
 .atividade-cartao summary::-webkit-details-marker { display: none; }

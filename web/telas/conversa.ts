@@ -6,8 +6,9 @@ import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
+import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
-import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
+import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa } from "../lib/mascote.ts";
@@ -421,18 +422,56 @@ const ETAPAS_VISIVEIS = 20;
  * Cartão de atividade (definido em 2026-09-24): o turno que já chamou ferramenta deixa de ser balão.
  * Mostra o que o agente está fazendo agora numa linha, há quanto tempo e as etapas recolhidas.
  */
-function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string): string {
+function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string, parar: string): string {
+  const mudo = minutosSemNovidade(a, estado.agora);
   const visiveis = a.etapas.slice(-ETAPAS_VISIVEIS);
   const anteriores = a.totalEtapas - visiveis.length;
   const etapas = visiveis.map((e) => `<li title="${esc(e.texto)}"><span class="atividade-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span><small>${e.ferramentas === 1 ? "1 ferramenta" : `${e.ferramentas} ferramentas`}</small></li>`).join("");
   return `<article class="message bot atividade ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
-    <div class="atividade-cab"><span class="atividade-pulso" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
+    <div class="atividade-cab"><span class="atividade-pulso${mudo !== null ? " parado" : ""}" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
     <p class="atividade-agora">${soLinks(linhaAtual(a))}</p>
+    ${renderAvisoDoVigia(a, estado.agora, parar)}
     ${renderTarefasDoBot(a.tarefas)}
     <details data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-seta" aria-hidden="true">›</span><span>${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}</span><span class="atividade-ver">Ver etapas</span><span class="atividade-recolher">Recolher</span></summary>
       <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
     </details>
   </section></div></article>`;
+}
+
+/**
+ * O vigia do turno na tela (definido em 2026-10-05, NOD-73; protótipo do Gil): só aviso — quem decide parar é a
+ * pessoa, com o Parar que já existe. Minutos sem novidade contados pelo relógio da tela a partir de `mudoDesde`;
+ * null = sem aviso de silêncio.
+ */
+export function minutosSemNovidade(a: AtividadeTurno | undefined, agora: number): number | null {
+  const desde = a?.vigia?.mudoDesde;
+  return desde === null || desde === undefined ? null : Math.max(1, Math.floor((agora - desde) / 60_000));
+}
+
+function esperaDoVigia(v: VigiaDaAtividade): string {
+  if (v.aberta) return `Esperando <b>${esc(v.aberta)}</b> terminar.`;
+  if (v.emFundo > 0) return `Esperando ${v.emFundo === 1 ? "1 comando" : `${v.emFundo} comandos`} em segundo plano.`;
+  return "O bot não responde.";
+}
+
+/** Um bloco só, em âmbar (relógio no silêncio, setas em círculo na repetição; nunca o triângulo de erro), com um Parar: o silêncio e a repetição (só o maior limiar, numa linha que se atualiza). */
+export function renderAvisoDoVigia(a: AtividadeTurno, agora: number, parar: string): string {
+  const v = a.vigia;
+  const mudo = minutosSemNovidade(a, agora);
+  if (!v || (mudo === null && !v.repeticao)) return "";
+  const linhas = [
+    mudo !== null ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.relogioMini}</span>Sem novidade há ${mudo} min</b><span>${esperaDoVigia(v)} Se parecer travado, use Parar.</span></p>` : "",
+    v.repeticao ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.proxima}</span>Repetiu a mesma ação ${v.repeticao.vezes} vezes</b><span>Em <b>${esc(v.repeticao.rotulo)}</b>. Pode estar andando em círculo.</span></p>` : "",
+  ].join("");
+  return `<div class="atividade-vigia" role="status">${linhas}${parar}</div>`;
+}
+
+/** O Parar do aviso: a mesma ação do cabeçalho (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
+function pararDoVigia(c: ConversaEstado): string {
+  const salaId = c.conversa.salaId;
+  return salaId
+    ? botao("parar-sala", "Parar", { classe: "aviso", id: salaId, titulo: "interrompe todos os turnos desta sala" })
+    : botao("parar-conversa", "Parar", { classe: "aviso", titulo: "interrompe agora o que está rodando nesta conversa" });
 }
 
 /** A lista de tarefas do bot (definido em 2026-09-28): a checklist que o terminal mostra, dentro do cartão. */
@@ -461,14 +500,17 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "O agente";
   if (atividade && atividade.ferramentas > 0) {
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: renderCartaoAtividade(t, atividade, estado, nome) }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: renderCartaoAtividade(t, atividade, estado, nome, pararDoVigia(c)) }];
   }
+  // NOD-73: sem cartão, o aviso de silêncio vira uma linha só, com o Parar.
+  const mudo = t.estado === "rodando" ? minutosSemNovidade(atividade, estado.agora) : null;
+  const linhaMuda = mudo !== null ? `<div class="msg-sistema vigia-linha" role="status">sem novidade há ${mudo} min · o bot não responde · ${pararDoVigia(c)}</div>` : "";
   if (atividade?.atual) {
     // definido em 2026-10-03: o texto ao vivo já sai formatado (negrito, listas, tabelas, chips), em vez de cru até o
     // fim do turno — o salto da troca pelo balão final some. A memória por chave guarda o último pedaço formatado.
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave }))}</div></div></article>` }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave }))}</div></div></article>${linhaMuda}` }];
   }
-  return [{ chave, html: linhaDoTurnoVivo(t, c, estado) }];
+  return [{ chave, html: linhaDoTurnoVivo(t, c, estado) + linhaMuda }];
 }
 
 /** O cursor do streaming fica na mesma linha do último texto, mesmo quando ele termina num parágrafo, item ou título. */
@@ -710,6 +752,8 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
+  // NOD-73: "Trabalhando · sem novidade há N min" quando o vigia avisou silêncio.
+  const mudo = vivo && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[vivo.turnoId], estado.agora) : null;
   const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
   const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
   // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
@@ -719,7 +763,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const presenca = emLigacao
     ? "Em ligação"
     : vivo
-    ? `Trabalhando${esperam ? ` <span class="presenca-sep" aria-hidden="true">·</span> <b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : ""}`
+    ? `Trabalhando${mudo !== null ? ` <span class="presenca-sep" aria-hidden="true">·</span> sem novidade há ${mudo} min` : ""}${esperam ? ` <span class="presenca-sep" aria-hidden="true">·</span> <b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : ""}`
     : esperam ? "Aguardando você" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
   return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo || emLigacao ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">

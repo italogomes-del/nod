@@ -69,6 +69,29 @@ describe("desktop: fronteiras HTTP", () => {
     await c.ponte.renovar({ ...pedido, turnoId: "outro" });
     expect(JSON.parse(String(f.mock.calls[2]?.[1]?.body)).trechos).toEqual([{ texto: "de outro turno" }]);
   });
+  it("vigia (NOD-73): o aviso novo substitui o que ainda não saiu; o servidor só aceita nome e números", async () => {
+    const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
+    const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
+    c.delta("x", "oi"); c.vigia("x", { mudoMs: 600_000, emFundo: 0 }); c.vigia("x", { mudoMs: 1_200_000, aberta: "Bash", emFundo: 1 });
+    await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, eventos: [] });
+    expect(JSON.parse(String(f.mock.calls[0]?.[1]?.body)).trechos).toEqual([{ texto: "oi" }, { vigia: { mudoMs: 1_200_000, aberta: "Bash", emFundo: 1 } }]);
+
+    const valido = { mudoMs: 600_000, aberta: "mcp__nod__gmail__search_threads", emFundo: 2, repeticao: { nome: "Bash", vezes: 10 } };
+    expect(trechos([{ vigia: valido }])).toEqual([{ vigia: valido }]);
+    expect(trechos([{ vigia: { mudoMs: 0, emFundo: 0 } }])).toEqual([{ vigia: { mudoMs: 0, emFundo: 0 } }]);
+    // Estrito: campo a mais (argumento), nome fora do formato, limiar inventado ou número fora da faixa somem.
+    expect(trechos([
+      { vigia: { ...valido, input: { command: "cat .env" } } },
+      { vigia: { ...valido, repeticao: { nome: "Bash", vezes: 10, input: "x" } } },
+      { vigia: { ...valido, aberta: "rm -rf /" } },
+      { vigia: { ...valido, repeticao: { nome: "Bash", vezes: 7 } } },
+      { vigia: { mudoMs: -1, emFundo: 0 } },
+      { vigia: { mudoMs: 1.5, emFundo: 0 } },
+      { vigia: { mudoMs: 0, emFundo: 1001 } },
+      { vigia: "x" },
+      { texto: "ok" },
+    ])).toEqual([{ texto: "ok" }]);
+  });
   it("fila acima de 16k de texto descarta o mais antigo", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });

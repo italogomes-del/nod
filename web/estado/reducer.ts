@@ -17,7 +17,7 @@ import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { Escopo } from "../../src/shared/types.ts";
-import { comFerramenta, comTarefas, comTexto, type AtividadeTurno } from "../lib/atividade.ts";
+import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
 
@@ -364,6 +364,20 @@ function turnoDeLigacao(dados: Record<string, unknown>): boolean {
   return dados.modo === "ligacao" || dados.origem === "ligacao";
 }
 
+/**
+ * O aviso do vigia do turno (NOD-73) como a tela o guarda. `mudoMs` vira o instante em que o silêncio começou, para a
+ * contagem de minutos andar sem frame novo. Fora do formato, null (o frame é ignorado).
+ */
+function vigiaDoFrame(d: Record<string, unknown>, agora: number): VigiaDaAtividade | null {
+  const mudoMs = d.mudoMs;
+  const emFundo = d.emFundo;
+  if (typeof mudoMs !== "number" || !Number.isFinite(mudoMs) || mudoMs < 0 || typeof emFundo !== "number" || !Number.isFinite(emFundo) || emFundo < 0) return null;
+  const r = d.repeticao && typeof d.repeticao === "object" ? (d.repeticao as Record<string, unknown>) : null;
+  const rotulo = r ? texto(r.rotulo) : null;
+  const repeticao = r && rotulo && typeof r.vezes === "number" && r.vezes > 0 ? { rotulo, vezes: r.vezes } : null;
+  return { mudoDesde: mudoMs > 0 ? agora - mudoMs : null, aberta: texto(d.aberta), emFundo: Math.floor(emFundo), repeticao };
+}
+
 /** Um handler por TipoFrame — a tabela é TOTAL: um tipo novo no contrato não compila sem entrar aqui. */
 type Handler = (estado: Estado, frame: FrameSse, agora: number) => Estado;
 
@@ -417,6 +431,16 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const conversaId = texto(f.dados.conversaId);
     if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
     return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comTarefas(a, tarefasDoFrame(f.dados.tarefas))) };
+  },
+  // NOD-73: o vigia só avisa. Guarda o aviso no turno vivo; a ligação não mostra nada disso (ADR-071).
+  "turno.vigia": (e, f, agora) => {
+    if (turnoDeLigacao(f.dados)) return e;
+    const turnoId = texto(f.dados.turnoId);
+    const conversaId = texto(f.dados.conversaId);
+    if (!turnoId || !conversaId || !guardaAoVivo(e, conversaId)) return e;
+    const vigia = vigiaDoFrame(f.dados, agora);
+    if (!vigia) return e;
+    return { ...e, atividades: comAtividade(e, conversaId, turnoId, (a) => comVigia(a, vigia)) };
   },
   // ADR-067: a volta do modelo virou mensagem e o turno segue rodando — a conversa relê, e o cartão ao vivo recomeça
   // vazio para a próxima volta (senão o mesmo texto apareceria duas vezes).

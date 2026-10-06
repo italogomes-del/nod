@@ -73,3 +73,40 @@ export function rotuloFerramenta(nomeCli: string): string {
   }
   return `Usou ${titulo(m[1] === "nod" ? nome : m[1]!)}`;
 }
+
+/** O substantivo das nativas no aviso do vigia ("Esperando *Terminal* terminar"), nunca o comando (NOD-73). */
+const NATIVAS_NOME: Record<string, string> = {
+  Bash: "Terminal",
+  BashOutput: "Terminal",
+  Monitor: "Monitor",
+  Read: "Leitura de arquivo",
+  Edit: "Edição de arquivo",
+  Write: "Escrita de arquivo",
+  NotebookEdit: "Notebook",
+  Glob: "Busca de arquivos",
+  Grep: "Busca nos arquivos",
+  WebFetch: "Navegador",
+  WebSearch: "Pesquisa na web",
+  Skill: "Skill",
+  Agent: "Subagente",
+  ToolSearch: "Busca de ferramentas",
+  TaskCreate: "Lista de tarefas",
+  TaskUpdate: "Lista de tarefas",
+  TaskList: "Lista de tarefas",
+  TaskGet: "Lista de tarefas",
+};
+
+/**
+ * O nome curto da ferramenta para o aviso do vigia do turno (definido em 2026-10-05, NOD-73): "Terminal", "Linear",
+ * "Computador". Como o rótulo, só lê o NOME que o CLI viu.
+ */
+export function nomeDaFerramenta(nomeCli: string): string {
+  const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(nomeCli);
+  if (!m) return NATIVAS_NOME[nomeCli] ?? (nomeCli || "uma ferramenta");
+  const nome = m[2]!;
+  if (nome.startsWith("computador_")) return "Computador";
+  if (nome.startsWith("workspace_")) return "Pasta de trabalho";
+  const conector = /^(.+?)__(.+)$/.exec(nome);
+  if (conector) return titulo(conector[1]!);
+  return titulo(m[1] === "nod" ? nome : m[1]!);
+}

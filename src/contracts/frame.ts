@@ -11,6 +11,11 @@ export type TipoFrame =
    * ao vivo daquele turno pela mensagem (relê a conversa e zera o trecho), e o turno segue "rodando".
    */
   | "turno.fala"
+  /**
+   * O vigia do turno (NOD-73): {mudoMs, aberta?, emFundo, repeticao?} com RÓTULOS, nunca argumentos. Só avisa; a
+   * tela mostra "sem novidade há N min" e "repetiu a mesma ação N vezes". A ligação ignora.
+   */
+  | "turno.vigia"
   | "turno.encerrado"
   | "turno.interrompido"
   | "decisao.nova"

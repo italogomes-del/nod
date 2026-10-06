@@ -9,6 +9,8 @@ import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
+import type { VigiaVivo } from "../../../src/contracts/ponte.ts";
+import { criarVigiaTurno } from "../../../src/domain/vigia-turno.ts";
 
 /**
  * Spawn REAL do binário falso (tests/fixtures/claude-falso.mjs, L3) por trás de um `claude` de
@@ -290,6 +292,19 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(espiao.deltas).toHaveLength(4);
     expect(espiao.deltas.join("")).toBe(`${resultado.texto.replace("\n\nAnotado.", "")}Anotado.`);
     expect(espiao.eventos.filter((e) => e.tipo === "texto_bloco")).toHaveLength(2);
+  });
+
+  it("NOD-73: 20 chamadas iguais do CLI real avisam a repetição em 5, 10 e 20, sem argumento, e o turno termina em sucesso", async () => {
+    const { instance } = await instanciar("repeticao");
+    const vigia = criarVigiaTurno(0);
+    const avisos: VigiaVivo[] = [];
+    const espiao = sinksEspiao();
+    const evento = espiao.sinks.evento;
+    espiao.sinks.evento = (e) => { evento(e); const a = vigia.registrar(e, 0); if (a) avisos.push(a); };
+    const resultado = await instance.adapter(planoDeTeste(dir)).rodarTurno(espiao.sinks);
+    expect(resultado.desfecho).toBe("sucesso");
+    expect(avisos.map((a) => a.repeticao)).toEqual([5, 10, 20].map((vezes) => ({ nome: "mcp__nod__somar", vezes })));
+    expect(JSON.stringify(avisos)).not.toContain("17");
   });
 
   it("binário que não existe → ErroDeDominio executor_indisponivel (motor_ausente) antes de qualquer spawn", async () => {

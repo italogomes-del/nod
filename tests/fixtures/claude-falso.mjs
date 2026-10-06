@@ -19,6 +19,7 @@ const CENARIOS = {
   "s6-sigterm": "s6-sigterm.jsonl",
   "s2c-session-in-use": "s2c-session-in-use.jsonl",
   "relatorio-lembrar": "relatorio-lembrar.jsonl",
+  "repeticao": "repeticao.jsonl",
 };
 
 const args = process.argv.slice(2);

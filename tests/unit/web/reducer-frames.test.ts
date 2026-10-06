@@ -85,6 +85,7 @@ describe("aplicarFrame por TipoFrame", () => {
       ferramentas: 2,
       ultimaFerramenta: "Alterou Gmail",
       tarefas: [],
+      vigia: null,
     });
   });
 
@@ -95,6 +96,23 @@ describe("aplicarFrame por TipoFrame", () => {
     e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Bash", rotulo: "Rodou um comando" }), AGORA);
     expect(e.atividades[CONVERSA]?.[TURNO]?.tarefas).toEqual(tarefas);
     expect(e.atividades[CONVERSA]?.[TURNO]?.ferramentas).toBe(1);
+  });
+
+  it("turno.vigia (NOD-73) liga e desliga o aviso no turno vivo, sem perder a ferramenta; ligação e frame torto são ignorados", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Bash", rotulo: "Rodou um comando" }), AGORA);
+    e = aplicarFrame(e, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, mudoMs: 600_000, aberta: "Terminal", emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.vigia).toEqual({ mudoDesde: AGORA - 600_000, aberta: "Terminal", emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } });
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Read", rotulo: "Leu um arquivo" }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.vigia?.mudoDesde).toBe(AGORA - 600_000);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.ferramentas).toBe(2);
+    e = aplicarFrame(e, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, mudoMs: 0, emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.vigia).toEqual({ mudoDesde: null, aberta: null, emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } });
+
+    const antes = e;
+    expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, modo: "ligacao", mudoMs: 600_000, emFundo: 0 }), AGORA)).toBe(antes);
+    expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, mudoMs: "muito", emFundo: 0 }), AGORA)).toBe(antes);
+    expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, mudoMs: 600_000, emFundo: 0 }), AGORA)).toBe(antes);
   });
 
   it("turno.interrompido limpa o vivo e invalida conversa, frota e sua-vez (pode ter nascido 'retomar?')", () => {
