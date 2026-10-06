@@ -235,6 +235,13 @@ organização pode ter desativado o uso por assinatura. `nao_autenticado` leva u
 - Texto do Mac não vira motivo, e o nome que entra na pergunta do teste passa por `nomeParaOTeste`.
 - `erroCru` remoto atravessa a ponte com teto e vai só ao diagnóstico gravado; nunca ao log do servidor.
 
+Reinício do servidor com Macs conectados (medido em produção em 2026-10-05, deploy no meio do uso): a ponte das
+máquinas vive em memória, então o servidor novo responde 409 `estado_invalido` ao `puxar` de toda máquina que não se
+reanunciou, e a fila daquela pessoa para. O app trata o 409 reanunciando (`vigia.reanunciar()`, com espera de 10 s);
+não troque isso por "mostrar mensagem e esperar a pessoa reabrir". No encerramento, `servidor.close` fecha as conexões
+ociosas na hora e as ativas em 5 s (`ESPERA_CONEXOES_ATIVAS_MS`); sem isso o keep-alive do Caddy segurava o processo
+até o SIGKILL do compose, meio servindo por 5 min.
+
 Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila só entrega a uma máquina
 tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro

@@ -55,6 +55,13 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
   return server;
 }
 
+/**
+ * definido em 2026-10-05: ao fechar, as conexões ociosas caem na hora e as ativas ganham este tempo para terminar o
+ * pedido em curso. A drenagem (boot.ts) já esperou o que importa (ligações e turnos com token vivo); o que sobra são
+ * long-polls e SSE, que o cliente refaz.
+ */
+export const ESPERA_CONEXOES_ATIVAS_MS = 5_000;
+
 export function listen(
   port = Number(process.env.NOD_API_PORT ?? 8888),
   host = process.env.NOD_HOST ?? "127.0.0.1",
@@ -73,6 +80,11 @@ export function listen(
         close: () =>
           new Promise((r, j) => {
             server.close((e) => (e ? j(e) : r()));
+            // medido em produção em 2026-10-05: `close` só para de escutar. As conexões keep-alive do Caddy ficavam
+            // abertas, o processo não saía (nenhum `nod_encerrado` no log) e o compose o matava no SIGKILL 5 min depois
+            // da drenagem, enquanto pedidos antigos ainda entravam por essas conexões e os novos eram recusados.
+            server.closeIdleConnections();
+            setTimeout(() => server.closeAllConnections(), ESPERA_CONEXOES_ATIVAS_MS).unref();
           }),
       });
     });

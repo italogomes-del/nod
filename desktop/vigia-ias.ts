@@ -63,6 +63,11 @@ export type VigiaDasIas = {
    * de novo agora (o `codex login status` não diz qual é a conta, então a impressão sozinha não perceberia).
    */
   contaMudou(ia: IaDesktop): Promise<void>;
+  /**
+   * O servidor não reconhece mais esta máquina (409 no `puxar`: ele reiniciou). O último inventário é anunciado de
+   * novo, mesmo sem nada ter mudado; sem isto a fila da pessoa fica parada até ela reabrir o app.
+   */
+  reanunciar(): Promise<void>;
   parar(): void;
 };
 
@@ -97,6 +102,7 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
   let carregados = false;
   let ultimoAnuncio: string | null = null;
   let ultima: Sondagem | null = null;
+  let ultimosInventarios: Inventarios | null = null;
   let timer: { cancelar(): void } | null = null;
   let parado = false;
   let ocupado: Promise<unknown> = Promise.resolve();
@@ -174,6 +180,7 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     // Só o que muda a decisão do servidor entra na chave: o instante de cada sonda não é novidade.
     const chave = JSON.stringify(IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado === "nao_autenticado" ? i.causa ?? null : null]; }));
     ultima = s;
+    ultimosInventarios = inventarios;
     d.aoRegistry(s.registry, principal.estado === "pronto");
     if (chave === ultimoAnuncio) return;
     await d.anunciar(inventarios, principal);
@@ -264,6 +271,14 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     contaMudou(ia) {
       forcadas.add(ia);
       return emFila(async () => { await carregar(); await passada(); });
+    },
+
+    reanunciar() {
+      return emFila(async () => {
+        if (parado || !ultima || !ultimosInventarios) return;
+        ultimoAnuncio = null;
+        await publicar(ultima, ultimosInventarios);
+      });
     },
 
     parar() {
