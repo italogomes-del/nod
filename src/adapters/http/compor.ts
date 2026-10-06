@@ -18,6 +18,7 @@ import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iaAtualDoCatalogo } from "../../domain/harness.ts";
 import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
 import { criarAvisoDoVigia } from "./aviso-vigia.ts";
@@ -219,6 +220,8 @@ export function comporApp(o: OpcoesCompor): App {
   // NOD-164: o modelo da ligação vem do env do servidor. O boot já validou; aqui lança antes de qualquer efeito se
   // alguém compôs sem o boot.
   const modelosLigacao = lerModelosLigacao(env);
+  // definido em 2026-10-06: o "A fazer" (ADR-064) desligado sem NOD_PENDENCIAS=1 — ver aFazerLigado.
+  const aFazer = aFazerLigado(env.NOD_PENDENCIAS);
   const compartilhado = env.NOD_MODO === "compartilhado";
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
@@ -353,7 +356,7 @@ export function comporApp(o: OpcoesCompor): App {
         const d = depsSobre(trx);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao });
+          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -817,7 +820,7 @@ export function comporApp(o: OpcoesCompor): App {
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
-    ...criarRotasPendencias(depsRotas),
+    ...(aFazer ? criarRotasPendencias(depsRotas) : []),
     ...criarRotasConversas(depsRotas),
     ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),

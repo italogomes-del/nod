@@ -206,6 +206,8 @@ describe("montarPromptSistema", () => {
       const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
       expect(conexoes(p)[0]).toMatchObject({ slug: "gmail", concedidas_a_voce: [] });
       expect(p).toContain("Conector habilitado não é acesso seu");
+      // 2026-10-06: o "já liberei" da pessoa vira pedido na hora — o card nasce na conversa, do bot.
+      expect(p).toContain("Se a pessoa disser que já conectou ou liberou um app e ele não está em concedidas_a_voce, chame pedir_acesso na hora");
       expect(p).toContain("Histórico e memória não provam concessão");
     });
 
@@ -321,12 +323,13 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
     // Impressão digital das linhas ORDENADAS do prompt da main 833f05f para as mesmas entradas (gerada antes da mudança).
     // Profundidade 1 para não cair no aviso do último passe, a única frase que saiu da linha da Colaboração.
     // É um retrato fixo: quem mudar de propósito o TEXTO de uma linha do prompt regenera estes hashes com o mesmo
-    // `digital`; uma falha aqui sem mudança de texto quer dizer que uma linha sumiu ou duplicou.
+    // `digital`; uma falha aqui sem mudança de texto quer dizer que uma linha sumiu ou duplicou. Regenerado em 2026-10-06:
+    // linha nova do "já liberei" (pedir_acesso na hora) em conversa e delegação.
     const digital = (s: string) => createHash("sha256").update([...s.split("\n")].sort().join("\n")).digest("hex");
     const esperado = {
-      conversa: "cf3687675cca69e5d7a4464d8e671c8867e4bd474c4cff13f1be84f33146aa8a",
+      conversa: "74d76b0ef12af0c0278b07b8338198a9a9a31daec1f529beeef816b40852b7d8",
       rotina: "6fab7fec27c5acc8285b61f6edbf1818db32abd5915d251c1bfd9ac698a7613a",
-      delegacao: "e07ba8fde11cf65317c206c0b3719e9f859ae169137115b1dfe96631125af23a",
+      delegacao: "efeb97808aec8c9bae528d82e7fbdea444e69601d690163ab00c9d06b461e758",
     };
     const obtido = { conversa: "", rotina: "", delegacao: "" };
     for (const modo of ["conversa", "rotina", "delegacao"] as const) obtido[modo] = digital(montarPromptSistema({ ...base, ...turnoA, profundidade: 1, modo }));

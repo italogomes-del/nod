@@ -273,6 +273,9 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
     // concluiu que a plataforma não ligou as ferramentas — em vez de pedir de novo. `concedidas_a_voce`
     // sai do plano do turno, a única fonte que diz o que ela pode chamar agora.
     linhas.push("Conector habilitado não é acesso seu: você só chama as capacidades listadas em concedidas_a_voce. Se a tarefa precisa de uma capacidade que está no catálogo e não em concedidas_a_voce, chame pedir_acesso com os nomes exatos (ou [] para pedir pelo nível), nivel, para e nao_pedido — a pessoa aprova num card e a tarefa retoma sozinha. Isso não é falha da plataforma. Histórico e memória não provam concessão: acesso pode ter sido revogado.");
+    // definido em 2026-10-06 (pedido do Marlon): o card de acesso aparece porque o bot pede, na própria conversa. Quem conectou
+    // o app no Marketplace por conta própria e diz "já liberei" recebe o card na hora, em vez de o bot dizer que segue sem acesso.
+    linhas.push("Se a pessoa disser que já conectou ou liberou um app e ele não está em concedidas_a_voce, chame pedir_acesso na hora, sem perguntar antes: o card mostra o app já conectado e ela libera com um clique.");
     const concedidas = (conectorId: string) => entrada.ferramentas.filter((f) => f.origem === "conector" && f.conectorId === conectorId).map((f) => f.nome.slice(f.nome.indexOf("__") + 2)).sort();
     // revisto em 2026-09-28 (modo dev): esta linha levava o catálogo INTEIRO de cada app, com descrição — na Clarice,
     // 439 ferramentas e ~99 mil caracteres em toda chamada, 316 delas que ela nem podia usar. Ficam só os NOMES do
@@ -347,7 +350,7 @@ const PREFIXOS_DAS_SECOES: readonly (readonly [SecaoDoPrompt, readonly string[]]
   ["computador", ["Seu computador está", "Você tem um computador", "Pastas do computador"]],
   ["colegas", ["Colaboração:", "Diretório de colegas", "Limite da corrente:", "Quem receber um pedido seu", "Colegas no nod"]],
   ["rotinas", ["Quando a pessoa pedir uma tarefa recorrente", "Rotinas deste agente:", "Inventário de rotinas", "Pausar interrompe", "Pausar e reativar"]],
-  ["apps", ["Apps que você pode pedir", "Apps do marketplace:", "Conector habilitado não é acesso", "Conexões cadastradas", "Apps conectados"]],
+  ["apps", ["Apps que você pode pedir", "Apps do marketplace:", "Conector habilitado não é acesso", "Se a pessoa disser que já conectou", "Conexões cadastradas", "Apps conectados"]],
   ["ferramentas", ["Artefatos:", "Pendências:", "As únicas ferramentas", "Terminal:", "Skills:", "Capacidades:", "Forma de trabalho:", "Progresso:"]],
   ["memoria", ["Memória (", "- ["]],
   ["contexto", ["Suas pendências abertas", "Contexto recente da conversa"]],

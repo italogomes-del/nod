@@ -17,6 +17,7 @@ import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { Escopo } from "../../src/shared/types.ts";
+import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
@@ -475,7 +476,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de
     // sistema do resolver e a fala do Fazer agora chegam pelos frames delas (mensagem.nova, turno.iniciado).
-    if (String(f.dados.acao).startsWith("pendencia_")) return agenteId ? invalidar(e, `pendencias:${agenteId}`) : e;
+    if (String(f.dados.acao).startsWith("pendencia_")) return agenteId && A_FAZER_LIGADO ? invalidar(e, `pendencias:${agenteId}`) : e;
     const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
     const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
     return invalidar(e, "frota", "gestao", "nao-lidos", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
@@ -741,7 +742,7 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "nova-sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "conversa" && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
   // ADR-064: o "a fazer" aparece embaixo da última mensagem e na gaveta, então chega junto com a conversa.
-  if (t.tipo === "conversa" && !estado.pendencias[t.agenteId]) faltas.push(`pendencias:${t.agenteId}`);
+  if (A_FAZER_LIGADO && t.tipo === "conversa" && !estado.pendencias[t.agenteId]) faltas.push(`pendencias:${t.agenteId}`);
   // Modo ligação (2026-10-04): o botão "Ligar" do cabeçalho só aparece com a disponibilidade lida, e só para bot da pessoa.
   if (t.tipo === "conversa" && !(t.agenteId in estado.disponibilidadeLigacao) && estado.frota?.agentes.some((a) => a.id === t.agenteId && a.ownerId === estado.sessao?.pessoaId)) faltas.push(`disponibilidade:${t.agenteId}`);
   // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.

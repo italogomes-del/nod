@@ -21,6 +21,7 @@ import { iniciarOrquestrador, type Orquestrador } from "../fundo/orquestrador-tu
 import { garantirParticoes } from "../fundo/particoes.ts";
 import { sincronizarDominiosAdmitidos } from "../fundo/dominios-admitidos.ts";
 import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
+import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
@@ -224,6 +225,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       services: app.services,
       useCases: app.useCases,
       agora,
+      aFazer: aFazerLigado(env.NOD_PENDENCIAS),
       intervaloMs: iv.schedulerMs,
     },
     { listarPessoas: o.listarPessoas },

@@ -46,6 +46,8 @@ export type EntradaEmitirPlano = {
    * (`lerModelosLigacao` sobre o env do servidor). Ausente = MODELOS_LIGACAO_PADRAO. O caso de uso não lê `process.env`.
    */
   modelosLigacao?: ModelosLigacao;
+  /** O "A fazer" ligado (NOD_PENDENCIAS=1, lido pelo compositor). Ausente = desligado: nem ferramentas nem lista. */
+  aFazer?: boolean;
 };
 
 /**
@@ -171,7 +173,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-30 (ADR-064): a lista do que o bot deixou para depois entra quando alguém de fora da corrente
   // de colegas chamou o bot — a pessoa ou uma rotina (profundidade 0: conversa, criação, rotina e as retomadas
   // delas). É isso que "na próxima rotina ou conversa" quer dizer; no meio de um pedido de colega, ela não aparece.
-  const comPendencias = turno.profundidade === 0 && (modo === "conversa" || modo === "criacao" || modo === "rotina");
+  const comPendencias = input.aFazer === true && turno.profundidade === 0 && (modo === "conversa" || modo === "criacao" || modo === "rotina");
   const pendencias = comPendencias ? pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(agente.id), agora) : [];
 
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
@@ -234,6 +236,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       return slug ? [`${slug}__${p.capacidade}`] : [];
     }),
     pendencias,
+    aFazer: input.aFazer === true,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).

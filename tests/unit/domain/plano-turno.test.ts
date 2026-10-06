@@ -18,7 +18,7 @@ const concessoes: Concessao[] = [
   { tenantId: "t", id: "g1", ownerId: "p", agenteId: "a1", conectorId: "k1", capacidade: "listar_contatos", mensagemId: "m", criadoEm: 0 },
   { tenantId: "t", id: "g2", ownerId: "p", agenteId: "a1", conectorId: "k1", capacidade: "enviar_email", mensagemId: "m", criadoEm: 0 },
 ];
-const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [conector], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora };
+const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [conector], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, aFazer: true };
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("montarPlano", () => {
@@ -116,6 +116,17 @@ describe("montarPlano", () => {
     expect(plano.promptSistema).toContain("publicar_artefato");
     expect(plano.promptSistema).toContain("window.nod.salvar");
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
+  });
+
+  it("2026-10-06: com o \"A fazer\" desligado (o padrão, sem aFazer) nenhuma ferramenta de pendência, nem a regra nem a lista no prompt", () => {
+    const pendencia = { tenantId: "t", id: "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e", agenteId: "a1", conversaId: "c1", turnoId: "t0", texto: "conferir o PR", aPartirDe: null, cuidado: false, profundidade: 0 as const, estado: "aberta" as const, resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: agora - 60_000 };
+    const { aFazer: _ligado, ...semChave } = base;
+    for (const modo of ["conversa", "criacao", "rotina", "sala", "delegacao", "ligacao"] as const) {
+      const plano = montarPlano({ ...semChave, modo, pendencias: [pendencia] });
+      expect(nomes(plano).filter((n) => n.includes("pendencia")), modo).toEqual([]);
+      expect(plano.promptSistema, modo).not.toContain("anotar_pendencia");
+      expect(plano.promptSistema, modo).not.toContain("conferir o PR");
+    }
   });
 
   it("ADR-064: anotar_pendencia em todo modo em que o bot trabalha, inclusive no limite de 3; concluir e descartar só onde ele vê a lista", () => {

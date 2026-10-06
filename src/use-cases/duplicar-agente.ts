@@ -3,6 +3,7 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { nuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ordemComCopia } from "../domain/ordem-barra.ts";
 import { redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { textoRotinaAtiva } from "./apoio-l7.ts";
@@ -39,6 +40,7 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     confirmado: original.confirmado,
   });
   if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "cópia não criada" });
+  if (dona) await porLogoAbaixo(deps, original, agente.id);
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente.id, visibility: agente.visibility });
   if (!conversa) throw new ErroDeDominio("estado_invalido", { cause: "conversa não criada" });
 
@@ -72,8 +74,20 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     }
     events.push(evento(deps.escopo, { kind: "rotina_criada", autoria, agora, conversaId: conversa.id, dados: { rotinaId: rotina.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana } }));
   }
-  return { data: { agente, conversa }, events };
+  return { data: { agente: (await deps.repos.agentes.buscar(agente.id)) ?? agente, conversa }, events };
 };
+
+/**
+ * definido em 2026-10-06 (pedido do Marlon): a cópia entra no grupo do original (fixados ou a mesma seção) logo abaixo
+ * dele. Antes nascia sem seção nem posição e caía no fim de "Meus agentes", e a pessoa arrastava de volta. A ordem
+ * gravada é a do grupo inteiro, como no arrasto (0041).
+ */
+async function porLogoAbaixo(deps: Deps, original: Agente, copiaId: string): Promise<void> {
+  if (original.secao) await deps.repos.agentes.organizar(copiaId, { secao: original.secao });
+  if (original.fixado) await deps.repos.agentes.fixar(copiaId, true);
+  const frota = await deps.repos.agentes.listar({ incluirOcultos: true });
+  await deps.repos.agentes.ordenar(ordemComCopia(frota, original, copiaId));
+}
 
 /**
  * Uma chamada de concederLote por conector: a cópia ganha a mesma mensagem "Concedido por … em …" e os

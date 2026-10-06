@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODOS, renderAvisoModo, renderChipModo, renderMenuModo } from "../../../web/telas/aprovacoes.ts";
+import { chaveAvisoModo, MODOS, renderAvisoModo, renderChipModo, renderMenuModo } from "../../../web/telas/aprovacoes.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
 import { porqueDaPausa } from "../../../web/telas/sua-vez.ts";
 
@@ -43,6 +43,11 @@ describe("o chip de aprovações no campo (ADR-059)", () => {
     expect(total).toContain("Clarice está sem aprovações.");
     expect(total).toContain('data-act="fechar-aviso-modo"');
     expect(renderAvisoModo("<b>x</b>", "total")).not.toContain("<b>x</b>");
+  });
+
+  it("2026-10-06: o aviso fechado vale pelo modo, não pelo bot — a mesma chave para qualquer bot", () => {
+    expect(chaveAvisoModo("total")).toBe("modo:total");
+    expect(chaveAvisoModo("automatico")).toBe("modo:automatico");
   });
 });
 

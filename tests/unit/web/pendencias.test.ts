@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { Pendencia } from "../../../src/contracts/pendencia.ts";
 import { estadoInicial, invalidacoesDaTela, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { proximaHora, quandoPendencia, renderAFazerNaConversa } from "../../../web/telas/pendencias.ts";
+
+// O "A fazer" está desligado desde 2026-10-06 (web/lib/a-fazer.ts); estes testes guardam como ele volta quando religado.
+vi.mock("../../../web/lib/a-fazer.ts", () => ({ A_FAZER_LIGADO: true }));
 
 /**
  * O "a fazer" do bot na web (ADR-064; canvas "Pendências", pranchas F6 e F7, A + C): o indicador embaixo da última

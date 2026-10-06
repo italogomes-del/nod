@@ -17,6 +17,8 @@ export type OpcoesTick = {
   services: Services;
   useCases: UseCasesNod;
   agora: Relogio;
+  /** O "A fazer" ligado (NOD_PENDENCIAS=1); ausente = desligado (ver dispararRotina). */
+  aFazer?: boolean;
 };
 
 /**
@@ -42,7 +44,7 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
       await tx(async (trx) => {
         const repos = criarRepos(trx, escopo);
         const deps: Deps = { repos, services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
-        const r = await dispararRotina(deps, { rotina, instanteAgendado: rotina.proximaExecucao, machineId: opcoes.machineId, executor: opcoes.executor });
+        const r = await dispararRotina(deps, { rotina, instanteAgendado: rotina.proximaExecucao, machineId: opcoes.machineId, executor: opcoes.executor, aFazer: opcoes.aFazer });
         if ("janelaDeOutro" in r.data) {
           resultado.deOutroProcesso.push(rotina.id);
           return;

@@ -1869,15 +1869,26 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { custoUsd: com.reduce((s, t) => s + (t.custoUsd ?? 0), 0), turnos: com.length };
       },
     },
-    preferencias: {
-      async buscar() {
-        return b.preferencias.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? { modoDev: false };
-      },
-      async gravar(p) {
-        b.preferencias.set(`${escopo.tenantId}:${escopo.pessoaId}`, { modoDev: p.modoDev });
-        return { modoDev: p.modoDev };
-      },
-    },
+    preferencias: (() => {
+      const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [] };
+      return {
+        async buscar() {
+          return atual();
+        },
+        async gravar(p) {
+          const nova = { ...atual(), modoDev: p.modoDev };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
+        async fecharAviso(aviso) {
+          const a = atual();
+          const nova = a.avisosFechados.includes(aviso) ? a : { ...a, avisosFechados: [...a.avisosFechados, aviso] };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
+      };
+    })(),
     onboarding: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
       const atual = (): LinhaOnboarding => b.onboarding.get(chave) ?? { etapa: null, guiaId: null, botId: null, concluidoEm: null, campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null } };

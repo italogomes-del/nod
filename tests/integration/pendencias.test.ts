@@ -139,7 +139,7 @@ describeIntegracao("pendências do bot (ADR-064)", () => {
       const l5 = depsSobre(c.repos, MARLON, { services: servicosL5({ agora }), agora, trx });
       const plano = async (origem: "conversa" | "rotina" | "delegacao", profundidade: 0 | 1) => {
         const t = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem, prazoEm: agora() + 60_000, profundidade, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
-        return (await emitirPlanoTurno(l5, { turnoId: t?.id ?? "", machineId: randomUUID() })).data;
+        return (await emitirPlanoTurno(l5, { turnoId: t?.id ?? "", machineId: randomUUID(), aFazer: true })).data;
       };
 
       const conversa = await plano("conversa", 0);

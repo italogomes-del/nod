@@ -126,8 +126,8 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       expect(plano.confiancaEntrada).toBe("confiavel");
       expect(plano.modoTurno).toBe("rotina");
       // ADR-044: pedir_acesso entra na rotina (o modo concede; no manual, a pessoa decide num botão). ADR-051: o artefato
-      // também. ADR-064: as pendências também. ADR-066: ver_colegas também (leitura que não incomoda ninguém).
-      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "lembrar", "ler_artefato", "pedir_a_bot", "pedir_a_pessoa", "pedir_acesso", "pedir_aprovacao", "publicar_artefato", "sem_novidade", "ver_colegas"]);
+      // também. ADR-064: as pendências não, desde 2026-10-06 ("A fazer" desligado). ADR-066: ver_colegas também (leitura que não incomoda ninguém).
+      expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["lembrar", "ler_artefato", "pedir_a_bot", "pedir_a_pessoa", "pedir_acesso", "pedir_aprovacao", "publicar_artefato", "sem_novidade", "ver_colegas"]);
       // turno de conversa comum não liga a flag
       const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       expect(await rotinaDoTurno(repos, comum?.id ?? "")).toBeNull();

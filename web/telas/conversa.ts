@@ -18,7 +18,6 @@ import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
-import { renderCardLiberar } from "./card-liberar.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
@@ -709,9 +708,9 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     { chave: "acolhimento", html: acolhimento },
     ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
-    // definido em 2026-10-05: a oferta de liberar apps recém-conectados fica no fim do histórico — é o que a pessoa
-    // acabou de fazer fora da conversa. Chave por bot: o cartão guarda no DOM o que ela marcou (card-liberar.ts).
-    { chave: `liberar:${c.conversa.agenteId ?? ""}`, html: renderCardLiberar(c, estado) },
+    // revisto em 2026-10-06 (pedido do Marlon): sai a oferta de liberar apps recém-conectados (card-liberar.ts, PR #141).
+    // Ela aparecia sozinha em bot novo e a cada reconexão do Mac, porque valia para todo bot sem acesso por 24 h depois de
+    // qualquer verificação. O card de acesso nasce quando o bot pede (pedir_acesso), logo abaixo da fala dele.
   ].filter((b) => b.html !== "");
 }
 

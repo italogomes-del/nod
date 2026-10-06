@@ -26,7 +26,7 @@ const github: Conector = { tenantId: "t", id: "k1", ownerId: "p", visibility: "p
   { nome: "pr_revisar", descricao: "revisa (pode aprovar)", schema: { type: "object" }, readOnlyHint: false },
 ], sondadoEm: agora, ultimaFalha: null, criadoEm: 0 };
 const concessoes: Concessao[] = ["pr_ver", "pr_comentar", "pr_revisar"].map((capacidade, i) => ({ tenantId: "t", id: `g${i}`, ownerId: "p", agenteId: "chico", conectorId: "k1", capacidade, mensagemId: "m", criadoEm: 0 }));
-const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [github], modo: "delegacao", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice" } };
+const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [github], modo: "delegacao", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice" }, aFazer: true };
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("quem recebe um pedido de colega usa os acessos dele", () => {

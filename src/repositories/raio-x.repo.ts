@@ -90,20 +90,35 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
+  type Linha = { modo_dev: boolean; avisos_fechados: string[] };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [] });
   return {
     async buscar(): Promise<Preferencias> {
-      const [l] = await conn<{ modo_dev: boolean }[]>`
-        select modo_dev from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
-      return { modoDev: l?.modo_dev ?? false };
+      const [l] = await conn<Linha[]>`
+        select modo_dev, avisos_fechados from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+      return paraPreferencias(l);
     },
 
-    async gravar(p: Preferencias): Promise<Preferencias> {
-      const [l] = await conn<{ modo_dev: boolean }[]>`
+    async gravar(p: Pick<Preferencias, "modoDev">): Promise<Preferencias> {
+      const [l] = await conn<Linha[]>`
         insert into preferencias (tenant_id, owner_id, modo_dev)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev})
         on conflict (tenant_id, owner_id) do update set modo_dev = excluded.modo_dev, atualizado_em = clock_timestamp()
-        returning modo_dev`;
-      return { modoDev: l?.modo_dev ?? p.modoDev };
+        returning modo_dev, avisos_fechados`;
+      return paraPreferencias(l);
+    },
+
+    /** 0059: guarda a chave do aviso fechado, sem repetir. Idempotente: fechar de novo não muda nada. */
+    async fecharAviso(chave: string): Promise<Preferencias> {
+      const [l] = await conn<Linha[]>`
+        insert into preferencias (tenant_id, owner_id, avisos_fechados)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${[chave]}::text[])
+        on conflict (tenant_id, owner_id) do update set
+          avisos_fechados = case when ${chave} = any(preferencias.avisos_fechados) then preferencias.avisos_fechados
+            else array_append(preferencias.avisos_fechados, ${chave}) end,
+          atualizado_em = clock_timestamp()
+        returning modo_dev, avisos_fechados`;
+      return paraPreferencias(l);
     },
   };
 }

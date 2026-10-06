@@ -20,6 +20,7 @@ import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
+import { FERRAMENTAS_PENDENCIA } from "./pendencia.ts";
 import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
@@ -166,6 +167,8 @@ export type EntradaPlano = {
    * ou uma rotina chamou o bot (profundidade 0). Ausente ou vazia = a linha não entra.
    */
   pendencias?: readonly Pendencia[];
+  /** O "A fazer" ligado (NOD_PENDENCIAS=1). Ausente = desligado: as ferramentas de pendência saem do catálogo. */
+  aFazer?: boolean;
   /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
   pastasAutorizadas?: boolean;
   /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
@@ -191,7 +194,9 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // salto (montarFerramentas tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
-  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : [])].map(ferramentaNod);
+  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : [])]
+    .filter((n) => entrada.aFazer === true || !FERRAMENTAS_PENDENCIA.includes(n))
+    .map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.
@@ -254,7 +259,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.pendencias, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,

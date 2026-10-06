@@ -8,7 +8,7 @@ import { abrirRaioX } from "./telas/raio-x.ts";
 import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
 import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
-import { abrirMenuModo, avisoFechado, fecharAviso, reabrirAviso } from "./lib/menu-modo.ts";
+import { abrirMenuModo, avisoFechado, fecharAviso, hidratarAvisosFechados } from "./lib/menu-modo.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
@@ -52,7 +52,8 @@ import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sa
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
 import { aparenciaDoComposer } from "./telas/pergunta.ts";
 import { BANDEJA, naoLidaDe, renderNaoLidos, rotuloNaoLidos } from "./telas/nao-lidos.ts";
-import { frotaAoSoltar, ordemAoSoltar, type Destino } from "./lib/arrastar.ts";
+import { frotaAoSoltar, ordemAoSoltar, velocidadeAutoRolagem, type Destino } from "./lib/arrastar.ts";
+import { rolagemDaBarra, type Faixa } from "./lib/rolagem-barra.ts";
 import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
@@ -824,15 +825,15 @@ function atualizarModoNoComposer(): void {
     chip.setAttribute("aria-label", `Aprovações: ${r.titulo}`);
     chip.setAttribute("aria-disabled", String(!dona));
   }
-  regiao("composer-aviso", avisoFechado(bot.id, modo) ? "" : renderAvisoModo(bot.nome, modo));
+  regiao("composer-aviso", avisoFechado(modo) ? "" : renderAvisoModo(bot.nome, modo));
 }
 
 function abrirModoAprovacao(el: HTMLElement): void {
   const t = estado.tela;
   const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
   if (!bot || bot.ownerId !== estado.sessao?.pessoaId) return;
+  // revisto em 2026-10-06: trocar de modo não reabre o aviso fechado — a linha de sistema na conversa já confirma a troca.
   abrirMenuModo(el, bot.nome, bot.modoAprovacao ?? "manual", (modo) => {
-    reabrirAviso(bot.id, modo);
     void agir(async () => { await mudarGestao(() => api!.mudarModoAprovacao(bot.id, modo)); });
   });
 }
@@ -916,10 +917,36 @@ function redesenharSidebar(): void {
   const busca = document.getElementById("busca-bots") as HTMLInputElement | null;
   const valorBusca = busca?.value ?? "";
   const focoBusca = document.activeElement === busca;
+  const rolagem = document.querySelector<HTMLElement>("#sidebar .list")?.scrollTop ?? 0;
   regiao("sidebar", html);
   const novaBusca = document.getElementById("busca-bots") as HTMLInputElement | null;
-  if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus(); }
+  if (novaBusca) { novaBusca.value = valorBusca; if (focoBusca) novaBusca.focus({ preventScroll: true }); }
   filtrarBots(valorBusca);
+  manterRolagemDaBarra(rolagem);
+}
+
+/** A conversa cuja linha já foi trazida à vista: a barra só rola sozinha quando a conversa aberta muda. */
+let conversaNaVistaDaBarra: string | null = null;
+
+/**
+ * definido em 2026-10-06 (web/lib/rolagem-barra.ts): a lista refeita volta à rolagem de antes; com conversa nova aberta,
+ * a linha dela entra na vista com o mínimo de movimento. Mede depois do filtro da busca, que esconde linhas.
+ */
+function manterRolagemDaBarra(anterior: number): void {
+  const lista = document.querySelector<HTMLElement>("#sidebar .list");
+  if (!lista) return;
+  const t = estado.tela;
+  const conversa = t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null;
+  const el = conversa && conversa !== conversaNaVistaDaBarra ? lista.querySelector<HTMLElement>('[aria-current="true"]') : null;
+  let linha: Faixa | null = null;
+  if (el && el.offsetParent !== null) {
+    const r = el.getBoundingClientRect();
+    const caixa = lista.getBoundingClientRect();
+    // Coordenadas do conteúdo da lista, já com a rolagem de antes.
+    linha = { topo: r.top - caixa.top + anterior, base: r.bottom - caixa.top + anterior };
+    conversaNaVistaDaBarra = conversa;
+  }
+  lista.scrollTop = rolagemDaBarra({ anterior, altura: lista.clientHeight, linha });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -936,6 +963,8 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   ambienteBanco = await api.ambiente();
   dispatch({ tipo: "sessao", escopo });
   void api.preferencias().then((p) => {
+    hidratarAvisosFechados(p.avisosFechados ?? []);
+    atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
     const c = conversaDaTela(estado);
     if (p.modoDev && c) void carregarRaioX(c.conversa.id);
@@ -1644,7 +1673,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     secoesRecolhidas = definirSecaoRecolhida(secoesRecolhidas, chave, !secoesRecolhidas.has(chave));
     render();
     // A barra é refeita: quem recolheu pelo teclado continua no mesmo título.
-    if (comFoco) document.querySelector<HTMLElement>(`#sidebar .secao-cab[data-chave="${CSS.escape(chave)}"]`)?.focus();
+    if (comFoco) document.querySelector<HTMLElement>(`#sidebar .secao-cab[data-chave="${CSS.escape(chave)}"]`)?.focus({ preventScroll: true });
   },
   "abrir-avancado": () => abrirMarketplace(true),
   "navegar-marketplace": () => abrirMarketplace(),
@@ -1807,8 +1836,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "fechar-aviso-modo": () => {
     const t = estado.tela;
     const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
-    if (bot) fecharAviso(bot.id, bot.modoAprovacao ?? "manual");
+    if (!bot) return;
+    const chave = fecharAviso(bot.modoAprovacao ?? "manual");
     atualizarModoNoComposer();
+    // Falhou a gravação: o aviso segue fechado nesta tela (cache) e o próximo fechar tenta de novo.
+    void api?.fecharAviso(chave).catch(() => undefined);
   },
   "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),
@@ -2406,7 +2438,37 @@ function encerrarArrasto(): void {
   }
   arrastandoBot = null;
   alvoArrasto = null;
+  if (quadroDaRolagem) cancelAnimationFrame(quadroDaRolagem);
+  quadroDaRolagem = 0;
   render();
+}
+
+/**
+ * Rolagem automática enquanto se arrasta (definido em 2026-10-06, web/lib/arrastar.ts): com o cursor perto da borda da
+ * lista, ou em cima do rodapé ou da busca, a lista rola um passo por quadro. O dragover chega a cada ~50 ms mesmo com o
+ * cursor parado e só guarda a posição; o laço anda e se reagenda enquanto a lista ainda tem para onde rolar.
+ */
+let cursorDoArrasto = { x: 0, y: 0 };
+let quadroDaRolagem = 0;
+
+function rolarNoArrasto(x: number, y: number): void {
+  cursorDoArrasto = { x, y };
+  if (!quadroDaRolagem) quadroDaRolagem = requestAnimationFrame(passoDaRolagem);
+}
+
+function passoDaRolagem(): void {
+  quadroDaRolagem = 0;
+  const lista = document.querySelector<HTMLElement>("#sidebar .list");
+  const barra = document.getElementById("sidebar")?.getBoundingClientRect();
+  if (!arrastandoBot || !lista || !barra) return;
+  const { x, y } = cursorDoArrasto;
+  if (x < barra.left || x > barra.right) return;
+  const caixa = lista.getBoundingClientRect();
+  const passo = velocidadeAutoRolagem(y, caixa.top, caixa.bottom);
+  if (passo === 0) return;
+  const antes = lista.scrollTop;
+  lista.scrollTop = antes + passo;
+  if (lista.scrollTop !== antes) quadroDaRolagem = requestAnimationFrame(passoDaRolagem);
 }
 
 /** O índice é contado entre os OUTROS bots do grupo; a vaga e a linha não entram na conta, então não oscilam. */
@@ -2481,6 +2543,7 @@ document.addEventListener("dragstart", (ev) => {
 });
 document.addEventListener("dragover", (ev) => {
   if (!arrastandoBot) return;
+  rolarNoArrasto(ev.clientX, ev.clientY);
   const grupo = (ev.target as HTMLElement).closest?.<HTMLElement>("#sidebar [data-grupo]");
   if (!grupo) {
     if (alvoArrasto) { limparIndicadores(); alvoArrasto = null; }

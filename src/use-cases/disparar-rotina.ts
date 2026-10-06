@@ -24,6 +24,8 @@ export type EntradaDisparo = {
    * pessoa conceder não passa pelo pré-voo — ela acabou de clicar "Permitir e rodar agora".
    */
   aposConceder?: boolean;
+  /** O "A fazer" ligado (NOD_PENDENCIAS=1). Ausente = desligado: a rotina "só com pendência" não acorda pelo agendador. */
+  aFazer?: boolean;
 };
 /**
  * `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045).
@@ -137,7 +139,8 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   // definido em 2026-10-01 (item 7 da ADR-066): depois do pré-voo (a rotina parada por acesso segue parada, com o
   // card dela) e antes do turno. Só no agendador: "Executar agora" e "Permitir e rodar agora" (preservarAgenda) são
   // atos da pessoa e rodam sempre. Visível = a mesma regra do prompt: aberta e com a_partir_de já passado.
-  if (rotina.soComPendencia && !input.preservarAgenda && pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0) {
+  // revisto em 2026-10-06: com o "A fazer" desligado o bot não anota nem vê pendência, então a rotina não acorda.
+  if (rotina.soComPendencia && !input.preservarAgenda && (input.aFazer !== true || pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0)) {
     return registrarSemPendencia(deps, input, agora);
   }
   const turno = await deps.repos.turnos.enfileirar({

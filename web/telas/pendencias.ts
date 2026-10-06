@@ -1,5 +1,6 @@
 import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { Estado } from "../estado/reducer.ts";
+import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 
@@ -66,7 +67,7 @@ function contagem(n: number): string {
  */
 export function renderAFazerNaConversa(estado: Estado, agenteId: string): string {
   const lista = estado.pendencias[agenteId] ?? [];
-  if (lista.length === 0) return "";
+  if (!A_FAZER_LIGADO || lista.length === 0) return "";
   const agora = estado.agora;
   const nome = estado.frota?.agentes.find((a) => a.id === agenteId)?.nome ?? "do bot";
   // `data-abrir` é o que o clique faz: abre a lista fechada, fecha a aberta.
@@ -84,7 +85,7 @@ export function renderAFazerNaConversa(estado: Estado, agenteId: string): string
 /** A seção da gaveta, acima de Rotinas; sem pendência, não ocupa lugar. */
 export function renderAFazerNaGaveta(estado: Estado, agenteId: string): string {
   const lista = estado.pendencias[agenteId] ?? [];
-  if (lista.length === 0) return "";
+  if (!A_FAZER_LIGADO || lista.length === 0) return "";
   return `<section class="gv-secao secao-a-fazer"><div class="gv-secao-cab"><h3>A fazer · ${lista.length}</h3></div>
     <ul class="gv-cartao pd-lista">${lista.map((p) => item(p, estado.agora)).join("")}</ul></section>`;
 }

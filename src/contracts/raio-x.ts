@@ -110,4 +110,8 @@ export type ResumoRaioX = {
 /** GET conversas/:id/raio-x?desde=<epoch ms>: os resumos e o total desde `desde` (a meia-noite da pessoa). */
 export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; turnos: number } };
 
-export type Preferencias = { modoDev: boolean };
+/**
+ * Preferências da pessoa (0036). `avisosFechados` (0059, definido em 2026-10-06): a chave de cada aviso da tela que ela
+ * fechou — por tipo, não por bot (ex.: "modo:total"). Fechou uma vez, não volta.
+ */
+export type Preferencias = { modoDev: boolean; avisosFechados: string[] };

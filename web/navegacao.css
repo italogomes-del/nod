@@ -16,6 +16,9 @@
 .fantasma-arrasto { position: fixed; top: -1000px; left: -1000px; z-index: 50; background: var(--surface); border-radius: 14px;
   box-shadow: var(--shadow-pop); }
 .fixados[data-vazio], .section[data-vazio], .nova-secao-alvo { display: none; }
+/* definido em 2026-10-06: arrastando, a lista ganha um fôlego embaixo — o último bot não encosta no rodapé e sobra onde
+   mirar para soltá-lo no fim; a rolagem automática (web/lib/arrastar.ts) leva até lá. */
+.arrastando-bot .list { padding-bottom: 72px; }
 .arrastando-bot .fixados[data-vazio] { display: grid; }
 .arrastando-bot .section[data-vazio] { display: block; min-height: 44px; }
 .fixados-vazio { grid-column: 1 / -1; margin: 0; padding: 18px 12px; border: 1.5px dashed var(--line-strong); border-radius: 14px; text-align: center;

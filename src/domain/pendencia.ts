@@ -15,6 +15,17 @@ export const REPEDIR_APOS_MS = 30_000;
 /** a_partir_de mais longe que isto é erro de conta do modelo, não um lembrete. */
 export const A_PARTIR_DE_MAX_MS = 366 * 24 * 60 * 60 * 1000;
 
+/**
+ * definido em 2026-10-06 (pedido do Marlon): o "A fazer" está desligado. A pílula e a seção da gaveta poluíam a tela
+ * sem ajudar, e a ideia volta com outra forma. Desligado, o bot não recebe as três ferramentas nem a lista no prompt,
+ * as rotas somem e rotina "só com pendência" não acorda. O código e as linhas ficam; NOD_PENDENCIAS=1 religa.
+ */
+export const FERRAMENTAS_PENDENCIA: readonly string[] = ["anotar_pendencia", "concluir_pendencia", "descartar_pendencia"];
+
+export function aFazerLigado(valor: string | undefined): boolean {
+  return valor === "1";
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** O id que o modelo mandou tem a forma de um id de linha: fora dela, nem chega ao Postgres (22P02 viraria 500). */

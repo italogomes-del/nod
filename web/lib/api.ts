@@ -150,7 +150,9 @@ export function criarApi(escopo: Escopo) {
     relatar: (entrada: EntradaRelato) => post<RespostaMutacao>("relatos", entrada),
     // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
     preferencias: () => get<Preferencias>("preferencias"),
-    gravarPreferencias: (p: Preferencias) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    gravarPreferencias: (p: Pick<Preferencias, "modoDev">) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa — o app do Mac limpa o localStorage.
+    fecharAviso: (chave: string) => pedir<Preferencias>("POST", `${base}/preferencias/avisos-fechados`, { chave }),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
     raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),
     // O "/" do chat (0038): o catálogo do Mac e os comandos da conversa; a nova sessão é do nod.
