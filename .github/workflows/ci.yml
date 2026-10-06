@@ -1,6 +1,8 @@
 # Três jobs paralelos (Práticas §9): lint+typecheck sem banco, unit sem banco, integração com Postgres.
 # O job de integração MIGRA e NÃO roda seed (Práticas §6): cada teste cria as próprias linhas.
 # CI=1 (padrão do GitHub) faz o skip de integração virar ERRO em tests/helpers/integracao.ts.
+# Roda no runner próprio na GCP (infra/gcp/runner/): o repo é privado e o runner hospedado cobra minutos.
+# Só o runner nod-integracao sobe o Postgres na porta 5434 do host, então dois jobs nunca disputam a porta.
 # Actions pinadas por SHA imutável (verificados em 2026-09-16 na API do GitHub):
 #   actions/checkout v4.2.2  = 11bd71901bbe5b1630ceea73d27597364c9af683
 #   actions/setup-node v4.4.0 = 49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -10,9 +12,14 @@ on:
     branches: [main, "rebuild/**"]
   pull_request:
 
+# Push novo no mesmo PR cancela o run antigo. Na main nada é cancelado: o deploy depende de cada ci.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint-typecheck:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, nod-ci]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -26,7 +33,7 @@ jobs:
       - run: npm run site:build
 
   unit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, nod-ci]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -37,7 +44,7 @@ jobs:
       - run: npm run test:unit
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, nod-integracao]
     services:
       postgres:
         image: postgres:16

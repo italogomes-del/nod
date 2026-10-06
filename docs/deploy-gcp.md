@@ -129,6 +129,24 @@ derivado do IP fixo `nod-ip`. Para trocar:
    emite o certificado novo.
 4. No app do Mac, conecte de novo com o endereço novo.
 
+## Runner do CI
+
+Desde 2026-10-06 o `ci` e o `deploy` rodam num runner próprio, a VM `nod-ci-runner` (`e2-standard-4`),
+porque o repo é privado e os minutos do plano Free acabaram. Ela tem três runners: `nod-ci-1` e
+`nod-ci-2` (label `nod-ci`: lint, unit e deploy) e `nod-ci-integracao` (label `nod-integracao`: o único
+que sobe o Postgres na porta 5434 do host). Fica na rede `nod-ci`, separada da `nod-vpc`, sem service
+account; o deploy se autentica pelo WIF, como antes. O `desktop-release` continua no runner do GitHub.
+
+```bash
+# Criar ou recriar (idempotente; precisa do gh com admin no repo)
+infra/gcp/runner/provisionar-runner.sh
+# Entrar na VM e ver os runners
+gcloud compute ssh nod-ci-runner --zone=southamerica-east1-b --tunnel-through-iap --project=nod-producao
+sudo systemctl list-units 'actions.runner.*'
+```
+
+Para recriar do zero: apague a VM, remova os três runners em Settings › Actions › Runners e rode o script.
+
 ## Operar
 
 ```bash
@@ -148,4 +166,4 @@ O monitor de disponibilidade fica fora da GCP (ADR-017): cadastre `https://<dom�
 num serviço externo (Better Stack, UptimeRobot).
 
 Custo esperado, coberto pelos créditos do programa GFS: VM `e2-medium`, Cloud SQL `db-custom-1-3840`
-com 10 GB SSD, IP fixo e tráfego baixo.
+com 10 GB SSD, IP fixo e tráfego baixo, mais o runner do CI (`e2-standard-4`, disco de 100 GB).
