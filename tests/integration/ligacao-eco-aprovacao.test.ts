@@ -20,15 +20,16 @@ import { withRollback } from "../helpers/with-rollback.ts";
  */
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 type Trx = Parameters<Parameters<typeof withRollback>[1]>[0];
-type CanalFalso = CanalVoz & { json: Record<string, unknown>[]; receber(m: object | Uint8Array): void };
+type CanalFalso = CanalVoz & { json: Record<string, unknown>[]; fechadoCom: number | null; receber(m: object | Uint8Array): void };
 
 function canalFalso(): CanalFalso {
   let aoMsg: ((m: { texto: string } | { binario: Uint8Array }) => void) | null = null;
   const c: CanalFalso = {
     json: [],
+    fechadoCom: null,
     enviarJson(m) { c.json.push(m as Record<string, unknown>); },
     enviarBinario() {},
-    fechar() {},
+    fechar(codigo) { c.fechadoCom = codigo; },
     aoMensagem(fn) { aoMsg = fn; },
     aoFechar() {},
     pendente: () => 0,
@@ -135,6 +136,8 @@ describeIntegracao("eco na janela de aprovação por voz não decide (NOD-165)",
         await ate(() => msgs(l.midia, "legenda").find((m) => m.final === true && m.texto === "eu aprovo"));
         await dormir(300);
         expect(msgs(l.midia, "comando")).toHaveLength(0);
+        // Zero comandos só vale com a mídia aberta: fechada pela guarda de abuso (4429), também daria zero (NOD-184).
+        expect(l.midia.fechadoCom).toBeNull();
         // Nada de decisão: o card segue pendente no banco.
         expect(await a.estado()).toBe("pendente");
       } finally {

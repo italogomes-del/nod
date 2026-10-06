@@ -37,7 +37,7 @@ afterAll(async () => {
   }
 });
 
-type Cliente = { msgs: MsgMidiaServidor[]; quadrosDeVoz: number; ws: WebSocket; esperarMsg(f: (m: MsgMidiaServidor) => boolean, nome: string, timeoutMs?: number): Promise<MsgMidiaServidor> };
+type Cliente = { msgs: MsgMidiaServidor[]; quadrosDeVoz: number; ws: WebSocket; fechou: string | null; esperarMsg(f: (m: MsgMidiaServidor) => boolean, nome: string, timeoutMs?: number): Promise<MsgMidiaServidor> };
 
 async function abrirMidia(ligacaoId: string, origin: string, s: ServidorCompleto = srv): Promise<Cliente> {
   const url = `${s.url.replace("http", "ws")}/api/t/${s.pessoa.tenantId}/voz/v1/midia`;
@@ -46,10 +46,20 @@ async function abrirMidia(ligacaoId: string, origin: string, s: ServidorCompleto
     msgs: [],
     quadrosDeVoz: 0,
     ws,
+    fechou: null,
     async esperarMsg(f, nome, timeoutMs = 8_000) {
-      return s.esperar(async () => c.msgs.find(f) ?? null, { nome, timeoutMs });
+      return s.esperar(async () => {
+        const m = c.msgs.find(f);
+        if (m) return m;
+        // NOD-184: a mídia fechada pelo servidor não traz mais nada — falha já, com o motivo, em vez de estourar o prazo.
+        if (c.fechou) throw new Error(`a mídia fechou (${c.fechou}) esperando: ${nome}`);
+        return null;
+      }, { nome, timeoutMs });
     },
   };
+  ws.on("close", (codigo, motivo) => {
+    c.fechou = `${codigo} ${String(motivo)}`.trim();
+  });
   ws.on("message", (dados, binario) => {
     if (binario) {
       c.quadrosDeVoz++;
@@ -78,6 +88,19 @@ function quadroMicrofone(seq: number, comVoz: boolean): Buffer {
   b.writeUInt32LE(seq, 1);
   for (let i = 0; i < amostras; i++) b.writeInt16LE(comVoz ? Math.round(Math.sin((i + seq * amostras) / 6) * 9000) : 0, 5 + i * 2);
   return b;
+}
+
+/**
+ * Uma fala pelo microfone no ritmo do app: blocos de 100 ms (5 quadros) em tempo real. Em rajada, as duas falas do teste
+ * (3,6 s de áudio) chegavam ~1,2 s depois de a mídia abrir, acima de 1,2× o tempo real + 2 s: a guarda de abuso fechava a
+ * mídia com 4429 e o "pode criar" nunca virava comando (NOD-184; só passava com o Mac lento).
+ */
+async function falarPeloMicrofone(cli: Cliente, seq: { n: number }, quadrosComVoz: number, quadrosDeSilencio: number): Promise<void> {
+  const total = quadrosComVoz + quadrosDeSilencio;
+  for (let i = 0; i < total; i++) {
+    cli.ws.send(quadroMicrofone(seq.n++, i < quadrosComVoz));
+    if (i % 5 === 4) await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transcrição, resumo e turno concluído", async () => {
@@ -110,9 +133,8 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("quero criar uma rotina"), "resposta ao texto");
 
   // Fala por áudio: 600 ms de tom e 1,2 s de silêncio → STT falso → "Oi, tudo bem com você?".
-  let seq = 0;
-  for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
-  for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
+  const seq = { n: 0 };
+  await falarPeloMicrofone(cli, seq, 30, 60);
   await cli.esperarMsg((m) => m.t === "legenda" && m.final && m.texto.includes("tudo bem"), "legenda final");
   await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("tudo bem"), "resposta à fala");
   expect(cli.quadrosDeVoz).toBeGreaterThan(0);
@@ -130,8 +152,7 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   const decisaoId = janela.t === "janela" ? janela.decisaoId : "";
   // Um comando forjado (sem passar pela janela) é recusado.
   expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: "forjado", acao: "aprovar" })).status).toBe(403);
-  for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
-  for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
+  await falarPeloMicrofone(cli, seq, 30, 60);
   const comando = await cli.esperarMsg((m) => m.t === "comando", "comando de voz");
   if (comando.t !== "comando") throw new Error("sem comando");
   expect(comando.acao).toBe("aprovar");

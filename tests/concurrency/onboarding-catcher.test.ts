@@ -29,7 +29,7 @@ afterAll(async () => {
   }
 });
 
-type Cliente = { msgs: MsgMidiaServidor[]; ws: WebSocket; fechado: Promise<number>; esperarMsg(f: (m: MsgMidiaServidor) => boolean, nome: string, timeoutMs?: number): Promise<MsgMidiaServidor> };
+type Cliente = { msgs: MsgMidiaServidor[]; ws: WebSocket; fechado: Promise<number>; fechou: string | null; esperarMsg(f: (m: MsgMidiaServidor) => boolean, nome: string, timeoutMs?: number): Promise<MsgMidiaServidor> };
 
 function abrirMidia(ligacaoId: string): Cliente {
   const url = `${srv.url.replace("http", "ws")}/api/t/${srv.pessoa.tenantId}/voz/v1/midia`;
@@ -38,10 +38,14 @@ function abrirMidia(ligacaoId: string): Cliente {
     msgs: [],
     ws,
     fechado: new Promise((r) => ws.once("close", (codigo) => r(codigo))),
+    fechou: null,
     async esperarMsg(f, nome, timeoutMs = 8_000) {
-      return srv.esperar(async () => c.msgs.find(f) ?? null, { nome, timeoutMs });
+      return srv.esperar(async () => c.msgs.find(f) ?? semMidiaFechada(c, nome), { nome, timeoutMs });
     },
   };
+  ws.on("close", (codigo, motivo) => {
+    c.fechou = `${codigo} ${String(motivo)}`.trim();
+  });
   ws.on("message", (dados, binario) => {
     if (binario) {
       ws.send(JSON.stringify({ t: "tocou-fim", utt: (dados as Buffer).readUInt16LE(5) }));
@@ -51,6 +55,12 @@ function abrirMidia(ligacaoId: string): Cliente {
   });
   ws.once("open", () => ws.send(JSON.stringify({ t: "ola", v: 1, ligacaoId, entrada: "pcm16", saida: "pcm16" })));
   return c;
+}
+
+/** NOD-184: a mídia fechada pelo servidor não traz mais nada — falha já, com o motivo, em vez de estourar o prazo. */
+function semMidiaFechada(c: Cliente, nome: string): null {
+  if (c.fechou) throw new Error(`a mídia fechou (${c.fechou}) esperando: ${nome}`);
+  return null;
 }
 
 function quadroMicrofone(seq: number, comVoz: boolean): Buffer {
@@ -63,18 +73,24 @@ function quadroMicrofone(seq: number, comVoz: boolean): Buffer {
 }
 
 let seq = 0;
-/** 600 ms de tom e 1,2 s de silêncio: o STT falso devolve a próxima fala do roteiro ("pode criar"). */
-function falar(cli: Cliente): void {
-  for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
-  for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
+/**
+ * 600 ms de tom e 1,2 s de silêncio: o STT falso devolve a próxima fala do roteiro ("pode criar"). Em blocos de 100 ms em
+ * tempo real, como o app: em rajada, duas falas logo depois de a mídia abrir passam de 1,2× o tempo real + 2 s e a guarda
+ * de abuso fecha a mídia (NOD-184).
+ */
+async function falar(cli: Cliente): Promise<void> {
+  for (let i = 0; i < 90; i++) {
+    cli.ws.send(quadroMicrofone(seq++, i < 30));
+    if (i % 5 === 4) await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 /** Aprova por voz o próximo card lido: leitura → janela → "pode criar" → comando → rota de decisão. */
 async function aprovarPorVoz(cli: Cliente, ligacaoId: string, jaVistas: number): Promise<string> {
-  const janela = await srv.esperar(async () => cli.msgs.filter((m) => m.t === "janela")[jaVistas] ?? null, { nome: `janela ${jaVistas + 1}`, timeoutMs: 10_000 });
+  const janela = await srv.esperar(async () => cli.msgs.filter((m) => m.t === "janela")[jaVistas] ?? semMidiaFechada(cli, `janela ${jaVistas + 1}`), { nome: `janela ${jaVistas + 1}`, timeoutMs: 10_000 });
   const decisaoId = janela.t === "janela" ? janela.decisaoId : "";
-  falar(cli);
-  const comando = await srv.esperar(async () => cli.msgs.filter((m) => m.t === "comando")[jaVistas] ?? null, { nome: `comando ${jaVistas + 1}` });
+  await falar(cli);
+  const comando = await srv.esperar(async () => cli.msgs.filter((m) => m.t === "comando")[jaVistas] ?? semMidiaFechada(cli, `comando ${jaVistas + 1}`), { nome: `comando ${jaVistas + 1}` });
   if (comando.t !== "comando") throw new Error("sem comando");
   expect(comando.acao).toBe("aprovar");
   expect(comando.decisaoId).toBe(decisaoId);

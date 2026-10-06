@@ -4,7 +4,7 @@ import { criarServicoVoz, NOTA_CONEXAO_VOLTOU, prioridadeTts, type FalaParaGrava
 import { criarProvedoresFalsos } from "../../../src/adapters/voz/voz-falsa.ts";
 import type { OpcoesSessaoStt, PedidoTts, Sintetizador, Transcritor } from "../../../src/adapters/voz/spi.ts";
 import type { CanalVoz } from "../../../src/adapters/voz/ws.ts";
-import type { MotivoFimLigacao } from "../../../src/contracts/voz.ts";
+import { FECHAMENTOS_VOZ, type MotivoFimLigacao } from "../../../src/contracts/voz.ts";
 import { FALAS_DE_ESPERA } from "../../../src/domain/ligacao-espera.ts";
 
 /**
@@ -53,7 +53,7 @@ function quadro(seq: number, voz: boolean): Uint8Array {
   return b;
 }
 
-function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, number>; tts?: Sintetizador; esperas?: FonteDeEsperas; aleatorio?: () => number; parciais?: boolean; stt?: Transcritor; ligacaoId?: string } = {}) {
+function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, number>; tts?: Sintetizador; esperas?: FonteDeEsperas; aleatorio?: () => number; parciais?: boolean; stt?: Transcritor; ligacaoId?: string; relogio?: () => number } = {}) {
   const falsos = criarProvedoresFalsos({ roteiro: o.roteiro ?? [], silencioso: true, parciais: o.parciais === true });
   const provedores = o.tts ? { ...falsos, tts: o.tts } : falsos;
   const falas: FalaParaGravar[] = [];
@@ -67,6 +67,7 @@ function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, 
     },
     aleatorio: o.aleatorio ?? (() => 0.99),
     ...(o.esperas ? { esperas: o.esperas } : {}),
+    ...(o.relogio ? { relogio: o.relogio } : {}),
     prazos: { midiaReconexaoMs: 100, cerebroReconexaoMs: 150, cerebroPrimeiroMs: 5000, confirmarInterrupcaoMs: 300, resumoMs: 50, ...o.prazos },
   });
   const id = o.ligacaoId ?? "l1";
@@ -75,6 +76,18 @@ function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, 
   const midia = canalFalso();
   const cerebro = canalFalso();
   return { voz, provedores, falas, fins, midia, cerebro, id };
+}
+
+/**
+ * Uma fala no ritmo do app: blocos de 100 ms (5 quadros) em tempo real. Em rajada, ~2,3 s de áudio logo depois de a mídia
+ * abrir passam de 1,2× o tempo real + 2 s e a guarda de abuso fecha a mídia no meio do teste (NOD-184).
+ */
+async function falarNoRitmo(midia: CanalFalso, seq: { n: number }, quadrosComVoz: number, quadrosDeSilencio: number): Promise<void> {
+  const total = quadrosComVoz + quadrosDeSilencio;
+  for (let i = 0; i < total; i++) {
+    midia.receber(quadro(seq.n++, i < quadrosComVoz));
+    if (i % 5 === 4) await dormir(100);
+  }
 }
 
 /** O "alto-falante" do teste: relata que tudo o que já foi mandado terminou de tocar. */
@@ -401,13 +414,11 @@ describe("orquestrador de voz", () => {
     tocouTudo(midia);
     provedores.stt.empurrarTexto("Primeiro eu quero definir o que você faz.");
     provedores.stt.empurrarTexto("Quero que seja minha secretária.");
-    let seq = 0;
-    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    const seq = { n: 0 };
+    await falarNoRitmo(midia, seq, 30, 40);
     await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1));
     // Volta a falar antes de qualquer áudio da resposta.
-    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    await falarNoRitmo(midia, seq, 30, 40);
     await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
     const vez2 = await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
     expect(String(vez2.texto)).toContain("Primeiro eu quero definir");
@@ -417,7 +428,8 @@ describe("orquestrador de voz", () => {
     cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Resposta velha." });
     await dormir(50);
     expect(msgs(midia, "bot-fala").some((m) => String(m.texto).includes("velha"))).toBe(false);
-  });
+    expect(midia.fechadoCom).toBeNull();
+  }, 10_000);
 
   it("uma batida curta enquanto a vez espera não vai ao STT, não refaz nada e a vez sai (antes ficava pendurada)", async () => {
     const { voz, midia, cerebro, provedores } = montar();
@@ -428,18 +440,21 @@ describe("orquestrador de voz", () => {
     // Termina em "e": a vez espera 1,4 s; no meio dela, 100 ms de batida.
     provedores.stt.empurrarTexto("Quero criar uma rotina e");
     provedores.stt.empurrarTexto("isto não pode virar fala");
-    let seq = 0;
-    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    // A primeira fala vai de uma vez (1,4 s cabe nos 2 s de folga da guarda) para a espera de 1,4 s começar já; a batida
+    // vem no ritmo do app, senão a soma passa de 1,2× o tempo real + 2 s e a guarda fecha a mídia (NOD-184).
+    const seq = { n: 0 };
+    for (let i = 0; i < 70; i++) midia.receber(quadro(seq.n++, i < 30));
     await ate(() => msgs(midia, "legenda").find((l) => l.final === true));
     await dormir(200);
-    for (let i = 0; i < 5; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    // A batida tem de cair na espera: com a vez já fora, o teste passaria sem provar nada.
+    expect(msgs(cerebro, "vez").some((v) => v.n === 1)).toBe(false);
+    await falarNoRitmo(midia, seq, 5, 40);
     const vez = await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1), 4000);
     expect(vez.texto).toBe("Quero criar uma rotina e");
     expect(provedores.stt.restantes).toBe(1);
     expect(msgs(cerebro, "interromper")).toHaveLength(0);
-  });
+    expect(midia.fechadoCom).toBeNull();
+  }, 10_000);
 });
 
 /**
@@ -640,17 +655,19 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     // Termina em "e": a vez espera 1,4 s. No meio dela, um "uhum".
     m.provedores.stt.empurrarTexto("Quero criar uma rotina e");
     m.provedores.stt.empurrarTexto("uhum");
+    // Como na batida: a fala vai de uma vez (1,4 s cabe nos 2 s de folga da guarda) e o "uhum" no ritmo do app (NOD-184).
     const seq = { n: 0 };
-    for (let i = 0; i < 30; i++) m.midia.receber(quadro(seq.n++, true));
-    for (let i = 0; i < 40; i++) m.midia.receber(quadro(seq.n++, false));
+    for (let i = 0; i < 70; i++) m.midia.receber(quadro(seq.n++, i < 30));
     await ate(() => msgs(m.midia, "legenda").find((l) => l.final === true));
     await dormir(200);
-    for (let i = 0; i < 12; i++) m.midia.receber(quadro(seq.n++, true));
-    for (let i = 0; i < 40; i++) m.midia.receber(quadro(seq.n++, false));
+    // O "uhum" tem de cair na espera: com a vez 2 já fora, o teste passaria sem provar nada.
+    expect(msgs(m.cerebro, "vez").some((v) => v.n === 2)).toBe(false);
+    await falarNoRitmo(m.midia, seq, 12, 40);
     const vez = await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 2), 4000);
     expect(vez.texto).toBe("Quero criar uma rotina e");
     expect(m.provedores.stt.restantes).toBe(0);
-  });
+    expect(m.midia.fechadoCom).toBeNull();
+  }, 10_000);
 
   it("interromper vale para todas as falas que o app ainda tem, não só para a mais nova", async () => {
     const m = montar();
@@ -891,6 +908,38 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     const fim = logDe(linhas, m.id).find((l) => l.evento === "voz_ligacao_encerrada");
     expect(fim?.quadros_perdidos).toBe(5);
   });
+
+  /**
+   * NOD-184: o e2e da ligação mandava cada fala (1,8 s de áudio) numa rajada só. Com o Mac rápido, a segunda rajada chegava
+   * ~1,2 s depois de a mídia abrir, com 3,6 s de áudio somados: acima de 1,2× o tempo real + 2 s. A guarda fechava a mídia
+   * e o "pode criar" nunca virava comando — a espera estourava sem dizer por quê.
+   */
+  it("duas falas de 1,8 s mandadas em rajada logo depois de a mídia abrir: a guarda de abuso fecha a mídia (4429)", async () => {
+    const linhas: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
+    // O relógio da guarda para em 1,2 s depois da mídia abrir, como no Mac rápido: com a máquina carregada, o atender
+    // sozinho podia passar de 1,3 s e a rajada deixava de estourar a guarda.
+    const t0 = Date.now();
+    let congelado: number | null = null;
+    const m = montar({ roteiro: ["Oi, tudo bem?", "pode criar"], ligacaoId: "rajada", relogio: () => congelado ?? Date.now() });
+    await atender(m);
+    congelado = t0 + 1_200;
+    let seq = 0;
+    for (let fala = 0; fala < 2; fala++) for (let i = 0; i < 90; i++) m.midia.receber(quadro(seq++, i < 30));
+    expect(m.midia.fechadoCom).toBe(FECHAMENTOS_VOZ.abuso);
+    expect(logDe(linhas, m.id).some((l) => l.evento === "voz_audio_acima_do_tempo_real")).toBe(true);
+  });
+
+  it("no ritmo do app (blocos de 100 ms em tempo real), 3 s de áudio não disparam a guarda de abuso", async () => {
+    const m = montar({ ligacaoId: "tempo-real" });
+    await atender(m);
+    let seq = 0;
+    for (let bloco = 0; bloco < 30; bloco++) {
+      for (let i = 0; i < 5; i++) m.midia.receber(quadro(seq++, false));
+      await dormir(100);
+    }
+    expect(m.midia.fechadoCom).toBeNull();
+  }, 10_000);
 
   it("cota do TTS: cada tipo de fala chega ao sintetizador com a sua prioridade, e o pico vai no voz_ligacao_encerrada", async () => {
     expect((["conteudo", "aviso", "leitura", "espera"] as const).map(prioridadeTts)).toEqual(["conteudo", "conteudo", "leitura", "espera"]);
