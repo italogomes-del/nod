@@ -206,7 +206,9 @@ quem executa usa `plano.harness`, nunca o padrão global copiado no boot.
 
 Claude Code e Codex estão integrados; Cursor e Hermes são somente entradas indisponíveis no catálogo.
 `NOD_EXECUTOR=auto` descobre contas conectadas sem turno pago; produção sem variável também usa auto.
-Desenvolvimento continua com catcher. `NOD_MODELO=auto` permite o padrão por harness; `sonnet` fixa
+Desenvolvimento continua com catcher. Valor fora de `auto|claude-cli|codex-cli|catcher` (exato, só as
+pontas aparadas; lido só por `lerNodExecutor`) falha fechado: o servidor sobe, loga `nod_executor_desconhecido`
+e fica sem IA com o motivo escrito, nunca cai no catcher (NOD-160). `NOD_MODELO=auto` permite o padrão por harness; `sonnet` fixa
 Claude para os agentes criados com esse override. Boot/desktop usam sondagem de login sem inferência;
 `scripts/sonda.ts` e `e2e:aceite` continuam explicitamente separados e pagos.
 

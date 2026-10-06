@@ -113,15 +113,36 @@ export async function criarRegistry(env: EnvRegistry, drivers: readonly Driver[]
 
 export type ExecutorPadrao = { id: IdDriver } | { id: null; motivo: string };
 
+export const VALIDOS_NOD_EXECUTOR = ["auto", "claude-cli", "codex-cli", "catcher"] as const;
+export type PedidoNodExecutor = (typeof VALIDOS_NOD_EXECUTOR)[number];
+
+/**
+ * NOD-160: o ÚNICO leitor de NOD_EXECUTOR (registry, boot e compor). Apara as pontas; o valor é exato (maiúscula
+ * não passa, para não esconder erro de digitação); ausente ou vazio vira null (regra do ambiente). Qualquer outro
+ * valor é `desconhecido`: quem chama falha fechado, nunca cai calado em outro driver.
+ */
+export function lerNodExecutor(env: EnvRegistry): { pedido: PedidoNodExecutor | null } | { desconhecido: string } {
+  const valor = env.NOD_EXECUTOR?.trim() ?? "";
+  if (!valor) return { pedido: null };
+  const valido = VALIDOS_NOD_EXECUTOR.find((v) => v === valor);
+  return valido ? { pedido: valido } : { desconhecido: valor };
+}
+
+export function motivoNodExecutorDesconhecido(valor: string): string {
+  return `NOD_EXECUTOR desconhecido: "${valor}" (válidos: ${VALIDOS_NOD_EXECUTOR.join(", ")})`;
+}
+
 /**
  * NOD_EXECUTOR escolhe; sem variável, catcher fora de produção e claude-cli em produção
- * (NODE_ENV=production). Só devolve um driver PRONTO; caso contrário diz por quê.
+ * (NODE_ENV=production). Só devolve um driver PRONTO; caso contrário diz por quê. Valor desconhecido → sem executor.
  */
 export function executorPadrao(env: EnvRegistry, registry: Registry): ExecutorPadrao {
-  const pedido = env.NOD_EXECUTOR;
+  const lido = lerNodExecutor(env);
+  if ("desconhecido" in lido) return { id: null, motivo: motivoNodExecutorDesconhecido(lido.desconhecido) };
+  const { pedido } = lido;
   const automatico = pedido === "auto" || (!pedido && env.NODE_ENV === "production");
   const disponivel: IdDriver = registry["claude-cli"].estado === "pronto" ? "claude-cli" : registry["codex-cli"]?.estado === "pronto" ? "codex-cli" : "claude-cli";
-  const escolhido: IdDriver = automatico ? disponivel : pedido === "claude-cli" || pedido === "codex-cli" || pedido === "catcher" ? pedido : env.NODE_ENV === "production" ? "claude-cli" : "catcher";
+  const escolhido: IdDriver = automatico ? disponivel : pedido ?? "catcher";
   const registro = registry[escolhido];
   if (registro?.estado === "pronto") return { id: escolhido };
   return { id: null, motivo: `${escolhido} em sombra: ${registro?.motivo ?? MOTIVO_NAO_REGISTRADO}` };

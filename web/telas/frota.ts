@@ -36,13 +36,14 @@ export function situacaoMotorFora(inv: Exclude<Inventario, { estado: "pronto" }>
  * Interruptor de executor (definido em 2026-09-16): a máquina roda OU o catcher (sem CLI, sem custo) OU o
  * Claude real (assinatura da pessoa). Um botão por opção que não está em uso; a troca para o Claude sonda o
  * CLI na hora e só acontece se a sonda disser 'pronto' — a recusa vem escrita, nunca um botão que "não faz nada".
+ * NOD-160: a opção em uso que não está pronta (ex.: NOD_EXECUTOR desconhecido) também tem botão — escolhê-la de novo a liga.
  */
 export function renderExecutor(estado: Estado): string {
   const ex = estado.executor;
   if (!ex) return `<div class="ex-linha"><b>Executor:</b> ainda não consultado</div>`;
   const botoes = ex.opcoes
-    .filter((o) => o.id !== ex.atual)
-    .map((o) => botao("trocar-executor", `usar ${esc(rotuloExecutor(o.id))}`, { classe: "sm", dados: { id: o.id }, desabilitado: estado.ocupado, titulo: o.custo === "real" ? "Verifica a conexão com sua conta" : "sem custo" }))
+    .filter((o) => o.id !== ex.atual || o.inventario.estado !== "pronto")
+    .map((o) => botao("trocar-executor", `${o.id === ex.atual ? "ligar" : "usar"} ${esc(rotuloExecutor(o.id))}`, { classe: "sm", dados: { id: o.id }, desabilitado: estado.ocupado, titulo: o.custo === "real" ? "Verifica a conexão com sua conta" : "sem custo" }))
     .join(" ");
   const linhas = ex.opcoes.map((o) => `<span>${esc(rotuloExecutor(o.id))}: ${esc(estadoDaOpcao(o.inventario))}</span>`).join(" · ");
   return `<details class="conexao-avancada"><summary>Configurar conexão</summary><div class="ex-linha"><b>Harness padrão:</b> ${esc(rotuloExecutor(ex.atual))} ${botoes}</div>

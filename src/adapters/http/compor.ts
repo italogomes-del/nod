@@ -67,7 +67,7 @@ import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { iniciarLaco } from "../executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
-import { MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
+import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
 import { criarPonteInterna, type PonteInternaNod } from "../fundo/ponte-interna.ts";
@@ -222,9 +222,13 @@ export function comporApp(o: OpcoesCompor): App {
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
   // (getter/closure), nunca uma cópia — senão a troca pela interface não chega ao plano do turno seguinte.
-  const automatico = env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production");
-  let driverPreferido: IdExecutor = env.NOD_EXECUTOR === "codex-cli" ? "codex-cli" : "claude-cli";
-  let executorAtual: Executor = compartilhado || automatico || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" ? "local" : "catcher";
+  // NOD-160: valor desconhecido é 'local' com o claude-cli (que o boot não registra), para o turno cair em
+  // executor_indisponivel com o motivo — nunca no catcher, que simularia achando que é a IA.
+  const lido = lerNodExecutor(env);
+  const pedido = "pedido" in lido ? lido.pedido : null;
+  const automatico = pedido === "auto" || (pedido === null && "pedido" in lido && env.NODE_ENV === "production");
+  let driverPreferido: IdExecutor = pedido === "codex-cli" ? "codex-cli" : "claude-cli";
+  let executorAtual: Executor = compartilhado || automatico || "desconhecido" in lido || pedido === "claude-cli" || pedido === "codex-cli" ? "local" : "catcher";
   const idDriverAtual = (): IdExecutor => (executorAtual === "local" ? driverPreferido : "catcher");
   const IDS_DRIVER: readonly IdExecutor[] = ["catcher", "claude-cli", "codex-cli"];
   const inventarioPorDriver: Partial<Record<IdDriver, Inventario>> = {};
@@ -725,7 +729,9 @@ export function comporApp(o: OpcoesCompor): App {
   }
   async function trocar(id: IdExecutor): Promise<EstadoExecutor> {
     const anterior = idDriverAtual();
-    if (id === anterior) return estadoExecutor();
+    // NOD-160: o mesmo id só é no-op com o driver pronto. Em sombra (NOD_EXECUTOR desconhecido deixa o Claude "atual" e em
+    // sombra desde o boot), escolhê-lo de novo no seletor é o pedido de ligá-lo: segue para a sonda.
+    if (id === anterior && (!registryLigado || registryLigado[id]?.estado === "pronto")) return estadoExecutor();
     const registry = registryLigado;
     if (!registry) return estadoExecutor("servidor ainda sem registry");
     try {

@@ -176,6 +176,20 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     expect(ponte.entregas[0]?.resultado).toMatchObject({ desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", sinais: SINAIS_ZERADOS });
   });
 
+  it("NOD-160 critério 5: harness fora do registry (cursor-cli) é interrompido executor_indisponivel e o laço segue para o próximo turno", async () => {
+    const ponte = ponteFalsa([{ ...planoDeTeste("t5b", "x", "local"), harness: "cursor-cli" }, planoDeTeste("t5c", "[[texto: segui]]")]);
+    const registry = await registryCom(driverFalso());
+    expect(registry["cursor-cli"]).toBeUndefined();
+    const laco = iniciarLaco({ ponte, registry, pessoaId: "p", machineId: "m1", relogio: Date.now, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => ponte.entregas.length === 2);
+    await laco.parar();
+    expect(ponte.entregas.map((e) => [e.turnoId, e.resultado.desfecho, e.resultado.motivoInterrupcao ?? null])).toEqual([
+      ["t5b", "interrompido", "executor_indisponivel"],
+      ["t5c", "sucesso", null],
+    ]);
+    expect(ponte.entregas[0]?.resultado.sinais).toEqual(SINAIS_ZERADOS);
+  });
+
   it("puxar que lança não derruba o laço; parar() acorda o sono e interrompe o turno em curso", async () => {
     let vezes = 0;
     const ponte = ponteFalsa([]);

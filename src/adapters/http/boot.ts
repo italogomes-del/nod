@@ -12,7 +12,7 @@ import { admitirPorDominio, buscarPorEmail, listarTodas } from "../../repositori
 import type { Db } from "../../shared/types.ts";
 import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../executor/drivers/claude-cli.ts";
-import { configDosDrivers, criarRegistryDetalhado, executorPadrao, nodHome, registrarDriver } from "../executor/registry.ts";
+import { configDosDrivers, criarRegistryDetalhado, executorPadrao, lerNodExecutor, nodHome, registrarDriver, VALIDOS_NOD_EXECUTOR } from "../executor/registry.ts";
 import { homeDaPessoa } from "../executor/caminho.ts";
 import { prazoSondaDoEnv } from "../executor/sonda.ts";
 import type { Driver, Registry } from "../executor/spi.ts";
@@ -51,7 +51,7 @@ export type OpcoesBoot = {
   /** Intervalos dos laços (testes encurtam). */
   intervalos?: { orquestradorMs?: number; schedulerMs?: number; leaseMs?: number; expiracaoMs?: number; outboxMs?: number; ociosidadeMs?: number };
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
-  /** Drivers do registry; default: catcher (+ claude-cli quando NOD_EXECUTOR=claude-cli). */
+  /** Drivers do registry; default: catcher (+ claude-cli/codex-cli quando NOD_EXECUTOR os pede ou é auto). */
   drivers?: (p: { urlNod: string; app: App }) => Driver[];
   /** Provedores de voz prontos (NOD-180); só em teste. Default: pelas envs NOD_VOZ_*. */
   voz?: ProvedoresVoz;
@@ -157,10 +157,17 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
   //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
   const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(env) }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, prazoSondaMs: prazoSondaDoEnv(env) })];
-  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" || env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production"));
+  //    NOD-160: NOD_EXECUTOR desconhecido sobe só o catcher (que não vira executor) e avisa UMA vez, aqui.
+  const lido = lerNodExecutor(env);
+  if ("desconhecido" in lido) log("aviso", "nod_executor_desconhecido", { valor: lido.desconhecido, validos: VALIDOS_NOD_EXECUTOR.join(", ") });
+  const sondaIas = "pedido" in lido && (lido.pedido === "claude-cli" || lido.pedido === "codex-cli" || lido.pedido === "auto" || (lido.pedido === null && env.NODE_ENV === "production"));
+  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || sondaIas);
   const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });
   const padrao = executorPadrao(env, registry);
+  // O inventário e o seletor leem o motivo do registro do driver em uso: com o valor desconhecido, ele diz a causa em vez de
+  // "driver não registrado". O interruptor re-registra por cima, inclusive escolhendo de novo o próprio driver em sombra.
+  if ("desconhecido" in lido && !app.compartilhado && padrao.id === null) registry[app.idDriver] = { estado: "sombra", motivo: padrao.motivo };
   const ativar: AtivarDriver = async (id) => {
     const driver = candidatos.find((d) => d.meta.id === id);
     if (!driver) return { estado: "ausente", motivo: `driver ${id} não disponível neste servidor`, em: agora() };

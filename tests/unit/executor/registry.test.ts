@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { catcherDriver } from "../../../src/adapters/executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
-import { configDosDrivers, criarRegistry, criarRegistryDetalhado, executorPadrao, nodHome } from "../../../src/adapters/executor/registry.ts";
+import { configDosDrivers, criarRegistry, criarRegistryDetalhado, executorPadrao, lerNodExecutor, motivoNodExecutorDesconhecido, nodHome, VALIDOS_NOD_EXECUTOR } from "../../../src/adapters/executor/registry.ts";
 import type { Driver, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import { criarInventario } from "../../../src/services/inventario.ts";
@@ -82,8 +82,63 @@ describe("registry (ADR-012 sombra, ADR-019 gate pré-spawn)", () => {
       expect(executorPadrao({ NODE_ENV: "production" }, pronto)).toEqual({ id: "claude-cli" });
     });
 
-    it("valor desconhecido em NOD_EXECUTOR cai no padrão do ambiente", () => {
-      expect(executorPadrao({ NOD_EXECUTOR: "box" }, registry)).toEqual({ id: "catcher" });
+    // NOD-160 critério 3: os quatro valores válidos e o ausente escolhem o mesmo driver de antes, dentro e fora de produção.
+    const tudoPronto: Registry = { ...registry, "claude-cli": registry.catcher, "codex-cli": registry.catcher };
+    it.each([
+      [undefined, undefined, "catcher"],
+      [undefined, "production", "claude-cli"],
+      ["", undefined, "catcher"],
+      ["", "production", "claude-cli"],
+      ["auto", undefined, "claude-cli"],
+      ["auto", "production", "claude-cli"],
+      ["claude-cli", undefined, "claude-cli"],
+      ["claude-cli", "production", "claude-cli"],
+      ["codex-cli", undefined, "codex-cli"],
+      ["codex-cli", "production", "codex-cli"],
+      ["catcher", undefined, "catcher"],
+      ["catcher", "production", "catcher"],
+      ["  catcher  ", undefined, "catcher"],
+      [" codex-cli\n", "production", "codex-cli"],
+    ])("NOD_EXECUTOR=%j, NODE_ENV=%j → %s (regra de hoje)", (valor, nodeEnv, esperado) => {
+      expect(executorPadrao({ NOD_EXECUTOR: valor, NODE_ENV: nodeEnv }, tudoPronto)).toEqual({ id: esperado });
+    });
+
+    it("auto sem Claude pronto escolhe o Codex pronto (regra do modo auto intacta)", () => {
+      expect(executorPadrao({ NOD_EXECUTOR: "auto" }, { ...registry, "codex-cli": registry.catcher })).toEqual({ id: "codex-cli" });
+    });
+
+    // NOD-160 critério 2: valor desconhecido falha fechado, com o motivo escrito, nos dois ambientes; não cai em outro driver.
+    it.each(["claude", "Claude-CLI", "codex", "box"])("NOD_EXECUTOR=%j → { id: null } com o motivo, dentro e fora de produção", (valor) => {
+      const motivo = `NOD_EXECUTOR desconhecido: "${valor}" (válidos: auto, claude-cli, codex-cli, catcher)`;
+      expect(executorPadrao({ NOD_EXECUTOR: valor }, tudoPronto)).toEqual({ id: null, motivo });
+      expect(executorPadrao({ NOD_EXECUTOR: valor, NODE_ENV: "production" }, tudoPronto)).toEqual({ id: null, motivo });
+      expect(motivoNodExecutorDesconhecido(valor)).toBe(motivo);
+    });
+  });
+
+  // NOD-160 critério 1.
+  describe("lerNodExecutor", () => {
+    it.each(VALIDOS_NOD_EXECUTOR)("reconhece %s, com e sem espaços nas pontas", (valor) => {
+      expect(lerNodExecutor({ NOD_EXECUTOR: valor })).toEqual({ pedido: valor });
+      expect(lerNodExecutor({ NOD_EXECUTOR: `  ${valor}\t` })).toEqual({ pedido: valor });
+    });
+
+    it("ausente, vazio ou só espaços → null (regra do ambiente)", () => {
+      expect(lerNodExecutor({})).toEqual({ pedido: null });
+      expect(lerNodExecutor({ NOD_EXECUTOR: "" })).toEqual({ pedido: null });
+      expect(lerNodExecutor({ NOD_EXECUTOR: "   " })).toEqual({ pedido: null });
+    });
+
+    it.each(["claude", "Claude-CLI", "codex", "CATCHER", "claude cli", "hermes", "cursor-cli"])("%j → desconhecido (valor exato, sem maiúsculas)", (valor) => {
+      expect(lerNodExecutor({ NOD_EXECUTOR: valor })).toEqual({ desconhecido: valor });
+    });
+
+    it("desconhecido guarda o valor já aparado", () => {
+      expect(lerNodExecutor({ NOD_EXECUTOR: " claude " })).toEqual({ desconhecido: "claude" });
+    });
+
+    it("os válidos são exatamente os quatro da spec", () => {
+      expect(VALIDOS_NOD_EXECUTOR).toEqual(["auto", "claude-cli", "codex-cli", "catcher"]);
     });
   });
 });
