@@ -29,6 +29,11 @@ import type { EstadoMicrofone } from "../src/contracts/desktop.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import { FalhaPareamento, parearPeloNavegador } from "./parear.ts";
 import { IDIOMA_DO_APP, templateDoMenu } from "./menu.ts";
+import { criarArquivoDeLog, escreverDiagnostico, instalarOuvintesDeQueda, lerCaudaDoLog, MAX_BYTES_LOG } from "./diagnostico.ts";
+import { montarDiagnostico, nomeArquivoDiagnostico, TETO_REGISTROS_BYTES, type EntradaDiagnostico } from "../src/domain/diagnostico-app.ts";
+import { definirDestinoDoLog, log } from "../src/obs/log.ts";
+import type { Inventario } from "../src/contracts/inventario.ts";
+import type { IdDriver } from "../src/adapters/executor/spi.ts";
 
 /** ADR-069: o endereço do servidor vem no build (scripts/desktop/build.mjs, NOD_SERVIDOR_PADRAO); vazio = a pessoa informa. */
 declare const __NOD_SERVIDOR_PADRAO__: string;
@@ -55,6 +60,10 @@ let itensGithub: ReturnType<typeof setInterval> | null = null;
 let vigiaIas: VigiaDasIas | null = null;
 /** A config dos drivers da conexão atual (ambiente limpo + PATH aumentado): a sonda e o login da IA a reaproveitam. */
 let cfgExecutor: ConfigDriver | null = null;
+/** O que o diagnóstico (NOD-138) conta da conexão atual; `parar()` zera. */
+let inventariosAtuais: Partial<Record<IdDriver, Inventario>> | null = null;
+let maquinaIdAtual: string | null = null;
+let ghLogado: boolean | null = null;
 /**
  * definido em 2026-09-24 (ADR-048): de 5 em 5 s o app puxa os itens aprovados que rodam no gh deste
  * Mac (um comentário que a pessoa aprovou no celular sai assim que o Mac estiver aberto). Um por vez.
@@ -167,7 +176,39 @@ async function definirAvisos(ligado: boolean): Promise<PreferenciasDesktop> {
   return estadoPreferencias();
 }
 function montarMenu() {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); } })));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); }, exportarDiagnostico: () => { void exportarDiagnostico(); } })));
+}
+// ---- Diagnóstico para suporte (definido em 2026-10-05, NOD-138) -------------------------------------------------------
+// Só pelo menu nativo: funciona na tela de conexão e com a janela web fora do ar, e não aumenta a ponte da página. O texto
+// sai de montarDiagnostico (redigido, ~ no lugar da pasta pessoal) e fica só neste Mac: nada sobe ao servidor.
+const AVISO_DIAGNOSTICO = "O arquivo traz a versão do app, o estado da conexão e da IA e os registros recentes deste Mac. Não traz chaves, senhas nem o texto das suas conversas.";
+const FALHA_DIAGNOSTICO = "Não foi possível salvar o diagnóstico. Escolha outra pasta e tente de novo.";
+function entradaDiagnostico(): EntradaDiagnostico {
+  const conectado = cliente !== null;
+  return {
+    app: { versao: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, plataforma: process.platform, arquitetura: process.arch, versaoSistema: process.getSystemVersion(), empacotado: app.isPackaged, ligadoHaSegundos: process.uptime() },
+    conexao: { servidor: configuracao?.url ?? null, conectado, maquinaId: maquinaIdAtual, status: mensagem },
+    ia: inventariosAtuais ? Object.entries(inventariosAtuais).map(([harness, i]) => ({ harness, estado: i?.estado ?? "desconhecido", motivo: i && "motivo" in i ? i.motivo : null, versao: i && "versao" in i ? i.versao ?? null : null })) : null,
+    execucao: { conectado, lacoAtivo: laco !== null, sondandoIa: vigiaIas !== null && laco === null, emLigacao, githubNoMac: ghLogado },
+    preferencias: { avisos: preferencias.avisos, tema: preferencias.tema, avisosBloqueados: bloqueados },
+    registros: lerCaudaDoLog(app.getPath("logs"), TETO_REGISTROS_BYTES),
+  };
+}
+async function exportarDiagnostico() {
+  const agora = Date.now();
+  const opcoes = { title: "Exportar diagnóstico", message: AVISO_DIAGNOSTICO, defaultPath: join(app.getPath("downloads"), nomeArquivoDiagnostico(agora, -new Date(agora).getTimezoneOffset())), filters: [{ name: "Texto", extensions: ["txt"] }] };
+  const w = janela && !janela.isDestroyed() ? janela : null;
+  const r = w ? await dialog.showSaveDialog(w, opcoes) : await dialog.showSaveDialog(opcoes);
+  if (r.canceled || !r.filePath) return;
+  try {
+    escreverDiagnostico(r.filePath, montarDiagnostico(entradaDiagnostico(), agora));
+    log("info", "diagnostico_exportado");
+    shell.showItemInFolder(r.filePath);
+  } catch {
+    log("aviso", "diagnostico_nao_salvo");
+    const erro = { type: "warning" as const, message: FALHA_DIAGNOSTICO };
+    void (w ? dialog.showMessageBox(w, erro) : dialog.showMessageBox(erro));
+  }
 }
 /** A janela aberta é a do nod web, na origem do servidor configurado (e não a tela de conexão). */
 function janelaWeb(): BrowserWindow | null {
@@ -280,6 +321,7 @@ async function parar() {
   for (const r of Object.values(registry ?? {})) if (r?.estado === "pronto") await r.instance.dispose();
   if (cliente) await cliente.ponte.desconectar("").catch(() => undefined);
   registry = null; cliente = null;
+  inventariosAtuais = null; maquinaIdAtual = null; ghLogado = null;
 }
 function falha(codigo: FalhaPonte["codigo"]) {
   mensagem = mensagens[codigo] ?? mensagens.servidor_fora!;
@@ -312,10 +354,12 @@ async function conectar(c: Config) {
   // fica pronta depois (ou um driver recriado) passa a valer sem reiniciar o laço.
   const registryDoLaco: Registry = criado.registry;
   registry = registryDoLaco;
+  inventariosAtuais = criado.inventarios; maquinaIdAtual = dados.machineId;
   const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
   cliente = ponteHttp;
   // ADR-048: o gh já logado neste Mac vira o jeito de conectar o GitHub da pessoa, sem ela configurar nada.
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
+  if (cliente === ponteHttp) ghLogado = gh; // um parar() durante o await já zerou: não ressuscita o valor velho
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true } as const;
   if (gh) vigiarItensGithub(ponteHttp);
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
@@ -334,7 +378,7 @@ async function conectar(c: Config) {
   const vigia = criarVigiaDasIas({
     sondar: () => criarRegistryDetalhado(envExecutor, drivers, { cfg }),
     impressao: (ia) => impressaoDoLogin(ia, cfg),
-    anunciar: async (inventarios, principal) => { if (cliente === ponteHttp) await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios }); },
+    anunciar: async (inventarios, principal) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios }); },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);
@@ -441,6 +485,10 @@ else {
     void Promise.all([parar(), gravacaoJanela]).finally(() => app.quit());
   });
   void app.whenReady().then(async () => {
+    // NOD-138: o log() do app passa a gravar em ~/Library/Logs/nod antes de qualquer outra coisa, e as quedas viram linha.
+    definirDestinoDoLog(criarArquivoDeLog({ dir: app.getPath("logs"), maxBytes: MAX_BYTES_LOG }));
+    instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
+    log("info", "app_iniciado", { versao: app.getVersion(), empacotado: app.isPackaged, arquitetura: process.arch });
     await carregarPreferencias();
     await carregarEstadoJanela();
     aplicarTemaNativo();

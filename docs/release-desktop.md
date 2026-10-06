@@ -68,6 +68,43 @@ pt-BR e outra com o macOS em inglês, e anexe as fotos a esta seção:
 
 Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Instale o novo DMG sobre o app anterior, mantendo a configuração cifrada no Keychain. Valide conexão, execução, Parar e revogação de chave nas duas arquiteturas. Não há atualização automática. Esse caminho ainda depende de aceite real. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
 
+## Diagnóstico para suporte (NOD-138)
+
+Quando o app não conecta, não acha o Claude ou o Codex, ou cai, peça à pessoa **nod › Exportar diagnóstico…**. O app
+abre "Salvar" com `nod-diagnostico-AAAAMMDD-HHMMSS.txt` sugerido em Downloads. Depois de salvar, o Finder mostra o
+arquivo; cancelar não grava nada. O item fica no menu nativo, e não na página: funciona na tela de conexão, sem
+servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` continua com 10 funções.
+
+**Onde fica o log.** O `log()` do app do Mac grava a mesma linha JSON do stdout, já redigida pela NOD-158, em
+`~/Library/Logs/nod/nod.log` (modo `0600`). Passou de 1 MiB, ela vira `nod.1.log`. São duas gerações, no máximo 2 MiB.
+Quedas de janela, de processo filho e exceções do processo principal viram uma linha `app_processo_caiu` só com
+metadados de lista fechada (tipo, motivo, código de saída, classe do erro), sem mensagem, URL ou caminho. Nada é
+registrado durante o Cmd+Q. O servidor não grava esse arquivo.
+
+**O que o diagnóstico leva.** Um `.txt` em pt-BR com as seções App, Conexão, IA neste Mac, Execução, Preferências,
+Quedas recentes e Registros recentes (a cauda das duas gerações, até 256 KiB). Leva a versão do app e do sistema, a
+origem do servidor (`https://host`, sem caminho nem credencial), o id da máquina (o mesmo de **Chaves**), o estado de
+cada IA e as preferências.
+
+**O que nunca leva.** A chave do Mac, o cookie de sessão, o e-mail, o nome do Mac e o texto das conversas. Primeiro o
+texto passa pelo redator da NOD-158 (segredos viram `«redigido: N caracteres»`), depois `/Users/<nome>` vira `~` e
+e-mail vira `«e-mail»`, e só então os registros são cortados pela cauda na borda de linha. O arquivo é gravado com
+`0600`, e nem ele nem o `nod.log` seguem symlink ou escrevem em hardlink. O diagnóstico fica no Mac. Ele nunca sobe ao
+servidor nem entra no relato.
+
+**Roteiro manual no app empacotado (Mac arm64).**
+
+1. Na tela de conexão (sem servidor, ou com uma chave inválida), use **nod › Exportar diagnóstico…** e salve.
+   Confira se o Finder abre com o arquivo selecionado. Repita com a janela do nod aberta e conectada.
+2. Abra o arquivo e confira se as sete seções estão na ordem. Desconectado, IA, máquina e execução aparecem como
+   "desconectado".
+3. `grep -cE 'nod_sessao|sk-|ghp_|Bearer [A-Za-z0-9]|/Users/' ~/Downloads/nod-diagnostico-*.txt` deve dar `0`.
+4. Com a janela do nod aberta, mate o processo **nod Helper (Renderer)** no Monitor de Atividade. Exporte de novo:
+   "Quedas recentes" deve trazer uma linha `app_processo_caiu` com `"superficie":"janela_principal"`.
+5. `ls -l ~/Library/Logs/nod` mostra `-rw-------` em `nod.log`.
+6. Cancelar o diálogo de salvar não grava nada. Salvar numa pasta sem permissão mostra "Não foi possível salvar o
+   diagnóstico. Escolha outra pasta e tente de novo."
+
 ## Gerar e publicar
 
 Para esta preview, use a tag `desktop-v0.2.0-rc.1`, dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.

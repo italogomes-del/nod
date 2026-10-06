@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { executarComContexto } from "../../../src/obs/contexto.ts";
-import { log } from "../../../src/obs/log.ts";
+import { definirDestinoDoLog, log } from "../../../src/obs/log.ts";
+
+const saida = vi.spyOn(console, "log").mockImplementation(() => {});
+afterEach(() => { saida.mockClear(); definirDestinoDoLog(null); });
 
 describe("log JSON único", () => {
-  const saida = vi.spyOn(console, "log").mockImplementation(() => {});
-  afterEach(() => saida.mockClear());
-
   it("escreve UMA linha JSON com ts, nivel, evento e o contexto (tenant, pessoa, correlation)", async () => {
     const linha = await executarComContexto({ tenantId: "t1", pessoaId: "p1", correlationId: "c1" }, async () =>
       log("info", "turno_criado", { turno_id: "x" }),
@@ -35,5 +35,32 @@ describe("log JSON único", () => {
     expect(linha).not.toContain("cpf");
     expect(JSON.parse(linha)).not.toHaveProperty("texto");
     expect(JSON.parse(linha).conversa_id).toBe("c");
+  });
+});
+
+describe("destino extra do log (NOD-138)", () => {
+  it("o destino recebe exatamente a linha que log() devolve, já redigida", () => {
+    const recebidas: string[] = [];
+    definirDestinoDoLog((l) => recebidas.push(l));
+    const linha = log("erro", "falhou", { erro_cru: "Bearer abcdefghijklmnop" });
+    expect(recebidas).toEqual([linha]);
+    expect(saida.mock.calls[0]?.[0]).toBe(linha);
+    expect(linha).not.toContain("abcdefghijklmnop");
+  });
+
+  it("um destino que lança não derruba log() nem o console", () => {
+    definirDestinoDoLog(() => { throw new Error("ENOSPC"); });
+    const linha = log("info", "segue");
+    expect(JSON.parse(linha).evento).toBe("segue");
+    expect(saida).toHaveBeenCalledTimes(1);
+  });
+
+  it("definirDestinoDoLog(null) desliga; sem destino, só o console, como antes", () => {
+    const recebidas: string[] = [];
+    definirDestinoDoLog((l) => recebidas.push(l));
+    definirDestinoDoLog(null);
+    log("info", "so_console");
+    expect(recebidas).toEqual([]);
+    expect(saida).toHaveBeenCalledTimes(1);
   });
 });

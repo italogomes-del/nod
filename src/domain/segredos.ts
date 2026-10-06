@@ -54,15 +54,16 @@ const BEARER = /(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})/g;
 const BASIC = /(\bAuthorization\s*:\s*Basic\s+)([A-Za-z0-9+/]{8,}={0,2})/gi;
 const BLOCO_PEM = /(-----BEGIN [A-Z ]*PRIVATE KEY-----)([\s\S]*?)(-----END [A-Z ]*PRIVATE KEY-----)/g;
 /** chave=valor / chave: valor / chave="valor" com nome de segredo. O valor é um token só: prosa depois
- * dos dois pontos ("password: deixe em branco") tem espaço e não casa. */
+ * dos dois pontos ("password: deixe em branco") tem espaço e não casa. A aspa pode vir escapada (`\"`):
+ * JSON dentro de uma string de JSON (`{\"token\":\"…\"}`) vazava cru no diagnóstico (NOD-138, QA). */
 const CHAVE_VALOR =
-  /\b((?:[A-Za-z0-9_-]{0,64}_)?(?:api[_-]?key|apikey|secret|token|password|passwd|senha|segredo|cookie|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)(["']?\s*[=:]\s*)(["']?)([A-Za-z0-9._~+/=-]{8,})\3/gi;
+  /\b((?:[A-Za-z0-9_-]{0,64}_)?(?:api[_-]?key|apikey|secret|token|password|passwd|senha|segredo|cookie|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)((?:\\?["'])?\s*[=:]\s*)((?:\\?["'])?)([A-Za-z0-9._~+/=-]{8,})\3/gi;
 /** Senha não tem piso nem alfabeto: `senha=hunter2` e `DB_PASSWORD=p@ss!w0rd` vazavam no `CHAVE_VALOR`
  * (8+ caracteres sem símbolo), e o `resumirDetalhe` antigo pegava os dois. Só com `=` colado ou com o
  * valor entre aspas: `password: deixe em branco` é prosa e fica. Roda antes do `CHAVE_VALOR` para não
  * sobrar o pedaço depois do 1º símbolo. */
 const SENHA =
-  /\b((?:[A-Za-z0-9_-]{0,64}[_-])?(?:password|passwd|senha|segredo|secret)s?)(?:(=)(?![="'])([^\s"'&;,«»]+)|(["']?\s*[=:]\s*)(["'])([^"'\n«»]{1,256})\5)/gi;
+  /\b((?:[A-Za-z0-9_-]{0,64}[_-])?(?:password|passwd|senha|segredo|secret)s?)(?:(=)(?![="'\\])([^\s"'&;,«»]+)|((?:\\?["'])?\s*[=:]\s*)(\\?["'])([^"'\n«»]{1,256})\5)/gi;
 /** `X_KEY=valor`: atribuição a um nome que TERMINA em key é credencial, sem piso de tamanho. O
  * separador antes de `key` é o que deixa `hotkey=` e `keyboard=` de fora. */
 const SUFIXO_KEY = /\b([A-Za-z][A-Za-z0-9_-]{0,64}[_-]key)s?(=)(["']?)([A-Za-z0-9._~+/=-]+)\3/gi;

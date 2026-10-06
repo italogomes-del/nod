@@ -103,3 +103,25 @@ segredo, `--token`, senha em URL), então UUID, sha e código continuam legívei
 
 Contrato para quem exporta (NOD-138, diagnóstico; NOD-44, conversa): use `redigirECortar` antes de
 qualquer corte. Cortar primeiro parte o segredo, e o pedaço que sobra não é mais reconhecido.
+
+## Emenda (2026-10-05, NOD-138) — log local e diagnóstico do app do Mac
+
+Esta emenda está no arquivo `adr-041-o-relato-carrega-o-estado-tecnico-a-pessoa-so-aponta.md`. O número 041 também
+é usado por `adr-041-chave-composio-do-tenant-catalogo-vindo-do-provedor.md`, que trata de outro assunto.
+
+O relato continua cobrindo só a resposta ruim vista pelo servidor. Para o problema que é do app do Mac, o app passa a
+guardar o próprio log e a exportar um diagnóstico local:
+
+- **Local e retenção:** o `log()` do app (não o do servidor) grava a mesma linha redigida do stdout em
+  `~/Library/Logs/nod/nod.log`, com modo `0600` e duas gerações de 1 MiB (`nod.1.log`). Quedas de processo entram
+  como `app_processo_caiu`, só com metadados de lista fechada.
+- **Exportação:** pelo menu **nod › Exportar diagnóstico…**, um `.txt` em pt-BR montado por
+  `src/domain/diagnostico-app.ts`. O texto é redigido (`redigirSegredos`) antes do corte de 256 KiB, a pasta pessoal
+  vira `~` e e-mail vira `«e-mail»`.
+- **O que nunca entra:** a chave do Mac, o cookie de sessão, o e-mail, o nome do Mac, o texto das conversas e o
+  `erroCru` dos turnos.
+- **Não sobe:** o diagnóstico fica no Mac. A pessoa decide se manda ao suporte. Ele não vai ao servidor nem é
+  anexado ao relato.
+
+Gatilho de reversão: reabrir se o suporte precisar do estado do servidor junto (aí o diagnóstico vira parte do
+relato) ou se 2 MiB não cobrirem o intervalo entre o problema e a exportação.

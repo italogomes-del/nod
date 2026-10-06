@@ -11,6 +11,18 @@ export type Nivel = "info" | "aviso" | "erro";
 
 export type CamposLog = Record<string, string | number | boolean | null | undefined>;
 
+/**
+ * Saída extra da linha (NOD-138): o app do Mac grava em ~/Library/Logs/nod, porque o stdout do app empacotado se
+ * perde. Recebe a MESMA `linha` do console, já redigida: o destino não redige de novo. O servidor não registra destino.
+ */
+export type DestinoDoLog = (linha: string) => void;
+let destino: DestinoDoLog | null = null;
+
+/** `null` desliga. */
+export function definirDestinoDoLog(novo: DestinoDoLog | null): void {
+  destino = novo;
+}
+
 export function log(nivel: Nivel, evento: string, campos: CamposLog = {}): string {
   const ctx = contextoAtual();
   const { texto: _texto, ...semTexto } = campos;
@@ -25,5 +37,7 @@ export function log(nivel: Nivel, evento: string, campos: CamposLog = {}): strin
   });
   // eslint-disable-next-line no-console -- único ponto de saída do processo (definido em 2026-09-16: no-console sem allow)
   console.log(linha);
+  // Erro no destino (disco cheio, permissão) nunca derruba log() nem vira outro log: sem laço de log-do-erro-do-log.
+  try { destino?.(linha); } catch { /* o console já recebeu a linha */ }
   return linha;
 }

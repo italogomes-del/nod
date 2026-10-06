@@ -77,6 +77,16 @@ describe("redigirSegredos (NOD-158)", () => {
     expect(redigirSegredos(`solto ${turno}`)).toBe(`solto ${turno}`);
   });
 
+  it("JSON dentro de string de JSON (aspa escapada) não vaza o valor (NOD-138, QA)", () => {
+    const tok = "tokAninhado987654";
+    const senha = "segredoAninhado12345";
+    expect(redigirSegredos(String.raw`{"corpo":"{\"token\":\"${tok}\",\"password\":\"${senha}\"}"}`)).toBe(String.raw`{"corpo":"{\"token\":\"${m(tok.length)}\",\"password\":\"${m(senha.length)}\"}"}`);
+    expect(redigirSegredos(String.raw`{\"senha\":\"hunter2\"}`)).toBe(String.raw`{\"senha\":\"${m(7)}\"}`);
+    expect(redigirSegredos(String.raw`password=\"abc123\"`)).toBe(String.raw`password=\"${m(6)}\"`);
+    expect(redigirSegredos(String.raw`{\"api_key\": \"abcdefgh1234\"}`)).toBe(String.raw`{\"api_key\": \"${m(12)}\"}`);
+    expect(redigirSegredos("password: deixe em branco")).toBe("password: deixe em branco");
+  });
+
   it("é idempotente byte a byte, inclusive com nome=valor sobre o próprio marcador", () => {
     const texto = [
       `ANTHROPIC_API_KEY=${ANTHROPIC}`, `Bearer ${GITHUB}`, "token=abc12345678", "X_KEY=v",

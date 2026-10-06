@@ -3,7 +3,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import { templateDoMenu } from "../../../desktop/menu.ts";
 
 /** NOD-174: o menu do Mac em pt-BR. Todo item com `role` ganha `label` explícito; o rótulo nativo do Electron é em inglês. */
-const nada = { conexao: () => undefined, definirAvisos: () => undefined };
+const nada = { conexao: () => undefined, definirAvisos: () => undefined, exportarDiagnostico: () => undefined };
 
 function itens(template: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
   return template.flatMap((i) => [i, ...(Array.isArray(i.submenu) ? itens(i.submenu) : [])]);
@@ -22,7 +22,7 @@ describe("templateDoMenu", () => {
 
   it("os rótulos são os da spec, em pt-BR", () => {
     expect(rotulos(true)).toEqual([
-      "nod", "Conexão / verificar conta de IA", "Avisos no Mac", "Sair do nod",
+      "nod", "Conexão / verificar conta de IA", "Exportar diagnóstico…", "Avisos no Mac", "Sair do nod",
       "Editar", "Desfazer", "Refazer", "Recortar", "Copiar", "Colar", "Selecionar tudo",
       "Visualizar", "Recarregar", "Tamanho real", "Aumentar", "Diminuir", "Tela cheia",
     ]);
@@ -47,6 +47,16 @@ describe("templateDoMenu", () => {
       item?.click?.({ checked: !avisos } as never, undefined, {} as never);
     }
     expect(chamadas).toEqual([false, true]);
+  });
+
+  it("Exportar diagnóstico… (NOD-138) chama a ação, empacotado ou não", () => {
+    for (const empacotado of [true, false]) {
+      let chamou = 0;
+      const item = itens(templateDoMenu({ avisos: true, empacotado }, { ...nada, exportarDiagnostico: () => { chamou += 1; } })).find((i) => i.label === "Exportar diagnóstico…");
+      expect(item?.role).toBeUndefined();
+      item?.click?.({} as never, undefined, {} as never);
+      expect(chamou).toBe(1);
+    }
   });
 
   it("os itens nativos mantêm o role (Copiar e Colar seguem funcionando)", () => {

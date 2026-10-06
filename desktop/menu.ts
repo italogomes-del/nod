@@ -6,7 +6,7 @@
  */
 import type { MenuItemConstructorOptions } from "electron";
 
-export type AcoesDoMenu = { conexao: () => void; definirAvisos: (ligado: boolean) => void };
+export type AcoesDoMenu = { conexao: () => void; definirAvisos: (ligado: boolean) => void; exportarDiagnostico: () => void };
 export type OpcoesDoMenu = { avisos: boolean; empacotado: boolean };
 
 /** O idioma que o Chromium usa no menu de contexto, nos diálogos nativos e na validação da página. */
@@ -28,6 +28,8 @@ export function templateDoMenu(opcoes: OpcoesDoMenu, acoes: AcoesDoMenu): MenuIt
       label: "nod",
       submenu: [
         { label: "Conexão / verificar conta de IA", click: () => acoes.conexao() },
+        // NOD-138: só pelo menu nativo, funciona na tela de conexão e com a janela web fora do ar.
+        { label: "Exportar diagnóstico…", click: () => acoes.exportarDiagnostico() },
         { type: "separator" },
         { label: "Avisos no Mac", type: "checkbox", checked: opcoes.avisos, click: (item) => acoes.definirAvisos(item.checked) },
         { type: "separator" },
