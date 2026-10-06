@@ -24,6 +24,7 @@
     "test:concurrency": "vitest run --project concurrency",
     "e2e:fumaca": "NOD_EXECUTOR=catcher vitest run --project concurrency tests/concurrency/e2e-catcher.test.ts",
     "e2e:aceite": "bash scripts/e2e-aceite.sh",
+    "ensaio:computador": "bash scripts/ensaio-computador.sh",
     "sonda": "node scripts/sonda.ts",
     "sonda:mcp-timeout": "node scripts/sonda-mcp-timeout.ts",
     "sonda:codex": "node scripts/sonda-codex-ferramentas.ts",

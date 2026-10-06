@@ -3,6 +3,7 @@ backups/local/
 dist/
 .env
 *.log
+!scripts/ensaio-computador/paginas/acessos.log
 .vite/
 coverage/
 .claude/*

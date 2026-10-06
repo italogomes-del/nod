@@ -105,4 +105,4 @@ Medido em 2026-09-18, no checkout de desenvolvimento:
 - Web e desktop compilados; proxy MCP inicializado dentro do Electron, sem Node externo nem CLI/modelo real.
 - Interface conferida em servidor temporário: ligar, assumir, navegar, executar comando, listar arquivos, devolver e desligar; abrir e fechar o painel preserva o rascunho da conversa. Os recursos descartáveis foram removidos ao terminar.
 
-Não foram usados logins reais de Meta Ads, Zendesk ou outros SaaS. A captura de áudio e o transporte de imagens/áudio foram validados; a interpretação por cada modelo ainda depende de ensaio com o harness escolhido. Nenhuma infraestrutura de nuvem foi provisionada.
+Não foram usados logins reais de Meta Ads, Zendesk ou outros SaaS. A captura de áudio e o transporte de imagens/áudio foram validados; a interpretação por cada modelo ainda depende de ensaio com o harness escolhido (roteiro: `npm run ensaio:computador`, ver a Rodada D de [uat-harnesses-e-modelos.md](uat-harnesses-e-modelos.md)). Nenhuma infraestrutura de nuvem foi provisionada.
