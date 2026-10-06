@@ -132,7 +132,7 @@ export function destinoDoEnvio(modo: ModoComposer): DestinoEnvio {
 
 /** O que o envio precisa da Api (estrutural: web/lib/api.ts satisfaz, e o teste passa um espião). */
 export type ApiDeEnvio = {
-  enviar(conversaId: string, texto: string, anexos?: readonly string[]): Promise<unknown>;
+  enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<unknown>;
   responder(decisaoId: string, texto: string): Promise<unknown>;
   postarNaSala(salaId: string, texto: string): Promise<unknown>;
 };
@@ -148,13 +148,22 @@ export type ResultadoEnvio = { enviado: "resposta" | "mensagem" } | { recusado: 
  * vira mensagem comum. A rota não leva arquivo: com anexo pronto, recusa por escrito em vez de mandar
  * a resposta e perder o arquivo em silêncio.
  */
-export async function enviarPeloComposer(api: ApiDeEnvio, alvo: { conversaId: string; salaId: string | null }, destino: DestinoEnvio, texto: string, anexos: readonly string[] = []): Promise<ResultadoEnvio> {
+export async function enviarPeloComposer(
+  api: ApiDeEnvio,
+  alvo: { conversaId: string; salaId: string | null },
+  destino: DestinoEnvio,
+  texto: string,
+  anexos: readonly string[] = [],
+  idEnvio?: string,
+): Promise<ResultadoEnvio> {
   if (destino.tipo === "resposta") {
     if (anexos.length > 0) return { recusado: "anexo_na_resposta" };
     await api.responder(destino.decisaoId, texto);
     return { enviado: "resposta" };
   }
   if (alvo.salaId) await api.postarNaSala(alvo.salaId, texto);
+  // NOD-156: a chave só vale para a mensagem comum; resposta e sala têm rotas próprias.
+  else if (idEnvio) await api.enviar(alvo.conversaId, texto, anexos, idEnvio);
   else await api.enviar(alvo.conversaId, texto, anexos);
   return { enviado: "mensagem" };
 }

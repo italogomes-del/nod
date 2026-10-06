@@ -67,6 +67,11 @@ export type NovaMensagem = {
   /** NOT NULL no banco (ADR-026): quem grava DECLARA a confiança do conteúdo. */
   confianca: Confianca;
   parcial?: boolean;
+  /**
+   * Chave de idempotência do envio da pessoa (definido em 2026-10-06, NOD-156). Com ela, o insert vira
+   * `on conflict do nothing` no índice único parcial da 0057 e devolve `null` se a chave já existe na conversa.
+   */
+  idEnvio?: string;
 };
 
 /** Mensagens com autoria composta (ADR-023/025). A da sala é lida por quem tem grant (perna via sala_id). */
@@ -76,11 +81,20 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       const a = m.autoria;
       const [l] = await conn<LinhaMensagem[]>`
         insert into mensagens (tenant_id, id, owner_id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao,
-          executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial)
+          executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, id_envio)
         values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.conversaId}, ${m.turnoId ?? null}, ${a.autor_tipo}, ${a.autor_id},
           ${a.sob_procuracao_de}, ${a.conta_de_execucao}, ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por},
-          ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false})
+          ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false}, ${m.idEnvio ?? null})
+        ${m.idEnvio ? conn`on conflict (tenant_id, conversa_id, id_envio) where id_envio is not null do nothing` : conn``}
         returning ${conn.unsafe(COLUNAS_MENSAGEM)}`;
+      return l ? paraMensagem(l) : null;
+    },
+
+    /** A mensagem gravada com a chave de envio nesta conversa (NOD-156), para o reenvio devolver a mesma fala. */
+    async buscarPorIdEnvio(conversaId: string, idEnvio: string): Promise<Mensagem | null> {
+      const [l] = await conn<LinhaMensagem[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and id_envio = ${idEnvio}`;
       return l ? paraMensagem(l) : null;
     },
 

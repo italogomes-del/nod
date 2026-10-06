@@ -141,6 +141,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTurno(l) : null;
     },
 
+    /** O turno disparado por esta fala da pessoa (NOD-156: o reenvio idempotente devolve o mesmo turno). */
+    async buscarPorMensagemOrigem(mensagemId: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos where tenant_id = ${escopo.tenantId} and mensagem_origem_id = ${mensagemId}
+        order by criado_em, id limit 1`;
+      return l ? paraTurno(l) : null;
+    },
+
     async buscar(id: string): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l ? paraTurno(l) : null;

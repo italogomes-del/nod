@@ -33,6 +33,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
           conversaId: ctx.params.id ?? "",
           texto: texto(corpo.texto),
           anexos: idsDeAnexo(corpo.anexos),
+          idEnvio: idDeEnvio(corpo.idEnvio),
           prazoMs: d.prazoDecisaoMs,
           executor: d.executor,
         });
@@ -93,6 +94,13 @@ function idsDeAnexo(v: unknown): string[] | undefined {
   if (v === undefined) return undefined;
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !UUID.test(x))) throw new ErroDeDominio("entrada_invalida", { cause: "anexos" });
   return v as string[];
+}
+
+/** NOD-156: a chave de idempotência é opcional (cliente antigo não manda), mas, quando vem, tem de ser UUID. */
+function idDeEnvio(v: unknown): string | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== "string" || !UUID.test(v)) throw new ErroDeDominio("entrada_invalida", { cause: "idEnvio" });
+  return v;
 }
 
 function decodificar(nome: string): string {

@@ -27,6 +27,7 @@ import type { MotivoAvaliacaoLigacao } from "./ligacao-protocolo.ts";
 import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
 import type { EstadoOnboarding, PedidoEtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { Escopo } from "../../src/shared/types.ts";
+import { corpoDoEnvio } from "./envio-idempotente.ts";
 
 /**
  * Cliente REST da web (ADR-020: a web DECIDE, nunca executa; ADR-018: só `import type` de src).
@@ -136,7 +137,9 @@ export function criarApi(escopo: Escopo) {
     executor: () => get<EstadoExecutor>("executor"),
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
-    enviar: (conversaId: string, texto: string, anexos: readonly string[] = []) => post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, anexos.length ? { texto, anexos } : { texto }),
+    /** NOD-156: `idEnvio` é a chave da fala (nasce no compositor); o reenvio com a mesma chave não duplica. */
+    enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string) =>
+      post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio)),
     /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,

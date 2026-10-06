@@ -135,6 +135,30 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
     });
   });
 
+  it("NOD-156: idEnvio que não é UUID → 400 entrada_invalida; o mesmo idEnvio duas vezes → 201 com os mesmos ids", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const { conversa } = (await (await servidor.chamar(marlon, "POST", "agentes", { dono: "pessoa" })).json()) as { conversa: Conversa };
+      await criarRepos(trx, MARLON).inventario.registrar("catcher", { estado: "pronto", versao: "teste", em: Date.now() });
+
+      for (const idEnvio of ["nao-e-uuid", 42, "", `${randomUUID()}x`]) {
+        const r = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "oi", idEnvio });
+        expect(r.status).toBe(400);
+        expect(((await r.json()) as { codigo: string }).codigo).toBe("entrada_invalida");
+      }
+      const idEnvio = randomUUID();
+      const primeiro = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "oi", idEnvio });
+      const segundo = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "oi", idEnvio });
+      expect([primeiro.status, segundo.status]).toEqual([201, 201]);
+      expect(((await segundo.json()) as RespostaMutacao).ids).toEqual(((await primeiro.json()) as RespostaMutacao).ids);
+      const reusado = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "outra", idEnvio });
+      expect(reusado.status).toBe(409);
+      expect(((await reusado.json()) as { codigo: string }).codigo).toBe("estado_invalido");
+      trxAtual = null;
+    });
+  });
+
   it("propostas: confirmar aplica e devolve ids; recusar; memória CRUD; fixar/ocultar/duplicar", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;

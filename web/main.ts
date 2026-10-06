@@ -57,6 +57,7 @@ import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type It
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
+import { criarEnvios } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
@@ -80,6 +81,8 @@ let composerDe: string | null = null;
  * O que estava digitado em cada conversa (definido em 2026-09-30): trocar de conversa recriava o campo vazio e a pessoa
  * perdia o texto. Agora ele fica com a conversa de onde ela saiu e volta quando ela volta — também depois de recarregar.
  */
+// NOD-156: a chave de idempotência da fala nasce aqui, uma por fala, e sobrevive ao reenvio depois de uma falha.
+const envios = criarEnvios();
 const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { return null; } });
 /** A conversa acompanha o fim e a pílula da base sobe às não lidas (definido em 2026-10-05, web/lib/rolagem-na-tela.ts). */
 const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -1320,8 +1323,19 @@ async function enviarComposer(): Promise<void> {
   }
   const destino = destinoDoEnvio(modoDoComposer(estado, alvo.conversaId));
   const a = api;
+  // Só a mensagem comum leva chave; com um envio dela em voo nesta conversa, o segundo (Enter + botão) é ignorado.
+  const comum = destino.tipo === "mensagem" && !alvo.salaId;
+  const idEnvio = comum ? envios.iniciar(alvo.conversaId, texto, ids) : undefined;
+  if (idEnvio === null) return;
   await agir(async () => {
-    const r = await enviarPeloComposer(a, alvo, destino, texto, ids);
+    let enviou = false;
+    let r: Awaited<ReturnType<typeof enviarPeloComposer>>;
+    try {
+      r = await enviarPeloComposer(a, alvo, destino, texto, ids, idEnvio);
+      enviou = true;
+    } finally {
+      if (idEnvio) envios.concluir(alvo.conversaId, enviou);
+    }
     if ("recusado" in r) {
       recusarAnexoNaResposta();
       return;

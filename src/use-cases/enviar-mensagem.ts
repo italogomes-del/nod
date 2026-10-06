@@ -8,6 +8,7 @@ import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
+import { log } from "../obs/log.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fiosDaConversa } from "./fios-da-pergunta.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -24,6 +25,8 @@ export type EntradaEnviarMensagem = {
   executor?: Executor;
   /** Inventário do motor já sondado (ADR-019); ausente = lê o registrado; nenhum = 'ausente' (fail-closed). */
   inventario?: Inventario;
+  /** Chave de idempotência (UUID) que o compositor cria, uma por fala (NOD-156): o reenvio devolve a mesma mensagem e o mesmo turno. */
+  idEnvio?: string;
 };
 
 export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: Mensagem | null };
@@ -33,6 +36,11 @@ export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: M
  * o rollback derruba os três). Localidade via resolverLocalidade com o inventário (ADR-022): recusada →
  * o turno NASCE interrompido 'executor_indisponivel' com mensagem de negação renderizável (E9.3, ADR-029).
  * Falar de novo libera a fila: encerra as paradas abertas que cobrem a conversa (E5.4/E8.1).
+ *
+ * definido em 2026-10-06 (NOD-156): com `idEnvio`, a fala já gravada com a mesma chave volta como está (mesma
+ * mensagem, mesmo turno, sem eventos e sem mexer em paradas). Na corrida, o `on conflict do nothing` do insert
+ * faz a perdedora esperar o commit da vencedora e voltar sem linha; aí ela lê a vencedora. Pegar a violação do
+ * índice não serve: no Postgres ela aborta a transação inteira.
  */
 export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensagem> = async (deps, input) => {
   const texto = typeof input.texto === "string" ? input.texto.trim() : "";
@@ -48,12 +56,23 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const origem: OrigemTurno = conversa.tipo === "sala" ? "sala" : "conversa";
   const agora = deps.agora();
   const executor = input.executor ?? "catcher";
+  const idEnvio = input.idEnvio;
 
-  await deps.repos.paradas.encerrarAbertas({ conversaId: conversa.id, agora });
+  if (idEnvio) {
+    const existente = await deps.repos.mensagens.buscarPorIdEnvio(conversa.id, idEnvio);
+    if (existente) return { data: await envioRepetido(deps, existente, texto, anexoIds), events: [] };
+  }
 
   const autoria = autoriaPessoa(deps.escopo, executor);
-  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel" });
+  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel", idEnvio });
+  if (!criada && idEnvio) {
+    // Perdeu a corrida: a outra transação gravou a mesma chave e já fez commit.
+    const vencedora = await deps.repos.mensagens.buscarPorIdEnvio(conversa.id, idEnvio);
+    if (vencedora) return { data: await envioRepetido(deps, vencedora, texto, anexoIds), events: [] };
+  }
   if (!criada) throw new ErroDeDominio("nao_permitido");
+  // Depois do insert (NOD-156): o reenvio de uma fala já gravada não pode encerrar uma parada aberta depois dela.
+  await deps.repos.paradas.encerrarAbertas({ conversaId: conversa.id, agora });
   // Prende só o que é solto, desta conversa e da dona; qualquer id que sobrar derruba a tx inteira.
   const anexos = await deps.repos.anexos.prender(anexoIds, { conversaId: conversa.id, mensagemId: criada.id });
   if (anexos.length !== anexoIds.length) throw new ErroDeDominio("entrada_invalida", { cause: "anexo de outra conversa, já enviado ou inexistente" });
@@ -96,6 +115,23 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   }
   return { data: { mensagem, turno, negacao }, events };
 };
+
+/**
+ * A fala já gravada com a mesma chave (NOD-156). Texto ou anexos diferentes com a mesma chave são erro do cliente,
+ * não reenvio: recusa sem gravar nada (devolver a fala antiga perderia os anexos novos em silêncio). O turno se acha
+ * por `mensagemOrigemId`.
+ */
+async function envioRepetido(deps: Deps, existente: Mensagem, texto: string, anexoIds: readonly string[]): Promise<SaidaEnviarMensagem> {
+  if (existente.texto !== texto) throw new ErroDeDominio("estado_invalido", { cause: "id_envio_reusado" });
+  const anexos = (await deps.repos.anexos.daMensagens([existente.id])).get(existente.id) ?? [];
+  const gravados = anexos.map((a) => a.id).sort();
+  const pedidos = anexoIds.map((id) => id.toLowerCase()).sort();
+  if (gravados.length !== pedidos.length || gravados.some((id, i) => id !== pedidos[i])) throw new ErroDeDominio("estado_invalido", { cause: "id_envio_reusado" });
+  const turno = await deps.repos.turnos.buscarPorMensagemOrigem(existente.id);
+  if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "id_envio sem turno" });
+  log("info", "envio_repetido", { conversa_id: existente.conversaId, mensagem_id: existente.id });
+  return { mensagem: anexos.length > 0 ? { ...existente, anexos } : existente, turno, negacao: null };
+}
 
 /**
  * Negação renderizável de executor indisponível (ADR-029): classe 'plano_ausente' porque nenhum plano

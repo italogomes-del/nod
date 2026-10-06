@@ -53,6 +53,8 @@ export type BancoMemoria = {
   pendencias: (Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null })[];
   conversas: Conversa[];
   mensagens: Mensagem[];
+  /** NOD-156: `tenant:conversa:idEnvio` → id da mensagem (a coluna id_envio não sai em Mensagem). */
+  idsDeEnvio: Map<string, string>;
   anexos: { tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number }[];
   /** ADR-051 (0031): artefato, versões e o estado por pessoa (UNIQUE tenant+artefato+owner reproduzido). */
   artefatos: (Artefato & { tenantId: string; ownerId: string })[];
@@ -118,6 +120,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     pendencias: [],
     conversas: [],
     mensagens: [],
+    idsDeEnvio: new Map(),
     anexos: [],
     artefatos: [],
     artefatoVersoes: [],
@@ -625,6 +628,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
 
     mensagens: {
       async criar(m) {
+        const chave = m.idEnvio ? `${escopo.tenantId}:${m.conversaId}:${m.idEnvio}` : null;
+        if (chave && b.idsDeEnvio.has(chave)) return null;
         const mensagem: Mensagem = {
           tenantId: escopo.tenantId,
           id: m.id ?? randomUUID(),
@@ -639,7 +644,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora() + b.mensagens.length / 1000,
         };
         b.mensagens.push(mensagem);
+        if (chave) b.idsDeEnvio.set(chave, mensagem.id);
         return mensagem;
+      },
+      async buscarPorIdEnvio(conversaId, idEnvio) {
+        const id = b.idsDeEnvio.get(`${escopo.tenantId}:${conversaId}:${idEnvio}`);
+        return id ? (doTenant(b.mensagens).find((m) => m.id === id) ?? null) : null;
       },
       async buscar(id) {
         return doTenant(b.mensagens).find((m) => m.id === id) ?? null;
@@ -734,6 +744,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     turnos: {
+      async buscarPorMensagemOrigem(mensagemId: string) {
+        return doTenant(b.turnos).filter((t) => t.mensagemOrigemId === mensagemId).sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
+      },
       async buscarTravado(id: string) {
         return doTenant(b.turnos).find((t) => t.id === id) ?? null;
       },
