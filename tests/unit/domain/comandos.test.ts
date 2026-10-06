@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comandoDaConversa, lerFrontmatter, montarCatalogo, textoDaCompactacao, traduzirParaOCli, traduzirSaidaDoComando } from "../../../src/domain/comandos.ts";
+import { comandoDaConversa, lerFrontmatter, montarCatalogo, textoDaCompactacao, traduzirParaOCli, traduzirSaidaDoComando, USO_FORA_DO_CLAUDE } from "../../../src/domain/comandos.ts";
 
 describe("comandos da conversa", () => {
   it("nome em português e o do terminal como apelido; o resto do texto vira argumento", () => {
@@ -20,6 +20,21 @@ describe("comandos da conversa", () => {
     // A nova sessão é do nod: nunca vira /clear no CLI (medido: a sessão original continua lembrando).
     expect(traduzirParaOCli("/nova-sessao")).toBe("/nova-sessao");
     expect(traduzirParaOCli("oi")).toBe("oi");
+  });
+
+  it("NOD-179: /uso só vira /cost no Claude Code; no Codex pede a frase fixa e a resposta é ela, diga o modelo o que disser", () => {
+    expect(traduzirParaOCli("/uso", "claude-cli")).toBe("/cost");
+    expect(traduzirParaOCli("/uso", null)).toBe("/cost");
+    for (const texto of ["/uso", "/cost", "/usage agora"]) {
+      const entrada = traduzirParaOCli(texto, "codex-cli");
+      expect(entrada).not.toContain("/cost");
+      expect(entrada).toContain(USO_FORA_DO_CLAUDE);
+    }
+    // Os outros comandos não mudam com o harness.
+    expect(traduzirParaOCli("/contexto", "codex-cli")).toBe("/context");
+    expect(traduzirSaidaDoComando("/uso", "Não tenho acesso a esse dado.", "codex-cli")).toBe(USO_FORA_DO_CLAUDE);
+    expect(traduzirSaidaDoComando("/uso", "Current session: 10% used · resets Sep 28 at 11:20pm", "claude-cli")).toContain("**10%**");
+    expect(traduzirSaidaDoComando("/review 420", "ok", "codex-cli")).toBe("ok");
   });
 });
 

@@ -3,6 +3,7 @@ import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
 import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
+import type { UsoDoPlano } from "../../src/contracts/uso-do-plano.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
@@ -84,6 +85,7 @@ export type BancoMemoria = {
   onboarding: Map<string, LinhaOnboarding>;
   /** 0038: o catálogo do "/" de cada pessoa (chave tenant:pessoa). */
   comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
+  usoDoPlano: Map<string, UsoDoPlano>;
   /** 0039: o "lido até" de cada pessoa em cada conversa (chave tenant:pessoa:conversa). */
   leituras: Map<string, number>;
   /** 0054: o "Agora não" do cartão de liberar apps (chave tenant:pessoa:agente:conector → instante). */
@@ -141,6 +143,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     preferencias: new Map(),
     onboarding: new Map(),
     comandos: new Map(),
+    usoDoPlano: new Map(),
     leituras: new Map(),
     liberacoesDispensadas: new Map(),
     contaminados: new Set(),
@@ -1883,6 +1886,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async buscar() {
         return b.comandos.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? null;
+      },
+    },
+    usoDoPlano: {
+      async gravar(uso) {
+        const chave = `${escopo.tenantId}:${escopo.pessoaId}:${uso.harness}`;
+        const atual = b.usoDoPlano.get(chave);
+        if (!atual || atual.medidoEm < uso.medidoEm) b.usoDoPlano.set(chave, uso);
+      },
+      async listar() {
+        const prefixo = `${escopo.tenantId}:${escopo.pessoaId}:`;
+        return [...b.usoDoPlano].filter(([k]) => k.startsWith(prefixo)).map(([, v]) => v).sort((x, y) => x.harness.localeCompare(y.harness));
       },
     },
     leituras: (() => {

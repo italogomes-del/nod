@@ -280,6 +280,25 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(resultado.negacoesPermissao).toEqual(["mcp__nod__somar"]);
   });
 
+  it("NOD-179: o turno entrega o uso do plano do rate_limit (duas janelas, renovação em ms); sem o evento, o campo fica ausente", async () => {
+    const antes = Date.now();
+    const { instance } = await instanciar("s3-mcp-ok");
+    const comEvento = await instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks);
+    expect(comEvento.usoDoPlano).toMatchObject({
+      harness: "claude-cli",
+      situacao: "normal",
+      cincoHoras: { utilizacao: 0.1, renovaEm: 1789537800000 },
+      semana: { utilizacao: 0.03, renovaEm: 1789747200000 },
+    });
+    expect(comEvento.usoDoPlano!.medidoEm).toBeGreaterThanOrEqual(antes);
+    expect(comEvento.usoDoPlano!.medidoEm).toBeLessThanOrEqual(Date.now());
+
+    const { instance: semRateLimit } = await instanciar("relatorio-lembrar");
+    const semEvento = await semRateLimit.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks);
+    expect(semEvento.desfecho).toBe("sucesso");
+    expect("usoDoPlano" in semEvento).toBe(false);
+  });
+
   it("relatório → lembrar → 'Anotado.': a fala leva o relatório e o final; o texto ao vivo sai só dos deltas, uma vez", async () => {
     const { instance } = await instanciar("relatorio-lembrar");
     const espiao = sinksEspiao();

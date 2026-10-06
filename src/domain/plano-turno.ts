@@ -5,6 +5,7 @@ import type { Concessao } from "../contracts/concessao.ts";
 import type { Conector } from "../contracts/conector.ts";
 import type { Autoria, Executor } from "../contracts/evento.ts";
 import { FERRAMENTAS_NOD, type NomeFerramentaNod } from "../contracts/ferramentas-nod.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Memoria } from "../contracts/memoria.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
@@ -169,6 +170,8 @@ export type EntradaPlano = {
   pastasAutorizadas?: boolean;
   /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
   terminal?: boolean;
+  /** A IA que roda o turno; ausente ou null = Claude Code (catcher, legado). Decide a tradução dos comandos da conversa. */
+  harness?: IdHarness | null;
   /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
   onboarding?: boolean;
   agora: number;
@@ -252,7 +255,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
     promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.pendencias, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
-    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
+    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,

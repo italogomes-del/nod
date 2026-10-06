@@ -56,6 +56,19 @@ describe("desktop: fronteiras HTTP", () => {
     expect("erroCru" in estranho).toBe(false);
     expect("erroCru" in entrega({ ...base, resultado: { ...resultado, erroCru: { texto: "objeto" } } }, "maq").resultado).toBe(false);
   });
+  it("NOD-179: o uso do plano atravessa validado; fora do formato some e a entrega é aceita", () => {
+    const agora = Date.UTC(2026, 9, 6, 12);
+    const base = { turnoId: "11111111-1111-4111-8111-111111111111", seqLocal: 1, fala: { tipo: "texto", texto: "ok" } };
+    const resultado = { desfecho: "sucesso", texto: "ok", sessaoCli: null, custoUsd: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    const usoDoPlano = { harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 0.1, renovaEm: agora + 3_600_000 }, semana: null, medidoEm: agora - 1000 };
+    expect(entrega({ ...base, resultado: { ...resultado, usoDoPlano } }, "maq", agora).resultado.usoDoPlano).toEqual(usoDoPlano);
+    for (const utilizacao of [Number.NaN, -1, 5]) {
+      const r = entrega({ ...base, resultado: { ...resultado, usoDoPlano: { ...usoDoPlano, cincoHoras: { utilizacao, renovaEm: null } } } }, "maq", agora).resultado;
+      expect(r.desfecho).toBe("sucesso");
+      expect("usoDoPlano" in r).toBe(false);
+    }
+    expect("usoDoPlano" in entrega({ ...base, resultado }, "maq", agora).resultado).toBe(false);
+  });
   it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, esvazia a fila e não mistura turnos", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });

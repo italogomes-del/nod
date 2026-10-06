@@ -16,6 +16,7 @@ import {
 import { ESTADOS_DA_TAREFA, type SinaisTurno, type TarefaDoBot } from "../../../contracts/turno.ts";
 import { TETO_TAREFAS, TETO_TITULO_TAREFA } from "../../../domain/tarefas-do-bot.ts";
 import { LIMIARES_REPETICAO } from "../../../domain/vigia-turno.ts";
+import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
@@ -178,7 +179,7 @@ export function comandos(v: unknown): CatalogoDeComandos | undefined {
   return { comandos: lista, soDoTerminal: c.soDoTerminal as string[], versaoCli: c.versaoCli as string | null };
 }
 
-export function entrega(v: unknown, machineId: string): Entrega {
+export function entrega(v: unknown, machineId: string, agora: number = Date.now()): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
   exigir(f.tipo === "texto" ? texto(f.texto) : f.tipo === "passe" && MOTIVOS_PASSE.some((m) => m === f.motivo));
@@ -193,6 +194,8 @@ export function entrega(v: unknown, machineId: string): Entrega {
   const raioX = execucao(r.execucao);
   const catalogo = comandos(r.comandos);
   const causa = causaSemIa(r.causaSemIa);
+  // NOD-179: o uso do plano também é extra; fora do formato ou com número absurdo, some e a entrega segue.
+  const uso = r.usoDoPlano === undefined ? undefined : usoDoPlanoValido(r.usoDoPlano, agora);
   // definido em 2026-09-17: erroCru remoto não entra no log; só os campos do contrato validado atravessam HTTP.
   // revisto em 2026-10-05: ele passa a ATRAVESSAR, com teto, só para o diagnóstico gravado da pessoa (ADR-041) — em
   // produção o diagnóstico de todo turno falho vinha vazio, porque o campo morria aqui. Continua fora do log
@@ -207,5 +210,6 @@ export function entrega(v: unknown, machineId: string): Entrega {
     ...(catalogo ? { comandos: catalogo } : {}),
     ...(erroCru ? { erroCru } : {}),
     ...(causa ? { causaSemIa: causa } : {}),
+    ...(uso ? { usoDoPlano: uso } : {}),
   } };
 }

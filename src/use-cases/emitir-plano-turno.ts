@@ -239,6 +239,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).
     terminal: modo !== "ligacao" && executor === "local" && (escolha ? escolha.harness === "claude-cli" : true),
+    harness: escolha?.harness ?? null,
     agora,
   });
 

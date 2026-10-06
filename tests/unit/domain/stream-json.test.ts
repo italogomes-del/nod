@@ -28,6 +28,25 @@ describe("interpretarLinhaStreamJson", () => {
     expect(ignorados.every((e) => e.tipo === "ignorado" && (e.razao === "tipo_desconhecido" || e.razao === "linha_vazia"))).toBe(true);
   });
 
+  it("NOD-179: o rate_limit traz as duas janelas com o resetsAt em epoch ms", () => {
+    expect(eventosDe("s3-mcp-ok.jsonl").find((e) => e.tipo === "rate_limit")).toEqual({
+      tipo: "rate_limit",
+      status: "allowed",
+      utilizacaoCincoHoras: 0.1,
+      utilizacaoSeteDias: 0.03,
+      renovaCincoHorasEm: 1789537800000,
+      renovaSeteDiasEm: 1789747200000,
+    });
+  });
+
+  it("NOD-179: rate_limit sem unifiedWindows, ou com resetsAt inválido, vira janelas nulas sem lançar", () => {
+    expect(interpretarLinhaStreamJson('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning"}}')).toEqual({
+      tipo: "rate_limit", status: "allowed_warning", utilizacaoCincoHoras: null, utilizacaoSeteDias: null, renovaCincoHorasEm: null, renovaSeteDiasEm: null,
+    });
+    const ruim = '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.5,"resetsAt":0},"seven_day":{"utilization":0.2,"resetsAt":"amanhã"}}}}';
+    expect(interpretarLinhaStreamJson(ruim)).toMatchObject({ status: "desconhecido", utilizacaoCincoHoras: 0.5, renovaCincoHorasEm: null, renovaSeteDiasEm: null });
+  });
+
   it("linha vazia e JSON inválido viram ignorado, nunca exceção", () => {
     expect(interpretarLinhaStreamJson("")).toEqual({ tipo: "ignorado", razao: "linha_vazia", tipoBruto: null });
     expect(interpretarLinhaStreamJson("{nope")).toEqual({ tipo: "ignorado", razao: "json_invalido", tipoBruto: null });

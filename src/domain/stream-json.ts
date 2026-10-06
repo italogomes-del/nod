@@ -19,6 +19,12 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** O `resetsAt` do rate_limit vem em segundos (medido no CLI 2.1.x); zero, negativo ou não número viram `null`. */
+function emMs(v: unknown): number | null {
+  const s = num(v);
+  return s !== null && s > 0 ? s * 1000 : null;
+}
+
 function tokensDe(usage: Obj | null): TokensTurno {
   return {
     entrada: num(usage?.["input_tokens"]) ?? 0,
@@ -106,11 +112,15 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
   if (type === "rate_limit_event") {
     const info = obj(o["rate_limit_info"]);
     const janelas = obj(info?.["unifiedWindows"]);
+    const cinco = obj(janelas?.["five_hour"]);
+    const sete = obj(janelas?.["seven_day"]);
     return {
       tipo: "rate_limit",
       status: str(info?.["status"], "desconhecido"),
-      utilizacaoCincoHoras: num(obj(janelas?.["five_hour"])?.["utilization"]),
-      utilizacaoSeteDias: num(obj(janelas?.["seven_day"])?.["utilization"]),
+      utilizacaoCincoHoras: num(cinco?.["utilization"]),
+      utilizacaoSeteDias: num(sete?.["utilization"]),
+      renovaCincoHorasEm: emMs(cinco?.["resetsAt"]),
+      renovaSeteDiasEm: emMs(sete?.["resetsAt"]),
     };
   }
   if (type === "stream_event") {

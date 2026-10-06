@@ -103,6 +103,7 @@ import { rotasTrilha } from "./rotas/trilha.ts";
 import { criarRotasTurnos } from "./rotas/turnos.ts";
 import { criarRotasRaioX } from "./rotas/raio-x.ts";
 import { criarRotasComandos } from "./rotas/comandos.ts";
+import { criarRotasUsoDoPlano } from "./rotas/uso-do-plano.ts";
 import { criarRotasNaoLidos } from "./rotas/nao-lidos.ts";
 import { criarRotasLigacoes } from "./rotas/ligacoes.ts";
 import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
@@ -797,6 +798,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasTurnos(depsRotas),
     ...criarRotasRaioX(depsRotas),
     ...criarRotasComandos(depsRotas),
+    ...criarRotasUsoDoPlano(depsRotas),
     ...criarRotasNaoLidos(depsRotas),
     ...criarRotasLigacoes({
       ...depsRotas,

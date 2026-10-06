@@ -137,3 +137,7 @@ com Codex".
 - **Se a sonda reprovar**: o critério 6, opção (b), vale: "ChatGPT sem voz na Release 1", e este ADR volta ao gatilho de
   reversão.
 
+> Nota (2026-10-06, NOD-179): a cota do Claude Code passou a ser gravada a cada turno (emenda à ADR-036, tabela
+> `uso_do_plano`), só para mostrar. O `account/rateLimits/*` do app-server é o caminho para o Codex entrar na mesma
+> tabela (harness `codex-cli`) quando o Codex de chat passar pelo app-server; até lá a linha do Codex não existe.
+

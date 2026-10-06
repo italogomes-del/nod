@@ -10,6 +10,7 @@ import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../../contrac
 import { comContaSemAcesso } from "../../../domain/conta-da-ia.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../../domain/erro.ts";
 import { montarExecucao } from "../../../domain/raio-x.ts";
+import { ultimoUsoDoPlano } from "../../../domain/uso-do-plano.ts";
 import type { CatalogoDeComandos } from "../../../contracts/comandos.ts";
 import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
@@ -390,8 +391,10 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     catalogoEntregue = chave;
                   }
                 }
+                // NOD-179: o último uso do plano que o CLI informou no turno, com o instante em que a linha chegou.
+                const usoDoPlano = ultimoUsoDoPlano(eventos, "claude-cli", (i) => inicio + (momentos[i] ?? 0));
                 // definido em 2026-10-05: a recusa da conta não vira fala do bot; vira falha com a causa em código.
-                return { ...comContaSemAcesso(r), ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}) };
+                return { ...comContaSemAcesso(r), ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}), ...(usoDoPlano ? { usoDoPlano } : {}) };
               };
               try {
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });

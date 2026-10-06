@@ -35,6 +35,7 @@ import type { turnosRepo } from "./turnos.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
+import type { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
 import type { leiturasRepo } from "./leituras.repo.ts";
 import type { ligacoesRepo } from "./ligacoes.repo.ts";
 import type { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
@@ -87,6 +88,7 @@ export interface Repos {
   preferencias: ReturnType<typeof preferenciasRepo>;
   onboarding: ReturnType<typeof onboardingRepo>;
   comandos: ReturnType<typeof comandosRepo>;
+  usoDoPlano: ReturnType<typeof usoDoPlanoRepo>;
   leituras: ReturnType<typeof leiturasRepo>;
   ligacoes: ReturnType<typeof ligacoesRepo>;
   liberacoesDispensadas: ReturnType<typeof liberacoesDispensadasRepo>;

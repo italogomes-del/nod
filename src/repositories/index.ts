@@ -36,6 +36,7 @@ import { turnosRepo } from "./turnos.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
+import { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
 import { leiturasRepo } from "./leituras.repo.ts";
 import { ligacoesRepo } from "./ligacoes.repo.ts";
 import { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
@@ -79,6 +80,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     raioX: raioXRepo(conn, escopo),
     preferencias: preferenciasRepo(conn, escopo),
     comandos: comandosRepo(conn, escopo),
+    usoDoPlano: usoDoPlanoRepo(conn, escopo),
     leituras: leiturasRepo(conn, escopo),
     ligacoes: ligacoesRepo(conn, escopo),
     liberacoesDispensadas: liberacoesDispensadasRepo(conn, escopo),

@@ -6,6 +6,7 @@ import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
 import { disponibilidadeLigacao, ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
 import { MODELOS_LIGACAO_PADRAO } from "../../src/contracts/modelos.ts";
 import { lerModelosLigacao } from "../../src/domain/modelo-ligacao.ts";
+import { USO_FORA_DO_CLAUDE } from "../../src/domain/comandos.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -32,6 +33,28 @@ describeIntegracao("harness por agente", () => {
       await expect(emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).rejects.toThrow("executor_indisponivel");
     });
   });
+  it("/uso só vira /cost quando a IA escolhida para o turno é o Claude Code; no automático com só o Codex pronto, não (NOD-179)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      const entrada = async (harness: "auto" | "codex-cli" | "claude-cli", harnesses: Parameters<typeof emitirPlanoTurno>[1]["harnesses"]) => {
+        const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "/uso", entradaConfianca: "confiavel", modelo: "auto", harness });
+        const plano = (await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses })).data;
+        return { harness: plano.harness, texto: plano.entrada.texto };
+      };
+      expect(await entrada("claude-cli", { "claude-cli": pronto, "codex-cli": pronto })).toEqual({ harness: "claude-cli", texto: "/cost" });
+      const codex = await entrada("codex-cli", { "claude-cli": pronto, "codex-cli": pronto });
+      expect(codex.harness).toBe("codex-cli");
+      expect(codex.texto).not.toContain("/cost");
+      expect(codex.texto).toContain(USO_FORA_DO_CLAUDE);
+      // O automático escolhe o Codex quando é a única IA pronta: o /uso segue a escolha, não o perfil.
+      const auto = await entrada("auto", { "codex-cli": pronto });
+      expect(auto.harness).toBe("codex-cli");
+      expect(auto.texto).not.toContain("/cost");
+    });
+  });
+
   it("automático funciona só com Codex disponível e não exige inventário do Claude", async () => {
     await withRollback(escopo, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);

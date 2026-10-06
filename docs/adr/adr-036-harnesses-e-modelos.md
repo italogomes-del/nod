@@ -71,3 +71,25 @@ isolamento "só o proxy nod" não está provado para o Codex como está para o C
 
 **Gatilho de reversão.** Se uma versão do Codex passar a dar arquivo ou rede ao código de `functions.exec`, o host
 volta a ser desligado e o Codex sai do catálogo até haver outro caminho para as ferramentas MCP.
+
+## Emenda (2026-10-06): a cota que o CLI informa é mostrada, nunca usada como gate (NOD-179)
+
+**Contexto.** "Limites desta entrega" diz que o login não prova saldo nem cota. O Claude Code passou a informar a cota
+a cada turno, de graça, no `rate_limit_event` do stream-json: quanto já foi usado na janela de 5 horas e na semana, e
+quando cada uma renova. A pessoa não tinha como ver isso no nod sem rodar `/uso` (que no Codex nem existia).
+
+**Decisão.**
+- O driver do Claude Code entrega o último `rate_limit` do turno (`usoDoPlano` no resultado). O servidor valida
+  pelo domínio (`usoDoPlanoValido`: utilização entre 0 e 1,5, horários plausíveis, harness igual ao que rodou o
+  turno) e grava uma linha por pessoa e CLI (0056, `uso_do_plano`, com RLS). A leitura mais nova vence; dado
+  inválido é descartado com log e a entrega segue.
+- `GET /api/uso-do-plano` devolve só as linhas da pessoa, em dados crus; a tela formata no fuso dela (ADR-007) com
+  `estadoDoMedidor`. A tela fica na NOD-12.
+- **Nunca gate.** Nenhum turno é bloqueado, adiado ou desviado para outra IA por este número, nem perto do limite.
+  O fim de cota continua sendo o erro do próprio fornecedor no turno (`limite_da_assinatura`, NOD-168).
+- Sem ler credencial nem chamar API do fornecedor (ADR-015/019) e sem processo extra só para medir.
+- `/uso` num bot de outra IA não vira `/cost`: responde "O uso do plano está em Seu espaço › Conexão."
+
+**Gatilho de reversão.** Se o Claude Code deixar de mandar o `rate_limit_event` ou mudar o formato, a linha para de
+ser atualizada (o `medido_em` envelhece) e a tela mostra a última leitura com a hora; nada no turno depende dela. Se
+um dia o número virar critério de decisão, isso pede ADR nova, não esta emenda.

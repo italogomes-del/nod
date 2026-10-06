@@ -13,6 +13,8 @@ import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
+import { log } from "../obs/log.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
@@ -106,7 +108,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // /contexto anterior (o último texto que sobra na sessão compactada). Vale só a linha com os números, abaixo.
   const comandoDoTurno = comandoDaConversa(turno.entradaTexto)?.comando.nome;
   // definido em 2026-10-05: com `causaSemIa` não há fala — o que veio é a recusa do fornecedor, nunca texto do bot.
-  const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" && !resultado.causaSemIa ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto) : "";
+  const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" && !resultado.causaSemIa ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto, entrega.harness) : "";
   let mensagem: Mensagem | null = null;
   if (entrega.fala.tipo === "passe") {
     const agente = await deps.repos.agentes.buscar(turno.agenteId);
@@ -174,6 +176,13 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (resultado.execucao) await deps.repos.raioX.gravarExecucao(turno.id, resultado.execucao);
   // O "/" do chat (0038): o catálogo do Mac, quando o app mandou um novo.
   if (resultado.comandos) await deps.repos.comandos.gravar(resultado.comandos);
+  // NOD-179: o uso do plano que o CLI informou. Só vale para o CLI que rodou o turno (o harness vem do plano puxado,
+  // nunca da máquina) e é revalidado aqui, porque a entrega local não passa pela ponte HTTP. Nunca recusa a entrega.
+  if (resultado.usoDoPlano) {
+    const uso = usoDoPlanoValido(resultado.usoDoPlano, agora);
+    if (uso && uso.harness === entrega.harness) await deps.repos.usoDoPlano.gravar(uso, entrega.machineId);
+    else log("aviso", "uso_do_plano_descartado", { turno_id: turno.id, harness_do_turno: entrega.harness ?? null, valido: uso !== undefined });
+  }
 
   for (const nome of resultado.negacoesPermissao) {
     // definido em 2026-10-01 (ADR-066): a nativa do kit do terminal que o CLI negou foi o HOOK do nod que negou — comando
