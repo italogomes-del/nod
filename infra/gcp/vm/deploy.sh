@@ -56,6 +56,8 @@ NOD_ADMINS=${NOD_ADMINS:-}
 NOD_ONBOARDING_VOZ=${NOD_ONBOARDING_VOZ:-0}
 NOD_MODELO_LIGACAO_CLAUDE=${NOD_MODELO_LIGACAO_CLAUDE:-}
 NOD_MODELO_LIGACAO_CODEX=${NOD_MODELO_LIGACAO_CODEX:-}
+# NOD-167: sem a linha no config.env, produção fica com a ligação Codex DESLIGADA (o padrão do código é ligada).
+NOD_LIGACAO_CODEX=${NOD_LIGACAO_CODEX:-0}
 # Teto de pedidos de TTS por minuto deste processo, abaixo da cota de 200/min do projeto (emenda da ADR-071, NOD-166).
 NOD_VOZ_TTS_TETO_MIN=${NOD_VOZ_TTS_TETO_MIN:-180}
 NOD_DRENAGEM_MAX_MS=600000

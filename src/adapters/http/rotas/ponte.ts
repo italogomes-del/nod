@@ -106,7 +106,9 @@ export function criarPonteHttpServidor(d: {
         const anunciados = objeto(b.harnesses);
         for (const h of HARNESSES) if (anunciados[h.id] !== undefined && h.integrado) motores[h.id] = inventario(anunciados[h.id], d.agora(), h.nome);
       }
-      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true });
+      // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
+      const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
+      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}) });
       await persistir(c);
       // Melhor esforço: a conexão não pode falhar porque a repetição falhou.
       if (c.inv.estado === "pronto" && d.repetirBarrados) await d.repetirBarrados(ctx.escopo).catch(() => log("aviso", "repetir_barrados_falhou", {}));
@@ -245,6 +247,14 @@ export function criarPonteHttpServidor(d: {
   function ligacaoDaPessoa(pessoaId: string): boolean {
     return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000 && c.ponte.maquinasConectadas().some((m) => m.machineId === id && m.ligacao === true));
   }
+  /**
+   * NOD-167: a IA está pronta em alguma máquina viva da pessoa que atende ligação, e TODAS essas a anunciaram sem o laço
+   * de voz (o Codex sem `app-server`). Basta uma máquina com o laço para não recusar.
+   */
+  function semLacoDeVozDaPessoa(pessoaId: string, harness: IdHarness): boolean {
+    const maquinas = [...conexoes.entries()].flatMap(([id, c]) => c.escopo.pessoaId === pessoaId && d.agora() - c.ultimo < 60_000 ? c.ponte.maquinasConectadas().filter((m) => m.machineId === id && m.ligacao === true && m.harnesses?.[harness]?.estado === "pronto") : []);
+    return maquinas.length > 0 && maquinas.every((m) => m.semLacoDeVoz?.includes(harness) === true);
+  }
   /** Alguma máquina viva da pessoa tem o gh: o registro automático do GitHub pode nascer dele. */
   function ghDaPessoa(pessoaId: string): boolean {
     return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && ghDaMaquina(c.escopo, id));
@@ -253,5 +263,5 @@ export function criarPonteHttpServidor(d: {
   function iniciarDrenagem(): void { drenando = true; }
   /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
   function reservasEmVoo(): number { return reservando; }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, iniciarDrenagem, reservasEmVoo };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

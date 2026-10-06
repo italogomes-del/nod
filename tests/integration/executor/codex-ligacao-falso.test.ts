@@ -1,15 +1,18 @@
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
 import { PEDIDO_DE_RESUMO } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
+import { MODELO_LUNA_CODEX } from "../../../src/contracts/harness.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
 import type { MsgCerebroCliente, MsgCerebroServidor } from "../../../src/contracts/voz.ts";
@@ -177,4 +180,107 @@ it("Parar no meio da ligação encerra o app-server e sai interrompido", async (
   const r = await resultado;
   expect(r.desfecho).toBe("interrompido");
   expect(await readdir(cfg.cwdBase)).toEqual(["ligacao-a"]);
+});
+
+// ---- NOD-167 ----------------------------------------------------------------------------------------------------
+
+it("NOD-167: turno mudo — o interromper duro do aviso de vez sem resposta vira turn/interrupt e a vez fecha sem fala", async () => {
+  const { resultado, canal } = await iniciar();
+  canal.enviar({ t: "vez", n: 1, texto: "[[mudo]] qual a minha agenda" });
+  await new Promise((r) => setTimeout(r, 200));
+  expect(canal.recebidas.some((m) => m.t === "fala")).toBe(false);
+  canal.enviar({ t: "interromper", modo: "duro" });
+  await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
+  expect(falaDe(canal.recebidas, 1)).toBe("");
+  // A ligação segue: a vez seguinte responde normalmente.
+  canal.enviar({ t: "vez", n: 2, texto: "e amanhã" });
+  await canal.esperar((m) => m.t === "fala-fim" && m.n === 2);
+  expect(falaDe(canal.recebidas, 2)).toBe("Entendi: e amanhã.");
+  canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+  expect((await resultado).desfecho).toBe("sucesso");
+  const registro = JSON.parse(await readFile(join(dir, "registro.json"), "utf8"));
+  expect(registro.interrupcoes).toBe(1);
+});
+
+it("NOD-167: o interromper duro com o turn/start ainda sem resposta interrompe o turno assim que ele abre", async () => {
+  const { resultado, canal } = await iniciar();
+  canal.enviar({ t: "vez", n: 1, texto: "[[lento]] [[mudo]] oi" });
+  await new Promise((r) => setTimeout(r, 50));
+  canal.enviar({ t: "interromper", modo: "duro" });
+  await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
+  canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+  expect((await resultado).desfecho).toBe("sucesso");
+  const registro = JSON.parse(await readFile(join(dir, "registro.json"), "utf8"));
+  expect(registro.interrupcoes).toBe(1);
+});
+
+// Regressão (revisão NOD-167): o interrupt pedido para um turno que concluiu antes da resposta do turn/start ficava
+// armado e cortava a vez seguinte, que a pessoa não interrompeu.
+it("NOD-167: o interrupt de um turno que concluiu antes de abrir não corta a vez seguinte", async () => {
+  const { resultado, canal } = await iniciar();
+  canal.enviar({ t: "vez", n: 1, texto: "[[conclui-antes]] oi" });
+  await new Promise((r) => setTimeout(r, 50));
+  canal.enviar({ t: "interromper", modo: "duro" });
+  await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
+  canal.enviar({ t: "vez", n: 2, texto: "e amanhã" });
+  await canal.esperar((m) => m.t === "fala-fim" && m.n === 2);
+  expect(falaDe(canal.recebidas, 2)).toBe("Entendi: e amanhã.");
+  canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+  expect((await resultado).desfecho).toBe("sucesso");
+  const registro = JSON.parse(await readFile(join(dir, "registro.json"), "utf8"));
+  expect(registro.interrupcoes).toBe(0);
+});
+
+it("NOD-167: a notificação que o laço não conhece é logada só pelo nome, uma vez", async () => {
+  const linhas: string[] = [];
+  const espiao = vi.spyOn(console, "log").mockImplementation((v: unknown) => { linhas.push(String(v)); });
+  try {
+    const { resultado, canal } = await iniciar();
+    canal.enviar({ t: "vez", n: 1, texto: "oi" });
+    await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
+    canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+    await resultado;
+  } finally {
+    espiao.mockRestore();
+  }
+  const ignoradas = linhas.filter((l) => l.includes("codex_ligacao_notificacao_ignorada"));
+  expect(ignoradas).toHaveLength(1);
+  expect(ignoradas[0]).toContain('"metodo":"account/rateLimits/updated"');
+  expect(ignoradas[0]).not.toContain("não logar");
+});
+
+it("NOD-167: Codex sem app-server — o Mac anuncia (lacoDeVoz false) e o turno da ligação cai com a causa própria", async () => {
+  cfg = { ...cfg, env: { ...cfg.env, TESTE_NOD_SEM_APP_SERVER: "1" } };
+  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
+  expect(await instance.lacoDeVoz?.()).toBe(false);
+  const adapter = instance.adapter(planoLigacao());
+  await expect(adapter.rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} })).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "codex_sem_app_server" });
+});
+
+it("NOD-167: com o app-server, lacoDeVoz é true; a sonda --seco mede tudo contra o falso e acha o Luna no model/list", async () => {
+  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
+  expect(await instance.lacoDeVoz?.()).toBe(true);
+  const saida = join(dir, "sonda.txt");
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../../scripts/sonda-codex-app-server.ts", import.meta.url)), "--seco", "--saida", saida], { encoding: "utf8", timeout: 60_000, env: { ...process.env, NOD_MODELO_LIGACAO_CODEX: "" } });
+  expect(r.stderr).toBe("");
+  expect(r.status).toBe(0);
+  const texto = await readFile(saida, "utf8");
+  expect(texto).toContain(`model/list: ${MODELO_LUNA_CODEX} presente`);
+  for (const medida of ["handshake:", "1º delta:", "turn/steer:", "turn/interrupt:", "aprovação negada:", "ferramenta mcp__nod__lembrar:"]) expect(texto).toContain(medida);
+  expect(texto).toMatch(/^veredito: aprovada/m);
+  expect(texto).toMatch(/^data: \d{4}-\d{2}-\d{2}T/m);
+  expect(texto).toContain("codex: codex-cli teste");
+});
+
+// Regressão (revisão NOD-167): a sonda sem --seco é paga; no CI ela recusa antes de chamar qualquer Codex.
+it("NOD-167: no CI, a sonda sem --seco sai 2 sem chamar o Codex", async () => {
+  const marca = join(dir, "codex-chamado");
+  const espiao = join(dir, "codex-espiao.sh");
+  await writeFile(espiao, `#!/bin/sh\ntouch "${marca}"\n`, { mode: 0o755 });
+  const saida = join(dir, "sonda-paga.txt");
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../../scripts/sonda-codex-app-server.ts", import.meta.url)), "--codex", espiao, "--saida", saida], { encoding: "utf8", timeout: 60_000, env: { ...process.env, CI: "true" } });
+  expect(r.status).toBe(2);
+  expect(r.stderr).toContain("no CI só roda com --seco");
+  expect(existsSync(marca)).toBe(false);
+  expect(existsSync(saida)).toBe(false);
 });

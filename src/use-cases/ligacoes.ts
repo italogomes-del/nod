@@ -31,6 +31,11 @@ export type ContextoLigacao = {
   iaPronta: boolean;
   /** O harness do bot é o Codex (o laço de voz do Codex é o app-server). */
   codexSemVoz: boolean;
+  /**
+   * NOD-167: a IA do bot está pronta no Mac, mas ele anunciou que ela não roda o laço de voz (o Codex sem
+   * `app-server`). Ausente = false (o app antigo não anuncia; o turno ainda falha com `executor_indisponivel`).
+   */
+  iaSemLacoDeVoz?: boolean;
   drenando: boolean;
   vozDisponivel: boolean;
   vivasNoServidor: number;
@@ -50,6 +55,7 @@ const TEXTOS_RECUSA: Record<MotivoRecusaLigacao, string> = {
   sem_ia: "A IA deste bot não está pronta no seu Mac. Abra o Claude Code (ou o Codex) e entre na sua conta.",
   app_antigo: "Atualize o app do nod no seu Mac para ligar.",
   codex_em_breve: "A ligação com bots que usam o ChatGPT (Codex) está desligada neste servidor. Por enquanto, converse por texto.",
+  codex_sem_app_server: "Atualize o Codex para ligar: a versão instalada no seu Mac não atende ligação. Por enquanto, converse por texto.",
   ja_em_ligacao: "Você já está numa ligação. Desligue antes de começar outra.",
   bot_ocupado_em_ligacao: "Este bot já está numa ligação.",
   sala: "Ligação é só com um bot por vez, na conversa dele.",
@@ -128,6 +134,7 @@ async function motivoDeRecusa(deps: Deps, agenteId: string, c: ContextoLigacao):
   if (c.codexSemVoz) return { motivo: "codex_em_breve" };
   if (!c.maquinaComLigacao) return { motivo: "sem_mac" };
   if (!c.iaPronta) return { motivo: "sem_ia" };
+  if (c.iaSemLacoDeVoz) return { motivo: "codex_sem_app_server" };
   return { conversaId: conversa.id, agente };
 }
 

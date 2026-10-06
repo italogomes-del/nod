@@ -124,6 +124,8 @@ export const PRAZOS_PADRAO = {
    * 250 ms) e a frase certa é a da rede de segurança, não a de queda de conexão.
    */
   quedaCerebroFalaMs: 1_500,
+  /** NOD-167: a vez sem trecho de resposta nem ferramenta neste prazo é avisada e interrompida (TEMPOS_ESPERA). */
+  vezSemRespostaMs: TEMPOS_ESPERA.vezSemRespostaMs as number,
 };
 
 /** definido em 2026-10-05: quantas vezes o `resolvendo` da tela recomeça a espera da escolha, por queda. */
@@ -252,6 +254,8 @@ const FALA_LIMITE_SEM_OUTRA = "Sua assinatura de IA chegou ao limite, então vou
 const FALA_VOZ_FORA = FALAS_DE_ESPERA.find((f) => f.categoria === "voz_fora") ?? null;
 /** definido em 2026-10-05 (NOD-168): frases seguidas com falha do TTS até a ligação seguir só com a legenda. */
 export const FALHAS_TTS_PARA_SO_LEGENDA = 2;
+/** Sem o clipe pronto (cache frio, sem `esperas`), o aviso da vez sem resposta sai pela voz normal: nunca em silêncio. */
+const AVISO_VEZ_SEM_RESPOSTA = FALAS_DE_ESPERA.find((f) => f.categoria === "vez_sem_resposta") ?? null;
 
 export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
   const relogio = deps.relogio ?? (() => Date.now());
@@ -494,6 +498,27 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       if (reconhecer) timersEspera.push(agendar(TEMPOS_ESPERA.reconhecimentoMs, () => { if (vezAtual === n && primeiroSomDaVez) tocarEspera("reconhecimento"); }));
       timersEspera.push(agendar(TEMPOS_ESPERA.pensandoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando && !conteudoParaSoar()) tocarEspera("pensando"); }));
       timersEspera.push(agendar(TEMPOS_ESPERA.pensandoLongoMs, () => { if (vezAtual === n && primeiroSomDaVez && !ferramentaRodando && !conteudoParaSoar()) tocarEspera("pensando_longo"); }));
+      timersEspera.push(agendar(prazos.vezSemRespostaMs, () => vezSemResposta(n)));
+    }
+
+    /**
+     * NOD-167: o cérebro recebeu a vez e, no prazo, não mandou nenhum trecho nem abriu ferramenta (o app-server do Codex
+     * pode ficar mudo sem cair). A vez se encerra: o aviso é falado, a resposta que vier depois não é, e o cérebro
+     * recebe a interrupção dura (no Codex vira `turn/interrupt`). Ferramenta rodando é trabalho, não silêncio: as
+     * esperas de tarefa longa cuidam dela.
+     */
+    function vezSemResposta(n: number): void {
+      if (encerrada || semIa || !cerebro || vezAtual !== n || vezRespondida || n === vezCancelada) return;
+      if (respostaTexto !== "" || houveFerramentaNaVez || ferramentaRodando || janela || lendo || desligando) return;
+      log("aviso", "ligacao_vez_sem_resposta", { ligacao_id: r.ligacaoId, harness: iaDoCerebro, prazo_ms: prazos.vezSemRespostaMs });
+      fecharMedicao("sem_resposta");
+      vezCancelada = n;
+      vezRespondida = true;
+      cancelarEsperas();
+      paraCerebro({ t: "interromper", modo: "duro" });
+      if (!tocarEspera("vez_sem_resposta") && AVISO_VEZ_SEM_RESPOSTA && midia) falarAviso(AVISO_VEZ_SEM_RESPOSTA.texto);
+      if (!tocandoFila && fila.length === 0) mudarFase("ouvindo");
+      reiniciarOciosidade();
     }
 
     // ---- voz do bot: fila e TTS -------------------------------------------------------------------------------------

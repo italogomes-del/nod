@@ -10,7 +10,7 @@ modelo da ligação; rede de segurança: a IA cai no meio da ligação)
   `reivindicar` ignoram `ligacao`), passa na frente da fila e só vai para máquina que anunciou `ligacao` no `conectar`.
 - O plano tem modo `ligacao`: catálogo da conversa sem `pedir_a_pessoa` nem artefatos, mais `iniciar_tarefa` e
   `desligar`; sem terminal; sem a sessão da conversa; prompt de voz (`montarPromptLigacao`) e `ligacaoVoz` com o modelo
-  rápido (resolvido no servidor; ver a emenda de 2026-10-05: hoje `claude-sonnet-5-5` com esforço low e sem thinking; Codex: `gpt-6-luna`).
+  rápido (resolvido no servidor; ver a emenda de 2026-10-05: hoje `claude-sonnet-5-5` com esforço low e sem thinking; Codex: `gpt-5.6-luna`, o `MODELO_LUNA_CODEX`).
 - **Claude Code:** `claude -p` com stream-json e stdin aberto a ligação inteira, `--system-prompt` de voz,
   `--tools ""`, `--no-session-persistence`, `MAX_THINKING_TOKENS=0`. A vez 0 aquece o cache e não é falada. No `fim`,
   pede um resumo de até 5 linhas. Mensagem escrita com uma volta em curso **abre outra volta** (dois `result`); o laço
@@ -79,7 +79,7 @@ Codex que deveria provar a troca passava com ou sem o override, porque montava o
   paga, ver abaixo; antes era `claude-sonnet-4-6` sem esforço). Na família 4.6 o thinking adaptativo
   ignora `MAX_THINKING_TOKENS=0`; com `false`, o driver injeta `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` no filho.
   `esforco` vira `--effort` só se o `--help` do CLI listar a flag (mesmo gate do chat); sem ela, a ligação segue e sai
-  o log `ligacao_sem_effort`. Codex: `gpt-6-luna`, só o modelo.
+  o log `ligacao_sem_effort`. Codex: `gpt-5.6-luna` (`MODELO_LUNA_CODEX`, ADR-076), só o modelo.
 - **A guia no "auto"** fala no mesmo modelo de voz das outras ligações (revisto em 2026-10-05, decisão do Marlon; antes
   ficava no `fable`, ADR-077). O mais potente segue só no chat dela. A montagem é `modeloDeVoz` (`modelo-ligacao.ts`).
 - **Trocar ou reverter** é uma linha no `infra/gcp/config.env` e o deploy (`deploy.sh` leva as duas ao `nod.env`). Enquanto

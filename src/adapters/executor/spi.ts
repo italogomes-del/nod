@@ -68,6 +68,11 @@ export interface Instance {
    * responde. Ausente no catcher.
    */
   testar?(pergunta: string): Promise<TesteDoMotor>;
+  /**
+   * NOD-167: este motor, já pronto, roda o laço de voz da ligação? false = não roda (o Codex sem `app-server`); null =
+   * não deu para saber agora (sonda lenta). Ausente = o motor não tem esse piso (o Claude Code).
+   */
+  lacoDeVoz?(): Promise<boolean | null>;
   adapter(plano: PlanoTurno): Adapter;
   dispose(): Promise<void>;
 }

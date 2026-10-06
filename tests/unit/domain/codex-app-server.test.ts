@@ -4,8 +4,10 @@ import {
   idDaThread,
   idDoTurno,
   interpretarLinhaAppServer,
+  modelosDaLista,
   notificacaoInitialized,
   pedidoInitialize,
+  pedidoModelList,
   pedidoThreadStart,
   pedidoTurnInterrupt,
   pedidoTurnStart,
@@ -111,8 +113,34 @@ describe("linhas do servidor", () => {
   });
 
   it("linha que não é JSON, não é objeto ou é notificação desconhecida é ignorada sem lançar", () => {
-    for (const l of ["", "texto solto", "[1,2]", "null", linha({ method: "account/rateLimits/updated", params: {} }), linha({ result: {} })]) {
+    for (const l of ["", "texto solto", "[1,2]", "null", linha({ result: {} })]) {
       expect(interpretarLinhaAppServer(l)).toEqual({ tipo: "ignorado" });
     }
+    // NOD-167: a notificação desconhecida leva só o nome (cortado), nunca os parâmetros.
+    expect(interpretarLinhaAppServer(linha({ method: "account/rateLimits/updated", params: { segredo: "x" } }))).toEqual({ tipo: "ignorado", metodo: "account/rateLimits/updated" });
+    expect(interpretarLinhaAppServer(linha({ method: "x".repeat(200), params: {} }))).toEqual({ tipo: "ignorado", metodo: "x".repeat(80) });
+  });
+});
+
+describe("model/list (NOD-167)", () => {
+  it("o pedido não leva parâmetros", () => {
+    expect(ler(pedidoModelList(7))).toEqual({ jsonrpc: "2.0", id: 7, method: "model/list", params: {} });
+  });
+
+  it("lê id, padrão e esforços no formato do protocolo v2", () => {
+    expect(modelosDaLista({ data: [
+      { id: "gpt-5.6-sol", model: "gpt-5.6-sol", isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }], defaultReasoningEffort: "high" },
+      { id: "gpt-5.6-luna", isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: "minimal" }, { reasoningEffort: "low" }], defaultReasoningEffort: "low" },
+    ], nextCursor: null })).toEqual([
+      { id: "gpt-5.6-sol", padrao: true, esforcos: ["low", "high"], esforcoPadrao: "high" },
+      { id: "gpt-5.6-luna", padrao: false, esforcos: ["minimal", "low"], esforcoPadrao: "low" },
+    ]);
+  });
+
+  it("tolera variações (models, model no lugar de id, esforço como texto ou {effort}) e descarta item sem id", () => {
+    expect(modelosDaLista({ models: [{ model: "m1", supportedReasoningEfforts: ["low", { effort: "medium" }, 3] }, { displayName: "sem id" }, "lixo"] })).toEqual([
+      { id: "m1", padrao: false, esforcos: ["low", "medium"], esforcoPadrao: null },
+    ]);
+    expect(modelosDaLista({})).toEqual([]);
   });
 });

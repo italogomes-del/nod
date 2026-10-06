@@ -16,7 +16,7 @@ const ausente = (): Inventario => ({ estado: "ausente", motivo: "instale", em: T
  * Um Mac de mentira: o login de cada IA (a sonda grátis), o que o teste de verdade devolve, a "impressão" da conta e o
  * que foi anunciado ao servidor. O timer é manual: `tique()` roda a passada agendada.
  */
-function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown }) {
+function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown; lacoDeVoz?: Partial<Record<Ia, boolean | null>> }) {
   const m = {
     login: { ...o.login },
     teste: { ...(o.teste ?? {}) } as Partial<Record<Ia, Roteiro>>,
@@ -24,6 +24,9 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
     agora: T0,
     disco: o.disco as unknown,
     anuncios: [] as { estados: Record<string, string>; causas: Record<string, string | null>; principal: string }[],
+    /** NOD-167: o `semLacoDeVoz` de cada anúncio, na mesma ordem. */
+    semVoz: [] as string[][],
+    lacoDeVoz: { ...(o.lacoDeVoz ?? {}) } as Partial<Record<Ia, boolean | null>>,
     testes: [] as { ia: Ia; pergunta: string }[],
     sondas: 0,
     gravacoes: 0,
@@ -38,6 +41,7 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
         sondar: async () => m.login[ia],
         adapter: () => { throw new Error("não usado"); },
         dispose: async () => {},
+        ...(ia in m.lacoDeVoz ? { lacoDeVoz: async () => m.lacoDeVoz[ia] ?? null } : {}),
         testar: async (pergunta: string) => {
           m.testes.push({ ia, pergunta });
           const t = m.teste[ia];
@@ -53,7 +57,8 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
   const deps: DepsVigia = {
     sondar: async () => { m.sondas++; return { registry: registry(), inventarios: { ...m.login } }; },
     impressao: async (ia) => m.impressao[ia],
-    anunciar: async (inventarios, principal) => {
+    anunciar: async (inventarios, principal, semLacoDeVoz) => {
+      m.semVoz.push([...semLacoDeVoz]);
       m.anuncios.push({
         estados: Object.fromEntries(Object.entries(inventarios).map(([k, v]) => [k, v?.estado ?? "?"])),
         causas: Object.fromEntries(Object.entries(inventarios).map(([k, v]) => [k, v && v.estado === "nao_autenticado" ? v.causa ?? null : null])),
@@ -82,6 +87,26 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
 const SEM_ACESSO: TesteDoMotor = { inventario: { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "1.0", em: T0 }, resposta: null };
 
 describe("vigia das IAs do Mac (2026-10-05)", () => {
+  it("NOD-167: Codex pronto sem app-server vai em semLacoDeVoz; 'não sei' não entra; atualizar o Codex reanuncia", async () => {
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": semLogin(), "codex-cli": pronto() }, lacoDeVoz: { "codex-cli": false } });
+    await vigia.iniciar(sondagem());
+    expect(m.semVoz).toEqual([["codex-cli"]]);
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "codex-cli": "pronto" }, principal: "pronto" });
+    // A sonda do app-server ficou lenta: sem certeza, o Codex não é anunciado como sem voz.
+    m.lacoDeVoz["codex-cli"] = null;
+    await vigia.reanunciar();
+    expect(m.semVoz.at(-1)).toEqual([]);
+    // O Codex foi atualizado: mesmo estado ("pronto"), anúncio novo porque o laço de voz mudou.
+    m.lacoDeVoz["codex-cli"] = false;
+    await vigia.reanunciar();
+    const antes = m.anuncios.length;
+    m.lacoDeVoz["codex-cli"] = true;
+    await vigia.contaMudou("codex-cli");
+    expect(m.anuncios.length).toBe(antes + 1);
+    expect(m.semVoz.at(-1)).toEqual([]);
+  });
+
+
   it("IA logada e sem veredito: anuncia como pronta, sobe o laço e não agenda nada nem gasta teste", async () => {
     const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": ausente() } });
     await vigia.iniciar(sondagem());

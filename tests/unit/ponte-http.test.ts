@@ -2,6 +2,7 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import type { AnuncioMaquina } from "../../src/contracts/ponte.ts";
 import { VERSAO_MINIMA_APP, type PonteInternaNod } from "../../src/adapters/fundo/ponte-interna.ts";
 import { criarPonteHttpServidor } from "../../src/adapters/http/rotas/ponte.ts";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
@@ -169,5 +170,46 @@ describe("NOD-175: ponte do servidor na drenagem", () => {
     expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: null } });
     expect(puxar).not.toHaveBeenCalled();
     expect(p.reservasEmVoo()).toBe(0);
+  });
+});
+
+describe("NOD-167: Codex sem app-server no anúncio do Mac", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  function montar() {
+    const maquinas = new Map<string, AnuncioMaquina>();
+    const ponte: PonteInternaNod = { conectar: async (m) => { maquinas.set(m.machineId, m); }, puxar: async () => null, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [...maquinas.values()], escopoDoTurno: () => null };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+    });
+    const conectar = async (corpo: unknown) => {
+      const rota = p.rotas.find((r) => r.padrao.test("/conectar"));
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: () => undefined });
+    };
+    return { p, maquinas, conectar };
+  }
+  const pronto = { estado: "pronto", versao: "fake", em: 0 };
+  const base = { versaoContrato: 1, nome: "Mac", inventario: pronto, ligacao: true };
+
+  it("o Codex pronto anunciado sem app-server recusa; app antigo (sem o campo), lixo no campo ou Codex fora não recusam", async () => {
+    const { p, maquinas, conectar } = montar();
+    await conectar({ ...base, harnesses: { "claude-cli": pronto, "codex-cli": pronto }, semLacoDeVoz: ["codex-cli", "hermes", 7, "__proto__"] });
+    expect(maquinas.get("m1")?.semLacoDeVoz).toEqual(["codex-cli"]);
+    expect(p.semLacoDeVozDaPessoa(escopo.pessoaId, "codex-cli")).toBe(true);
+    expect(p.semLacoDeVozDaPessoa(escopo.pessoaId, "claude-cli")).toBe(false);
+    expect(p.semLacoDeVozDaPessoa("outra-pessoa", "codex-cli")).toBe(false);
+
+    await conectar({ ...base, harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(maquinas.get("m1")?.semLacoDeVoz).toBeUndefined();
+    expect(p.semLacoDeVozDaPessoa(escopo.pessoaId, "codex-cli")).toBe(false);
+
+    await conectar({ ...base, harnesses: { "claude-cli": pronto, "codex-cli": pronto }, semLacoDeVoz: "codex-cli" });
+    expect(p.semLacoDeVozDaPessoa(escopo.pessoaId, "codex-cli")).toBe(false);
+
+    // Codex não pronto: a recusa é a de sempre (sem_ia), não esta.
+    await conectar({ ...base, harnesses: { "claude-cli": pronto, "codex-cli": { estado: "ausente", motivo: "x", em: 0 } }, semLacoDeVoz: ["codex-cli"] });
+    expect(p.semLacoDeVozDaPessoa(escopo.pessoaId, "codex-cli")).toBe(false);
   });
 });

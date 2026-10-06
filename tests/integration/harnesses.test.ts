@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
-import { ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
+import { disponibilidadeLigacao, ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
 import { MODELOS_LIGACAO_PADRAO } from "../../src/contracts/modelos.ts";
 import { lerModelosLigacao } from "../../src/domain/modelo-ligacao.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -94,7 +94,7 @@ describeIntegracao("modelo da ligação resolvido no servidor (NOD-164)", () => 
       expect(await voz(agenteId)).toEqual(expect.objectContaining({ modelo: padrao.modelo, esforco: padrao.esforco, pensamentoAdaptativo: false }));
       expect((await voz(agenteId, lerModelosLigacao({ NOD_MODELO_LIGACAO_CLAUDE: "claude-sonnet-4-6" })))?.esforco).toBeUndefined();
       expect(await voz(agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }));
-      expect(await voz(codex.agenteId)).toEqual(expect.objectContaining({ modelo: "gpt-6-luna" }));
+      expect(await voz(codex.agenteId)).toEqual(expect.objectContaining({ modelo: "gpt-5.6-luna" }));
       expect(await voz(codex.agenteId, configurada)).toEqual(expect.objectContaining({ modelo: "gpt-6-astra" }));
       expect((await voz(codex.agenteId, configurada))?.pensamentoAdaptativo).toBeUndefined();
 
@@ -118,4 +118,24 @@ it("fila não deixa um computador com Claude reivindicar um turno fixado no Code
   });
 });
 
+});
+
+describeIntegracao("Codex sem app-server: recusa própria do Ligar (NOD-167)", () => {
+  const contexto: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
+  it("o Mac anunciou o Codex sem app-server: recusa em pt-BR antes de tocar; sem IA pronta continua sem_ia; desligado no servidor continua codex_em_breve", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos, agenteId } = await agenteComConversa(trx, escopo);
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      await editarPerfil(deps, { agenteId, harness: "codex-cli", modelo: "auto" });
+      const semAppServer = { ...contexto, iaSemLacoDeVoz: true };
+      expect((await disponibilidadeLigacao(deps, { agenteId, contexto: semAppServer })).data).toEqual({
+        disponivel: false, motivo: "codex_sem_app_server", texto: "Atualize o Codex para ligar: a versão instalada no seu Mac não atende ligação. Por enquanto, converse por texto.",
+      });
+      await expect(ligar(deps, { agenteId, contexto: semAppServer, executor: "local", iniciadaPor: "produto" })).rejects.toMatchObject({ codigo: "estado_invalido", cause: "codex_sem_app_server" });
+      expect(await repos.ligacoes.viva()).toBeNull();
+      expect((await disponibilidadeLigacao(deps, { agenteId, contexto: { ...semAppServer, iaPronta: false } })).data).toMatchObject({ motivo: "sem_ia" });
+      expect((await disponibilidadeLigacao(deps, { agenteId, contexto: { ...semAppServer, codexSemVoz: true } })).data).toMatchObject({ motivo: "codex_em_breve" });
+    });
+  });
 });

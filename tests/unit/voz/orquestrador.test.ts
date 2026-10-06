@@ -5,6 +5,7 @@ import { criarProvedoresFalsos } from "../../../src/adapters/voz/voz-falsa.ts";
 import type { OpcoesSessaoStt, PedidoTts, Sintetizador, Transcritor } from "../../../src/adapters/voz/spi.ts";
 import type { CanalVoz } from "../../../src/adapters/voz/ws.ts";
 import type { MotivoFimLigacao } from "../../../src/contracts/voz.ts";
+import { FALAS_DE_ESPERA } from "../../../src/domain/ligacao-espera.ts";
 
 /**
  * Orquestrador de voz com canais e provedores falsos (definido em 2026-10-04, ADR-071/073/074): sem socket, sem banco,
@@ -1094,5 +1095,69 @@ describe("orquestrador de voz: só legenda (NOD-168)", () => {
     expect(msgs(m.midia, "bot-fala").some((x) => x.tipo === "leitura")).toBe(false);
     expect(msgs(m.midia, "janela")).toHaveLength(0);
     await m.voz.fechar();
+  });
+});
+
+describe("vez sem resposta (NOD-167)", () => {
+  const esperas: FonteDeEsperas = { obterPronto: () => new Int16Array(2400), aquecer: () => undefined };
+  const avisos = FALAS_DE_ESPERA.filter((f) => f.categoria === "vez_sem_resposta").map((f) => f.texto);
+
+  async function ligado(prazo: number, fonte: FonteDeEsperas | null = esperas) {
+    const m = montar({ esperas: fonte ?? undefined, prazos: { vezSemRespostaMs: prazo } });
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+    await dormir(30);
+    tocouTudo(m.midia);
+    return m;
+  }
+
+  it("sem trecho nem ferramenta no prazo: fala o aviso, interrompe o cérebro, cala a resposta atrasada e a vez seguinte segue normal", async () => {
+    const { midia, cerebro } = await ligado(200);
+    midia.receber({ t: "texto", conteudo: "qual a minha próxima reunião" });
+    await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
+    const aviso = await ate(() => msgs(midia, "bot-fala").find((m) => m.tipo === "espera" && avisos.includes(String(m.texto))));
+    expect(aviso).toBeTruthy();
+    // O Codex responde depois da interrupção: não é falado.
+    cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Resposta atrasada que não deve soar. " });
+    cerebro.receber({ t: "fala-fim", n: 1 });
+    await dormir(600);
+    expect(msgs(midia, "bot-fala").some((m) => String(m.texto).includes("atrasada"))).toBe(false);
+    expect(msgs(cerebro, "interromper")).toHaveLength(1);
+
+    tocouTudo(midia);
+    midia.receber({ t: "texto", conteudo: "e a de amanhã" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
+    cerebro.receber({ t: "fala", n: 2, seq: 0, delta: "Amanhã às nove. " });
+    cerebro.receber({ t: "fala-fim", n: 2 });
+    await ate(() => msgs(midia, "bot-fala").find((m) => m.texto === "Amanhã às nove."));
+  });
+
+  it("com trecho ou ferramenta antes do prazo, nada de aviso nem interrupção", async () => {
+    const { midia, cerebro } = await ligado(250);
+    midia.receber({ t: "texto", conteudo: "me conta uma coisa" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1));
+    cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Já te conto" });
+    await dormir(500);
+    cerebro.receber({ t: "fala-fim", n: 1 });
+    tocouTudo(midia);
+    midia.receber({ t: "texto", conteudo: "agora olha a agenda" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
+    cerebro.receber({ t: "atividade", tipo: "inicio", nome: "mcp__nod__lembrar" });
+    await dormir(500);
+    expect(msgs(cerebro, "interromper")).toHaveLength(0);
+    expect(msgs(midia, "bot-fala").some((m) => avisos.includes(String(m.texto)))).toBe(false);
+  });
+
+  // Regressão (revisão NOD-167): sem o clipe em cache, o aviso saía mudo e a pessoa ficava em silêncio.
+  it.each([
+    ["clipe ainda não sintetizado", { obterPronto: () => null, aquecer: () => undefined } as FonteDeEsperas],
+    ["sem fonte de esperas", null],
+  ])("%s: o aviso sai pela voz normal, nunca em silêncio", async (_nome, fonte) => {
+    const { midia, cerebro } = await ligado(200, fonte);
+    midia.receber({ t: "texto", conteudo: "qual a minha próxima reunião" });
+    await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
+    const aviso = await ate(() => msgs(midia, "bot-fala").find((m) => avisos.includes(String(m.texto))));
+    expect(aviso.tipo).toBe("aviso");
+    expect(msgs(midia, "bot-fala").filter((m) => avisos.includes(String(m.texto)))).toHaveLength(1);
   });
 });

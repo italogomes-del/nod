@@ -55,6 +55,8 @@ export type MotivoRecusaLigacao =
   | "sem_ia"
   | "app_antigo"
   | "codex_em_breve"
+  /** NOD-167: o Codex do Mac não tem `codex app-server` (versão antiga): o laço de voz não sobe. */
+  | "codex_sem_app_server"
   | "ja_em_ligacao"
   | "bot_ocupado_em_ligacao"
   | "sala"

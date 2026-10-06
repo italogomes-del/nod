@@ -1,4 +1,5 @@
 import type { EsforcoAgente } from "./agente.ts";
+import { MODELO_LUNA_CODEX } from "./harness.ts";
 
 /**
  * definido em 2026-09-17: agentes usam o alias Sonnet do CLI. NOD-164 (2026-10-05): as sondas saem do Haiku 4.5
@@ -14,13 +15,14 @@ export const MODELO_SONDA_PADRAO = "claude-sonnet-4-6";
  * vira `--effort` e `pensamentoAdaptativo:false` vira `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` no driver. O padrão é
  * o Sonnet 5.5 com esforço low e sem thinking adaptativo, escolhido pela sonda paga de 2026-10-05 (docs/uat-modo-ligacao.md,
  * "Sonda de modelos"): o único candidato com TTFT quente perto de 1 s e custo abaixo de 3x o Haiku; o Sonnet 4.6 ficou
- * mais lento e mais caro. Trocar ou reverter é uma linha no `infra/gcp/config.env` mais o redeploy.
+ * mais lento e mais caro. Trocar ou reverter é uma linha no `infra/gcp/config.env` mais o redeploy. O Codex usa o Luna
+ * do catálogo (MODELO_LUNA_CODEX, NOD-167).
  */
 export type ConfigModeloLigacaoClaude = { modelo: string; esforco?: EsforcoAgente; pensamentoAdaptativo: boolean };
 export type ModelosLigacao = { "claude-cli": ConfigModeloLigacaoClaude; "codex-cli": { modelo: string } };
 export const MODELOS_LIGACAO_PADRAO: ModelosLigacao = {
   "claude-cli": { modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false },
-  "codex-cli": { modelo: "gpt-6-luna" },
+  "codex-cli": { modelo: MODELO_LUNA_CODEX },
 };
 
 /**

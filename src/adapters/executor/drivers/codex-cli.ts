@@ -149,6 +149,11 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
       return {
         sondar,
         testar,
+        // NOD-167: o Mac anuncia o Codex sem app-server, e o servidor recusa o Ligar com motivo próprio antes de tocar.
+        async lacoDeVoz() {
+          if ((await sondar()).estado !== "pronto" || !bin) return null;
+          try { return (await sondarAppServer(bin)) !== null; } catch { return null; }
+        },
         adapter(plano) {
           let proc: Processo | null = null;
           let parado = false;
@@ -162,7 +167,9 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
               // ADR-076: o turno-cérebro de uma ligação é o laço de voz no app-server, não um `codex exec`.
               if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
                 const flagsNoHelp = await sondarAppServer(bin);
-                if (!flagsNoHelp) throw new ErroDeDominio("executor_indisponivel", { cause: "codex sem app-server: atualize o Codex para ligar" });
+                // NOD-167: o servidor já recusa o Ligar (motivo `codex_sem_app_server`) quando o Mac anuncia isto; aqui
+                // sobra só o Mac de um app antigo, que não anuncia, e a causa sai com o mesmo código no diagnóstico.
+                if (!flagsNoHelp) throw new ErroDeDominio("executor_indisponivel", { cause: "codex_sem_app_server" });
                 await mkdir(cfg.cwdBase, { recursive: true });
                 return await rodarLigacaoCodex({
                   plano, sinks, bin, flagsNoHelp, recusadas, env, cwdBase: cfg.cwdBase,

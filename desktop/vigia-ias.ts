@@ -41,8 +41,11 @@ export type DepsVigia = {
   sondar(): Promise<Sondagem>;
   /** A impressão da conta logada nesta IA; null quando não dá para saber. */
   impressao(ia: IaDesktop): Promise<string | null>;
-  /** Manda o inventário ao servidor (o `conectar` da ponte). `principal` é a IA pronta, ou a que explica a falta. */
-  anunciar(inventarios: Inventarios, principal: Inventario): Promise<void>;
+  /**
+   * Manda o inventário ao servidor (o `conectar` da ponte). `principal` é a IA pronta, ou a que explica a falta.
+   * `semLacoDeVoz` (NOD-167): as prontas que não atendem ligação (o Codex sem `app-server`).
+   */
+  anunciar(inventarios: Inventarios, principal: Inventario, semLacoDeVoz: IaDesktop[]): Promise<void>;
   /** Uma IA ficou pronta: `registry` é o que o laço deve usar (chamado a cada mudança, não só na primeira). */
   aoRegistry(registry: Registry, algumaPronta: boolean): void;
   ler(): Promise<unknown>;
@@ -174,6 +177,17 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     return saida;
   }
 
+  /** NOD-167: as IAs prontas cujo motor diz que não roda o laço de voz; "não sei" (null) não entra. */
+  async function semLacoDeVoz(s: Sondagem, inventarios: Inventarios): Promise<IaDesktop[]> {
+    const saida: IaDesktop[] = [];
+    for (const ia of IAS_DESKTOP) {
+      const reg = s.registry[ia];
+      if (inventarios[ia]?.estado !== "pronto" || reg?.estado !== "pronto" || !reg.instance.lacoDeVoz) continue;
+      if ((await reg.instance.lacoDeVoz().catch(() => null)) === false) saida.push(ia);
+    }
+    return saida;
+  }
+
   async function publicar(s: Sondagem, inventarios: Inventarios): Promise<void> {
     // A principal é a pronta; sem nenhuma, a que melhor explica a falta: a reprovada no teste, depois a sem login.
     const todos = Object.values(inventarios);
@@ -183,12 +197,14 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
       ?? inventarios["claude-cli"] ?? AUSENTE(d.agora());
     // Só o que muda a decisão do servidor entra na chave: o instante de cada sonda não é novidade.
     // NOD-178: a causa conta também em 'ausente': "ausente lento" → "ausente de verdade" tem de chegar ao servidor.
-    const chave = JSON.stringify(IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado !== "pronto" ? i.causa ?? null : null]; }));
+    // NOD-167: o Codex atualizado (ganhou o app-server) também é novidade, mesmo com o estado igual.
+    const semVoz = await semLacoDeVoz(s, inventarios);
+    const chave = JSON.stringify([IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado !== "pronto" ? i.causa ?? null : null]; }), semVoz]);
     ultima = s;
     ultimosInventarios = inventarios;
     d.aoRegistry(s.registry, principal.estado === "pronto");
     if (chave === ultimoAnuncio) return;
-    await d.anunciar(inventarios, principal);
+    await d.anunciar(inventarios, principal, semVoz);
     ultimoAnuncio = chave;
   }
 

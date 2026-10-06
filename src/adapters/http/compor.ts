@@ -8,7 +8,7 @@ import { expandirTil } from "../executor/caminho.ts";
 import { criarWorkspaces } from "../fundo/workspaces.ts";
 import { rotasWorkspaces } from "./rotas/workspaces.ts";
 import { HARNESSES } from "../../contracts/harness.ts";
-import type { CatalogoHarness } from "../../contracts/harness.ts";
+import type { CatalogoHarness, IdHarness } from "../../contracts/harness.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
@@ -580,6 +580,11 @@ export function comporApp(o: OpcoesCompor): App {
     const fuso = 3 * 3_600_000;
     return Math.floor((agora - fuso) / 86_400_000) * 86_400_000 + fuso;
   };
+  /** NOD-167: no modo local, a mesma regra de `semLacoDeVozDaPessoa` sobre as máquinas da ponte interna. */
+  function semLacoDeVozLocal(harness: IdHarness): boolean {
+    const maquinas = ponte.maquinasConectadas().filter((m) => m.ligacao === true && m.harnesses?.[harness]?.estado === "pronto");
+    return maquinas.length > 0 && maquinas.every((m) => m.semLacoDeVoz?.includes(harness) === true);
+  }
   async function contextoLigacao(escopo: Escopo, agenteId: string, onboarding = false): Promise<ContextoLigacao> {
     const agente = await dentro(escopo, (d) => d.repos.agentes.buscar(agenteId));
     const harness = agente?.harness && agente.harness !== "auto" ? agente.harness : driverPreferido;
@@ -594,6 +599,10 @@ export function comporApp(o: OpcoesCompor): App {
       // ADR-076 (fase 4): o laço de voz do Codex é o app-server (drivers/codex-ligacao.ts). Liga por padrão;
       // NOD_LIGACAO_CODEX=0 é a chave de desligar (o app-server é experimental na OpenAI).
       codexSemVoz: executorAtual !== "catcher" && harness === "codex-cli" && env.NOD_LIGACAO_CODEX === "0",
+      // NOD-167: o Mac disse que esta IA não roda o laço de voz (o Codex sem `app-server`): recusa própria, antes de tocar.
+      iaSemLacoDeVoz: executorAtual !== "catcher" && (compartilhado
+        ? ponteHttp.semLacoDeVozDaPessoa(escopo.pessoaId, harness as IdHarness)
+        : semLacoDeVozLocal(harness as IdHarness)),
       drenando: voz.drenando(),
       vozDisponivel: vozConfigurada,
       vivasNoServidor: voz.vivas(),

@@ -92,9 +92,20 @@ else {
  * - "[[ferramenta]]" no texto: um item mcpToolCall do servidor nod antes da fala.
  * - "demorar": fala "Pensando" e espera turn/steer (responde a fala nova e conclui) ou turn/interrupt (conclui interrompido).
  * - O pedido de resumo do fim responde "Resumo da ligação: N turno(s)." (N = turnos antes do resumo).
+ * - "[[mudo]]" no texto (NOD-167): abre o turno e não fala nada até o turn/interrupt (conclui interrompido).
+ * - "[[lento]]" no texto (NOD-167): a resposta do turn/start demora 300 ms (o turno fica "iniciando" no laço).
+ * - "[[conclui-antes]]" no texto (revisão NOD-167): depois de 300 ms o turno conclui sem fala e só então chega a
+ *   resposta do turn/start (a ordem que o app-server real pode entregar num turno curto).
+ * - model/list (NOD-167) devolve o Luna e um modelo de chat, com os esforços aceitos; uma notificação que o laço não
+ *   conhece (`account/rateLimits/updated`) sai no primeiro turno.
  * - stdin fechado: grava o registro (TESTE_NOD_REGISTRO) e sai 0.
  */
 async function appServer() {
+  // NOD-167: um Codex antigo, sem o subcomando (o clap recusa com 2, como qualquer subcomando desconhecido).
+  if (process.env.TESTE_NOD_SEM_APP_SERVER) {
+    process.stderr.write("error: unrecognized subcommand 'app-server'\n");
+    process.exit(2);
+  }
   if (args.includes("--help")) {
     process.stdout.write("[experimental] Run the app server or related tooling.\n  --listen <URL>\n  --ignore-user-config\n");
     return;
@@ -144,6 +155,13 @@ async function appServer() {
       return concluir(threadId, turnId, "completed");
     }
     turnosAntesDoResumo++;
+    if (turnosAntesDoResumo === 1) notificar("account/rateLimits/updated", { rateLimits: { primary: { usedPercent: 12, conteudo: "não logar" } } });
+    if (texto.includes("[[mudo]]")) {
+      // O interrupt pode ter chegado antes deste ponto (ativo ainda sem gancho): vale como já interrompido.
+      const jaInterrompido = ativo?.id === turnId && ativo.interrompido === true;
+      await new Promise((r) => { if (jaInterrompido) r(); else ativo = { id: turnId, aoSteer: null, aoInterromper: () => r() }; });
+      return concluir(threadId, turnId, "interrupted");
+    }
     if (!pediuAprovacao) {
       pediuAprovacao = true;
       const resposta = new Promise((r) => { aoAprovacao = r; });
@@ -189,13 +207,31 @@ async function appServer() {
           registro.thread = m.params; gravar();
           responder(m.id, { thread: { id: "thr_falso" }, model: m.params.model });
           break;
+        case "model/list":
+          registro.modelList = (registro.modelList ?? 0) + 1;
+          responder(m.id, { data: [
+            { id: "gpt-5.6-sol", model: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }, { reasoningEffort: "high" }], defaultReasoningEffort: "medium" },
+            { id: "gpt-5.6-luna", model: "gpt-5.6-luna", displayName: "GPT-5.6 Luna", isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: "minimal" }, { reasoningEffort: "low" }, { reasoningEffort: "medium" }], defaultReasoningEffort: "low" },
+          ], nextCursor: null });
+          break;
         case "turn/start": {
           const turnId = `turn_${proximoTurno++}`;
           const texto = m.params.input?.[0]?.text ?? "";
           registro.turnos.push({ texto, effort: m.params.effort }); gravar();
-          responder(m.id, { turn: { id: turnId, status: "inProgress", items: [] } });
-          ativo = { id: turnId, aoSteer: null, aoInterromper: null };
-          fila = fila.then(() => rodarTurno(m.params.threadId, turnId, texto));
+          const abrir = () => {
+            responder(m.id, { turn: { id: turnId, status: "inProgress", items: [] } });
+            ativo = { id: turnId, aoSteer: null, aoInterromper: null };
+            fila = fila.then(() => rodarTurno(m.params.threadId, turnId, texto));
+          };
+          if (texto.includes("[[conclui-antes]]")) {
+            setTimeout(() => {
+              notificar("turn/completed", { threadId: m.params.threadId, turn: { id: turnId, status: "completed", items: [] } });
+              responder(m.id, { turn: { id: turnId, status: "inProgress", items: [] } });
+            }, 300);
+            break;
+          }
+          if (texto.includes("[[lento]]")) setTimeout(abrir, 300);
+          else abrir();
           break;
         }
         case "turn/steer":
@@ -207,7 +243,10 @@ async function appServer() {
         case "turn/interrupt":
           registro.interrupcoes++; gravar();
           responder(m.id, {});
-          if (ativo?.id === m.params.turnId) ativo.aoInterromper?.();
+          if (ativo?.id === m.params.turnId) {
+            if (ativo.aoInterromper) ativo.aoInterromper();
+            else ativo.interrompido = true;
+          }
           break;
         default:
           if (m.id !== undefined) emit({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "método desconhecido" } });

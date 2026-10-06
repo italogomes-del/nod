@@ -22,6 +22,11 @@ export type AnuncioMaquina = {
    * antigo: o turno da ligação nunca vai para ele.
    */
   ligacao?: boolean;
+  /**
+   * NOD-167: IAs prontas neste Mac que NÃO rodam o laço de voz (o Codex sem `app-server`). O servidor recusa o Ligar
+   * de um bot com essa IA com o motivo `codex_sem_app_server`. Ausente = app antigo, ou todas rodam.
+   */
+  semLacoDeVoz?: IdHarness[];
 };
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */

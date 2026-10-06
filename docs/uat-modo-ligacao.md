@@ -76,7 +76,37 @@ Depois de desligar: "Como foi a ligação?":
   manual no app assinado (plano, "Manual no Mac").
 - **Voz do Google**: não testada ao vivo (sem credencial nesta máquina); o provedor está atrás da mesma interface e
   coberto por testes com transporte falso. O teste cego é da fase 0.
-- **Codex**: só contra o app-server falso (o Codex não está instalado aqui).
+- **Codex**: só contra o app-server falso (o Codex não está instalado aqui). A homologação com o Codex real é do
+  Marlon, pelo roteiro abaixo; até lá, produção sobe com `NOD_LIGACAO_CODEX=0` (NOD-167).
+
+### Homologar a ligação com Codex (NOD-167, Marlon)
+
+Precisa do Codex instalado e logado na conta do ChatGPT (`codex --version` e `codex login status`). Custa centavos da
+assinatura.
+
+1. **Sonda** (uns 2 minutos): `node scripts/sonda-codex-app-server.ts`. Ela fala direto com o `codex app-server` com os
+   argumentos reais do laço e um MCP falso, e grava `sonda-codex-app-server-<data>.txt` com a data e a versão do Codex.
+   Com o Codex fora do PATH, use `--codex /caminho/do/codex`. Para outro modelo ou esforço, use `--modelo` e `--esforco`.
+   Para investigar uma medição estranha, `--bruto sonda.jsonl` guarda o JSON-RPC cru.
+   - **Aprova** se a última linha for `veredito: aprovada`: `model/list` lista `gpt-5.6-luna` (com o `low` entre os
+     esforços), sai delta no 1º turno, `mcp__nod__lembrar` chega ao MCP, `turn/steer` é aceito e `turn/interrupt`
+     conclui como `interrupted`, e o processo responde depois.
+   - **Reprova**: anexe o arquivo na NOD-167 e avise a Cecília **antes** de seguir. A saída prevista é o critério 6,
+     opção (b): "ChatGPT sem voz na Release 1".
+   - Se o `model/list` mostrar outro id para o Luna, ele se troca numa linha só, `MODELO_LUNA_CODEX` em
+     `src/contracts/harness.ts`.
+2. **Ligação manual de 10 minutos**, com o servidor local (`NOD_LIGACAO_CODEX` sem valor ou `1`) e um bot cuja IA é o
+   Codex:
+   - liga e conversa de verdade, com pelo menos 10 vezes;
+   - fala por cima da resposta: a fala para, e a resposta seguinte considera o que você disse (é o `turn/steer`);
+   - pede algo que use uma ferramenta do nod (por exemplo "me lembra de beber água às 15h"): sai a fala de espera e
+     depois a confirmação;
+   - fica calado: a ociosidade encerra como hoje;
+   - anote o tempo até a primeira fala de umas 10 respostas. A meta é p50 ≤ 3,0 s e p95 ≤ 4,5 s (saída da fase 4);
+   - confira nos logs do Mac os eventos `codex_ligacao_notificacao_ignorada`, que dizem quais notificações o app-server
+     manda e o laço não usa, e `ligacao_vez_sem_resposta`, que deve aparecer só se a IA travar.
+3. Aprovado nos dois, anote o resultado na NOD-167 e no ADR-076 (emenda de 2026-10-05). Depois, `NOD_LIGACAO_CODEX=1`
+   no `infra/gcp/config.env` liga em produção.
 - **whisper base**: erra nomes curtos ("Ouina" por "Oi Nina"); suficiente para dev (decisão de 2026-10-04: grátis e
   compreensível). Para mais acerto, `NOD_VOZ_WHISPER_MODELO` com o `small`.
 

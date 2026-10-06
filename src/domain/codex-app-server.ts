@@ -45,7 +45,11 @@ export type EventoAppServer =
   | { tipo: "uso"; tokens: TokensAppServer }
   /** Notificação `error` do servidor (a mensagem crua fica só aqui). */
   | { tipo: "erro"; mensagem: string | null; vaiRepetir: boolean }
-  | { tipo: "ignorado" };
+  /**
+   * O que o laço não usa. `metodo` = a notificação que o parser não conhece (NOD-167: o laço loga só o nome, uma vez
+   * por ligação, para a homologação mostrar o que o app-server real manda); ausente = linha que não é JSON-RPC útil.
+   */
+  | { tipo: "ignorado"; metodo?: string };
 
 type Obj = Record<string, unknown>;
 
@@ -125,6 +129,32 @@ export function respostaNegando(id: IdRpc, metodo: string): string {
   }
 }
 
+/** NOD-167: a lista de modelos da conta (a sonda do app-server confere que o id do Luna está nela). */
+export function pedidoModelList(id: IdRpc): string {
+  return pedido(id, "model/list", {});
+}
+
+export type ModeloAppServer = { id: string; padrao: boolean; esforcos: string[]; esforcoPadrao: string | null };
+
+/**
+ * `model/list` → `{data: [{id, model, isDefault, supportedReasoningEfforts, defaultReasoningEffort}], nextCursor}`.
+ * NÃO HOMOLOGADO (como o resto deste arquivo): tolera `model` no lugar de `id` e esforços como texto solto ou como
+ * `{reasoningEffort}`; item sem id é descartado.
+ */
+export function modelosDaLista(resultado: Obj): ModeloAppServer[] {
+  const itens = Array.isArray(resultado.data) ? resultado.data : Array.isArray(resultado.models) ? resultado.models : [];
+  return itens.flatMap((v: unknown) => {
+    if (!ehObj(v)) return [];
+    const id = texto(v.id) ?? texto(v.model);
+    if (!id) return [];
+    const esforcos = (Array.isArray(v.supportedReasoningEfforts) ? v.supportedReasoningEfforts : []).flatMap((e: unknown) => {
+      const t = texto(e) ?? (ehObj(e) ? texto(e.reasoningEffort) ?? texto(e.effort) : null);
+      return t ? [t] : [];
+    });
+    return [{ id, padrao: v.isDefault === true, esforcos, esforcoPadrao: texto(v.defaultReasoningEffort) }];
+  });
+}
+
 /** `thread/start` → `{thread: {id}}`; tolera `threadId` solto. */
 export function idDaThread(resultado: Obj): string | null {
   return (ehObj(resultado.thread) ? texto(resultado.thread.id) : null) ?? texto(resultado.threadId);
@@ -190,7 +220,7 @@ function interpretarNotificacao(metodo: string, params: Obj): EventoAppServer {
       return { tipo: "erro", mensagem: redigirECortar(texto(erro.message), ERRO_CRU_APP_SERVER_MAX_CHARS), vaiRepetir: params.willRetry === true };
     }
     default:
-      return { tipo: "ignorado" };
+      return { tipo: "ignorado", metodo: metodo.slice(0, 80) };
   }
 }
 

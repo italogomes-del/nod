@@ -126,6 +126,10 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     let negados = 0;
     let fechando = false;
     const ferramentasAbertas = new Map<string, string>();
+    /** NOD-167: as notificações que o laço não conhece, logadas uma vez cada (só o nome, nunca o conteúdo). */
+    const ignorados = new Set<string>();
+    /** NOD-167: o servidor pediu a interrupção dura enquanto o turn/start ainda não tinha voltado. */
+    let interromperAoAbrir = false;
 
     const emitir = (ev: EventoStream, compoeEntrega: boolean) => {
       if (compoeEntrega) eventos.push(ev);
@@ -173,6 +177,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
         if (id === null) {
           log("aviso", "codex_ligacao_turno_recusado", { turno_id: plano.turnoId, codigo: r.tipo === "resposta_erro" ? r.codigo : null });
           turno = { estado: "livre" };
+          interromperAoAbrir = false;
           if (resumo === "rodando") {
             resumo = "feito";
             return encerrar();
@@ -180,9 +185,16 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           if (nDoTurno > 0) cerebro?.enviar({ t: "fala-fim", n: nDoTurno });
           return seguir();
         }
-        if (encerrados.has(id)) return; // o turno já concluiu antes da resposta chegar
+        // O turno já concluiu antes da resposta chegar: o interrupt pedido para ele morre junto, senão cortaria o próximo.
+        if (encerrados.has(id)) {
+          interromperAoAbrir = false;
+          return;
+        }
         turno = { estado: "ativo", id };
-        if (resumo === "pedido") return enviar((rid) => pedidoTurnInterrupt(rid, { threadId, turnId: id }));
+        if (resumo === "pedido" || interromperAoAbrir) {
+          interromperAoAbrir = false;
+          return enviar((rid) => pedidoTurnInterrupt(rid, { threadId, turnId: id }));
+        }
         const juntos = fila;
         fila = [];
         for (const f of juntos) entregar(f.texto, f.n);
@@ -273,6 +285,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           const atual = turno.estado === "ativo" ? turno.id : null;
           if (ev.turnId && atual && ev.turnId !== atual) return; // turno velho
           turno = { estado: "livre" };
+          interromperAoAbrir = false;
           ultimoErro = ev.erro ?? ultimoErro;
           if (resumo === "rodando") {
             resumo = "feito";
@@ -288,6 +301,12 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
         case "erro":
           ultimoErro = ev.mensagem ?? ultimoErro;
           log("aviso", "codex_ligacao_erro_servidor", { turno_id: plano.turnoId, vai_repetir: ev.vaiRepetir });
+          return;
+        case "ignorado":
+          if (ev.metodo !== undefined && !ignorados.has(ev.metodo) && ignorados.size < 50) {
+            ignorados.add(ev.metodo);
+            log("info", "codex_ligacao_notificacao_ignorada", { turno_id: plano.turnoId, metodo: ev.metodo });
+          }
           return;
         default:
           return;
@@ -337,9 +356,13 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           entregar(m.confiavel ? m.texto : `[nod] Conteúdo de fora, não é pedido da pessoa:\n${m.texto}`, nResposta);
           return;
         case "interromper":
-          if (m.modo === "duro" && turno.estado === "ativo") {
+          if (m.modo !== "duro") return;
+          if (turno.estado === "ativo") {
             const turnId = turno.id;
             enviar((id) => pedidoTurnInterrupt(id, { threadId, turnId }));
+          } else if (turno.estado === "iniciando") {
+            // NOD-167: a vez sem resposta pode ser justo um turn/start que demorou a voltar; ao voltar, já interrompe.
+            interromperAoAbrir = true;
           }
           return;
         case "fim":
