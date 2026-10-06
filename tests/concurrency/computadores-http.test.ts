@@ -22,10 +22,13 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   let raizArquivos: string;
   const efeitos: {id:string;acao:AcaoComputador}[]=[];
   const ativos=new Set<string>();
+  // NOD-162: cada CHAMADA de driver.iniciar (onde o container nasce e liga), para travar o adiamento.
+  const inicios:string[]=[];
+  const novos:{agente:Agente;conversa:Conversa}[]=[];
   let bloquear: (()=>Promise<void>)|undefined;
   const driver: DriverComputador={
     estado:async id=>({disponivel:true,ativo:ativos.has(id),motivo:null}),
-    iniciar:async id=>{ativos.add(id);},parar:async id=>{ativos.delete(id);},ligados:async()=>new Set(ativos),
+    iniciar:async id=>{inicios.push(id);ativos.add(id);},parar:async id=>{ativos.delete(id);},ligados:async()=>new Set(ativos),
     executar:async(id,acao)=>{
       efeitos.push({id,acao});await bloquear?.();
       if (acao.tipo === "ler_texto" || acao.tipo === "gravar_texto") {
@@ -42,13 +45,13 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   },30000);
   // O plano é lido no PUXAR: desde a emenda da ADR-037 (24/09), computador desligado sai do catálogo —
   // quem liga no meio do teste emite o plano de novo.
-  const emitirPlano=()=>srv.app.dentro(srv.pessoa,async d=>{
-    await d.tx(async trx=>{await trx`update agentes set confirmado = true where id = ${bot.agente.id}`;});
-    const t=await d.repos.turnos.enfileirar({agenteId:bot.agente.id,conversaId:bot.conversa.id,origem:"conversa",prazoEm:Date.now()+600000,profundidade:0,entradaTexto:"Use seu computador",entradaConfianca:"confiavel",modelo:"auto",harness:"auto"});
+  const emitirPlano=(b=bot)=>srv.app.dentro(srv.pessoa,async d=>{
+    await d.tx(async trx=>{await trx`update agentes set confirmado = true where id = ${b.agente.id}`;});
+    const t=await d.repos.turnos.enfileirar({agenteId:b.agente.id,conversaId:b.conversa.id,origem:"conversa",prazoEm:Date.now()+600000,profundidade:0,entradaTexto:"Use seu computador",entradaConfianca:"confiavel",modelo:"auto",harness:"auto"});
     plano=(await emitirPlanoTurno(d,{turnoId:t!.id,machineId:randomUUID(),executor:"catcher"})).data;
   });
-  beforeEach(emitirPlano,30000);
-  afterAll(async()=>{if(srv){await srv.fechar();await limparPessoaE2E(srv.db,srv.dbDono,srv.pessoa,{agentes:[bot.agente.id],conversas:[bot.conversa.id]});await srv.desligar();}if(raizArquivos)await rm(raizArquivos,{recursive:true,force:true});},30000);
+  beforeEach(()=>emitirPlano(),30000);
+  afterAll(async()=>{if(srv){await srv.fechar();await limparPessoaE2E(srv.db,srv.dbDono,srv.pessoa,{agentes:[bot.agente.id,...novos.map(n=>n.agente.id)],conversas:[bot.conversa.id,...novos.map(n=>n.conversa.id)]});await srv.desligar();}if(raizArquivos)await rm(raizArquivos,{recursive:true,force:true});},30000);
   const consultar=()=>srv.json<ComputadorDto>("GET",`agentes/${bot.agente.id}/computador`);
   const configurar=(operacao:string)=>srv.json("POST",`agentes/${bot.agente.id}/computador`,{operacao});
   const humano=(acao:AcaoComputador)=>srv.chamar("POST",`agentes/${bot.agente.id}/computador/acoes`,acao);
@@ -134,5 +137,47 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     expect((await srv.chamar("GET",`agentes/${bot.agente.id}/computador`)).status).toBe(404);
     expect((await srv.chamar("POST",`agentes/${bot.agente.id}/restaurar`,{})).status).toBe(200);
     const restaurado=await consultar();expect(restaurado.computador.id).toBe(c.computador.id);expect(restaurado.computador.habilitado).toBe(false);
+  });
+  // NOD-162: o computador só nasce na primeira ferramenta computador_* que executa. Um bot novo por caso, para o
+  // vínculo começar nulo; o contador `inicios` conta chamadas de driver.iniciar.
+  const botNovo=async()=>{const b=await srv.json<{agente:Agente;conversa:Conversa}>("POST","agentes",{dono:"pessoa",interativo:true});novos.push(b);return b;};
+  // Lido por SQL, não pelo GET: o GET do painel cria a linha em `computadores` (obter).
+  const vinculo=(b:{agente:Agente})=>srv.app.dentro(srv.pessoa,d=>d.tx(async trx=>(await trx<{computador_id:string|null}[]>`select computador_id from agentes where id = ${b.agente.id}`)[0]!.computador_id));
+  it("(a) plano emitido e turno sem computador_*: nenhum iniciar e agentes.computador_id nulo",async()=>{
+    const b=await botNovo();const antes=inicios.length;
+    await emitirPlano(b);
+    expect(plano.catalogo.ferramentas.some(f=>f.nome==="computador_observar")).toBe(true);
+    expect(inicios.length).toBe(antes);
+    expect(await vinculo(b)).toBeNull();
+  });
+  it("(b) a 1ª computador_observar chama iniciar uma vez e cria o vínculo",async()=>{
+    const b=await botNovo();await emitirPlano(b);const antes=inicios.length;
+    expect(await vinculo(b)).toBeNull();
+    expect(await chamar("computador_observar")).toMatchObject({ok:true});
+    const id=await vinculo(b);
+    expect(id).not.toBeNull();
+    expect(inicios.slice(antes)).toEqual([id]);
+  });
+  it("(c) supervisionado (padrão, modo manual): card pendente não liga; aprovar liga uma vez; recusar não liga",async()=>{
+    const b=await botNovo();await emitirPlano(b);const antes=inicios.length;
+    const r=await chamar("computador_interagir",{tipo:"clicar",x:1,y:1,quadro});
+    if(!("aguardar" in r))throw new Error("aprovação ausente");
+    expect(inicios.length).toBe(antes);
+    const id=await vinculo(b);
+    const [item]=await srv.app.dentro(srv.pessoa,d=>d.repos.itensAprovacao.listar(r.aguardar));
+    expect((await srv.chamar("POST",`decisoes/${r.aguardar}/decidir`,{itens:[{id:item!.id,selecionado:true}]})).status).toBe(200);
+    expect(inicios.slice(antes)).toEqual([id]);
+    await emitirPlano(b);
+    const outra=await chamar("computador_interagir",{tipo:"clicar",x:2,y:2,quadro});
+    if(!("aguardar" in outra))throw new Error("aprovação ausente");
+    const [recusado]=await srv.app.dentro(srv.pessoa,d=>d.repos.itensAprovacao.listar(outra.aguardar));
+    expect((await srv.chamar("POST",`decisoes/${outra.aguardar}/decidir`,{itens:[{id:recusado!.id,selecionado:false}]})).status).toBe(200);
+    expect(inicios.slice(antes)).toEqual([id]);
+  });
+  it("(d) GET do computador (painel) não chama iniciar e mostra desligado",async()=>{
+    const b=await botNovo();const antes=inicios.length;
+    const c=await srv.json<ComputadorDto>("GET",`agentes/${b.agente.id}/computador`);
+    expect(c.ativo).toBe(false);
+    expect(inicios.length).toBe(antes);
   });
 });

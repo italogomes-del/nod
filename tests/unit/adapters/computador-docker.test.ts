@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 type Resposta = { codigo?: number; saida?: string; erro?: string };
 const chamadas: string[][] = [];
+/** O stdin de cada `docker ...` (o cofre vai por aqui no unlock). */
+const entradas: string[] = [];
 let responder: (args: string[]) => Resposta = () => ({});
 
 vi.mock("node:child_process", () => ({
@@ -15,7 +18,7 @@ vi.mock("node:child_process", () => ({
     const p = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
-      stdin: Object.assign(new EventEmitter(), { end: () => undefined }),
+      stdin: Object.assign(new EventEmitter(), { end: (e?: string) => { entradas.push(e ?? ""); } }),
       kill: () => true,
     });
     const r = responder(args);
@@ -68,6 +71,7 @@ const comandos = () => chamadas.map((a) => a.join(" "));
 
 beforeEach(() => {
   chamadas.length = 0;
+  entradas.length = 0;
 });
 
 describe("driver Docker: teto de computadores ligados (NOD-170)", () => {
@@ -152,5 +156,143 @@ describe("driver Docker: imagem nova chega à máquina parada (NOD-170)", () => 
     const c = comandos();
     expect(c.some((x) => x.startsWith("rm "))).toBe(false);
     expect(c.some((x) => x.startsWith("create --name nod-computador-"))).toBe(true);
+  });
+});
+
+describe("driver Docker: log computador_iniciado mede o boot (NOD-162)", () => {
+  let linhas: Record<string, unknown>[] = [];
+  let brutas: string[] = [];
+  beforeEach(() => {
+    linhas = [];
+    brutas = [];
+    vi.spyOn(console, "log").mockImplementation((l: string) => { brutas.push(l); linhas.push(JSON.parse(l) as Record<string, unknown>); });
+    return () => vi.restoreAllMocks();
+  });
+  const iniciados = () => linhas.filter((l) => l.evento === "computador_iniciado");
+
+  it("máquina nova: frio, duração numérica, sem imagem recriada nem reinício", async () => {
+    host({ ligados: [], existe: false });
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toEqual([expect.objectContaining({ nivel: "info", computador_id: ID, partida: "frio", ok: true, imagem_recriada: false, reiniciou: false })]);
+    expect(typeof iniciados()[0]!.duracao_ms).toBe("number");
+  });
+
+  it("máquina parada: quente", async () => {
+    host({ ligados: [] });
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toEqual([expect.objectContaining({ partida: "quente", ok: true, imagem_recriada: false, reiniciou: false })]);
+  });
+
+  it("imagem velha: frio com imagem_recriada", async () => {
+    host({ ligados: [], imagemDoContainer: "sha256:velha", imagemDaTag: "sha256:nova" });
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toEqual([expect.objectContaining({ partida: "frio", imagem_recriada: true, ok: true })]);
+  });
+
+  it("de pé com o cofre trancado (docker restart): quente com reiniciou", async () => {
+    host({ ligados: [ID], rodando: true });
+    let primeiroPing = true;
+    responder = ((anterior) => (args: string[]) => {
+      if (args[0] === "exec" && primeiroPing) { primeiroPing = false; return { saida: JSON.stringify({ resultado: { pronto: false } }) }; }
+      return anterior(args);
+    })(responder);
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toEqual([expect.objectContaining({ partida: "quente", reiniciou: true, ok: true })]);
+  });
+
+  // QA NOD-162: no Mac carregado o 1º ping estoura os 3 s. Ping sem resposta não mostra cofre trancado nem
+  // código parado, e nada foi reiniciado: não pode contar como reinício na medição.
+  it("de pé, mas o 1º ping não responde (prazo estourado): quente sem reiniciou", async () => {
+    host({ ligados: [ID], rodando: true });
+    let primeiroPing = true;
+    responder = ((anterior) => (args: string[]) => {
+      if (args[0] === "exec" && args.includes("/opt/nod/client.mjs") && primeiroPing) { primeiroPing = false; return { codigo: 1, erro: "context deadline exceeded" }; }
+      return anterior(args);
+    })(responder);
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toEqual([expect.objectContaining({ partida: "quente", reiniciou: false, ok: true })]);
+    expect(comandos().some((c) => c.startsWith("restart "))).toBe(false);
+  });
+
+  it("ligada e pronta: nenhum computador_iniciado (executar passa por iniciar em toda ação)", async () => {
+    host({ ligados: [ID], rodando: true });
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toEqual([]);
+  });
+
+  it("nao_permitido não loga", async () => {
+    await expect(criarDriverDocker({ ...ENV, NOD_COMPUTADORES: "" }).iniciar(ID)).rejects.toMatchObject({ codigo: "nao_permitido" });
+    expect(iniciados()).toEqual([]);
+  });
+
+  it("falha no start: aviso com ok:false e o motivo fechado, sem o detalhe do stderr, e relança", async () => {
+    host({ ligados: [] });
+    responder = ((anterior) => (args: string[]) => args[0] === "start" && args.at(-1) === `nod-computador-${ID}` ? { codigo: 1, erro: "OCI runtime: segredo-do-stderr" } : anterior(args))(responder);
+    await expect(criarDriverDocker(ENV).iniciar(ID)).rejects.toMatchObject({ motivo: "nao_iniciou" });
+    expect(iniciados()).toEqual([expect.objectContaining({ nivel: "aviso", ok: false, motivo: "nao_iniciou", partida: "quente" })]);
+    expect(typeof iniciados()[0]!.duracao_ms).toBe("number");
+    expect(brutas.join("\n")).not.toContain("segredo-do-stderr");
+  });
+
+  it("falha mede a duração até o ponto da falha, não até o log", async () => {
+    let agora = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => agora);
+    host({ ligados: [] });
+    responder = ((anterior) => (args: string[]) => {
+      if (args[0] === "start" && args.at(-1) === `nod-computador-${ID}`) { agora += 4321; return { codigo: 1, erro: "falhou" }; }
+      return anterior(args);
+    })(responder);
+    const p = criarDriverDocker(ENV).iniciar(ID);
+    await expect(p).rejects.toMatchObject({ motivo: "nao_iniciou" });
+    agora += 99_999;
+    expect(iniciados()).toEqual([expect.objectContaining({ ok: false, duracao_ms: 4321 })]);
+  });
+
+  it("máquina nova que falha antes do create (rede): frio, não quente", async () => {
+    host({ ligados: [], existe: false });
+    responder = ((anterior) => (args: string[]) => (args[0] === "network" ? { codigo: 1, erro: "sem rede" } : anterior(args)))(responder);
+    await expect(criarDriverDocker(ENV).iniciar(ID)).rejects.toMatchObject({ motivo: "nao_iniciou" });
+    expect(iniciados()).toEqual([expect.objectContaining({ ok: false, partida: "frio", imagem_recriada: false })]);
+  });
+
+  it("imagem velha que falha no create da máquina: frio com imagem_recriada", async () => {
+    host({ ligados: [], imagemDoContainer: "sha256:velha", imagemDaTag: "sha256:nova" });
+    responder = ((anterior) => (args: string[]) => (args[0] === "create" && args[2] === `nod-computador-${ID}` ? { codigo: 1, erro: "create falhou" } : anterior(args)))(responder);
+    await expect(criarDriverDocker(ENV).iniciar(ID)).rejects.toMatchObject({ motivo: "nao_iniciou" });
+    expect(iniciados()).toEqual([expect.objectContaining({ ok: false, partida: "frio", imagem_recriada: true })]);
+  });
+
+  it("falha depois do unlock (ok:false): nem a chave, nem o HMAC, nem o detalhe do runtime vão ao log", async () => {
+    const cofre = createHmac("sha256", Buffer.from(ENV.NOD_CREDENTIAL_KEY, "hex")).update(`nod-computador:${ID}`).digest("hex");
+    host({ ligados: [], existe: false });
+    // O runtime devolve o detalhe com o pior conteúdo possível: o próprio cofre e a chave.
+    const detalhe = `cofre recusado: ${cofre} ${ENV.NOD_CREDENTIAL_KEY} detalhe-cru-do-runtime`;
+    responder = ((anterior) => (args: string[]) => (args[0] === "exec" && args.includes("/opt/nod/client.mjs") ? { saida: JSON.stringify({ resultado: { pronto: false, falha: "cofre_invalido", detalhe } }) } : anterior(args)))(responder);
+    await expect(criarDriverDocker(ENV).iniciar(ID)).rejects.toMatchObject({ motivo: "cofre_invalido" });
+    expect(entradas).toContain(cofre);
+    expect(iniciados()).toEqual([expect.objectContaining({ nivel: "aviso", ok: false, motivo: "cofre_invalido", partida: "frio" })]);
+    expect(iniciados()[0]).not.toHaveProperty("detalhe");
+    const tudo = brutas.join("\n");
+    expect(tudo).not.toContain(ENV.NOD_CREDENTIAL_KEY);
+    expect(tudo).not.toContain(cofre);
+    expect(tudo).not.toContain("detalhe-cru-do-runtime");
+  });
+
+  it("teto: ok:false com limite_de_computadores, sem boot", async () => {
+    host({ ligados: OUTROS });
+    await expect(criarDriverDocker(ENV).iniciar(ID)).rejects.toMatchObject({ motivo: "limite_de_computadores" });
+    expect(iniciados()).toEqual([expect.objectContaining({ ok: false, motivo: "limite_de_computadores" })]);
+  });
+
+  it("nem a NOD_CREDENTIAL_KEY nem o HMAC do cofre aparecem no log", async () => {
+    const cofre = createHmac("sha256", Buffer.from(ENV.NOD_CREDENTIAL_KEY, "hex")).update(`nod-computador:${ID}`).digest("hex");
+    host({ ligados: [], existe: false });
+    await criarDriverDocker(ENV).iniciar(ID);
+    expect(iniciados()).toHaveLength(1);
+    const tudo = brutas.join("\n");
+    expect(tudo).not.toContain(ENV.NOD_CREDENTIAL_KEY);
+    expect(tudo).not.toContain(cofre);
+    // O cofre foi mesmo para o unlock (prova de que o teste compara o HMAC certo).
+    expect(entradas).toContain(cofre);
   });
 });

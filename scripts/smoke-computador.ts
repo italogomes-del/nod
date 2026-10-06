@@ -5,7 +5,36 @@ import { execFileSync } from "node:child_process";
 import { criarDriverDocker } from "../src/adapters/computador/docker.ts";
 // NOD-170: o teto é por host e conta os computadores de verdade já ligados; o smoke não mede o teto (o teste unit do
 // driver mede), então sobe o máximo para não ser recusado num host em uso.
-const driver = criarDriverDocker({ NOD_COMPUTADORES: "docker", NOD_COMPUTADOR_IMAGEM: process.env.NOD_COMPUTADOR_IMAGEM, NOD_CREDENTIAL_KEY: randomBytes(32).toString("hex"), NOD_COMPUTADORES_MAX: "1000" });
+// NOD-162: NOD_SMOKE_MEDIR=1 só mede o boot (log computador_iniciado), com UMA máquina e o teto do ambiente (padrão 3),
+// para caber num host com computadores de verdade ligados: 1 frio, 1 após docker restart, NOD_SMOKE_QUENTES (padrão 5)
+// parar+iniciar e, com NOD_SMOKE_STATS=1, docker stats ociosa (após 1 min) e durante uma ação.
+const medir = process.env.NOD_SMOKE_MEDIR === "1";
+const driver = criarDriverDocker({ NOD_COMPUTADORES: "docker", NOD_COMPUTADOR_IMAGEM: process.env.NOD_COMPUTADOR_IMAGEM, NOD_CREDENTIAL_KEY: randomBytes(32).toString("hex"), NOD_COMPUTADORES_MAX: medir ? (process.env.NOD_COMPUTADORES_MAX ?? "3") : "1000" });
+const stats = (id: string, rotulo: string) => process.stdout.write(`stats ${rotulo}: ${execFileSync("docker", ["stats", "--no-stream", "--format", "{{.CPUPerc}} {{.MemUsage}}", `nod-computador-${id}`]).toString().trim()}\n`);
+if (medir) {
+  const id = randomUUID();
+  await writeFile("/tmp/nod-computadores-smoke-ids.json", JSON.stringify([id]));
+  try {
+    await driver.iniciar(id);
+    if (process.env.NOD_SMOKE_STATS === "1") {
+      await new Promise((r) => setTimeout(r, 60_000));
+      stats(id, "ociosa");
+      const acao = driver.executar(id, { tipo: "navegar", url: "https://example.com" });
+      await new Promise((r) => setTimeout(r, 1500));
+      stats(id, "em uso");
+      await acao;
+    }
+    execFileSync("docker", ["restart", "--time", "10", `nod-computador-${id}`], { stdio: "ignore" });
+    await driver.iniciar(id);
+    for (let i = 0; i < Number(process.env.NOD_SMOKE_QUENTES ?? "5"); i++) { await driver.parar(id); await driver.iniciar(id); }
+  } finally {
+    await driver.parar(id).catch(() => undefined);
+    for (const args of [["rm", "-f", `nod-computador-${id}`, `nod-egress-${id}`], ["network", "rm", `nod-rede-${id}`], ["volume", "rm", `nod-computador-${id}-home`, `nod-computador-${id}-workspace`]]) {
+      try { execFileSync("docker", args, { stdio: "ignore" }); } catch { /* recursos que o boot não chegou a criar */ }
+    }
+  }
+  process.exit(0);
+}
 const ids = [randomUUID(), randomUUID()];
 await writeFile("/tmp/nod-computadores-smoke-ids.json", JSON.stringify(ids));
 try {

@@ -96,20 +96,26 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
   /**
    * definido em 2026-10-05 (NOD-170): imagem nova só chega à máquina PARADA. Se a imagem do container
    * difere da tag, remove a máquina e o proxy SEM -v (os volumes -home/-workspace são nomeados e ficam) e
-   * o fluxo normal recria os dois. Devolve se recriou.
+   * o fluxo normal recria os dois. Devolve se recriou, ou "ausente" se o inspect não achou a máquina (NOD-162: a
+   * partida provisória, antes do create; o inspect que estoura o prazo também cai aqui e o passo do create corrige).
    */
-  async function trocarImagemSeVelha(id: string, n: ReturnType<typeof nomes>, comPrazo: (args: string[], entrada?: string, timeout?: number, padrao?: MotivoFalhaComputador) => Promise<string>): Promise<boolean> {
+  async function trocarImagemSeVelha(id: string, n: ReturnType<typeof nomes>, comPrazo: (args: string[], entrada?: string, timeout?: number, padrao?: MotivoFalhaComputador) => Promise<string>): Promise<"ausente" | "mantida" | "recriada"> {
     const doContainer = (await comPrazo(["inspect", "--format", "{{.Image}}", n.maquina], undefined, 5000).catch(() => "")).trim();
-    if (!doContainer) return false;
+    if (!doContainer) return "ausente";
     const daTag = (await comPrazo(["image", "inspect", "--format", "{{.Id}}", imagem], undefined, 5000, "imagem_ausente")).trim();
-    if (!daTag || daTag === doContainer) return false;
+    if (!daTag || daTag === doContainer) return "mantida";
     await comPrazo(["rm", n.maquina], undefined, 30_000, "nao_iniciou");
     await comPrazo(["rm", "--force", n.proxy], undefined, 30_000).catch(() => undefined);
     log("info", "computador_imagem_recriada", { computador_id: id, imagem });
-    return true;
+    return "recriada";
   }
-  async function iniciar(id: string) {
-    if (!habilitado || !cofreConfigurado) throw new ErroDeDominio("nao_permitido");
+  /**
+   * definido em 2026-10-05 (NOD-162): como a máquina subiu, para o log `computador_iniciado`. `frio` = criada agora
+   * (inclusive depois de trocar a imagem); `quente` = já existia e foi ligada ou reiniciada. `jaPronta` = a volta
+   * antecipada da máquina já de pé, que não loga (executar passa por iniciar em toda ação).
+   */
+  type Partida = { partida: "frio" | "quente"; imagemRecriada: boolean; reiniciou: boolean; jaPronta: boolean };
+  async function subir(id: string, anotar: Partida) {
     const prazo = Date.now() + 120_000;
     const comPrazo = (args: string[], entrada?: string, timeout = 70_000, padrao?: MotivoFalhaComputador) => {
       const restante = prazo - Date.now();
@@ -120,7 +126,10 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
     const ping = () => comPrazo(["exec", "-i", n.maquina, "node", "/opt/nod/client.mjs"], '{"tipo":"ping"}', 3000).then(lerPing, () => null);
     if (await rodando(n.maquina)) {
       const p = await ping();
-      if (p?.pronto) return;
+      if (p?.pronto) { anotar.jaPronta = true; return; }
+      // De pé com o cofre trancado (docker restart) ou parado num código: a partida conta como reinício. Ping sem
+      // resposta (prazo de 3 s estourado no host carregado) não mostra nenhum dos dois: segue quente, sem reinício.
+      anotar.reiniciou = p !== null;
       // De pé, mas parado num código (ex.: navegador_nao_abriu pelo SingletonLock de um container
       // antigo): reiniciar resolve, porque o runtime limpa a trava do perfil ao subir. Volumes ficam.
       if (p?.falha) await comPrazo(["restart", "--time", "10", n.maquina], undefined, 30_000, "nao_iniciou");
@@ -134,7 +143,10 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
         log("aviso", "computador_limite", { computador_id: id, ligados: ativos.size, maximo: limite.maximo });
         throw new FalhaComputador("limite_de_computadores", { detalhe: `${ativos.size} ligados, máximo ${limite.maximo}`, limite });
       }
-      await trocarImagemSeVelha(id, n, comPrazo);
+      const maquina = await trocarImagemSeVelha(id, n, comPrazo);
+      anotar.imagemRecriada = maquina === "recriada";
+      // Falha entre aqui e o create (imagem, rede, proxy) sai com a partida certa: máquina ausente ou removida é frio.
+      if (maquina !== "mantida") anotar.partida = "frio";
     }
     await comPrazo(["image", "inspect", imagem], undefined, 5000, "imagem_ausente");
     await comPrazo(["network", "inspect", n.rede], undefined, 5000).catch(() => comPrazo(["network", "create", "--internal", "--label", "nod.computador=true", n.rede], undefined, 70_000, "nao_iniciou"));
@@ -145,6 +157,7 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
     }
     if (!await rodando(n.proxy)) await comPrazo(["start", n.proxy], undefined, 70_000, "nao_iniciou");
     const existe = await comPrazo(["inspect", n.maquina], undefined, 5000).then(() => true, () => false);
+    anotar.partida = existe ? "quente" : "frio";
     if (!existe) await comPrazo(["create", "--name", n.maquina, "--label", "nod.computador=true", "--restart", "unless-stopped", "--network", n.rede,
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--memory", "2g", "--cpus", "2", "--pids-limit", "512", "--shm-size", "512m",
       "--tmpfs", "/tmp:rw,nosuid,size=512m", "--tmpfs", "/run:rw,nosuid,size=64m,uid=1000,gid=1000",
@@ -161,6 +174,24 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
       await pausa(500);
     }
     throw new FalhaComputador("sem_resposta", { detalhe: "o computador não ficou pronto em 2 min", reinicios: (await inspecionar(n.maquina)).reinicios });
+  }
+  /**
+   * definido em 2026-10-05 (NOD-162): mede o boot. Sem cofre, chave nem detalhe no log (o computador_falhou de quem
+   * chamou já resume o detalhe). nao_permitido e a máquina já pronta não logam.
+   */
+  async function iniciar(id: string) {
+    if (!habilitado || !cofreConfigurado) throw new ErroDeDominio("nao_permitido");
+    nomes(id); // id inválido é entrada_invalida, não boot que falhou: recusa antes de medir.
+    const anotar: Partida = { partida: "quente", imagemRecriada: false, reiniciou: false, jaPronta: false };
+    const inicio = Date.now();
+    const campos = () => ({ computador_id: id, partida: anotar.partida, duracao_ms: Date.now() - inicio, imagem_recriada: anotar.imagemRecriada, reiniciou: anotar.reiniciou });
+    try {
+      await subir(id, anotar);
+    } catch (e) {
+      log("aviso", "computador_iniciado", { ...campos(), ok: false, motivo: e instanceof FalhaComputador ? e.motivo : "nao_iniciou" });
+      throw e;
+    }
+    if (!anotar.jaPronta) log("info", "computador_iniciado", { ...campos(), ok: true });
   }
   return {
     async estado(id) {
