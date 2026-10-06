@@ -20,3 +20,15 @@
 
 A voz é dado sensível; o áudio sai do Brasil para o provedor (com DPA, decisão de 2026-10-03), mas nada fica guardado
 além do texto que a própria pessoa controla.
+
+## Emenda 2026-10-06 — ouvir uma resposta fora da ligação (NOD-180)
+
+- Ouvir uma resposta manda o texto dela ao mesmo provedor de TTS da ligação. Por isso exige o **mesmo consentimento
+  versionado** (`VERSAO_CONSENTIMENTO_VOZ`): sem ele, a rota recusa com `estado_invalido` antes de chamar o TTS. O texto
+  do aviso já cobre ("a voz do bot também é gerada lá"); a versão não sobe.
+- **Nenhum áudio é gravado** (nem em disco, nem em cache): cada "ouvir" sintetiza de novo, com `cache-control: no-store`.
+- O **teto diário** de caracteres fica só em memória e zera no reinício; não há tabela nova nem registro por mensagem.
+- Só respostas de bot próprio, prontas e de texto, na conversa própria dele. Sala e bot da equipe ficam de fora, como
+  na ligação.
+- O log `voz_leitura` leva ids e contagens, nunca o texto lido.
+

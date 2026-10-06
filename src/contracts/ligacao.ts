@@ -67,9 +67,13 @@ export type MotivoRecusaLigacao =
   | "drenagem"
   | "sem_consentimento";
 
+/**
+ * `ouvir` (definido em 2026-10-06, NOD-180): a pessoa pode ouvir as respostas deste bot (GET mensagens/:id/ouvir),
+ * mesmo quando a ligação está recusada (sem Mac, sem IA). Ausente = não pode (servidor anterior à NOD-180).
+ */
 export type DisponibilidadeLigacao =
-  | { disponivel: true; consentimentoNecessario: boolean; versaoConsentimento: number; provedor: string }
-  | { disponivel: false; motivo: MotivoRecusaLigacao; texto: string };
+  | { disponivel: true; consentimentoNecessario: boolean; versaoConsentimento: number; provedor: string; ouvir?: boolean }
+  | { disponivel: false; motivo: MotivoRecusaLigacao; texto: string; ouvir?: boolean };
 
 /** POST ligacoes: o que a tela precisa para abrir a mídia. */
 export type LigacaoCriada = { ligacao: Ligacao; maxS: number };

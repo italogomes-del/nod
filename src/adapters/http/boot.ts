@@ -1,4 +1,5 @@
 import type { DriverComputador } from "../../contracts/computador.ts";
+import type { ProvedoresVoz } from "../voz/spi.ts";
 import { criarCodexCliDriver } from "../executor/drivers/codex-cli.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -52,6 +53,8 @@ export type OpcoesBoot = {
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
   /** Drivers do registry; default: catcher (+ claude-cli quando NOD_EXECUTOR=claude-cli). */
   drivers?: (p: { urlNod: string; app: App }) => Driver[];
+  /** Provedores de voz prontos (NOD-180); só em teste. Default: pelas envs NOD_VOZ_*. */
+  voz?: ProvedoresVoz;
   segredoSessao?: string;
   staticDir?: string;
 };
@@ -135,7 +138,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
-  const app = comporApp({ db, computador: o.computador, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
+  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,

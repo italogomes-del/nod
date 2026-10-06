@@ -116,6 +116,8 @@ import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz
 import type { EstadoIaDaLigacao } from "../../contracts/voz.ts";
 import { ehIaDaLigacao } from "../../domain/ligacao-sem-ia.ts";
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
+import { ADIANTE_MS_PADRAO, CARACTERES_DIA_PADRAO, criarLeitorDeVoz, lerInteiroDaLeitura } from "./leitura-voz.ts";
+import type { ContextoLeitura } from "../../use-cases/ouvir-mensagem.ts";
 import type { ProvedoresVoz } from "../voz/spi.ts";
 import { concatenar, montarWav } from "../voz/audio.ts";
 import { VELOCIDADES_VOZ, VOZES_NOD } from "../../contracts/vozes.ts";
@@ -151,6 +153,8 @@ export type OpcoesCompor = {
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
   /** Quem responde se o `gh` desta máquina está logado (ADR-048); só em teste. Default: `gh auth status`. */
   detectorGh?: DetectorGh;
+  /** Provedores de voz prontos (NOD-180); só em teste, para observar o TTS falso. Default: pelas envs NOD_VOZ_*. */
+  voz?: ProvedoresVoz;
 };
 
 export type App = {
@@ -464,7 +468,7 @@ export function comporApp(o: OpcoesCompor): App {
   let vozConfigurada = true;
   let provedoresVoz: ProvedoresVoz;
   try {
-    provedoresVoz = criarProvedoresVoz(env);
+    provedoresVoz = o.voz ?? criarProvedoresVoz(env);
   } catch (e) {
     vozConfigurada = false;
     log("erro", "voz_nao_configurada", { erro: e instanceof Error ? e.name : "desconhecido" });
@@ -570,6 +574,21 @@ export function comporApp(o: OpcoesCompor): App {
     }
     return p;
   }
+  // Ouvir as respostas (definido em 2026-10-06, NOD-180): desligado por padrão; NOD_VOZ_LEITURA=1 liga. Segue a mesma
+  // abertura das ligações (NOD_LIGACAO) e o mesmo provedor; o teto diário e a janela à frente vêm das envs.
+  const leituraHabilitada = env.NOD_VOZ_LEITURA === "1";
+  const leitor = criarLeitorDeVoz({
+    tts: provedoresVoz.tts,
+    caracteresPorDia: lerInteiroDaLeitura("NOD_VOZ_LEITURA_CARACTERES_DIA", env.NOD_VOZ_LEITURA_CARACTERES_DIA, CARACTERES_DIA_PADRAO),
+    adianteMs: lerInteiroDaLeitura("NOD_VOZ_LEITURA_ADIANTE_MS", env.NOD_VOZ_LEITURA_ADIANTE_MS, ADIANTE_MS_PADRAO),
+  });
+  async function contextoLeitura(escopo: Escopo): Promise<ContextoLeitura> {
+    return {
+      habilitada: leituraHabilitada,
+      permitido: leituraHabilitada && (modoLigacao === "todas" || (modoLigacao === "admins" && (await ehAdminVoz(escopo)))),
+      vozDisponivel: vozConfigurada,
+    };
+  }
   async function ehAdminVoz(escopo: Escopo): Promise<boolean> {
     if (adminsVoz.length === 0) return false;
     if (adminsVoz.includes(escopo.pessoaId.toLowerCase())) return true;
@@ -612,6 +631,7 @@ export function comporApp(o: OpcoesCompor): App {
       inicioDoDia: inicioDoDiaSp(relogio()),
       provedorStt: provedoresVoz.stt.id,
       provedorTts: provedoresVoz.tts.id,
+      leituraHabilitada,
     };
   }
 
@@ -813,6 +833,8 @@ export function comporApp(o: OpcoesCompor): App {
       iasProntas: (escopo) => (!compartilhado && executorAtual === "catcher" ? null : iasDoMacParaVoz(escopo.pessoaId).filter((i) => i.estado === "pronto").map((i) => i.id)),
       reabrirCerebro: (escopo, p) => voz.reabrirCerebro({ pessoaId: escopo.pessoaId, ...p }),
       amostra: amostraDeVoz,
+      contextoLeitura,
+      ouvir: (escopo, p) => leitor.ler({ escopo, ...p }),
     }),
     ...criarRotasOnboarding({
       ...depsRotas,
@@ -956,6 +978,7 @@ export function comporApp(o: OpcoesCompor): App {
       });
     },
     async fechar() {
+      leitor.fechar();
       await voz.fechar();
       await provedoresVoz.encerrar();
       if (varredorMaquinas) clearInterval(varredorMaquinas);

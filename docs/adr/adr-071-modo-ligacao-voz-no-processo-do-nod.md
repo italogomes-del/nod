@@ -172,3 +172,33 @@ vozes, voz abaixo de 3,5 sai do catálogo da Release 1), a rotação de 12 min (
 `voz_tts_limitado` com `descartado:false` e `espera_ms` acima de 1 s em mais de 1 em cada 50 ligações (subir a cota
 no GCP ou o teto) ou a sonda mostrar que o fluxo não conta na cota (o teto sobe e o streaming deixa de pedir vaga
 extra).
+
+## Emenda 2026-10-06 — voz fora da ligação: ouvir uma resposta (NOD-180)
+
+A voz do bot também lê uma resposta pronta do chat, sem ligação: `GET /api/t/:tenant/mensagens/:id/ouvir`. Só o
+servidor (a tela é da NOD-106). Desligado por padrão (`NOD_VOZ_LEITURA=1` liga) e com a mesma abertura das ligações
+(`NOD_LIGACAO`). A disponibilidade da ligação ganha `ouvir`, que não depende do Mac nem da IA.
+
+- **Mesmo provedor, prioridade `previa`.** A leitura usa o `Sintetizador` das ligações e entra no limitador da cota no
+  nível mais baixo, junto da prévia da voz: a ligação ao vivo sempre passa na frente.
+- **Contrato do áudio.** PCM16 mono a 24 kHz, **big-endian**, `content-type: audio/L16; rate=24000; channels=1` (RFC
+  2586), `cache-control: no-store`, sem `content-length`. O cabeçalho só sai com o primeiro pedaço: erro do TTS antes
+  disso é 502 (`conector_indisponivel`); depois, a resposta corta (o roteador não muda mais o status).
+- **Texto.** `textoParaLeitura` (domínio): bloco de código e tabela viram uma frase ("Aqui tem um bloco de código em
+  TypeScript."), link vira o rótulo, URL solta vira "um link", caminho vira o nome do arquivo. Até 4.000 caracteres;
+  passou, corta no fim de frase e fecha com "O resto está na tela.". O 1º trecho tem até 25 palavras, para o áudio
+  começar cedo; os outros juntam frases até 400 caracteres.
+- **Custo e corrida.** Teto diário por pessoa em caracteres (`NOD_VOZ_LEITURA_CARACTERES_DIA`, padrão 100.000, dia de
+  São Paulo), reservado inteiro antes do 1º byte e devolvido no que não chegou ao TTS; passou, 429. Uma leitura por
+  pessoa: a nova aborta a anterior. A pessoa fechou, o TTS é abortado na hora e nenhum trecho novo é pedido. No máximo
+  `NOD_VOZ_LEITURA_ADIANTE_MS` (padrão 15 s) de áudio à frente do relógio, mais o `drain` do socket. No desligamento,
+  as leituras vivas são abortadas. Log `voz_leitura` (trechos, caracteres, bytes, ms, desfecho, provedor), nunca o texto.
+
+**Por que streaming HTTP e não o WebSocket da ligação.** Ouvir é uma ida só, sem microfone, vez nem cérebro: um GET
+que o navegador toca enquanto chega não precisa de sessão de mídia, e o Caddy já passa o corpo sem buffer
+(`flush_interval -1`).
+
+**Gatilho de reversão.** `voz_tts_limitado` com prioridade `previa` descartando leituras com frequência (a leitura
+precisa de cota própria) ou o custo de TTS das leituras passar o das ligações no mês (o teto diário desce ou a leitura
+passa a ter cache por mensagem, o que exigiria rever a regra de nenhum áudio guardado da ADR-075).
+

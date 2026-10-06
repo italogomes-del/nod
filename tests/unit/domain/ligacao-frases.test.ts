@@ -266,3 +266,132 @@ describe("trecho cortado na vírgula (UAT de 2026-10-04)", () => {
     expect(textoFalavel("Então: você é Marlon,").falavel).toBe("Então: você é Marlon,");
   });
 });
+
+import { FRASE_RESTO_TELA, FRASE_TABELA, LEITURA, textoParaLeitura } from "../../../src/domain/ligacao-frases.ts";
+
+const lido = (md: string) => textoParaLeitura(md).join(" ");
+
+describe("textoParaLeitura (NOD-180: ouvir uma resposta pronta)", () => {
+  it("texto simples sai igual, com ponto, sem nada mandado para o chat", () => {
+    expect(textoParaLeitura("Tudo certo por aqui")).toEqual(["Tudo certo por aqui."]);
+    expect(lido("Pronto. Já resolvi.")).not.toMatch(/chat/iu);
+  });
+
+  it("vazio ou só código vira [] ou só o aviso do bloco", () => {
+    expect(textoParaLeitura("")).toEqual([]);
+    expect(textoParaLeitura("   \n\n  ")).toEqual([]);
+    expect(textoParaLeitura("**  **")).toEqual([]);
+    expect(textoParaLeitura("```ts\nconst a = 1;\n```")).toEqual(["Aqui tem um bloco de código em TypeScript."]);
+  });
+
+  it("bloco de código: uma frase por bloco, com a linguagem conhecida", () => {
+    const md = "Veja:\n\n```py\nprint(1)\n```\n\nE também:\n\n```\nx\n```\n\n~~~sql\nselect 1;\n~~~\n\n```brainfuck\n+++\n```";
+    const t = lido(md);
+    expect(t).toContain("Aqui tem um bloco de código em Python.");
+    expect(t).toContain("Aqui tem um bloco de código em SQL.");
+    expect(t.match(/Aqui tem um bloco de código\./gu)).toHaveLength(2);
+    expect(t).not.toMatch(/print|select|\+\+\+/u);
+  });
+
+  it("bloco sem fecho não vaza o código", () => {
+    expect(lido("Olha:\n```js\nconst segredo = 42;")).toBe("Olha: Aqui tem um bloco de código em JavaScript.");
+  });
+
+  it("tabela vira uma frase só, mesmo com várias linhas", () => {
+    const md = "Resumo:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\nFim.";
+    const t = textoParaLeitura(md);
+    expect(t.join(" ").match(new RegExp(FRASE_TABELA, "gu"))).toHaveLength(1);
+    expect(t.join(" ")).not.toMatch(/\|/u);
+  });
+
+  it("link vira o rótulo; URL solta e <url> viram 'um link'", () => {
+    expect(lido("Abri o [PR #157](https://github.com/marlonwlv/nod/pull/157).")).toBe("Abri o PR #157.");
+    expect(lido("Veja https://exemplo.com/a?b=1 agora.")).toBe("Veja um link agora.");
+    expect(lido("Veja <https://exemplo.com>.")).toBe("Veja um link.");
+  });
+
+  it("código em linha curto é lido; longo vira 'um trecho de código'", () => {
+    expect(lido("Rode `npm run check`.")).toBe("Rode npm run check.");
+    expect(lido("Use `if (a) { b(); }` no fim.")).toBe("Use um trecho de código no fim.");
+  });
+
+  it("caminho vira o nome do arquivo, sem pegar data nem e/ou", () => {
+    expect(lido("Mexi em src/adapters/voz/spi.ts hoje.")).toBe("Mexi em spi.ts hoje.");
+    expect(lido("Veja docs/adr/ e o resto.")).toBe("Veja adr e o resto.");
+    expect(lido("Dia 06/10/2026, e/ou amanhã a 80 km/h.")).toContain("e/ou");
+    expect(lido("Dia 06/10/2026.")).not.toBe("Dia 2026.");
+  });
+
+  it("não parte número, abreviação nem versão", () => {
+    const t = textoParaLeitura("Custou R$ 1.000,50 ao Sr. Silva. A versão é v1.2.3 desde ontem. Fim.");
+    const tudo = t.join(" ");
+    expect(tudo).toContain("Sr. Silva");
+    expect(tudo).toMatch(/1\.2\.3/u);
+    expect(t.some((x) => x.endsWith("Sr."))).toBe(false);
+  });
+
+  // Regressão (QA NOD-180, 2026-10-06): com 2 barras, uma lista de palavras virava só a última ("sim/não/talvez" → "talvez").
+  it("palavras separadas por barra, sem extensão nem raiz, ficam como estão", () => {
+    expect(lido("Defina leitura/escrita/execução no arquivo.")).toContain("leitura/escrita/execução");
+    expect(lido("Responda sim/não/talvez.")).toContain("sim/não/talvez");
+    expect(lido("Abri ~/nod/Tarsila/qa-180 e /tmp/saida agora.")).toBe("Abri qa-180 e saida agora.");
+  });
+
+  // Regressão (QA NOD-180, 2026-10-06): a cerca de 4 crases fechava na de 3 de dentro e o código era lido em voz alta.
+  it("bloco dentro de bloco (cerca de 4 crases) e bloco recuado em lista não vazam o código", () => {
+    expect(lido("Exemplo:\n\n````md\n```ts\nconst segredo = 42;\n```\n````\n\nFim.")).toBe("Exemplo: Aqui tem um bloco de código em Markdown. Fim.");
+    expect(lido("1. Rode:\n   ```bash\n   npm ci\n   ```\n2. Pronto.")).not.toMatch(/npm|ci\b/u);
+    expect(lido("Use ```npm ci``` aqui.")).toBe("Use npm ci aqui.");
+  });
+
+  it("1º trecho tem até 25 palavras; os outros juntam frases até 400 caracteres", () => {
+    const frase = "Esta é uma frase de exemplo com várias palavras para encher o trecho.";
+    const md = Array.from({ length: 30 }, () => frase).join(" ");
+    const t = textoParaLeitura(md);
+    expect(t[0]?.split(/\s+/u).length).toBeLessThanOrEqual(LEITURA.primeiroPalavras);
+    for (const x of t.slice(1)) expect(x.length).toBeLessThanOrEqual(LEITURA.trechoCaracteres);
+    expect(t.join(" ").replace(/\s+/gu, " ")).toBe(md);
+  });
+
+  it("1º trecho longo corta na vírgula que cabe", () => {
+    const md = "Olhei o PR inteiro com calma e atenção, conferi cada um dos testes e também os logs do CI que passaram sem nenhum problema de verdade.";
+    const t = textoParaLeitura(md);
+    expect(t[0]).toBe("Olhei o PR inteiro com calma e atenção,");
+    expect(t.join(" ")).toBe(md);
+  });
+
+  it("frase gigante sem pontuação é partida em pedaços de até 1.000 caracteres", () => {
+    const md = Array.from({ length: 400 }, (_, i) => `palavra${i}`).join(" ");
+    const t = textoParaLeitura(md);
+    for (const x of t) expect(x.length).toBeLessThanOrEqual(LEITURA.tetoTrechoCaracteres);
+    expect(t.length).toBeGreaterThan(2);
+  });
+
+  // Regressão (QA NOD-180, 2026-10-06): o 1º trecho só olhava palavras; um token longo sem espaço ia inteiro ao TTS (3.978 caracteres).
+  it("1º trecho também respeita o tamanho de trecho, mesmo com palavra gigante", () => {
+    for (const md of ["a".repeat(5000), `Hash: ${"ção".repeat(1500)}`, `${"x".repeat(900)} fim de frase.`]) {
+      const t = textoParaLeitura(md);
+      expect(t[0]?.length).toBeLessThanOrEqual(LEITURA.trechoCaracteres);
+      for (const x of t) expect(x.length).toBeLessThanOrEqual(LEITURA.tetoTrechoCaracteres);
+    }
+  });
+
+  it("passou de 4.000 caracteres: corta no fim de frase e fecha com 'O resto está na tela.'", () => {
+    const md = Array.from({ length: 200 }, (_, i) => `Esta é a frase número ${i} da resposta longa.`).join(" ");
+    const t = textoParaLeitura(md);
+    const tudo = t.join(" ");
+    expect(tudo.length).toBeLessThanOrEqual(LEITURA.maxCaracteres);
+    expect(tudo.endsWith(`resposta longa. ${FRASE_RESTO_TELA}`)).toBe(true);
+  });
+
+  it("até 4.000 caracteres não ganha o fecho", () => {
+    expect(lido("Uma resposta curta.")).not.toContain(FRASE_RESTO_TELA);
+  });
+
+  it("listas e títulos viram frases faladas, sem marcadores", () => {
+    const t = lido("## Resumo\n\n- primeiro item\n- segundo item\n\n**Importante:** acabou");
+    expect(t).not.toMatch(/[#*]/u);
+    expect(t).toContain("Primeiro item");
+    expect(t).toContain("acabou");
+  });
+});

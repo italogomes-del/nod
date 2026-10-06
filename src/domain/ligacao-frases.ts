@@ -300,6 +300,188 @@ function cortarFrase(frase: string, maxPalavras: number): string {
   return comPonto(palavras.slice(0, corte).join(" ").replace(/[,;:]$/u, ""));
 }
 
+/**
+ * Leitura de uma resposta pronta (definido em 2026-10-06, NOD-180): teto de caracteres por leitura e tamanhos dos
+ * trechos que vão ao TTS. O 1º trecho é curto para o áudio começar cedo; os outros juntam frases inteiras.
+ */
+export const LEITURA = { maxCaracteres: 4000, primeiroPalavras: 25, trechoCaracteres: 400, tetoTrechoCaracteres: 1000 } as const;
+export const FRASE_RESTO_TELA = "O resto está na tela.";
+export const FRASE_TABELA = "Aqui tem uma tabela.";
+
+/** definido em 2026-10-06: como o nome da linguagem do bloco de código é lido; fora da lista, a frase sai sem ela. */
+const LINGUAGENS: Record<string, string> = {
+  ts: "TypeScript", typescript: "TypeScript", tsx: "TypeScript", mts: "TypeScript", cts: "TypeScript",
+  js: "JavaScript", javascript: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
+  py: "Python", python: "Python", sql: "SQL", psql: "SQL", plpgsql: "SQL", json: "JSON", jsonc: "JSON",
+  sh: "shell", bash: "shell", zsh: "shell", shell: "shell", console: "shell", html: "HTML", css: "CSS",
+  yaml: "YAML", yml: "YAML", toml: "TOML", xml: "XML", md: "Markdown", markdown: "Markdown", go: "Go", rust: "Rust",
+  rs: "Rust", java: "Java", kotlin: "Kotlin", kt: "Kotlin", swift: "Swift", ruby: "Ruby", rb: "Ruby", php: "PHP",
+  c: "C", cpp: "C++", "c++": "C++", cs: "C#", csharp: "C#", dockerfile: "Dockerfile", graphql: "GraphQL", diff: "diff",
+};
+
+function fraseDoBloco(info: string): string {
+  const linguagem = LINGUAGENS[(info.trim().split(/[\s{,]/u)[0] ?? "").toLowerCase()];
+  return linguagem ? `Aqui tem um bloco de código em ${linguagem}.` : "Aqui tem um bloco de código.";
+}
+
+/**
+ * Caminho de arquivo vira o nome do arquivo ("src/adapters/voz/spi.ts" → "spi.ts"). definido em 2026-10-06: só conta
+ * como caminho o que tem letra e termina num arquivo com extensão, começa na raiz ("/", "~/", "./", "../") ou termina
+ * em barra ("docs/adr/"); "e/ou", "km/h", "sim/não/talvez" e datas ficam como estão.
+ */
+function nomeDoArquivo(caminho: string): string {
+  const partes = caminho.split("/").filter((p) => p !== "");
+  const ultimo = partes[partes.length - 1] ?? "";
+  if (!/\p{L}/u.test(ultimo)) return caminho;
+  const comExtensao = /\.[\p{L}\p{N}]{1,8}$/u.test(ultimo) && partes.length > 1;
+  const pasta = /^(?:~|\.{1,2})?\//u.test(caminho) || (caminho.endsWith("/") && partes.length > 1);
+  return comExtensao || pasta ? ultimo : caminho;
+}
+
+/** Corta `texto` em pedaços de até `max` caracteres, na última vírgula que cabe ou, sem ela, na última palavra. */
+function partirPorCaracteres(texto: string, max: number): string[] {
+  const pedacos: string[] = [];
+  let resto = texto.trim();
+  while (resto.length > max) {
+    const janela = resto.slice(0, max + 1);
+    let corte = janela.lastIndexOf(", ");
+    if (corte < max / 4) corte = -1;
+    else corte += 1;
+    if (corte === -1) {
+      const espaco = janela.lastIndexOf(" ");
+      corte = espaco > 0 ? espaco : max;
+    }
+    pedacos.push(resto.slice(0, corte).trim());
+    resto = resto.slice(corte).trim();
+  }
+  if (resto !== "") pedacos.push(resto);
+  return pedacos;
+}
+
+/** Primeiro trecho de até `max` palavras: corta na última vírgula que cabe (depois de 4 palavras) ou na palavra. */
+function partirPrimeiro(frase: string, max: number): [string, string] {
+  const palavras = frase.split(/\s+/u);
+  let corte = max;
+  for (let i = max - 1; i >= SEGMENTACAO.primeiraVirgulaPalavras - 1; i--) {
+    if (/,$/u.test(palavras[i] ?? "")) {
+      corte = i + 1;
+      break;
+    }
+  }
+  return [palavras.slice(0, corte).join(" "), palavras.slice(corte).join(" ")];
+}
+
+/**
+ * Resposta → trechos para ouvir (definido em 2026-10-06, NOD-180). Diferente de `textoFalavel` (a ligação), nada vai
+ * "para o chat": a pessoa está olhando a tela. Bloco de código vira "Aqui tem um bloco de código em <linguagem>.",
+ * tabela vira "Aqui tem uma tabela.", link vira o rótulo, URL solta vira "um link", código em linha longo vira "um
+ * trecho de código" e caminho vira o nome do arquivo. Passou de 4.000 caracteres, corta no fim de frase e fecha com
+ * "O resto está na tela.". Sem nada para falar, devolve [].
+ */
+export function textoParaLeitura(md: string): string[] {
+  let t = md.replace(/\r\n?/g, "\n").replace(/\p{Extended_Pictographic}️?/gu, "");
+  // A cerca fecha numa linha só com a mesma cerca (ou maior): a de 4 crases não fecha na de 3 de dentro. Pode vir recuada (lista).
+  t = t.replace(/^[ \t]*(`{3,}|~{3,})([^\n]*)[\s\S]*?(?:\n[ \t]*\1[`~]*[ \t]*(?=\n|(?![\s\S]))|(?![\s\S]))/gmu, (_, _cerca: string, info: string) => `\n\n${fraseDoBloco(info)}\n\n`);
+  const linhas: string[] = [];
+  for (const l of t.split("\n")) {
+    if (/^\s*\|.*\|\s*$/u.test(l)) {
+      if (linhas[linhas.length - 2] !== FRASE_TABELA) linhas.push("", FRASE_TABELA, "");
+    } else linhas.push(l);
+  }
+  t = linhas
+    .join("\n")
+    .replace(/!\[([^\]]*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
+    .replace(/<(?:https?:\/\/|mailto:)[^>\s]+>/giu, "um link")
+    .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, "um link")
+    .replace(/(`+)([^\n]+?)\1(?!`)/gu, (_, _crases: string, c: string) => {
+      const falado = codigoEmLinha(c);
+      return falado === CODIGO ? "um trecho de código" : falado;
+    })
+    .replace(/(?<![\p{L}\p{N}_/])~?\.{0,2}\/?(?:[\p{L}\p{N}_.@-]+\/)+(?:[\p{L}\p{N}_.@-]*[\p{L}\p{N}_@-])?/gu, nomeDoArquivo);
+
+  const pedacos: string[] = [];
+  let paragrafo: string[] = [];
+  const fecharParagrafo = () => {
+    if (paragrafo.length > 0) pedacos.push(paragrafo.join(" "));
+    paragrafo = [];
+  };
+  for (const l of t.split("\n")) {
+    const { texto, frase } = linhaFalavel(l);
+    if (texto.trim() === "") {
+      fecharParagrafo();
+      continue;
+    }
+    if (frase) {
+      fecharParagrafo();
+      pedacos.push(texto);
+    } else paragrafo.push(texto.trim());
+  }
+  fecharParagrafo();
+
+  const frases = pedacos
+    .map((p) =>
+      maiuscula(
+        comPonto(
+          normalizarParaFala(semEnfase(p))
+            .replace(/[*#]{2,}/gu, "")
+            .replace(/\s+([,.;:!?…])/gu, "$1")
+            .replace(/\s+/gu, " ")
+            .trim(),
+        ),
+      ),
+    )
+    .filter((p) => /[\p{L}\p{N}]/u.test(p))
+    .flatMap(dividirFrases)
+    .map(maiuscula);
+  if (frases.length === 0) return [];
+
+  // Teto da leitura: frases inteiras enquanto couberem com o fecho; a 1ª frase sozinha grande demais é cortada.
+  const disponivel = LEITURA.maxCaracteres - FRASE_RESTO_TELA.length - 1;
+  if (frases.join(" ").length > LEITURA.maxCaracteres) {
+    const mantidas: string[] = [];
+    let usados = 0;
+    for (const f of frases) {
+      const custo = f.length + (mantidas.length > 0 ? 1 : 0);
+      if (usados + custo > disponivel) break;
+      mantidas.push(f);
+      usados += custo;
+    }
+    if (mantidas.length === 0) mantidas.push(comPonto(partirPorCaracteres(frases[0] ?? "", disponivel - 1)[0] ?? ""));
+    frases.splice(0, frases.length, ...mantidas, FRASE_RESTO_TELA);
+  }
+
+  // Trechos: o 1º com até 25 palavras; os outros juntam frases até 400 caracteres, frase de até 1.000 fica inteira.
+  const trechos: string[] = [];
+  const fila = [...frases];
+  const primeira = fila.shift() ?? "";
+  let [inicio, resto] = contarPalavras(primeira) <= LEITURA.primeiroPalavras ? [primeira, ""] : partirPrimeiro(primeira, LEITURA.primeiroPalavras);
+  // Poucas palavras não garantem trecho curto (hash, token, palavra gigante): o 1º também cabe em `trechoCaracteres`.
+  if (inicio.length > LEITURA.trechoCaracteres) {
+    const curto = partirPorCaracteres(inicio, LEITURA.trechoCaracteres)[0] ?? "";
+    resto = `${inicio.slice(curto.length).trim()} ${resto}`;
+    inicio = curto;
+  }
+  trechos.push(inicio);
+  if (resto.trim() !== "") fila.unshift(resto.trim());
+  let atual = "";
+  const fechar = () => {
+    if (atual !== "") trechos.push(atual);
+    atual = "";
+  };
+  for (const f of fila) {
+    if (f.length > LEITURA.trechoCaracteres) {
+      fechar();
+      trechos.push(...(f.length > LEITURA.tetoTrechoCaracteres ? partirPorCaracteres(f, LEITURA.trechoCaracteres) : [f]));
+      continue;
+    }
+    if (atual !== "" && atual.length + 1 + f.length > LEITURA.trechoCaracteres) fechar();
+    atual = atual === "" ? f : `${atual} ${f}`;
+  }
+  fechar();
+  return trechos;
+}
+
 /** definido em 2026-10-04: o primeiro trecho sai na 1ª vírgula depois de 4 palavras, ou após 400 ms parado com 3. */
 export const SEGMENTACAO = { primeiraVirgulaPalavras: 4, paradoMs: 400, paradoPalavras: 3, maxPalavrasTrecho: 25 } as const;
 

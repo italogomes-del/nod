@@ -46,6 +46,8 @@ export type ContextoLigacao = {
   inicioDoDia: number;
   provedorStt: string;
   provedorTts: string;
+  /** NOD_VOZ_LEITURA=1 (NOD-180): ouvir as respostas fora da ligação. Ausente = desligada. */
+  leituraHabilitada?: boolean;
 };
 
 const TEXTOS_RECUSA: Record<MotivoRecusaLigacao, string> = {
@@ -138,11 +140,22 @@ async function motivoDeRecusa(deps: Deps, agenteId: string, c: ContextoLigacao):
   return { conversaId: conversa.id, agente };
 }
 
+/**
+ * Ouvir as respostas (NOD-180): a leitura ligada, a voz aberta para a pessoa e no ar, e um bot próprio. Não depende do
+ * Mac, da IA, da drenagem nem do consentimento (a tela pede o aviso antes do primeiro "ouvir").
+ */
+async function podeOuvir(deps: Deps, agenteId: string, c: ContextoLigacao): Promise<boolean> {
+  if (!c.leituraHabilitada || !c.habilitada || !c.permitido || !c.vozDisponivel) return false;
+  const agente = await deps.repos.agentes.buscar(agenteId);
+  return !!agente && agente.excluidoEm == null && agente.dono !== "empresa";
+}
+
 export const disponibilidadeLigacao: CasoDeUso<{ agenteId: string; contexto: ContextoLigacao }, DisponibilidadeLigacao> = async (deps, input) => {
   const r = await motivoDeRecusa(deps, input.agenteId, input.contexto);
-  if ("motivo" in r) return { data: { disponivel: false, motivo: r.motivo, texto: textoDaRecusa(r.motivo) } };
+  const ouvir = await podeOuvir(deps, input.agenteId, input.contexto);
+  if ("motivo" in r) return { data: { disponivel: false, motivo: r.motivo, texto: textoDaRecusa(r.motivo), ouvir } };
   const { versao } = await deps.repos.ligacoes.consentimento();
-  return { data: { disponivel: true, consentimentoNecessario: (versao ?? 0) < VERSAO_CONSENTIMENTO_VOZ, versaoConsentimento: VERSAO_CONSENTIMENTO_VOZ, provedor: input.contexto.provedorTts } };
+  return { data: { disponivel: true, consentimentoNecessario: (versao ?? 0) < VERSAO_CONSENTIMENTO_VOZ, versaoConsentimento: VERSAO_CONSENTIMENTO_VOZ, provedor: input.contexto.provedorTts, ouvir } };
 };
 
 export type SaidaLigar = { ligacao: Ligacao; turno: Turno; voz: string; velocidade: number; nomeBot: string; genero: "feminina" | "masculina" };

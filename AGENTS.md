@@ -317,3 +317,9 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
 - Limite da assinatura (ADR-078): só o `rate_limit_event` com `rejected` vira `{t:"limite"}` no canal do cérebro; nunca
   classifique pelo texto do erro do fornecedor. Com outra IA pronta, o limite entra no "sem IA" (causa `limite`); sem
   alternativa, encerra com `limite_da_assinatura`. Log: `ligacao_limite_da_assinatura`.
+- Ouvir uma resposta fora da ligação (NOD-180, emenda de 2026-10-06 das ADR-071/075): `GET mensagens/:id/ouvir` devolve
+  o áudio em streaming (`audio/L16; rate=24000`, PCM16 **big-endian**). Desligado por padrão: só `NOD_VOZ_LEITURA=1` liga,
+  e a abertura segue `NOD_LIGACAO`. O texto vira trechos em `textoParaLeitura` (`ligacao-frases.ts`), o caso de uso é
+  `prepararLeitura` e o áudio é do `leitura-voz.ts` (teto diário em memória `NOD_VOZ_LEITURA_CARACTERES_DIA`, padrão
+  100000; janela à frente `NOD_VOZ_LEITURA_ADIANTE_MS`, padrão 15000; prioridade `previa`; uma leitura por pessoa). Log
+  `voz_leitura` só com contagens e desfecho. Nos testes, a voz falsa entra pela opção `voz` do `servidorCompleto`.

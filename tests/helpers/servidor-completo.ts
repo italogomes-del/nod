@@ -37,6 +37,8 @@ export type OpcoesServidorCompleto = {
   /** Pessoas ADICIONAIS que os laços devem enxergar (default: só a própria). */
   pessoasExtras?: Escopo[];
   drivers?: OpcoesBoot["drivers"];
+  /** Provedores de voz prontos (NOD-180), para observar o TTS falso. */
+  voz?: OpcoesBoot["voz"];
 };
 
 /**
@@ -82,6 +84,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     segredoSessao: SEGREDO_DE_TESTE,
     drivers: o.drivers,
     computador: o.computador,
+    voz: o.voz,
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

@@ -153,7 +153,7 @@ describeIntegracao("Codex sem app-server: recusa própria do Ligar (NOD-167)", (
       await editarPerfil(deps, { agenteId, harness: "codex-cli", modelo: "auto" });
       const semAppServer = { ...contexto, iaSemLacoDeVoz: true };
       expect((await disponibilidadeLigacao(deps, { agenteId, contexto: semAppServer })).data).toEqual({
-        disponivel: false, motivo: "codex_sem_app_server", texto: "Atualize o Codex para ligar: a versão instalada no seu Mac não atende ligação. Por enquanto, converse por texto.",
+        disponivel: false, motivo: "codex_sem_app_server", texto: "Atualize o Codex para ligar: a versão instalada no seu Mac não atende ligação. Por enquanto, converse por texto.", ouvir: false,
       });
       await expect(ligar(deps, { agenteId, contexto: semAppServer, executor: "local", iniciadaPor: "produto" })).rejects.toMatchObject({ codigo: "estado_invalido", cause: "codex_sem_app_server" });
       expect(await repos.ligacoes.viva()).toBeNull();

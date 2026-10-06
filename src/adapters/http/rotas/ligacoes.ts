@@ -1,3 +1,4 @@
+import type { ServerResponse } from "node:http";
 import type { Escopo } from "../../../shared/types.ts";
 import type { IaDaLigacao } from "../../../contracts/voz.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -16,6 +17,7 @@ import {
   reabrirCerebroDaLigacao,
   type ContextoLigacao,
 } from "../../../use-cases/ligacoes.ts";
+import { prepararLeitura, type ContextoLeitura, type LeituraPreparada } from "../../../use-cases/ouvir-mensagem.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, texto, type DepsRotas } from "./executar-caso.ts";
 
@@ -35,6 +37,10 @@ export type DepsRotasLigacoes = DepsRotas & {
   reabrirCerebro(escopo: Escopo, p: { ligacaoId: string; turnoId: string; ia: IaDaLigacao }): boolean;
   /** A prévia de uma voz (WAV) para escolher a voz do bot; null = voz desconhecida ou fora do ar. */
   amostra(voz: string, velocidade: number): Promise<Buffer | null>;
+  /** NOD-180: o que só o servidor sabe para ouvir uma resposta (a chave, a permissão da voz e o provedor no ar). */
+  contextoLeitura(escopo: Escopo): Promise<ContextoLeitura>;
+  /** NOD-180: toca a leitura no `res` (leitura-voz.ts). Lança antes do 1º byte; depois, nunca. */
+  ouvir(escopo: Escopo, p: { mensagemId: string; leitura: LeituraPreparada; res: ServerResponse }): Promise<void>;
   maxS: number;
 };
 
@@ -147,6 +153,20 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
         if (!wav) throw new ErroDeDominio("nao_encontrado", { cause: "voz" });
         ctx.res.writeHead(200, { "content-type": "audio/wav", "content-length": String(wav.length), "cache-control": "private, max-age=3600" });
         ctx.res.end(wav);
+      },
+    },
+    {
+      // Ouvir uma resposta (definido em 2026-10-06, NOD-180): o áudio sai em streaming (audio/L16 big-endian, 24 kHz)
+      // enquanto é sintetizado. Com NOD_VOZ_LEITURA desligada, 403 antes de tocar no banco.
+      metodo: "GET",
+      padrao: new RegExp(`^/mensagens/${ID}/ouvir$`),
+      async handler(ctx) {
+        const mensagemId = ctx.params.id ?? "";
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(mensagemId)) throw new ErroDeDominio("nao_encontrado");
+        const contexto = await d.contextoLeitura(ctx.escopo);
+        if (!contexto.habilitada) throw new ErroDeDominio("nao_permitido", { cause: "leitura desligada" });
+        const leitura = await executar(ctx.escopo, prepararLeitura, { mensagemId, contexto });
+        await d.ouvir(ctx.escopo, { mensagemId, leitura, res: ctx.res });
       },
     },
     {
