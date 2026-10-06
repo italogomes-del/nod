@@ -33,6 +33,12 @@ const APROVA_PROPOSTA = new Set([
   "claro", "pode fazer", "faz", "aprova", "pode mandar", "bora", "cria sim", "pode criar sim",
 ]);
 
+/** Tudo o que aprova sozinho em cada perfil (lista para a cobertura de eco da NOD-165, que testa cada um como eco). */
+export const COMANDOS_QUE_APROVAM: Readonly<Record<"estrito" | "proposta", readonly string[]>> = {
+  estrito: [...APROVA_ESTRITO],
+  proposta: [...APROVA_PROPOSTA],
+};
+
 /** Afirmativas que no perfil estrito pedem a frase de novo ("diga 'eu aprovo'"). */
 const AFIRMATIVAS = new Set([
   "sim", "ok", "okay", "pode", "beleza", "isso", "certo", "claro", "ta", "bom", "uhum", "aham", "manda", "ver", "fechado",
