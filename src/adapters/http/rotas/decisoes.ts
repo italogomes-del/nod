@@ -4,7 +4,7 @@ import type { Decisao } from "../../../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
-import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-cases/aplicar-proposta-rotina.ts";
+import { aplicarAtualizacaoRotina, aplicarExclusaoRotina, erroRotinaMudou } from "../../../use-cases/aplicar-proposta-rotina.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
 import { decidirPropostaDeBot } from "../../../use-cases/onboarding.ts";
@@ -188,11 +188,12 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
 
         if (atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
           // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, rotinas-do-agente.ts).
+          // NOD-159: a rotina mudou depois da proposta — o caso recusou e avisou sem lançar; o erro sai DEPOIS do commit.
+          let obsoleta = false;
           await comoDona(ctx.escopo, atual, async (deps) => {
             const proposta = await deps.repos.propostas.buscar(atual.id);
             const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
             if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
-            const events: RuntimeEvent[] = [eventoDecidida(deps, decidida, { recusada: recusada(corpo) })];
             if (recusada(corpo)) {
               if (proposta && proposta.estado === "pendente") await executar(deps, recusarProposta, { propostaId: proposta.id });
             } else if (atual.tipo === "rotina") {
@@ -206,12 +207,15 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
               const caso = atual.tipo === "rotina_atualizacao" ? aplicarAtualizacaoRotina : aplicarExclusaoRotina;
               const r = await executar(deps, caso, { propostaId: atual.id });
               ids.rotina = r.rotina.id;
+              obsoleta = r.obsoleta === true;
             } else if (proposta && proposta.estado === "pendente") {
               const r = await executar(deps, confirmarProposta, { propostaId: proposta.id, prazoMs: d.prazoDecisaoMs });
               if (r.agente) ids.agente = r.agente.id;
             }
-            await deps.repos.events.gravarComOutbox(events);
+            // Obsoleta: a pessoa clicou em confirmar, mas a proposta saiu recusada — o frame diz o que ficou no banco.
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) || obsoleta })]);
           });
+          if (obsoleta) throw erroRotinaMudou();
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

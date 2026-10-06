@@ -87,6 +87,11 @@ export type PayloadPropostaRotinaAtualizacao = {
   proximaExecucao: EpochMs;
   resumo: string;
   antes: { resumo: string; instrucao: string };
+  /**
+   * definido em 2026-10-06 (NOD-159): revisaoDaRotina (src/domain/revisao-rotina.ts) de quando a proposta nasceu.
+   * Confirmar só aplica se a rotina ainda tiver esta revisão. Ausente = proposta anterior, aplica como antes.
+   */
+  revisao?: string;
 };
 /** Exclusão recuperável (ADR-034): o card precisa dizer QUAL rotina, então carrega o resumo. */
 export type PayloadPropostaRotinaExclusao = {
@@ -94,6 +99,8 @@ export type PayloadPropostaRotinaExclusao = {
   rotinaId: string;
   resumo: string;
   instrucao: string;
+  /** Mesma regra de PayloadPropostaRotinaAtualizacao.revisao (NOD-159). */
+  revisao?: string;
 };
 export type PayloadPropostaAcesso = {
   kind: "acesso";

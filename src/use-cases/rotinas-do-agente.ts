@@ -8,7 +8,7 @@ import { mesmosAcessos } from "../domain/rotina-acessos.ts";
 import { resumoCron, validarAtualizacaoRotina } from "../domain/rotina-texto.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { agenteVisivel, assertUuid, autoriaAgente, carimbo, evento, PRAZO_DECISAO_MS } from "./apoio-l7.ts";
-import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "./aplicar-proposta-rotina.ts";
+import { aplicarAtualizacaoRotina, aplicarExclusaoRotina, erroRotinaMudou, revisaoAtual } from "./aplicar-proposta-rotina.ts";
 import { confirmacaoPeloModo, semCard } from "./confirmar-pelo-modo.ts";
 import { acessosDeclarados } from "./criar-rotina.ts";
 import { pausarRotina } from "./pausar-rotina.ts";
@@ -123,6 +123,14 @@ async function propor(deps: Deps, input: ContextoFerramenta, payload: PayloadPro
 }
 
 /**
+ * NOD-159: a rotina mudou entre propor e aplicar no mesmo turno (raro, mas a regra é uma só). O caso já recusou a
+ * proposta e avisou; o erro volta ao modelo SEM lançar, para a transação do turno guardar a recusa e o aviso.
+ */
+function obsoleta(daProposta: readonly RuntimeEvent[], daAplicacao: readonly RuntimeEvent[] | undefined) {
+  return { data: { erro: erroRotinaMudou().codigo }, events: [...semCard(daProposta), ...(daAplicacao ?? [])] };
+}
+
+/**
  * `atualizar_rotina`: NADA é aplicado — nasce proposta 'rotina_atualizacao' com o payload já
  * normalizado (sobrevive a reinício sem reinterpretar, E7.1). Diferente de pausar, mudar QUANDO ou
  * O QUE a rotina faz sozinha não é reversível em um clique, então a pessoa confirma.
@@ -167,6 +175,8 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
       ...(mudaAcessos && acessos ? { acessos } : {}),
       ...(mudaFlag ? { soComPendencia: normalizada.soComPendencia } : {}),
       antes: { resumo: resumoCron(atual.cron, atual.fusoIana), instrucao: atual.instrucao },
+      // NOD-159: a confirmação só aplica se a rotina ainda for a que o card mostra.
+      revisao: revisaoAtual(atual),
     };
     const precisa = payload.acessos?.length ? ` · precisa de ${payload.acessos.map((a) => `${nomeDoApp(a.conector)} (${a.nivel})`).join(", ")}` : "";
     const flag = mudaFlag ? (normalizada.soComPendencia ? " · passa a acordar só com pendência aberta" : " · volta a acordar em toda janela") : "";
@@ -176,6 +186,7 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
     const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false });
     if (porRegra) {
       const aplicada = await aplicarAtualizacaoRotina(deps, { propostaId: proposta.id, porRegra });
+      if (aplicada.data.obsoleta) return obsoleta(events, aplicada.events);
       return { data: { proposta_id: proposta.id, resumo: normalizada.resumo, aplicada: true }, events: [...semCard(events), ...(aplicada.events ?? [])] };
     }
     return { data: { proposta_id: proposta.id, resumo: normalizada.resumo }, events };
@@ -190,12 +201,13 @@ export const excluirRotinaPeloAgente: CasoNod<Deps, "excluir_rotina"> = async (d
   try {
     const atual = await rotinaDoAgente(deps, input.agenteId, input.rotina_id);
     const resumo = resumoCron(atual.cron, atual.fusoIana);
-    const payload: PayloadPropostaRotinaExclusao = { kind: "rotina_exclusao", rotinaId: atual.id, resumo, instrucao: atual.instrucao };
+    const payload: PayloadPropostaRotinaExclusao = { kind: "rotina_exclusao", rotinaId: atual.id, resumo, instrucao: atual.instrucao, revisao: revisaoAtual(atual) };
     const { proposta, events } = await propor(deps, input, payload, `Exclusão de rotina proposta: ${resumo} — ${atual.instrucao}`);
     // ADR-059: excluir é o "apagar" da rotina — o automático só confirma quando a pessoa pediu na conversa.
     const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: true });
     if (porRegra) {
       const aplicada = await aplicarExclusaoRotina(deps, { propostaId: proposta.id, porRegra });
+      if (aplicada.data.obsoleta) return obsoleta(events, aplicada.events);
       return { data: { proposta_id: proposta.id, resumo, aplicada: true }, events: [...semCard(events), ...(aplicada.events ?? [])] };
     }
     return { data: { proposta_id: proposta.id, resumo }, events };
