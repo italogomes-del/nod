@@ -28,7 +28,7 @@ import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
-import { avisoContaSemAcesso, ehIa, linhaIaTrocada } from "./ia-fora.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoLimiteDoPlano, avisoModeloRecusado, ehIa, inventarioDaIa, linhaIaTrocada } from "./ia-fora.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
@@ -168,7 +168,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
   if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
-  if (m.kind === "sistema") return linhaIaTrocada(m) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (m.kind === "sistema") return linhaIaTrocada(m) ?? avisoLimiteDoPlano(m, { nomeDoBot: m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id)?.nome ?? null : null, agenteId: m.autoria.autor_tipo === "agente" ? m.autoria.autor_id : null, agora: estado.agora }) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
@@ -196,18 +196,32 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
 
 /**
  * Executor indisponível (ADR-029, classe plano_ausente) como aviso de ERRO do design system (definido em 2026-10-04):
- * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e o instante em ISO);
+ * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e a hora);
  * na frente, o que aconteceu em palavras e o próximo passo: "Conectar IA" enquanto a IA continua fora, e "mande de
  * novo" quando ela já voltou (a mensagem perdida não é reenviada sozinha).
  */
 function avisoSemExecutor(m: Mensagem, estado: Estado): string {
-  const nome = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id)?.nome : undefined;
-  const inv = inventarioEmUso(estado);
+  const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
+  const nome = bot?.nome;
+  const negacao = m.payload?.kind === "negacao" ? m.payload : null;
+  const ia = negacao && ehIa(negacao.nome) ? negacao.nome : null;
+  // NOD-171: o bot FIXADO numa IA depende do inventário DELA, não do motor em uso: com o Claude pronto e o bot fixado
+  // no Codex fora, dizer "já voltou" seria falso. No automático (ou bot desconhecido) vale o motor em uso.
+  // O bot antigo em "auto" com modelo escolhido roda fixado no Claude Code (resolverHarness; inteligencia.ts faz igual).
+  const fixado = bot?.harness && bot.harness !== "auto" ? bot.harness : bot?.modelo && bot.modelo !== "auto" ? "claude-cli" : null;
+  const doFixado = ia !== null && fixado === ia;
+  const inv = doFixado && ia ? inventarioDaIa(estado, ia) : inventarioEmUso(estado);
   // Sem sonda ainda (inventário null, logo ao abrir a página) vale como fora: dizer "já voltou" seria afirmar sem saber.
   const aindaFora = !inv || inv.estado !== "pronto";
+  const noApp = "nodDesktop" in globalThis;
   // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
-  const negacao = m.payload?.kind === "negacao" ? m.payload : null;
-  if (negacao?.causa && ehIa(negacao.nome)) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia: negacao.nome, causa: negacao.causa, aindaFora, noApp: "nodDesktop" in globalThis });
+  if (negacao?.causa && ia) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia, causa: negacao.causa, aindaFora, noApp });
+  // NOD-171: a IA está pronta e recusou o modelo do agente; esperar não resolve.
+  if (negacao?.modelo && ia) return avisoModeloRecusado(m, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia, modelo: negacao.modelo });
+  // NOD-171: o bot fixado numa IA que não está pronta — o aviso nomeia a IA e o estado dela (desatualizada, sem login,
+  // fora). No automático o nome da negação é só o motor em uso: vale o aviso de sempre.
+  const doHarness = doFixado && ia ? avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia, noApp }) : null;
+  if (doHarness) return doHarness;
   const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
   return avisoDeEstado({
     tom: "erro",

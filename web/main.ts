@@ -45,7 +45,7 @@ import type { Proposta } from "../src/contracts/conversa.ts";
 import { blocosAoVivo, blocosDoHistorico, htmlComposer, renderCabecalhoConversa, renderTimeline, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
-import { inventarioEmUso, situacaoMotorFora } from "./telas/frota.ts";
+import { inventarioEmUso, motorDesatualizado, situacaoMotorFora } from "./telas/frota.ts";
 import { ehIa, inventarioDaIa, pedeInstalar } from "./telas/ia-fora.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
@@ -574,7 +574,7 @@ function renderSidebar(estado: Estado): string {
   const situacaoMotor = !estado.executor
     ? "Verificando conexão…"
     : falhaMotor
-      ? situacaoMotorFora(inv)
+      ? situacaoMotorFora(inv, estado.executor.atual)
       : estado.executor.atual === "catcher"
         ? "Modo de simulação"
         : "Sua IA conectada";
@@ -597,7 +597,7 @@ function renderSidebar(estado: Estado): string {
       ${equipe}
     </div>
     ${ambiente}
-    ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
+    ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
     <div class="rodape">
       <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}" title="Menu da conta · ${esc(situacaoMotor)}"><span class="av-me">eu</span><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
       <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}">${LOJA}Marketplace</button>
@@ -1603,6 +1603,19 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const mac = window.nodDesktop;
     void (pedeInstalar(inventarioDaIa(estado, ia)) ? mac?.iaInstalar?.(ia) : mac?.iaEntrar?.(ia))?.catch(() => undefined);
   },
+  // NOD-171: "Atualizar" do CLI abaixo do piso. No app do Mac abre a página oficial (o mesmo `iaInstalar`; quem atualiza é a
+  // pessoa, no Terminal); fora dele, a seção Conexão, que mostra o comando.
+  "ia-atualizar": (el) => {
+    const ia = el.dataset.ia;
+    const mac = window.nodDesktop;
+    if (ehIa(ia) && mac?.iaInstalar) void mac.iaInstalar(ia).catch(() => undefined);
+    else abrirEspaco("conexao");
+  },
+  "copiar-texto": async (el) => {
+    const antes = el.textContent ?? "";
+    try { await navigator.clipboard.writeText(el.dataset.texto ?? ""); el.textContent = "Copiado"; } catch { el.textContent = "Não copiou"; }
+    setTimeout(() => { el.textContent = antes; }, 1500);
+  },
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no
   // cartão do marketplace, na gaveta, no painel do bot e no card da rotina — e a web espera sozinha
@@ -2523,7 +2536,7 @@ function dadosMenuConta(): DadosMenuConta {
   const falha = !!inv && inv.estado !== "pronto";
   const fora = [...new Set((estado.frota?.negacoes ?? []).filter((n) => n.classe === "conector_indisponivel").map((n) => estado.conectores.find((c) => c.slug === n.nome || c.nome === n.nome)?.nome ?? n.nome))];
   const faixa = falha
-    ? { texto: situacaoMotorFora(inv), botao: "Conectar" }
+    ? { texto: situacaoMotorFora(inv, estado.executor?.atual), botao: motorDesatualizado(estado) ? "Atualizar" : "Conectar" }
     : fora.length ? { texto: faixaDeConectores(fora), botao: "Ver" } : null;
   const banco = textoAmbiente(ambienteBanco);
   return {

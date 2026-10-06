@@ -1,6 +1,7 @@
 import type { CamposEntrevista, EstadoOnboarding, IaNoMac, ModeloDeBot, TamanhoTime } from "../../src/contracts/onboarding.ts";
 import type { IaDesktop, ResultadoIaDesktop, TesteDeIa } from "../../src/contracts/desktop.ts";
 import { botao, esc, iconeAgente } from "../lib/render.ts";
+import { COMANDO_ATUALIZAR_IA, desatualizado, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 
 /**
@@ -249,7 +250,7 @@ export function deveTestar(inv: IaNoMac | undefined, veredito: TesteDeIa | undef
   return vistoNaoPronto;
 }
 
-export type SituacaoIa = "testando" | "procurando" | "pronto" | "entrando" | "sonda_lenta" | "conta_sem_acesso" | "teste_falhou" | "falta_entrar" | "ausente";
+export type SituacaoIa = "testando" | "procurando" | "pronto" | "entrando" | "sonda_lenta" | "conta_sem_acesso" | "teste_falhou" | "falta_entrar" | "desatualizado" | "ausente";
 
 /** Em que pé está uma IA, do que o servidor diz (instalação e login) e do que o teste disse (a conta responde?). */
 export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: IaDesktop | null, teste: Pick<TesteNaTela, "rodando" | "vereditos" | "testando"> | null = null): { situacao: SituacaoIa; resposta: string | null } {
@@ -259,8 +260,10 @@ export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: I
   if (teste?.testando.includes(ia)) return so("testando");
   if (teste?.rodando && !v) return so(inv?.estado === "pronto" ? "testando" : "procurando");
   if (v?.estado === "pronto") return { situacao: "pronto", resposta: v.resposta ?? null };
-  // NOD-171: o CLI abaixo do piso aparece como "ausente" (instalar a versão atual resolve) até a tela própria do PR 2.
-  if (v?.causa) return so(v.causa === "cli_antigo" ? "ausente" : v.causa);
+  if (v?.causa) return so(v.causa === "cli_antigo" ? "desatualizado" : v.causa);
+  // NOD-171: o CLI está no Mac, abaixo do piso testado. Quem sabe a versão é a sonda do servidor; o card diz "Atualizar",
+  // nunca "não está neste Mac" nem "Instalar".
+  if (desatualizado(inv)) return so("desatualizado");
   // Sem veredito de conta logada: da instalação e do login quem sabe é o servidor (a sonda do app), que é mais novo
   // que um veredito "falta entrar". Um "pronto" do servidor aqui é só login: com teste, ele ainda vai ser testado.
   const macDizInstalado = v !== undefined && v.estado !== "ausente";
@@ -289,13 +292,15 @@ export type EstadoCardIa = {
   resposta: string | null;
   /** O bloco de explicação sob o card (só na conta sem acesso), com o "Como liberar". */
   explicacao: string | null;
+  /** NOD-171: o comando que atualiza o CLI desatualizado, com "Copiar" (só no `desatualizado`). */
+  comando: string | null;
 };
 
 /** O estado de um card de IA: texto, tom, botão e o que o clique faz. */
 export function estadoDoCardIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: IaDesktop | null, teste: Pick<TesteNaTela, "rodando" | "vereditos" | "testando"> | null = null): EstadoCardIa {
   const cli = NOME_CLI[ia];
   const { situacao, resposta } = situacaoDaIa(ia, ias, entrando, teste);
-  const card = (estado: string, tom: EstadoCardIa["tom"], acao: string | null, act: AcaoCardIa | null, girando = false, explicacao: string | null = null): EstadoCardIa => ({ situacao, estado, tom, acao, act, girando, resposta, explicacao });
+  const card = (estado: string, tom: EstadoCardIa["tom"], acao: string | null, act: AcaoCardIa | null, girando = false, explicacao: string | null = null, comando: string | null = null): EstadoCardIa => ({ situacao, estado, tom, acao, act, girando, resposta, explicacao, comando });
   switch (situacao) {
     case "pronto":
       return card(resposta ? "Conectado · respondeu ao teste" : "Conectado", "ok", "Conectado", null);
@@ -313,6 +318,13 @@ export function estadoDoCardIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando:
       return card("Não respondeu ao teste", "aviso", "Testar de novo", "onboarding-ia-testar");
     case "falta_entrar":
       return card(`${cli} instalado · falta entrar`, "mudo", "Entrar", "onboarding-ia-entrar");
+    case "desatualizado": {
+      // NOD-171 (protótipo do Gil, estado 1): a versão instalada, a mínima e o comando. "Atualizar" abre a página
+      // oficial (`iaInstalar`); quem atualiza é a pessoa, no Terminal, e a sonda percebe sozinha a versão nova.
+      const d = desatualizado(ias.find((i) => i.id === ia));
+      const versoes = d ? `${cli} ${d.versao} · o nod precisa da ${versaoLegivel(d.minima)} ou mais nova` : `${cli} desatualizado neste Mac`;
+      return card(versoes, "aviso", "Atualizar", "onboarding-ia-instalar", false, null, COMANDO_ATUALIZAR_IA[ia]);
+    }
     case "ausente":
       return card(`${cli} não está neste Mac`, "mudo", "Instalar e entrar", "onboarding-ia-instalar");
   }
@@ -421,17 +433,28 @@ function htmlProva(nome: string | null, nomeIa: string, resposta: string | null)
   return `<div class="ob-prova"><div class="ob-prova-linha"><span class="ob-prova-quem">nod</span><span>${esc(perguntaDoTeste(nome))}</span></div><div class="ob-prova-linha"><span class="ob-prova-quem">${esc(nomeIa)}</span>${r}</div></div>`;
 }
 
+/**
+ * NOD-171 (protótipo do Gil, estado 1): como atualizar o CLI desatualizado. "Atualizar" abre a página oficial; o comando
+ * fica à mão com "Copiar". O nod não roda nada no Terminal.
+ */
+function htmlComandoDeAtualizar(ia: IaDesktop, comando: string): string {
+  const cli = NOME_CLI[ia];
+  return `<div class="ob-ia-explica ob-ia-atualizar"><p>“Atualizar” abre a página oficial do ${esc(cli)} no navegador. No Terminal deste Mac, rode:</p><div class="ob-comando"><code>${esc(comando)}</code><button type="button" class="ob-link" data-act="onboarding-ia-copiar" data-texto="${esc(comando)}">Copiar</button></div><p>O nod percebe sozinho quando a versão nova estiver instalada.</p></div>`;
+}
+
 function htmlCardIa(p: ProvedorIa & { ia: IaDesktop }, s: EstadoCardIa, nome: string | null, opcoes: { menor?: boolean } = {}): string {
   // O "Conectado" sem a pílula verde ao lado leva o ícone: a frase não fica só na cor.
   const marca = s.tom === "aviso" ? ICONE.aviso : s.tom === "ok" && !s.acao ? ICONE.certo : "";
   const classeEstado = s.tom === "mudo" ? "" : ` class="${s.tom}"`;
   const lado = s.acao
-    ? `<button type="button" class="ob-pilula${s.tom === "ok" ? " ok" : ""}${opcoes.menor ? " contorno" : ""}"${s.act ? ` data-act="${s.act}" data-ia="${p.ia}"` : " disabled"}>${s.girando ? GIRA : ""}${esc(s.acao)}</button>`
+    ? `<button type="button" class="ob-pilula${s.tom === "ok" ? " ok" : ""}${s.situacao === "desatualizado" ? " aviso" : ""}${opcoes.menor ? " contorno" : ""}"${s.act ? ` data-act="${s.act}" data-ia="${p.ia}"` : " disabled"}>${s.girando ? GIRA : ""}${esc(s.acao)}</button>`
     : s.girando ? girando(s.situacao === "procurando" ? "Procurando" : "Testando") : "";
   const prova = s.situacao === "testando" ? htmlProva(nome, p.nome, null) : s.resposta && !opcoes.menor ? htmlProva(nome, p.nome, s.resposta) : "";
   const explica = s.explicacao && !opcoes.menor
     ? `<div class="ob-ia-explica"><p>${esc(s.explicacao)}</p><button type="button" class="ob-link" data-act="onboarding-ia-como-liberar" data-ia="${p.ia}">Como liberar</button></div>`
-    : "";
+    : s.comando && !opcoes.menor
+      ? htmlComandoDeAtualizar(p.ia, s.comando)
+      : "";
   return `<div class="ob-card-ia${s.tom === "aviso" && !opcoes.menor ? " aviso" : ""}${opcoes.menor ? " menor" : ""}"><div class="ob-ia-linha"><span class="ob-logo">${LOGOS_IA[p.id]}</span><div class="ob-ia-txt"><b>${esc(p.nome)}</b><span${classeEstado} role="status">${marca}${esc(s.estado)}</span></div>${lado}</div>${prova}${explica}</div>`;
 }
 

@@ -22,3 +22,10 @@ Diretório de trabalho por turno é literal: o driver usa `mkdtemp` como cwd do 
 ## Gatilho de reversão
 
 Reabrir (voltar o CLI ao container no caminho padrão) se a assinatura pessoal deixar de cobrir o uso diário (custo medido por pessoa/mês acima do que a chave da empresa custaria), ou se mais de um colega por mês ficar com turnos falhando por versão de CLI abaixo dos flag floors apesar do aviso escrito.
+
+## Emenda de 2026-10-06 — os flag floors viraram recusa (NOD-171)
+
+O "aviso escrito" do gatilho acima virou código: abaixo do `PISO_CLI` o harness é `ausente` com causa `cli_antigo`
+(ADR-019, emenda de 2026-10-06) e o bot fixado nele recebe a negação "desatualizado" com o comando de atualizar, em vez
+de turnos falhando com erro de argumento. O bot no automático segue na outra IA pronta. O gatilho de reversão continua
+contando colegas com turnos falhando por versão: agora eles aparecem como `cli_antigo` no inventário.

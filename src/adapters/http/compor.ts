@@ -18,6 +18,7 @@ import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
+import { iaAtualDoCatalogo } from "../../domain/harness.ts";
 import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
 import { criarAvisoDoVigia } from "./aviso-vigia.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
@@ -788,7 +789,7 @@ export function comporApp(o: OpcoesCompor): App {
   /** ADR-077: a IA dos bots no Mac da pessoa, para os cards de IA do onboarding (o catcher conta como pronto). */
   function executorDoMac(pessoaId: string): { pronto: boolean; ias: IaNoMac[] } {
     const catalogo = catalogoHarness(pessoaId);
-    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado !== "pronto" && h.inventario.causa ? { causa: h.inventario.causa } : {}) }));
+    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado !== "pronto" && h.inventario.causa ? { causa: h.inventario.causa } : {}), ...(h.inventario.estado === "ausente" && h.inventario.causa === "cli_antigo" && h.inventario.versao && h.inventario.minima ? { versao: h.inventario.versao, minima: h.inventario.minima } : {}) }));
     return { pronto: (!compartilhado && executorAtual === "catcher") || ias.some((i) => i.estado === "pronto"), ias };
   }
 
@@ -812,7 +813,7 @@ export function comporApp(o: OpcoesCompor): App {
       ...ponteHttp.rotas,
       { metodo: "GET", padrao: /^\/executor$/, async handler(ctx) {
         const catalogo = catalogoHarness(ctx.escopo.pessoaId);
-        ctx.json(200, { atual: catalogo.padrao ?? "claude-cli", opcoes: catalogo.opcoes.filter((h) => h.integrado).map((h) => ({ id: h.id, custo: "real", inventario: h.inventario })), recusa: null, harnesses: catalogo });
+        ctx.json(200, { atual: iaAtualDoCatalogo(catalogo), opcoes: catalogo.opcoes.filter((h) => h.integrado).map((h) => ({ id: h.id, custo: "real", inventario: h.inventario })), recusa: null, harnesses: catalogo });
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),

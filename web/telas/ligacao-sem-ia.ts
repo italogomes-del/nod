@@ -1,6 +1,7 @@
 import type { CausaCerebroCaiu, EstadoIaDaLigacao, IaDaLigacao, IAS_DA_LIGACAO as IasDaLigacao } from "../../src/contracts/voz.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { botao, esc } from "../lib/render.ts";
+import { COMANDO_ATUALIZAR_IA, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 
 /**
@@ -115,6 +116,11 @@ function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
     // NOD-178: o CLI só demorou para responder; nem "Instalar" nem "Entrar", o app do Mac sonda de novo sozinho.
     texto = `O ${cli} demorou para responder; o Mac está carregado. A ligação percebe quando ficar pronto.`;
     acao = "";
+  } else if (daIa?.causa === "cli_antigo" && daIa.versao && daIa.minima) {
+    // NOD-171: o CLI está no Mac, abaixo do piso. Nem "Instalar" nem "não está neste Mac": a versão, a mínima e o comando.
+    texto = `O ${cli} deste Mac está na versão ${daIa.versao}; o nod precisa da ${versaoLegivel(daIa.minima)} ou mais nova. A ligação percebe quando ficar pronto.`;
+    acao = "";
+    noTerminal = `No Terminal deste Mac, rode “${COMANDO_ATUALIZAR_IA[ia]}”.`;
   } else if (estado === "nao_autenticado") {
     texto = s.ponte.entrar ? `O ${cli} está neste Mac; falta entrar na conta.` : `O ${cli} está neste Mac; falta entrar na conta. A ligação percebe quando ficar pronto.`;
     acao = s.ponte.entrar ? botao("ligacao-ia-entrar", "Entrar", { classe: "sm", dados: { ia }, desabilitado: s.ocupado }) : "";

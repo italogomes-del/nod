@@ -8,7 +8,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { fraseDoErroFornecedor, fraseDoLimiteDoPlano } from "../domain/erro-fornecedor.ts";
+import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
@@ -248,12 +248,15 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
         : desfecho.motivoFalha
           ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru)
           : null;
+    // NOD-171: o limite do plano (do protocolo ou do texto do Codex) leva o payload, para a tela desenhar o card dele.
+    const limite = desfecho.motivoFalha === "limite_do_plano" || (desfecho.motivoFalha && classificarErroFornecedor(resultado.erroCru) === "limite_de_uso");
     const aviso = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,
       autoria,
       kind: "sistema",
       texto: redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoEmPortugues(motivo) }),
+      ...(limite ? { payload: { kind: "limite_do_plano" as const, harness: entrega.harness ?? null, voltaEm: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm && resultado.limiteVoltaEm > agora ? resultado.limiteVoltaEm : null } } : {}),
       confianca: "confiavel",
     });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
@@ -326,7 +329,7 @@ async function aposContaSemAcesso(
     turnoId: turno.id,
     autoria: autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" }),
     kind: "negacao",
-    texto: redigir("executor-indisponivel", agora, { motivo: `${p.harness ?? "ia"} ${inventario.estado}: ${inventario.motivo}`, desde: new Date(agora).toISOString() }),
+    texto: redigir("executor-indisponivel", agora, { motivo: `${p.harness ?? "ia"} ${inventario.estado}: ${inventario.motivo}`, desde: horaDaFrase(agora, agora) }),
     payload: { kind: "negacao", classe: "plano_ausente", nome: p.harness ?? "ia", motivo: "plano_ausente", terminal: true, causa },
     confianca: "confiavel",
   });

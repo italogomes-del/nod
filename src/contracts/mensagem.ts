@@ -43,13 +43,23 @@ export type PayloadMensagem =
    * decisão sem reler o texto redigido; as mensagens gravadas antes não os têm.
    */
   | { kind: "resultado_aprovacao"; decisaoId: string; frase?: string; itens: { idx: number; desfecho: DesfechoItem; texto?: string }[] }
-  /** `causa` (definido em 2026-10-05): a IA estava logada e a conta não serviu (src/contracts/inventario.ts). */
-  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa }
+  /**
+   * `causa` (definido em 2026-10-05): a IA estava logada e a conta não serviu (src/contracts/inventario.ts).
+   * `modelo` (NOD-171): o harness está pronto, mas o modelo escolhido no agente não é aceito por ele; a tela pede outro
+   * modelo em vez de dizer que a IA "já voltou".
+   */
+  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string }
   /**
    * definido em 2026-10-05: o bot em "automático" passou a responder por outra IA porque a conta da primeira não
    * serviu. Linha de sistema, dita uma vez por troca; o turno que falhou foi repetido na outra IA.
    */
   | { kind: "ia_trocada"; de: IdHarness; para: IdHarness; causa: CausaSemIa }
+  /**
+   * NOD-171: o turno parou porque o plano da IA atingiu o limite de uso (motivo `limite_do_plano` do protocolo do Claude
+   * Code, ou a classe `limite_de_uso` do texto do Codex). Vai no aviso "Turno interrompido" para a tela desenhar o card
+   * com a hora LOCAL de `voltaEm` (o texto gravado traz a de São Paulo). `voltaEm` null: o fornecedor não disse quando.
+   */
+  | { kind: "limite_do_plano"; harness: IdHarness | null; voltaEm: EpochMs | null }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   /**
    * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não

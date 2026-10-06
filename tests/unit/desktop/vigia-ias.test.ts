@@ -297,6 +297,17 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.agendado).toBeNull();
   });
 
+  it("NOD-171 (revisão): com uma IA pronta e a outra desatualizada, a vigia sonda de novo a cada 30 s até a versão nova", async () => {
+    const ANTIGO: Inventario = { estado: "ausente", motivo: "Codex 0.147.0 abaixo do piso", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0", em: T0 };
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": ANTIGO } });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    m.login["codex-cli"] = pronto();
+    await tique();
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" } });
+    expect(m.agendado).toBeNull();
+  });
+
   it("NOD-178: 'ausente' lento → 'ausente' de verdade é reanunciado (a causa entra na chave do anúncio)", async () => {
     const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": LENTO(), "codex-cli": ausente() } });
     await vigia.iniciar(sondagem());

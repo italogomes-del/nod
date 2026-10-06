@@ -96,6 +96,14 @@ function diaMes(instante: number): string {
 }
 
 /**
+ * A hora de uma frase gravada, no mesmo fuso: "14:30" no dia de `agora`, "05/10 às 14:30" em outro. Também serve ao
+ * "desde" de executor indisponível (UX-02 da UAT da NOD-171), que saía em ISO e UTC.
+ */
+export function horaDaFrase(instante: number, agora: number): string {
+  return diaMes(instante) === diaMes(agora) ? horaMinuto(instante) : `${diaMes(instante)} às ${horaMinuto(instante)}`;
+}
+
+/**
  * A frase do motivo `limite_do_plano` (protocolo do Claude Code, stream-json.ts): "seu plano do Claude Code atingiu o
  * limite de uso; volta a funcionar às 14:30" (outro dia: "em 09/10 às 14:30"). Sem `voltaEm`, ou com ele já passado,
  * sai sem hora: nunca uma hora que já foi.
@@ -104,6 +112,6 @@ export function fraseDoLimiteDoPlano(harness: IdHarness | null | undefined, volt
   const nome = HARNESSES.find((h) => h.id === harness)?.nome;
   const base = `seu plano ${nome ? `do ${nome}` : "da sua IA"} atingiu o limite de uso`;
   if (voltaEm === null || voltaEm === undefined || voltaEm <= agora) return `${base}; espere o uso renovar e tente de novo`;
-  const quando = diaMes(voltaEm) === diaMes(agora) ? `às ${horaMinuto(voltaEm)}` : `em ${diaMes(voltaEm)} às ${horaMinuto(voltaEm)}`;
+  const quando = diaMes(voltaEm) === diaMes(agora) ? `às ${horaDaFrase(voltaEm, agora)}` : `em ${horaDaFrase(voltaEm, agora)}`;
   return `${base}; volta a funcionar ${quando}`;
 }

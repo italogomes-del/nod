@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CLASSES_ERRO_FORNECEDOR, classificarErroFornecedor, FRASE_ERRO_FORNECEDOR, fraseDoErroFornecedor, fraseDoLimiteDoPlano } from "../../../src/domain/erro-fornecedor.ts";
+import { CLASSES_ERRO_FORNECEDOR, classificarErroFornecedor, FRASE_ERRO_FORNECEDOR, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase } from "../../../src/domain/erro-fornecedor.ts";
+import { redigir } from "../../../src/domain/redacao.ts";
 import { redigirSegredos } from "../../../src/domain/segredos.ts";
 
 /**
@@ -93,6 +94,15 @@ describe("erro do fornecedor em classe fechada (NOD-174)", () => {
       expect(fraseDoLimiteDoPlano("claude-cli", voltaEm, agora)).toBe("seu plano do Claude Code atingiu o limite de uso; espere o uso renovar e tente de novo");
     }
     expect(fraseDoLimiteDoPlano(null, null, agora)).not.toMatch(/[{}]|[a-z]+_[a-z]+|claude-cli/);
+  });
+
+  it("UX-02: o 'desde' de executor indisponível sai na hora de São Paulo, nunca em ISO/UTC", () => {
+    const agora = Date.UTC(2026, 9, 6, 15, 0); // 12:00 em SP
+    expect(horaDaFrase(Date.UTC(2026, 9, 6, 13, 20, 54), agora)).toBe("10:20");
+    expect(horaDaFrase(Date.UTC(2026, 9, 5, 14, 46), agora)).toBe("05/10 às 11:46");
+    const texto = redigir("executor-indisponivel", agora, { motivo: "claude-cli: conta sem acesso", desde: horaDaFrase(agora, agora) });
+    expect(texto).toBe("Nenhum trabalho começa: executor indisponível (claude-cli: conta sem acesso) desde 12:00.");
+    expect(texto).not.toMatch(/\d{4}-\d{2}-\d{2}T|Z\./);
   });
 
   it("segredo no erro cru: o redator roda antes e a frase não carrega o valor", () => {

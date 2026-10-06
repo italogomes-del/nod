@@ -6,6 +6,7 @@ import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import type { IdHarness } from "../contracts/harness.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { horaDaFrase } from "../domain/erro-fornecedor.ts";
 import { motivoHarnessIndisponivel } from "../domain/harness.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -150,8 +151,8 @@ export async function mensagemExecutorIndisponivel(
     turnoId: p.turnoId,
     autoria: autoriaAgente({ agenteId: p.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: p.executor, localityReason: "motor_ausente" }),
     kind: "negacao",
-    texto: redigir("executor-indisponivel", p.agora, { motivo, desde: new Date(p.inventario.em).toISOString() }),
-    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true },
+    texto: redigir("executor-indisponivel", p.agora, { motivo, desde: horaDaFrase(p.inventario.em, p.agora) }),
+    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, ...(p.modeloInvalido !== undefined ? { modelo: p.modeloInvalido } : {}) },
     confianca: "confiavel",
   });
 }

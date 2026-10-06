@@ -93,3 +93,31 @@ quando cada uma renova. A pessoa não tinha como ver isso no nod sem rodar `/uso
 **Gatilho de reversão.** Se o Claude Code deixar de mandar o `rate_limit_event` ou mudar o formato, a linha para de
 ser atualizada (o `medido_em` envelhece) e a tela mostra a última leitura com a hora; nada no turno depende dela. Se
 um dia o número virar critério de decisão, isso pede ADR nova, não esta emenda.
+
+## Emenda (2026-10-06): fixado e indisponível recusa, limite do plano com motivo próprio (NOD-171)
+
+**Harness fixado e indisponível.** O UAT de 2026-09-18 deixou a ressalva UX-01: no app do Mac, o bot fixado num harness
+que o Mac não tinha pronto ficava com o turno pendente para sempre, e a negação falava em "motor pronto". Agora:
+- `resolverHarness` diz qual harness faltou; o despacho recusa com o inventário dele, e a negação nomeia o harness e o
+  estado (não instalado, sem conta conectada, desatualizado).
+- A reivindicação recebe os harnesses prontos de todas as máquinas vivas da pessoa: o turno fixado num harness que
+  nenhuma delas tem pronto é reivindicado e recusado, em vez de ficar pendente. Harness em `sonda_lenta` conta como
+  "pode ficar pronto" e o turno espera a re-sonda.
+- Modelo fora da lista vira `executor_indisponivel` com `modelo_invalido`, não `entrada_invalida`. A negação leva o
+  `modelo` no payload e a tela pede outro modelo: a IA está pronta, então nunca diz que ela "já voltou".
+- A repetição das falas barradas (`repetirBarradosPorIa`) não repete a fala fixada num harness que ainda não está
+  pronto, para não gerar uma negação nova a cada anúncio do Mac.
+
+**Limite do plano.** `limite_do_plano` entra no enum de motivos de falha (0058). No Claude Code ele vem do protocolo:
+`rate_limit_event` com `status: "rejected"` na mesma rodada do `result`, com a hora em que o plano volta
+(`limiteVoltaEm`); `isUsingOverage: true` não conta como limite. No Codex só existe texto (`usage_limit_reached`, "You've
+hit your usage limit"), classificado em `limite_de_uso`. Nos dois casos a conversa ganha a mensagem de sistema com
+`payload: { kind: "limite_do_plano", harness, voltaEm }`, e a tela diz quando volta (no Codex, "parece", porque a hora
+não vem do protocolo). A prova é por
+fixtures e CLI falso: não se leva uma conta ao limite de propósito.
+
+**Lista editorial.** Só cresce: entra o modelo que o `model/list` do Codex real mostrou e que passou num turno real do
+UAT (`docs/uat-harnesses-e-modelos.md`). Os padrões do automático (Sonnet e GPT-5.6 Sol) não mudaram.
+
+**Gatilho de reversão.** Se a recusa imediata do fixado irritar mais que a espera (a pessoa estava instalando o CLI
+naquele minuto), o caminho é estender o `sonda_lenta` a "instalando", não voltar à fila pendente sem aviso.

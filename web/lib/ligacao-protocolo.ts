@@ -122,6 +122,8 @@ const IAS_LIGACAO: typeof IasDaLigacao = ["claude-cli", "codex-cli"];
 const ESTADOS_IA: typeof EstadosIa = ["pronto", "nao_autenticado", "ausente"];
 const ehIa = (v: unknown): v is IaDaLigacao => typeof v === "string" && (IAS_LIGACAO as readonly string[]).includes(v);
 
+const ehVersao = (v: unknown): v is string => typeof v === "string" && v.length <= 40 && /^\d+\.\d+\.\d+[0-9A-Za-z.+-]*$/.test(v);
+
 /** O estado das IAs do Mac: no máximo uma linha por IA conhecida; qualquer linha fora do formato invalida a lista. */
 function lerIas(v: unknown): EstadoIaDaLigacao[] | null {
   if (!Array.isArray(v) || v.length > IAS_LIGACAO.length) return null;
@@ -131,7 +133,9 @@ function lerIas(v: unknown): EstadoIaDaLigacao[] | null {
     const i = x as Record<string, unknown>;
     const estado = ESTADOS_IA.find((e) => e === i.estado);
     if (!ehIa(i.id) || !estado || ias.some((y) => y.id === i.id)) return null;
-    ias.push({ id: i.id, estado, ...(i.causa === "sonda_lenta" ? { causa: "sonda_lenta" as const } : {}) });
+    // NOD-171: o CLI abaixo do piso passa com as duas versões; versão fora do formato derruba só a causa.
+    const antigo = estado === "ausente" && i.causa === "cli_antigo" && ehVersao(i.versao) && ehVersao(i.minima) ? { causa: "cli_antigo" as const, versao: i.versao, minima: i.minima } : {};
+    ias.push({ id: i.id, estado, ...(i.causa === "sonda_lenta" ? { causa: "sonda_lenta" as const } : antigo) });
   }
   return ias;
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
+import { HARNESSES, type CatalogoHarness } from "../../../src/contracts/harness.ts";
+import type { Inventario } from "../../../src/contracts/inventario.ts";
+import { causaHarnessIndisponivel, harnessFixado, iaAtualDoCatalogo, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
 
 describe("escolha de inteligência", () => {
   it("escolhe uma conta conectada sem configurar harness ou modelo", () => {
@@ -58,5 +60,23 @@ describe("escolha de inteligência", () => {
     it("sem sonda do harness não afirma 'não instalado'", () => {
       expect(motivoHarnessIndisponivel("codex-cli", inventarioHarnessSemSonda(0))).toBe("Codex não está pronto em nenhum computador conectado");
     });
+  });
+});
+
+describe("NOD-171 (revisão): a IA 'atual' do modo compartilhado", () => {
+  const catalogo = (padrao: CatalogoHarness["padrao"], inv: Record<string, Inventario>): CatalogoHarness => ({
+    padrao, simulacao: false,
+    opcoes: HARNESSES.map((h) => ({ ...h, integrado: h.id === "claude-cli" || h.id === "codex-cli" ? true : h.integrado, inventario: inv[h.id] ?? { estado: "ausente", motivo: "não encontrado", em: 0 } })),
+  });
+  const antigo: Inventario = { estado: "ausente", motivo: "abaixo do piso", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0", em: 0 };
+
+  it("com uma IA pronta, é o padrão do catálogo", () => {
+    expect(iaAtualDoCatalogo(catalogo("codex-cli", { "codex-cli": { estado: "pronto", em: 0 } as Inventario }))).toBe("codex-cli");
+  });
+  it("sem nenhuma pronta, o Codex desatualizado vence o Claude ausente", () => {
+    expect(iaAtualDoCatalogo(catalogo(null, { "codex-cli": antigo }))).toBe("codex-cli");
+  });
+  it("sem nada no Mac, segue o Claude", () => {
+    expect(iaAtualDoCatalogo(catalogo(null, {}))).toBe("claude-cli");
   });
 });

@@ -64,8 +64,11 @@ export type PendentesOnboarding = {
   rotina: { decisaoId: string; resumo: string } | null;
 };
 
-/** `causa` (definido em 2026-10-05): a IA está logada, mas o teste de verdade a reprovou (src/contracts/inventario.ts). */
-export type IaNoMac = { id: "claude-cli" | "codex-cli"; estado: "pronto" | "nao_autenticado" | "ausente"; motivo?: string; causa?: CausaSemIa | CausaInventario };
+/**
+ * `causa` (definido em 2026-10-05): a IA está logada, mas o teste de verdade a reprovou (src/contracts/inventario.ts).
+ * NOD-171: com `cli_antigo`, `versao` (a instalada) e `minima` (o piso) vão juntas, para o card dizer "Atualizar".
+ */
+export type IaNoMac = { id: "claude-cli" | "codex-cli"; estado: "pronto" | "nao_autenticado" | "ausente"; motivo?: string; causa?: CausaSemIa | CausaInventario; versao?: string; minima?: string };
 
 /** GET /api/t/:tenant/onboarding. */
 export type EstadoOnboarding = {

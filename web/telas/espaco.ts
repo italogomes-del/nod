@@ -7,6 +7,7 @@ import type { Volta } from "../lib/volta.ts";
 import { inventarioEmUso, renderExecutor, situacaoMotorFora, textoInventario } from "./frota.ts";
 import { renderChaves } from "./chaves.ts";
 import { renderGestao } from "./gestao.ts";
+import { desatualizado, ehIa, linhaAtualizarIa } from "./ia-fora.ts";
 import { logoApp } from "./marketplace.ts";
 import { renderNegacoes, textoMotivo } from "./negacao.ts";
 import { renderPreferenciaModoDev } from "./modo-dev.ts";
@@ -75,7 +76,10 @@ function renderConexao(estado: Estado): string {
   const inv = inventarioEmUso(estado);
   const pronto = inv?.estado === "pronto";
   const simulacao = estado.executor?.atual === "catcher";
-  const titulo = !inv ? "Verificando conexão…" : inv.estado !== "pronto" ? situacaoMotorFora(inv) : simulacao ? "Modo de simulação" : "Sua IA está conectada";
+  const titulo = !inv ? "Verificando conexão…" : inv.estado !== "pronto" ? situacaoMotorFora(inv, estado.executor?.atual) : simulacao ? "Modo de simulação" : "Sua IA está conectada";
+  const atual = estado.executor?.atual;
+  // NOD-171: o CLI abaixo do piso ganha o comando que atualiza, com "Copiar" e, no app do Mac, "Atualizar".
+  const atualizar = desatualizado(inv) && ehIa(atual) ? linhaAtualizarIa(atual, "nodDesktop" in globalThis) : "";
   const negacoes = [...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")];
   const fora = negacoes.filter((n) => n.classe === "conector_indisponivel");
   const outras = negacoes.filter((n) => n.classe !== "conector_indisponivel");
@@ -91,6 +95,7 @@ function renderConexao(estado: Estado): string {
       <p class="intro">Quem executa o trabalho dos seus bots: a sua conta de IA ou a simulação sem custo.</p>
       <div class="espaco-cartao">
         <div class="espaco-ia"><span class="espaco-ponto ${pronto ? "ok" : "falha"}" aria-hidden="true"></span><div role="status"><b>${esc(titulo)}</b><small>${esc(textoInventario(inv, estado.agora))}</small></div>${botao("sondar-inventario", "Verificar de novo", { classe: "sm", titulo: "Verifica a conexão com sua conta" })}</div>
+        ${atualizar}
         ${renderExecutor(estado)}
       </div>
       ${fora.length ? `<h3 class="espaco-subtitulo">Fora do ar</h3>${fora.map(linhaFora).join("")}` : ""}

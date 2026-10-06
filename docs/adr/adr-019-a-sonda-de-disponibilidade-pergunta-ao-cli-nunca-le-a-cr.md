@@ -58,3 +58,23 @@ gravado da pessoa (ADR-041), e continua fora do log do servidor (`erroCruNoLog: 
 `src/domain/conta-da-ia.ts`. Se o teste do onboarding reprovar contas boas (lentidão do fornecedor), o teto de 90 s do
 turno de teste é o primeiro a rever.
 
+
+## Emenda de 2026-10-06 — piso de versão por CLI (NOD-171)
+
+**Contexto.** A versão do CLI já entrava no inventário "porque alimenta os flag floors", mas nenhum piso recusava nada:
+um Codex de quatro meses atrás era anunciado como pronto e todo turno fixado nele falhava com erro de argumento.
+
+**Decisão.**
+- `PISO_CLI` (`src/adapters/executor/flag-floors.ts`) guarda a versão mínima de cada CLI: as versões aprovadas no UAT
+  de 2026-10-06 (`claude-cli` 2.1.290, `codex-cli` 0.159.0). O piso do Codex fica numa linha só, isolado, até o Marlon
+  escolher entre 0.159.0 e 0.159.2: trocar é essa linha.
+- Abaixo do piso, a sonda (completa e sem turno) devolve `ausente` com `causa: "cli_antigo"`, `versao` e `minima`, sem
+  gastar turno nem perguntar o login. O turno lança `executor_indisponivel` com a mesma causa antes de qualquer prompt.
+  Pré-release conta (`0.159.0-alpha.3` < `0.159.0`); sem versão legível não recusa (o `--version` que falhou já é
+  `ausente`).
+- A ponte aceita `cli_antigo` de um Mac com versões no formato `x.y.z[-pre]`; a frase é sempre a do servidor.
+- A tela diz "desatualizado" (versão instalada e mínima, e o comando de atualizar), nunca "não instalado": o
+  onboarding, a frota, o seletor de Inteligência e a negação na conversa.
+
+**Gatilho de reversão.** Se um piso recusar uma versão boa (o fornecedor lançou uma versão com numeração fora do
+semver), baixar a linha do `PISO_CLI` e publicar o app e o servidor: o Mac sonda com o piso que veio no app.

@@ -31,6 +31,12 @@ No modo compartilhado não há sonda nem execução Claude no servidor. `NOD_EXE
 
 Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM64. O suporte a Monterey foi removido somente no Electron 44 ([nota oficial](https://www.electronjs.org/blog/electron-44-0)); esta candidata mantém Electron 43. O requisito do runtime não substitui o aceite do Nod nas duas arquiteturas.
 
+**Versões mínimas das IAs (NOD-171, 2026-10-06).** Claude Code 2.1.290 e Codex 0.159.0 (`PISO_CLI`). Abaixo disso o app
+mostra a IA como **desatualizada**, com a versão instalada, a mínima e o comando de atualizar, e o bot fixado nela recebe
+a negação na conversa em vez de turnos com erro. **Ordem do deploy:** servidor antes do app. O servidor anterior não
+conhece a causa `cli_antigo` no anúncio da máquina (`ponte-validacao.ts` a descarta) e mostraria a IA desatualizada como
+"não encontrada", pedindo para instalar.
+
 ## Primeira abertura no Mac
 
 1. Entre na sua conta do Claude Code (`claude`) ou do Codex neste Mac.

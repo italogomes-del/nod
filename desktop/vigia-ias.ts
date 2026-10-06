@@ -215,7 +215,10 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     const algumaPronta = Object.values(inventarios).some((i) => i?.estado === "pronto");
     // NOD-178: uma IA lenta é sondada de novo mesmo com a outra pronta; sem isso o "tentando de novo" giraria para sempre.
     const algumaLenta = Object.values(inventarios).some((i) => i !== undefined && sondaFoiLenta(i));
-    const ms = !algumaPronta || algumaLenta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 ? INTERVALO_COM_REPROVADA_MS : null;
+    // NOD-171: uma IA desatualizada também é sondada de novo com a outra pronta (no passo lento: atualizar leva minutos),
+    // para a tela cumprir "o nod percebe sozinho quando a versão nova estiver instalada".
+    const algumaAntiga = Object.values(inventarios).some((i) => i?.estado === "ausente" && i.causa === "cli_antigo");
+    const ms = !algumaPronta || algumaLenta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 || algumaAntiga ? INTERVALO_COM_REPROVADA_MS : null;
     if (ms === null) return;
     timer = d.agendar(() => { void emFila(passada).catch(() => undefined); }, ms);
   }

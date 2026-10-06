@@ -226,7 +226,11 @@ describeIntegracao("NOD-171: harness fixado e indisponível", () => {
       const invalido = await enfileirar(b, "codex-cli", "sonnet");
       expect((await puxar(b)).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
       expect(await b.repos.turnos.buscar(invalido!.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
-      expect((await b.repos.mensagens.ultimaDaConversa(b.conversaId))?.texto).toContain("Codex: o modelo sonnet não é aceito");
+      const recusa = await b.repos.mensagens.ultimaDaConversa(b.conversaId);
+      expect(recusa?.texto).toContain("Codex: o modelo sonnet não é aceito");
+      // A tela pede outro modelo (avisoModeloRecusado) em vez de dizer que a IA já voltou.
+      expect(recusa?.payload).toMatchObject({ kind: "negacao", nome: "codex-cli", modelo: "sonnet" });
+      expect(recusa?.texto).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
       // Sem laço: o próximo puxar não acha o mesmo turno.
       expect((await puxar(b)).data.motivo).toBe("fila_vazia");
       const antigo = await enfileirar(b, "auto", "haiku");

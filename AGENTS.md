@@ -255,6 +255,18 @@ tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões n
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro
 fornecedor nem para catcher sem a pessoa escolher.
 
+Piso de versão e limite do plano (NOD-171, 2026-10-06; emendas das ADR-019 e ADR-036):
+- `PISO_CLI` em `flag-floors.ts` é a versão mínima testada de cada CLI. Abaixo dela o harness é `ausente` com causa
+  `cli_antigo` (com `versao` e `minima`) e o turno é recusado antes do prompt. Subir o piso exige rodar de novo o UAT
+  real (`scripts/uat/harnesses.sh`) e registrar em `docs/uat-harnesses-e-modelos.md`. O piso do Codex é uma linha
+  isolada: trocar 0.159.0 por 0.159.2 é só ela.
+- Bot fixado num harness que nenhuma máquina viva da pessoa tem pronto: o turno é reivindicado e recusado com a
+  negação que nomeia o harness, nunca fica pendente. Não reintroduza "motor pronto" na negação.
+- `limite_do_plano` do Claude Code vem do protocolo (`rate_limit_event` `rejected`), nunca de texto; o do Codex é a
+  classe `limite_de_uso` de `erro-fornecedor.ts`. Teste com fixtures e CLI falso; não leve conta real ao limite.
+- Lista editorial de modelos (`HARNESSES` em `contracts/harness.ts`) só cresce, e só com modelo que passou num turno
+  real do UAT. Os padrões do automático não mudam por ela.
+
 ## Computadores dos bots (ADR-037, 2026-09-18)
 
 `NOD_COMPUTADORES=docker` habilita o driver do servidor; `npm run computador:build` prepara a imagem.

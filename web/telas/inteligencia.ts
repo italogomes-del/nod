@@ -2,6 +2,7 @@ import type { Agente, EsforcoAgente } from "../../src/contracts/agente.ts";
 import type { CatalogoHarness, PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import { esc } from "../lib/render.ts";
+import { desatualizado, versaoLegivel } from "./ia-fora.ts";
 
 export function nomeInteligencia(a: Pick<Agente, "modelo" | "harness">, catalogo?: CatalogoHarness): string {
   if (a.modelo === "auto" && (!a.harness || a.harness === "auto")) return "Automático";
@@ -35,6 +36,9 @@ const ESFORCOS: Record<EsforcoAgente, string> = {
  */
 export function motivoDoInventario(nome: string, inv: Inventario): string {
   if (inv.estado === "pronto") return "";
+  // NOD-171: o CLI abaixo do piso está instalado; a frase diz "Atualize", nunca "Instale".
+  const antigo = desatualizado(inv);
+  if (antigo) return `O ${nome} deste Mac está na versão ${antigo.versao}. Atualize para a ${versaoLegivel(antigo.minima)} ou mais nova para usá-lo no nod.`;
   if (inv.motivo && !/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/.test(inv.motivo)) return inv.motivo;
   return inv.estado === "ausente" ? `Não encontramos o ${nome} neste Mac. Instale e entre na sua conta para usá-lo no nod.` : `Entre na sua conta do ${nome} neste Mac e tente de novo.`;
 }
@@ -52,25 +56,33 @@ export function renderInteligencia(a: Pick<Agente, "modelo" | "harness" | "esfor
   const padrao = catalogo?.opcoes.find((h) => h.id === catalogo.padrao);
   const opcoes: string[] = ['<option value="auto"' + (valor === "auto" ? ' selected' : '') + '>Automático · recomendado</option>'];
   let encontrado = valor === "auto";
+  // NOD-171 (protótipo do Gil, estado 4): a IA abaixo do piso aparece "desatualizada", não "não conectada", e a ajuda diz
+  // que os modelos dela voltam quando ela for atualizada.
+  const desatualizadas: string[] = [];
   for (const h of catalogo?.opcoes ?? []) {
     if (!h.integrado) continue;
     const disponivel = h.inventario.estado === "pronto";
+    const antigo = desatualizado(h.inventario) !== null;
+    if (antigo) desatualizadas.push(h.nome);
     const modelos = [{ id: "auto", nome: "Recomendado pelo nod", descricao: "" }, ...h.modelos];
-    opcoes.push(`<optgroup label="${esc(h.nome)}${disponivel ? "" : " · não conectado"}">${modelos.map((m) => {
+    opcoes.push(`<optgroup label="${esc(h.nome)}${disponivel ? "" : antigo ? " · desatualizado" : " · não conectado"}">${modelos.map((m) => {
       const v = `${h.id}:${m.id}`; const selecionado = v === valor; encontrado ||= selecionado;
       return `<option value="${esc(v)}"${selecionado ? " selected" : ""}${!disponivel && !selecionado ? " disabled" : ""}>${esc(m.nome)}${m.descricao ? ` · ${esc(m.descricao)}` : ""}</option>`;
     }).join("")}</optgroup>`);
   }
-  if (!encontrado) opcoes.push(`<option selected value="${esc(valor)}">${esc(atual)} · configuração atual</option>`);
+  // O modelo gravado que saiu da lista editorial continua aceito (NOD-171: a lista só cresce ou esconde); o rótulo diz.
+  // Sem o catálogo (o GET executor ainda não chegou) não se sabe se saiu: fica só "configuração atual".
+  if (!encontrado) opcoes.push(`<option selected value="${esc(valor)}">${esc(atual)} · configuração atual${catalogo ? " · fora da lista" : ""}</option>`);
+  const ajudaDesatualizada = desatualizadas.map((n) => `<p class="inteligencia-ajuda">Os modelos do ${esc(n)} voltam quando ele for atualizado neste Mac.</p>`).join("");
   return `<section class="inteligencia-card" aria-label="Inteligência do agente">
     <div class="inteligencia-topo"><span class="inteligencia-simbolo" aria-hidden="true">✦</span><div><h3>Inteligência do agente</h3><p>Você pede. O nod cuida da escolha.</p></div><span class="inteligencia-chip">${esc(atual)}</span></div>
     <p class="inteligencia-contexto">${catalogo?.simulacao ? "Este ambiente está em simulação. A preferência fica salva para quando uma conta de IA estiver conectada." : padrao ? `No automático, usamos uma opção conectada neste computador. Hoje: ${esc(padrao.nome)}.` : "Conecte sua conta de IA no computador para começar. O nod escolhe uma opção disponível automaticamente."}</p>
     <details class="inteligencia-personalizar"${aberto || valor !== "auto" ? " open" : ""}><summary>Personalizar modelo <span>Opcional</span></summary>
       <label class="inteligencia-label">Modelo<select name="inteligencia" aria-describedby="inteligencia-ajuda">${opcoes.join("")}</select></label>
-      <p id="inteligencia-ajuda" class="inteligencia-ajuda">Vale para as próximas tarefas. Seu histórico e sua memória continuam aqui. Volte a Automático quando quiser.</p>
+      <p id="inteligencia-ajuda" class="inteligencia-ajuda">Vale para as próximas tarefas. Seu histórico e sua memória continuam aqui. Volte a Automático quando quiser.</p>${ajudaDesatualizada}
       ${renderEsforco(a.esforco)}
       <details class="inteligencia-avancado"><summary>Harnesses e disponibilidade</summary><p>O harness conecta o agente à sua conta de IA. Cada um oferece seus próprios modelos; a disponibilidade depende da sua conta.</p>
-        <ul>${(catalogo?.opcoes ?? []).map((h) => `<li><div><b>${esc(h.nome)}</b><span class="harness-status ${h.inventario.estado === "pronto" && h.integrado ? "pronto" : ""}">${!h.integrado ? "Em preparação" : h.inventario.estado === "pronto" ? "Conectado" : "Não conectado"}</span></div><small>${esc(!h.integrado ? h.descricao : h.inventario.estado === "pronto" ? h.descricao : motivoDoInventario(h.nome, h.inventario))}</small></li>`).join("")}</ul>
+        <ul>${(catalogo?.opcoes ?? []).map((h) => `<li><div><b>${esc(h.nome)}</b><span class="harness-status ${h.inventario.estado === "pronto" && h.integrado ? "pronto" : ""}">${!h.integrado ? "Em preparação" : h.inventario.estado === "pronto" ? "Conectado" : desatualizado(h.inventario) ? "Desatualizado" : "Não conectado"}</span></div><small>${esc(!h.integrado ? h.descricao : h.inventario.estado === "pronto" ? h.descricao : motivoDoInventario(h.nome, h.inventario))}</small></li>`).join("")}</ul>
       </details>
     </details>
   </section>`;

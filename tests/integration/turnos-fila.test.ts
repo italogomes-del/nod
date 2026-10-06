@@ -255,7 +255,9 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       expect(resultado).toMatchObject({ desfecho: "falha", motivoFalha: "limite_do_plano" });
       const { data } = await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, harness: "claude-cli", fala: { tipo: "texto", texto: resultado.texto }, resultado });
       expect(data.turno).toMatchObject({ estado: "interrompido", motivoFalha: "limite_do_plano" });
-      const aviso = (await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto ?? "";
+      const ultima = await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id);
+      expect(ultima?.payload).toEqual({ kind: "limite_do_plano", harness: "claude-cli", voltaEm: Math.floor(voltaEm / 1000) * 1000 });
+      const aviso = ultima?.texto ?? "";
       expect(aviso).toContain("Turno interrompido: seu plano do Claude Code atingiu o limite de uso; volta a funcionar ");
       expect(aviso).toContain(hora);
       expect(aviso).not.toContain("usage limit");

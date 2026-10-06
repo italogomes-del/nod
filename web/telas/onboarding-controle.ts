@@ -369,6 +369,10 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     "onboarding-ia-instalar": (el) => iaNoMac(iaDoClique(el), "instalar"),
     "onboarding-ia-testar": (el) => testarIa(iaDoClique(el)),
     "onboarding-ia-como-liberar": (el) => comoLiberar(iaDoClique(el)),
+    // NOD-171: o comando que atualiza o CLI desatualizado vai para a área de transferência; o botão diz se copiou.
+    "onboarding-ia-copiar": async (el) => {
+      try { await navigator.clipboard.writeText(el.dataset.texto ?? ""); el.textContent = "Copiado"; } catch { el.textContent = "Não copiou"; }
+    },
     "onboarding-ia-pagina": (el) => teste.abrirInstalacao(iaDoClique(el)),
     "onboarding-ia-login": (el) => teste.abrirLogin(iaDoClique(el)),
     "onboarding-ia-cancelar": () => teste.cancelar(),

@@ -1,5 +1,5 @@
 import { HARNESSES } from "../contracts/harness.ts";
-import type { IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import type { CatalogoHarness, IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
 import { ErroDeDominio } from "./erro.ts";
@@ -81,4 +81,14 @@ export function motivoHarnessIndisponivel(harness: string, inventario: Inventari
     : inventario.causa === "sonda_lenta" ? "sem resposta"
     : "não instalado";
   return `${nome} ${estado}: ${inventario.motivo}`;
+}
+
+/**
+ * NOD-171: a IA que o GET executor do modo compartilhado chama de "atual". Sem nenhuma pronta, a que está no Mac
+ * (desatualizada ou sem login) vence um Claude ausente: senão o rodapé diria "não foi encontrada" com o Codex instalado
+ * e só desatualizado.
+ */
+export function iaAtualDoCatalogo(catalogo: CatalogoHarness): IdHarness {
+  const noMac = catalogo.opcoes.find((h) => h.integrado && ((h.inventario.estado === "ausente" && h.inventario.causa === "cli_antigo") || h.inventario.estado === "nao_autenticado"));
+  return catalogo.padrao ?? noMac?.id ?? "claude-cli";
 }
