@@ -338,6 +338,100 @@ function nomeDoArquivo(caminho: string): string {
   return comExtensao || pasta ? ultimo : caminho;
 }
 
+/** Linha separadora de tabela GFM (`---|---`, `:--|--:`, com ou sem `|` nas pontas); `---` sozinho é régua, não tabela. */
+const SEPARADORA_DE_TABELA = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/u;
+const RECUO_DE_CODIGO = /^(?: {4}|\t)/u;
+const ITEM_DE_LISTA = /^\s*(?:[-*+]|\d{1,9}[.)])\s/u;
+
+/**
+ * Bloco recuado (4 espaços ou tab, sem cerca) vira a frase de bloco sem linguagem (NOD-181). Como no CommonMark, só
+ * começa no início do texto ou depois de linha em branco, e não dentro de item de lista: a continuação recuada de um
+ * item segue lida como texto. Linhas em branco no meio do bloco continuam o bloco.
+ */
+function semBlocosRecuados(linhas: string[]): string[] {
+  const saida: string[] = [];
+  let depoisDeBranco = true;
+  let emItem = false;
+  for (let i = 0; i < linhas.length; i++) {
+    const l = linhas[i] ?? "";
+    if (l.trim() === "") {
+      saida.push(l);
+      depoisDeBranco = true;
+      continue;
+    }
+    if (depoisDeBranco && !emItem && RECUO_DE_CODIGO.test(l)) {
+      let fim = i;
+      for (let j = i; j < linhas.length; j++) {
+        const lj = linhas[j] ?? "";
+        if (lj.trim() !== "" && !RECUO_DE_CODIGO.test(lj)) break;
+        if (lj.trim() !== "") fim = j;
+      }
+      saida.push("", fraseDoBloco(""), "");
+      i = fim;
+      depoisDeBranco = false;
+      continue;
+    }
+    if (ITEM_DE_LISTA.test(l)) emItem = true;
+    else if (!(emItem && /^\s/u.test(l))) emItem = false;
+    depoisDeBranco = false;
+    saida.push(l);
+  }
+  return saida;
+}
+
+/**
+ * Tabela vira `FRASE_TABELA`: linha que começa e termina com `|`, ou linha com `|` seguida da separadora (NOD-181).
+ * As linhas seguintes com `|` entram na mesma tabela.
+ */
+function semTabelas(linhas: string[]): string[] {
+  const saida: string[] = [];
+  let naTabela = false;
+  for (let i = 0; i < linhas.length; i++) {
+    const l = linhas[i] ?? "";
+    if (naTabela && l.includes("|")) continue;
+    naTabela = /^\s*\|.*\|\s*$/u.test(l) || (l.includes("|") && SEPARADORA_DE_TABELA.test(linhas[i + 1] ?? ""));
+    if (!naTabela) saida.push(l);
+    else if (saida[saida.length - 2] !== FRASE_TABELA) saida.push("", FRASE_TABELA, "");
+  }
+  return saida;
+}
+
+const CODIGO_EM_LINHA = /(`+)([^\n]+?)\1(?!`)/gu;
+
+/** Comentário e `<script>`/`<style>` com o conteúdo: somem inteiros, mesmo com crase dentro. */
+const HTML_NAO_LIDO = /<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/giu;
+/** Tag de bloco separa palavras (`<p>a</p><p>b</p>` → "a b"); a de linha (`<b>`, `<a>`) cola (`<b>neg</b>rito`). */
+const TAG_DE_BLOCO =
+  /<\/?(?:address|article|aside|blockquote|br|caption|center|dd|details|div|dl|dt|figcaption|figure|footer|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul)\b(?:\s[^<>]*)?\/?>/giu;
+/** Só nome de tag HTML conhecido: `Promise<string>`, `Array<T>` e `<Enter>` ficam como estão. */
+const TAG_DE_LINHA =
+  /<\/?(?:a|abbr|b|bdi|bdo|big|button|cite|code|del|dfn|em|font|i|img|input|ins|kbd|label|mark|q|s|samp|small|span|strike|strong|sub|sup|time|tt|u|var|wbr)\b(?:\s[^<>]*)?\/?>/giu;
+
+/** Faixas `[início, fim)` de código em linha em `t`. */
+function faixasDeCodigo(t: string): Array<[number, number]> {
+  return [...t.matchAll(CODIGO_EM_LINHA)].map((m) => [m.index, m.index + m[0].length]);
+}
+
+/**
+ * HTML (NOD-181): tags conhecidas somem e o texto de dentro fica (tag de bloco, como `<br>` e `<p>`, vira espaço);
+ * comentário e conteúdo de `<script>` e `<style>` somem inteiros. `a < b`, `x -> y`, `<3` e `Promise<string>` ficam.
+ * Código em linha não é mexido: segue a regra de código em linha.
+ */
+function semHtml(t: string): string {
+  const dentroDeCodigo = (i: number, faixas: Array<[number, number]>) => faixas.some(([a, b]) => i >= a && i < b);
+  // Antes de separar o código em linha: a crase dentro do script não pode partir o script ao meio.
+  const faixas = faixasDeCodigo(t);
+  const s = t.replace(HTML_NAO_LIDO, (m: string, ...args: unknown[]) => (dentroDeCodigo(args.at(-2) as number, faixas) ? m : ""));
+  const limpar = (x: string) => x.replace(TAG_DE_BLOCO, " ").replace(TAG_DE_LINHA, "");
+  let saida = "";
+  let desde = 0;
+  for (const [a, b] of faixasDeCodigo(s)) {
+    saida += limpar(s.slice(desde, a)) + s.slice(a, b);
+    desde = b;
+  }
+  return saida + limpar(s.slice(desde));
+}
+
 /** Corta `texto` em pedaços de até `max` caracteres, na última vírgula que cabe ou, sem ela, na última palavra. */
 function partirPorCaracteres(texto: string, max: number): string[] {
   const pedacos: string[] = [];
@@ -382,19 +476,15 @@ export function textoParaLeitura(md: string): string[] {
   let t = md.replace(/\r\n?/g, "\n").replace(/\p{Extended_Pictographic}️?/gu, "");
   // A cerca fecha numa linha só com a mesma cerca (ou maior): a de 4 crases não fecha na de 3 de dentro. Pode vir recuada (lista).
   t = t.replace(/^[ \t]*(`{3,}|~{3,})([^\n]*)[\s\S]*?(?:\n[ \t]*\1[`~]*[ \t]*(?=\n|(?![\s\S]))|(?![\s\S]))/gmu, (_, _cerca: string, info: string) => `\n\n${fraseDoBloco(info)}\n\n`);
-  const linhas: string[] = [];
-  for (const l of t.split("\n")) {
-    if (/^\s*\|.*\|\s*$/u.test(l)) {
-      if (linhas[linhas.length - 2] !== FRASE_TABELA) linhas.push("", FRASE_TABELA, "");
-    } else linhas.push(l);
-  }
-  t = linhas
+  // Bloco recuado antes da tabela; HTML depois das cercas e dos autolinks (`<https://…>` não é tag).
+  const semMarcacao = semTabelas(semBlocosRecuados(t.split("\n")))
     .join("\n")
     .replace(/!\[([^\]]*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
     .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
-    .replace(/<(?:https?:\/\/|mailto:)[^>\s]+>/giu, "um link")
+    .replace(/<(?:https?:\/\/|mailto:)[^>\s]+>/giu, "um link");
+  t = semHtml(semMarcacao)
     .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, "um link")
-    .replace(/(`+)([^\n]+?)\1(?!`)/gu, (_, _crases: string, c: string) => {
+    .replace(CODIGO_EM_LINHA, (_, _crases: string, c: string) => {
       const falado = codigoEmLinha(c);
       return falado === CODIGO ? "um trecho de código" : falado;
     })

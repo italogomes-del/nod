@@ -395,3 +395,76 @@ describe("textoParaLeitura (NOD-180: ouvir uma resposta pronta)", () => {
     expect(t).toContain("acabou");
   });
 });
+
+describe("textoParaLeitura: acertos da QA da NOD-180 (NOD-181)", () => {
+  it("1. tabela sem '|' no começo da linha vira uma frase só", () => {
+    for (const sep of ["---|---", ":--|--:", "| --- | --- |", "--- | ---"]) {
+      const t = lido(`Veja:\n\na | b\n${sep}\n1 | 2\n3 | 4\n\nFim.`);
+      expect(t).toBe(`Veja: ${FRASE_TABELA} Fim.`);
+      expect(t).not.toMatch(/\||---/u);
+    }
+    // A tabela vai até a 1ª linha sem "|".
+    expect(lido("a | b\n---|---\n1 | 2\nDepois da tabela.")).toBe(`${FRASE_TABELA} Depois da tabela.`);
+  });
+
+  it("2. regressão: '|' sem linha separadora segue lido como texto; régua sozinha não vira tabela", () => {
+    expect(lido("Escolha a | b agora.")).toBe("Escolha a | b agora.");
+    expect(lido("a | b\n\n---\n\nFim.")).not.toContain(FRASE_TABELA);
+    expect(lido("Dia 06/10/2026, e/ou amanhã.")).toContain("e/ou");
+    expect(lido("Dia 06/10/2026, e/ou amanhã.")).toContain("06/10/2026");
+  });
+
+  it("3. HTML: tags somem e o texto de dentro é lido; comentário, script e style não são lidos", () => {
+    expect(lido("Olá <b>mundo</b><br>tudo bem")).toBe("Olá mundo tudo bem.");
+    expect(lido("Antes <!-- nota --> depois.")).toBe("Antes depois.");
+    expect(lido("Antes <!--\nnota em\nduas linhas\n--> depois.")).not.toMatch(/nota/u);
+    expect(lido("Oi <script>x()</script> fim.")).toBe("Oi fim.");
+    expect(lido("Oi <SCRIPT type=\"a\">x()</SCRIPT> <style>p { a: b }</style>fim.")).toBe("Oi fim.");
+    expect(lido("<details><summary>Ver mais</summary>\n\nConteúdo.\n</details>")).toBe("Ver mais. Conteúdo.");
+    expect(lido('Um <a href="x">link</a> e <img src="y" /> aqui.')).toBe("Um link e aqui.");
+    // Código em linha não é mexido: segue a regra de código em linha.
+    expect(lido("Use `<b>` e pronto.")).toBe("Use um trecho de código e pronto.");
+    // Tag de bloco separa as palavras; a de linha não.
+    expect(lido("<p>Primeiro</p><p>segundo</p>")).toBe("Primeiro segundo.");
+    expect(lido("<ul><li>um</li><li>dois</li></ul>")).toBe("Um dois.");
+    expect(lido("<details><summary>Resumo</summary>Corpo</details>")).toBe("Resumo Corpo.");
+    expect(lido("<td>a</td><td>b</td>, <br/>fim")).toBe("A b, fim.");
+    expect(lido("Use <b>neg</b>rito e <pre>x</pre>.")).toBe("Use negrito e x.");
+    // Crase dentro de comentário, script ou style não salva o conteúdo; o mesmo HTML em código em linha fica.
+    expect(lido("Antes <script>const x = `a` + 1;</script> depois.")).toBe("Antes depois.");
+    expect(lido("A <!-- nota `x` secreta --> b.")).toBe("A b.");
+    expect(lido("<style>.a::after{content:`x`}</style> fim.")).toBe("Fim.");
+    expect(lido("Use `<!-- -->` para comentar.")).toBe("Use um trecho de código para comentar.");
+  });
+
+  it("3b. regressão: nome que não é tag HTML entre '<' e '>' fica (genérico, tecla, componente)", () => {
+    expect(lido("Retorna Promise<string> no final.")).toBe("Retorna Promise<string> no final.");
+    expect(lido("Array<T> e List<Item> ok.")).toBe("Array<T> e List<Item> ok.");
+    expect(lido("Aperte <Enter> para seguir.")).toBe("Aperte <Enter> para seguir.");
+  });
+
+  it("4. regressão: '<' e '>' soltos não perdem texto", () => {
+    expect(lido("Se a < b e c > d, pronto.")).toBe("Se a < b e c > d, pronto.");
+    expect(lido("Fluxo x -> y.")).toBe("Fluxo x -> y.");
+    expect(lido("Te amo <3")).toBe("Te amo <3.");
+  });
+
+  it("5. bloco recuado com 4 espaços (ou tab) vira a frase de bloco sem linguagem", () => {
+    const t = lido("Veja:\n\n    npm ci\n    npm test\n\nPronto.");
+    expect(t).toBe("Veja: Aqui tem um bloco de código. Pronto.");
+    expect(t).not.toMatch(/npm/u);
+    expect(lido("\tnpm ci\n\n\tnpm test\n\nPronto.")).toBe("Aqui tem um bloco de código. Pronto.");
+    // Sem linha em branco antes, não interrompe o parágrafo.
+    expect(lido("Veja:\n    npm ci")).toContain("npm ci");
+  });
+
+  it("6. regressão: continuação recuada de item de lista segue lida", () => {
+    expect(lido("- item\n\n    continuação")).toMatch(/continuação/iu);
+    expect(lido("1. item\n\n    continuação\n\n    mais uma")).toMatch(/mais uma/iu);
+  });
+
+  it("7. regressão: 'Deno/Node.js' continua como hoje (ponto 4 fora); caminho vira o nome do arquivo", () => {
+    expect(lido("Use Deno/Node.js aqui.")).toBe("Use Node.js aqui.");
+    expect(lido("Abra src/index.ts agora.")).toBe("Abra index.ts agora.");
+  });
+});
