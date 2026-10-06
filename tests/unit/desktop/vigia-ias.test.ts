@@ -235,6 +235,21 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.testes).toHaveLength(1);
   });
 
+  it("o servidor reiniciou (409 no puxar): o último inventário é anunciado de novo, igual, sem sonda nem teste", async () => {
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": pronto() } });
+    await vigia.iniciar(sondagem());
+    expect(m.anuncios).toHaveLength(1);
+    await vigia.reanunciar();
+    expect(m.anuncios).toHaveLength(2);
+    expect(m.anuncios[1]).toEqual(m.anuncios[0]);
+    expect(m.sondas).toBe(0);
+    expect(m.testes).toEqual([]);
+    // Depois de parar, nada é anunciado.
+    vigia.parar();
+    await vigia.reanunciar();
+    expect(m.anuncios).toHaveLength(2);
+  });
+
   it("parar cancela a passada agendada e nada mais roda", async () => {
     const { m, vigia, sondagem } = mac({ login: { "claude-cli": semLogin(), "codex-cli": ausente() } });
     await vigia.iniciar(sondagem());

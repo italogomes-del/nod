@@ -323,8 +323,17 @@ async function parar() {
   registry = null; cliente = null;
   inventariosAtuais = null; maquinaIdAtual = null; ghLogado = null;
 }
+/** definido em 2026-10-05: entre dois reanúncios depois de um 409 (o laço puxa a cada segundo e cada um falharia igual). */
+const ESPERA_REANUNCIO_MS = 10_000;
+let ultimoReanuncio = 0;
 function falha(codigo: FalhaPonte["codigo"]) {
   mensagem = mensagens[codigo] ?? mensagens.servidor_fora!;
+  // medido em produção em 2026-10-05: o servidor reiniciou num deploy, esqueceu a máquina e respondeu 409 a todo
+  // `puxar`; o app só trocava a mensagem e a fila da pessoa ficou parada até ela reabrir o app. Agora se reanuncia.
+  if (codigo === "reconectar" && vigiaIas && Date.now() - ultimoReanuncio >= ESPERA_REANUNCIO_MS) {
+    ultimoReanuncio = Date.now();
+    void vigiaIas.reanunciar().then(() => { if (mensagem === mensagens.reconectar) mensagem = "Conectado."; }).catch(() => undefined);
+  }
   if (!["chave_invalida", "atualize_app"].includes(codigo) || falhando || encerrando) return;
   falhando = true;
   setTimeout(() => { void parar().then(mostrarSetup).finally(() => { falhando = false; }); }, 0);

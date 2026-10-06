@@ -9,6 +9,9 @@ import { boot } from "./boot.ts";
  */
 export { criarServidor, listen, type OpcoesServidor } from "./servidor.ts";
 
+/** definido em 2026-10-05: teto do `fechar()` depois da drenagem (o compose dá 11 min no total; a drenagem usa até 10). */
+const FECHAMENTO_MAX_MS = 30_000;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     process.loadEnvFile(".env");
@@ -26,7 +29,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // compose dá stop_grace_period de 11 min). Sem nada vivo, fecha na hora como antes. Segundo sinal: o padrão mata.
     servidor
       .drenar({ prazoMs: Number(process.env.NOD_DRENAGEM_MAX_MS) || 600_000 })
-      .then(() => servidor.fechar())
+      .then(() => {
+        // definido em 2026-10-05 (medido em produção): se o fechamento travar, o processo sai mesmo assim, antes de o
+        // compose precisar do SIGKILL. A drenagem já terminou; o que falta fechar não vale um serviço meio no ar.
+        setTimeout(() => { log("aviso", "fechamento_demorou", { ms: FECHAMENTO_MAX_MS }); process.exit(1); }, FECHAMENTO_MAX_MS).unref();
+        return servidor.fechar();
+      })
       .then(() => process.exit(0), () => process.exit(1));
   };
   const aoSigint = () => encerrar("SIGINT");
