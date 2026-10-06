@@ -156,6 +156,8 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
     let capacidadeInterrupcao = false;
     let cancelaFila = false;
     let entradaAberta = true;
+    // NOD-168: a assinatura bateu no teto. O servidor sabe uma vez só; o resumo não é pedido (o CLI não responderia).
+    let limitado = false;
     const ferramentasAbertas = new Map<string, string>();
 
     const proc = iniciarProcesso({
@@ -196,6 +198,10 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
         for (const k of ["attempted", "rejected", "promptSubmitted", "producedOutput"] as const) if (depois[k] && !sinais[k]) pendentes.push(sinks.sinal(k));
         sinais = depois;
         if (ev.tipo === "result") emVolta = false;
+        if (ev.tipo === "rate_limit" && ev.status === "rejected" && !limitado) {
+          limitado = true;
+          cerebro?.enviar({ t: "limite" });
+        }
         if (pedindoResumo) {
           // medido em 2026-10-04 (scripts/sonda-ligacao-claude.ts, CLI 2.1.289): mensagem escrita com uma volta em curso
           // abre OUTRA volta — dois `result`. O da volta que já corria é pulado; o seguinte é o do resumo.
@@ -243,6 +249,10 @@ export async function rodarLigacaoClaude(c: ContextoLigacaoClaude): Promise<Resu
     const pedirResumo = () => {
       if (pedindoResumo || !entradaAberta) return;
       pedindoResumo = true;
+      if (limitado) {
+        fecharEntrada();
+        return;
+      }
       resultsAPular = emVolta ? 1 : 0;
       uuidDoResumo = escrever(PEDIDO_DE_RESUMO, null);
       // definido em 2026-10-04: sem resposta em 45 s (CLI preso numa ferramenta), fecha mesmo assim.

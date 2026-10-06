@@ -314,3 +314,6 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
   (`aguardando_escolha`; sem escolha em 2 min, fim `sem_ia`). `POST ligacoes/:id/continuar {ia}` abre OUTRO turno-cérebro
   para a mesma ligação. Quem criar um caminho novo que encerre o turno `ligacao` mantém o evento com `origem: "ligacao"`
   e o motivo em código, senão a ligação volta a ficar muda. Log: `ligacao_cerebro_caiu` (causa e contagens, nunca fala).
+- Limite da assinatura (ADR-078): só o `rate_limit_event` com `rejected` vira `{t:"limite"}` no canal do cérebro; nunca
+  classifique pelo texto do erro do fornecedor. Com outra IA pronta, o limite entra no "sem IA" (causa `limite`); sem
+  alternativa, encerra com `limite_da_assinatura`. Log: `ligacao_limite_da_assinatura`.

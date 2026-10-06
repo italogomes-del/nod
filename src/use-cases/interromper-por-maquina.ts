@@ -30,7 +30,7 @@ type Caido = { turno: Turno; motivo: MotivoDaQueda; perdidoDesde: number; maquin
  * O que acontece com UM turno derrubado. Rotina: só o histórico — execução 'interrompida', sem decisão
  * e sem mensagem; a próxima janela roda sozinha, então "Retomar" não faz sentido. Conversa: a retomada
  * anterior da MESMA conversa fecha por regra e nasce uma, com a frase na conversa — a pessoa estava
- * esperando aquela resposta.
+ * esperando aquela resposta. Ligação: só o histórico, como na entrega (ADR-072).
  */
 async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | null }, prazoMs: number | undefined, events: RuntimeEvent[]): Promise<{ decisaoId: string | null; rotinaId: string | null; rotina: boolean }> {
   const { turno, motivo } = c;
@@ -43,6 +43,9 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
     events.push(...(r.events ?? []));
     return { decisaoId: null, rotinaId: c.rotinaId, rotina: true };
   }
+  // NOD-168 (ADR-072): o turno-cérebro de uma ligação não ganha card "Retomar" nem aviso na conversa — a ligação conta
+  // como acabou (o orquestrador encerra e grava a linha do motivo). A queda segue em `porMotivo` e no aviso do Mac.
+  if (turno.origem === "ligacao") return { decisaoId: null, rotinaId: null, rotina: false };
   for (const anterior of await deps.repos.decisoes.pendentesDaConversa(turno.conversaId)) {
     if (anterior.tipo !== "retomar_turno") continue;
     const fechada = await deps.repos.decisoes.fecharPorRegra(anterior.id, { regra: REGRA_RETOMADA_SUBSTITUIDA, regraVersao: 1, agora });

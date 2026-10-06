@@ -28,6 +28,11 @@ describe("o motivo, com o que se sabe", () => {
     expect(motivoSemIa("falhou", null)).toBe("A IA deste Mac parou de responder.");
     expect(motivoSemIa("conta_sem_acesso", null)).toBe("A IA deste Mac parou de responder.");
   });
+
+  it("NOD-168: limite da assinatura é dito como é (nomeia o programa quando se sabe qual)", () => {
+    expect(motivoSemIa("limite", "claude-cli")).toBe("A assinatura do Claude Code deste Mac chegou ao limite.");
+    expect(motivoSemIa("limite", null)).toBe("A assinatura de IA deste Mac chegou ao limite.");
+  });
 });
 
 describe("2A · há outra IA pronta no Mac", () => {

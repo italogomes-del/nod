@@ -255,6 +255,30 @@ describe("laço de voz do Claude contra o CLI falso", { timeout: 30_000 }, () =>
     expect((await resultado).desfecho).toBe("sucesso");
     expect(await argv()).not.toContain("--replay-user-messages");
   });
+
+  it("NOD-168: rate_limit `rejected` manda um `limite` só (mesmo em duas voltas) e o fim fecha a entrada sem pedir o resumo", async () => {
+    const { resultado, canal, escritas } = await iniciar();
+    await canal.esperar((m) => m.t === "ola");
+    canal.enviar({ t: "vez", n: 1, texto: "[[limite]] oi" });
+    await canal.esperar((m) => m.t === "limite");
+    canal.enviar({ t: "vez", n: 2, texto: "[[limite]] de novo" });
+    await canal.esperar((m) => m.t === "fala-fim" && m.n === 2);
+    expect(canal.recebidas.filter((m) => m.t === "limite")).toHaveLength(1);
+    canal.enviar({ t: "fim", motivo: "limite_da_assinatura" });
+    await resultado;
+    expect((await escritas()).map((l) => l.message?.content[0]?.text)).not.toContain(PEDIDO_DE_RESUMO);
+  });
+
+  it("NOD-168: rate_limit `allowed_warning` (perto do teto) não manda `limite` e a vez é respondida", async () => {
+    const { resultado, canal } = await iniciar();
+    await canal.esperar((m) => m.t === "ola");
+    canal.enviar({ t: "vez", n: 1, texto: "[[limite-aviso]] oi" });
+    await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
+    expect(falaDe(canal.recebidas, 1)).toBe("Entendi: [[limite-aviso]] oi.");
+    expect(canal.recebidas.some((m) => m.t === "limite")).toBe(false);
+    canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+    expect((await resultado).desfecho).toBe("sucesso");
+  });
 });
 
 describe("uuidDoEco", () => {

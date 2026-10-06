@@ -73,8 +73,18 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
       out({ type: "system", subtype: "init", session_id: sessaoVoz, tools: [], model: valor("--model"), claude_code_version: VERSAO, apiKeySource: "none", capabilities: ["interrupt_receipt_v1", "interrupt_cancel_queued_v1"] });
       ler(m);
       let ultimo = "";
+      let limite = false;
       for (;;) {
         const texto = textoDe(m);
+        // NOD-168: `[[limite]]` é a assinatura no teto (o CLI real manda `rate_limit_event` com `rejected` e fecha a volta
+        // com erro, sem texto); `[[limite-aviso]]` é o aviso de perto do teto (`allowed_warning`), que não para nada.
+        const rateLimit = (status) => out({ type: "rate_limit_event", rate_limit_info: { status, rateLimitType: "five_hour", unifiedWindows: { five_hour: { utilization: status === "rejected" ? 1 : 0.9 } } } });
+        if (texto.includes("[[limite]]")) {
+          rateLimit("rejected");
+          limite = true;
+          break;
+        }
+        if (texto.includes("[[limite-aviso]]")) rateLimit("allowed_warning");
         if (texto.includes("[[ferramenta]]")) {
           delta("Vou anotar.");
           const id = `tu_${++ferramentas}`;
@@ -99,6 +109,10 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
         break;
       }
       cortar = null;
+      if (limite) {
+        out({ type: "result", subtype: "success", is_error: true, session_id: sessaoVoz, result: "Claude AI usage limit reached", total_cost_usd: 0, num_turns: 1, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, permission_denials: [] });
+        continue;
+      }
       out({ type: "result", subtype: volta.cortada ? "error_during_execution" : "success", is_error: volta.cortada, session_id: sessaoVoz, result: volta.cortada ? "" : ultimo, total_cost_usd: 0.01, num_turns: 1, usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 10, cache_creation_input_tokens: 0 }, permission_denials: [] });
     }
     emVolta = false;

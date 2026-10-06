@@ -7,12 +7,14 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
+import { ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobreTrx, executar, MARLON } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const PRONTO = { estado: "pronto" as const, versao: "teste", em: 0 };
+const CONTEXTO_LIGACAO: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
 
 /** Uma rotina com o turno JÁ reivindicado por uma máquina (despachando, lease até agora + LEASE_MS). */
 async function rotinaRodando(deps: Deps, conversaId: string, agenteId: string, maquina: string, agora: number) {
@@ -120,6 +122,29 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
       expect(await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000)).toEqual({ interrompidos: [], decisoes: [] });
       expect(await deps.repos.rotinaExecucoes.listar(rotina.id)).toHaveLength(1);
       expect(await deps.repos.incidentes.visiveis(0)).toMatchObject([{ rotinas: 1 }]);
+    });
+  });
+
+  it("ligação (NOD-168): lease vencido → interrompido, 0 decisões, 0 mensagens de sistema, o evento do turno; o aviso conta a conversa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      const maquina = randomUUID();
+      const { turno } = (await executar(deps, ligar, { agenteId: criado.agente.id, contexto: CONTEXTO_LIGACAO, executor: "local", iniciadaPor: "produto" })).data;
+      expect((await deps.repos.turnos.reivindicar({ machineId: maquina, agora, aceitaLigacao: true }))?.id).toBe(turno.id);
+      const mensagensAntes = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).length;
+
+      const r = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 1);
+      expect(r).toMatchObject({ interrompidos: [turno.id], decisoes: [] });
+      expect(await deps.repos.turnos.buscar(turno.id)).toMatchObject({ origem: "ligacao", estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+      expect(await deps.repos.decisoes.pendentesDaConversa(criado.conversa.id)).toEqual([]);
+      expect(await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).toHaveLength(mensagensAntes);
+      // O evento fica: é por ele que o orquestrador sabe que o cérebro caiu (ADR-072).
+      const eventos = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turno.id} and created_at > ${new Date(agora)}`;
+      expect(eventos.map((e) => e.kind)).toEqual(["turno_interrompido"]);
+      expect(await deps.repos.incidentes.visiveis(0)).toMatchObject([{ id: r.incidenteId, conversas: 1, rotinas: 0 }]);
+      expect(await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000)).toEqual({ interrompidos: [], decisoes: [] });
     });
   });
 

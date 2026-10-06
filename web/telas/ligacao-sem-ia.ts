@@ -51,6 +51,8 @@ export type EstadoIaVoltou = { ia: IaDaLigacao | null; trocou: boolean };
  */
 export function motivoSemIa(causa: CausaCerebroCaiu, ia: IaDaLigacao | null): string {
   if (causa === "conta_sem_acesso" && ia) return `A conta do ${NOME_CLI[ia]} deste Mac está sem acesso: a organização dela desativou o uso por assinatura.`;
+  // NOD-168 (ADR-078): a assinatura no teto é dita como é; "parou de responder" faria a pessoa tentar de novo à toa.
+  if (causa === "limite") return ia ? `A assinatura do ${NOME_CLI[ia]} deste Mac chegou ao limite.` : "A assinatura de IA deste Mac chegou ao limite.";
   return "A IA deste Mac parou de responder.";
 }
 
@@ -104,7 +106,9 @@ function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
   if (ia === s.ia) {
     texto = s.causa === "conta_sem_acesso"
       ? `Entre com uma conta que tenha acesso, ou peça ao administrador da organização para liberar o ${cli}.`
-      : `O ${cli} parou de responder nesta ligação. Dá para tentar de novo.`;
+      : s.causa === "limite"
+        ? `O ${cli} chegou ao limite da assinatura. Dá para tentar de novo quando o limite renovar.`
+        : `O ${cli} parou de responder nesta ligação. Dá para tentar de novo.`;
     acao = acaoDaQueCaiu(ia, s, true);
     if (s.causa === "conta_sem_acesso" && !s.ponte.entrar) noTerminal = notaNoTerminal(ia, "entrar");
   } else if (daIa?.causa === "sonda_lenta") {

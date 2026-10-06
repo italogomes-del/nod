@@ -117,7 +117,7 @@ const MOTIVOS_FIM: typeof MotivosFim = [
 ];
 
 /** Rede de segurança (definido em 2026-10-05): os códigos do aviso "a IA caiu", conferidos um a um como o resto. */
-const CAUSAS_CEREBRO: typeof CausasCerebroCaiu = ["conta_sem_acesso", "falhou"];
+const CAUSAS_CEREBRO: typeof CausasCerebroCaiu = ["conta_sem_acesso", "falhou", "limite"];
 const IAS_LIGACAO: typeof IasDaLigacao = ["claude-cli", "codex-cli"];
 const ESTADOS_IA: typeof EstadosIa = ["pronto", "nao_autenticado", "ausente"];
 const ehIa = (v: unknown): v is IaDaLigacao => typeof v === "string" && (IAS_LIGACAO as readonly string[]).includes(v);

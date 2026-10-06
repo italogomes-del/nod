@@ -1,12 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { criarCatcherDriver } from "../../src/adapters/executor/drivers/catcher.ts";
+import type { FabricaSocket } from "../../src/adapters/executor/cerebro-ligacao.ts";
 import type { Driver } from "../../src/adapters/executor/spi.ts";
+import { NOTA_CONEXAO_VOLTOU } from "../../src/adapters/voz/orquestrador.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConversaDto } from "../../src/contracts/api.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao } from "../../src/contracts/ligacao.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import type { Rotina } from "../../src/contracts/rotina.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import type { MsgMidiaServidor } from "../../src/contracts/voz.ts";
 import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
@@ -333,4 +336,79 @@ describe("o cérebro cai no meio da ligação", () => {
     // O que foi escrito na espera não entrou na ligação.
     expect(falas.some((f) => f.texto.includes("alguém me ouve"))).toBe(false);
   }, 120_000);
+});
+
+/**
+ * NOD-168: a rede do Mac cai com o card de aprovação na tela. O canal do cérebro fecha sem código de fim, o executor
+ * religa a MESMA sessão e o servidor manda "A conexão voltou" em vez da abertura. Aprovar na tela durante a queda (dois
+ * cliques ao mesmo tempo) decide uma vez só, cria uma rotina só, e a nota da decisão chega ao cérebro quando ele volta, depois da de religação.
+ */
+describe("a rede cai com o card na tela (NOD-168)", () => {
+  let srv3: ServidorCompleto;
+  const criados3 = { agentes: [] as string[], conversas: [] as string[] };
+  const sockets: { s: { close(codigo?: number): void }; recebidas: Record<string, unknown>[] }[] = [];
+  const fabricaEspia: FabricaSocket = (url, headers) => {
+    const Ctor: unknown = Reflect.get(globalThis, "WebSocket");
+    const s = Reflect.construct(Ctor as new (...a: unknown[]) => object, [url, { headers }]) as ReturnType<FabricaSocket>;
+    const espia = { s, recebidas: [] as Record<string, unknown>[] };
+    s.addEventListener("message", (ev) => {
+      if (typeof ev.data === "string") espia.recebidas.push(JSON.parse(ev.data) as Record<string, unknown>);
+    });
+    sockets.push(espia);
+    return s;
+  };
+
+  beforeAll(async () => {
+    srv3 = await servidorCompleto({ env: { NOD_LIGACAO: "todas" }, drivers: ({ urlNod }) => [criarCatcherDriver({ urlNod, fabricaSocket: fabricaEspia })] });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (!srv3) return;
+    try {
+      await srv3.fechar();
+    } finally {
+      await limparPessoaE2E(srv3.db, srv3.dbDono, { tenantId: srv3.pessoa.tenantId, pessoaId: srv3.pessoa.pessoaId }, criados3);
+      await srv3.desligar();
+    }
+  }, 30_000);
+
+  it("aprovar durante a queda decide uma vez; o cérebro religado recebe a nota, não a abertura", async () => {
+    const { agente, conversa } = await srv3.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    criados3.agentes.push(agente.id);
+    criados3.conversas.push(conversa.id);
+    await srv3.json("POST", "voz/consentimento", { versao: 1 });
+    const { ligacao } = await srv3.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
+    const cli = await abrirMidia(ligacao.id, `http://${new URL(srv3.url).host}`, srv3);
+    await cli.esperarMsg((m) => m.t === "cerebro" && m.online, "cérebro online", 10_000);
+
+    const rotina = { cron: "0 9 * * 1-5", fuso_iana: "America/Sao_Paulo", instrucao: "resuma os PRs abertos", fonte: "PRs abertos", entregavel: "resumo curto", limites_aprovacao: "nada sai sem aprovação", politica_sem_dado: "diga que não houve" };
+    cli.ws.send(JSON.stringify({ t: "texto", conteudo: `cria uma rotina [[tool: criar_rotina ${JSON.stringify(rotina)}]] [[delta: Proposta enviada.]]` }));
+    const janela = await cli.esperarMsg((m) => m.t === "janela", "janela aberta", 10_000);
+    const decisaoId = janela.t === "janela" ? janela.decisaoId : "";
+    expect(sockets).toHaveLength(1);
+
+    // ---- a rede cai: fechamento sem código de fim, o executor vai religar ----
+    sockets[0]?.s.close(4000);
+    await cli.esperarMsg((m) => m.t === "cerebro" && !m.online, "cérebro fora");
+    const [a, b] = await Promise.all([srv3.chamar("POST", `decisoes/${decisaoId}/decidir`, {}), srv3.chamar("POST", `decisoes/${decisaoId}/decidir`, {})]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+
+    // ---- religou: a mesma sessão, outro socket ----
+    await srv3.esperar(async () => (cli.msgs.filter((m) => m.t === "cerebro" && m.online).length >= 2 ? true : null), { nome: "cérebro religado", timeoutMs: 10_000 });
+    const religado = await srv3.esperar(async () => {
+      const r = sockets[1]?.recebidas ?? [];
+      return r.some((m) => m.t === "nota" && typeof m.texto === "string" && m.texto.includes("decidiu na tela")) ? r : null;
+    }, { nome: "nota da decisão no cérebro religado" });
+    expect(religado.filter((m) => m.t === "nota").map((m) => m.texto)[0]).toBe(NOTA_CONEXAO_VOLTOU);
+    expect(religado.filter((m) => m.t === "nota" && m.texto === NOTA_CONEXAO_VOLTOU)).toHaveLength(1);
+    expect(religado.filter((m) => m.t === "vez" && m.n === 0)).toEqual([]);
+
+    const { rotinas } = await srv3.json<{ rotinas: { rotina: Rotina }[] }>("GET", "rotinas");
+    expect(rotinas.filter((x) => x.rotina.agenteId === agente.id)).toHaveLength(1);
+    // A ligação seguiu viva e responde de novo.
+    cli.ws.send(JSON.stringify({ t: "texto", conteudo: "voltou?" }));
+    await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("voltou?"), "resposta depois da religação", 10_000);
+    cli.ws.send(JSON.stringify({ t: "tchau" }));
+    await cli.esperarMsg((m) => m.t === "fim", "fim");
+  }, 60_000);
 });

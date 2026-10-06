@@ -28,6 +28,9 @@ export const CATEGORIAS_ESPERA = [
   // definido em 2026-10-05: a frase da rede de segurança (a IA do Mac caiu no meio da ligação). Mora aqui para ser
   // gravada e cacheada como as esperas; quem a toca é o orquestrador (`falarSemIa`), como aviso, nunca `escolherFala`.
   "sem_ia",
+  // definido em 2026-10-05 (NOD-168): o aviso único do modo "só legenda" (o TTS falhou 2 frases seguidas). Só toca se o
+  // clipe já estiver no cache — é a voz ao vivo que caiu; sem clipe, o aviso sai só escrito. Quem toca é o orquestrador.
+  "voz_fora",
 ] as const;
 export type CategoriaEspera = (typeof CATEGORIAS_ESPERA)[number];
 
@@ -56,8 +59,11 @@ export type FalaDeEspera = {
   ferramenta?: FerramentaComFala;
 };
 
-/** definido em 2026-10-04: versão da biblioteca inteira (sobe quando entra ou sai uma fala). 2 em 2026-10-05: `sem_ia`. */
-export const VERSAO_FALAS_DE_ESPERA = 2;
+/**
+ * definido em 2026-10-04: versão da biblioteca inteira (sobe quando entra ou sai uma fala). 2 em 2026-10-05: `sem_ia`.
+ * 3 em 2026-10-05 (NOD-168): `voz_fora`.
+ */
+export const VERSAO_FALAS_DE_ESPERA = 3;
 
 type Grupo = { categoria: CategoriaEspera; ferramenta?: FerramentaComFala; textos: readonly string[] };
 
@@ -125,6 +131,7 @@ const GRUPOS: readonly Grupo[] = [
   { categoria: "despedida", textos: ["Até mais!", "Tchau, até mais!", "Falou! Até a próxima.", "Até logo!"] },
   // Uma frase só, a do protótipo aprovado em 2026-10-05: ela aponta para a tela, onde estão o motivo e as saídas.
   { categoria: "sem_ia", textos: ["Não consegui usar a IA deste Mac. As opções estão na tela."] },
+  { categoria: "voz_fora", textos: ["A voz falhou. Sigo por escrito, na legenda e no chat."] },
 ];
 
 function montarFalas(): readonly FalaDeEspera[] {

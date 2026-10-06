@@ -121,6 +121,20 @@ padrão do Node (`process.once`).
 `pos_restart{desfecho="perdido",origem="restart_servidor"}` por deploy, antes e depois, junto com
 `drenagem_concluida.duracao_ms`.
 
+## Emenda 2026-10-05 — o fim que a pessoa não escolheu fica na conversa (NOD-168)
+
+**O que muda.** Definido em 2026-10-05: quando a ligação acaba por um motivo que a pessoa não escolheu, o
+`encerrarLigacao` grava, na mesma tx que atualiza a linha "Chat de voz", uma mensagem `sistema` com o porquê, e emite
+`mensagem_criada`. Os textos são os do `textoFim` da web (`TEXTOS_FIM` em `src/use-cases/ligacoes.ts`); `pessoa_desligou`,
+`bot_desligou`, `tempo_maximo` e `nao_atendida` não gravam nada (a linha "Chat de voz" já diz tudo).
+
+**Uma vez só.** O repo encerra a ligação uma vez; a 2ª chamada (o `fechar()` repetido, o boot depois da queda) não
+devolve a linha e não grava de novo.
+
+**Deploy que passa do prazo.** A ligação que sobra depois de `NOD_DRENAGEM_MAX_MS` encerra no `fechar()` com
+`reinicio_servidor` e deixa "A ligação caiu porque o nod foi atualizado. Ligue de novo." na conversa. O "religa sozinha
+na mesma linha" do plano não foi feito: a pessoa liga de novo.
+
 ## Emenda 2026-10-05 — provedor de produção e limitador da cota do TTS (NOD-166)
 
 **Provedor padrão de produção: Google.** Definido em 2026-10-05: em produção a voz é o Google (Transcribe Live + Chirp

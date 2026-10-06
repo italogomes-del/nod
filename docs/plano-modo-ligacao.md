@@ -340,12 +340,12 @@ Todas as migrações são só de adição (expand-only), porque o código velho 
 
 ### Operação
 
-- **Drenagem:** no SIGTERM (`src/adapters/http/server.ts`), recusa ligação nova e avisa as vivas. Espera até `NOD_DRENAGEM_MAX_MS` (10 min) antes de `fechar()`. `stop_grace_period: 11m` em `compose.yml`. Ligação que sobrar religa sozinha na mesma linha, com as últimas 30 falas. No boot, linhas vivas sem `LigacaoViva` fecham com `reinicio_servidor`.
+- **Drenagem:** no SIGTERM (`src/adapters/http/server.ts`), recusa ligação nova e avisa as vivas. Espera até `NOD_DRENAGEM_MAX_MS` (10 min) antes de `fechar()`. `stop_grace_period: 11m` em `compose.yml`. Ligação que sobrar encerra com `reinicio_servidor` e deixa na conversa a linha "A ligação caiu porque o nod foi atualizado. Ligue de novo." (NOD-168; religar sozinha na mesma linha ficou fora). No boot, linhas vivas sem `LigacaoViva` fecham com `reinicio_servidor`.
 - **Caddy:** o bind de arquivo único fica no inode antigo (`compose.yml:30`). `deploy.sh` recria o container do Caddy só quando o Caddyfile muda, fora de ligação.
 - **Quedas:**
-  - Cérebro: aviso, 20 s, até 2 religações. `aposQuedaDaMaquina` (`interromper-por-maquina.ts:129`) não cria "Retomar" para ligação.
-  - Travado (nada em 8 s, sem ferramenta) ou limite da assinatura (`rate_limit_event`; `account/rateLimits`): aviso falado e escrito, fim com motivo próprio.
-  - TTS 429/5xx: uma nova tentativa, depois só legenda + chat. STT fora: reconecta, depois pede para digitar.
+  - Cérebro: aviso, 20 s, até 2 religações; numa religação com a ligação atendida o cérebro novo recebe a nota "[nod] A conexão voltou" em vez da vez 0. O varredor (`consequencias` em `interromper-por-maquina.ts`) não cria "Retomar" nem mensagem para turno de ligação (NOD-168). Mídia e cérebro fora juntos encerram com `cerebro_caiu`.
+  - Travado (nada em 8 s, sem ferramenta): aviso falado e escrito. Limite da assinatura (`rate_limit_event` `rejected`, ADR-078): com outra IA pronta, aviso e o fluxo "sem IA" ("Continuar com o ChatGPT"); sem alternativa, aviso e fim com `limite_da_assinatura`.
+  - TTS 429/5xx: uma nova tentativa; 2 falhas seguidas viram "só legenda" (aviso único escrito, sem janela de aprovação por voz). STT fora: reabre uma vez, depois pede para digitar (NOD-168).
   - Renovação: `renovar` propaga `FalhaPonte.codigo` (`ponte-http.ts:32-39,54`). No turno de ligação, falha de transporte é tolerada por 20 s; 401/403/`{ativo:false}` param na hora. `RespostaRenovar.ligacaoEncerrada` vem montada em `ponte-interna.ts:107-133`.
 - **STT:** rotação antes dos 10 min. Abre a sessão nova, espera `setup_complete` e só então fecha a antiga.
 - **Cotas:** Chirp 3 HD tem 200 pedidos/min. Limitador com prioridade conteúdo > leitura > prévia. Pedir aumento antes da fase 6.
@@ -494,7 +494,7 @@ Todas as migrações são só de adição (expand-only), porque o código velho 
 | AEC fraco no MacBook | `'all'`, limiar maior, confirmação por palavras, fone; plano B meio-duplex com interrupção por botão ou espaço |
 | Corte no meio da frase | Pistas de texto e corpus; Smart Turn num worker (traz onnxruntime) |
 | e2-medium engasga | Carga em cada fase, buffer no cliente; VM maior ou mídia em processo próprio |
-| Deploy derruba ligação | Drenagem, religar na mesma linha, resumo de queda, deploy fora do horário comercial |
+| Deploy derruba ligação | Drenagem; o que passa do prazo encerra e deixa o motivo na conversa (NOD-168); deploy fora do horário comercial |
 | Laço de voz e trabalho do mesmo bot juntos | Origem própria, testes de concorrência, notas só do `ligacao_id`, absorção desligada |
 | Eco ou alguém ao lado aprova | Janela pelo VAD, gramática fechada, leitura do servidor, `comandoId` de uso único; risco residual aceito |
 | Eco de conteúdo de fora vira pedido | Só palavras de parada durante leitura não confiável; `conversaComAPessoa` falso |

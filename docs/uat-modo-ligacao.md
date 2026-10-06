@@ -196,3 +196,40 @@ HD); o item 6 são 220 frases curtas.
 | Limite da sessão sem rotação e `goAway` | a medir |
 | Fluxo de streaming conta na cota | a medir |
 | `tts_pico_min` com 3 ligações | a medir |
+
+## Resiliência da ligação (NOD-168, roteiro escrito em 2026-10-05)
+
+Ensaio manual, num Mac de verdade, depois do PR da NOD-168 e da preparação da NOD-165 (#147: `scripts/uat/relatorio-ligacao.ts`
+lê os logs do intervalo e as decisões com `canal:"voz"`). Os testes automáticos cobrem cada queda com custo zero; aqui
+se confere o que só o aparelho mostra: a tela, a voz e o tempo de verdade.
+
+Preparação: app desktop logado, uma IA pronta no Mac (o Claude Code) e, para o item 6, também o Codex. Antes de cada item,
+anote a hora em UTC; no fim rode `node scripts/uat/relatorio-ligacao.ts --desde <hora> --ate <hora>` e cole o resumo
+na tabela de resultados.
+
+| # | O quê | Como provocar | Passa se |
+|---|---|---|---|
+| 1 | Wi-Fi fora por 5 s | No meio de uma fala da pessoa, desligue o Wi-Fi do Mac e religue 5 s depois | A tela mostra "reconectando" e volta sozinha; o cérebro religa (`cerebro_religando` no Mac, `ligacao_cerebro_religou` no servidor); o bot **não** cumprimenta de novo; a vez dita na queda é respondida depois |
+| 2 | Wi-Fi fora por 30 s | Igual, mas 30 s | Passados os 20 s de reconexão do cérebro, a ligação encerra com `cerebro_caiu`, e a conversa ganha **uma** linha "A ligação caiu: o seu Mac parou de responder." |
+| 3 | Tampa fechada | Com a ligação em curso, feche a tampa por 1 min e abra | Mídia e cérebro caem juntos: fim `cerebro_caiu` e a mesma linha do item 2; nenhum card "Retomar" na conversa (o varredor não abre Retomar para turno de ligação) |
+| 4 | TTS bloqueado | Com voz `google`, bloqueie `texttospeech.googleapis.com` (linha `0.0.0.0` no `/etc/hosts` do servidor local) e fale duas vezes | Depois de 2 falhas seguidas (`voz_tts_falhou`), `voz_so_legenda` uma vez e o aviso escrito único; as respostas seguem em legenda; um card de aprovação **não** abre a janela de voz, só o card da tela |
+| 5 | STT morto | Com voz local, `pkill -f whisper-server` no meio da ligação; repita depois da reabertura | Na 1ª, `voz_stt_reaberto` e a ligação segue ouvindo; na 2ª, `voz_stt_falhou` e o aviso pedindo para digitar; o texto digitado continua sendo respondido |
+| 6 | Limite simulado | Aponte `NOD_CLAUDE_BIN` do app para um shim do CLI falso (o mesmo de `iniciar()` em `tests/integration/executor/claude-ligacao-falso.test.ts`: `NOD_FALSO_CENARIO=ligacao-voz`, o `NOD_FALSO_HELP` do teste e `exec node tests/fixtures/claude-falso.mjs "$@"`) e digite uma frase com `[[limite]]`; repita com o Codex desligado | Com o Codex pronto: aviso "Sua assinatura de IA chegou ao limite.", a tela "A assinatura do Claude Code deste Mac chegou ao limite." e "Continuar com o ChatGPT", que retoma a mesma ligação. Sem o Codex: o aviso falado "…então vou encerrar a ligação" e o fim `limite_da_assinatura` (`ligacao_limite_da_assinatura` no log) |
+| 7 | Deploy passando do prazo | Servidor local com `NOD_DRENAGEM_MAX_MS=30000`; com a ligação em curso, mande `SIGTERM` ao processo e não desligue | Ligação nova é recusada durante a drenagem; aos 30 s a ligação encerra com `reinicio_servidor`, e a conversa ganha **uma** linha "A ligação caiu porque o nod foi atualizado. Ligue de novo." |
+| 8 | Aprovar na tela durante a queda | Com o servidor fora do Mac (staging), peça uma rotina, espere o card, desligue o Wi-Fi do Mac e aprove o card no celular durante a queda; religue em menos de 20 s | A decisão sai uma vez (uma rotina só), e o bot, ao voltar, não lê o card de novo |
+
+Fim que a pessoa escolheu (`pessoa_desligou`, `bot_desligou`, `tempo_maximo`, `nao_atendida`) **não** deixa linha de
+motivo: só a "Chat de voz · mm:ss" de sempre.
+
+### Resultados
+
+| Item | Resultado |
+|---|---|
+| 1 Wi-Fi 5 s | a ensaiar |
+| 2 Wi-Fi 30 s | a ensaiar |
+| 3 Tampa fechada | a ensaiar |
+| 4 TTS bloqueado | a ensaiar |
+| 5 STT morto | a ensaiar |
+| 6 Limite simulado | a ensaiar |
+| 7 Deploy passando do prazo | a ensaiar |
+| 8 Aprovar na tela durante a queda | a ensaiar |

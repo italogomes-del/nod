@@ -3,7 +3,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import WebSocket from "ws";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
-import type { RespostaMutacao } from "../../src/contracts/api.ts";
+import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { Ligacao } from "../../src/contracts/ligacao.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
@@ -235,6 +235,58 @@ describeIntegracao("NOD-175: modo local", () => {
 
     ws.send(JSON.stringify({ t: "tchau" }));
     expect(await drenagem).toMatchObject({ vivas: 0, turnos: 0, prazo_vencido: false });
+    ws.close();
+  });
+});
+
+describeIntegracao("NOD-168: ligação que passa do prazo da drenagem", () => {
+  let srv: ServidorCompleto;
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  beforeAll(async () => {
+    srv = await servidorCompleto({ env: { NOD_LIGACAO: "todas" } });
+  });
+  afterAll(async () => {
+    if (!srv) return;
+    await srv.fechar();
+    await limparPessoaE2E(srv.db, srv.dbDono, srv.pessoa, criados);
+    await srv.desligar();
+  });
+
+  it("prazo vencido com a ligação viva: o fechar encerra com reinicio_servidor e deixa UMA linha na conversa", async () => {
+    const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    criados.agentes.push(agente.id);
+    criados.conversas.push(conversa.id);
+    await srv.json("POST", "voz/consentimento", { versao: 1 });
+    const { ligacao } = await srv.json<{ ligacao: Ligacao }>("POST", "ligacoes", { agenteId: agente.id });
+
+    const host = new URL(srv.url).host;
+    const ws = new WebSocket(`${srv.url.replace("http", "ws")}/api/t/${srv.pessoa.tenantId}/voz/v1/midia`, { headers: { cookie: srv.pessoa.cookie, origin: `http://${host}` } });
+    const textos: string[] = [];
+    ws.on("message", (dados, binario) => {
+      if (binario) {
+        ws.send(JSON.stringify({ t: "tocou-fim", utt: (dados as Buffer).readUInt16LE(5) }));
+        return;
+      }
+      textos.push(String(dados));
+    });
+    await new Promise<void>((r, j) => {
+      ws.once("open", () => r());
+      ws.once("error", j);
+    });
+    ws.send(JSON.stringify({ t: "ola", v: 1, ligacaoId: ligacao.id, entrada: "pcm16", saida: "pcm16" }));
+    await srv.esperar(async () => srv.app.voz.vivas() === 1, { nome: "ligação viva" });
+
+    // A pessoa não desliga: a drenagem vence o prazo com a ligação viva, e o SIGTERM segue para o fechar (server.ts).
+    expect(await srv.drenar({ prazoMs: 300, intervaloMs: 50 })).toMatchObject({ vivas: 1, prazo_vencido: true });
+    await srv.app.voz.fechar();
+    await srv.esperar(async () => textos.some((t) => t.includes('"reinicio_servidor"')), { nome: "fim na mídia" });
+
+    const linhas = async () => (await srv.json<ConversaDto>("GET", `conversas/${conversa.id}/mensagens`)).mensagens.filter((m) => m.kind === "sistema" && m.texto.startsWith("A ligação"));
+    await srv.esperar(async () => (await linhas()).length > 0, { nome: "linha do fim" });
+    expect((await linhas()).map((m) => m.texto)).toEqual(["A ligação caiu porque o nod foi atualizado. Ligue de novo."]);
+    // Fechar de novo (o fechar do servidor no afterAll) não duplica: o repo só encerra uma vez.
+    await srv.app.voz.fechar();
+    expect(await linhas()).toHaveLength(1);
     ws.close();
   });
 });

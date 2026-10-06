@@ -66,8 +66,11 @@ export type FaseLigacao = "chamando" | "conectando" | "ouvindo" | "pensando" | "
  */
 export const IAS_DA_LIGACAO = ["claude-cli", "codex-cli"] as const;
 export type IaDaLigacao = (typeof IAS_DA_LIGACAO)[number];
-/** Código fechado, nunca o texto do fornecedor: `conta_sem_acesso` vem do `causaSemIa` do turno; o resto é `falhou`. */
-export const CAUSAS_CEREBRO_CAIU = ["conta_sem_acesso", "falhou"] as const;
+/**
+ * Código fechado, nunca o texto do fornecedor: `conta_sem_acesso` vem do `causaSemIa` do turno; `limite` é a assinatura
+ * no teto com outra IA pronta (NOD-168, ADR-078: o cérebro ainda está vivo, mas não responde mais); o resto é `falhou`.
+ */
+export const CAUSAS_CEREBRO_CAIU = ["conta_sem_acesso", "falhou", "limite"] as const;
 export type CausaCerebroCaiu = (typeof CAUSAS_CEREBRO_CAIU)[number];
 export const ESTADOS_IA_DA_LIGACAO = ["pronto", "nao_autenticado", "ausente"] as const;
 /** Como cada IA está neste Mac agora (o inventário que o Mac anunciou): é o que decide os botões do aviso. */
@@ -171,4 +174,9 @@ export type MsgCerebroCliente =
   | { t: "fala-fim"; n: number }
   /** O bot começou ou terminou uma ferramenta (só o nome, nunca entrada nem resultado). */
   | { t: "atividade"; tipo: "inicio" | "fim"; nome: string }
+  /**
+   * NOD-168 (ADR-078): a assinatura da IA chegou ao teto (`rate_limit_event` com `rejected`). Vai uma vez por ligação;
+   * quem decide o desfecho é o servidor (oferece a outra IA pronta ou encerra com `limite_da_assinatura`).
+   */
+  | { t: "limite" }
   | { t: "ping" };
