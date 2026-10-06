@@ -1218,6 +1218,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscar(id) {
         return doTenant(b.rotinas).find((r) => r.id === id) ?? null;
       },
+      async buscarParaAtualizar(id) {
+        // Espelha o SQL: só a dona (o FOR UPDATE passa pela policy de UPDATE). Sem concorrência na memória, sem lock.
+        return doTenant(b.rotinas).find((r) => r.id === id && r.ownerId === escopo.pessoaId) ?? null;
+      },
       async listar() {
         return doTenant(b.rotinas).filter((r) => r.excluidoEm === null);
       },

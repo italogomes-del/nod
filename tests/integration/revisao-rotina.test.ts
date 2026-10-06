@@ -133,4 +133,27 @@ describeIntegracao("revisão da rotina nas propostas de mudar e excluir (NOD-159
       expect((await repos.rotinas.buscar(rotinaId))?.excluidoEm).not.toBeNull();
     });
   });
+  it("NOD-182: atualização com a rotina já excluída sai obsoleta e a recusa persiste; sem revisao mantém o erro antigo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { deps, repos, ctx, rotinaId, rotinaConversaId, conversaId, agenteId } = await rotinaAtiva(trx);
+      const atual = await repos.rotinas.buscar(rotinaId);
+      if (!atual) throw new Error("rotina");
+      const up = await atualizarRotinaPeloAgente(deps, { ...ctx, rotina_id: rotinaId, cron: "0 9 * * 1-5" });
+      if ("erro" in up.data) throw new Error(up.data.erro);
+      // Payload como era gravado antes da NOD-159: sem `revisao`.
+      const legado = await repos.propostas.criar({ conversaId, agenteId, payload: { kind: "rotina_atualizacao", rotinaId, cron: "0 10 * * 1-5", proximaExecucao: AGORA, resumo: "dias úteis às 10:00", antes: { resumo: "dias úteis às 08:00", instrucao: atual.instrucao } } });
+      if (!legado) throw new Error("proposta");
+      await repos.rotinas.excluir(rotinaId, AGORA);
+
+      const r = await aplicarAtualizacaoRotina(deps, { propostaId: up.data.proposta_id });
+      expect(r.data).toMatchObject({ obsoleta: true, jaAplicada: false });
+      expect((await repos.propostas.buscar(up.data.proposta_id))?.estado).toBe("recusada");
+      expect((await repos.decisoes.buscar(up.data.proposta_id))?.estado).toBe("decidida");
+      expect((await repos.mensagens.listarDaConversa(rotinaConversaId)).filter((m) => m.texto === TEXTO_ROTINA_MUDOU)).toHaveLength(1);
+      expect((await repos.rotinas.buscar(rotinaId))?.cron).toBe(atual.cron);
+
+      await expect(aplicarAtualizacaoRotina(deps, { propostaId: legado.id })).rejects.toMatchObject({ codigo: "estado_invalido", cause: "rotina excluída" });
+      expect((await repos.propostas.buscar(legado.id))?.estado).toBe("pendente");
+    });
+  });
 });

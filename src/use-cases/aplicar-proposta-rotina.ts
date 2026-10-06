@@ -65,14 +65,38 @@ function jaDecidida(estado: string): boolean {
   return estado === "confirmada";
 }
 
+/**
+ * definido em 2026-10-06 (NOD-182): trava a rotina (FOR UPDATE) e só DEPOIS relê a proposta. Duas confirmações
+ * concorrentes da mesma revisão liam a rotina antes de qualquer uma gravar e as duas aplicavam; travada, a segunda
+ * espera a primeira e relê a rotina já mudada. A proposta é relida porque foi lida antes do lock: o mesmo card
+ * confirmado duas vezes acorda com ela já `confirmada` e volta jaAplicada, em vez do aviso falso de "rotina mudou".
+ * A única linha travada é a rotina (a proposta só é lida): duas confirmações não se travam em ordem cruzada.
+ */
+async function travarRotinaEReler(deps: Deps, propostaId: string, rotinaId: string): Promise<{ proposta: Proposta; atual: Rotina }> {
+  const atual = await deps.repos.rotinas.buscarParaAtualizar(rotinaId);
+  if (!atual) {
+    // O FOR UPDATE só enxerga a rotina da dona; a de outra pessoa do tenant existe, mas não é dela para mudar.
+    exigir(await deps.repos.rotinas.buscar(rotinaId), "nao_encontrado", "rotina");
+    throw new ErroDeDominio("nao_permitido", { cause: "só a dona muda a rotina" });
+  }
+  const proposta = exigir(await deps.repos.propostas.buscar(propostaId), "nao_encontrado", "proposta");
+  if (proposta.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
+  return { proposta, atual };
+}
+
 /** `porRegra` (ADR-059): o modo do bot confirmou no turno — sem clique; autoria do agente e decisão fechada por regra. */
 export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?: PorRegra }, SaidaAplicarPropostaRotina> = async (deps, input) => {
-  const proposta = exigir(await deps.repos.propostas.buscar(input.propostaId), "nao_encontrado", "proposta");
-  if (proposta.payload.kind !== "rotina_atualizacao") throw new ErroDeDominio("estado_invalido", { cause: "proposta não é de atualização de rotina" });
-  if (proposta.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
-  const p = proposta.payload;
-  const atual = exigir(await deps.repos.rotinas.buscar(p.rotinaId), "nao_encontrado", "rotina");
-  if (atual.excluidoEm !== null) throw new ErroDeDominio("estado_invalido", { cause: "rotina excluída" });
+  const lida = exigir(await deps.repos.propostas.buscar(input.propostaId), "nao_encontrado", "proposta");
+  if (lida.payload.kind !== "rotina_atualizacao") throw new ErroDeDominio("estado_invalido", { cause: "proposta não é de atualização de rotina" });
+  if (lida.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
+  const p = lida.payload;
+  const { proposta, atual } = await travarRotinaEReler(deps, input.propostaId, p.rotinaId);
+  if (atual.excluidoEm !== null) {
+    // NOD-182: a exclusão venceu a corrida (ou veio antes). Com revisão é o mesmo caso de "a rotina mudou": recusa e
+    // avisa sem lançar, para a transação guardar a recusa. Proposta sem revisão (antes da NOD-159) mantém o erro.
+    if (p.revisao !== undefined && proposta.estado === "pendente") return recusarObsoleta(deps, proposta, atual, input.porRegra);
+    throw new ErroDeDominio("estado_invalido", { cause: "rotina excluída" });
+  }
   if (jaDecidida(proposta.estado)) return { data: { rotina: atual, jaAplicada: true } };
   if (mudouDesdeAProposta(p.revisao, atual)) return recusarObsoleta(deps, proposta, atual, input.porRegra);
 
@@ -120,15 +144,24 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
  * disparar. Turno já em execução pode terminar — mesmo limite do resto do nod.
  */
 export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: PorRegra }, SaidaAplicarPropostaRotina> = async (deps, input) => {
-  const proposta = exigir(await deps.repos.propostas.buscar(input.propostaId), "nao_encontrado", "proposta");
-  if (proposta.payload.kind !== "rotina_exclusao") throw new ErroDeDominio("estado_invalido", { cause: "proposta não é de exclusão de rotina" });
-  if (proposta.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
-  const p = proposta.payload;
-  const atual = exigir(await deps.repos.rotinas.buscar(p.rotinaId), "nao_encontrado", "rotina");
-  if (atual.excluidoEm !== null || jaDecidida(proposta.estado)) return { data: { rotina: atual, jaAplicada: true } };
+  const lida = exigir(await deps.repos.propostas.buscar(input.propostaId), "nao_encontrado", "proposta");
+  if (lida.payload.kind !== "rotina_exclusao") throw new ErroDeDominio("estado_invalido", { cause: "proposta não é de exclusão de rotina" });
+  if (lida.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
+  const p = lida.payload;
+  const { proposta, atual } = await travarRotinaEReler(deps, input.propostaId, p.rotinaId);
+  if (jaDecidida(proposta.estado)) return { data: { rotina: atual, jaAplicada: true } };
+  const agora = deps.agora();
+  if (atual.excluidoEm !== null) {
+    // Outra proposta já excluiu a rotina: o pedido desta está cumprido. Sem fechá-la, ela ficava pendente e o card
+    // "Excluir rotina" voltava na conversa com a decisão já fechada. Fecha sem segundo aviso de "Rotina excluída".
+    await deps.repos.propostas.decidir(proposta.id, "confirmada");
+    const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
+    const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
+    const events = decisao ? [evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_exclusao" }, { conversaId: atual.conversaId })] : [];
+    return { data: { rotina: atual, jaAplicada: true }, events };
+  }
   if (mudouDesdeAProposta(p.revisao, atual)) return recusarObsoleta(deps, proposta, atual, input.porRegra);
 
-  const agora = deps.agora();
   await deps.repos.propostas.decidir(proposta.id, "confirmada");
   const rotina = await deps.repos.rotinas.excluir(p.rotinaId, agora);
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona exclui a rotina" });
