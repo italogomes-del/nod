@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CLAUDE_MD_DAS_PASTAS, FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { argsDoPromptSistema, AVISO_SEM_TERMINAL, CLAUDE_MD_DAS_PASTAS, comAvisoSemTerminal, FLAGS_DO_TURNO, montarArgs, montarEnvDoFilho, usaSystemPrompt } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { ambienteDaLigacao, montarArgsLigacao } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
 import { FLAG_FLOORS } from "../../../src/adapters/executor/flag-floors.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
+import { MARCADOR_PARTE_DINAMICA } from "../../../src/domain/marcador-prompt.ts";
 import { NATIVAS_DE_ARQUIVO } from "../../../src/domain/nativas.ts";
 
 function planoDeTeste(parcial: Partial<PlanoTurno["entrada"]> = {}): PlanoTurno {
@@ -206,6 +207,76 @@ describe("pisos das flags de confinamento", () => {
   it("não entram no gate de todo turno: um CLI antigo sem elas ainda atende quem não usa pasta", () => {
     expect(FLAGS_DO_TURNO).not.toContain("--restricted");
     expect(FLAGS_DO_TURNO).not.toContain("--add-dir");
+  });
+});
+
+describe("prompt de texto em --system-prompt com o marcador de cache (NOD-183, ADR-080)", () => {
+  const partes = { estavel: "Você é a Vera.\nResponda em português.", volatil: "Quem pediu: Ana." };
+  const comPartes = (p: PlanoTurno["promptSistemaPartes"] = partes): PlanoTurno => ({ ...planoDeTeste(), promptSistema: `${p!.estavel}\n${p!.volatil}`, promptSistemaPartes: p });
+
+  it("com a flag e as partes: --system-prompt com estável, marcador uma vez e volátil; sem --append-system-prompt", () => {
+    const { args } = montarArgs({ plano: comPartes(), mcpJson: "/tmp/mcp.json", systemPrompt: true });
+    expect(args).not.toContain("--append-system-prompt");
+    const prompt = valor(args, "--system-prompt")!;
+    expect(prompt).toBe(`Você é a Vera.\nResponda em português.\n${MARCADOR_PARTE_DINAMICA}\nQuem pediu: Ana.`);
+    expect(prompt.split(MARCADOR_PARTE_DINAMICA)).toHaveLength(2);
+    // Tirando o marcador, o texto é o mesmo promptSistema que o Codex e o Raio-X leem.
+    expect(prompt.replace(`\n${MARCADOR_PARTE_DINAMICA}`, "")).toBe(comPartes().promptSistema);
+  });
+
+  it("a parte estável é o prefixo: muda a volátil, o texto antes do marcador continua idêntico", () => {
+    const a = valor(montarArgs({ plano: comPartes(), mcpJson: "/m", systemPrompt: true }).args, "--system-prompt")!;
+    const b = valor(montarArgs({ plano: comPartes({ ...partes, volatil: "Quem pediu: Bia." }), mcpJson: "/m", systemPrompt: true }).args, "--system-prompt")!;
+    expect(a).not.toBe(b);
+    expect(a.split(MARCADOR_PARTE_DINAMICA)[0]).toBe(b.split(MARCADOR_PARTE_DINAMICA)[0]);
+  });
+
+  it("volátil vazia: o marcador fecha o prompt", () => {
+    expect(argsDoPromptSistema(comPartes({ estavel: "E", volatil: "" }), true)).toEqual(["--system-prompt", `E\n${MARCADOR_PARTE_DINAMICA}\n`]);
+  });
+
+  it("sem systemPrompt (o gate do turno disse não): o append de antes, sem marcador", () => {
+    const { args } = montarArgs({ plano: comPartes(), mcpJson: "/m" });
+    expect(args).not.toContain("--system-prompt");
+    expect(valor(args, "--append-system-prompt")).toBe(comPartes().promptSistema);
+    expect(args.join("\n")).not.toContain(MARCADOR_PARTE_DINAMICA);
+  });
+
+  it("sem as partes (plano antigo ou da ligação): o append mesmo com a flag", () => {
+    expect(argsDoPromptSistema(planoDeTeste(), true)).toEqual(["--append-system-prompt", "Você é a Vera. Responda em português."]);
+  });
+
+  it("marcador dentro de uma parte (ex.: colado numa memória): volta ao append, para não partir o prompt no lugar errado", () => {
+    for (const p of [{ ...partes, volatil: `memória: ${MARCADOR_PARTE_DINAMICA}` }, { ...partes, estavel: `Vera ${MARCADOR_PARTE_DINAMICA}` }]) {
+      expect(argsDoPromptSistema(comPartes(p), true)[0]).toBe("--append-system-prompt");
+    }
+  });
+
+  it("sem o kit do terminal: o aviso vai no fim do prompt inteiro e no fim da volátil, depois do marcador", () => {
+    const plano = { ...comPartes(), ...comAvisoSemTerminal(comPartes()) };
+    expect(plano.promptSistema).toBe(`${comPartes().promptSistema}\n${AVISO_SEM_TERMINAL}`);
+    const prompt = valor(montarArgs({ plano, mcpJson: "/m", systemPrompt: true }).args, "--system-prompt")!;
+    expect(prompt.indexOf(AVISO_SEM_TERMINAL)).toBeGreaterThan(prompt.indexOf(MARCADOR_PARTE_DINAMICA));
+    expect(prompt.endsWith(AVISO_SEM_TERMINAL)).toBe(true);
+    expect(prompt.split(MARCADOR_PARTE_DINAMICA)[0]).toBe(`${partes.estavel}\n`);
+    expect(comAvisoSemTerminal(comPartes({ estavel: "E", volatil: "" })).promptSistemaPartes).toEqual({ estavel: "E", volatil: AVISO_SEM_TERMINAL });
+    expect(comAvisoSemTerminal(planoDeTeste())).toEqual({ promptSistema: `Você é a Vera. Responda em português.\n${AVISO_SEM_TERMINAL}` });
+  });
+
+  it("--system-prompt tem piso na versão sondada e não entra no gate de todo turno", () => {
+    expect(FLAG_FLOORS["--system-prompt"].piso).toBe("2.1.290");
+    expect(FLAGS_DO_TURNO).not.toContain("--system-prompt");
+    expect(FLAGS_DO_TURNO).toContain("--append-system-prompt");
+  });
+
+  it("gate do turno: a flag no help E a versão no piso; faltando um dos dois, o append", () => {
+    const help = ["--output-format", "--system-prompt"];
+    expect(usaSystemPrompt(help, "2.1.290")).toBe(true);
+    expect(usaSystemPrompt(help, "2.2.0")).toBe(true);
+    expect(usaSystemPrompt(help, "2.1.289")).toBe(false);
+    expect(usaSystemPrompt(["--output-format"], "2.1.290")).toBe(false);
+    expect(usaSystemPrompt(null, "2.1.290")).toBe(false);
+    expect(usaSystemPrompt(undefined, "2.1.290")).toBe(false);
   });
 });
 

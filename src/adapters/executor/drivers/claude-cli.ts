@@ -18,11 +18,12 @@ import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
 import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
-import { conferirFloors, conferirPisoCli, inventarioAbaixoDoPiso, type FlagComPiso } from "../flag-floors.ts";
+import { compararVersoes, conferirFloors, conferirPisoCli, FLAG_FLOORS, inventarioAbaixoDoPiso, type FlagComPiso } from "../flag-floors.ts";
 import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
+import { MARCADOR_PARTE_DINAMICA } from "../../../domain/marcador-prompt.ts";
 import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
 
@@ -108,6 +109,35 @@ export const FLAGS_DO_TURNO: readonly FlagComPiso[] = [
 /** O que o modelo lê quando o plano pediu o kit do terminal e esta máquina não o tem (app sem o hook). */
 export const AVISO_SEM_TERMINAL = "Nesta máquina o kit do terminal não está disponível neste turno: não há Bash, WebFetch nem WebSearch, e as nativas de arquivo só valem nas pastas de projeto autorizadas.";
 
+/** O plano com o AVISO_SEM_TERMINAL no fim do prompt inteiro e, quando há partes, no fim da volátil (depois do marcador). */
+export function comAvisoSemTerminal(plano: PlanoTurno): Pick<PlanoTurno, "promptSistema" | "promptSistemaPartes"> {
+  const promptSistema = `${plano.promptSistema}\n${AVISO_SEM_TERMINAL}`;
+  const p = plano.promptSistemaPartes;
+  if (!p) return { promptSistema };
+  return { promptSistema, promptSistemaPartes: { estavel: p.estavel, volatil: p.volatil === "" ? AVISO_SEM_TERMINAL : `${p.volatil}\n${AVISO_SEM_TERMINAL}` } };
+}
+
+/**
+ * definido em 2026-10-06 (NOD-183, ADR-080): o par de args do prompt de sistema. Medido no CLI 2.1.290
+ * (scripts/sonda-system-prompt-texto.ts): o `--append-system-prompt` ignora o marcador e o cache do 2º turno ficava em
+ * 16%; o `--system-prompt` com a parte estável, o marcador e a volátil subiu para 75%, e os quatro comportamentos
+ * (ToolSearch, Edit/Read, Bash sob o hook, só texto) seguiram iguais sem o prompt padrão do Claude Code. Sem a flag,
+ * sem as partes ou com o marcador dentro de uma delas (ele partiria o prompt no lugar errado), volta ao append de antes.
+ */
+export function argsDoPromptSistema(plano: PlanoTurno, systemPrompt: boolean): string[] {
+  const p = plano.promptSistemaPartes;
+  if (!systemPrompt || !p || p.estavel.includes(MARCADOR_PARTE_DINAMICA) || p.volatil.includes(MARCADOR_PARTE_DINAMICA)) return ["--append-system-prompt", plano.promptSistema];
+  return ["--system-prompt", [p.estavel, MARCADOR_PARTE_DINAMICA, p.volatil].join("\n")];
+}
+
+/**
+ * ADR-080: o --system-prompt com o marcador só quando o help traz a flag E a versão é a sondada. Hoje o PISO_CLI
+ * do claude-cli é o mesmo 2.1.290 e recusa o turno antes; o piso próprio segura o caso de o PISO_CLI baixar.
+ */
+export function usaSystemPrompt(flagsNoHelp: readonly string[] | null | undefined, versao: string): boolean {
+  return (flagsNoHelp ?? []).includes("--system-prompt") && compararVersoes(versao, FLAG_FLOORS["--system-prompt"].piso) >= 0;
+}
+
 /** ADR-052: o turno com o kit do terminal — `settings` (o hook do nod) e as pastas além do cwd (ADR-055: a pasta da pessoa). */
 export type TurnoTerminal = { settings: string; dirsExtras: readonly string[] };
 
@@ -151,7 +181,7 @@ export function comandoDoHook(p: { nodePath: string; hookPath: string; config: s
 export const FERRAMENTA_DE_BUSCA = "ToolSearch";
 
 /** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean }): { args: string[]; sessaoCli: string } {
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean }): { args: string[]; sessaoCli: string } {
   const { plano, terminal } = entrada;
   const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
@@ -194,8 +224,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     permitidas,
     "--permission-mode",
     "default",
-    "--append-system-prompt",
-    plano.promptSistema,
+    ...argsDoPromptSistema(plano, entrada.systemPrompt === true),
     ...(plano.entrada.sessaoCli ? ["--resume", plano.entrada.sessaoCli] : ["--session-id", sessaoCli]),
   ];
   return { args, sessaoCli };
@@ -416,9 +445,11 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   ? mensagemClaude(plano.entrada.texto, anexos)
                   : [plano.entrada.texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
                 // Sem o kit (sem hook nesta máquina), o prompt não pode prometer Bash e web: a linha que corrige vai junto.
-                const semKit = pedeTerminal && !terminal ? { promptSistema: `${plano.promptSistema}\n${AVISO_SEM_TERMINAL}` } : {};
+                // NOD-183: a linha vai também no fim da parte volátil, depois do marcador, para não quebrar o cache.
+                const semKit = pedeTerminal && !terminal ? comAvisoSemTerminal(plano) : {};
                 const esforco = (flagsNoHelp ?? []).includes("--effort");
-                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco });
+                const systemPrompt = usaSystemPrompt(flagsNoHelp, v);
+                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];

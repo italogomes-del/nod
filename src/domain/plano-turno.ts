@@ -20,7 +20,7 @@ import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
-import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
+import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
@@ -254,7 +254,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.pendencias, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.pendencias, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,
@@ -272,6 +272,16 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     semprePermitir: entrada.confianca === "nao_confiavel" ? [] : semprePermitirNoCatalogo(entrada.semprePermitir ?? [], ferramentas),
     expiraEm: PLANO_SEM_VALIDADE,
   };
+}
+
+/**
+ * definido em 2026-10-06 (NOD-183, ADR-080): o prompt de texto vai inteiro em `promptSistema` (Codex, Raio-X) e em
+ * duas partes em `promptSistemaPartes`, que o driver do claude-cli separa com o marcador de cache. Juntadas com "\n",
+ * as partes dão o `promptSistema` (a volátil pode vir vazia: aí ele é só a estável).
+ */
+export function promptEmPartes(entrada: EntradaPromptSistema): Pick<PlanoTurno, "promptSistema" | "promptSistemaPartes"> {
+  const p = partesDoPromptSistema(entrada);
+  return { promptSistema: [...p.estavel, ...p.volatil].join("\n"), promptSistemaPartes: { estavel: p.estavel.join("\n"), volatil: p.volatil.join("\n") } };
 }
 
 /**

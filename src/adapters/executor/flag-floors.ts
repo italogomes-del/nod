@@ -46,6 +46,13 @@ export const FLAG_FLOORS = {
   "--autocompact": { piso: "2.1.276", ocultaNoHelp: false },
   /** definido em 2026-09-28 (0037): o esforço do bot. Condicional como --autocompact; piso na versão sondada aqui. */
   "--effort": { piso: "2.1.284", ocultaNoHelp: false },
+  /**
+   * definido em 2026-10-06 (NOD-183, ADR-080): o prompt de texto em `--system-prompt` com o marcador de cache. Sondada
+   * em 2026-10-06 na 2.1.290 (scripts/sonda-system-prompt-texto.ts): cache do 2º turno de 16% para 75% e os quatro
+   * comportamentos iguais. Condicional: fica fora de FLAGS_DO_TURNO; sem ela no help ou abaixo do piso, o driver
+   * segue no `--append-system-prompt`.
+   */
+  "--system-prompt": { piso: "2.1.290", ocultaNoHelp: false },
 } as const satisfies Record<string, { piso: string; ocultaNoHelp: boolean }>;
 
 export type FlagComPiso = keyof typeof FLAG_FLOORS;

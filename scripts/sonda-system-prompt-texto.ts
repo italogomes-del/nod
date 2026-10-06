@@ -1,0 +1,202 @@
+/**
+ * Sonda do passo 0 da NOD-183 (gate, 2026-10-06). PAGA: usa a assinatura do Claude Code (dezenas de turnos curtos no
+ * modelo padrão dos bots). Roda o `claude -p` com os argumentos REAIS do turno de texto (montarArgs) e um prompt de
+ * delegação real (partesDoPromptSistema), trocando só como o prompt de sistema entra, e mede:
+ *  1. cache: dois turnos seguidos do mesmo bot, em sessões novas, com a parte volátil diferente (outro remetente). Do
+ *     2º turno sai cache lido / escrito / sem cache, no mesmo cálculo do cachePct do Raio-X;
+ *  2. comportamento sem o prompt padrão do Claude Code, lado a lado: ToolSearch para achar uma ferramenta MCP, Edit/Read
+ *     numa pasta autorizada, Bash sob o hook do terminal e resposta só em texto;
+ *  3. o `--resume` com a forma do prompt diferente da do turno anterior (o app atualizado no meio da conversa) e se o
+ *     prompt novo vale na sessão retomada.
+ * Um MCP falso `nod` (sem rede) expõe o kit da delegação e um app `clima` com 20 ferramentas; o hook do terminal é um
+ * script local que registra a chamada e deixa passar. Nada sai do Mac além das chamadas ao modelo.
+ * Uso: node scripts/sonda-system-prompt-texto.ts [--modelo sonnet] [--fases cache,comportamento,resume] [--bruto dir]
+ */
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import type { FerramentaPlano, PlanoTurno } from "../src/contracts/plano-turno.ts";
+import { FERRAMENTAS_NOD } from "../src/contracts/ferramentas-nod.ts";
+import { MODELO_AGENTE_PADRAO } from "../src/contracts/modelos.ts";
+import { FERRAMENTAS_NOD_POR_MODO } from "../src/domain/plano-turno.ts";
+import { partesDoPromptSistema, type EntradaPromptSistema } from "../src/domain/prompt-sistema.ts";
+import { MARCADOR_PARTE_DINAMICA } from "../src/domain/marcador-prompt.ts";
+import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../src/domain/nativas.ts";
+import { montarAmbiente } from "../src/domain/ambiente-executor.ts";
+import { montarArgs, montarEnvDoFilho, settingsDoTerminal } from "../src/adapters/executor/drivers/claude-cli.ts";
+
+const arg = (nome: string) => {
+  const i = process.argv.indexOf(nome);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+};
+const modelo = arg("--modelo") ?? MODELO_AGENTE_PADRAO;
+const fases = new Set((arg("--fases") ?? "cache,comportamento,resume").split(","));
+const bruto = arg("--bruto");
+if (bruto) mkdirSync(bruto, { recursive: true });
+const escrever = (s: string) => process.stdout.write(`${s}\n`);
+const home = homedir();
+const env = montarEnvDoFilho(montarAmbiente("local", process.env), home, 600_000);
+const dir = mkdtempSync(join(tmpdir(), "sonda-183-"));
+const sal = randomUUID().slice(0, 8);
+
+// --- MCP falso: o kit da delegação (schemas reais) e o app clima; só clima__PREVISAO_AMANHA responde algo útil.
+const CODIGO_CLIMA = `CLIMA-${sal}`;
+const ACOES = ["LISTAR", "BUSCAR", "VER", "CRIAR", "ATUALIZAR"];
+const ferramentasClima = Array.from({ length: 20 }, (_, i) => (i === 7 ? "PREVISAO_AMANHA" : `${ACOES[i % ACOES.length]}_ESTACAO_${i}`)).map((acao) => ({
+  name: `clima__${acao}`,
+  description: acao === "PREVISAO_AMANHA" ? "Ferramenta do conector clima: previsão do tempo de amanhã para uma cidade. Devolve o resumo e um código de consulta." : `Ferramenta do conector clima: ${acao.toLowerCase().replace(/_/g, " ")}.`,
+  inputSchema: { type: "object", properties: { cidade: { type: "string", description: "Nome da cidade." } }, additionalProperties: false },
+}));
+const kit = FERRAMENTAS_NOD_POR_MODO.delegacao;
+const ferramentasMcp = [...kit.map((nome) => ({ name: nome, description: String(FERRAMENTAS_NOD[nome].description ?? nome), inputSchema: FERRAMENTAS_NOD[nome] })), ...ferramentasClima];
+const mcpFalso = join(dir, "mcp-falso.mjs");
+writeFileSync(mcpFalso, `import { createInterface } from "node:readline";
+const tools = ${JSON.stringify(ferramentasMcp)};
+const enviar = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+createInterface({ input: process.stdin }).on("line", (l) => {
+  let m; try { m = JSON.parse(l); } catch { return; }
+  if (m.method === "initialize") enviar({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "nod", version: "0" } } });
+  else if (m.method === "tools/list") enviar({ jsonrpc: "2.0", id: m.id, result: { tools } });
+  else if (m.method === "tools/call") enviar({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text: m.params?.name === "clima__PREVISAO_AMANHA" ? "Amanhã: sol entre nuvens, 29 °C. Código da consulta: ${CODIGO_CLIMA}" : "ok" }] } });
+  else if (m.id !== undefined) enviar({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "sonda" } });
+});
+process.stdin.on("end", () => process.exit(0));
+`);
+const mcpJson = join(dir, "mcp.json");
+writeFileSync(mcpJson, JSON.stringify({ mcpServers: { nod: { type: "stdio", command: process.execPath, args: [mcpFalso] } } }));
+
+// --- Hook do terminal: registra cada nativa e deixa passar (o do nod pergunta ao servidor; aqui não há servidor).
+const logHook = join(dir, "hook.log");
+const hook = join(dir, "hook.mjs");
+writeFileSync(hook, `import { appendFileSync } from "node:fs";
+let s = ""; process.stdin.on("data", (b) => (s += b)); process.stdin.on("end", () => {
+  let nome = "?"; try { nome = JSON.parse(s).tool_name; } catch {}
+  appendFileSync(${JSON.stringify(logHook)}, nome + "\\n");
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: "nod: sonda" } }));
+});
+`);
+const settings = settingsDoTerminal({ comandoHook: `'${process.execPath}' '${hook}'` });
+
+// --- O prompt: delegação real, com colegas, conectores, memória e o kit do turno.
+const f = (nome: string, origem: FerramentaPlano["origem"] = "nod", conectorId: string | null = null): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem, conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: {} });
+const catalogo: FerramentaPlano[] = [...kit.map((n) => f(n)), ...ferramentasClima.map((t) => f(t.name, "conector", "con-clima"))];
+const colegas = ["Ada", "Cecília", "Chico", "Gil", "Tarsila", "Eng 2", "Eng 3"].map((nome, i) => ({ id: `00000000-0000-4000-8000-00000000000${i}`, nome, titulo: "Colega do time", descricao: `Sou ${nome}, do time de engenharia do Marlon. Respondo em português do Brasil, de forma curta e direta.` }));
+const conectores = [{ id: "con-clima", slug: "clima", nome: "Clima", habilitado: true, catalogo: ferramentasClima.map((t) => ({ nome: t.name.slice("clima__".length) })) }];
+type Forma = { nome: string; padraoMantido: boolean; args: (estavel: string, volatil: string) => string[] };
+const juntar = (...p: string[]) => p.join("\n");
+const FORMAS: Record<string, Forma> = {
+  append: { nome: "append sem marcador (hoje)", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, v)] },
+  appendMarcador: { nome: "append com marcador", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, v)] },
+  system: { nome: "--system-prompt com marcador", padraoMantido: false, args: (e, v) => ["--system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, v)] },
+  appendExcluir: { nome: "append + --exclude-dynamic-system-prompt-sections", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, v), "--exclude-dynamic-system-prompt-sections"] },
+  appendMarcadorExcluir: { nome: "append com marcador + --exclude-dynamic…", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, v), "--exclude-dynamic-system-prompt-sections"] },
+  systemMaisAppend: { nome: "--system-prompt (estável) + --append-system-prompt (volátil)", padraoMantido: false, args: (e, v) => ["--system-prompt", e, "--append-system-prompt", v] },
+};
+
+type Caso = { nome?: string; remetente: string; nativas?: readonly string[]; pastaDoBot?: string; pastas?: { ativa: string; aprovadas: string[] }; terminal?: boolean; memoria?: string };
+function prompt(c: Caso): { estavel: string; volatil: string } {
+  const entrada: EntradaPromptSistema = {
+    agente: { nome: c.nome ?? `Sonda ${sal}`, titulo: "Dev Sr", descricao: "Sou desenvolvedor sênior do time de engenharia do Marlon: implemento, reviso, testo e abro PRs.", modoAprovacao: "total" },
+    memorias: c.memoria ? [{ id: "m1", agenteId: "a", texto: c.memoria, criadoEm: 1 } as never] : [],
+    ferramentas: catalogo, nativas: c.nativas ?? [], ...(c.pastaDoBot ? { pastaDoBot: c.pastaDoBot } : {}),
+    pessoaNome: "Marlon", modo: "delegacao", colegas, conectores: conectores as never,
+    delegacao: { pessoaNome: "Marlon", remetenteNome: c.remetente },
+    contextoConversa: `Contexto recente da conversa (JSON de dados): ${JSON.stringify({ historico: [{ autor: c.remetente, texto: `Pedido de ${c.remetente} para a sonda ${sal}.` }] })}`,
+  };
+  const p = partesDoPromptSistema(entrada);
+  return { estavel: p.estavel.join("\n"), volatil: p.volatil.join("\n") };
+}
+
+type Saida = { ok: boolean; texto: string; ferramentas: string[]; lido: number; escrito: number; semCache: number; custo: number; ms: number; erro?: string };
+async function turno(rotulo: string, forma: Forma, c: Caso, texto: string, opcoes: { sessao?: string; resume?: boolean; cwd?: string } = {}): Promise<Saida> {
+  const p = prompt(c);
+  const plano = {
+    catalogo: { ferramentas: catalogo }, promptSistema: juntar(p.estavel, p.volatil), nativas: c.nativas ?? [], workspacePastas: c.pastas ?? null,
+    entrada: { texto, modelo, sessaoCli: opcoes.resume ? opcoes.sessao : undefined },
+  } as unknown as PlanoTurno;
+  const terminal = c.terminal ? { settings, dirsExtras: [] } : undefined;
+  const { args: base } = montarArgs({ plano, mcpJson, sessaoNova: () => opcoes.sessao ?? randomUUID(), terminal });
+  const i = base.indexOf("--append-system-prompt");
+  const args = [...base.slice(0, i), ...forma.args(p.estavel, p.volatil), ...base.slice(i + 2)];
+  // Como o driver: a pasta do bot no terminal, a pasta ativa com projeto, senão um diretório temporário.
+  const cwd = opcoes.cwd ?? (c.pastaDoBot ? join(home, "nod", c.pastaDoBot) : undefined) ?? c.pastas?.ativa ?? mkdtempSync(join(dir, "cwd-"));
+  const t0 = Date.now();
+  const proc = spawn("claude", args, { cwd, env: montarEnvDoFilho(env, home, 600_000, { claudeMdDasPastas: Boolean(terminal) }), stdio: ["pipe", "pipe", "pipe"] });
+  proc.stdin.end(texto);
+  let out = "";
+  let err = "";
+  proc.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));
+  proc.stderr.on("data", (b: Buffer) => (err += b.toString("utf8")));
+  const codigo = await new Promise<number | null>((r) => proc.on("close", r));
+  if (bruto) writeFileSync(join(bruto, `${rotulo}.jsonl`), out);
+  type Bloco = { type?: string; name?: string };
+  type Linha = { type?: string; subtype?: string; result?: string; total_cost_usd?: number; message?: { content?: Bloco[] }; usage?: Record<string, number> };
+  const linhas = out.split("\n").flatMap((l) => { try { return [JSON.parse(l) as Linha]; } catch { return []; } });
+  const ferramentas = linhas.filter((o) => o.type === "assistant").flatMap((o) => (o.message?.content ?? []).filter((b) => b.type === "tool_use").map((b) => String(b.name)));
+  const r = linhas.find((o) => o.type === "result");
+  const u = r?.usage ?? {};
+  return { ok: codigo === 0 && r?.subtype === "success", texto: String(r?.result ?? ""), ferramentas, lido: u.cache_read_input_tokens ?? 0, escrito: u.cache_creation_input_tokens ?? 0, semCache: u.input_tokens ?? 0, custo: Number(r?.total_cost_usd ?? 0), ms: Date.now() - t0, ...(r ? {} : { erro: `exit ${codigo}: ${err.slice(0, 300)}` }) };
+}
+const pct = (s: Saida) => { const ctx = s.lido + s.escrito + s.semCache; return ctx > 0 ? Math.round((100 * s.lido) / ctx) : 0; };
+const uso = (s: Saida) => `lido ${s.lido} · escrito ${s.escrito} · sem cache ${s.semCache} · cachePct ${pct(s)}% · US$ ${s.custo.toFixed(4)}${s.erro ? ` · ERRO ${s.erro}` : ""}`;
+let custoTotal = 0;
+const somar = (s: Saida) => ((custoTotal += s.custo), s);
+
+escrever(`CLI: modelo ${modelo} · sal ${sal} · bruto ${bruto ?? "(não grava)"}`);
+
+if (fases.has("cache")) {
+  escrever("\n## 1. Cache do 2º turno (sessões novas; o volátil muda de remetente: Cecília → Chico)");
+  escrever("| forma | prompt padrão | 1º turno | 2º turno |\n|---|---|---|---|");
+  for (const [chave, forma] of Object.entries(FORMAS)) {
+    // O nome do bot leva a forma: o prefixo estável de uma forma não aquece o da seguinte.
+    const nome = `Sonda ${sal} ${chave}`;
+    const t1 = somar(await turno(`cache-${chave}-1`, forma, { nome, remetente: "Cecília" }, "Responda só: ok."));
+    const t2 = somar(await turno(`cache-${chave}-2`, forma, { nome, remetente: "Chico" }, "Responda só: ok."));
+    escrever(`| ${forma.nome} | ${forma.padraoMantido ? "mantido" : "substituído"} | ${uso(t1)} | ${uso(t2)} |`);
+  }
+}
+
+if (fases.has("comportamento")) {
+  escrever("\n## 2. Comportamento, lado a lado");
+  const pastaBotRel = `Eng 1/.sonda-183-${sal}`;
+  const pastaBot = join(home, "nod", pastaBotRel);
+  for (const chave of ["append", "system"] as const) {
+    const forma = FORMAS[chave]!;
+    escrever(`\n### ${forma.nome}`);
+    const a = somar(await turno(`comp-${chave}-toolsearch`, forma, { remetente: "Cecília" }, "Use a ferramenta do app clima para ver a previsão de amanhã em Recife e me diga o código da consulta que ela devolver."));
+    escrever(`- ToolSearch: ${a.ferramentas.includes("ToolSearch") && a.ferramentas.includes("mcp__nod__clima__PREVISAO_AMANHA") && a.texto.includes(CODIGO_CLIMA) ? "OK" : "FALHOU"} · ferramentas ${a.ferramentas.join(" → ") || "(nenhuma)"} · ${uso(a)}\n  > ${a.texto.replace(/\n+/g, " ").slice(0, 300)}`);
+
+    const proj = mkdtempSync(join(dir, "proj-"));
+    writeFileSync(join(proj, "notas.txt"), "tarefa: sonda\nstatus: pendente\n");
+    const b = somar(await turno(`comp-${chave}-edit`, forma, { remetente: "Cecília", nativas: NATIVAS_DE_ARQUIVO, pastas: { ativa: proj, aprovadas: [proj] } }, "No projeto autorizado, leia o arquivo notas.txt e troque o status pendente por concluido. Depois diga o que mudou."));
+    const notas = readFileSync(join(proj, "notas.txt"), "utf8");
+    escrever(`- Edit/Read: ${/status: conclu[ií]do/.test(notas) && b.ferramentas.some((n) => n === "Read") && b.ferramentas.some((n) => n === "Edit" || n === "Write") ? "OK" : "FALHOU"} · ferramentas ${b.ferramentas.join(" → ") || "(nenhuma)"} · arquivo: ${JSON.stringify(notas)} · ${uso(b)}`);
+
+    rmSync(pastaBot, { recursive: true, force: true });
+    mkdirSync(pastaBot, { recursive: true });
+    writeFileSync(logHook, "");
+    const c = somar(await turno(`comp-${chave}-bash`, forma, { remetente: "Cecília", nativas: NATIVAS_DO_TERMINAL, pastaDoBot: pastaBotRel, terminal: true }, "Rode no terminal, na sua pasta, o comando: echo sonda-$((6*7)) > saida.txt && git --version. Depois me diga o conteúdo de saida.txt e a versão do git."));
+    const saida = existsSync(join(pastaBot, "saida.txt")) ? readFileSync(join(pastaBot, "saida.txt"), "utf8").trim() : "(não existe)";
+    const chamadasHook = readFileSync(logHook, "utf8").trim().split("\n").filter(Boolean);
+    escrever(`- Bash sob o hook: ${saida === "sonda-42" && chamadasHook.includes("Bash") && c.texto.includes("sonda-42") ? "OK" : "FALHOU"} · ferramentas ${c.ferramentas.join(" → ") || "(nenhuma)"} · hook viu ${chamadasHook.join(", ") || "nada"} · saida.txt=${saida} · ${uso(c)}\n  > ${c.texto.replace(/\n+/g, " ").slice(0, 300)}`);
+    rmSync(pastaBot, { recursive: true, force: true });
+
+    const d = somar(await turno(`comp-${chave}-texto`, forma, { remetente: "Cecília" }, "Em uma frase curta: o que é um pull request?"));
+    escrever(`- Só texto: ${d.ferramentas.length === 0 && d.texto.length < 400 && !/^\s*(\d+\.|#)/m.test(d.texto) ? "OK" : "FALHOU"} · ferramentas ${d.ferramentas.join(", ") || "(nenhuma)"} · ${d.texto.length} caracteres · ${uso(d)}\n  > ${d.texto.replace(/\n+/g, " ")}`);
+  }
+}
+
+if (fases.has("resume")) {
+  escrever("\n## 3. --resume com a forma trocada (o nome do bot muda no 2º turno: qual prompt vale?)");
+  for (const [de, para] of [["append", "system"], ["system", "append"], ["append", "append"], ["system", "system"]] as const) {
+    const sessao = randomUUID();
+    const t1 = somar(await turno(`resume-${de}-${para}-1`, FORMAS[de]!, { nome: "Ana", remetente: "Cecília", memoria: "A palavra do dia é laranja." }, "Responda só: ok.", { sessao }));
+    const t2 = somar(await turno(`resume-${de}-${para}-2`, FORMAS[para]!, { nome: "Bia", remetente: "Chico", memoria: "A palavra do dia é azul." }, "Qual é o seu nome e qual é a palavra do dia, segundo as suas instruções de sistema? Responda só os dois, separados por vírgula.", { sessao, resume: true }));
+    escrever(`- ${de} → ${para}: 1º ${t1.ok ? "ok" : `ERRO ${t1.erro}`} · 2º ${t2.ok ? "ok" : `ERRO ${t2.erro}`} · resposta "${t2.texto.trim()}" · 2º turno: ${uso(t2)}`);
+  }
+}
+
+escrever(`\ncusto total da sonda: US$ ${custoTotal.toFixed(4)}`);
+rmSync(dir, { recursive: true, force: true });

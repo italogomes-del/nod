@@ -149,6 +149,22 @@ describe("montarPlano", () => {
     expect(sem.startsWith(com.slice(0, com.lastIndexOf("\n", inicio)))).toBe(true);
   });
 
+  it("NOD-183 (ADR-080): o plano leva as duas partes do prompt; juntadas com \"\\n\" dão o promptSistema, sem marcador", () => {
+    const pendencia = { tenantId: "t", id: "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e", agenteId: "a1", conversaId: "c1", turnoId: "t0", texto: "Cobrar o PR", aPartirDe: null, cuidado: false, profundidade: 0 as const, estado: "aberta" as const, resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: agora - 60_000 };
+    for (const entrada of [base, { ...base, pendencias: [pendencia] }, { ...base, modo: "delegacao" as const, profundidade: 1 as const }]) {
+      const p = montarPlano(entrada);
+      const partes = p.promptSistemaPartes!;
+      expect([partes.estavel, partes.volatil].filter((s) => s !== "").join("\n")).toBe(p.promptSistema);
+      expect(p.promptSistema).not.toContain("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
+    }
+    // A volátil leva as pendências; a estável é a mesma com e sem elas (é o prefixo que o CLI cacheia).
+    const sem = montarPlano(base).promptSistemaPartes!;
+    const com = montarPlano({ ...base, pendencias: [pendencia] }).promptSistemaPartes!;
+    expect(com.estavel).toBe(sem.estavel);
+    expect(com.volatil).toContain("Suas pendências abertas");
+    expect(com.estavel).not.toContain("Suas pendências abertas");
+  });
+
   it("agente acordado por rotina pede a colega com o catálogo inteiro, mesmo não confiável; quem recebe (delegacao) tem o catálogo dele e repassa até o limite (ADR-058/062/066)", () => {
     const rotina = montarPlano({ ...base, modo: "rotina", turno: { ...turno, origem: "rotina" }, confianca: "nao_confiavel" });
     expect(nomes(rotina)).toContain("pedir_a_bot");

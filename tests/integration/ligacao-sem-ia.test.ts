@@ -44,6 +44,8 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const plano = (await emitirPlanoTurno(deps, { turnoId: novo.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto }, harnessPreferido: "claude-cli" })).data;
       expect(plano.harness).toBe("codex-cli");
       expect(plano.modoTurno).toBe("ligacao");
+      // NOD-183: o prompt de voz substitui o de texto; as partes do de texto não vão junto.
+      expect(plano.promptSistemaPartes).toBeUndefined();
       expect(plano.ligacaoVoz).toMatchObject({ ligacaoId: ligacao.id, modelo: MODELOS_LIGACAO_PADRAO["codex-cli"].modelo });
       // A preferência do bot é da pessoa: continuar a ligação com outra IA não a troca.
       expect(await repos.agentes.buscar(agenteId)).toMatchObject({ harness: "auto", modelo: "haiku" });

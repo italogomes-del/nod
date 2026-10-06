@@ -259,7 +259,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     const base = { ligacaoId: lig.id, nomeBot: agente.nome, generoVoz: generoDaVoz(lig.voz) };
     // NOD-164 (2026-10-05): a guia no "auto" também — o mais potente fica no chat dela (modeloEscolhido, acima).
     parcial.ligacaoVoz = { ...base, ...modeloDeVoz(escolha?.harness ?? "claude-cli", input.modelosLigacao ?? MODELOS_LIGACAO_PADRAO) };
-    // O prompt de voz (prompt-ligacao.ts) substitui o de texto: curto, falado, sem "Formatação:".
+    // O prompt de voz (prompt-ligacao.ts) substitui o de texto: curto, falado, sem "Formatação:". As partes do de texto
+    // (NOD-183) saem junto: o de voz já traz o próprio marcador.
+    delete parcial.promptSistemaPartes;
     parcial.promptSistema = montarPromptLigacao({
       nomeBot: agente.nome,
       generoVoz: generoDaVoz(lig.voz),

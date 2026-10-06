@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { AVISO_SEM_TERMINAL, criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
@@ -365,6 +365,33 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       await expect(instance.adapter(planoDeTeste(dir)).rodarTurno(espiao.sinks)).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "cli_antigo" });
       expect(espiao.sinais).toEqual(["attempted"]);
       await expect(stat(stdin)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  describe("NOD-183 (ADR-080): prompt de texto em --system-prompt com o marcador", () => {
+    const MARCADOR = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
+    const comPartes = () => ({ ...planoDeTeste(dir), promptSistema: "Você é a sonda do nod.\nQuem pediu: Ana.", promptSistemaPartes: { estavel: "Você é a sonda do nod.", volatil: "Quem pediu: Ana." } });
+    it("com --system-prompt no help da versão sondada: estável, marcador e volátil, sem --append-system-prompt", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" });
+      expect((await instance.adapter(comPartes()).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+      expect(valor(r.argv, "--system-prompt")).toBe(`Você é a sonda do nod.\n${MARCADOR}\nQuem pediu: Ana.`);
+      expect(r.argv).not.toContain("--append-system-prompt");
+    });
+    it("sem a flag no help: o append de antes, com o prompt inteiro e sem marcador", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format" });
+      expect((await instance.adapter(comPartes()).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+      expect(valor(r.argv, "--append-system-prompt")).toBe("Você é a sonda do nod.\nQuem pediu: Ana.");
+      expect(r.argv).not.toContain("--system-prompt");
+      expect(r.argv.join("\n")).not.toContain(MARCADOR);
+    });
+    it("plano pede o terminal e a máquina não tem o hook: o aviso vai depois do marcador, com o prefixo estável intacto", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" });
+      const plano = { ...comPartes(), nativas: ["Read", "Bash"] };
+      expect((await instance.adapter(plano).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      const prompt = valor((JSON.parse(await readFile(registro, "utf8")) as Registro).argv, "--system-prompt")!;
+      expect(prompt).toBe(`Você é a sonda do nod.\n${MARCADOR}\nQuem pediu: Ana.\n${AVISO_SEM_TERMINAL}`);
     });
   });
 

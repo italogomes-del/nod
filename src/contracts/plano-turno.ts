@@ -92,6 +92,12 @@ export type PlanoTurno = {
   catalogo: { ferramentas: FerramentaPlano[]; servidores: ServidorPlano[] };
   promptSistema: string;
   /**
+   * definido em 2026-10-06 (NOD-183, ADR-080): as duas partes do `promptSistema` do turno de texto, para o driver do
+   * claude-cli pôr o marcador de cache entre elas no `--system-prompt`. Juntadas com "\n" dão o `promptSistema`.
+   * Ausente = só o `promptSistema` (ligação, planos antigos); quem não sabe usar ignora.
+   */
+  promptSistemaPartes?: { estavel: string; volatil: string };
+  /**
    * `anexos` (ADR-046): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
