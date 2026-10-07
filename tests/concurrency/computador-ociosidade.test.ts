@@ -27,6 +27,7 @@ describeIntegracao("computador ocioso desliga sozinho; o teto do host é neutro 
   let teto = false;
   const LIMITE = { maximo: 3, ociosoMin: 15 };
   const driver: DriverComputador = {
+    ambiente: async () => ({ disponivel: true, motivo: null, limite: LIMITE }),
     estado: async (id) => ({ disponivel: true, ativo: ligados.has(id), motivo: null, limite: LIMITE }),
     iniciar: async (id) => {
       chamadas.push(`iniciar ${id}`);

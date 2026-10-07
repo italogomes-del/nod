@@ -14,6 +14,19 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId}`;
       return l ? computador(l) : null;
     },
+    /**
+     * NOD-192: o painel só lê — sem FOR UPDATE e sem insert. `undefined` = agente inexistente, excluído ou de
+     * outra pessoa (o mesmo 404 de `obter`); `null` = o agente ainda não tem computador.
+     */
+    async buscarDoAgente(agenteId: string): Promise<Computador | null | undefined> {
+      const [l] = await conn<(Partial<Linha> & { dono_agente_id: string; vinculo: string | null })[]>`select c.*, a.id as dono_agente_id, a.computador_id as vinculo from agentes a
+        left join computadores c on c.tenant_id = a.tenant_id and c.id = a.computador_id and c.owner_id = ${escopo.pessoaId}
+        where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId} and a.excluido_em is null`;
+      if (!l) return undefined;
+      // Vínculo para uma linha que esta pessoa não vê: o mesmo 404 que `obter` daria.
+      if (l.vinculo && !l.id) return undefined;
+      return l.id ? computador({ ...l, agente_id: l.dono_agente_id } as Linha) : null;
+    },
     async obter(agenteId: string): Promise<Computador | null> {
       const [agente] = await conn<{ id: string; computador_id: string | null }[]>`select id, computador_id from agentes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${agenteId} and excluido_em is null for update`;
       if (!agente) return null;

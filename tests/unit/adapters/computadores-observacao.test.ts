@@ -20,6 +20,7 @@ let proxima: ResultadoComputador | null;
 
 /** A máquina falsa reproduz o runtime: quadro novo a cada tela e clique só com o quadro da última. */
 const driver: DriverComputador = {
+  ambiente: async () => ({ disponivel: true, motivo: null }),
   estado: async () => ({ disponivel: true, ativo: true, motivo: null }),
   iniciar: async () => {}, parar: async () => {}, ligados: async () => new Set<string>(),
   executar: async (_id, acao): Promise<ResultadoComputador> => {

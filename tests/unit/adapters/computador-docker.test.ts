@@ -116,6 +116,20 @@ describe("driver Docker: teto de computadores ligados (NOD-170)", () => {
     host({ ligados: [] });
     expect((await criarDriverDocker({ ...ENV, NOD_COMPUTADOR_OCIOSO_MIN: "0" }).estado(ID)).limite).toEqual({ maximo: 3, ociosoMin: 0 });
   });
+
+  it("NOD-192: ambiente() só olha a imagem (nenhuma máquina) e diz o mesmo que estado() sobre o ambiente", async () => {
+    host({ ligados: [] });
+    const driver = criarDriverDocker(ENV);
+    expect(await driver.ambiente()).toEqual({ disponivel: true, motivo: null, limite: { maximo: 3, ociosoMin: 15 } });
+    expect(comandos().filter((c) => !c.startsWith("image inspect"))).toEqual([]);
+    expect(await driver.estado(ID)).toMatchObject(await driver.ambiente());
+    for (const env of [{ ...ENV, NOD_COMPUTADORES: "" }, { ...ENV, NOD_CREDENTIAL_KEY: "" }]) {
+      const d = criarDriverDocker(env);
+      const a = await d.ambiente();
+      expect(a.disponivel).toBe(false);
+      expect(await d.estado(ID)).toEqual({ ...a, ativo: false });
+    }
+  });
 });
 
 describe("driver Docker: imagem nova chega à máquina parada (NOD-170)", () => {

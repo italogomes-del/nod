@@ -3,7 +3,8 @@ import type { FrotaDto } from "../../../src/contracts/api.ts";
 import type { ComputadorDto, RegistroComputador } from "../../../src/contracts/computador.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { agruparAtividade, estadoEmPalavras, mensagemDoLimite, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
+import { computadorPadrao } from "../../../src/domain/computador.ts";
+import { agruparAtividade, estadoEmPalavras, foraDoAr, mensagemDoLimite, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 
@@ -35,6 +36,17 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     expect(estadoEmPalavras(dto({ falhasSeguidas: 3, falhaMotivo: "navegador_nao_abriu", indisponivelDesde: T0 }), T0, "iniciar")).toBe("Tentando de novo…");
     expect(estadoEmPalavras(dto({}), T0, null)).toBe("Pronto para o bot");
     expect(estadoEmPalavras(dto({}, { ativo: false }), T0, null)).toBe("Desligado");
+  });
+
+  it("NOD-192: o painel de um bot sem computador (id nulo) mostra o mesmo de um recém-criado: Desligado, sem cartões", () => {
+    const sem: ComputadorDto = { computador: computadorPadrao("a1"), disponivel: true, ativo: false, motivo: null, atividade: [] };
+    expect(sem.computador.id).toBeNull();
+    expect(foraDoAr(sem)).toBe(false);
+    expect(estadoEmPalavras(sem, T0, null)).toBe("Desligado");
+    expect(estadoEmPalavras(sem, T0, "iniciar")).toBe(estadoEmPalavras({ ...sem, computador: { ...sem.computador, id: "c", criadoEm: T0 } }, T0, "iniciar"));
+    expect(mensagemDoLimite(sem)).toBeNull();
+    expect(agruparAtividade(sem.atividade)).toEqual([]);
+    expect(estadoEmPalavras({ ...sem, disponivel: false, motivo: "Configure NOD_COMPUTADORES=docker no servidor." }, T0, null)).toBe("Ambiente indisponível");
   });
 
   it("NOD-170: o cartão do teto mostra os números só enquanto a última tentativa bateu no limite e a máquina segue desligada", () => {

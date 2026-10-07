@@ -25,6 +25,7 @@ describeIntegracao("computador do bot fora do ar: três falhas, um aviso, plano 
   let quebrado = true;
   let iniciados = 0;
   const driver: DriverComputador = {
+    ambiente: async () => ({ disponivel: true, motivo: null }),
     estado: async () => ({ disponivel: true, ativo: true, motivo: null, reinicios: quebrado ? 6 : 0 }),
     iniciar: async () => {
       iniciados += 1;

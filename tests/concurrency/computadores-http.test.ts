@@ -11,6 +11,7 @@ import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { ItemAprovacao } from "../../src/contracts/item-aprovacao.ts";
 import type { ResultadoChamada } from "../../src/use-cases/chamar-ferramenta.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { computadorPadrao } from "../../src/domain/computador.ts";
 import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
@@ -27,6 +28,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   const novos:{agente:Agente;conversa:Conversa}[]=[];
   let bloquear: (()=>Promise<void>)|undefined;
   const driver: DriverComputador={
+    ambiente:async()=>({disponivel:true,motivo:null}),
     estado:async id=>({disponivel:true,ativo:ativos.has(id),motivo:null}),
     iniciar:async id=>{inicios.push(id);ativos.add(id);},parar:async id=>{ativos.delete(id);},ligados:async()=>new Set(ativos),
     executar:async(id,acao)=>{
@@ -128,12 +130,12 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     expect(await chamar("computador_gravar_texto",{caminho:"relatorio.txt",texto:"Relatório revisado",revisao:dado.texto!.revisao})).toMatchObject({ok:true,isError:false});
     expect(await chamar("computador_gravar_texto",{caminho:"relatorio.txt",texto:"versão antiga",revisao:dado.texto!.revisao})).toMatchObject({ok:true,isError:true});
     const c=await consultar();
-    expect(await readFile(join(raizArquivos,c.computador.id,"relatorio.txt"),"utf8")).toBe("Relatório revisado");
+    expect(await readFile(join(raizArquivos,c.computador.id!,"relatorio.txt"),"utf8")).toBe("Relatório revisado");
   });
   it("excluir desliga processos; restaurar conserva o vínculo sem religar",async()=>{
     const c=await consultar();
     expect((await srv.chamar("DELETE",`agentes/${bot.agente.id}`)).status).toBe(200);
-    expect(ativos.has(c.computador.id)).toBe(false);
+    expect(ativos.has(c.computador.id!)).toBe(false);
     expect((await srv.chamar("GET",`agentes/${bot.agente.id}/computador`)).status).toBe(404);
     expect((await srv.chamar("POST",`agentes/${bot.agente.id}/restaurar`,{})).status).toBe(200);
     const restaurado=await consultar();expect(restaurado.computador.id).toBe(c.computador.id);expect(restaurado.computador.habilitado).toBe(false);
@@ -141,7 +143,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   // NOD-162: o computador só nasce na primeira ferramenta computador_* que executa. Um bot novo por caso, para o
   // vínculo começar nulo; o contador `inicios` conta chamadas de driver.iniciar.
   const botNovo=async()=>{const b=await srv.json<{agente:Agente;conversa:Conversa}>("POST","agentes",{dono:"pessoa",interativo:true});novos.push(b);return b;};
-  // Lido por SQL, não pelo GET: o GET do painel cria a linha em `computadores` (obter).
+  // Lido por SQL, não pelo GET (até a NOD-192, o GET do painel criava a linha em `computadores`).
   const vinculo=(b:{agente:Agente})=>srv.app.dentro(srv.pessoa,d=>d.tx(async trx=>(await trx<{computador_id:string|null}[]>`select computador_id from agentes where id = ${b.agente.id}`)[0]!.computador_id));
   it("(a) plano emitido e turno sem computador_*: nenhum iniciar e agentes.computador_id nulo",async()=>{
     const b=await botNovo();const antes=inicios.length;
@@ -180,4 +182,52 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     expect(c.ativo).toBe(false);
     expect(inicios.length).toBe(antes);
   });
+  // NOD-192: abrir o painel só lê — não cria a linha, não preenche o vínculo e não pega FOR UPDATE.
+  // Pelo escopo da pessoa: o dono do banco não vê as linhas (FORCE RLS só com policies para nod_app).
+  const linhas=()=>srv.app.dentro(srv.pessoa,d=>d.tx(async trx=>(await trx<{n:number}[]>`select count(*)::int as n from computadores`)[0]!.n));
+  it("(e) GET de bot sem computador: 200 com o padrão desligado, nada gravado; a 1ª ação cria uma vez só",async()=>{
+    // Um computador de outro bot antes: prova que a contagem enxerga as linhas desta pessoa.
+    const comLinha=await botNovo();await srv.json("POST",`agentes/${comLinha.agente.id}/computador`,{operacao:"iniciar"});
+    const b=await botNovo();const antes=await linhas();
+    expect(antes).toBeGreaterThan(0);
+    const c=await srv.json<ComputadorDto>("GET",`agentes/${b.agente.id}/computador`);
+    expect(c).toEqual({computador:computadorPadrao(b.agente.id),disponivel:true,ativo:false,motivo:null,atividade:[]});
+    await srv.json<ComputadorDto>("GET",`agentes/${b.agente.id}/computador`);
+    expect(await linhas()).toBe(antes);
+    expect(await vinculo(b)).toBeNull();
+    expect((await srv.chamar("GET",`agentes/${randomUUID()}/computador`)).status).toBe(404);
+    const outra=srv.sessaoDe({tenantId:srv.pessoa.tenantId,pessoaId:randomUUID()});
+    expect((await srv.chamar("GET",`agentes/${b.agente.id}/computador`,undefined,outra)).status).toBe(404);
+    // "Ligar": cria o vínculo uma vez; o GET seguinte é o de um computador que existe.
+    const ini=inicios.length;
+    await srv.json("POST",`agentes/${b.agente.id}/computador`,{operacao:"iniciar"});
+    const id=await vinculo(b);
+    expect(id).not.toBeNull();expect(await linhas()).toBe(antes+1);expect(inicios.slice(ini)).toEqual([id]);
+    const depois=await srv.json<ComputadorDto>("GET",`agentes/${b.agente.id}/computador`);
+    expect(depois.computador.id).toBe(id);expect(depois.ativo).toBe(true);
+    expect(await linhas()).toBe(antes+1);
+  });
+  it("(f) GET de bot com computador: a linha do banco e o estado do driver, como antes",async()=>{
+    const b=await botNovo();
+    await srv.json("POST",`agentes/${b.agente.id}/computador`,{operacao:"iniciar"});
+    await srv.json("POST",`agentes/${b.agente.id}/computador`,{operacao:"autonomo"});
+    const linha=await srv.app.dentro(srv.pessoa,d=>d.repos.computadores.buscarVinculo(b.agente.id));
+    const atividade=await srv.app.dentro(srv.pessoa,d=>d.repos.computadores.atividade(linha!.id));
+    const c=await srv.json<ComputadorDto>("GET",`agentes/${b.agente.id}/computador`);
+    expect(c).toEqual({computador:linha,atividade,...await driver.estado(linha!.id)});
+    expect(c.computador.politica).toBe("autonomo");
+  });
+  it("(g) o GET não espera uma transação que segura o agente e o computador em FOR UPDATE",async()=>{
+    for (const comComputador of [false,true]) {
+      const b=await botNovo();
+      if(comComputador)await srv.json("POST",`agentes/${b.agente.id}/computador`,{operacao:"iniciar"});
+      const status=await srv.app.dentro(srv.pessoa,d=>d.tx(async trx=>{
+        await trx`select id from agentes where id = ${b.agente.id} for update`;
+        await trx`select c.id from computadores c join agentes a on a.tenant_id = c.tenant_id and a.computador_id = c.id where a.id = ${b.agente.id} for update of c`;
+        const prazo=new Promise<"esperou">(r=>setTimeout(()=>r("esperou"),5000));
+        return Promise.race([srv.chamar("GET",`agentes/${b.agente.id}/computador`).then(r=>r.status),prazo]);
+      }));
+      expect(status).toBe(200);
+    }
+  },30000);
 });

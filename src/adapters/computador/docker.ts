@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
-import type { AcaoComputador, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
+import type { AcaoComputador, AmbienteComputador, DriverComputador, ResultadoComputador } from "../../contracts/computador.ts";
 import { MOTIVOS_FALHA_COMPUTADOR, type MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import { FalhaComputador, limiteDoAmbiente } from "../../domain/computador.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
@@ -193,13 +193,20 @@ export function criarDriverDocker(env: Readonly<Record<string, string | undefine
     }
     if (!anotar.jaPronta) log("info", "computador_iniciado", { ...campos(), ok: true });
   }
+  /** NOD-192: o mesmo diagnóstico que `estado` fazia antes da máquina — sem `limite` quando nem chega ao Docker. */
+  async function ambiente(): Promise<AmbienteComputador> {
+    if (!habilitado) return { disponivel: false, motivo: "Configure NOD_COMPUTADORES=docker no servidor." };
+    if (!cofreConfigurado) return { disponivel: false, motivo: "Configure a chave de credenciais do servidor para proteger os logins." };
+    const ok = await docker(["image", "inspect", imagem], undefined, 5000).then(() => true, () => false);
+    return { disponivel: ok, limite, motivo: ok ? null : "Prepare o ambiente com npm run computador:build e Docker em execução." };
+  }
   return {
+    ambiente,
     async estado(id) {
-      if (!habilitado) return { disponivel: false, ativo: false, motivo: "Configure NOD_COMPUTADORES=docker no servidor." };
-      if (!cofreConfigurado) return { disponivel: false, ativo: false, motivo: "Configure a chave de credenciais do servidor para proteger os logins." };
-      const ok = await docker(["image", "inspect", imagem], undefined, 5000).then(() => true, () => false);
-      const maquina = ok ? await inspecionar(nomes(id).maquina) : { rodando: false, reinicios: null };
-      return { disponivel: ok, ativo: maquina.rodando, reinicios: maquina.reinicios, limite, motivo: ok ? null : "Prepare o ambiente com npm run computador:build e Docker em execução." };
+      const a = await ambiente();
+      if (!a.limite) return { ...a, ativo: false };
+      const maquina = a.disponivel ? await inspecionar(nomes(id).maquina) : { rodando: false, reinicios: null };
+      return { disponivel: a.disponivel, ativo: maquina.rodando, reinicios: maquina.reinicios, limite: a.limite, motivo: a.motivo };
     },
     iniciar,
     ligados,

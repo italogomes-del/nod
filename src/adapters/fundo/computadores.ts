@@ -3,7 +3,7 @@ import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, Resul
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
+import { alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo } from "../../domain/modo-aprovacao.ts";
@@ -231,11 +231,18 @@ export function criarComputadores(o: Opcoes) {
       if (c) await o.driver.parar(c.id);
       o.mudou(escopo, agenteId);
     },
+    /**
+     * definido em 2026-10-07 (NOD-192): abrir o painel só lê — sem FOR UPDATE (não disputa com o turno nem com uma
+     * ação do mesmo bot) e sem criar a linha. Sem computador, devolve o padrão desligado e pergunta ao driver só o
+     * ambiente (Docker, cofre, imagem): não há container para inspecionar. A 1ª ação cria, em `obter`.
+     */
     async consultar(escopo: Escopo, agenteId: string): Promise<ComputadorDto> {
       const c = await o.dentro(escopo, async (d) => {
-        const computador = await obter(d, agenteId);
-        return { computador, atividade: await d.repos.computadores.atividade(computador.id) };
+        const computador = await d.repos.computadores.buscarDoAgente(agenteId);
+        if (computador === undefined) throw new ErroDeDominio("nao_encontrado");
+        return computador && { computador, atividade: await d.repos.computadores.atividade(computador.id) };
       });
+      if (!c) return { computador: computadorPadrao(agenteId), ativo: false, atividade: [], ...await o.driver.ambiente() };
       return { ...c, ...await o.driver.estado(c.computador.id) };
     },
     async configurar(escopo: Escopo, agenteId: string, operacao: string): Promise<void> {

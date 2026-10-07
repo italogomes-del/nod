@@ -75,8 +75,13 @@ export type RegistroComputador = {
   motivo: MotivoFalhaComputador | null;
   em: number;
 };
+/**
+ * NOD-192: o que o painel vê. Um bot que nunca usou o computador não tem linha em `computadores`: o GET
+ * devolve o padrão (computadorPadrao) com `id` e `criadoEm` nulos, sem criar nada. A web age pelo agente.
+ */
+export type ComputadorVisto = Omit<Computador, "id" | "criadoEm"> & { id: string | null; criadoEm: number | null };
 export type ComputadorDto = {
-  computador: Computador;
+  computador: ComputadorVisto;
   disponivel: boolean;
   ativo: boolean;
   motivo: string | null;
@@ -86,7 +91,11 @@ export type ComputadorDto = {
   limite?: { maximo: number; ociosoMin: number };
   atividade: RegistroComputador[];
 };
+/** O ambiente do servidor (Docker, cofre, imagem), sem olhar nenhuma máquina. */
+export type AmbienteComputador = { disponivel: boolean; motivo: string | null; limite?: { maximo: number; ociosoMin: number } };
 export interface DriverComputador {
+  /** NOD-192: o painel de um bot sem computador mostra só o ambiente — não há container para inspecionar. */
+  ambiente(): Promise<AmbienteComputador>;
   estado(id: string): Promise<{ disponivel: boolean; ativo: boolean; motivo: string | null; reinicios?: number | null; limite?: { maximo: number; ociosoMin: number } }>;
   iniciar(id: string): Promise<void>;
   parar(id: string): Promise<void>;
