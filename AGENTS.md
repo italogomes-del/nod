@@ -79,12 +79,19 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
 - **Migração nova só adiciona** (NOD-186). `npm run fence:migrations` (`scripts/migracao-aditiva.ts`, no `check`
   e no CI) lê o trecho antes de `-- ROLLBACK:`, sem comentários nem literais (`'…'`, `E'…'`, `"…"`; o corpo
   de `$$…$$` é verificado como código), e barra `DROP TABLE`,
-  `DROP [COLUMN]`, `RENAME` (tabela, coluna, valor de enum…), `ALTER [COLUMN] … TYPE` e `SET NOT NULL`,
-  com `arquivo:linha`. Motivo: o rollback de código (NOD-173) volta a imagem e deixa o banco novo; o código
-  antigo quebra se a coluna sumiu ou mudou. Vale só para prefixo > `BASE_ADITIVA` (0058); as antigas não
+  `DROP [COLUMN]`, `RENAME` (tabela, coluna, valor de enum…), `ALTER [COLUMN] … TYPE`, `SET NOT NULL` e
+  (NOD-191) `DROP [MATERIALIZED] VIEW`, `DROP TYPE`, `DROP DOMAIN`, `DROP FUNCTION/PROCEDURE/ROUTINE`,
+  `TRUNCATE` e, em `ALTER TYPE`, `ALTER ATTRIBUTE … [SET DATA] TYPE` e `DROP ATTRIBUTE`, com `arquivo:linha`.
+  Passam: `ALTER TYPE … ADD VALUE/ADD ATTRIBUTE`, `CREATE OR REPLACE VIEW/FUNCTION`, `DROP INDEX/TRIGGER/POLICY`,
+  `DROP CONSTRAINT/DEFAULT/NOT NULL` e `TRUNCATE` como privilégio (`GRANT/REVOKE`) ou evento de trigger.
+  Motivo: o rollback de código (NOD-173) volta a imagem e deixa o banco novo; o código
+  antigo quebra se a coluna, a view, a função ou o tipo sumiu ou mudou, e `TRUNCATE` apaga dado que o
+  rollback não devolve. Vale só para prefixo > `BASE_ADITIVA` (0058); as antigas não
   são reescritas. Exceção caso a caso: `-- destrutiva-ok: <motivo>` na linha anterior ao comando (ou à
   cláusula dele); a marca vale do código logo abaixo até o `;` seguinte, nunca para a instrução
-  seguinte nem para o resto do arquivo; motivo vazio falha.
+  seguinte nem para o resto do arquivo; motivo vazio falha. Exemplo legítimo: `DROP FUNCTION f(int)`
+  antes de recriar `f(bigint)` com outra assinatura leva a marca com o motivo (o gate não analisa se o
+  código antigo usa o objeto; barra sempre e a exceção decide caso a caso).
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e

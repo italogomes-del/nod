@@ -9,7 +9,9 @@ import { trechoAplicavel } from "../src/db/migrar.ts";
  * com as migrações novas; uma coluna apagada, renomeada ou com outro tipo quebra o código antigo.
  * Este gate lê o trecho aplicável (antes de `-- ROLLBACK:`, pela mesma função do runner), sem
  * comentários nem literais de texto, e barra DROP TABLE, DROP [COLUMN], RENAME, ALTER [COLUMN] … TYPE
- * e SET NOT NULL. Exceção caso a caso: `-- destrutiva-ok: <motivo>` na linha anterior ao comando
+ * e SET NOT NULL. NOD-191: também DROP [MATERIALIZED] VIEW, DROP TYPE, DROP DOMAIN, DROP FUNCTION/
+ * PROCEDURE/ROUTINE, TRUNCATE e, em ALTER TYPE, ALTER ATTRIBUTE … TYPE e DROP ATTRIBUTE (o código antigo
+ * procura a view/função/tipo que sumiu; TRUNCATE apaga dado que o rollback não devolve). Exceção caso a caso: `-- destrutiva-ok: <motivo>` na linha anterior ao comando
  * (ou à cláusula dele), valendo até o `;` seguinte; motivo vazio não vale. Regra no AGENTS.md.
  *
  * definido em 2026-10-06: corte por número, não por diff (não depende de fetch-depth nem da base do PR).
@@ -21,12 +23,31 @@ export type Problema = { arquivo: string; linha: number; comando: string; motivo
 
 // [^\n]: com CRLF o `\r` fica no motivo (e sai no trim); com `.` e `$` a marca nunca casava.
 const EXCECAO = /^\s*--\s*destrutiva-ok:([^\n]*)$/i;
-// O conteúdo de "…" já vem em branco.
-const ID = String.raw`(?:"[^"]+"|[a-z_][a-z0-9_$]*)`;
+// O conteúdo de "…" já vem em branco. Identificador sem aspas no Postgres aceita letra não ASCII
+// (`orçamentos`, `preço`): sem a faixa \u0080-\uffff, `ALTER COLUMN preço TYPE` e `TRUNCATE orçamentos`
+// escapavam (QA NOD-191).
+const LETRA = String.raw`a-z_\u0080-\uffff`;
+const ID = String.raw`(?:"[^"]+"|[${LETRA}][${LETRA}0-9$]*)`;
 const PADROES: { comando: string; re: RegExp }[] = [
   { comando: "DROP TABLE", re: /\bDROP\s+TABLE\b/gi },
   { comando: "RENAME", re: /\bRENAME\b/gi },
   { comando: "SET NOT NULL", re: /\bSET\s+NOT\s+NULL\b/gi },
+  // NOD-191. CREATE OR REPLACE e DROP INDEX/TRIGGER/POLICY não casam (não apagam dado nem objeto lido).
+  { comando: "DROP VIEW", re: /\bDROP\s+(?:MATERIALIZED\s+)?VIEW\b/gi },
+  { comando: "DROP TYPE", re: /\bDROP\s+TYPE\b/gi },
+  { comando: "DROP DOMAIN", re: /\bDROP\s+DOMAIN\b/gi },
+  { comando: "DROP FUNCTION", re: /\bDROP\s+(?:FUNCTION|PROCEDURE|ROUTINE)\b/gi },
+  // TRUNCATE como privilégio (`GRANT/REVOKE …, TRUNCATE, … ON`) ou evento de trigger (`BEFORE TRUNCATE
+  // [OR …] ON`) não é o comando: este nunca vem seguido de `,`, `ON` ou `OR` (palavras reservadas, não
+  // podem ser nome de tabela). O fim de ON/OR é checado por caractere de identificador, não por `\b`:
+  // `on$log` e `orçamentos` são nomes de tabela válidos e `\b` cortaria antes do `$` ou do `ç`.
+  // `'TRUNCATE'` como literal inteiro só passa quando é o valor de TG_OP comparado (`= / <> / != / WHEN`,
+  // ou numa lista `IN ('…', 'TRUNCATE')`) num corpo com EXECUTE; concatenado (`'TRUNCATE' || ' t'`,
+  // `concat('TRUNCATE', …)`) é SQL dinâmico de verdade e barra (revisão NOD-191).
+  {
+    comando: "TRUNCATE",
+    re: /\bTRUNCATE\b(?!\s*,|\s+(?:ON|OR)(?![A-Za-z0-9_$\u0080-\uffff]))(?!'(?<=(?:=|<>|!=|\bWHEN|\bIN\s*\((?:\s*'[^']*'\s*,)*)\s*'TRUNCATE'))/gi,
+  },
 ];
 // As cláusulas de coluna só existem dentro de ALTER [FOREIGN] TABLE, e são procuradas DEPOIS do cabeçalho
 // `ALTER TABLE [IF EXISTS] [ONLY] nome [*]`. Assim `ALTER TABLE type ADD …` (tabela chamada type) não é
@@ -40,8 +61,15 @@ const ALTER_TIPO = new RegExp(String.raw`\bALTER\s+(?:COLUMN\s+)?${ID}\s+(?:SET\
 // Dentro de ALTER TABLE, `DROP x` sem a palavra COLUMN também apaga a coluna. Só não barram os DROP
 // que tiram restrição/default/identidade.
 const DROP_COLUNA = /\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\s+NULL\b|IDENTITY\b|EXPRESSION\b)/gi;
+// NOD-191: o mesmo molde para ALTER TYPE (tipo composto). `ALTER TYPE` tem de vir colado: `ALTER COLUMN a
+// TYPE` não entra. As cláusulas são procuradas depois de `ALTER TYPE nome[.nome]`, então um tipo chamado
+// type (`ALTER TYPE type ADD VALUE`) não vira falso positivo; ADD VALUE e ADD ATTRIBUTE passam.
+const ALTER_TYPE = /\bALTER\s+TYPE\b[^;]*/gi;
+const CABECALHO_TYPE = new RegExp(String.raw`^ALTER\s+TYPE\s+${ID}(?:\s*\.\s*${ID})?`, "i");
+const ALTER_ATRIBUTO = new RegExp(String.raw`\bALTER\s+ATTRIBUTE\s+${ID}\s+(?:SET\s+DATA\s+)?TYPE\b`, "gi");
+const DROP_ATRIBUTO = /\bDROP\s+ATTRIBUTE\b/gi;
 
-const IDENT_CHAR = /[A-Za-z0-9_$]/;
+const IDENT_CHAR = /[A-Za-z0-9_$\u0080-\uffff]/;
 const DOLAR = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/y;
 
 /**
@@ -163,20 +191,30 @@ export function verificarMigracao(arquivo: string, conteudo: string): Problema[]
   const excecoes = marcas(conteudo.split("\n"), limpo, linhaComentario);
   const achados: { pos: number; comando: string }[] = [];
   for (const { comando, re } of PADROES) for (const m of limpo.matchAll(re)) achados.push({ pos: m.index, comando });
-  for (const alter of limpo.matchAll(ALTER_TABLE)) {
-    const cab = CABECALHO.exec(alter[0])?.[0].length ?? 0;
-    const corpo = alter[0].slice(cab);
-    const clausulas: [RegExp, string][] = [
-      [DROP_COLUNA, "DROP COLUMN"],
-      [ALTER_TIPO, "ALTER COLUMN … TYPE"],
-    ];
-    for (const [re, comando] of clausulas) {
-      for (const d of corpo.matchAll(re)) {
-        const pos = alter.index + cab + d.index;
-        if (!achados.some((a) => a.pos === pos)) achados.push({ pos, comando });
+  // Cláusula achada depois do cabeçalho manda no nome: em `ALTER TABLE t DROP type` (coluna chamada type)
+  // o DROP TYPE de PADROES casa na mesma posição, mas o que se apaga é a coluna.
+  const clausulasDe = (blocos: RegExp, cabecalho: RegExp, clausulas: [RegExp, string][]) => {
+    for (const bloco of limpo.matchAll(blocos)) {
+      const cab = cabecalho.exec(bloco[0])?.[0].length ?? 0;
+      const corpo = bloco[0].slice(cab);
+      for (const [re, comando] of clausulas) {
+        for (const d of corpo.matchAll(re)) {
+          const pos = bloco.index + cab + d.index;
+          const ja = achados.find((a) => a.pos === pos);
+          if (ja) ja.comando = comando;
+          else achados.push({ pos, comando });
+        }
       }
     }
-  }
+  };
+  clausulasDe(ALTER_TABLE, CABECALHO, [
+    [DROP_COLUNA, "DROP COLUMN"],
+    [ALTER_TIPO, "ALTER COLUMN … TYPE"],
+  ]);
+  clausulasDe(ALTER_TYPE, CABECALHO_TYPE, [
+    [ALTER_ATRIBUTO, "ALTER ATTRIBUTE … TYPE"],
+    [DROP_ATRIBUTO, "DROP ATTRIBUTE"],
+  ]);
   const problemas: Problema[] = [];
   for (const { pos, comando } of achados.sort((a, b) => a.pos - b.pos)) {
     const linha = linhaDe(limpo, pos);
@@ -212,7 +250,7 @@ async function principal(): Promise<void> {
   const { verificadas, problemas } = await verificarPasta(dir);
   if (problemas.length) {
     for (const p of problemas) process.stderr.write(`${formatar(p)}\n`);
-    process.stderr.write(`FALHA: ${problemas.length} comando(s) destrutivo(s) em migração nova (NOD-186, AGENTS.md).\n`);
+    process.stderr.write(`FALHA: ${problemas.length} comando(s) destrutivo(s) em migração nova (NOD-186/NOD-191, AGENTS.md).\n`);
     process.exitCode = 1;
     return;
   }
