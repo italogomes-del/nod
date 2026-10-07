@@ -1,6 +1,7 @@
 import type { PayloadPropostaPerfil, PayloadPropostaRotina } from "../contracts/conversa.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
+import { revisaoAtualDoPerfil } from "./confirmar-perfil.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
 import { prepararRotina } from "./criar-rotina.ts";
 import type { UseCasesNod } from "./tipos.ts";
@@ -50,6 +51,10 @@ export const atualizarPerfil: UseCasesNod["atualizarPerfil"] = async (deps, inpu
     ids.push(criada.id);
   }
   if (ids.length > 0) payload.rotinas = ids;
+
+  // NOD-190: a revisão do perfil de agora vai no payload; a confirmação só aplica se ele ainda for este.
+  const agente = await deps.repos.agentes.buscar(input.agenteId);
+  if (agente) payload.revisao = revisaoAtualDoPerfil(agente);
 
   const proposta = await deps.repos.propostas.criar({ conversaId: input.conversaId, agenteId: input.agenteId, payload });
   if (!proposta) throw new ErroDeDominio("nao_permitido");

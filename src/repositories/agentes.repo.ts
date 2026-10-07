@@ -169,6 +169,16 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraAgente);
     },
 
+    /**
+     * definido em 2026-10-07 (NOD-190): `buscar` com a linha TRAVADA até o fim da transação, para confirmar uma proposta
+     * de perfil. Mesmo filtro de `atualizarPerfil` (só a dona, não excluído), no molde de rotinas.buscarParaAtualizar:
+     * a segunda confirmação concorrente, e o editarPerfil da tela, esperam a primeira e veem o perfil já mudado.
+     */
+    async buscarParaAtualizar(id: string): Promise<Agente | null> {
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from agentes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null for update`;
+      return l ? paraAgente(l) : null;
+    },
+
     async atualizarPerfil(id: string, perfil: PerfilAgente): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`
         update agentes set

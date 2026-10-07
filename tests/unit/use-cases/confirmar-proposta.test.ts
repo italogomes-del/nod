@@ -29,7 +29,13 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     expect(ultima?.texto).toContain("Confirmado por");
     expect(ultima?.texto).toContain("nome: Vera");
 
-    await esperarErro(() => confirmarProposta(deps, { propostaId: idDaProposta(proposta.data) }), "estado_invalido");
+    // NOD-190: o mesmo card de novo é idempotente — volta confirmada, sem evento e sem mensagem nova.
+    const ultimaAntes = await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id);
+    const de_novo = await executar(deps, confirmarProposta, { propostaId: idDaProposta(proposta.data) });
+    expect(de_novo.data.proposta.estado).toBe("confirmada");
+    expect(de_novo.data.obsoleta).toBeUndefined();
+    expect(de_novo.events).toEqual([]);
+    expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.id).toBe(ultimaAntes?.id);
     await esperarErro(() => confirmarProposta(deps, { propostaId: randomUUID() }), "nao_encontrado");
   });
 

@@ -1,4 +1,5 @@
 import type { Rotina } from "../contracts/rotina.ts";
+import { jsonEstavel as estavel } from "./json-estavel.ts";
 
 /**
  * definido em 2026-10-06 (NOD-159): a revisão de uma rotina é o hash dos campos que uma proposta muda. A rotina não
@@ -9,16 +10,6 @@ import type { Rotina } from "../contracts/rotina.ts";
  * O domínio é puro (ADR-018), então o sha256 chega por parâmetro; quem chama usa `node:crypto`.
  */
 export type CamposDaRevisao = Pick<Rotina, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "acessos" | "soComPendencia">;
-
-/** JSON com as chaves em ordem alfabética em todos os níveis: a mesma rotina dá sempre o mesmo texto. */
-function estavel(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(estavel).join(",")}]`;
-  if (v !== null && typeof v === "object") {
-    const o = v as Record<string, unknown>;
-    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${estavel(o[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(v);
-}
 
 /** Acessos são um conjunto: a ordem da lista (e das capacidades dentro de cada um) não muda a revisão. */
 function acessosOrdenados(acessos: CamposDaRevisao["acessos"]): string[] | null {

@@ -5,6 +5,7 @@ import type { Executor, RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { aplicarAtualizacaoRotina, aplicarExclusaoRotina, erroRotinaMudou } from "../../../use-cases/aplicar-proposta-rotina.ts";
+import { erroPerfilMudou } from "../../../use-cases/confirmar-perfil.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
 import { decidirPropostaDeBot } from "../../../use-cases/onboarding.ts";
@@ -188,10 +189,17 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
 
         if (atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
           // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, rotinas-do-agente.ts).
-          // NOD-159: a rotina mudou depois da proposta — o caso recusou e avisou sem lançar; o erro sai DEPOIS do commit.
+          // NOD-159/NOD-190: a rotina (ou o perfil) mudou depois da proposta — o caso recusou e avisou sem lançar; o erro
+          // sai DEPOIS do commit.
           let obsoleta = false;
           await comoDona(ctx.escopo, atual, async (deps) => {
             const proposta = await deps.repos.propostas.buscar(atual.id);
+            // NOD-190: o perfil trava o AGENTE antes da decisão, na mesma ordem de POST propostas/:id/confirmar
+            // (confirmar-perfil.ts trava o agente e, no card obsoleto, fecha a decisão). Na ordem inversa, o mesmo card
+            // clicado na conversa e em "Sua vez" ao mesmo tempo fazia deadlock (decisão → agente × agente → decisão).
+            // Vale também para RECUSAR (QA da NOD-190): a recusa fecha a decisão e depois a proposta, e a confirmação do
+            // card obsoleto pela conversa trava a proposta e depois a decisão — sem o agente na frente, 40P01 e 500.
+            if (atual.tipo === "perfil" && proposta) await deps.repos.agentes.buscarParaAtualizar(proposta.agenteId);
             const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
             if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
             if (recusada(corpo)) {
@@ -211,11 +219,12 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             } else if (proposta && proposta.estado === "pendente") {
               const r = await executar(deps, confirmarProposta, { propostaId: proposta.id, prazoMs: d.prazoDecisaoMs });
               if (r.agente) ids.agente = r.agente.id;
+              obsoleta = r.obsoleta === true;
             }
             // Obsoleta: a pessoa clicou em confirmar, mas a proposta saiu recusada — o frame diz o que ficou no banco.
             await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) || obsoleta })]);
           });
-          if (obsoleta) throw erroRotinaMudou();
+          if (obsoleta) throw atual.tipo === "perfil" ? erroPerfilMudou() : erroRotinaMudou();
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

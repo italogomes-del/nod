@@ -363,6 +363,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((a) => (opcoes.incluirExcluidos || !a.excluidoEm) && (opcoes.incluirOcultos || !a.oculto))
           .sort((x, y) => Number(y.fixado) - Number(x.fixado) || (x.posicao ?? Infinity) - (y.posicao ?? Infinity) || x.criadoEm - y.criadoEm);
       },
+      async buscarParaAtualizar(id) {
+        // Espelha o SQL: só a dona e não excluído. Sem concorrência na memória, sem lock.
+        return doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm) ?? null;
+      },
       async atualizarPerfil(id, perfil) {
         const a = doTenant(b.agentes).find((x) => x.id === id);
         if (!a) return null;

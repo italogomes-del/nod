@@ -39,7 +39,16 @@ export type EstadoProposta = "pendente" | "confirmada" | "recusada";
  * só e confirmar cria todas); `turnoId` é o turno que propôs, retomado quando a pessoa confirma. Propostas
  * gravadas antes não têm nenhum dos dois.
  */
-export type PayloadPropostaPerfil = { kind: "perfil"; nome?: string; titulo?: string; descricao?: string; turnoId?: string; rotinas?: string[] };
+export type PayloadPropostaPerfil = {
+  kind: "perfil";
+  nome?: string;
+  titulo?: string;
+  descricao?: string;
+  turnoId?: string;
+  rotinas?: string[];
+  /** definido em 2026-10-07 (NOD-190): revisão do perfil quando a proposta nasceu (revisaoDoPerfil). Ausente = proposta anterior. */
+  revisao?: string;
+};
 export type PayloadPropostaRotina = {
   kind: "rotina";
   cron: string;

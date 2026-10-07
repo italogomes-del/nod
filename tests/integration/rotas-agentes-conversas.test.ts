@@ -167,11 +167,17 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       const deps = depsSobreTrx(trx, MARLON);
       const p1 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Vera", titulo: "Revisora" })).data;
       const p2 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Outra" })).data;
+      const p3 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Terceira" })).data;
 
       const confirmada = await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`);
       expect(confirmada.status).toBe(200);
       expect(((await confirmada.json()) as RespostaMutacao).ids).toEqual({ proposta: idDaProposta(p1), agente: agente.id });
-      expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`)).status).toBe(409);
+      // NOD-190: o mesmo card de novo é idempotente; um card montado sobre o perfil anterior responde 409 (perfil_mudou).
+      expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`)).status).toBe(200);
+      const obsoleta = await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p3)}/confirmar`);
+      expect(obsoleta.status).toBe(409);
+      expect(((await obsoleta.json()) as { codigo: string }).codigo).toBe("estado_invalido");
+      expect((await deps.repos.propostas.buscar(idDaProposta(p3)))?.estado).toBe("recusada");
       expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p2)}/recusar`)).status).toBe(200);
       expect((await servidor.chamar(marlon, "POST", `propostas/${randomUUID()}/recusar`)).status).toBe(404);
       expect(await deps.repos.agentes.buscar(agente.id)).toMatchObject({ nome: "Vera", titulo: "Revisora", confirmado: true });
