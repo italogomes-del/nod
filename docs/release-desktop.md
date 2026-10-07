@@ -1,12 +1,12 @@
-# nod 0.2.0-rc.1 — guia de instalação e distribuição
+# nod — guia de instalação e distribuição
 
 A distribuição usa um servidor compartilhado e dois aplicativos macOS: `arm64` para chips M e `x64` para Intel. O Mac precisa do Claude Code ou do Codex instalado e autenticado (ADR-036). Não precisa de Node, Docker ou Postgres. O servidor guarda as conversas, permissões, decisões e rotinas; cada app puxa os trabalhos da pessoa que emitiu sua chave.
 
-## Preview sem assinatura — 17/09/2026
+## Histórico (0.2.0-rc.1): Preview sem assinatura — 17/09/2026
 
 Implementados: app Electron, configuração do endereço, chave cifrada com `safeStorage` (Keychain no macOS), sessão web obtida pela chave, ponte HTTP autenticada, executor local reutilizado, builds separados e workflow de assinatura/notarização. Nenhuma URL de produção foi escolhida. Nenhum certificado Developer ID válido foi encontrado na máquina de desenvolvimento. O mantenedor autorizou publicar esta candidata como preview sem assinatura, repetindo a distribuição anterior. Não há assinatura Developer ID nem notarização Apple. O macOS pode bloquear a abertura; esta publicação não representa aceite de instalação sob Gatekeeper nem validação de uso em produção. A distribuição assinada fica para uma versão estável.
 
-## Mudanças e validação desta candidata
+## Histórico (0.2.0-rc.1): Mudanças e validação desta candidata
 
 Integra o desktop à main atual, incluindo gestão e exclusão recuperável de agentes (migrações 0011 e 0012), decisões diretamente no chat, cooperação iniciada por agentes acordados por rotinas e Sonnet como modelo padrão. As sondas usavam Haiku; desde a NOD-164 usam o Sonnet 4.6. Candidatas `-rc.N` são reconhecidas pela verificação de compatibilidade do app.
 
@@ -29,7 +29,9 @@ No modo compartilhado não há sonda nem execução Claude no servidor. `NOD_EXE
 
 ## Requisitos do Mac
 
-Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM64. O suporte a Monterey foi removido somente no Electron 44 ([nota oficial](https://www.electronjs.org/blog/electron-44-0)); esta candidata mantém Electron 43. O requisito do runtime não substitui o aceite do Nod nas duas arquiteturas.
+macOS 12+ para o app e o Codex; o Claude Code exige macOS 13+.
+
+Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM64. O suporte a Monterey foi removido somente no Electron 44 ([nota oficial](https://www.electronjs.org/blog/electron-44-0)); o app mantém o Electron 43. O requisito do runtime não substitui o aceite do Nod nas duas arquiteturas.
 
 **Versões mínimas das IAs (NOD-171, 2026-10-06).** Claude Code 2.1.290 e Codex 0.159.0 (`PISO_CLI`). Abaixo disso o app
 mostra a IA como **desatualizada**, com a versão instalada, a mínima e o comando de atualizar, e o bot fixado nela recebe
@@ -72,14 +74,27 @@ pt-BR e outra com o macOS em inglês, e anexe as fotos a esta seção:
 
 ## Atualizar a partir da preview
 
-Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Instale o novo DMG sobre o app anterior, mantendo a configuração cifrada no Keychain. Valide conexão, execução, Parar e revogação de chave nas duas arquiteturas. Não há atualização automática. Esse caminho ainda depende de aceite real. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
+**No Mac.** Não há atualização automática (NOD-132). Baixe o DMG novo, abra e arraste **nod** para **Aplicativos**,
+escolhendo **Substituir**. Na primeira abertura, o macOS pode pedir a senha do Mac uma vez para o app novo usar o
+Keychain. Depois disso, um destes dois desfechos é o esperado:
+
+- **(a) Reconecta sozinho.** O app abre o nod com a mesma chave; **Chaves**, no navegador, não ganha chave nova.
+- **(b) Volta à tela de conexão.** O app assinado não conseguiu ler a conexão guardada pela preview. Clique em
+  **Entrar com Google** e conecte de novo; depois, em **Chaves**, revogue a chave antiga deste Mac.
+
+Travar, abrir tela branca ou ficar alternando entre a tela de conexão e o nod não é esperado: preserve o diagnóstico
+(**nod › Exportar diagnóstico…**) e avise o time. Ao abrir uma ligação, o macOS pode perguntar de novo pelo microfone
+(NOD-165). A 0.2.0-rc.1 usava outro `appId` (`br.com.leapy.nod`): quem vem dela é o pior caso e deve esperar o desfecho (b). O roteiro de aceite desses
+casos é a seção H de [aceite-desktop.md](aceite-desktop.md).
+
+**No servidor.** Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
 
 ## Diagnóstico para suporte (NOD-138)
 
 Quando o app não conecta, não acha o Claude ou o Codex, ou cai, peça à pessoa **nod › Exportar diagnóstico…**. O app
 abre "Salvar" com `nod-diagnostico-AAAAMMDD-HHMMSS.txt` sugerido em Downloads. Depois de salvar, o Finder mostra o
 arquivo; cancelar não grava nada. O item fica no menu nativo, e não na página: funciona na tela de conexão, sem
-servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` continua com 10 funções.
+servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` continua com 11 funções.
 
 **Onde fica o log.** O `log()` do app do Mac grava a mesma linha JSON do stdout, já redigida pela NOD-158, em
 `~/Library/Logs/nod/nod.log` (modo `0600`). Passou de 1 MiB, ela vira `nod.1.log`. São duas gerações, no máximo 2 MiB.
@@ -113,11 +128,11 @@ servidor nem entra no relato.
 
 ## Gerar e publicar
 
-Para esta preview, use a tag `desktop-v0.2.0-rc.1`, dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
+Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada é `desktop-v0.4.0-rc.4`; a primeira foi `desktop-v0.2.0-rc.1`), dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
 
 `npm ci` usa as versões exatas de Electron e electron-builder do lockfile. `npm run desktop:build` compila app, preload e proxy e recusa dependências de servidor no bundle desktop. `npm run desktop:dev` permite HTTP somente em loopback para desenvolvimento; o app empacotado aceita só HTTPS.
 
-O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, cria os dois DMGs em runners nativos, testa o proxy com o runtime empacotado, verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
+O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, roda o smoke da janela (`scripts/desktop/smoke-window.mjs`) antes de empacotar, cria os dois DMGs em runners nativos, testa o proxy com o runtime empacotado, verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
 
 Configure estes secrets do GitHub, sem colocá-los no repositório:
 

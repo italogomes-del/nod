@@ -93,20 +93,7 @@ Se um upload falhar, consulte primeiro os assets existentes. Reenvie apenas o ar
 
 ## 4. Aceitar os instaladores baixados
 
-Em **cada arquitetura**, registre pessoa, modelo do Mac, macOS, versão/SHA, data e resultado:
-
-- Baixar pelo GitHub, abrir DMG, arrastar para Aplicativos e abrir normalmente sob Gatekeeper, sem remover quarentena nem desabilitar proteções.
-- Verificar assinatura e ticket no app instalado:
-
-  ```bash
-  codesign --verify --deep --strict --verbose=2 /Applications/nod.app
-  xcrun stapler validate /Applications/nod.app
-  spctl --assess --type execute --verbose=2 /Applications/nod.app
-  ```
-
-- Configurar HTTPS, autenticar via navegador, gerar chave individual e conectar.
-- Executar um turno real curto e testar Parar, reconexão, fechar/reabrir e revogação da chave. O turno e a sonda usam a assinatura Claude: registrar o custo e evitar repetições desnecessárias.
-- Atualizar a partir da versão anterior, preservando configuração, e verificar compatibilidade com o servidor que o time vai usar.
+Em **cada arquitetura**, siga o checklist [aceite-desktop.md](aceite-desktop.md) com os DMGs baixados do rascunho e preencha o bloco de registro dele. O turno usa a assinatura da IA: registre o custo e evite repetições desnecessárias.
 
 Falha de assinatura, login, executor ou compatibilidade impede release estável. Build cruzado e inspeção Mach-O não substituem execução nativa. Publique os resultados e limitações nas notas; não copie contagens de testes de outra versão.
 
@@ -144,6 +131,7 @@ Assinatura e notarização:
 Aceite Intel (pessoa, Mac, macOS, resultado):
 Aceite ARM (pessoa, Mac, macOS, resultado):
 Atualização desde a versão anterior:
+Custo dos turnos do aceite:
 Limitações e recuperação:
 O que falhou e o que melhorar na próxima versão:
 ```

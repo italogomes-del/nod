@@ -60,6 +60,11 @@ jobs:
       - run: node scripts/desktop/release-preflight.mjs
       - run: npm ci
       - run: npm run desktop:build
+      # NOD-187: antes do empacotamento, para falhar cedo sem gastar assinatura e notarização.
+      # Sem prazo, um Electron travado (GPU/viz sob carga) prenderia o job até o limite de 6 h do runner.
+      - name: Smoke da janela
+        timeout-minutes: 5
+        run: npx electron scripts/desktop/smoke-window.mjs
       - run: npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true
       - name: Verificar assinatura e notarização
         env:
