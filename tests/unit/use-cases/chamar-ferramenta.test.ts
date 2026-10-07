@@ -4,6 +4,7 @@ import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { FerramentaPlano, PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { chamarFerramenta, errosDoSchema, validarArgsNod } from "../../../src/use-cases/chamar-ferramenta.ts";
 import type { Deps } from "../../../src/use-cases/tipos.ts";
+import { criarConectoresVivos } from "../../../src/services/conectores-vivos.ts";
 import { planoDeTeste } from "../../helpers/l5.ts";
 import { depsFalsos, type OpcoesDepsFalsos } from "./deps-l5.ts";
 
@@ -277,6 +278,35 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(marcar).toHaveBeenCalledTimes(1);
     expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "conector_indisponivel", terminal: false } });
     expect(r.data).not.toHaveProperty("negacao.causa");
+  });
+
+  it("NOD-193: sessão MCP expirada (404 com mcp-session-id) uma vez e depois 200 → ok: true, sem marcarFalha", async () => {
+    let sessoes = 0;
+    let expirar = 1;
+    const metodos: string[] = [];
+    const fetchImpl: typeof fetch = async (_u, init) => {
+      const q = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      metodos.push(q.method);
+      if (q.method === "initialize") return Response.json({ jsonrpc: "2.0", id: q.id, result: {} }, { headers: { "mcp-session-id": `S${++sessoes}` } });
+      if (!q.id) return new Response(null, { status: 202 });
+      if (expirar-- > 0) return new Response("x", { status: 404 });
+      return Response.json({ jsonrpc: "2.0", id: q.id, result: { content: [{ type: "text", text: "3" }] } });
+    };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const vivos = criarConectoresVivos({ agora: () => AGORA, fetchImpl, carregar: async () => ({ nome: "exemplo", transporte: "http", url: "https://mcp.exemplo.com/mcp" }) });
+    try {
+      const c = await cenario({ responder: (ch) => vivos.chamar(ch.conectorId, ch.tool, ch.args, { rotina: false, somenteLeitura: true }) });
+      const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+      const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
+      expect(r.data).toMatchObject({ ok: true });
+      expect(marcar).not.toHaveBeenCalled();
+      expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toBeNull();
+      expect(metodos.filter((m) => m === "tools/call")).toHaveLength(2);
+      expect(metodos.filter((m) => m === "initialize")).toHaveLength(2);
+    } finally {
+      log.mockRestore();
+      await vivos.fechar();
+    }
   });
 
   it("NOD-157: 401/403 do conector nega com causa acesso_recusado (falha_tecnica), sem enum novo e sem dizer 'servidor fora'", async () => {
