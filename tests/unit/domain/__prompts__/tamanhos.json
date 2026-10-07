@@ -1,0 +1,38 @@
+{
+  "colega-profundidade-1": {
+    "estavel": 6156,
+    "volatil": 1030
+  },
+  "colega-profundidade-3": {
+    "estavel": 5689,
+    "volatil": 1178
+  },
+  "conversa-automatico": {
+    "estavel": 13997,
+    "volatil": 896
+  },
+  "conversa-manual": {
+    "estavel": 12947,
+    "volatil": 896
+  },
+  "conversa-total": {
+    "estavel": 13736,
+    "volatil": 896
+  },
+  "criacao-de-bot": {
+    "estavel": 6816,
+    "volatil": 0
+  },
+  "rotina-com-inventario": {
+    "estavel": 7930,
+    "volatil": 1373
+  },
+  "segundo-turno": {
+    "estavel": 13736,
+    "volatil": 455
+  },
+  "sem-terminal-computador-fora": {
+    "estavel": 2558,
+    "volatil": 1080
+  }
+}

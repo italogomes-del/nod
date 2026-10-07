@@ -1,14 +1,10 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Conector } from "../../../src/contracts/conector.ts";
-import type { Memoria } from "../../../src/contracts/memoria.ts";
 import type { Pendencia } from "../../../src/contracts/pendencia.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema, partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
-
-const agente = { nome: "Vera", titulo: "revisora de PRs", descricao: "Revisa PRs do time nod e responde curto." };
-const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } });
-const mem = (id: string, texto: string, criadoEm: number): Memoria => ({ tenantId: "t", id, agenteId: "a", tipo: "preferencia", texto, origem: "pessoa", criadoEm });
+import { agente, f, mem } from "./_fixtures-prompt.ts";
 
 describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
   const comTerminal = (modoAprovacao: "manual" | "automatico" | "total") => montarPromptSistema({ agente: { ...agente, modoAprovacao }, memorias: [], ferramentas: [f("pedir_aprovacao")], nativas: ["Read", "Bash"], pastaDoBot: "Vera", pessoaNome: "Marlon", modo: "conversa" });

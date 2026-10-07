@@ -20,11 +20,20 @@ npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou N
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
+npm run prompt:referencia   # NOD-163: regrava tests/unit/domain/__prompts__/ (o prompt de sistema inteiro por cenário, estável × volátil, e tamanhos.json) — só quando a mudança no prompt é de propósito
 npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test)
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
 npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
 npm start                   # node src/adapters/http/server.ts → boot.ts (partições, compor, listen, registry, laços); é o mesmo CMD do Dockerfile
 ```
+
+Prompts de referência (NOD-163): `tests/unit/domain/prompt-referencia.test.ts` (projeto unit, roda no `check`) compara o
+prompt de sistema de cada cenário fixo com `__prompts__/<cenario>.txt` e falha com o diff em qualquer mudança de
+`src/domain/prompt-sistema.ts`; também falha se a parte estável de um cenário crescer mais de 10% sobre
+`__prompts__/tamanhos.json`. Mudou o prompt de propósito: rode `npm run prompt:referencia` e commite o diff de
+`__prompts__/` junto. **Regra:** o diff de `__prompts__/` é revisado no PR como código — o revisor lê as linhas que
+entraram, saíram ou mudaram de parte (estável × volátil) e o tamanho novo; atualizar a referência sem olhar é o que este
+teste existe para impedir.
 
 O pre-commit roda só `lint-staged` (eslint --fix nos .ts). O gate pesado é `npm run check`, antes do push.
 O hook é instalado pelo `prepare` do `npm ci`/`npm install`; confira com `ls .git/hooks/pre-commit`
