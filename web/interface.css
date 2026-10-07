@@ -576,6 +576,16 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .icone-topo { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
   background: none; color: var(--ink-2); cursor: pointer; }
 .icone-topo:hover, .icone-topo:focus-visible { background: var(--surface-raised); }
+/* definido em 2026-10-07 (ADR-081, canvas "Nod — bot fixo", Alt E): o Nod discreto — o logo (fundo da ação, olhos do
+   texto sobre ela) e o nome, à esquerda da lupa. O ponto do aviso é o mesmo do mascote (âmbar decisão, azul pergunta). */
+.nod-topo { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-right: auto; padding: 0 10px 0 5px;
+  border: 0; border-radius: 10px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.nod-topo:hover, .nod-topo:focus-visible, .nod-topo[aria-current="true"] { background: var(--surface-raised); color: var(--ink); }
+.nod-topo .logo-fundo { fill: var(--action); }
+.nod-topo .logo-olhos { fill: var(--on-action); }
+.nod-topo-aviso { position: absolute; top: 4px; left: 21px; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 2px var(--surface-side); }
+.nod-topo-aviso[data-aviso="decisao"] { background: var(--warning); }
+.menu-nota { margin: 6px 12px 8px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
 .search[hidden] { display: none; }
 .search { height: 36px; }
 

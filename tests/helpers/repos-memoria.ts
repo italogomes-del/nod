@@ -401,6 +401,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         a.oculto = oculto;
         return a;
       },
+      // ADR-081: sem concorrência na memória, travar é só buscar.
+      async travarNod() {
+        return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;
+      },
+      async buscarNod() {
+        return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;
+      },
+      async marcarComoNod(id, perfil) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.dono === "pessoa" && !x.excluidoEm && !x.papel);
+        if (!a || doTenant(b.agentes).some((x) => x.ownerId === escopo.pessoaId && x.papel === "nod")) return null;
+        Object.assign(a, { ...perfil, papel: "nod", cor: "c-black", fixado: true, oculto: false, confirmado: true });
+        return a;
+      },
       async definirVoz(id, p) {
         const a = doTenant(b.agentes).find((x) => x.id === id);
         if (!a) return null;

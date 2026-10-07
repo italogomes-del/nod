@@ -40,7 +40,7 @@ function dados(p: Partial<EstadoOnboarding> = {}): EstadoOnboarding {
     mostrar: true,
     campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null },
     modelo,
-    guia: { id: "g1", nome: "Nina", conversaId: "cg", forma: "shape-square", cor: "c-blue" },
+    guia: { id: "g1", nome: "Nod", conversaId: "cg", forma: "shape-square", cor: "c-black" },
     bot: null,
     passo: "bot",
     pendentes: { bot: null, acesso: null, rotina: null },
@@ -279,7 +279,7 @@ describe("teste de verdade: 'Falta conectar uma IA'", () => {
 
   it("o título, o Claude com o aviso e os dois botões, o ChatGPT com 'Instalar e entrar', Grok e Gemini em breve", () => {
     expect(h).toContain('<h1 tabindex="-1">Falta conectar uma IA</h1>');
-    expect(h).toContain("Testei as IAs deste Mac e nenhuma respondeu. Conecte uma e a Nina te liga em seguida.");
+    expect(h).toContain("Testei as IAs deste Mac e nenhuma respondeu. Conecte uma e o Nod te liga em seguida.");
     expect(h).toContain("Conta sem acesso ao Claude Code");
     expect(h).toContain('data-act="onboarding-ia-entrar" data-ia="claude-cli">Entrar com outra conta</button>');
     expect(h).toContain('data-act="onboarding-ia-como-liberar" data-ia="claude-cli">Como liberar</button>');
@@ -295,7 +295,7 @@ describe("teste de verdade: 'Falta conectar uma IA'", () => {
 
   it("sem nenhuma conta logada, a frase não diz que testou", () => {
     const nada = htmlExecutor(tela({ dados: comIas({ id: "claude-cli", estado: "ausente" }, { id: "codex-cli", estado: "nao_autenticado" }), teste: teste() }));
-    expect(nada).toContain("Não achei uma IA conectada neste Mac. Conecte uma e a Nina te liga em seguida.");
+    expect(nada).toContain("Não achei uma IA conectada neste Mac. Conecte uma e o Nod te liga em seguida.");
     expect(nada).not.toContain("Testei");
   });
 
@@ -396,7 +396,7 @@ describe("teste de verdade: 'Seus bots já têm uma IA'", () => {
   it("mostra a pergunta e a resposta de verdade, o Continuar e o outro provedor ainda com problema", () => {
     const h = htmlExecutor(tela({ dados: d, teste: teste({ vereditos: { "claude-cli": SEM_ACESSO, "codex-cli": RESPONDEU }, nome: "Marlon" }) }));
     expect(h).toContain("Seus bots já têm uma IA");
-    expect(h).toContain("O ChatGPT respondeu ao teste neste Mac. A Nina vai te ligar para montar o seu primeiro bot.");
+    expect(h).toContain("O ChatGPT respondeu ao teste neste Mac. O Nod vai te ligar para montar o seu primeiro bot.");
     expect(h).toContain("Diga oi para Marlon em uma frase curta, em português. Só a frase.");
     expect(h).toContain("<b>Oi, Marlon. Estou pronto para trabalhar com os seus bots.</b>");
     expect(h).toContain("Conectado · respondeu ao teste");
@@ -433,15 +433,15 @@ describe("teste de verdade: 'Seus bots já têm uma IA'", () => {
 
 describe("'está te ligando'", () => {
   it("a linha do provedor: a primeira IA pronta, com o logo; o teste ganha do servidor; sem IA do Mac, não aparece", () => {
-    expect(htmlChamando(tela({ fase: "chamando" }))).toMatch(/<p class="ob-pensa"><span class="ob-pensa-logo"><svg.*?<\/svg><\/span>Nina vai pensar com o Claude deste Mac<\/p>/);
+    expect(htmlChamando(tela({ fase: "chamando" }))).toMatch(/<p class="ob-pensa"><span class="ob-pensa-logo"><svg.*?<\/svg><\/span>Nod vai pensar com o Claude deste Mac<\/p>/);
     const d = comIas({ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado: "pronto" });
-    expect(htmlChamando(tela({ fase: "chamando", dados: d, teste: teste({ vereditos: { "claude-cli": SEM_ACESSO, "codex-cli": RESPONDEU } }) }))).toContain("Nina vai pensar com o ChatGPT deste Mac");
+    expect(htmlChamando(tela({ fase: "chamando", dados: d, teste: teste({ vereditos: { "claude-cli": SEM_ACESSO, "codex-cli": RESPONDEU } }) }))).toContain("Nod vai pensar com o ChatGPT deste Mac");
     expect(htmlChamando(tela({ fase: "chamando", dados: dados({ executor: { pronto: true, ias: [] } }) }))).not.toContain("vai pensar");
   });
 
   it("Atender e 'Configurar sem voz', com a linha da voz sob o Atender e o 'saber mais'", () => {
     const h = htmlChamando(tela({ fase: "chamando" }));
-    expect(h).toContain("<b>Nina</b><span>está te ligando</span>");
+    expect(h).toContain("<b>Nod</b><span>está te ligando</span>");
     expect(h).toContain('data-act="onboarding-atender"');
     expect(h).toContain('data-act="onboarding-sem-voz"');
     expect(h).toContain("Configurar sem voz");
@@ -531,8 +531,8 @@ describe("configuração guiada", () => {
 
   it("fim: 'Tudo montado…' e 'Ver o onboarding de novo'", () => {
     const h = htmlGuia(tela({ fase: "fim", dados: dados({ etapa: "configurando", passo: "fim" }) }));
-    expect(h).toContain(textoTudoMontado("Nina"));
-    expect(h).toContain("Tudo montado. Quando quiser, é só chamar a Nina por aqui.");
+    expect(h).toContain(textoTudoMontado("Nod"));
+    expect(h).toContain("Tudo montado. Quando quiser, é só chamar o Nod por aqui.");
     expect(h).toContain('data-act="onboarding-de-novo"');
   });
 

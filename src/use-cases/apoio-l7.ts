@@ -5,6 +5,7 @@ import type { Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { autorizarDelegacao } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehNod } from "../domain/nod.ts";
 import { redigir } from "../domain/redacao.ts";
 import { assentar, HANDOFFS_POR_RODADA, type DesfechoRodada, type Fala } from "../domain/rodada-sala.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
@@ -147,6 +148,8 @@ export async function resolverAlvo(repos: Repos, remetente: Agente, agente: stri
   const alvo = porId ? await repos.agentes.buscar(identificador) : alvos[0];
   if (!alvo) throw new ErroDeDominio("nao_encontrado", { cause: "bot alvo" });
   if (alvo.id === remetente.id) throw new ErroDeDominio("entrada_invalida", { cause: "pedir a si mesmo" });
+  // ADR-081: ninguém pede ao Nod — ele age só a pedido da pessoa, na conversa dele (a cerca 2 das mãos do Nod).
+  if (ehNod(alvo)) throw new ErroDeDominio("nao_permitido", { cause: "o Nod só atende a pessoa" });
   return alvo;
 }
 

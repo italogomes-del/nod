@@ -21,6 +21,8 @@ import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
 import { FERRAMENTAS_PENDENCIA } from "./pendencia.ts";
+import { MANUAL_DO_NOD } from "./manual-do-nod.ts";
+import { ehNod } from "./nod.ts";
 import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
@@ -259,7 +261,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}) }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,

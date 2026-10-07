@@ -2,6 +2,7 @@ import type { PreferenciaHarness } from "../contracts/harness.ts";
 import { validarInteligencia } from "../domain/harness.ts";
 import { CORES_AGENTE, ESFORCOS_AGENTE, FORMAS_AGENTE, type Agente, type EsforcoAgente, type FormaAgente, type CorAgente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehNod, nomeReservadoAoNod } from "../domain/nod.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -54,6 +55,11 @@ export const editarPerfil: CasoDeUso<EntradaEditarPerfil, { agente: Agente }> = 
 
   const existente = await deps.repos.agentes.buscar(input.agenteId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
+  // ADR-081: o Nod não se renomeia, e nenhum outro bot vira "Nod".
+  if (perfil.nome !== undefined && perfil.nome !== existente.nome) {
+    if (ehNod(existente)) throw new ErroDeDominio("nod_protegido", { cause: "renomear" });
+    if (nomeReservadoAoNod(perfil.nome)) throw new ErroDeDominio("entrada_invalida", { cause: "nome reservado ao Nod" });
+  }
   if (perfil.harness !== undefined || perfil.modelo !== undefined) validarInteligencia(perfil.harness ?? existente.harness ?? "auto", perfil.modelo ?? existente.modelo);
   const modeloMudou = perfil.harness !== undefined && perfil.harness !== existente.harness || perfil.modelo !== undefined && perfil.modelo !== existente.modelo;
   const agente = await deps.repos.agentes.atualizarPerfil(input.agenteId, { ...perfil, ...(perfil.descricao !== undefined || perfil.titulo !== undefined ? { confirmado: true } : {}) });

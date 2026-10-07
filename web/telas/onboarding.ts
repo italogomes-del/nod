@@ -68,11 +68,12 @@ export function linhasMontado(d: EstadoOnboarding): string[] {
 }
 
 export function textoTudoMontado(nomeGuia: string): string {
-  return `Tudo montado. Quando quiser, é só chamar a ${nomeGuia} por aqui.`;
+  return `Tudo montado. Quando quiser, é só chamar o ${nomeGuia} por aqui.`;
 }
 
 export function nomeDaGuia(d: EstadoOnboarding): string {
-  return d.guia?.nome ?? "Nina";
+  // revisto em 2026-10-07 (ADR-081): a guia é o Nod, o bot fixo da pessoa.
+  return d.guia?.nome ?? "Nod";
 }
 
 // ---- ícones -------------------------------------------------------------------------------------------------------------
@@ -469,7 +470,7 @@ function htmlListaDeIas(e: TelaExecutor, t: TesteNaTela, tela: "testando" | "sem
   const reprovada = ORDEM_IAS.some((ia) => { const causa = t.vereditos[ia]?.causa; return causa !== undefined && causa !== "sonda_lenta"; });
   const cabeca = tela === "testando"
     ? cabecaIa("A IA dos seus bots", "Seus bots trabalham com a conta que você já assina, aqui neste Mac. Estou testando cada uma com uma pergunta curta.")
-    : cabecaIa("Falta conectar uma IA", `${reprovada ? "Testei as IAs deste Mac e nenhuma respondeu." : "Não achei uma IA conectada neste Mac."} Conecte uma e a ${guia} te liga em seguida.`);
+    : cabecaIa("Falta conectar uma IA", `${reprovada ? "Testei as IAs deste Mac e nenhuma respondeu." : "Não achei uma IA conectada neste Mac."} Conecte uma e o ${guia} te liga em seguida.`);
   const cards = CARDS_IA.filter(comIa).map((p) => htmlCardIa(p, estadoDoCardIa(p.ia, e.dados.executor.ias, e.iaEntrando, t), t.nome)).join("");
   const breves = CARDS_IA.filter((p) => !comIa(p)).map((p) => `<div class="ob-breve" aria-disabled="true"><span class="ob-breve-logo">${LOGOS_IA[p.id]}</span><b>${esc(p.nome)}</b><span>Em breve</span></div>`).join("");
   const nota = e.notaIa ?? (tela === "testando" ? `${SEM_SENHA} O teste gasta uma resposta curta da sua assinatura.` : `${SEM_SENHA} ${DEPOIS_EM_AJUSTES}`);
@@ -511,7 +512,7 @@ function htmlConectada(e: TelaExecutor, t: TesteNaTela, ia: IaDesktop): string {
   const outros = cards.filter((c) => c.p.ia !== ia).map((c) => htmlCardIa(c.p, c.s, t.nome, { menor: true })).join("");
   const respondeu = principal?.s.resposta ? "respondeu ao teste" : "está conectado";
   const titulo = "Seus bots já têm uma IA";
-  return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabecaIa(titulo, `O ${nome} ${respondeu} neste Mac. A ${guia} vai te ligar para montar o seu primeiro bot.`)}
+  return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabecaIa(titulo, `O ${nome} ${respondeu} neste Mac. O ${guia} vai te ligar para montar o seu primeiro bot.`)}
     <div class="ob-cards-ia largo">${principal ? htmlCardIa(principal.p, principal.s, t.nome) : ""}${outros}</div>
     <div class="ob-seguir"><button type="button" class="ob-pilula grande" data-act="onboarding-ia-continuar"${t.seguindo ? " disabled" : ""}>${t.seguindo ? GIRA : ""}Continuar</button><p class="ob-nota" role="status">${esc(e.notaIa ?? DEPOIS_EM_AJUSTES)}</p></div></section>`;
 }

@@ -117,6 +117,8 @@ function fecharBusca(): void {
   filtrarBots("");
   render();
 }
+/** definido em 2026-10-07 (ADR-081): o logo do nod (os olhos num quadrado) — o Nod discreto, na barra de cima. */
+const LOGO_NOD = '<svg class="logo-nod" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect class="logo-fundo" width="32" height="32" rx="7.5"/><g class="logo-olhos" transform="rotate(14 16 16)"><rect x="8.6" y="8.5" width="5.6" height="15" rx="2.8"/><rect x="17.8" y="8.5" width="5.6" height="15" rx="2.8"/></g></svg>';
 const LUPA = '<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>';
 const LOJA = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 4.5 3h11L17 7.5"/><path d="M3 7.5a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.7 0"/><path d="M4.2 10v7h11.6v-7"/><path d="M8 17v-4h4v4"/></svg>';
 
@@ -508,7 +510,8 @@ function renderSidebar(estado: Estado): string {
   const atual = (conversaId: string) => ((t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === conversaId ? ' aria-current="true"' : "");
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): os bots da pessoa se arrastam — para a grade (fixa), entre
   // seções ou para uma seção nova. Os da equipe não: fixar e seção são da dona.
-  const arrastavel = (a: (typeof agentes)[number]) => (a.ownerId === estado.sessao?.pessoaId ? ` draggable="true" data-arrastavel="${esc(a.id)}"` : "");
+  // ADR-081: o Nod não se arrasta — ele não entra em seção; topo e discreto são pelo menu dele.
+  const arrastavel = (a: (typeof agentes)[number]) => (a.ownerId === estado.sessao?.pessoaId && a.papel !== "nod" ? ` draggable="true" data-arrastavel="${esc(a.id)}"` : "");
   const avisos = new Map(agentes.map((a): [string, AvisoBot] => [a.id, (abertas.get(a.id) ?? 0) > 0 ? "decisao" : perguntas.get(a.id) ? "pergunta" : temNovas(a.conversaId, estado) ? "nao-lido" : ""]));
   const avisoDe = (a: (typeof agentes)[number]): AvisoBot => avisos.get(a.id) ?? "";
   const linha = (a: (typeof agentes)[number], escondida = false) => {
@@ -554,10 +557,18 @@ function renderSidebar(estado: Estado): string {
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
     return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
   };
-  const secoes = [...new Set(meus.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
-  const fixados = meus.filter((a) => a.fixado);
+  // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
+  // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
+  const nod = meus.find((a) => a.papel === "nod") ?? null;
+  const comuns = meus.filter((a) => a.papel !== "nod");
+  const secoes = [...new Set(comuns.filter((a) => !a.fixado && a.secao).map((a) => a.secao!))].sort((a, b) => a.localeCompare(b));
+  const fixados = [...(nod?.fixado ? [nod] : []), ...comuns.filter((a) => a.fixado)];
   const grade = meus.length ? `<section class="fixados" aria-label="Fixados" data-grupo="fixados"${fixados.length ? "" : " data-vazio"}>${fixados.map(bloco).join("")}${fixados.length ? "" : '<p class="fixados-vazio">Solte aqui para fixar</p>'}</section>` : "";
-  const bots = meus.length ? grupo("Meus agentes", "", meus.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, meus.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
+  const bots = meus.length ? grupo("Meus agentes", "", comuns.filter((a) => !a.fixado && !a.secao)) + secoes.map((s) => grupo(s, s, comuns.filter((a) => !a.fixado && a.secao === s))).join("") + '<div class="nova-secao-alvo" data-grupo="nova-secao" aria-hidden="true">+ Nova seção</div>' : "";
+  const avisoNod = nod ? avisoDe(nod) : "";
+  const nodDiscreto = nod && !nod.fixado
+    ? `<button class="nod-topo" data-bot-contexto="${esc(nod.id)}"${atual(nod.conversaId)} data-act="abrir-conversa" data-conversa="${esc(nod.conversaId)}" data-agente="${esc(nod.id)}" aria-label="Abrir o Nod${avisoNod ? ` (${ESPERA[avisoNod]})` : ""}" title="Nod">${LOGO_NOD}<span>Nod</span>${avisoNod ? `<span class="nod-topo-aviso" data-aviso="${avisoNod}" aria-hidden="true"></span>` : ""}</button>`
+    : "";
   const daEquipe = agentes.filter((a) => a.ownerId !== estado.sessao?.pessoaId);
   const equipe = daEquipe.length ? secaoDeBots("Agentes da equipe", chaveDaSecao(pessoaId, null), daEquipe, "") : "";
   // definido em 2026-10-04: a seção Salas saiu da barra — só poluía. As salas voltam como uma feature pensada na
@@ -588,7 +599,7 @@ function renderSidebar(estado: Estado): string {
     ? `<button class="icone-topo nao-lidos-bt" data-act="navegar" data-tela="nao-lidos" aria-current="${t.tipo === "nao-lidos" ? "page" : "false"}" aria-label="${esc(rotuloNaoLidos(estado))}" title="Não lidos">${BANDEJA}${comNovas ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</button>`
     : "";
   return `<div class="search-wrap">
-      <div class="sh"><button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
