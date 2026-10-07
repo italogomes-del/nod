@@ -195,9 +195,16 @@ export function textoFalavel(md: string, opcoes: OpcoesFalavel = {}): TextoFalav
   t = t
     .replace(/!\[([^\]]*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
     .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
-    .replace(/<(?:https?:\/\/|mailto:)[^>\s]+>/giu, LINK)
-    .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, LINK)
-    .replace(/`([^`\n]+)`/gu, (_, c: string) => codigoEmLinha(c));
+    .replace(AUTOLINK, LINK);
+  // Entidades (NOD-189) fora do código em linha, antes da URL solta (a mesma ordem de `textoParaLeitura`: senão a URL
+  // engole o `&gt` de `&lt;https://…&gt;` e o `;` que sobra fecha a frase) e antes de o código em linha virar fala.
+  // Os blocos já viraram marcador.
+  t = comCraseLiteral(
+    entidadesForaDeCodigo(t)
+      .replace(AUTOLINK, LINK)
+      .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, LINK)
+      .replace(/`([^`\n]+)`/gu, (_, c: string) => codigoEmLinha(c)),
+  );
 
   // Parágrafos: linhas em branco separam; título, item de lista e bloco (código ou tabela) são pedaços próprios.
   const pedacos: string[] = [];
@@ -422,14 +429,72 @@ function semHtml(t: string): string {
   // Antes de separar o código em linha: a crase dentro do script não pode partir o script ao meio.
   const faixas = faixasDeCodigo(t);
   const s = t.replace(HTML_NAO_LIDO, (m: string, ...args: unknown[]) => (dentroDeCodigo(args.at(-2) as number, faixas) ? m : ""));
-  const limpar = (x: string) => x.replace(TAG_DE_BLOCO, " ").replace(TAG_DE_LINHA, "");
+  return foraDeCodigo(s, (x) => x.replace(TAG_DE_BLOCO, " ").replace(TAG_DE_LINHA, ""));
+}
+
+/** Aplica `f` só nos trechos de `t` fora do código em linha; o código fica como está. */
+function foraDeCodigo(t: string, f: (trecho: string) => string): string {
   let saida = "";
   let desde = 0;
-  for (const [a, b] of faixasDeCodigo(s)) {
-    saida += limpar(s.slice(desde, a)) + s.slice(a, b);
+  for (const [a, b] of faixasDeCodigo(t)) {
+    saida += f(t.slice(desde, a)) + t.slice(a, b);
     desde = b;
   }
-  return saida + limpar(s.slice(desde));
+  return saida + f(t.slice(desde));
+}
+
+/** definido em 2026-10-07 (NOD-189): lista fixa; nomeada fora dela fica literal. `&nbsp;` vira espaço comum. */
+const ENTIDADES_NOMEADAS: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+/** Autolink `<https://…>`. Passa de novo depois das entidades: `&lt;https://x.com&gt;` também é autolink (QA da NOD-189). */
+const AUTOLINK = /<(?:https?:\/\/|mailto:)[^>\s]+>/giu;
+const ENTIDADE = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/gu;
+
+/**
+ * Numérica só vira caractere se for Unicode válido: 1..0x10FFFF, fora dos surrogates, de controle (menos \t e \n) e do
+ * uso privado do BMP (0xE000–0xF8FF), onde moram os marcadores internos: `&#xE000;` forjaria um BLOCO.
+ */
+function caractereDoCodigo(n: number): string | null {
+  if (n < 1 || n > 0x10ffff) return null;
+  if (n >= 0xd800 && n <= 0xdfff) return null;
+  if (n >= 0xe000 && n <= 0xf8ff) return null;
+  if ((n < 0x20 && n !== 0x09 && n !== 0x0a) || (n >= 0x7f && n <= 0x9f)) return null;
+  return String.fromCodePoint(n);
+}
+
+function decodificar(t: string, crase: string, falado = false): string {
+  return t.replace(ENTIDADE, (m: string, dec: string | undefined, hex: string | undefined, nome: string | undefined) => {
+    if (nome !== undefined) return ENTIDADES_NOMEADAS[nome] ?? m;
+    const c = caractereDoCodigo(dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? "", 16));
+    if (c === null) return m;
+    // QA da NOD-189: na fala, emoji vindo de entidade some como o emoji cru (o começo das duas funções já o tira).
+    if (falado && /^(?:\p{Extended_Pictographic}|\uFE0F)$/u.test(c)) return "";
+    return c === "`" ? crase : c;
+  });
+}
+
+/**
+ * Entidades HTML viram o caractere (NOD-189): `&amp;` → `&`, `&#39;` e `&#x27;` → `'`. Passada única: `&amp;lt;` vira
+ * `&lt;` literal, sem decodificar duas vezes. Desconhecida, malformada ou sem `;` fica como está. Quem chama decide o
+ * que é código; aqui decodifica tudo o que recebe.
+ */
+export function decodificarEntidades(t: string): string {
+  return decodificar(t, "`");
+}
+
+/** Crase vinda de `&#96;`/`&#x60;`: é texto, não marcação. Fica neste marcador até o código em linha virar fala. */
+const CRASE_LITERAL = "";
+
+/**
+ * Decodifica fora do código em linha. A crase decodificada sai como CRASE_LITERAL: se saísse crase, formaria par com
+ * outra da linha e criaria um código em linha falso. Quem chama devolve a crase com `comCraseLiteral` depois de tratar
+ * o código em linha.
+ */
+function entidadesForaDeCodigo(t: string): string {
+  return foraDeCodigo(t, (x) => decodificar(x, CRASE_LITERAL, true));
+}
+
+function comCraseLiteral(t: string): string {
+  return t.replaceAll(CRASE_LITERAL, "`");
 }
 
 /** Corta `texto` em pedaços de até `max` caracteres, na última vírgula que cabe ou, sem ela, na última palavra. */
@@ -481,14 +546,17 @@ export function textoParaLeitura(md: string): string[] {
     .join("\n")
     .replace(/!\[([^\]]*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
     .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
-    .replace(/<(?:https?:\/\/|mailto:)[^>\s]+>/giu, "um link");
-  t = semHtml(semMarcacao)
-    .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, "um link")
-    .replace(CODIGO_EM_LINHA, (_, _crases: string, c: string) => {
-      const falado = codigoEmLinha(c);
-      return falado === CODIGO ? "um trecho de código" : falado;
-    })
-    .replace(/(?<![\p{L}\p{N}_/])~?\.{0,2}\/?(?:[\p{L}\p{N}_.@-]+\/)+(?:[\p{L}\p{N}_.@-]*[\p{L}\p{N}_@-])?/gu, nomeDoArquivo);
+    .replace(AUTOLINK, "um link");
+  // Entidades depois do HTML: antes, `&lt;b&gt;` viraria tag e sumiria.
+  t = comCraseLiteral(
+    entidadesForaDeCodigo(semHtml(semMarcacao))
+      .replace(AUTOLINK, "um link")
+      .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, "um link")
+      .replace(CODIGO_EM_LINHA, (_, _crases: string, c: string) => {
+        const falado = codigoEmLinha(c);
+        return falado === CODIGO ? "um trecho de código" : falado;
+      }),
+  ).replace(/(?<![\p{L}\p{N}_/])~?\.{0,2}\/?(?:[\p{L}\p{N}_.@-]+\/)+(?:[\p{L}\p{N}_.@-]*[\p{L}\p{N}_@-])?/gu, nomeDoArquivo);
 
   const pedacos: string[] = [];
   let paragrafo: string[] = [];

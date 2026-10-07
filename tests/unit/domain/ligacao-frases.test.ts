@@ -468,3 +468,119 @@ describe("textoParaLeitura: acertos da QA da NOD-180 (NOD-181)", () => {
     expect(lido("Abra src/index.ts agora.")).toBe("Abra index.ts agora.");
   });
 });
+
+import { decodificarEntidades } from "../../../src/domain/ligacao-frases.ts";
+
+describe("decodificarEntidades (NOD-189)", () => {
+  it.each([
+    ["&amp;", "&"],
+    ["&lt;", "<"],
+    ["&gt;", ">"],
+    ["&quot;", '"'],
+    ["&apos;", "'"],
+    ["a&nbsp;b", "a b"],
+    ["&#39;", "'"],
+    ["&#x27;", "'"],
+    ["&#X27;", "'"],
+    ["&#9;", "\t"],
+    ["&#10;", "\n"],
+    ["&#x1F600;", "😀"], // a função exportada devolve o emoji; quem fala é que o tira
+    ["&#x10FFFF;", "\u{10FFFF}"],
+    ["&#96;", "`"],
+    ["&#x60;", "`"],
+    ["&#xF900;", "\uF900"],
+  ])("%j vira %j", (entrada, saida) => {
+    expect(decodificarEntidades(entrada)).toBe(saida);
+  });
+
+  it.each(["&foo;", "&AMP;", "&#xZZ;", "&#0;", "&#x0;", "&#xD800;", "&#xDFFF;", "&#x110000;", "&#1;", "&#13;", "&#x7F;", "&#x9F;", "&amp", "& amp;", "&#;", "&#x;", "&#12345678;", "&#xE000;", "&#57345;", "&#xE002;", "&#xF8FF;"])(
+    "%j fica igual",
+    (entrada) => {
+      expect(decodificarEntidades(entrada)).toBe(entrada);
+    },
+  );
+
+  it("passada única: &amp;lt; vira &lt; literal, sem decodificar duas vezes", () => {
+    expect(decodificarEntidades("&amp;lt;")).toBe("&lt;");
+    expect(decodificarEntidades("&amp;amp;")).toBe("&amp;");
+  });
+});
+
+// Código em linha com `;` (como `&amp;`) já vira "trecho de código"/"o código": é o que prova que não foi decodificado.
+const entidadesNasDuas: Array<[string, (md: string) => string, string]> = [
+  ["textoParaLeitura", lido, "Use um trecho de código aqui."],
+  ["textoFalavel", falavel, `Use o código aqui. ${FRASE_CHAT}`],
+];
+
+describe.each(entidadesNasDuas)("%s: entidades HTML viram o caractere (NOD-189)", (_nome, fala, codigoNaoDecodificado) => {
+  it.each([
+    ["Tom &amp; Jerry", "Tom e Jerry."],
+    ["Tom&nbsp;&amp;&nbsp;Jerry", "Tom e Jerry."],
+    ["Se a &lt; b, pronto", "Se a < b, pronto."],
+    ["Se c &gt; d, pronto", "Se c > d, pronto."],
+    ["Ele disse &quot;oi&quot;", 'Ele disse "oi".'],
+    ["Copo d&apos;água", "Copo d'água."],
+    ["Copo d&#39;água", "Copo d'água."],
+    ["Copo d&#x27;água", "Copo d'água."],
+    ["Bom&nbsp;dia", "Bom dia."],
+    ["Use &lt;b&gt;negrito&lt;/b&gt; aqui", "Use <b>negrito</b> aqui."],
+  ])("%j sai %j", (md, esperado) => {
+    expect(fala(md)).toBe(esperado);
+  });
+
+  // O `;` que sobra segue a regra de sempre (fecha frase na leitura); o que importa é a entidade continuar literal.
+  it.each(["&foo;", "&#xZZ;", "&#0;", "&#xD800;", "&#x110000;", "&amp;lt;", "&#xE000;", "&#xE001;", "&#xE002;"])("%j fica literal (sem decodificar duas vezes)", (ent) => {
+    const esperado = ent === "&amp;lt;" ? "&lt;" : ent;
+    expect(fala(`Veja ${ent} aqui`)).toContain(`Veja ${esperado}`);
+  });
+
+  it('"&amp" sem ";" fica igual', () => {
+    expect(fala("Veja &amp aqui")).toBe("Veja &amp aqui.");
+  });
+
+  // Revisão da NOD-189: a crase decodificada é texto. Se virasse crase antes do código em linha, faria par com outra.
+  it.each([
+    ["Use &#96;x&#96; aqui", "Use `x` aqui."],
+    ["Use &#96; e depois `a b` fim", "Use ` e depois a b fim."],
+    ["Rode `ls` e &#x60;rm -rf /&#x60; agora", "Rode ls e `rm -rf /` agora."],
+    ["Use &lt;b&gt; e &#96;", "Use <b> e `."],
+  ])("crase de entidade não forma código em linha: %j sai %j", (md, esperado) => {
+    expect(fala(md)).toBe(esperado);
+  });
+
+  // A URL solta é trocada depois de decodificar: antes, ela engolia o `&gt` e o `;` que sobrava fechava a frase.
+  it("URL entre &lt; e &gt; vira o link inteira, sem sobrar ponto e vírgula", () => {
+    expect(fala("Veja &lt;https://x.com/a?b=1&amp;c=2&gt; aí")).not.toMatch(/;|&|x\.com/u);
+  });
+
+  // Uso privado do BMP é dos marcadores internos: `&#xE000;` decodificado diria "Te mandei no chat." sem ter mandado.
+  it("numérica no uso privado não forja marcador interno", () => {
+    expect(fala("Veja &#xE000; e &#xE001; e &#xE002; aqui")).not.toMatch(/chat|o link|o código|trecho/u);
+  });
+
+  // QA da NOD-189: `&lt;https://…&gt;` é o autolink de sempre, sem "<" e ">" em volta do link na fala.
+  it.each(["Veja &lt;https://x.com&gt; aí", "Veja &lt;https://x.com/a?b=1&amp;c=2&gt; aí", "Veja <https://x.com> aí"])(
+    "autolink vindo de entidade fala como o autolink cru: %j",
+    (md) => {
+      expect(fala(md)).toBe(fala("Veja <https://x.com> aí"));
+      expect(fala(md)).not.toMatch(/[<>]/u);
+    },
+  );
+
+  // QA da NOD-189: o emoji cru já some da fala; o que vem de entidade também.
+  it.each(["Oi &#x1F600; tudo bem", "Oi &#128512;&#xFE0F; tudo bem", "Oi &#x2705; tudo bem", "Oi 😀 tudo bem"])(
+    "emoji vindo de entidade não é falado: %j",
+    (md) => {
+      expect(fala(md)).toBe("Oi tudo bem.");
+    },
+  );
+
+  it("entidade dentro de crases não é decodificada", () => {
+    expect(fala("Use `&amp;` aqui")).toBe(codigoNaoDecodificado);
+  });
+
+  it("entidade dentro de bloco cercado não é lida", () => {
+    const t = fala("Veja:\n\n```html\n<p>Tom &amp; Jerry</p>\n```\n\nFim.");
+    expect(t).not.toMatch(/Tom|Jerry|&/u);
+  });
+});
