@@ -30,6 +30,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run fence:domain
+      - run: npm run fence:migrations
       - run: npm run site:build
 
   unit:

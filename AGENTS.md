@@ -14,7 +14,7 @@ ou remover esse volume sem um pedido explícito de perda total dos dados.
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
 npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0010) e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
-npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
+npm run check               # lint → typecheck → fence:domain → fence:migrations → unit → integration → conformidade → concurrency
 npm run e2e:fumaca          # doze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
 npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou NOD_MODELO); imprime o custo somado — rode UMA vez, custa assinatura
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
@@ -67,6 +67,15 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
   desligados: a decisora reescreveu frase/prazo e pôs `visibility = 'equipe'` na decisão da dona); por isso a policy vem
   SEMPRE com um trigger BEFORE UPDATE que fecha a lista de colunas que quem não é a dona pode mudar
   (`colunasLivresDaDecisora` em `src/db/schema/decisoes.ts`), e o motivo em `POLICIES_EXTRAS` nomeia o trigger.
+- **Migração nova só adiciona** (NOD-186). `npm run fence:migrations` (`scripts/migracao-aditiva.ts`, no `check`
+  e no CI) lê o trecho antes de `-- ROLLBACK:`, sem comentários nem literais (`'…'`, `E'…'`, `"…"`; o corpo
+  de `$$…$$` é verificado como código), e barra `DROP TABLE`,
+  `DROP [COLUMN]`, `RENAME` (tabela, coluna, valor de enum…), `ALTER [COLUMN] … TYPE` e `SET NOT NULL`,
+  com `arquivo:linha`. Motivo: o rollback de código (NOD-173) volta a imagem e deixa o banco novo; o código
+  antigo quebra se a coluna sumiu ou mudou. Vale só para prefixo > `BASE_ADITIVA` (0058); as antigas não
+  são reescritas. Exceção caso a caso: `-- destrutiva-ok: <motivo>` na linha anterior ao comando (ou à
+  cláusula dele); a marca vale do código logo abaixo até o `;` seguinte, nunca para a instrução
+  seguinte nem para o resto do arquivo; motivo vazio falha.
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e

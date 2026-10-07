@@ -1,0 +1,225 @@
+import { realpathSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { trechoAplicavel } from "../src/db/migrar.ts";
+
+/**
+ * NOD-186: migração nova só ADICIONA. O rollback de código (NOD-173) volta a imagem e deixa o banco
+ * com as migrações novas; uma coluna apagada, renomeada ou com outro tipo quebra o código antigo.
+ * Este gate lê o trecho aplicável (antes de `-- ROLLBACK:`, pela mesma função do runner), sem
+ * comentários nem literais de texto, e barra DROP TABLE, DROP [COLUMN], RENAME, ALTER [COLUMN] … TYPE
+ * e SET NOT NULL. Exceção caso a caso: `-- destrutiva-ok: <motivo>` na linha anterior ao comando
+ * (ou à cláusula dele), valendo até o `;` seguinte; motivo vazio não vale. Regra no AGENTS.md.
+ *
+ * definido em 2026-10-06: corte por número, não por diff (não depende de fetch-depth nem da base do PR).
+ * As 58 que existiam ficam de fora; duas delas seriam barradas (0003:114 e 0046:11).
+ */
+export const BASE_ADITIVA = 58;
+
+export type Problema = { arquivo: string; linha: number; comando: string; motivo: "destrutiva" | "excecao_sem_motivo" };
+
+// [^\n]: com CRLF o `\r` fica no motivo (e sai no trim); com `.` e `$` a marca nunca casava.
+const EXCECAO = /^\s*--\s*destrutiva-ok:([^\n]*)$/i;
+// O conteúdo de "…" já vem em branco.
+const ID = String.raw`(?:"[^"]+"|[a-z_][a-z0-9_$]*)`;
+const PADROES: { comando: string; re: RegExp }[] = [
+  { comando: "DROP TABLE", re: /\bDROP\s+TABLE\b/gi },
+  { comando: "RENAME", re: /\bRENAME\b/gi },
+  { comando: "SET NOT NULL", re: /\bSET\s+NOT\s+NULL\b/gi },
+];
+// As cláusulas de coluna só existem dentro de ALTER [FOREIGN] TABLE, e são procuradas DEPOIS do cabeçalho
+// `ALTER TABLE [IF EXISTS] [ONLY] nome [*]`. Assim `ALTER TABLE type ADD …` (tabela chamada type) não é
+// ALTER … TYPE, e uma coluna chamada type/index (`ALTER type TYPE bigint`) não escapa.
+const ALTER_TABLE = /\bALTER\s+(?:FOREIGN\s+)?TABLE\b[^;]*/gi;
+const CABECALHO = new RegExp(
+  String.raw`^ALTER\s+(?:FOREIGN\s+)?TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?${ID}(?:\s*\.\s*${ID})?(?:\s*\*)?`,
+  "i",
+);
+const ALTER_TIPO = new RegExp(String.raw`\bALTER\s+(?:COLUMN\s+)?${ID}\s+(?:SET\s+DATA\s+)?TYPE\b`, "gi");
+// Dentro de ALTER TABLE, `DROP x` sem a palavra COLUMN também apaga a coluna. Só não barram os DROP
+// que tiram restrição/default/identidade.
+const DROP_COLUNA = /\bDROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\s+NULL\b|IDENTITY\b|EXPRESSION\b)/gi;
+
+const IDENT_CHAR = /[A-Za-z0-9_$]/;
+const DOLAR = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/y;
+
+/**
+ * Troca comentários (`--`, `/* *\/` aninhado, como no Postgres), o conteúdo de '…', E'…' (com `\'`)
+ * e "…" por espaços, preservando posições e quebras de linha. O corpo de `$tag$…$tag$` continua
+ * sendo verificado (DO/função é código), mas limpo à parte: uma aspa solta lá dentro (`$$it's$$`)
+ * não engole o SQL depois do fechamento.
+ */
+export function semComentarios(sql: string): string {
+  return limpar(sql).texto;
+}
+
+/**
+ * `linhaComentario`: onde começa cada `--` que é comentário de verdade (fora de literal e de `/* *\/`),
+ * para uma marca de exceção comentada não valer. `manterLiterais`: o corpo de um `$…$` que chama
+ * EXECUTE monta SQL dinâmico em texto (`EXECUTE 'DROP TABLE x'`, `format('… DROP COLUMN %I', …)`);
+ * nele o conteúdo dos literais é verificado como código.
+ */
+function limpar(sql: string, manterLiterais = false): { texto: string; linhaComentario: Set<number> } {
+  const out = sql.split("");
+  const linhaComentario = new Set<number>();
+  let i = 0;
+  const apagar = (de: number, ate: number) => {
+    for (let k = de; k < ate; k++) if (out[k] !== "\n") out[k] = " ";
+  };
+  /** Fecha um literal delimitado por `q`, com `qq` como escape (e `\x` se `barra`). */
+  const fimDoLiteral = (de: number, q: string, barra: boolean): number => {
+    let j = de;
+    while (j < sql.length) {
+      if (barra && sql[j] === "\\") j += 2;
+      else if (sql[j] === q && sql[j + 1] === q) j += 2;
+      else if (sql[j] === q) return j;
+      else j++;
+    }
+    return sql.length;
+  };
+  while (i < sql.length) {
+    const antes = i > 0 ? (sql[i - 1] ?? "") : "";
+    if (sql.startsWith("--", i)) {
+      linhaComentario.add(i);
+      const fim = sql.indexOf("\n", i);
+      const ate = fim === -1 ? sql.length : fim;
+      apagar(i, ate);
+      i = ate;
+    } else if (sql.startsWith("/*", i)) {
+      let j = i + 2;
+      let nivel = 1;
+      while (j < sql.length && nivel > 0) {
+        if (sql.startsWith("/*", j)) {
+          nivel++;
+          j += 2;
+        } else if (sql.startsWith("*/", j)) {
+          nivel--;
+          j += 2;
+        } else j++;
+      }
+      apagar(i, j);
+      i = j;
+    } else if (sql[i] === "'" || sql[i] === '"') {
+      const q = sql[i] as string;
+      const barra = q === "'" && /[eE]/.test(antes) && !IDENT_CHAR.test(i > 1 ? (sql[i - 2] ?? "") : "");
+      const j = fimDoLiteral(i + 1, q, barra);
+      if (!(manterLiterais && q === "'")) apagar(i + 1, j);
+      i = j + 1;
+    } else if (sql[i] === "$" && !IDENT_CHAR.test(antes)) {
+      DOLAR.lastIndex = i;
+      const m = DOLAR.exec(sql);
+      const fim = m ? sql.indexOf(m[0], i + m[0].length) : -1;
+      if (!m) {
+        i++;
+        continue;
+      }
+      const ini = i + m[0].length;
+      const ate = fim === -1 ? sql.length : fim;
+      const bruto = sql.slice(ini, ate);
+      let corpo = limpar(bruto);
+      if (/\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE)\b)/i.test(corpo.texto)) corpo = limpar(bruto, true);
+      for (let k = 0; k < corpo.texto.length; k++) out[ini + k] = corpo.texto[k] as string;
+      for (const c of corpo.linhaComentario) linhaComentario.add(ini + c);
+      i = fim === -1 ? sql.length : fim + m[0].length;
+    } else {
+      i++;
+    }
+  }
+  return { texto: out.join(""), linhaComentario };
+}
+
+function linhaDe(texto: string, pos: number): number {
+  let n = 1;
+  for (let k = 0; k < pos; k++) if (texto[k] === "\n") n++;
+  return n;
+}
+
+/**
+ * Cada marca cobre um trecho: do primeiro caractere de código depois da linha dela até o `;` seguinte.
+ * Assim vale para o comando (ou a cláusula) logo abaixo, inclusive em várias linhas, e não para a
+ * instrução seguinte na mesma linha nem para o resto do arquivo.
+ */
+function marcas(linhas: string[], limpo: string, linhaComentario: Set<number>): { de: number; ate: number; motivo: string }[] {
+  const r: { de: number; ate: number; motivo: string }[] = [];
+  let offset = 0;
+  for (const linha of linhas) {
+    const fimDaLinha = offset + linha.length;
+    const m = EXCECAO.exec(linha);
+    // A marca tem de ser um comentário `--` de verdade: dentro de /* */ ou de literal ela não vale.
+    if (m && fimDaLinha <= limpo.length && linhaComentario.has(offset + linha.indexOf("--"))) {
+      let de = fimDaLinha;
+      while (de < limpo.length && /\s/.test(limpo[de] ?? "")) de++;
+      const pv = limpo.indexOf(";", de);
+      r.push({ de, ate: pv === -1 ? limpo.length : pv, motivo: (m[1] ?? "").trim() });
+    }
+    offset = fimDaLinha + 1;
+  }
+  return r;
+}
+
+export function verificarMigracao(arquivo: string, conteudo: string): Problema[] {
+  const { texto: limpo, linhaComentario } = limpar(trechoAplicavel(conteudo));
+  const excecoes = marcas(conteudo.split("\n"), limpo, linhaComentario);
+  const achados: { pos: number; comando: string }[] = [];
+  for (const { comando, re } of PADROES) for (const m of limpo.matchAll(re)) achados.push({ pos: m.index, comando });
+  for (const alter of limpo.matchAll(ALTER_TABLE)) {
+    const cab = CABECALHO.exec(alter[0])?.[0].length ?? 0;
+    const corpo = alter[0].slice(cab);
+    const clausulas: [RegExp, string][] = [
+      [DROP_COLUNA, "DROP COLUMN"],
+      [ALTER_TIPO, "ALTER COLUMN … TYPE"],
+    ];
+    for (const [re, comando] of clausulas) {
+      for (const d of corpo.matchAll(re)) {
+        const pos = alter.index + cab + d.index;
+        if (!achados.some((a) => a.pos === pos)) achados.push({ pos, comando });
+      }
+    }
+  }
+  const problemas: Problema[] = [];
+  for (const { pos, comando } of achados.sort((a, b) => a.pos - b.pos)) {
+    const linha = linhaDe(limpo, pos);
+    const marca = excecoes.find((e) => e.de <= pos && pos <= e.ate);
+    if (!marca) problemas.push({ arquivo, linha, comando, motivo: "destrutiva" });
+    else if (!marca.motivo) problemas.push({ arquivo, linha, comando, motivo: "excecao_sem_motivo" });
+  }
+  return problemas;
+}
+
+/** Arquivos com prefixo numérico ≤ BASE_ADITIVA são ignorados; sem prefixo numérico, verificados. */
+export function ehNova(nome: string, base = BASE_ADITIVA): boolean {
+  const n = Number.parseInt(nome, 10);
+  return Number.isNaN(n) || n > base;
+}
+
+export async function verificarPasta(dir: string, base = BASE_ADITIVA): Promise<{ verificadas: string[]; problemas: Problema[] }> {
+  const novas = (await readdir(dir)).filter((f) => f.endsWith(".sql") && ehNova(f, base)).sort();
+  const problemas: Problema[] = [];
+  for (const nome of novas) problemas.push(...verificarMigracao(nome, await readFile(join(dir, nome), "utf8")));
+  return { verificadas: novas, problemas };
+}
+
+export function formatar(p: Problema): string {
+  const onde = `src/db/migrations/${p.arquivo}:${p.linha}`;
+  return p.motivo === "destrutiva"
+    ? `${onde}  ${p.comando} — migração nova só adiciona; se for inevitável, ponha "-- destrutiva-ok: <motivo>" na linha anterior`
+    : `${onde}  ${p.comando} — "-- destrutiva-ok:" sem motivo; escreva o porquê`;
+}
+
+async function principal(): Promise<void> {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "db", "migrations");
+  const { verificadas, problemas } = await verificarPasta(dir);
+  if (problemas.length) {
+    for (const p of problemas) process.stderr.write(`${formatar(p)}\n`);
+    process.stderr.write(`FALHA: ${problemas.length} comando(s) destrutivo(s) em migração nova (NOD-186, AGENTS.md).\n`);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`migrações aditivas ok: ${verificadas.length} nova(s) depois da ${String(BASE_ADITIVA).padStart(4, "0")}\n`);
+}
+
+// realpath: o loader ESM resolve symlink em import.meta.url e o argv[1] não. Sem isso, rodar o gate
+// por um caminho com symlink não chamava principal() e saía 0 sem verificar nada (falha aberta).
+// Os dois lados por realpath: com --preserve-symlinks-main o import.meta.url também fica com o symlink.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) await principal();
