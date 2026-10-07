@@ -29,3 +29,11 @@ O "aviso escrito" do gatilho acima virou código: abaixo do `PISO_CLI` o harness
 (ADR-019, emenda de 2026-10-06) e o bot fixado nele recebe a negação "desatualizado" com o comando de atualizar, em vez
 de turnos falhando com erro de argumento. O bot no automático segue na outra IA pronta. O gatilho de reversão continua
 contando colegas com turnos falhando por versão: agora eles aparecem como `cli_antigo` no inventário.
+
+## Emenda de 2026-10-06 — cwd estável no turno de texto do claude-cli (NOD-188)
+
+A EMENDA 11 vale para o `mcp.json` e a config do hook, que continuam num `mkdtemp` por turno apagado no `finally`. O
+cwd do processo, quando o turno não tem pasta do bot nem projeto, passou a ser `<cwdBase>/texto-<agenteId>`, estável
+por bot, como o da ligação (`ligacao-<agenteId>`). O CLI grava o cwd em cada turno do transcrito e o reenvia no
+`--resume`: um cwd novo por turno reescrevia o histórico e derrubava o cache da conversa longa. Medição e decisão na
+emenda da NOD-188 da ADR-080.

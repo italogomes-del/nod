@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AVISO_SEM_TERMINAL, criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
+import { ABRE_CONTEXTO_DO_TURNO, AVISO_SEM_TERMINAL, FECHA_CONTEXTO_DO_TURNO, criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
@@ -197,13 +197,14 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(valor(r.argv, "--session-id")).toBe(resultado.sessaoCli);
     expect(r.argv).not.toContain("--resume");
 
-    // cwd = mkdtemp em NOD_HOME/turnos (nunca o repo) com o mcp.json 0600 dentro
-    // (realpath: no macOS o tmpdir /var/... é enxergado pelo filho como /private/var/...)
-    expect(r.cwd.startsWith(join(await realpath(join(dir, ".nod", "turnos")), "turno-"))).toBe(true);
-    expect(r.mcp?.caminho).toBe(join(dir, ".nod", "turnos", basename(r.cwd), "mcp.json"));
+    // NOD-188: sem pasta, o cwd é estável por bot em NOD_HOME/turnos (nunca o repo); o mcp.json 0600 fica num mkdtemp
+    // do turno, apagado no fim (realpath: no macOS o tmpdir /var/... é enxergado pelo filho como /private/var/...)
+    expect(r.cwd).toBe(join(await realpath(join(dir, ".nod", "turnos")), "texto-a"));
+    expect(basename(dirname(r.mcp!.caminho))).toMatch(/^turno-/);
+    expect(dirname(dirname(r.mcp!.caminho))).toBe(join(dir, ".nod", "turnos"));
     expect(r.mcp?.modo).toBe("600");
     expect(r.mcp?.conteudo).toEqual({ mcpServers: { nod: { command: process.execPath, args: [lig.proxyPath], env: { NOD_URL: lig.urlNod, NOD_TOKEN_TURNO: "token-de-turno-teste" } } } });
-    await expect(stat(r.cwd)).rejects.toThrow(/ENOENT/);
+    await expect(stat(dirname(r.mcp!.caminho))).rejects.toThrow(/ENOENT/);
 
     // ambiente do filho: denylist aplicada, PATH aumentado, HOME e MCP_TOOL_TIMEOUT presentes
     expect(r.env.ANTHROPIC_API_KEY).toBeUndefined();
@@ -260,7 +261,7 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(resultado.sinais.producedOutput).toBe(true);
     expect(resultado.texto.length).toBeGreaterThan(0);
     const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
-    await expect(stat(r.cwd)).rejects.toThrow(/ENOENT/);
+    await expect(stat(dirname(r.mcp!.caminho))).rejects.toThrow(/ENOENT/);
   });
 
   it("s2c: exit 1 sem init (Session ID already in use) → 'sessao_rejeitada' com rejected=true; tmpdir apagado mesmo na falha", async () => {
@@ -271,7 +272,7 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(resultado.sinais.rejected).toBe(true);
     expect(resultado.sinais.producedOutput).toBe(false);
     const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
-    await expect(stat(r.cwd)).rejects.toThrow(/ENOENT/);
+    await expect(stat(dirname(r.mcp!.caminho))).rejects.toThrow(/ENOENT/);
   });
 
   it("s4b: negação de permissão NÃO é erro: sucesso com negacoesPermissao = ['mcp__nod__somar']", async () => {
@@ -372,27 +373,33 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
   describe("NOD-183 (ADR-080): prompt de texto em --system-prompt com o marcador", () => {
     const MARCADOR = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
     const comPartes = () => ({ ...planoDeTeste(dir), promptSistema: "Você é a sonda do nod.\nQuem pediu: Ana.", promptSistemaPartes: { estavel: "Você é a sonda do nod.", volatil: "Quem pediu: Ana." } });
-    it("com --system-prompt no help da versão sondada: estável, marcador e volátil, sem --append-system-prompt", async () => {
-      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" });
-      expect((await instance.adapter(comPartes()).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+    it("com --system-prompt no help da versão sondada: estável e marcador no sistema, volátil no stdin do turno (NOD-188)", async () => {
+      const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" });
+      const plano = comPartes();
+      expect((await instance.adapter(plano).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
       const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
-      expect(valor(r.argv, "--system-prompt")).toBe(`Você é a sonda do nod.\n${MARCADOR}\nQuem pediu: Ana.`);
+      expect(valor(r.argv, "--system-prompt")).toBe(`Você é a sonda do nod.\n${MARCADOR}\n`);
       expect(r.argv).not.toContain("--append-system-prompt");
+      expect(r.argv.join("\n")).not.toContain("Quem pediu: Ana.");
+      expect(await readFile(stdin, "utf8")).toBe(`${ABRE_CONTEXTO_DO_TURNO}\nQuem pediu: Ana.\n${FECHA_CONTEXTO_DO_TURNO}\n\n${plano.entrada.texto}`);
     });
     it("sem a flag no help: o append de antes, com o prompt inteiro e sem marcador", async () => {
-      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format" });
-      expect((await instance.adapter(comPartes()).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+      const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format" });
+      const plano = comPartes();
+      expect((await instance.adapter(plano).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
       const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
       expect(valor(r.argv, "--append-system-prompt")).toBe("Você é a sonda do nod.\nQuem pediu: Ana.");
       expect(r.argv).not.toContain("--system-prompt");
       expect(r.argv.join("\n")).not.toContain(MARCADOR);
+      expect(await readFile(stdin, "utf8")).toBe(plano.entrada.texto);
     });
-    it("plano pede o terminal e a máquina não tem o hook: o aviso vai depois do marcador, com o prefixo estável intacto", async () => {
-      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" });
+    it("plano pede o terminal e a máquina não tem o hook: o aviso vai com a volátil no turno, com o sistema intacto", async () => {
+      const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" });
       const plano = { ...comPartes(), nativas: ["Read", "Bash"] };
       expect((await instance.adapter(plano).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
       const prompt = valor((JSON.parse(await readFile(registro, "utf8")) as Registro).argv, "--system-prompt")!;
-      expect(prompt).toBe(`Você é a sonda do nod.\n${MARCADOR}\nQuem pediu: Ana.\n${AVISO_SEM_TERMINAL}`);
+      expect(prompt).toBe(`Você é a sonda do nod.\n${MARCADOR}\n`);
+      expect(await readFile(stdin, "utf8")).toContain(`Quem pediu: Ana.\n${AVISO_SEM_TERMINAL}\n${FECHA_CONTEXTO_DO_TURNO}`);
     });
 
     // NOD-185: o CLI falso imita o snapshot (on: o --resume reusa o prompt gravado no 1º turno; off: vale o do launch).
@@ -404,27 +411,91 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       const doisTurnos = async (help: string) => {
         const { instance, registro, sessoes } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: help });
         const primeiro = await instance.adapter(comVolatil("A palavra do dia é laranja.")).rodarTurno(sinksEspiao().sinks);
+        const r1 = JSON.parse(await readFile(registro, "utf8")) as Registro;
         const segundo = await instance.adapter(comVolatil("A palavra do dia é azul.", primeiro.sessaoCli)).rodarTurno(sinksEspiao().sinks);
         expect(segundo.desfecho).toBe("sucesso");
         const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
         expect(valor(r.argv, "--resume")).toBe(primeiro.sessaoCli);
         // O falso só grava o snapshot (<sessão>.prompt) num launch sem `off`: diz se o 1º turno também foi com `off`.
         const gravouSnapshot = existsSync(join(sessoes, `${primeiro.sessaoCli}.prompt`));
-        return { argv: r.argv, gravouSnapshot, visto: await readFile(join(sessoes, `${primeiro.sessaoCli}.efetivo`), "utf8") };
+        return { r1, r, gravouSnapshot, visto: await readFile(join(sessoes, `${primeiro.sessaoCli}.efetivo`), "utf8") };
       };
 
-      it("com a flag no help: o modelo vê a parte volátil nova, com off no 1º turno (nada gravado) e no --resume", async () => {
-        const { argv, gravouSnapshot, visto } = await doisTurnos("--output-format --system-prompt --system-prompt-snapshot");
-        expect(visto).toBe(`Você é a sonda do nod.\n${MARCADOR}\nA palavra do dia é azul.`);
+      it("com a flag no help: off no 1º turno (nada gravado) e no --resume, com o mesmo sistema nos dois turnos", async () => {
+        const { r1, r, gravouSnapshot, visto } = await doisTurnos("--output-format --system-prompt --system-prompt-snapshot");
+        expect(visto).toBe(`Você é a sonda do nod.\n${MARCADOR}\n`);
         expect(gravouSnapshot).toBe(false);
-        expect(valor(argv, "--system-prompt-snapshot")).toBe("off");
+        expect(valor(r.argv, "--system-prompt-snapshot")).toBe("off");
+        expect(valor(r.argv, "--system-prompt")).toBe(valor(r1.argv, "--system-prompt"));
       });
 
-      it("sem a flag no help: os args de antes, e o --resume segue com o prompt gravado no 1º turno", async () => {
-        const { argv, gravouSnapshot, visto } = await doisTurnos("--output-format --system-prompt");
-        expect(visto).toContain("laranja");
+      it("sem a flag no help: os args de antes, e o --resume segue com o sistema gravado no 1º turno", async () => {
+        const { r, gravouSnapshot, visto } = await doisTurnos("--output-format --system-prompt");
+        expect(visto).toBe(`Você é a sonda do nod.\n${MARCADOR}\n`);
         expect(gravouSnapshot).toBe(true);
-        expect(argv).not.toContain("--system-prompt-snapshot");
+        expect(r.argv).not.toContain("--system-prompt-snapshot");
+      });
+    });
+
+    // NOD-188: no --resume com histórico longo, o que mudava entre turnos (volátil no sistema e cwd) quebrava o cache do histórico.
+    describe("NOD-188: volátil na mensagem do turno e cwd estável no --resume", () => {
+      const comVolatil = (volatil: string, sessaoCli?: string | null) => {
+        const base = planoDeTeste(dir, sessaoCli ? { sessaoCli } : {});
+        return { ...base, promptSistema: `Você é a sonda do nod.\n${volatil}`, promptSistemaPartes: { estavel: "Você é a sonda do nod.", volatil } };
+      };
+      for (const help of ["--output-format --system-prompt --system-prompt-snapshot", "--output-format --system-prompt"]) {
+        it(`o turno retomado recebe a volátil nova no stdin, com o mesmo sistema e o mesmo cwd (help: ${help})`, async () => {
+          const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: help });
+          const primeiro = await instance.adapter(comVolatil("A palavra do dia é laranja.")).rodarTurno(sinksEspiao().sinks);
+          const r1 = JSON.parse(await readFile(registro, "utf8")) as Registro;
+          const stdin1 = await readFile(stdin, "utf8");
+          const plano2 = comVolatil("A palavra do dia é azul.", primeiro.sessaoCli);
+          expect((await instance.adapter(plano2).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+          const r2 = JSON.parse(await readFile(registro, "utf8")) as Registro;
+          expect(valor(r2.argv, "--resume")).toBe(primeiro.sessaoCli);
+          expect(stdin1).toContain("laranja");
+          const stdin2 = (await readFile(stdin, "utf8")).slice(stdin1.length);
+          expect(stdin2).toBe(`${ABRE_CONTEXTO_DO_TURNO}\nA palavra do dia é azul.\n${FECHA_CONTEXTO_DO_TURNO}\n\n${plano2.entrada.texto}`);
+          expect(valor(r2.argv, "--system-prompt")).toBe(valor(r1.argv, "--system-prompt"));
+          expect(r2.argv.join("\n")).not.toMatch(/laranja|azul/);
+          expect(r2.cwd).toBe(r1.cwd);
+          expect(basename(r2.cwd)).toBe(`texto-${plano2.agenteId}`);
+          // O tmpdir do turno (mcp.json, config do hook) continua sendo por turno.
+          expect(dirname(r2.mcp!.caminho)).not.toBe(dirname(r1.mcp!.caminho));
+        });
+      }
+
+      it("mensagem com '/' (skill): o texto vai intacto no stdin e a volátil fica no --system-prompt desse turno", async () => {
+        const { instance, registro, stdin } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt --system-prompt-snapshot" });
+        const base = comVolatil("A palavra do dia é azul.");
+        const plano = { ...base, entrada: { ...base.entrada, texto: "/review 420" } };
+        expect((await instance.adapter(plano).rodarTurno(sinksEspiao().sinks)).desfecho).toBe("sucesso");
+        const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+        expect(await readFile(stdin, "utf8")).toBe("/review 420");
+        expect(valor(r.argv, "--system-prompt")).toBe(`Você é a sonda do nod.\n${MARCADOR}\nA palavra do dia é azul.`);
+      });
+
+      it("dois bots ao mesmo tempo: cada um no seu cwd estável; o tmpdir de config é de cada turno e some no fim", async () => {
+        const [x, y] = await Promise.all([instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" }), instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --system-prompt" })]);
+        const [rx, ry] = await Promise.all([
+          x.instance.adapter({ ...comVolatil("Quem pediu: Ana."), agenteId: "bot-x" }).rodarTurno(sinksEspiao().sinks),
+          y.instance.adapter({ ...comVolatil("Quem pediu: Bia."), agenteId: "bot-y" }).rodarTurno(sinksEspiao().sinks),
+        ]);
+        expect([rx.desfecho, ry.desfecho]).toEqual(["sucesso", "sucesso"]);
+        const [regX, regY] = [JSON.parse(await readFile(x.registro, "utf8")) as Registro, JSON.parse(await readFile(y.registro, "utf8")) as Registro];
+        expect([basename(regX.cwd), basename(regY.cwd)]).toEqual(["texto-bot-x", "texto-bot-y"]);
+        expect(dirname(regX.cwd)).toBe(dirname(regY.cwd));
+        for (const r of [regX, regY]) await expect(stat(dirname(r.mcp!.caminho))).rejects.toThrow(/ENOENT/);
+        expect((await stat(regX.cwd)).isDirectory()).toBe(true);
+      });
+
+      it("QA: o cwd estável não pode ser criado (um arquivo no lugar) → o turno falha e o tmpdir de config não fica para trás", async () => {
+        const cwdBase = await mkdtemp(join(dir, "base-qa-"));
+        await writeFile(join(cwdBase, "texto-bot-bloqueado"), "não é pasta");
+        const bin = await shim(dir, `claude-qa-${Math.random().toString(36).slice(2, 6)}`, { NOD_FALSO_CENARIO: "s3-mcp-ok", NOD_FALSO_SESSOES: join(dir, "sessoes-qa"), NOD_FALSO_HELP: "--output-format --system-prompt" });
+        const instance = await criarClaudeCliDriver(lig).create({ ...cfgBase, bin, cwdBase });
+        await expect(instance.adapter({ ...comVolatil("Quem pediu: Ana."), agenteId: "bot-bloqueado" }).rodarTurno(sinksEspiao().sinks)).rejects.toThrow(/EEXIST|ENOTDIR/);
+        expect((await readdir(cwdBase)).filter((n) => n.startsWith("turno-"))).toEqual([]);
       });
     });
   });

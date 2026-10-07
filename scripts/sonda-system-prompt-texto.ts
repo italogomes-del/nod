@@ -14,8 +14,9 @@
  * on × off` no `--resume` — se o 2º e o 3º turno da mesma sessão veem o prompt novo e quanto cacheiam; `on → off` é a
  * sessão gravada antes do app atualizado. A `snapshot` troca também o nome do bot (parte estável); a `snapshotVolatil`
  * muda só a volátil, como no uso real (é a dos números da ADR-080); a `snapshotHistorico` mede um 1º turno longo.
- * `--formas` filtra só a fase `cache`.
- * Uso: node scripts/sonda-system-prompt-texto.ts [--modelo sonnet] [--fases cache,comportamento,resume,snapshot,snapshotVolatil,snapshotHistorico] [--formas system,systemOff] [--bruto dir]
+ * `--formas` filtra as fases `cache` e `comportamento` (esta, por padrão, roda append e system).
+ * `--bot` é a pasta em ~/nod onde a fase `comportamento` cria a pasta do bot (padrão: Eng 1).
+ * Uso: node scripts/sonda-system-prompt-texto.ts [--modelo sonnet] [--fases cache,comportamento,resume,snapshot,snapshotVolatil,snapshotHistorico] [--formas system,systemOff] [--variantes 1,3,5] [--bot "Eng 2"] [--bruto dir]
  */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -89,7 +90,8 @@ const f = (nome: string, origem: FerramentaPlano["origem"] = "nod", conectorId: 
 const catalogo: FerramentaPlano[] = [...kit.map((n) => f(n)), ...ferramentasClima.map((t) => f(t.name, "conector", "con-clima"))];
 const colegas = ["Ada", "Cecília", "Chico", "Gil", "Tarsila", "Eng 2", "Eng 3"].map((nome, i) => ({ id: `00000000-0000-4000-8000-00000000000${i}`, nome, titulo: "Colega do time", descricao: `Sou ${nome}, do time de engenharia do Marlon. Respondo em português do Brasil, de forma curta e direta.` }));
 const conectores = [{ id: "con-clima", slug: "clima", nome: "Clima", habilitado: true, catalogo: ferramentasClima.map((t) => ({ nome: t.name.slice("clima__".length) })) }];
-type Forma = { nome: string; padraoMantido: boolean; args: (estavel: string, volatil: string) => string[] };
+/** `volatilNaMensagem` (NOD-188): a volátil sai do prompt de sistema e vai no começo da mensagem do turno. */
+type Forma = { nome: string; padraoMantido: boolean; args: (estavel: string, volatil: string) => string[]; volatilNaMensagem?: boolean };
 const juntar = (...p: string[]) => p.join("\n");
 const FORMAS: Record<string, Forma> = {
   append: { nome: "append sem marcador (hoje)", padraoMantido: true, args: (e, v) => ["--append-system-prompt", juntar(e, v)] },
@@ -100,7 +102,14 @@ const FORMAS: Record<string, Forma> = {
   systemMaisAppend: { nome: "--system-prompt (estável) + --append-system-prompt (volátil)", padraoMantido: false, args: (e, v) => ["--system-prompt", e, "--append-system-prompt", v] },
   // NOD-185: o mesmo --system-prompt com marcador, sem o snapshot (o prompt é renderizado de novo a cada request).
   systemOff: { nome: "--system-prompt com marcador + snapshot off", padraoMantido: false, args: (e, v) => ["--system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, v), "--system-prompt-snapshot", "off"] },
+  // NOD-188: o --system-prompt só com a estável; a volátil vai no começo da mensagem do turno (com e sem snapshot).
+  systemMsg: { nome: "--system-prompt só estável + volátil na mensagem", padraoMantido: false, volatilNaMensagem: true, args: (e) => ["--system-prompt", e] },
+  systemMsgOff: { nome: "--system-prompt só estável + volátil na mensagem + snapshot off", padraoMantido: false, volatilNaMensagem: true, args: (e) => ["--system-prompt", e, "--system-prompt-snapshot", "off"] },
+  // Sem o marcador o CLI põe a parte dinâmica dele (cwd, que muda a cada turno) no prompt cacheável: o marcador fica.
+  systemMarcadorMsg: { nome: "--system-prompt estável + marcador + volátil na mensagem", padraoMantido: false, volatilNaMensagem: true, args: (e) => ["--system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, "")] },
+  systemMarcadorMsgOff: { nome: "--system-prompt estável + marcador + volátil na mensagem + snapshot off", padraoMantido: false, volatilNaMensagem: true, args: (e) => ["--system-prompt", juntar(e, MARCADOR_PARTE_DINAMICA, ""), "--system-prompt-snapshot", "off"] },
 };
+const volatilNoTurno = (volatil: string, texto: string) => `[Contexto deste turno]\n${volatil}\n[Fim do contexto deste turno]\n\n${texto}`;
 
 type Caso = { nome?: string; remetente: string; nativas?: readonly string[]; pastaDoBot?: string; pastas?: { ativa: string; aprovadas: string[] }; terminal?: boolean; memoria?: string };
 function prompt(c: Caso): { estavel: string; volatil: string } {
@@ -131,7 +140,7 @@ async function turno(rotulo: string, forma: Forma, c: Caso, texto: string, opcoe
   const cwd = opcoes.cwd ?? (c.pastaDoBot ? join(home, "nod", c.pastaDoBot) : undefined) ?? c.pastas?.ativa ?? mkdtempSync(join(dir, "cwd-"));
   const t0 = Date.now();
   const proc = spawn("claude", args, { cwd, env: montarEnvDoFilho(env, home, 600_000, { claudeMdDasPastas: Boolean(terminal) }), stdio: ["pipe", "pipe", "pipe"] });
-  proc.stdin.end(texto);
+  proc.stdin.end(forma.volatilNaMensagem ? volatilNoTurno(p.volatil, texto) : texto);
   let out = "";
   let err = "";
   proc.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));
@@ -168,9 +177,9 @@ if (fases.has("cache")) {
 
 if (fases.has("comportamento")) {
   escrever("\n## 2. Comportamento, lado a lado");
-  const pastaBotRel = `Eng 1/.sonda-183-${sal}`;
+  const pastaBotRel = `${arg("--bot") ?? "Eng 1"}/.sonda-183-${sal}`;
   const pastaBot = join(home, "nod", pastaBotRel);
-  for (const chave of ["append", "system"] as const) {
+  for (const chave of arg("--formas")?.split(",") ?? ["append", "system"]) {
     const forma = FORMAS[chave]!;
     escrever(`\n### ${forma.nome}`);
     const a = somar(await turno(`comp-${chave}-toolsearch`, forma, { remetente: "Cecília" }, "Use a ferramenta do app clima para ver a previsão de amanhã em Recife e me diga o código da consulta que ela devolver."));
@@ -239,17 +248,44 @@ if (fases.has("snapshotVolatil")) {
 if (fases.has("snapshotHistorico")) {
   // O preço do `off`: o histórico da conversa vem DEPOIS do prompt de sistema; se a volátil muda, o cache dele cai junto.
   // O 1º turno leva um texto longo (~15 mil tokens) para pesar como uma conversa comprida.
-  escrever("\n## 6. Histórico longo no --resume (1º turno com ~15 mil tokens; a volátil muda a cada turno)");
-  escrever("| 1º → seguintes | 2º turno: resposta | 2º turno: uso | 3º turno: resposta | 3º turno: uso |\n|---|---|---|---|---|");
+  // NOD-188 (gate de diagnóstico): além do controle (volátil variando no sistema, on e off), a volátil FIXA nos três
+  // turnos (on e off: se o 2º turno passa de 60%, a causa é a volátil antes do histórico) e a volátil na mensagem do
+  // turno (a candidata a correção). Com --bruto, o cache_creation/cache_read de cada turno fica no JSON.
+  escrever("\n## 6. Histórico longo no --resume (1º turno com ~15 mil tokens)");
+  escrever("| variante | 2º turno: resposta | 2º turno: uso | 3º turno: resposta | 3º turno: uso |\n|---|---|---|---|---|");
   const longo = Array.from({ length: 600 }, (_, i) => `Linha ${i} do relatório ${sal}: a estação ${i % 37} registrou ${(i * 7) % 101} mm de chuva e vento de ${(i * 13) % 61} km/h.`).join("\n");
-  const pergunta = "Qual é a palavra do dia, segundo as suas instruções de sistema? Responda só a palavra.";
-  for (const [de, para] of [["system", "system"], ["systemOff", "systemOff"]] as const) {
+  const pergunta = "Qual é a palavra do dia, segundo as suas memórias? Responda só a palavra.";
+  const variando = [{ remetente: "Cecília", memoria: "A palavra do dia é laranja." }, { remetente: "Chico", memoria: "A palavra do dia é azul." }, { remetente: "Gil", memoria: "A palavra do dia é verde." }];
+  const fixa = [variando[0]!, variando[0]!, variando[0]!];
+  const variantes: [string, string, typeof variando][] = [
+    ["system", "controle on, volátil variando", variando],
+    ["systemOff", "controle off, volátil variando", variando],
+    ["system", "volátil fixa, on", fixa],
+    ["systemOff", "volátil fixa, off", fixa],
+    ["systemMsg", "volátil na mensagem, on", variando],
+    ["systemMsgOff", "volátil na mensagem, off", variando],
+    ["systemMarcadorMsg", "marcador + volátil na mensagem, on", variando],
+    ["systemMarcadorMsgOff", "marcador + volátil na mensagem, off", variando],
+    // O CLI grava o cwd do launch como anexo `environment` do turno; o driver usa um diretório temporário novo por
+    // turno. As variantes com "cwd fixo" mantêm o mesmo cwd na sessão inteira.
+    ["system", "controle on, volátil variando, cwd fixo", variando],
+    ["systemOff", "controle off, volátil variando, cwd fixo", variando],
+    ["systemMarcadorMsgOff", "marcador + volátil na mensagem, off, cwd fixo", variando],
+  ];
+  const cwdFixo = (rotulo: string) => rotulo.endsWith("cwd fixo");
+  const filtro = arg("--variantes")?.split(",").map(Number);
+  for (const [i, [chave, rotulo, vol]] of variantes.entries()) {
+    if (filtro && !filtro.includes(i + 1)) continue;
     const sessao = randomUUID();
-    const nome = `Vera ${sal} hist-${de}`;
-    const t1 = somar(await turno(`snaph-${de}-1`, FORMAS[de]!, { nome, remetente: "Cecília", memoria: "A palavra do dia é laranja." }, `Guarde este relatório para depois e responda só: ok.\n\n${longo}`, { sessao }));
-    const t2 = somar(await turno(`snaph-${de}-2`, FORMAS[para]!, { nome, remetente: "Chico", memoria: "A palavra do dia é azul." }, pergunta, { sessao, resume: true }));
-    const t3 = somar(await turno(`snaph-${de}-3`, FORMAS[para]!, { nome, remetente: "Gil", memoria: "A palavra do dia é verde." }, `De novo: ${pergunta}`, { sessao, resume: true }));
-    escrever(`| ${de} → ${para}${t1.ok ? "" : ` (1º ERRO ${t1.erro})`} | "${t2.texto.trim()}" | ${uso(t2)} | "${t3.texto.trim()}" | ${uso(t3)} |`);
+    // Um bot por variante: o prefixo estável de uma não aquece o da seguinte.
+    const nome = `Vera ${sal} hist-${i + 1}`;
+    const forma = FORMAS[chave]!;
+    const cwd = cwdFixo(rotulo) ? mkdtempSync(join(dir, "cwd-fixo-")) : undefined;
+    const t1 = somar(await turno(`snaph-${i + 1}-${chave}-1`, forma, { nome, ...vol[0]! }, `Guarde este relatório para depois e responda só: ok.\n\n${longo}`, { sessao, cwd }));
+    const t2 = somar(await turno(`snaph-${i + 1}-${chave}-2`, forma, { nome, ...vol[1]! }, pergunta, { sessao, resume: true, cwd }));
+    const t3 = somar(await turno(`snaph-${i + 1}-${chave}-3`, forma, { nome, ...vol[2]! }, `De novo: ${pergunta}`, { sessao, resume: true, cwd }));
+    // O 1º turno com ferramenta (o modelo às vezes "guarda" o relatório com lembrar) muda o que fica no cache: sai na linha.
+    escrever(`| ${i + 1}. ${rotulo} (${chave})${t1.ok ? "" : ` (1º ERRO ${t1.erro})`}${t1.ferramentas.length ? ` [1º turno usou ${t1.ferramentas.join(", ")}]` : ""} | "${t2.texto.trim()}" | ${uso(t2)} | "${t3.texto.trim()}" | ${uso(t3)} |`);
   }
 }
 

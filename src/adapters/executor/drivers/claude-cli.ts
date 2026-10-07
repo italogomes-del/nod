@@ -31,8 +31,8 @@ import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../..
  * Driver claude-cli (ADR-012: implementação ÚNICA e real; ADR-014 invertido: o CLI é o da pessoa).
  * Contrato empírico de 2026-09-16 (mapa-cli): -p + stream-json + --verbose obrigatório, --tools ""
  * + --strict-mcp-config + --allowedTools exato = menor privilégio verificado (s3/s4b), --session-id
- * só no PRIMEIRO turno e --resume nos seguintes (s2c), cwd = mkdtemp por turno (EMENDA 11; --resume
- * funciona de qualquer cwd, s2d), SIGTERM → exit 143 sem `result` (s6).
+ * só no PRIMEIRO turno e --resume nos seguintes (s2c), config (mcp.json, hook) num mkdtemp por turno (EMENDA 11;
+ * --resume funciona de qualquer cwd, s2d) e, sem pasta, cwd estável por bot (NOD-188), SIGTERM → exit 143 sem `result` (s6).
  */
 export type LigacaoClaudeCli = {
   /** URL do servidor nod para o proxy (vai no mcp.json, nunca no env do CLI). */
@@ -125,9 +125,55 @@ export function comAvisoSemTerminal(plano: PlanoTurno): Pick<PlanoTurno, "prompt
  * sem as partes ou com o marcador dentro de uma delas (ele partiria o prompt no lugar errado), volta ao append de antes.
  */
 export function argsDoPromptSistema(plano: PlanoTurno, systemPrompt: boolean): string[] {
+  if (!promptEmDuasPartes(plano, systemPrompt)) return ["--append-system-prompt", plano.promptSistema];
+  const p = plano.promptSistemaPartes!;
+  // NOD-188: só a estável e o marcador; a volátil vai na mensagem do turno (volatilNaMensagem). Quando a mensagem
+  // começa com "/", ela não pode ir antes do texto, e fica depois do marcador, como na NOD-183.
+  return ["--system-prompt", [p.estavel, MARCADOR_PARTE_DINAMICA, comecaComBarra(plano.entrada.texto) ? p.volatil : ""].join("\n")];
+}
+
+/**
+ * Comando da barra (/cost, /compact, uma skill como "/review 420") só é reconhecido pelo CLI no começo da mensagem.
+ * Um caminho ("/Users/ana/x.txt, o que tem aqui?") também começa com "/": vale a mesma regra, porque o CLI decide.
+ */
+const comecaComBarra = (texto: string): boolean => texto.trimStart().startsWith("/");
+
+/** A forma do ADR-080 vale: o gate deixou, há as duas partes e nenhuma traz o marcador (ele partiria o prompt no lugar errado). */
+function promptEmDuasPartes(plano: PlanoTurno, systemPrompt: boolean): boolean {
   const p = plano.promptSistemaPartes;
-  if (!systemPrompt || !p || p.estavel.includes(MARCADOR_PARTE_DINAMICA) || p.volatil.includes(MARCADOR_PARTE_DINAMICA)) return ["--append-system-prompt", plano.promptSistema];
-  return ["--system-prompt", [p.estavel, MARCADOR_PARTE_DINAMICA, p.volatil].join("\n")];
+  return systemPrompt && p !== undefined && !p.estavel.includes(MARCADOR_PARTE_DINAMICA) && !p.volatil.includes(MARCADOR_PARTE_DINAMICA);
+}
+
+/** O bloco que abre a mensagem do turno com a parte volátil (NOD-188). */
+export const ABRE_CONTEXTO_DO_TURNO = "[Contexto deste turno]";
+export const FECHA_CONTEXTO_DO_TURNO = "[Fim do contexto deste turno]";
+/**
+ * Um delimitador do bloco dentro da volátil (memória, conversa recente de outros) ou da mensagem vira texto, com
+ * parênteses. revisto em 2026-10-07 (QA da NOD-188): o modelo lê "[Fim  do contexto deste turno ]", com quebra de
+ * linha, NBSP, espaço de largura zero ou colchete largo como o mesmo delimitador, então a busca aceita essas variações.
+ */
+const SEPARADOR = "[\\s\\u200B-\\u200D\\u2060\\uFEFF]";
+const DELIMITADOR_FORJADO = new RegExp(`[\\[\\uFF3B]${SEPARADOR}*((?:fim${SEPARADOR}+do${SEPARADOR}+)?contexto${SEPARADOR}+deste${SEPARADOR}+turno)${SEPARADOR}*[\\]\\uFF3D]`, "giu");
+const neutralizarDelimitador = (t: string): string => t.replace(DELIMITADOR_FORJADO, (_m, dentro: string) => `(${dentro.replace(new RegExp(`${SEPARADOR}+`, "gu"), " ")})`);
+
+/**
+ * definido em 2026-10-07 (NOD-188, emenda da ADR-080): a parte volátil (remetente, memória, conversa recente) vai no
+ * começo da mensagem do turno, não no prompt de sistema. Medido no CLI 2.1.292 (scripts/sonda-system-prompt-texto.ts,
+ * fase snapshotHistorico, 1º turno de ~15 mil tokens): com a volátil no sistema e o snapshot `off`, o sistema muda a
+ * cada turno e o histórico inteiro, que vem depois dele, é reescrito no cache (15% do 3º turno em diante); com ela na
+ * mensagem, o sistema fica igual e o 3º turno lê 99% do cache, com a volátil nova chegando ("azul", "verde"). Vale no 1º
+ * turno também (uma forma só). Sem a forma do ADR-080 (append, plano sem partes) ou com a volátil vazia, o texto vai
+ * como veio. Mensagem que começa com "/" (comando da barra, skill, caminho) também: o CLI só reconhece o comando no
+ * começo, e a volátil fica no --system-prompt desse turno (argsDoPromptSistema), em vez de sumir.
+ * A volátil traz texto de fora (conversa recente, memória): um delimitador dentro dela fecharia o bloco antes da hora
+ * e faria o resto parecer fala da pessoa; ele chega ao modelo com parênteses no lugar dos colchetes. Na mensagem também
+ * (QA da NOD-188): o pedido de um colega ou a fala de outro na sala poderia abrir, logo depois do bloco real, um
+ * "[Contexto deste turno]" falso com outro remetente.
+ */
+export function volatilNaMensagem(plano: PlanoTurno, systemPrompt: boolean, texto: string): string {
+  const volatil = plano.promptSistemaPartes?.volatil ?? "";
+  if (!promptEmDuasPartes(plano, systemPrompt) || volatil.trim() === "" || comecaComBarra(texto)) return texto;
+  return `${ABRE_CONTEXTO_DO_TURNO}\n${neutralizarDelimitador(volatil)}\n${FECHA_CONTEXTO_DO_TURNO}\n\n${neutralizarDelimitador(texto)}`;
 }
 
 /**
@@ -230,9 +276,10 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     "--permission-mode",
     "default",
     ...argsDoPromptSistema(plano, entrada.systemPrompt === true),
-    // NOD-185: sem o snapshot, o `--resume` leva a parte volátil deste turno, não a gravada no 1º. Vai em todo turno,
-    // para o 1º também não gravar (medido na 2.1.290: cache de 71–72% no 2º e 3º turno; sem a flag, 76–78%, mas do
-    // prompt velho).
+    // NOD-185: sem o snapshot, o `--resume` leva o prompt de sistema deste turno, não o gravado no 1º. Vai em todo turno,
+    // para o 1º também não gravar. revisto em 2026-10-07 (NOD-188): com a volátil na mensagem, o sistema é só a parte
+    // estável, então o `off` não custa cache (99% do 3º turno com histórico longo) e mantém a estável atualizada quando
+    // o bot muda de nome ou ganha conector no meio da conversa.
     ...(entrada.snapshotOff ? ["--system-prompt-snapshot", "off"] : []),
     ...(plano.entrada.sessaoCli ? ["--resume", plano.entrada.sessaoCli] : ["--session-id", sessaoCli]),
   ];
@@ -400,44 +447,51 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               const pastas = confinavel ? plano.workspacePastas ?? null : null;
               await mkdir(cfg.cwdBase, { recursive: true });
               const tmpdir = await mkdtemp(join(cfg.cwdBase, "turno-"));
-              // ADR-052: o kit do terminal só liga com o hook do nod e a pasta do bot; senão, as nativas de arquivo de antes.
-              const pedeTerminal = (plano.nativas ?? []).some((n) => !(NATIVAS_DE_ARQUIVO as readonly string[]).includes(n));
-              const pastaBot = pedeTerminal && lig.hookPath && confinavel && plano.pastaDoBot ? join(home, "nod", plano.pastaDoBot) : null;
-              let terminal: TurnoTerminal | undefined;
-              if (pastaBot && lig.hookPath) {
-                await mkdir(pastaBot, { recursive: true });
-                const config = join(tmpdir, "hook-nativas.json");
-                // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts).
-                await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home }), { mode: 0o600 });
-                const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
-                // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
-                const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);
-                terminal = { settings: settingsDoTerminal({ comandoHook }), dirsExtras };
-              }
-              const diretorio = pastaBot ?? pastas?.ativa ?? tmpdir;
-              const eventos: EventoStream[] = [];
-              // Modo dev (0036): quando cada evento chegou, para o Raio-X pôr as chamadas e compactações no tempo.
-              const inicio = Date.now();
-              const momentos: number[] = [];
-              const finalizar = async (r: ResultadoTurno): Promise<ResultadoTurno> => {
-                const execucao = montarExecucao(eventos, momentos, Date.now() - inicio);
-                const init = eventos.find((e): e is Extract<EventoStream, { tipo: "init" }> => e.tipo === "init");
-                let comandos: CatalogoDeComandos | undefined;
-                if (init && (init.skills?.length || init.comandos?.length)) {
-                  const pastasDeProjeto = (terminal?.dirsExtras ?? pastas?.aprovadas ?? []).filter((p) => p !== home);
-                  const catalogo = await lerCatalogoDoMac(init, { home, pastasDeProjeto }).catch(() => null);
-                  const chave = catalogo ? JSON.stringify(catalogo) : null;
-                  if (catalogo && chave !== catalogoEntregue) {
-                    comandos = catalogo;
-                    catalogoEntregue = chave;
-                  }
-                }
-                // NOD-179: o último uso do plano que o CLI informou no turno, com o instante em que a linha chegou.
-                const usoDoPlano = ultimoUsoDoPlano(eventos, "claude-cli", (i) => inicio + (momentos[i] ?? 0));
-                // definido em 2026-10-05: a recusa da conta não vira fala do bot; vira falha com a causa em código.
-                return { ...comContaSemAcesso(r), ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}), ...(usoDoPlano ? { usoDoPlano } : {}) };
-              };
+              // QA da NOD-188: o try começa logo depois do mkdtemp. A config do hook e as pastas (inclusive a texto-<agenteId>)
+              // são criadas aqui, e uma falha nelas deixava o tmpdir do turno para trás.
               try {
+                // ADR-052: o kit do terminal só liga com o hook do nod e a pasta do bot; senão, as nativas de arquivo de antes.
+                const pedeTerminal = (plano.nativas ?? []).some((n) => !(NATIVAS_DE_ARQUIVO as readonly string[]).includes(n));
+                const pastaBot = pedeTerminal && lig.hookPath && confinavel && plano.pastaDoBot ? join(home, "nod", plano.pastaDoBot) : null;
+                let terminal: TurnoTerminal | undefined;
+                if (pastaBot && lig.hookPath) {
+                  await mkdir(pastaBot, { recursive: true });
+                  const config = join(tmpdir, "hook-nativas.json");
+                  // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts).
+                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home }), { mode: 0o600 });
+                  const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
+                  // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
+                  const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);
+                  terminal = { settings: settingsDoTerminal({ comandoHook }), dirsExtras };
+                }
+                // definido em 2026-10-07 (NOD-188, como a ligação na ADR-072): sem pasta, o cwd é estável por bot, não o
+                // tmpdir do turno. O CLI põe o cwd no contexto de cada turno; mudando a cada um, o histórico inteiro era
+                // reescrito no cache no --resume (medido no 2.1.292: 15% → 99% no 3º turno). O tmpdir segue com a config.
+                const cwdEstavel = join(cfg.cwdBase, `texto-${plano.agenteId}`);
+                if (!pastaBot && !pastas) await mkdir(cwdEstavel, { recursive: true });
+                const diretorio = pastaBot ?? pastas?.ativa ?? cwdEstavel;
+                const eventos: EventoStream[] = [];
+                // Modo dev (0036): quando cada evento chegou, para o Raio-X pôr as chamadas e compactações no tempo.
+                const inicio = Date.now();
+                const momentos: number[] = [];
+                const finalizar = async (r: ResultadoTurno): Promise<ResultadoTurno> => {
+                  const execucao = montarExecucao(eventos, momentos, Date.now() - inicio);
+                  const init = eventos.find((e): e is Extract<EventoStream, { tipo: "init" }> => e.tipo === "init");
+                  let comandos: CatalogoDeComandos | undefined;
+                  if (init && (init.skills?.length || init.comandos?.length)) {
+                    const pastasDeProjeto = (terminal?.dirsExtras ?? pastas?.aprovadas ?? []).filter((p) => p !== home);
+                    const catalogo = await lerCatalogoDoMac(init, { home, pastasDeProjeto }).catch(() => null);
+                    const chave = catalogo ? JSON.stringify(catalogo) : null;
+                    if (catalogo && chave !== catalogoEntregue) {
+                      comandos = catalogo;
+                      catalogoEntregue = chave;
+                    }
+                  }
+                  // NOD-179: o último uso do plano que o CLI informou no turno, com o instante em que a linha chegou.
+                  const usoDoPlano = ultimoUsoDoPlano(eventos, "claude-cli", (i) => inicio + (momentos[i] ?? 0));
+                  // definido em 2026-10-05: a recusa da conta não vira fala do bot; vira falha com a causa em código.
+                  return { ...comContaSemAcesso(r), ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}), ...(usoDoPlano ? { usoDoPlano } : {}) };
+                };
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
                 // Fail-closed: sem --autocompact no help da versão instalada, o turno roda sem ela.
                 const compactar = (flagsNoHelp ?? []).includes("--autocompact");
@@ -446,20 +500,23 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
                 // ADR-067: a sessão viva precisa da entrada em stream-json. O comando da conversa (/uso, /contexto,
                 // /compactar) segue de uma vez só, pelo texto, como o CLI o reconhece desde a 0038.
-                const comandoDaBarra = plano.entrada.texto.trimStart().startsWith("/");
+                const comandoDaBarra = comecaComBarra(plano.entrada.texto);
                 const temEntradaJson = (flagsNoHelp ?? []).includes("--input-format");
                 const viva = temEntradaJson && !comandoDaBarra;
                 const streamJson = temEntradaJson && (viva || anexos.length > 0);
-                const entradaStdin = streamJson
-                  ? mensagemClaude(plano.entrada.texto, anexos)
-                  : [plano.entrada.texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
                 // Sem o kit (sem hook nesta máquina), o prompt não pode prometer Bash e web: a linha que corrige vai junto.
                 // NOD-183: a linha vai também no fim da parte volátil, depois do marcador, para não quebrar o cache.
                 const semKit = pedeTerminal && !terminal ? comAvisoSemTerminal(plano) : {};
                 const esforco = (flagsNoHelp ?? []).includes("--effort");
                 const systemPrompt = usaSystemPrompt(flagsNoHelp, v);
                 const snapshotOff = usaSnapshotOff(flagsNoHelp, v);
-                const { args } = montarArgs({ plano: { ...plano, ...semKit, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff });
+                const planoDoTurno = { ...plano, ...semKit };
+                // NOD-188: a parte volátil abre a mensagem do turno (o sistema leva só a estável).
+                const texto = volatilNaMensagem(planoDoTurno, systemPrompt, plano.entrada.texto);
+                const entradaStdin = streamJson
+                  ? mensagemClaude(texto, anexos)
+                  : [texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
+                const { args } = montarArgs({ plano: { ...planoDoTurno, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];
@@ -554,7 +611,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
         },
 
         async dispose(): Promise<void> {
-          // nada persistente: cada turno limpa o próprio tmpdir
+          // cada turno limpa o próprio tmpdir; a pasta texto-<agenteId> (NOD-188) é reusada entre turnos, como a da ligação
         },
       };
     },

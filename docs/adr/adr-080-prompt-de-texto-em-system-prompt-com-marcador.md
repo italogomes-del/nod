@@ -43,11 +43,13 @@ novo OK nas duas formas; o turno só de texto leu 15% do cache no append (US$ 0,
   `--system-prompt "<estável>\n__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n<volátil>"` e não manda `--append-system-prompt`.
   Sem a flag, sem as partes ou com o marcador dentro de alguma parte (um texto colado numa memória partiria o prompt
   no lugar errado), volta ao `--append-system-prompt` de antes.
+  Desde a NOD-188 (emenda abaixo), a volátil sai do `--system-prompt` e vai na mensagem do turno.
 - **Gate da flag.** `--system-prompt` entra em `FLAG_FLOORS` com piso 2.1.290 (a versão sondada) e fica fora de
   `FLAGS_DO_TURNO`, como `--effort` e `--autocompact`. O driver só a usa quando o `--help` lido no turno a traz **e** a
   versão é ≥ 2.1.290. Hoje o `PISO_CLI` do Claude também é 2.1.290 (NOD-171), então na prática o gate é o help.
 - **Aviso sem terminal.** Quando o plano pede o terminal e a máquina não tem o hook, o `AVISO_SEM_TERMINAL` vai no fim
-  do `promptSistema` (como antes) e no fim da parte volátil, depois do marcador, para não quebrar o prefixo.
+  do `promptSistema` (como antes) e no fim da parte volátil, depois do marcador, para não quebrar o prefixo. Desde a NOD-188,
+  vai com a volátil na mensagem do turno.
 - O marcador saiu de `prompt-ligacao.ts` para `src/domain/marcador-prompt.ts`, que os dois prompts usam.
 
 ## Alternativas descartadas
@@ -99,6 +101,80 @@ muda: é sessão efêmera, sem `--resume`.
 
 Gatilho de revisão: o cache do 2º turno cair abaixo de ~70% com `off` numa versão nova do CLI, ou o histórico passar a
 cachear no `--resume` com `on` (aí o `off` passaria a custar a reescrita do histórico a cada turno).
+
+## Emenda — NOD-188: volátil na mensagem do turno e cwd estável por bot (2026-10-06)
+
+Com um histórico de ~15 mil tokens, o 2º turno no `--resume` lia só 15–16% do cache (US$ 0,25 por turno), com e sem
+snapshot. A fase `snapshotHistorico` da sonda (sonnet, CLI 2.1.292, 11 variantes, 3 turnos "laranja → azul → verde"
+com o mesmo bot; brutos da NOD-188) separou três causas:
+
+| Variante | 2º turno | 3º turno | Respostas |
+|---|---|---|---|
+| controle on (volátil no sistema) | 16% | 16% | "laranja" (prompt velho) |
+| controle off | 15% | 15% | azul / verde |
+| volátil fixa, off | 99% ¹ | 99% | — |
+| volátil na mensagem, off | 15% | 15% | azul / verde |
+| estável + marcador no sistema, volátil na mensagem, off | 15% | 14% | azul / verde |
+| controle off, cwd fixo | 15% | 15% | azul / verde |
+| **estável + marcador, volátil na mensagem, off, cwd fixo** | **14%** | **99%** | **azul / verde** |
+
+¹ Nessa variante o 1º turno chamou ferramentas (3 requests); ver a causa 3.
+
+1. **A volátil no prompt de sistema.** Ela muda a cada turno (remetente, memória) e fica antes do histórico: tudo
+   depois dela deixa de casar com o cache. Mudou para a mensagem do turno.
+2. **O cwd por turno.** O CLI grava em cada turno do transcrito um anexo `environment` com o cwd, que é reenviado no
+   `--resume`. Com um `mkdtemp` por turno (EMENDA 11 da ADR-014), cada turno reescreve o histórico. Só com 1 e 2
+   resolvidos o 3º turno vai a 99%.
+3. **Peculiaridade do CLI, sem conserto do nosso lado.** O 1º request de uma sessão nova renderiza a 1ª mensagem de um
+   jeito diferente do replay no `--resume`. Por isso o 2º turno erra o cache uma vez (~15%) quando o 1º turno foi uma
+   resposta só. Quando o 1º turno teve mais de um request (ferramentas), o replay já casa e o 2º turno cacheia. Do 3º
+   turno em diante, 99–100%.
+
+Decisão:
+
+- **Driver do claude-cli.** Com as partes e a flag liberada, o `--system-prompt` leva só
+  `"<estável>\n__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n"`, idêntico entre turnos e remetentes. A volátil vai no início da
+  mensagem do turno (stdin), entre `[Contexto deste turno]` e `[Fim do contexto deste turno]`, seguida do texto da
+  pessoa (`volatilNaMensagem`). A volátil vazia fica de fora. Na mensagem que começa com "/" (comando da barra como
+  `/cost`, skill como `/review 420`, ou um caminho), que o CLI só reconhece no início, a volátil volta ao
+  `--system-prompt` desse turno, depois do marcador, como na NOD-183: o turno perde o cache do histórico uma vez, mas
+  o modelo não fica sem remetente, memória e regras do modo. Um delimitador do bloco que venha dentro da volátil
+  (conversa recente, memória) chega ao modelo com parênteses no lugar dos colchetes, para não fechar o bloco antes da
+  hora e fazer o resto parecer fala da pessoa (revisão do Eng 1). No append (gate fechado, sem partes ou marcador dentro de uma parte) nada muda: a volátil segue no
+  prompt inteiro. O `AVISO_SEM_TERMINAL` continua no fim da volátil, agora na mensagem.
+- **cwd estável por bot (exceção à EMENDA 11 da ADR-014).** Sem pasta do bot nem projeto, o cwd do turno de texto é
+  `<cwdBase>/texto-<agenteId>`, como a ligação já faz (`ligacao-<agenteId>`, ADR-071/072). O `mkdtemp` por turno
+  continua guardando o `mcp.json` 0600 e a config do hook, e é apagado no `finally`. Com pasta do bot ou projeto, o cwd
+  já era estável.
+- `--system-prompt-snapshot off` (NOD-185) fica: o sistema não muda mais, mas o `off` evita que uma sessão gravada
+  antes desta versão reenvie a volátil velha.
+- Ligação e Codex não mudam.
+
+Sem regressão nas fases `cache` e `comportamento` (sonnet, CLI 2.1.292), forma nova contra a de antes:
+
+| | `--system-prompt` com a volátil (antes) | volátil na mensagem + `off` (agora) |
+|---|---|---|
+| 2º turno de sessão nova, outro remetente | 75% | 75% |
+| ToolSearch → ferramenta MCP | OK | OK |
+| Read → Edit no projeto | OK | OK |
+| Bash sob o hook, na pasta do bot | OK | OK |
+| Só texto, frase curta | OK | OK |
+
+Consequências: a conversa longa sai de ~15% para 99% do 3º turno em diante (US$ 0,27 contra 0,37 no 3º turno da
+medição). O critério de ≥ 60% no 2º turno só é atingido quando o 1º turno teve mais de um request; com um 1º turno de
+resposta única, o 2º turno segue em ~15% pela causa 3. O que a volátil diz continua chegando ao modelo (azul e verde
+nas respostas), agora como contexto do usuário.
+
+Relato para o Claude Code (causa 3): "With `claude -p --resume <id>`, the first resumed request misses the prompt
+cache for the first user turn: the first request of a new session serializes that turn differently from how
+`--resume` replays it from the transcript. Repro: turn 1 `claude -p --session-id X --system-prompt S` (single
+response, ~15k tokens of context), turn 2 and 3 `claude -p --resume X --system-prompt S` with the same cwd. Turn 2
+reads ~15% from cache, turn 3 reads ~99%. If turn 1 makes tool calls, turn 2 already hits the cache. CLI 2.1.292,
+sonnet."
+
+Gatilho de revisão: o 3º turno cair abaixo de ~90% no `--resume` numa versão nova do CLI; o CLI passar a cachear o
+2º turno (a causa 3 resolvida upstream: refazer a medição e fechar o critério); o modelo tratar o bloco
+`[Contexto deste turno]` como fala da pessoa num turno real (QA).
 
 ## Gatilho de revisão
 
