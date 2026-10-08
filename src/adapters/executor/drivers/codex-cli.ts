@@ -171,7 +171,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
           return {
             async interromper() { parado = true; if (proc) await proc.interromper(); },
             aceitaMensagens: () => sessao?.aceitaMensagens() ?? false,
-            receberMensagem: (texto) => sessao?.receberMensagem(texto) ?? false,
+            receberMensagem: (texto, id) => sessao?.receberMensagem(texto, id) ?? false,
             grupoDeProcessos: () => proc?.pid ?? null,
             async rodarTurno(sinks) {
               const eventos: EventoStream[] = [];

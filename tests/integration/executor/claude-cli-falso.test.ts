@@ -600,6 +600,31 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       const entradas = (await readFile(stdin, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { message: { content: { text: string }[] } });
       expect(entradas[1]!.message.content[0]!.text).toBe(molduraMensagemNoMeio("qual é o prazo?"));
     });
+
+    it("X1: a mensagem escrita enquanto a narração ainda sai — a narração não vira a resposta; a fala depois do tool_result, sim", async () => {
+      const { instance } = await instanciar("mensagem-no-meio", {}, { ...HELP, NOD_FALSO_MEIO_CEDO: "1" });
+      const adapter = instance.adapter(planoDeTeste(dir));
+      const falas: string[] = [];
+      const entraram: string[] = [];
+      let mandou = false;
+      const espiao = sinksEspiao({});
+      const resultado = await adapter.rodarTurno({
+        ...espiao.sinks,
+        evento: (e) => {
+          espiao.sinks.evento(e);
+          if (e.tipo === "delta" && !mandou) mandou = adapter.receberMensagem!(molduraMensagemNoMeio("qual é o prazo?"), "m1");
+        },
+        falaIntermediaria: (t) => falas.push(t),
+        // X2: o stdin aceitou a escrita: a mensagem entrou.
+        mensagemEntrou: (id) => entraram.push(id),
+        ocioso: async () => false,
+      });
+      expect(mandou).toBe(true);
+      expect(entraram).toEqual(["m1"]);
+      expect(falas).toHaveLength(1);
+      expect(falas[0]).toMatch(/^Recebi: A pessoa escreveu enquanto você trabalhava: «qual é o prazo\?»/);
+      expect(resultado).toMatchObject({ desfecho: "sucesso", texto: "Revisei as três." });
+    });
   });
 
   describe("fork da sessão (#193, rede de 2 min)", () => {

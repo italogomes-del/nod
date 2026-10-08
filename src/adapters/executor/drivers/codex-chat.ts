@@ -40,8 +40,18 @@ const SAIDA_APOS_FIM_MS = 2_000;
  */
 const ESFORCO_CODEX: Record<EsforcoAgente, EsforcoCodex> = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" };
 
+/**
+ * Onde o Codex passa a ler um steer já aceito (definido em 2026-10-08, revisão do épico #188, X1): o texto entra na
+ * próxima amostragem do modelo, então o que fecha o item em curso (a mensagem que já saía, ou a ferramenta) ainda é de
+ * antes; a primeira fala depois do fim de um item é a resposta. Medido só contra o app-server falso.
+ */
+const FRONTEIRAS_CODEX: readonly EventoStream["tipo"][] = ["texto_bloco", "tool_result", "result"];
+
 /** O que o adapter repassa ao laço enquanto a thread está viva. */
-export type SessaoChatCodex = { aceitaMensagens(): boolean; receberMensagem(texto: string): boolean };
+export type SessaoChatCodex = { aceitaMensagens(): boolean; receberMensagem(texto: string, id?: string): boolean };
+
+/** Uma mensagem da pessoa a caminho da sessão, com os ids que o laço confirma quando ela entrar (X2). */
+type ItemDaFila = { texto: string; ids: string[] };
 
 export type ContextoChatCodex = {
   plano: PlanoTurno;
@@ -78,6 +88,7 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
   if (!pastas) await mkdir(cwd, { recursive: true });
   const dir = await mkdtemp(join(c.cwdBase, "codex-chat-"));
   let timerSaida: ReturnType<typeof setTimeout> | null = null;
+  let devolverRestantes: (() => void) | null = null;
   try {
     const launcher = await escreverLauncherProxy(dir, { urlNod: c.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: c.proxyPath });
     const configMcp = configMcpCodex(plano, { urlNod: c.urlNod, proxyPath: launcher, nodePath: c.nodePath, electronComoNode: c.electronComoNode }, c.recusadas);
@@ -88,11 +99,20 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     const eventos: EventoStream[] = [];
     const pendentes: Promise<void>[] = [];
     let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
-    const meio = criarFalaDoMeio();
+    const meio = criarFalaDoMeio(FRONTEIRAS_CODEX);
     const falaNaHora = plano.modoTurno !== "sala" && sinks.falaIntermediaria !== undefined;
     // A entrada da sessão: aberta depois do handshake, fechada quando o modelo terminou e nada mais chegou.
     let aberta = false;
-    let fila: string[] = [];
+    let fila: ItemDaFila[] = [];
+    // X2 (revisto em 2026-10-08): os ids aceitos por `receberMensagem` que ainda não entraram nem voltaram.
+    const aCaminho = new Set<string>();
+    const entrou = (ids: readonly string[]) => {
+      for (const id of ids) if (aCaminho.delete(id)) sinks.mensagemEntrou?.(id);
+    };
+    const devolver = (ids: readonly string[]) => {
+      for (const id of ids) if (aCaminho.delete(id)) sinks.mensagemDevolvida?.(id);
+    };
+    devolverRestantes = () => devolver([...aCaminho]);
     let steersEmVoo = 0;
     let decidindo = false;
     const rodadas: EventoStream[][] = [];
@@ -186,23 +206,38 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     };
 
     /** Texto na sessão: steer no turno ativo, senão espera o turno abrir (ou o próximo). */
-    const mandar = (texto: string) => {
-      if (cliente.turno().estado !== "ativo") return void fila.push(texto);
+    const mandar = (item: ItemDaFila) => {
+      if (cliente.turno().estado !== "ativo") return void fila.push(item);
       steersEmVoo += 1;
-      cliente.steer(texto, (aceito) => {
+      cliente.steer(item.texto, (aceito) => {
         steersEmVoo -= 1;
-        // O turno acabou antes de o steer chegar: o texto abre o próximo turno.
-        if (!aceito) fila.push(texto);
+        if (aceito) {
+          // X1/X2: o texto entrou no turno, mas o modelo só o lê depois do item em curso.
+          meio.absorveu();
+          entrou(item.ids);
+        } else {
+          // O turno acabou antes de o steer chegar: o texto abre o próximo turno.
+          fila.push(item);
+        }
         if (cliente.turno().estado === "livre") void decidir();
       });
     };
 
-    const iniciar = (texto: string) => {
+    /** `itens` = as mensagens da pessoa que este turno leva (nenhuma no primeiro, que leva o pedido do plano). */
+    const iniciar = (texto: string, itens: readonly ItemDaFila[] = []) => {
+      const ids = itens.flatMap((i) => i.ids);
       cliente.iniciarTurno((id, threadId) => pedidoTurnStart(id, { threadId, texto, ...(esforco ? { esforco } : {}) }), (id, r) => {
         if (id === null) {
           log("aviso", "codex_chat_turno_recusado", { turno_id: plano.turnoId, codigo: r.tipo === "resposta_erro" ? r.codigo : null });
+          // X2: a volta que levava as mensagens não abriu — elas voltam para a fila do servidor (viram turno próprio).
+          devolver(ids);
           fecharRodada(false, "error_during_execution", r.tipo === "resposta_erro" ? "turno_recusado" : null);
           return void decidir();
+        }
+        if (itens.length > 0) {
+          // X1: a volta começou com o texto: nada de antes no caminho, a próxima fala já é a resposta.
+          meio.armar();
+          entrou(ids);
         }
         const juntos = fila;
         fila = [];
@@ -223,7 +258,7 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
           falarRodadas();
           const juntos = fila;
           fila = [];
-          return iniciar(juntos.join("\n\n"));
+          return iniciar(juntos.map((i) => i.texto).join("\n\n"), juntos);
         }
         encerrar();
       } catch {
@@ -235,10 +270,11 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
 
     c.aoSessao({
       aceitaMensagens: () => aberta && !cliente.fechando(),
-      receberMensagem(texto) {
+      receberMensagem(texto, id) {
         if (!aberta || cliente.fechando()) return false;
-        meio.absorveu();
-        mandar(texto);
+        // X2: aceita para entrar; o laço só confirma quando o steer for aceito ou a volta abrir com ela.
+        if (id !== undefined) aCaminho.add(id);
+        mandar({ texto, ids: id !== undefined ? [id] : [] });
         return true;
       },
     });
@@ -247,7 +283,7 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       await cliente.abrirThread({
         versaoNod: c.versaoNod ?? "0",
         prazoMs: PRAZO_HANDSHAKE_MS,
-        threadStart: (id) => pedidoThreadStart(id, { modelo: plano.entrada.modelo, instrucoes: plano.promptSistema, cwd, sandbox, efemera: false }),
+                threadStart: (id) => pedidoThreadStart(id, { modelo: plano.entrada.modelo, instrucoes: plano.promptSistema, cwd, sandbox, efemera: false }),
       });
     } catch (e) {
       // Nada foi escrito para o modelo ainda: o turno segue no `codex exec`, como sem app-server.
@@ -278,6 +314,8 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     return { ...r, erroCru, sessaoCli: null };
   } finally {
     if (timerSaida) clearTimeout(timerSaida);
+    // X2: o que ficou na fila ou com o steer no ar quando a sessão acabou não entrou: volta para a fila do servidor.
+    devolverRestantes?.();
     c.aoSessao(null);
     c.aoProcesso(null);
     await rm(dir, { recursive: true, force: true });

@@ -69,7 +69,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
 
         adapter(plano: PlanoTurno): Adapter {
           let interrompido = false;
-          let sinksDoTurno: { evento(e: EventoStream): void } | null = null;
+          let sinksDoTurno: SinksTurno | null = null;
           // definido em 2026-09-16 (L9, pendência L4 §1): o passo vai pelo SPI (EventoStream 'catcher'); o servidor liga aoEvento → catcher_registros.
           const registrar = (tipo: string, dados: Record<string, unknown>) => {
             sinksDoTurno?.evento({ tipo: "catcher", subtipo: tipo, dados });
@@ -84,11 +84,12 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
 
           return {
             aceitaMensagens: () => o.sessaoViva === true && rodando && !interrompido,
-            receberMensagem(texto: string): boolean {
+            receberMensagem(texto: string, id?: string): boolean {
               if (o.sessaoViva !== true || !rodando || interrompido) return false;
               fila.push(texto);
-              meio.absorveu();
               registrar("mensagem_no_meio", { chars: texto.length });
+              // X2 (revisto em 2026-10-08): como o stdin do Claude, a fila do catcher aceitou o texto — entrou.
+              if (id !== undefined) sinksDoTurno?.mensagemEntrou?.(id);
               return true;
             },
 
@@ -120,6 +121,8 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
               const responderFila = async () => {
                 while (fila.length > 0 && !interrompido) {
                   const resposta = `Respondendo: ${semMoldura(fila.shift()!)}`;
+                  // X1: o catcher lê a mensagem entre um passo e outro, e o que sai agora já é a resposta.
+                  meio.armar();
                   if (!(await emitir({ tipo: "delta", texto: resposta }))) return;
                   await emitir({ tipo: "texto_bloco", texto: resposta });
                 }

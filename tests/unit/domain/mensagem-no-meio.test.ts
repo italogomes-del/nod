@@ -11,8 +11,11 @@ import { classificarResultado, classificarSessao, interpretarLinhaStreamJson } f
 const FIXTURES = new URL("../../fixtures/stream-json/", import.meta.url);
 const eventosDe = (nome: string): EventoStream[] => readFileSync(new URL(nome, FIXTURES), "utf8").split("\n").filter((l) => l.trim() !== "").map(interpretarLinhaStreamJson);
 
-/** Reproduz o turno gravado com a absorção logo depois do primeiro tool_result, como o driver faria. */
-function reproduzir(falouNaHora: boolean) {
+/**
+ * Reproduz o turno gravado com a mensagem escrita na sessão em `quando` (o índice do evento depois do qual o driver a
+ * escreveu). revisto em 2026-10-08 (X1): o CLI só a lê na fronteira seguinte (o `tool_result` do `consultar`).
+ */
+function reproduzir(falouNaHora: boolean, quando: (ev: EventoStream) => boolean = (ev) => ev.tipo === "tool_use") {
   const eventos = eventosDe("mensagem-no-meio.jsonl");
   const meio = criarFalaDoMeio();
   const falas: string[] = [];
@@ -20,7 +23,7 @@ function reproduzir(falouNaHora: boolean) {
   for (const ev of eventos) {
     const resposta = meio.avaliar(ev, falouNaHora);
     if (resposta !== null && falouNaHora) falas.push(resposta);
-    if (ev.tipo === "tool_result" && !absorveu) {
+    if (quando(ev) && !absorveu) {
       absorveu = true;
       meio.absorveu();
     }
@@ -56,6 +59,34 @@ describe("primeira fala depois de uma mensagem absorvida (stream-json gravado)",
     expect(r.texto).not.toContain("Vou revisar");
   });
 
+  it("X1: a mensagem escrita ANTES da narração em curso (\"Vou revisar…\") — a narração não vira a resposta; a fala depois da fronteira, sim", () => {
+    const { eventos, meio, falas } = reproduzir(true, (ev) => ev.tipo === "init");
+    expect(falas).toEqual(["O prazo é sexta-feira, dia 9."]);
+    const r = classificarSessao({ eventos, exitCode: 0, signal: null, stderr: "", falaDoMeio: meio });
+    expect(r).toMatchObject({ desfecho: "sucesso", texto: "Revisei as três; duas estão atrasadas." });
+  });
+
+  it("X1: escrita no meio da fala (pendente) só arma na fronteira; `armar()` arma na hora (a volta nova começou com o texto)", () => {
+    const meio = criarFalaDoMeio();
+    const narracao: EventoStream = { tipo: "texto_bloco", texto: "Vou revisar." };
+    const resposta: EventoStream = { tipo: "texto_bloco", texto: "Sexta." };
+    meio.absorveu();
+    expect(meio.avaliar(narracao, true)).toBeNull();
+    expect(meio.avaliar({ tipo: "tool_use", id: "u", nome: "x", input: null }, true)).toBeNull();
+    expect(meio.avaliar({ tipo: "tool_result", toolUseId: "u", isError: false, texto: "" }, true)).toBeNull();
+    expect(meio.avaliar(resposta, true)).toBe("Sexta.");
+    const outro = criarFalaDoMeio();
+    outro.armar();
+    expect(outro.avaliar(resposta, true)).toBe("Sexta.");
+  });
+
+  it("X1: fronteiras do driver — com o fim do item de texto como fronteira, o bloco que a fecha ainda é de antes", () => {
+    const meio = criarFalaDoMeio(["texto_bloco", "tool_result", "result"]);
+    meio.absorveu();
+    expect(meio.avaliar({ tipo: "texto_bloco", texto: "Começando." }, true)).toBeNull();
+    expect(meio.avaliar({ tipo: "texto_bloco", texto: "Recebi." }, true)).toBe("Recebi.");
+  });
+
   it("uma resposta por absorção: duas mensagens antes de qualquer texto têm uma resposta só; texto vazio não conta", () => {
     const meio = criarFalaDoMeio();
     const vazio: EventoStream = { tipo: "texto_bloco", texto: "  " };
@@ -64,6 +95,7 @@ describe("primeira fala depois de uma mensagem absorvida (stream-json gravado)",
     expect(meio.avaliar(a, true)).toBeNull();
     meio.absorveu();
     meio.absorveu();
+    expect(meio.avaliar({ tipo: "result", sucesso: true, subtype: "success", sessaoCli: "s", texto: "", custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [], erroCru: null }, true)).toBeNull();
     expect(meio.avaliar({ tipo: "delta", texto: "Respondo" }, true)).toBeNull();
     expect(meio.avaliar(vazio, true)).toBeNull();
     expect(meio.avaliar(a, true)).toBe("Respondo as duas.");
@@ -74,7 +106,7 @@ describe("primeira fala depois de uma mensagem absorvida (stream-json gravado)",
   it("a resposta que era o último bloco (o `result.texto` igual a ela) também sai da fala final, e os deltas dela não voltam", () => {
     const meio = criarFalaDoMeio();
     const resposta: EventoStream = { tipo: "texto_bloco", texto: "4" };
-    meio.absorveu();
+    meio.armar();
     meio.avaliar(resposta, true);
     const eventos: EventoStream[] = [
       { tipo: "init", sessaoCli: "s", ferramentas: [], modelo: "m", versaoCli: "v", apiKeySource: "none" },

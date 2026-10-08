@@ -149,7 +149,10 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
 // ADR-081 §6 (#189), mensagem no meio: a 1ª mensagem abre a volta ("Vou revisar as tasks." e `consultar`) e a
 // ferramenta só "termina" quando chega a 2ª mensagem pelo stdin — o CLI a lê no limite da ferramenta e o modelo
 // responde curto ("Recebi: …") antes de chamar `lembrar` e fechar com "Revisei as três." num `result` só.
+// NOD_FALSO_MEIO_CEDO=1 (X1, revisão do épico #188): a 2ª mensagem chega enquanto a narração ainda sai (só o delta
+// dela saiu); o bloco "Vou revisar as tasks." e o `consultar` vêm depois, e o CLI só a lê no `tool_result`.
 if (process.env.NOD_FALSO_CENARIO === "mensagem-no-meio") {
+  const cedo = process.env.NOD_FALSO_MEIO_CEDO === "1";
   const sessaoMeio = valor("--session-id") ?? valor("--resume") ?? "00000000-0000-4000-8000-000000000000";
   const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
   const texto = (t) => out({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: t }] } });
@@ -175,9 +178,17 @@ if (process.env.NOD_FALSO_CENARIO === "mensagem-no-meio") {
       if (mensagens === 1) {
         emVolta = true;
         out({ type: "system", subtype: "init", session_id: sessaoMeio, tools: ["mcp__nod__consultar", "mcp__nod__lembrar"], model: "claude-sonnet-4-6", claude_code_version: VERSAO, apiKeySource: "none" });
-        texto("Vou revisar as tasks.");
-        ferramenta("toolu_1", "consultar");
+        if (cedo) {
+          out({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Vou revisar" } } });
+        } else {
+          texto("Vou revisar as tasks.");
+          ferramenta("toolu_1", "consultar");
+        }
       } else if (mensagens === 2) {
+        if (cedo) {
+          texto("Vou revisar as tasks.");
+          ferramenta("toolu_1", "consultar");
+        }
         resultado("toolu_1");
         texto(`Recebi: ${recebido.slice(0, 160)}`);
         ferramenta("toolu_2", "lembrar");

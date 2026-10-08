@@ -86,6 +86,8 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
     const etapa = { falou: false, liberado: false, rodados: [] as string[] };
     const recebidas: string[] = [];
     let aberta = true;
+    // X2 (revisão do épico #188): a escrita aceita avisa o laço por `mensagemEntrou`, como o stdin do Claude.
+    let sinksVivos: SinksTurno | null = null;
     const driverVivo: Driver = {
       meta: { id: "catcher", locality: "ambos", capacidades: SESSAO_VIVA },
       async create() {
@@ -94,6 +96,7 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
           dispose: async () => {},
           adapter: (plano): Adapter => ({
             async rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno> {
+              sinksVivos = sinks;
               etapa.rodados.push(plano.turnoId);
               await sinks.sinal("attempted");
               await sinks.sinal("promptSubmitted");
@@ -108,9 +111,10 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
             },
             async interromper() { etapa.liberado = true; },
             aceitaMensagens: () => aberta,
-            receberMensagem(texto) {
+            receberMensagem(texto, id) {
               if (!aberta) return false;
               recebidas.push(texto);
+              if (id !== undefined) sinksVivos?.mensagemEntrou?.(id);
               return true;
             },
           }),
@@ -181,8 +185,10 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
           dispose: async () => {},
           adapter: (plano): Adapter => {
             let aberta = true;
+            let sinksDoTurno: SinksTurno | null = null;
             return {
               async rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno> {
+                sinksDoTurno = sinks;
                 etapa.rodados.push(plano.turnoId);
                 await sinks.sinal("attempted");
                 await sinks.sinal("promptSubmitted");
@@ -200,10 +206,11 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
               },
               async interromper() { etapa.liberado = true; },
               aceitaMensagens: () => aberta,
-              receberMensagem(texto) {
+              receberMensagem(texto, id) {
                 etapa.ofertas += 1;
                 if (!aberta || !o.escreve) return false;
                 recebidas.push(texto);
+                if (id !== undefined) sinksDoTurno?.mensagemEntrou?.(id);
                 return true;
               },
             };

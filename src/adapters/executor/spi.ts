@@ -43,6 +43,14 @@ export type SinksTurno = {
    * fechar, e daqui em diante o servidor não absorve mais nada para este turno.
    */
   ocioso?(): Promise<boolean>;
+  /**
+   * revisto em 2026-10-08 (revisão do épico #188, X2): a mensagem `id` (de `receberMensagem`) ENTROU na sessão — o
+   * stdin do CLI a aceitou, o app-server aceitou o steer ou abriu a volta com ela. Só então o laço a confirma ao
+   * servidor; antes disso ela continua `pendente` na fila e, se nunca entrar, vira turno próprio.
+   */
+  mensagemEntrou?(id: string): void;
+  /** X2: a mensagem `id` não vai entrar (a volta que a levaria foi recusada, ou a sessão acabou com ela na fila). */
+  mensagemDevolvida?(id: string): void;
 };
 
 export interface Adapter {
@@ -52,8 +60,10 @@ export interface Adapter {
   /**
    * Sessão viva (ADR-067): uma mensagem nova da pessoa entra no meio do trabalho, como no Claude Code. `false` = este
    * adapter não tem sessão viva ou ela já fechou a entrada; o laço então não pede mensagens ao servidor.
+   * revisto em 2026-10-08 (X2): `true` = aceita para entrar; a confirmação vem depois por `mensagemEntrou(id)` (ou
+   * `mensagemDevolvida(id)`) nos sinks do turno. Sem `id`, nada é confirmado.
    */
-  receberMensagem?(texto: string): boolean;
+  receberMensagem?(texto: string, id?: string): boolean;
   /** true enquanto o adapter aceita mensagem nova (sessão viva com a entrada aberta). */
   aceitaMensagens?(): boolean;
   /**

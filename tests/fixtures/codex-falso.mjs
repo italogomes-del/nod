@@ -101,6 +101,7 @@ else {
  *   conhece (`account/rateLimits/updated`) sai no primeiro turno.
  * - "[[chat-steer]]" no texto (chat do Codex, ADR-081 §6): fala "Começando.", chama `consultar` e espera um turn/steer;
  *   com ele, fala "Recebi: <texto do steer>", chama `lembrar` e fecha com "Terminei.".
+ * - TESTE_NOD_RECUSAR_TURNO=N (X2, revisão do épico #188): o N-ésimo turn/start responde erro (o turno não abre).
  * - stdin fechado: grava o registro (TESTE_NOD_REGISTRO) e sai 0.
  */
 async function appServer() {
@@ -236,9 +237,13 @@ async function appServer() {
           ], nextCursor: null });
           break;
         case "turn/start": {
-          const turnId = `turn_${proximoTurno++}`;
           const texto = m.params.input?.[0]?.text ?? "";
           registro.turnos.push({ texto, effort: m.params.effort }); gravar();
+          if (Number(process.env.TESTE_NOD_RECUSAR_TURNO) === registro.turnos.length) {
+            emit({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "turno recusado" } });
+            break;
+          }
+          const turnId = `turn_${proximoTurno++}`;
           const abrir = () => {
             responder(m.id, { turn: { id: turnId, status: "inProgress", items: [] } });
             ativo = { id: turnId, aoSteer: null, aoInterromper: null };

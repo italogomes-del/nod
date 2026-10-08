@@ -141,9 +141,11 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       if (renovando) return renovando;
       let confirmou = false;
       renovando = (async () => {
-        const enviadas = falas;
-        const confirmar = entregues;
-        const devolver = devolvidas;
+        // Cópias (revisto em 2026-10-08, X2): a fala e a confirmação que chegam com a renovação no ar entram no array vivo;
+        // com o mesmo array, o filtro da resposta as daria por enviadas sem que tivessem ido.
+        const enviadas = [...falas];
+        const confirmar = [...entregues];
+        const devolver = [...devolvidas];
         const aceita = aceitando && adapterAtual?.aceitaMensagens?.() === true;
         const memoria = o.memoria?.leitura(plano.turnoId, medirGrupo ? (adapterAtual?.grupoDeProcessos?.() ?? null) : null);
         try {
@@ -171,12 +173,15 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             devolvidas = devolvidas.filter((id) => !devolver.includes(id));
           }
           const ids = r.mensagensIds ?? [];
+          const semMoldura = r.mensagensSemMoldura ?? [];
           for (const [i, texto] of (r.mensagens ?? []).entries()) {
             const id = ids[i];
-            // ADR-081 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver.
-            if (adapterAtual?.receberMensagem?.(molduraMensagemNoMeio(texto))) {
+            // ADR-081 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver. X3 (revisto
+            // em 2026-10-08): o recado para a task não é fala da pessoa — entra como veio.
+            const entrada = id !== undefined && semMoldura.includes(id) ? texto : molduraMensagemNoMeio(texto);
+            // X2: `true` = o adapter vai escrevê-la; ela só é confirmada quando ele avisar que entrou (mensagemEntrou).
+            if (adapterAtual?.receberMensagem?.(entrada, id)) {
               mensagensRecebidas += 1;
-              if (id) entregues.push(id);
             } else {
               // O CLI morreu entre o pedido e a resposta: a mensagem volta para a fila (#189) e vira turno próprio. A
               // sessão que recusou a escrita não pede mais mensagens neste turno (senão a mesma voltaria a cada renovação).
@@ -246,6 +251,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         seqLocal,
         fala: { tipo: "texto", texto: resultado.texto },
         resultado,
+        // X4 (revisto em 2026-10-08): a última renovação falhou com mensagens que entraram ainda sem confirmação — a
+        // entrega confirma; senão elas viravam turno próprio e a pessoa recebia a resposta duas vezes.
+        ...(entregues.length ? { mensagensEntregues: [...entregues] } : {}),
       };
       try {
         await o.ponte.entregar(entrega);
@@ -284,6 +292,15 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         falaIntermediaria(texto) {
           seqFala += 1;
           falas.push({ seq: seqFala, texto: cortarTexto(texto) });
+          void renovar();
+        },
+        // X2 (revisto em 2026-10-08): só o que entrou na sessão é confirmado; o devolvido volta para a fila do servidor.
+        mensagemEntrou(id) {
+          if (!entregues.includes(id)) entregues.push(id);
+          void renovar();
+        },
+        mensagemDevolvida(id) {
+          if (!devolvidas.includes(id)) devolvidas.push(id);
           void renovar();
         },
         async ocioso() {
