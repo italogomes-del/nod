@@ -151,6 +151,10 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 export function pontoTrabalho(t: Pick<TrabalhoDto, "estado">, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
+  // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
+  // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.
+  if (t.estado === "parado") return '<span class="ponto-trabalho feito parado" aria-hidden="true">■</span>';
+  if (t.estado === "falhou") return '<span class="ponto-trabalho feito falhou" aria-hidden="true">!</span>';
   if (!aberto(t)) return '<span class="ponto-trabalho feito" aria-hidden="true">✓</span>';
   return `<span class="ponto-trabalho ${esc(cor ?? "")}${t.estado === "rodando" ? " pulso-trab" : ""}" aria-hidden="true"></span>`;
 }

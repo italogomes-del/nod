@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { estadoMascoteNaConversa } from "../../../web/lib/mascote.ts";
+import { pontoTrabalho } from "../../../web/lib/trabalhos.ts";
 import { nivelDaGaveta } from "../../../web/telas/detalhes.ts";
 
 /**
@@ -40,5 +41,13 @@ describe("um sinal por bot (K8 variante 3): task rodando não anima o mascote", 
     expect(estadoMascoteNaConversa(pelaLista, "c-dev1")).toBe("disponivel");
     const conversa: Estado = { ...pelaLista, turnosVivos: { ...pelaLista.turnosVivos, tc: vivo("tc") } };
     expect(estadoMascoteNaConversa(conversa, "c-dev1")).toBe("trabalhando");
+  });
+});
+
+describe("o ✓ é só da task que terminou", () => {
+  it("terminada ✓; parada ■; falhou !", () => {
+    expect(pontoTrabalho({ estado: "terminado" }, "c-red")).toContain(">✓<");
+    expect(pontoTrabalho({ estado: "parado" }, "c-red")).toBe('<span class="ponto-trabalho feito parado" aria-hidden="true">■</span>');
+    expect(pontoTrabalho({ estado: "falhou" }, "c-red")).toBe('<span class="ponto-trabalho feito falhou" aria-hidden="true">!</span>');
   });
 });

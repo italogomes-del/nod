@@ -1126,6 +1126,8 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .ponto-trabalho.precisa { background: var(--signal); }
 .ponto-trabalho.na-fila { background: transparent; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
 .ponto-trabalho.feito { width: auto; height: auto; border-radius: 0; background: none; color: var(--success); font-size: 12px; line-height: 1; }
+.ponto-trabalho.feito.parado { color: var(--ink-3); font-size: 9px; }
+.ponto-trabalho.feito.falhou { color: var(--danger); font-weight: 700; }
 /* K8, variante 3: o ponto pisca de leve (opacidade, 1,6 s) enquanto há task rodando; sem animação para quem pediu menos movimento. */
 @keyframes pulsa-trab { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .pulso-trab { animation: pulsa-trab 1.6s ease-in-out infinite; }
