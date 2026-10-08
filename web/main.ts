@@ -67,7 +67,7 @@ import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
-import { aberto, abertosDoBot, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
+import { aberto, abertosDoBot, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
@@ -2015,7 +2015,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota", "trabalhos"] });
     });
     if (tasks.length === 0) return parar();
-    pedirGestao(textoPararTasks(tasks), `<p>${esc(botGerido(t.tipo === "conversa" ? t.agenteId : undefined)?.nome ?? "O bot")} para também o que estiver fazendo nesta conversa. O que já foi feito fica.</p>`, tasks.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
+    const nome = botGerido(t.tipo === "conversa" ? t.agenteId : undefined)?.nome;
+    pedirGestao(textoPararTasks(tasks, nome), `${listaPararTasks(tasks)}<p>${esc(nome ?? "O bot")} para também o que estiver fazendo nesta conversa. O que já foi feito fica.</p>`, tasks.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
   },
   // A tela da task (#195): Parar task para só ela; Fechar (ou Esc) volta para onde a pessoa estava.
   "abrir-trabalho": (el) => abrirTrabalho(el.dataset.id ?? ""),
