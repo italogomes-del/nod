@@ -99,6 +99,8 @@ else {
  *   resposta do turn/start (a ordem que o app-server real pode entregar num turno curto).
  * - model/list (NOD-167) devolve o Luna e um modelo de chat, com os esforços aceitos; uma notificação que o laço não
  *   conhece (`account/rateLimits/updated`) sai no primeiro turno.
+ * - "[[chat-steer]]" no texto (chat do Codex, ADR-081 §6): fala "Começando.", chama `consultar` e espera um turn/steer;
+ *   com ele, fala "Recebi: <texto do steer>", chama `lembrar` e fecha com "Terminei.".
  * - stdin fechado: grava o registro (TESTE_NOD_REGISTRO) e sai 0.
  */
 async function appServer() {
@@ -137,11 +139,18 @@ async function appServer() {
   const dormirMs = (ms) => new Promise((r) => setTimeout(r, ms));
   const responder = (id, result) => emit({ jsonrpc: "2.0", id, result });
   const notificar = (method, params) => emit({ jsonrpc: "2.0", method, params });
+  let mensagensFaladas = 0;
   const falar = async (threadId, turnId, partes) => {
-    const itemId = `msg_${turnId}`;
+    const itemId = `msg_${turnId}_${++mensagensFaladas}`;
     notificar("item/started", { threadId, turnId, item: { type: "agentMessage", id: itemId, text: "" } });
     for (const delta of partes) { notificar("item/agentMessage/delta", { threadId, turnId, itemId, delta }); await dormirMs(5); }
     notificar("item/completed", { threadId, turnId, item: { type: "agentMessage", id: itemId, text: partes.join("") } });
+  };
+  const ferramenta = async (threadId, turnId, tool) => {
+    const id = `mcp_${turnId}_${tool}`;
+    notificar("item/started", { threadId, turnId, item: { type: "mcpToolCall", id, server: "nod", tool, status: "inProgress", arguments: {} } });
+    await dormirMs(5);
+    notificar("item/completed", { threadId, turnId, item: { type: "mcpToolCall", id, server: "nod", tool, status: "completed", arguments: {} } });
   };
   const concluir = (threadId, turnId, status) => {
     notificar("thread/tokenUsage/updated", { threadId, turnId, tokenUsage: { total: { inputTokens: 100 * proximoTurno, cachedInputTokens: 80, outputTokens: 10 * proximoTurno, totalTokens: 0 } } });
@@ -174,6 +183,17 @@ async function appServer() {
       notificar("item/started", { threadId, turnId, item: { type: "mcpToolCall", id: `mcp_${turnId}`, server: "nod", tool: "lembrar", status: "inProgress", arguments: {} } });
       await dormirMs(5);
       notificar("item/completed", { threadId, turnId, item: { type: "mcpToolCall", id: `mcp_${turnId}`, server: "nod", tool: "lembrar", status: "completed", arguments: {} } });
+    }
+    if (texto.includes("[[chat-steer]]")) {
+      const esperando = new Promise((r) => { ativo = { id: turnId, aoSteer: (t) => r({ steer: t }), aoInterromper: () => r({ interrompido: true }) }; });
+      await falar(threadId, turnId, ["Começando."]);
+      await ferramenta(threadId, turnId, "consultar");
+      const desfecho = await esperando;
+      if (desfecho.interrompido) return concluir(threadId, turnId, "interrupted");
+      await falar(threadId, turnId, ["Recebi: ", desfecho.steer]);
+      await ferramenta(threadId, turnId, "lembrar");
+      await falar(threadId, turnId, ["Terminei."]);
+      return concluir(threadId, turnId, "completed");
     }
     if (texto.includes("demorar")) {
       // Os ganchos entram ANTES da fala: o steer/interrupt pode chegar logo depois do primeiro delta.
