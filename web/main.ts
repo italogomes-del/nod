@@ -33,7 +33,7 @@ import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
-import { renderDetalhes } from "./telas/detalhes.ts";
+import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
@@ -1950,9 +1950,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
   gaveta: (el) => {
-    const tipo = el.dataset.nivel;
-    const id = el.dataset.id ?? "";
-    const nivel: NivelGaveta | null = tipo === "rotina" || tipo === "acesso" ? { tipo, id } : tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" ? { tipo } : null;
+    const nivel = nivelDaGaveta(el.dataset.nivel, el.dataset.id ?? "");
     if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
   },
   "gaveta-voltar": () => voltarNivel(),
