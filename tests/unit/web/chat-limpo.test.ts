@@ -334,9 +334,10 @@ describe("QA do épico (2026-10-08): nome de rotina longo não estica a linha ne
 describe("QA do épico (2026-10-08): o aviso de turno interrompido da task fica na tela dela", () => {
   it("Parar task / Fazer depois / Fazer aqui não deixam 'Turno interrompido' no chat; a task que falhou deixa", () => {
     const aviso = (id: string, trabalhoId: string): Mensagem => msg(id, t0 + MIN, { kind: "sistema", texto: "Turno interrompido: você pediu para parar.", turnoId: `t-${id}`, origemTurno: "conversa", trabalhoId });
-    const lista = [trabalho("tb-parada", { estado: "parado", terminadoEm: t0 + MIN }), trabalho("tb-fila", { estado: "na_fila" }), trabalho("tb-falhou", { estado: "falhou", terminadoEm: t0 + MIN })];
-    const { e, c } = cenario([daPessoa("p1", t0), aviso("a1", "tb-parada"), aviso("a2", "tb-fila"), aviso("a3", "tb-falhou")], { trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: null } });
-    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "a3"]);
+    const lista = [trabalho("tb-parada", { estado: "parado", terminadoEm: t0 + MIN }), trabalho("tb-fila", { estado: "na_fila" }), trabalho("tb-falhou", { estado: "falhou", terminadoEm: t0 + MIN }), trabalho("tb-espera", { estado: "precisa_de_voce" })];
+    const { e, c } = cenario([daPessoa("p1", t0), aviso("a1", "tb-parada"), aviso("a2", "tb-fila"), aviso("a3", "tb-falhou"), aviso("a4", "tb-espera")], { trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: null } });
+    // A que falhou e a que ficou esperando a pessoa porque o Mac caiu no meio continuam com o aviso.
+    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "a3", "a4"]);
   });
 });
 
