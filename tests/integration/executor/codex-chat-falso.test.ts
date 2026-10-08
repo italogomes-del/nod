@@ -157,6 +157,14 @@ it("X2: o turn/start que levaria a mensagem é recusado — ela nunca é confirm
   expect(r.desfecho).toBeDefined();
 });
 
+it("X9: capacidades anunciadas — mensagem no meio só com o app-server achado pela sonda", async () => {
+  const comAppServer = await criarCodexCliDriver(lig).create(cfg);
+  expect(await comAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: true, bifurcaSessao: false, retomaSessao: false });
+  cfg.env.TESTE_NOD_SEM_APP_SERVER = "1";
+  const semAppServer = await criarCodexCliDriver(lig).create(cfg);
+  expect(await semAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: false, bifurcaSessao: false });
+});
+
 it("Parar no meio do chat encerra o app-server e sai interrompido; o grupo do processo é medível enquanto roda", async () => {
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const adapter = instance.adapter(planoHarness({ texto: "[[chat-steer]] e espera" }));

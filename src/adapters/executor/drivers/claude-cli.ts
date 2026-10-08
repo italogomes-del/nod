@@ -331,8 +331,9 @@ const chavesSinais: readonly (keyof SinaisTurno)[] = ["attempted", "rejected", "
 
 export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
   const prazoSondaMs = lig.prazoSondaMs ?? PRAZO_SONDA_PADRAO_MS;
+  const capacidadesDoDriver = capacidadesDe("claude-cli");
   return {
-    meta: { id: "claude-cli", locality: "local", capacidades: capacidadesDe("claude-cli") },
+    meta: { id: "claude-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg: ConfigDriver): Promise<Instance> {
       const home = cfg.env.HOME ?? homedir();
       const path = caminhoAumentado(cfg.env.PATH, home);
@@ -403,6 +404,18 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           if ("versao" in s.inventario && s.inventario.versao) versao = s.inventario.versao;
           log("info", "teste_claude_cli", { estado: s.inventario.estado, causa: "causa" in s.inventario ? s.inventario.causa ?? null : null, custo_usd: s.custoUsd });
           return { inventario: s.inventario, resposta: s.resposta };
+        },
+
+        // X9 (definido em 2026-10-08, revisão do épico #188): o que o app anuncia é a promessa do driver com os pisos do
+        // CLI instalado — sem `--fork-session` no help o turno de cópia é recusado (rodarTurno), e sem `--input-format` a
+        // sessão não fica viva. Sem conseguir ler o help, fecha as duas (o servidor cai no caminho sem a capacidade).
+        async capacidades() {
+          const flags = await garantirVersao().then(() => flagsNoHelp ?? [], () => [] as string[]);
+          return {
+            ...capacidadesDoDriver,
+            bifurcaSessao: capacidadesDoDriver.bifurcaSessao && flags.includes("--fork-session"),
+            mensagemNoMeio: capacidadesDoDriver.mensagemNoMeio && flags.includes("--input-format"),
+          };
         },
 
         adapter(plano: PlanoTurno): Adapter {

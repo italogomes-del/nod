@@ -90,6 +90,12 @@ export interface Instance {
    * não deu para saber agora (sonda lenta). Ausente = o motor não tem esse piso (o Claude Code).
    */
   lacoDeVoz?(): Promise<boolean | null>;
+  /**
+   * definido em 2026-10-08 (revisão do épico #188, X9): as capacidades de `meta.capacidades` ajustadas pelo CLI
+   * instalado (ex.: `bifurcaSessao` só com `--fork-session` no help). É o que o app anuncia ao servidor. Ausente = as do
+   * `meta`, sem ajuste.
+   */
+  capacidades?(): Promise<CapacidadesHarness>;
   adapter(plano: PlanoTurno): Adapter;
   dispose(): Promise<void>;
 }

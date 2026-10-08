@@ -396,7 +396,7 @@ async function conectar(c: Config) {
   const vigia = criarVigiaDasIas({
     sondar: () => criarRegistryDetalhado(envExecutor, drivers, { cfg }),
     impressao: (ia) => impressaoDoLogin(ia, cfg),
-    anunciar: async (inventarios, principal, semLacoDeVoz) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz }); },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades }); },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);

@@ -1,5 +1,7 @@
 import { IAS_DESKTOP, type IaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
+import { SEM_CAPACIDADES, type CapacidadesHarness } from "../src/contracts/harness.ts";
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../src/contracts/inventario.ts";
+import { capacidadesDe } from "../src/domain/harness.ts";
 import { sondaFoiLenta } from "../src/domain/sonda-lenta.ts";
 import type { IdDriver, Registry } from "../src/adapters/executor/spi.ts";
 import { nomeParaOTeste, perguntaDoTeste } from "../src/domain/conta-da-ia.ts";
@@ -34,6 +36,8 @@ export const ESPERA_RETESTE_MS = 60_000;
 export const ESPERA_RETESTE_MAX_MS = 3_600_000;
 
 type Inventarios = Partial<Record<IdDriver, Inventario>>;
+/** X9: as capacidades de cada IA pronta, já com os pisos do CLI instalado (o `AnuncioMaquina.capacidades`). */
+export type CapacidadesAnunciadas = Partial<Record<IaDesktop, CapacidadesHarness>>;
 export type Sondagem = { registry: Registry; inventarios: Inventarios };
 
 export type DepsVigia = {
@@ -43,9 +47,10 @@ export type DepsVigia = {
   impressao(ia: IaDesktop): Promise<string | null>;
   /**
    * Manda o inventário ao servidor (o `conectar` da ponte). `principal` é a IA pronta, ou a que explica a falta.
-   * `semLacoDeVoz` (NOD-167): as prontas que não atendem ligação (o Codex sem `app-server`).
+   * `semLacoDeVoz` (NOD-167): as prontas que não atendem ligação (o Codex sem `app-server`). `capacidades` (X9,
+   * definido em 2026-10-08): o que cada IA pronta sabe fazer neste Mac.
    */
-  anunciar(inventarios: Inventarios, principal: Inventario, semLacoDeVoz: IaDesktop[]): Promise<void>;
+  anunciar(inventarios: Inventarios, principal: Inventario, semLacoDeVoz: IaDesktop[], capacidades: CapacidadesAnunciadas): Promise<void>;
   /** Uma IA ficou pronta: `registry` é o que o laço deve usar (chamado a cada mudança, não só na primeira). */
   aoRegistry(registry: Registry, algumaPronta: boolean): void;
   ler(): Promise<unknown>;
@@ -188,6 +193,22 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     return saida;
   }
 
+  /**
+   * X9 (definido em 2026-10-08, revisão do épico #188): a promessa de cada driver pronto, ajustada pela sonda do CLI
+   * (`Instance.capacidades`). O servidor só promove pela rede de 2 min quando a máquina anunciou `bifurcaSessao`. Sonda
+   * que falha anuncia nenhuma capacidade: o servidor segue o caminho sem ela, nunca promete o que o CLI não faz.
+   */
+  async function capacidadesAnunciadas(s: Sondagem, inventarios: Inventarios): Promise<CapacidadesAnunciadas> {
+    const saida: CapacidadesAnunciadas = {};
+    for (const ia of IAS_DESKTOP) {
+      const reg = s.registry[ia];
+      if (inventarios[ia]?.estado !== "pronto" || reg?.estado !== "pronto") continue;
+      const promessa = reg.driver.meta.capacidades ?? capacidadesDe(ia);
+      saida[ia] = reg.instance.capacidades ? await reg.instance.capacidades().catch(() => SEM_CAPACIDADES) : promessa;
+    }
+    return saida;
+  }
+
   async function publicar(s: Sondagem, inventarios: Inventarios): Promise<void> {
     // A principal é a pronta; sem nenhuma, a que melhor explica a falta: a reprovada no teste, depois a sem login.
     const todos = Object.values(inventarios);
@@ -199,12 +220,14 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     // NOD-178: a causa conta também em 'ausente': "ausente lento" → "ausente de verdade" tem de chegar ao servidor.
     // NOD-167: o Codex atualizado (ganhou o app-server) também é novidade, mesmo com o estado igual.
     const semVoz = await semLacoDeVoz(s, inventarios);
-    const chave = JSON.stringify([IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado !== "pronto" ? i.causa ?? null : null]; }), semVoz]);
+    // X9: o CLI atualizado (ganhou `--fork-session`) também é novidade.
+    const capacidades = await capacidadesAnunciadas(s, inventarios);
+    const chave = JSON.stringify([IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado !== "pronto" ? i.causa ?? null : null]; }), semVoz, capacidades]);
     ultima = s;
     ultimosInventarios = inventarios;
     d.aoRegistry(s.registry, principal.estado === "pronto");
     if (chave === ultimoAnuncio) return;
-    await d.anunciar(inventarios, principal, semVoz);
+    await d.anunciar(inventarios, principal, semVoz, capacidades);
     ultimoAnuncio = chave;
   }
 
