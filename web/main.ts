@@ -70,7 +70,7 @@ import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
-import { chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTelaTrabalho, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
+import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -697,7 +697,9 @@ function renderPrincipal(): void {
       break;
     case "trabalho":
       cabecalho = renderTopoTrabalho(estado, t.id);
-      corpo = `<div class="timeline tk-timeline">${renderTelaTrabalho(estado, t.id)}</div>`;
+      // Por blocos como a conversa (definido em 2026-10-08, revisão W1, ADR-061): o texto ao vivo só mexe na parte ao vivo.
+      partes = partesDaTask(t.id);
+      corpo = CASCA_TIMELINE_TASK;
       composer = { chave: `trabalho:${t.id}`, html: htmlComposer("Escreva para esta task…") + htmlAcoesDaTask(t.id) };
       break;
     case "linha":
@@ -766,6 +768,14 @@ type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[
  * algo que ele lê muda; a parte ao vivo é refeita a cada quadro, e só o bloco do turno que escreveu é regravado.
  */
 const CASCA_TIMELINE = '<div class="timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/** A casca da tela da task: as mesmas duas partes da conversa, com o desenho da task (`tk-timeline`). */
+const CASCA_TIMELINE_TASK = '<div class="timeline tk-timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/** A tela da task em duas partes: o histórico lembrado (só muda com mensagem nova) e o ao vivo do turno do trabalho. */
+function partesDaTask(id: string): PartesDaTimeline {
+  return { historico: lembrar("task-historico", estado, [id], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
+}
 
 function partesDaTimeline(): PartesDaTimeline | null {
   const c = conversaDaTela(estado);
