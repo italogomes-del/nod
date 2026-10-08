@@ -9,7 +9,7 @@ import { AVALIACAO_VIGIA_MS, criarVigiaTurno } from "../../domain/vigia-turno.ts
 import { log } from "../../obs/log.ts";
 import { CHECAGEM_MENSAGENS_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
-import type { FonteMemoria } from "./amostrador-memoria.ts";
+import { INTERVALO_AMOSTRA_MEMORIA_MS, type FonteMemoria } from "./amostrador-memoria.ts";
 import type { Adapter, IdDriver, Registry } from "./spi.ts";
 
 /**
@@ -135,6 +135,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let devolvidas: string[] = [];
     let medirGrupo = false;
     const aConfirmar = () => entregues.length > 0 || devolvidas.length > 0;
+    // X5 (revisto em 2026-10-08): a última leitura de memória que o servidor confirmou (o número da amostra e quando).
+    let memoriaEnviada: { amostra: number; em: number } | null = null;
 
     const renovar = async (): Promise<void> => {
       if (entregue) return;
@@ -147,7 +149,12 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         const confirmar = [...entregues];
         const devolver = [...devolvidas];
         const aceita = aceitando && adapterAtual?.aceitaMensagens?.() === true;
-        const memoria = o.memoria?.leitura(plano.turnoId, medirGrupo ? (adapterAtual?.grupoDeProcessos?.() ?? null) : null);
+        // A leitura é pedida sempre (registra o grupo do turno e acorda o amostrador); só VAI quando a amostra mudou ou
+        // a cada 30 s — a renovação de 1 s do app levava a mesma leitura 30 vezes.
+        const leitura = o.memoria?.leitura(plano.turnoId, medirGrupo ? (adapterAtual?.grupoDeProcessos?.() ?? null) : null);
+        const amostra = o.memoria?.amostra() ?? 0;
+        const agora = o.relogio();
+        const memoria = leitura && (memoriaEnviada === null || memoriaEnviada.amostra !== amostra || agora - memoriaEnviada.em >= INTERVALO_AMOSTRA_MEMORIA_MS) ? leitura : null;
         try {
           const r = await o.ponte.renovar({
             turnoId: plano.turnoId,
@@ -171,6 +178,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           if (r.ativo) {
             entregues = entregues.filter((id) => !confirmar.includes(id));
             devolvidas = devolvidas.filter((id) => !devolver.includes(id));
+            if (memoria) memoriaEnviada = { amostra, em: agora };
           }
           const ids = r.mensagensIds ?? [];
           const semMoldura = r.mensagensSemMoldura ?? [];

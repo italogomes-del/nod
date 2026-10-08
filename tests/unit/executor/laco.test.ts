@@ -524,7 +524,7 @@ describe("sessão viva no laço (ADR-067)", () => {
     const d = driverControlado({ capacidades: SEM_CAPACIDADES, grupo: 4242 });
     const ponte = ponteDaSessao({ fila: ["não deve entrar"] });
     const leituras: (number | null)[] = [];
-    const memoria = { leitura: (_t: string, g: number | null): LeituraMemoria => (leituras.push(g), { nivel: "amarela", totalMb: 0, porTurno: [] }), soltar: () => {} };
+    const memoria = { leitura: (_t: string, g: number | null): LeituraMemoria => (leituras.push(g), { nivel: "amarela", totalMb: 0, porTurno: [] }), soltar: () => {}, amostra: () => 1 };
     const laco = await cenario(d, ponte, { checagemMensagensMs: 10, memoria });
     await new Promise((r) => setTimeout(r, 60));
     d.sinks()!.falaIntermediaria!("uma fala");
@@ -535,7 +535,9 @@ describe("sessão viva no laço (ADR-067)", () => {
     expect(d.recebidas).toEqual([]);
     // Sem `processoProprio`, o nível vai (a pressão é da máquina), mas o turno não entra na soma.
     expect(leituras.every((g) => g === null)).toBe(true);
-    expect(ponte.renovacoes.every((r) => r.memoria?.nivel === "amarela")).toBe(true);
+    // X5: a mesma amostra vai uma vez só (a primeira renovação), não em toda batida.
+    expect(ponte.renovacoes[0]!.memoria?.nivel).toBe("amarela");
+    expect(ponte.renovacoes.slice(1).every((r) => r.memoria === undefined)).toBe(true);
     expect(ponte.entregas[0]!.resultado.desfecho).toBe("sucesso");
     await laco.parar();
   });
@@ -548,6 +550,7 @@ describe("sessão viva no laço (ADR-067)", () => {
     const memoria = {
       leitura: (turnoId: string, g: number | null): LeituraMemoria => (grupos.push(g), { nivel: "verde", totalMb: 512, porTurno: g === null ? [] : [{ turnoId, mb: 512 }] }),
       soltar: (turnoId: string) => void soltos.push(turnoId),
+      amostra: () => grupos.length,
     };
     const laco = await cenario(d, ponte, { memoria });
     d.sinks()!.falaIntermediaria!("rodando");
@@ -555,7 +558,7 @@ describe("sessão viva no laço (ADR-067)", () => {
     await esperarAte(() => ponte.entregas.length === 1);
     expect(grupos.length).toBeGreaterThan(0);
     expect(grupos.every((g) => g === 4242)).toBe(true);
-    expect(ponte.renovacoes.at(-1)!.memoria).toEqual({ nivel: "verde", totalMb: 512, porTurno: [{ turnoId: "t1", mb: 512 }] });
+    expect(ponte.renovacoes.filter((r) => r.memoria).at(-1)!.memoria).toEqual({ nivel: "verde", totalMb: 512, porTurno: [{ turnoId: "t1", mb: 512 }] });
     expect(soltos).toEqual(["t1"]);
     await laco.parar();
   });
@@ -622,6 +625,26 @@ describe("sessão viva no laço (ADR-067)", () => {
     await esperarAte(() => ponte.entregas.length === 1);
     expect(ponte.renovacoes.some((r) => r.mensagensEntregues?.includes("m1"))).toBe(true);
     expect(ponte.entregas[0]!.mensagensEntregues).toEqual(["m1"]);
+    await laco.parar();
+  });
+
+  it("X5: 10 batidas com a amostra parada mandam a memória uma vez; amostra nova ou 30 s depois, de novo", async () => {
+    let t = 0;
+    let amostra = 7;
+    const d = driverControlado({ capacidades: { ...SESSAO_VIVA, processoProprio: true }, grupo: 4242 });
+    const ponte = ponteDaSessao();
+    const memoria = { leitura: (turnoId: string): LeituraMemoria => ({ nivel: "verde", totalMb: 100, porTurno: [{ turnoId, mb: 100 }] }), soltar: () => {}, amostra: () => amostra };
+    const laco = await cenario(d, ponte, { memoria, relogio: () => t, renovacaoMs: 2 });
+    await esperarAte(() => ponte.renovacoes.length >= 10);
+    expect(ponte.renovacoes.filter((r) => r.memoria)).toHaveLength(1);
+    amostra = 8;
+    await esperarAte(() => ponte.renovacoes.filter((r) => r.memoria).length === 2);
+    const depois = ponte.renovacoes.length;
+    t += 30_000;
+    await esperarAte(() => ponte.renovacoes.filter((r) => r.memoria).length === 3);
+    expect(ponte.renovacoes.length).toBeGreaterThan(depois);
+    d.terminar("pronto");
+    await esperarAte(() => ponte.entregas.length === 1);
     await laco.parar();
   });
 });
