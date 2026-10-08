@@ -3,6 +3,7 @@ import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
 import type { MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
+import type { LeituraMemoria } from "./trabalho.ts";
 import type { ResultadoTurno, SinaisTurno, TarefaDoBot } from "./turno.ts";
 
 /** A máquina se anuncia (ADR-021 conectar). */
@@ -58,6 +59,8 @@ export type PedidoRenovar = {
    * conversa e as devolve; sem isto elas esperam na fila, como antes.
    */
   aceitaMensagens?: boolean;
+  /** definido em 2026-10-07 (ADR-081, #194): a memória do Mac, amostrada uma vez por máquina a cada 30 s. */
+  memoria?: LeituraMemoria;
 };
 /** O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067). */
 export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; ligacaoEncerrada?: boolean };

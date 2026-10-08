@@ -495,6 +495,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "relato.criado": (e) => e,
   // A linha "Chat de voz" da conversa e a ligação viva (a barra lateral marca o bot "Em ligação").
   "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
+  // ADR-081: o lane da web (#195/#196) troca estes dois por releitura dos trabalhos e da pressão.
+  "trabalho.mudou": (e, f) => (conv(f) ? invalidar(e, conv(f)) : e),
+  "memoria.mudou": (e) => e,
   resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 

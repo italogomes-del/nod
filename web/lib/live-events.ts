@@ -78,6 +78,8 @@ const TIPOS: Record<TipoFrame, true> = {
   "parada.faixa": true,
   "relato.criado": true,
   "ligacao.mudou": true,
+  "trabalho.mudou": true,
+  "memoria.mudou": true,
   resumed: true,
 };
 

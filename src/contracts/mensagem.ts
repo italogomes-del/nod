@@ -4,6 +4,7 @@ import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
 import type { CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
+import type { OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
@@ -107,4 +108,13 @@ export type Mensagem = {
   criadoEm: EpochMs;
   /** ADR-046: arquivos que a pessoa mandou com esta mensagem (só metadados; bytes por rota própria). */
   anexos?: AnexoMeta[];
+  /**
+   * definido em 2026-10-07 (ADR-081, épico #188): de onde veio o turno que gravou a mensagem, para a web agrupar sem
+   * adivinhar. `origemTurno`: a origem do turno (null = sem turno, como a fala da pessoa); `trabalhoId`: o trabalho do
+   * turno (null = turno da conversa); `fimDoTurno`: é a última fala de um turno já encerrado — as outras falas desse
+   * turno foram do meio (ADR-067). Ausentes = servidor anterior ao épico.
+   */
+  origemTurno?: OrigemTurno | null;
+  trabalhoId?: string | null;
+  fimDoTurno?: boolean;
 };

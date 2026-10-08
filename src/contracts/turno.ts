@@ -74,6 +74,8 @@ export type Turno = {
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
   absorvidoPor?: string | null;
+  /** definido em 2026-10-07 (ADR-081): o trabalho deste turno; null = turno da conversa (a faixa que coordena). */
+  trabalhoId?: string | null;
   /**
    * Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Preenchido só no turno de delegação: a autoria do
    * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
