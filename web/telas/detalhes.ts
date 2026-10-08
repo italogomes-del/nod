@@ -17,6 +17,8 @@ import { renderMemoriaNaGaveta } from "./memoria.ts";
 import { renderNovaRotinaNaGaveta } from "./nova-rotina.ts";
 import { renderAFazerNaGaveta } from "./pendencias.ts";
 import { textoMotivo } from "./negacao.ts";
+import { renderGavetaTrabalhos } from "./trabalhos.ts";
+import { abertosDoBot } from "../lib/trabalhos.ts";
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 type Concessoes = Estado["concessoes"][string];
@@ -66,10 +68,13 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     ? `<section class="gv-secao"><h3>Computador do bot</h3><div class="detalhe-computador-fora"><span class="tag tag-vermelha">fora do ar</span><p>Desde ${esc(dataHora(fora.desde))} · ${esc(MOTIVO_FALHA_TEXTO[fora.motivo])}.</p><div class="dr-acoes">${botao("religar-computador", "Tentar de novo", { classe: "link sm", id: a.id })}${botao("abrir-computador", "Abrir computador", { classe: "link sm", id: a.id })}</div></div></section>`
     : "";
 
+  // ADR-081 (#196): os trabalhos do bot abrem num nível da gaveta (Precisa de você, Trabalhando, Na fila, Terminados hoje).
+  const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
   const atalhos = `<section class="gv-secao"><h3>Atalhos</h3><div class="gv-cartao">
       ${linha(`${ICONE.brilho}<span class="gv-linha-txt">Planejar uma tarefa</span>`, 'data-act="preencher-prompt" data-texto="Me ajude a planejar esta tarefa: "')}
       ${linha(`${ICONE.balao}<span class="gv-linha-txt">Pedir ajuda a outro bot</span>`, 'data-act="preencher-prompt" data-texto="Consulte o colega mais adequado da minha equipe para me ajudar com: "')}
       ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, irPara("memoria"), ICONE.seta)}
+      ${linha(`${ICONE.relogio}<span class="gv-linha-txt">Trabalhos</span>${trabalhosAbertos ? `<span class="gv-meta">${trabalhosAbertos} ${trabalhosAbertos === 1 ? "aberto" : "abertos"}</span>` : ""}`, irPara("trabalhos"), ICONE.seta)}
     </div></section>`;
 
   // definido em 2026-09-24 (revisão da interface): a chave liga/desliga fica na linha; o resto da rotina (instrução,
@@ -142,6 +147,8 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
       };
     case "nova-rotina":
       return { titulo: "Nova rotina", corpo: renderNovaRotinaNaGaveta(a), rodape: rodapeDeFormulario("Criar rotina"), form: 'data-form="criar-rotina"' };
+    case "trabalhos":
+      return { titulo: `Trabalhos de ${a.nome}`, corpo: renderGavetaTrabalhos(estado, a.id) };
   }
 }
 

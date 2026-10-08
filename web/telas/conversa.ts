@@ -29,6 +29,8 @@ import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoLimiteDoPlano, avisoModeloRecusado, ehIa, inventarioDaIa, linhaIaTrocada } from "./ia-fora.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
+import { planejarLinhas } from "./linhas-do-chat.ts";
+import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -287,7 +289,11 @@ export function comChipDeComando(texto: string): string {
   return `<span class="chip-comando">/${esc(m[1]!)}</span>${resto ? ` ${paragrafos(resto)}` : ""}`;
 }
 
-export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
+/**
+ * `etiqueta` (definido em 2026-10-07, #191/#195): a fala que chega de uma rotina ou de uma task leva "da rotina …" /
+ * "da task …" ao lado do nome — é balão porque é para a pessoa, mas não é resposta à última mensagem dela.
+ */
+export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false, opcoes: { etiqueta?: string } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -302,7 +308,8 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // Autoria composta (ADR-023) aparece inteira: o pedido de colega é "Taga · por você" (ADR-047/058). O bloco de
   // contexto só existe em pedido antigo (delegar_tarefa); o de pedir_a_bot já traz o contexto no próprio texto.
   const autor = ehPessoa ? "Você" : m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agente?.nome ?? assinatura(m.autoria, nomesDe(estado));
-  const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time></div>`;
+  const etiqueta = opcoes.etiqueta ? `<span class="etiqueta-origem">${esc(opcoes.etiqueta)}</span>` : "";
+  const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
   const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? "outro bot")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
   const tags = ehPessoa || m.payload?.kind === "peer_pedido" || m.payload?.kind === "boas_vindas"
@@ -570,46 +577,34 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
  */
 export type BlocoDaTimeline = { chave: string; html: string };
 
+/**
+ * As mensagens em blocos (revisto em 2026-10-07, #191, chat limpo): `planejarLinhas` (web/telas/linhas-do-chat.ts) diz
+ * o que vira linha centralizada, o que vira balão com etiqueta e o que some para dentro de uma linha ou da tela da task;
+ * o resto é desenhado como sempre. O pedido a colega de quem pede, que era um `<details class="collaboration">`, agora é
+ * linha também ("Enviou mensagem para…", "N mensagens com…").
+ */
 function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean): BlocoDaTimeline[] {
-  const grupos = new Map<string, Mensagem[]>();
-  const tarefas = new Map<string, string>();
-  for (const m of mensagens) {
-    if (m.payload?.kind === "handoff" && m.payload.tarefaId) tarefas.set(m.payload.tarefaId, m.turnoId ?? m.id);
-  }
-  const grupoDe = (m: Mensagem): string | undefined => {
-    if (m.payload?.kind === "handoff" && m.payload.tarefaId) return tarefas.get(m.payload.tarefaId);
-    if (m.payload?.kind === "peer_ask") return tarefas.get(m.payload.tarefaId) ?? m.payload.turnoOrigemId ?? m.id;
-    return undefined;
-  };
-  for (const m of mensagens) {
-    const k = grupoDe(m);
-    if (k) grupos.set(k, [...(grupos.get(k) ?? []), m]);
-  }
-  const mostrados = new Set<string>();
+  const planos = planejarLinhas(mensagens, estado);
   // definido em 2026-09-29 (0039, canvas "Não lidos"): a linha "Novas" entra acima da primeira não lida de quando a
-  // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair.
+  // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair. Se a
+  // primeira não lida sumiu para dentro de uma linha, a linha "Novas" fica sozinha no lugar dela.
   const novas = mensagens[0] ? estado.novasDesde[mensagens[0].conversaId] : undefined;
-  const pedacos = mensagens.map((m) => (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + pedaco(m));
-  function pedaco(m: Mensagem): string {
-    const k = grupoDe(m);
-    if (!k) return renderMensagem(m, estado, sala);
-    if (mostrados.has(k)) return "";
-    mostrados.add(k);
-    const grupo = grupos.get(k) ?? [];
-    const participantes = [...new Set(grupo.flatMap((x) => x.payload?.kind === "handoff" ? [x.payload.para] : x.payload?.kind === "peer_ask" ? [x.payload.agenteId] : []))];
-    const avatares = participantes.map((id) => agenteDe(estado, id)).flatMap((a) => a ? [iconeAgente(a, "sm")] : []).join("");
-    const nome = participantes.length === 1 ? agenteDe(estado, participantes[0] ?? "")?.nome ?? "outro bot" : `${participantes.length} bots`;
-    return `<details class="collaboration" data-disclosure="${esc(k)}"><summary>${grupo.length} ${grupo.length === 1 ? "mensagem" : "mensagens"} com <span class="avatar-stack">${avatares}</span><span>${esc(nome)}</span><span class="chevron">⌄</span></summary><div class="collaboration-panel">${participantes.map((id) => {
-      const a = agenteDe(estado, id);
-      const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
-      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Pedido · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluído" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto, { chave: `colab:${x.id}` })}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
-    }).join("")}</div></details>`;
-  }
   // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de
   // recolher os avisos — o <details> do fio não é linha de sistema.
-  const linhas: LinhaDaConversa[] = mensagens.map((m, i) => ({ id: m.id, sistema: linhaDeSistema(m), html: pedacos[i] ?? "" }));
+  const linhas: LinhaDaConversa[] = mensagens.map((m) => {
+    const plano = planos.get(m.id);
+    const html = !plano
+      ? renderMensagem(m, estado, sala)
+      : plano.tipo === "oculta"
+        ? ""
+        : plano.tipo === "linha"
+          ? plano.html
+          : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta });
+    return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...(plano?.tipo === "linha" ? { chave: plano.chave } : {}) };
+  });
   const conversaId = mensagens[0]?.conversaId;
-  return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas).filter((b) => b.html !== "");
+  const desenhadas = (conversaId ? desenharFios(linhas, estado, conversaId) : linhas).filter((l) => l.html !== "");
+  return recolherAvisos(desenhadas);
 }
 
 /** Os data-* são da pílula da base (web/lib/rolagem.ts): ela sabe qual linha a pessoa já viu e o que dizer. */
@@ -645,11 +640,11 @@ function recolherAvisos(linhas: readonly LinhaDaConversa[]): BlocoDaTimeline[] {
       saida.push({ chave: `avisos-${id}`, html: `<details class="avisos-sistema" data-disclosure="avisos-${esc(id)}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>` });
       i = fim;
     } else if (fim > i) {
-      saida.push(...linhas.slice(i, fim).map((l) => ({ chave: l.id, html: l.html })));
+      saida.push(...linhas.slice(i, fim).map((l) => ({ chave: l.chave ?? l.id, html: l.html })));
       i = fim;
     } else {
       const l = linhas[i];
-      if (l) saida.push({ chave: l.id, html: l.html });
+      if (l) saida.push({ chave: l.chave ?? l.id, html: l.html });
       i++;
     }
   }
@@ -670,9 +665,22 @@ export function renderAoVivoDaTimeline(c: ConversaEstado, estado: Estado): strin
   return blocosAoVivo(c, estado).map((b) => b.html).join("");
 }
 
+/**
+ * Os turnos do bot que são de um trabalho (ADR-081): o ao vivo deles mora na tela da task, nunca no chat. O frame
+ * `turno.iniciado` pode dizer (`trabalhoId`); a conversa relida diz pelo `turnosEmCurso`; a lista, pelo `turnoVivoId`.
+ */
+export function turnosDeTrabalho(c: ConversaEstado, estado: Estado): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const t of c.turnosEmCurso) if (t.trabalhoId) ids.add(t.id);
+  for (const t of trabalhosConhecidos(estado, c.conversa.id)) if (t.turnoVivoId) ids.add(t.turnoVivoId);
+  for (const t of Object.values(estado.turnosVivos)) if (t.trabalhoId) ids.add(t.turnoId);
+  return ids;
+}
+
 /** Os turnos vivos da conversa e a faixa de parada, em blocos (um por turno). */
 export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
-  const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id);
+  const deTrabalho = turnosDeTrabalho(c, estado);
+  const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id && !deTrabalho.has(t.turnoId));
   const blocos: BlocoDaTimeline[] = [...vivos.flatMap((t) => blocosDoTurnoVivo(t, c, estado)), { chave: "faixa", html: renderFaixaParada(estado.faixaParada) }];
   return blocos.filter((b) => b.html !== "");
 }
@@ -737,7 +745,8 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
   const pedidos = pedidosAncoraveis(estado, c.conversa.id, propostas);
   if (pedidos.length === 0) return { blocos, ancoradas: new Set() };
   const posicao = new Map(c.mensagens.map((m, i) => [m.id, i]));
-  const inicioDe = blocos.map((b) => posicao.get(b.chave.startsWith("avisos-") ? b.chave.slice("avisos-".length) : b.chave));
+  // As chaves com prefixo levam o id da primeira mensagem do bloco: `avisos-<id>` e, desde 2026-10-07 (#191), `linha:<id>`.
+  const inicioDe = blocos.map((b) => posicao.get(b.chave.startsWith("avisos-") ? b.chave.slice("avisos-".length) : b.chave.startsWith("linha:") ? b.chave.slice("linha:".length) : b.chave));
   const depoisDe = new Map<number, typeof pedidos>();
   for (const item of pedidos) {
     const ancora = ancoraDoPedido(item.decisao, c);
@@ -769,6 +778,8 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const mudo = vivo && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[vivo.turnoId], estado.agora) : null;
   const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
   const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
+  // ADR-081 (#195): com task aberta o Parar fica no cabeçalho mesmo sem turno da conversa — ele para tudo do bot.
+  const tasks = abertosDoBot(estado, agenteId, a?.conversaId).length;
   // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
   // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o
   // turno vivo vence nos dois e o que espera a pessoa entra junto, contado por fio ("Trabalhando · 2 esperam você").
@@ -782,7 +793,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
     <div class="cab-acoes">
       ${renderSeloModoDev(estado, a?.conversaId, nome)}
       ${ligar}
-      ${vivo ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" }) : ""}
+      ${vivo || tasks ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: tasks ? "para a conversa e as tasks deste bot (mostra a lista antes)" : "interrompe agora o que está rodando nesta conversa" }) : ""}
       <button type="button" class="bt toggle-detalhes" data-act="alternar-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot">${PAINEL}</button>
     </div>`;
 }

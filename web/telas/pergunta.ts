@@ -226,7 +226,8 @@ export function aparenciaDoComposer(modo: ModoComposer, estado: Estado, padrao: 
 }
 
 /** Uma linha já desenhada da conversa: o id da mensagem, se é linha de sistema (recolhível) e o HTML. */
-export type LinhaDaConversa = { id: string; sistema: boolean; html: string };
+/** `chave` (definido em 2026-10-07, #191): a chave do bloco quando não é o id da mensagem (as linhas do chat limpo). */
+export type LinhaDaConversa = { id: string; sistema: boolean; html: string; chave?: string };
 
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 

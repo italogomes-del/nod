@@ -19,6 +19,7 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
 import type { AcaoComandoVoz } from "../../src/contracts/voz.ts";
@@ -150,7 +151,8 @@ export function criarApi(escopo: Escopo) {
     relatar: (entrada: EntradaRelato) => post<RespostaMutacao>("relatos", entrada),
     // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
     preferencias: () => get<Preferencias>("preferencias"),
-    gravarPreferencias: (p: Pick<Preferencias, "modoDev">) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    // ADR-081: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
+    gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "faixaTrabalhosRecolhida">>) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
     // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa — o app do Mac limpa o localStorage.
     fecharAviso: (chave: string) => pedir<Preferencias>("POST", `${base}/preferencias/avisos-fechados`, { chave }),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
@@ -159,6 +161,16 @@ export function criarApi(escopo: Escopo) {
     comandos: () => get<ComandosDto>("comandos"),
     novaSessao: (conversaId: string) => post<RespostaMutacao>(`conversas/${encodeURIComponent(conversaId)}/nova-sessao`),
     relatos: () => get<{ relatos: Relato[] }>("relatos"),
+    // ADR-081 §8 (definido em 2026-10-07): os trabalhos (tasks) dos bots, a tela da task e o que se faz nela.
+    trabalhos: (agenteId?: string) => get<TrabalhosDto>(agenteId ? `trabalhos?agenteId=${encodeURIComponent(agenteId)}` : "trabalhos"),
+    trabalho: (id: string) => get<TrabalhoDetalheDto>(`trabalhos/${encodeURIComponent(id)}`),
+    escreverNoTrabalho: (id: string, texto: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/mensagens`, { texto }),
+    pararTrabalho: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/parar`),
+    trabalhoDepois: (id: string, depoisDe: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/depois`, { depoisDe }),
+    trabalhoFazerAqui: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/fazer-aqui`),
+    // #191: o que a tela mostrou e o que a pessoa abriu, em lote; a taxa por tipo aparece no Modo dev.
+    telemetriaLinhas: (eventos: readonly EventoLinha[]) => post<RespostaMutacao>("telemetria/linhas", { eventos }),
+    taxasLinhas: () => get<TaxaDeAbertura[]>("telemetria/linhas"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
     // ADR-059: o chip de aprovações do campo; o servidor escreve a troca na conversa do bot.
