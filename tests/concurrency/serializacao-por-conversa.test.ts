@@ -71,7 +71,7 @@ async function disputaSimultanea(): Promise<(string | null)[]> {
   return [a?.id ?? null, b?.id ?? null];
 }
 
-describeIntegracao("concorrência: serialização por conversa e por agente", () => {
+describeIntegracao("concorrência: serialização por faixa (conversa ou trabalho, ADR-081)", () => {
   it("dois turnos pendentes da mesma conversa, duas máquinas AO MESMO TEMPO: sai um só; o segundo só depois de assentar o primeiro", async () => {
     const { conversaId, turnos } = await conversaComTurnos(2);
     const resultados = await disputaSimultanea();
@@ -88,12 +88,88 @@ describeIntegracao("concorrência: serialização por conversa e por agente", ()
     expect(segundo?.id).not.toBe(ganhos[0]);
   });
 
-  it("o mesmo agente em duas conversas, duas máquinas ao mesmo tempo: sai um só (EMENDA 13)", async () => {
+  it("revisto em 2026-10-07 (ADR-081 §3): o mesmo agente em duas conversas (direta e sala) roda nas duas ao mesmo tempo", async () => {
     const agenteId = randomUUID();
     await conversaComTurnos(1, agenteId);
     await conversaComTurnos(1, agenteId);
     const resultados = await disputaSimultanea();
-    expect(resultados.filter((r) => r !== null), `sobreposição: ${JSON.stringify(resultados)}`).toHaveLength(1);
+    expect(resultados.filter((r) => r !== null), `esperava as duas: ${JSON.stringify(resultados)}`).toHaveLength(2);
+  });
+
+  it("ADR-081 (#192, critério 1): rotina, pedido de colega e task da pessoa do MESMO bot saem juntos, e a mensagem da conversa sai enquanto os três rodam", async () => {
+    const agenteId = randomUUID();
+    const colegaId = randomUUID();
+    const conversaId = randomUUID();
+    const turnos = { rotina: randomUUID(), colega: randomUUID(), pessoa: randomUUID(), conversa: randomUUID() };
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      await repos.agentes.criar({ id: agenteId, nome: "Paralelo", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.agentes.criar({ id: colegaId, nome: "Chico", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
+      const rotina = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Triagem", origem: "rotina" });
+      const colega = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Pedido do Chico", origem: "colega", pedidoPorAgenteId: colegaId });
+      const pessoa = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Dashboard de churn", origem: "pessoa" });
+      const base = { conversaId, agenteId, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m" };
+      await repos.turnos.enfileirar({ ...base, id: turnos.rotina, origem: "rotina", trabalhoId: rotina?.id ?? null });
+      await repos.turnos.enfileirar({ ...base, id: turnos.colega, origem: "delegacao", trabalhoId: colega?.id ?? null });
+      await repos.turnos.enfileirar({ ...base, id: turnos.pessoa, origem: "conversa", trabalhoId: pessoa?.id ?? null });
+    });
+    criados.agentes.push(agenteId, colegaId);
+    criados.conversas.push(conversaId);
+    criados.turnos.push(turnos.rotina, turnos.colega, turnos.pessoa);
+    const lado = () => escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
+    const tres = (await Promise.all([lado(), lado(), lado()])).map((t) => t?.id ?? null);
+    expect(new Set(tres), `os três trabalhos: ${JSON.stringify(tres)}`).toEqual(new Set([turnos.rotina, turnos.colega, turnos.pessoa]));
+    await escopado(async (trx) => criarRepos(trx, MARLON).turnos.enfileirar({ id: turnos.conversa, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "e aí?", entradaConfianca: "confiavel", modelo: "m" }));
+    criados.turnos.push(turnos.conversa);
+    expect((await lado())?.id).toBe(turnos.conversa);
+    const vivos = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.vivosDaConversa(conversaId));
+    expect(vivos.filter((t) => t.estado === "despachando")).toHaveLength(4);
+  });
+
+  it("ADR-081: na fila, a mensagem da pessoa passa na frente da rotina e do pedido de colega", async () => {
+    const agenteId = randomUUID();
+    const conversaId = randomUUID();
+    const ids = { rotina: randomUUID(), colega: randomUUID(), conversa: randomUUID() };
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      await repos.agentes.criar({ id: agenteId, nome: "Ordem", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
+      const rotina = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Triagem", origem: "rotina" });
+      const colega = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Pedido", origem: "colega" });
+      const base = { conversaId, agenteId, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m" };
+      await repos.turnos.enfileirar({ ...base, id: ids.rotina, origem: "rotina", trabalhoId: rotina?.id ?? null });
+      await repos.turnos.enfileirar({ ...base, id: ids.colega, origem: "retomada", trabalhoId: colega?.id ?? null });
+      await repos.turnos.enfileirar({ ...base, id: ids.conversa, origem: "conversa" });
+    });
+    criados.agentes.push(agenteId);
+    criados.conversas.push(conversaId);
+    criados.turnos.push(ids.rotina, ids.colega, ids.conversa);
+    const primeiro = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
+    expect(primeiro?.id).toBe(ids.conversa);
+  });
+
+  it("ADR-081 (#192, critério 3): o trabalho com depois_de só sai quando o outro termina", async () => {
+    const agenteId = randomUUID();
+    const conversaId = randomUUID();
+    const turnoDepois = randomUUID();
+    let primeiroId = "";
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      await repos.agentes.criar({ id: agenteId, nome: "Depois", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
+      const primeiro = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Primeiro", origem: "pessoa", estado: "rodando" });
+      primeiroId = primeiro?.id ?? "";
+      const depois = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Depois", origem: "pessoa", depoisDeTrabalhoId: primeiroId });
+      await repos.turnos.enfileirar({ id: turnoDepois, conversaId, agenteId, origem: "conversa", trabalhoId: depois?.id ?? null, prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    });
+    criados.agentes.push(agenteId);
+    criados.conversas.push(conversaId);
+    criados.turnos.push(turnoDepois);
+    const reivindicar = () => escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
+    expect(await reivindicar()).toBeNull();
+    await escopado(async (trx) => criarRepos(trx, MARLON).trabalhos.mudarEstado(primeiroId, "terminado", Date.now()));
+    expect((await reivindicar())?.id).toBe(turnoDepois);
   });
 
   it("conversas e agentes DIFERENTES não se bloqueiam: duas máquinas ao mesmo tempo levam um turno cada", async () => {
