@@ -22,7 +22,7 @@ WHERE lower(trim(a.nome)) = 'nod' AND a.excluido_em IS NULL AND a.papel IS NULL
 -- A guia viva vira o Nod: mesma conversa, memória e acessos; nome, título, descrição e mascote do Nod, no topo.
 -- A voz padrão da guia ('clara', feminina) vira a do Nod ('bento', masculina): ele se apresenta como "o Nod". Voz
 -- escolhida pela pessoa fica.
-UPDATE agentes a SET papel = 'nod', nome = 'Nod', titulo = 'Nod', cor = 'c-black', fixado = true, oculto = false,
+UPDATE agentes a SET papel = 'nod', nome = 'Nod', titulo = 'Ajudante', cor = 'c-black', fixado = true, oculto = false,
   voz = CASE WHEN a.voz IS NULL OR a.voz = 'clara' THEN 'bento' ELSE a.voz END,
   descricao = 'Seu bot fixo no Nod. Tira dúvidas sobre o produto, cria e ajusta seus bots e anota bugs e ideias para o time do Nod.'
 FROM preferencias p

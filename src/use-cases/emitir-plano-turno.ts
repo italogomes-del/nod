@@ -49,6 +49,8 @@ export type EntradaEmitirPlano = {
   modelosLigacao?: ModelosLigacao;
   /** O "A fazer" ligado (NOD_PENDENCIAS=1, lido pelo compositor). Ausente = desligado: nem ferramentas nem lista. */
   aFazer?: boolean;
+  /** ADR-082: NOD_GERIR_BOTS=0 desliga as ferramentas do Nod (o interruptor de rollback). Ausente = ligadas. */
+  semFerramentasDoNod?: boolean;
 };
 
 /**
@@ -239,6 +241,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     }),
     pendencias,
     aFazer: input.aFazer === true,
+    semFerramentasDoNod: input.semFerramentasDoNod === true,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).

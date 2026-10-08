@@ -108,6 +108,7 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
   // NOD-190: o perfil trava o agente, relê a proposta e confere a revisão ANTES de decidir; o caminho genérico abaixo
   // decide primeiro, e a recusa por perfil mudado teria de sair de `confirmada`.
   if (existente.payload.kind === "perfil") return confirmarPerfil(deps, existente);
+  if (existente.payload.kind === "lote_bots") throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
   if (existente.payload.kind === "acesso" && existente.estado === "pendente") {
     const jaAberta = await deps.repos.decisoes.buscar(existente.id);
     if (jaAberta) return { data: { proposta: existente, agente: null, rotina: null, decisao: jaAberta }, events: [] };
@@ -144,6 +145,9 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     throw new ErroDeDominio("estado_invalido", { cause: "proposta de rotina existente se confirma pela decisão em Sua vez" });
   } else if (proposta.payload.kind === "bot") {
     throw new ErroDeDominio("estado_invalido", { cause: "proposta de bot se confirma por decidirPropostaDeBot" });
+  } else if (proposta.payload.kind === "lote_bots") {
+    // ADR-082: o lote do Nod se decide pela decisão de mesmo id (POST decisoes/:id/decidir → decidirLoteDeBots).
+    throw new ErroDeDominio("estado_invalido", { cause: "lote do Nod se decide pela decisão do card" });
   } else {
     const p = proposta.payload;
     const agenteDaProposta = await deps.repos.agentes.buscar(proposta.agenteId);

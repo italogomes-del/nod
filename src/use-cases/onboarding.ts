@@ -8,7 +8,7 @@ import type { BotDoOnboarding, EstadoOnboarding, EtapaOnboarding, IaNoMac, Pende
 import type { ContextoFerramenta, SaidaCasoDeUso } from "../contracts/servicos.ts";
 import { ehIdVoz } from "../domain/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { DESCRICAO_DO_NOD, ehNod, NOME_DO_NOD } from "../domain/nod.ts";
+import { DESCRICAO_DO_NOD, ehNod, NOME_DO_NOD, TITULO_DO_NOD } from "../domain/nod.ts";
 import { camposQueFaltam, modeloDoObjetivo, normalizarCampo, passoDaConfiguracao, PERGUNTAS_ENTREVISTA, resumoDaEntrevista } from "../domain/roteiro-onboarding.ts";
 import { log } from "../obs/log.ts";
 import type { LinhaOnboarding } from "../repositories/onboarding.repo.ts";
@@ -122,12 +122,12 @@ export const garantirNod: CasoDeUso<Record<string, never>, { nod: BotDoOnboardin
   }
   const guia = !existente && linha.guiaId ? await deps.repos.agentes.buscar(linha.guiaId) : null;
   if (guia && !ehNod(guia) && guia.dono === "pessoa" && guia.ownerId === deps.escopo.pessoaId) {
-    const marcado = await deps.repos.agentes.marcarComoNod(guia.id, { nome: NOME_DO_NOD, titulo: NOME_DO_NOD, descricao: DESCRICAO_DO_NOD });
+    const marcado = await deps.repos.agentes.marcarComoNod(guia.id, { nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD });
     const nod = marcado ? await botComConversa(deps, marcado.id) : null;
     if (nod) return { data: { nod, criado: false } };
   }
-  const r = await criarAgenteSemReserva(deps, { dono: "pessoa", nome: NOME_DO_NOD, titulo: NOME_DO_NOD, descricao: DESCRICAO_DO_NOD, forma: "shape-square", cor: "c-black", mensagem: APRESENTACAO_DO_NOD });
-  const marcado = await deps.repos.agentes.marcarComoNod(r.data.agente.id, { nome: NOME_DO_NOD, titulo: NOME_DO_NOD, descricao: DESCRICAO_DO_NOD });
+  const r = await criarAgenteSemReserva(deps, { dono: "pessoa", nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD, forma: "shape-square", cor: "c-black", mensagem: APRESENTACAO_DO_NOD });
+  const marcado = await deps.repos.agentes.marcarComoNod(r.data.agente.id, { nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD });
   if (!marcado) throw new ErroDeDominio("estado_invalido", { cause: "nod não marcado" });
   await deps.repos.agentes.definirVoz(marcado.id, { voz: "bento" });
   await deps.repos.onboarding.definirGuia(marcado.id);

@@ -37,7 +37,7 @@ describeIntegracao("concorrência: um Nod por pessoa (ADR-081)", () => {
     const ids = new Set(resultados.map((r) => r.data.nod.id));
     expect(ids.size).toBe(1);
     expect(resultados.filter((r) => r.data.criado)).toHaveLength(1);
-    const [{ total }] = await escopado((trx) => trx<{ total: number }[]>`select count(*)::int as total from agentes where owner_id = ${ESCOPO.pessoaId} and papel = 'nod'`);
-    expect(total).toBe(1);
+    const [linha] = await escopado((trx) => trx<{ total: number }[]>`select count(*)::int as total from agentes where owner_id = ${ESCOPO.pessoaId} and papel = 'nod'`);
+    expect(linha?.total).toBe(1);
   });
 });

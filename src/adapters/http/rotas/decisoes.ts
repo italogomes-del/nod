@@ -1,3 +1,4 @@
+import { decidirLoteDeBots } from "../../../use-cases/gerir-bots.ts";
 import { randomUUID } from "node:crypto";
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Decisao } from "../../../contracts/decisao.ts";
@@ -182,6 +183,18 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             if (r.agenteId) ids.agente = r.agenteId;
             await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) })]);
           });
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "lote_bots") {
+          // ADR-082: o card do lote do Nod. `selecionados` = os índices das ações que a pessoa deixou marcadas; ausente =
+          // todas as que esperam. Roda como a DONA (as ações mexem nos bots dela), gravando quem clicou.
+          const c = typeof corpo === "object" && corpo !== null ? (corpo as Record<string, unknown>) : {};
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirLoteDeBots, { decisaoId: atual.id, recusar: recusada(corpo), selecionados: c.selecionados }));
+          ids.feitas = String(r.feitas);
+          if (r.falhas > 0) ids.falhas = String(r.falhas);
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

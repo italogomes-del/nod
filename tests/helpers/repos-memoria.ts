@@ -758,6 +758,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         p.estado = estado;
         return p;
       },
+      async atualizarPayload(id, payload) {
+        const p = doTenant(b.propostas).find((x) => x.id === id && x.kind === payload.kind);
+        if (!p) return null;
+        p.payload = payload;
+        return p;
+      },
     },
 
     turnos: {
@@ -1580,6 +1586,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           tenantId: escopo.tenantId,
           id: randomUUID(),
           mensagemId: r.mensagemId,
+          tipo: r.tipo ?? "bug",
+          origem: r.origem ?? "botao",
           conversaId: r.conversaId,
           turnoId: r.turnoId,
           categoria: r.categoria,
@@ -1617,6 +1625,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async prosaDe() {
         return null;
+      },
+      async contarDoNodDesde(desde) {
+        return doTenant(b.relatos).filter((r) => r.ownerId === escopo.pessoaId && r.origem === "nod" && r.criadoEm >= desde).length;
       },
       async registrarDiagnostico() {},
       async diagnosticoDoTurno() {

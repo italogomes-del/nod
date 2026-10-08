@@ -12,6 +12,11 @@ function autorDe(m: Mensagem): string {
   return m.autoria.autor_tipo === "pessoa" ? "pessoa" : "agente";
 }
 
+/** O trecho que o relato anexa (o do botão e o contado ao Nod): o tipo do autor e o texto redigido (NOD-158). */
+export function trechoDoRelato(mensagens: readonly Mensagem[]): { mensagens: { id: string; autor: string; kind: string; texto: string; em: number }[] } {
+  return { mensagens: mensagens.map((m) => ({ id: m.id, autor: autorDe(m), kind: m.kind, texto: redigirSegredos(m.texto), em: m.criadoEm })) };
+}
+
 /**
  * A pessoa aponta uma mensagem e diz que o comportamento não foi o desejado (ADR-041).
  *
@@ -72,7 +77,7 @@ export const registrarRelato: CasoDeUso<EntradaRelato, SaidaRegistrarRelato> = a
   await deps.repos.relatos.gravarProsa({
     relatoId: relato.id,
     textoPessoa: textoPessoa === "" ? null : redigirSegredos(textoPessoa),
-    trecho: { mensagens: anexadas.map((m) => ({ id: m.id, autor: autorDe(m), kind: m.kind, texto: redigirSegredos(m.texto), em: m.criadoEm })) },
+    trecho: trechoDoRelato(anexadas),
   });
 
   // Só escalares no evento (DadosEvento): o texto do relato NUNCA sai daqui (ADR-004).

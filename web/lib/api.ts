@@ -231,7 +231,7 @@ export function criarApi(escopo: Escopo) {
     rotinaDoOnboarding: (indice: number) => post<EstadoOnboarding>("onboarding/rotina", { indice }),
     /** A decisão 'bot' do onboarding decidida pelo clique: o nome e a descrição podem ter sido editados no card. */
     decidirBot: (id: string, corpo: { nome?: string; descricao?: string; recusar?: boolean }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
-    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
+    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[]; selecionados?: number[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),
     reabrir: (id: string) => post<RespostaMutacao>(`decisoes/${id}/reabrir`),

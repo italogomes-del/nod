@@ -1955,6 +1955,20 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "decidir-aprovacao-resto": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? ""), restoDaTarefa: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
   "decidir-aprovacao-sempre": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? ""), sempre: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
   "decidir-aprovacao-nenhum": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "").map((m) => ({ ...m, selecionado: false })) }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  // 0062: o filtro por tipo da tela Relatos é atributo na seção (o CSS esconde o resto); nada é redesenhado.
+  "filtrar-relatos": (el) => {
+    const secao = el.closest<HTMLElement>(".relatos");
+    if (!secao) return;
+    secao.dataset.filtro = el.dataset.filtroTipo ?? "todos";
+    for (const b of secao.querySelectorAll<HTMLButtonElement>("[data-act=filtrar-relatos]")) b.setAttribute("aria-pressed", String(b === el));
+  },
+  // ADR-082: o card do lote do Nod — manda os índices das ações que ficaram marcadas.
+  "decidir-lote": (el) => agir(async () => {
+    const card = el.closest<HTMLElement>("[data-proposta]");
+    const selecionados = [...(card?.querySelectorAll<HTMLInputElement>("input[data-lote-i]") ?? [])].filter((c) => c.checked).map((c) => Number(c.dataset.loteI));
+    await api!.decidir(el.dataset.id ?? "", { selecionados });
+    dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "gestao", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  }),
   "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   "recusar-decisao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde pelo campo da conversa — sem card

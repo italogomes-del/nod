@@ -9,6 +9,9 @@ import { NOME_DO_NOD } from "./roteiro-onboarding.ts";
 
 export { NOME_DO_NOD };
 
+/** O título do Nod (o chip da barra lateral e "Você é Nod, Ajudante" no prompt). */
+export const TITULO_DO_NOD = "Ajudante";
+
 /** A descrição do Nod (a mesma que a 0061 grava na guia promovida). */
 export const DESCRICAO_DO_NOD = "Seu bot fixo no Nod. Tira dúvidas sobre o produto, cria e ajusta seus bots e anota bugs e ideias para o time do Nod.";
 

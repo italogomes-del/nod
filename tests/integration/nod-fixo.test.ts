@@ -26,7 +26,7 @@ describeIntegracao("o Nod fixo (ADR-081)", () => {
       const primeiro = await executar(d, garantirNod, {});
       expect(primeiro.data.criado).toBe(true);
       const nod = await d.repos.agentes.buscar(primeiro.data.nod.id);
-      expect(nod).toMatchObject({ nome: "Nod", titulo: "Nod", papel: "nod", cor: "c-black", fixado: true, confirmado: true, voz: "bento" });
+      expect(nod).toMatchObject({ nome: "Nod", titulo: "Ajudante", papel: "nod", cor: "c-black", fixado: true, confirmado: true, voz: "bento" });
       expect((await d.repos.onboarding.buscar()).guiaId).toBe(nod?.id);
       const segundo = await executar(d, garantirNod, {});
       expect(segundo.data).toMatchObject({ criado: false, nod: { id: nod?.id } });
