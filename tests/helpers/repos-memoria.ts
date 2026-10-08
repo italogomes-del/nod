@@ -922,9 +922,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         alvo.entradaAnexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
         return { turno: alvo, absorvidos };
       },
-      async absorverNaSessao(turno) {
+      async absorverNaSessao(turno, ids) {
         const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && t.entradaAnexos.length === 0)
+          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && t.entradaAnexos.length === 0 && (!ids || ids.includes(t.id)))
           .sort((x, y) => x.criadoEm - y.criadoEm);
         for (const t of absorvidos) {
           t.estado = "interrompido";

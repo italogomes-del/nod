@@ -15,7 +15,9 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "nod-codex-teste-"));
   const bin = join(dir, "codex");
   await writeFile(bin, `#!${process.execPath}\nawait import(${JSON.stringify(new URL("../../fixtures/codex-falso.mjs", import.meta.url).href)});\n`); await chmod(bin, 0o700);
-  cfg = { bins: { "codex-cli": bin }, env: { HOME: dir, PATH: process.env.PATH ?? "", TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar" }, cwdBase: join(dir, "turnos") };
+  // ADR-081 §6: com o app-server, o chat roda nele (codex-chat-falso.test.ts). Este arquivo cobre o `codex exec`, a
+  // reserva para Codex sem app-server.
+  cfg = { bins: { "codex-cli": bin }, env: { HOME: dir, PATH: process.env.PATH ?? "", TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar", TESTE_NOD_SEM_APP_SERVER: "1" }, cwdBase: join(dir, "turnos") };
 });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 it("normaliza texto, ferramentas, sinais e tokens; isola configuração e apaga o token", async () => {

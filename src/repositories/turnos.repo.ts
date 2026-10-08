@@ -405,12 +405,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fila lida junta, mas o texto vai à sessão do CLI em vez de mudar a entrada. Só fala da pessoa (conversa), e só
      * sem anexo: o anexo espera o próximo turno, que o baixa e o entrega inteiro. Quem decide se o turno vivo aceita
      * é o caso de uso (absorverNaSessao).
+     * definido em 2026-10-07 (#189): com `ids`, só estas — as que o app confirmou ter escrito na sessão
+     * (confirmarNaSessao); sem, todas as da fila, como antes (app que não confirma).
      */
-    async absorverNaSessao(turno: Turno): Promise<Turno[]> {
+    async absorverNaSessao(turno: Turno, ids?: readonly string[]): Promise<Turno[]> {
+      if (ids && ids.length === 0) return [];
       const linhas = await conn<Linha[]>`
         update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
           and estado = 'pendente' and origem = 'conversa' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
+          ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
         returning ${conn.unsafe(COLUNAS)}`;
       return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
     },

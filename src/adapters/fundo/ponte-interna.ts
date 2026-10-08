@@ -12,7 +12,7 @@ import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { assentarTurno, type SaidaAssentarTurno } from "../../use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../use-cases/despachar-turno.ts";
-import { absorverNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
+import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -71,6 +71,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const tenantsPorPessoa = new Map<string, string>();
   /** ADR-067: o maior `seq` de fala intermediária já gravado por turno (some na entrega). */
   const falasGravadas = new Map<string, number>();
+  /**
+   * #189: as mensagens da fila já entregues ao app neste turno e ainda não confirmadas — não vão de novo na próxima
+   * renovação. Somem na entrega; a não confirmada continua `pendente` no banco e vira turno próprio.
+   */
+  const oferecidas = new Map<string, Set<string>>();
 
   /** NOD-171: os harnesses das máquinas desta ponte somados aos da pessoa nas outras conexões; o pronto vence. */
   function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {
@@ -164,7 +169,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const executor = executores.get(p.turnoId) ?? executorAtual();
       // ADR-067: cada fala da sessão viva entra uma vez — a renovação que falhou na volta é repetida com as mesmas.
       const novas = (p.falas ?? []).filter((f) => f.seq > (falasGravadas.get(p.turnoId) ?? 0)).sort((a, b) => a.seq - b.seq);
-      const { ativo, mensagens } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      // #189: app que manda `mensagensEntregues` confirma o que escreveu; a mensagem só sai da fila na confirmação.
+      const confirma = Array.isArray(p.mensagensEntregues);
+      const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
+      for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
+      const { ativo, mensagens, ids } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
@@ -173,17 +182,28 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           const g = await gravarFalasDaSessao(d, { turnoId: p.turnoId, machineId: p.machineId, executor, textos: novas.map((f) => f.texto) });
           events.push(...(g.events ?? []));
         }
+        // Turno parado (ativo:false) não confirma: a resposta não vai sair, e a mensagem fica para o próximo turno.
+        if (r.ativo && p.mensagensEntregues?.length) {
+          const c = await confirmarNaSessao(d, { turnoId: p.turnoId, executor, ids: p.mensagensEntregues });
+          events.push(...(c.events ?? []));
+        }
         let textos: string[] = [];
+        let ids: string[] = [];
         if (r.ativo && p.aceitaMensagens) {
-          const a = await absorverNaSessao(d, { turnoId: p.turnoId, executor });
+          const a = await absorverNaSessao(d, { turnoId: p.turnoId, executor, confirma, jaOferecidas: [...jaOferecidas] });
           textos = a.data.textos;
+          ids = a.data.ids;
           events.push(...(a.events ?? []));
         }
         if (events.length) await d.repos.events.gravarComOutbox(events);
-        return { ativo: r.ativo, mensagens: textos };
+        return { ativo: r.ativo, mensagens: textos, ids };
       });
       if (novas.length) falasGravadas.set(p.turnoId, novas.at(-1)!.seq);
-      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(mensagens.length ? { mensagens } : {}) };
+      if (confirma) {
+        for (const id of ids) jaOferecidas.add(id);
+        oferecidas.set(p.turnoId, jaOferecidas);
+      }
+      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}) };
     },
 
     async entregar(e: Entrega) {
@@ -254,6 +274,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         executores.delete(e.turnoId);
         harnesses.delete(e.turnoId);
         falasGravadas.delete(e.turnoId);
+        oferecidas.delete(e.turnoId);
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
       }

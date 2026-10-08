@@ -1,3 +1,4 @@
+import type { CapacidadesHarness } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/turno.ts";
@@ -55,6 +56,12 @@ export interface Adapter {
   receberMensagem?(texto: string): boolean;
   /** true enquanto o adapter aceita mensagem nova (sessão viva com a entrada aberta). */
   aceitaMensagens?(): boolean;
+  /**
+   * definido em 2026-10-07 (ADR-081, #194): o grupo de processos do turno (o pid do líder, que nasce com
+   * `detached: true`), para o amostrador somar a memória dele. null = ainda não subiu ou já saiu. Só os drivers com
+   * `processoProprio` respondem; o laço nem pergunta aos outros.
+   */
+  grupoDeProcessos?(): number | null;
 }
 
 /** O veredito do teste de verdade de uma IA e o que ela respondeu (null quando não ficou pronta). */
@@ -78,7 +85,12 @@ export interface Instance {
 }
 
 export interface Driver {
-  meta: { id: IdDriver; locality: Localidade };
+  /**
+   * `capacidades` (definido em 2026-10-07, ADR-081): o que o driver promete fazer, lido de `CAPACIDADES_HARNESS` pelo
+   * id (uma fonte só). Ausente = `capacidadesDe(id)`; o catcher e os drivers de teste declaram as suas. O laço nunca
+   * compara o id: deixa de pedir mensagens quando `!mensagemNoMeio` e não mede memória quando `!processoProprio`.
+   */
+  meta: { id: IdDriver; locality: Localidade; capacidades?: CapacidadesHarness };
   create(cfg: ConfigDriver): Promise<Instance>;
 }
 

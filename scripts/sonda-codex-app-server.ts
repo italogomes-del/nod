@@ -9,6 +9,8 @@
  *  - uma ferramenta mcp__nod__lembrar: o item mcpToolCall aparece e o MCP falso recebe o tools/call?
  *  - turn/steer com o turno em curso: aceito? a fala muda?
  *  - turn/interrupt: o turno conclui "interrupted", e em quanto tempo?
+ *  - steer no chat (ADR-081 §6, 2026-10-07): com uma ferramenta rodando, a mensagem da pessoa entra pelo turn/steer com
+ *    a moldura do chat (molduraMensagemNoMeio); aceito? a primeira fala depois dele sai no mesmo turno?
  * A saída sai no terminal e num arquivo (com a data e a versão do Codex), para anexar na homologação.
  *
  * `--seco`: roda contra o app-server falso (tests/fixtures/codex-falso.mjs); é o que o CI exercita, sem Codex e sem custo.
@@ -25,6 +27,7 @@ import { configMcpCodex } from "../src/adapters/executor/drivers/codex-comum.ts"
 import { MODELO_LUNA_CODEX } from "../src/contracts/harness.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { montarAmbiente } from "../src/domain/ambiente-executor.ts";
+import { molduraMensagemNoMeio } from "../src/domain/mensagem-no-meio.ts";
 import {
   ESFORCO_LIGACAO_CODEX,
   type EsforcoCodex,
@@ -231,6 +234,19 @@ async function main(): Promise<void> {
   await concluido(t5.turnId, t5.t0, 20_000);
   escrever(`depois do interrupt responde: ${d5 ? `sim (${d5.em - t5.t0} ms)` : "não"}`);
   if (!d5) falhas.push("não respondeu depois do interrupt");
+
+  // Steer no chat (ADR-081 §6): a mensagem do meio entra com a moldura enquanto uma ferramenta roda, como o driver do
+  // chat (codex-chat.ts) faz; a resposta a ela tem de sair no mesmo turno, antes de ele concluir.
+  const t6 = await turno("Use a ferramenta lembrar com o texto \"chat\" e depois diga só: terminei. [[chat-steer]]");
+  const ferramenta6 = await esperar((e) => e.tipo === "item" && e.fase === "inicio" && e.ferramenta !== null, t6.t0);
+  const tSteer6 = Date.now();
+  const rSteer6 = ferramenta6 ? await respostaDe(mandar((i) => pedidoTurnSteer(i, { threadId, texto: molduraMensagemNoMeio("qual é a capital da França?"), turnoEsperado: t6.turnId ?? "" })), tSteer6, 15_000) : null;
+  const c6 = await concluido(t6.turnId, t6.t0);
+  const falasDepois = eventos.filter((x) => x.em >= tSteer6 && x.e.tipo === "item" && x.e.fase === "fim" && x.e.texto).map((x) => (x.e.tipo === "item" ? x.e.texto ?? "" : ""));
+  escrever(`steer no chat: ferramenta ${ms(ferramenta6, t6.t0)} · steer ${rSteer6?.e.tipo === "resposta" ? `aceito em ${rSteer6.em - tSteer6} ms` : rSteer6 ? "recusado" : "não enviado"} · 1ª fala depois: "${(falasDepois[0] ?? "").slice(0, 80)}" · turno ${c6?.e.tipo === "turno_concluido" ? c6.e.status : "não concluiu"}`);
+  if (!ferramenta6) falhas.push("steer no chat: nenhuma ferramenta para mandar a mensagem no meio");
+  else if (rSteer6?.e.tipo !== "resposta") falhas.push("steer no chat não aceito com a ferramenta rodando");
+  else if (falasDepois.length === 0) falhas.push("steer no chat sem fala depois da mensagem");
 
   const ignoradas = [...new Set(eventos.flatMap((x) => (x.e.tipo === "ignorado" && x.e.metodo ? [x.e.metodo] : [])))];
   escrever(`notificações que o laço ignora: ${ignoradas.join(", ") || "(nenhuma)"}`);

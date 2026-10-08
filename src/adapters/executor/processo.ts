@@ -35,6 +35,49 @@ const STDERR_MAX_CHARS = 65_536;
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
+ * Grupos de processo vivos (definido em 2026-10-07, ADR-081, #194). Cada filho nasce líder do próprio grupo
+ * (`detached: true`), para o amostrador somar a memória do grupo e o Parar levar junto os netos (servidor MCP, Bash do
+ * modelo). O preço do `detached` é o filho não morrer com o app: o `exit` do processo do nod (app do Mac ou servidor)
+ * mata com SIGKILL todo grupo que ainda estiver aqui. `process.kill` é síncrono, o único tipo de trabalho que o `exit`
+ * permite.
+ */
+const gruposVivos = new Set<number>();
+let ganchoDeSaida = false;
+
+/** Sinal para o grupo inteiro; sem grupo (plataforma sem `-pid`) ou já morto, cai no próprio processo. */
+function sinalizarGrupo(pid: number, sinal: NodeJS.Signals, sozinho: () => void): void {
+  try {
+    process.kill(-pid, sinal);
+  } catch {
+    try {
+      sozinho();
+    } catch {
+      // já saiu
+    }
+  }
+}
+
+function vigiarGrupo(pid: number): void {
+  gruposVivos.add(pid);
+  if (ganchoDeSaida) return;
+  ganchoDeSaida = true;
+  process.on("exit", () => {
+    for (const g of gruposVivos) {
+      try {
+        process.kill(-g, "SIGKILL");
+      } catch {
+        // o grupo já acabou
+      }
+    }
+  });
+}
+
+/** Os grupos que este processo do nod ainda tem vivos (os testes conferem que o Parar os solta). */
+export function gruposDeProcessoVivos(): number[] {
+  return [...gruposVivos];
+}
+
+/**
  * Divide o stdout em linhas procurando o "\n" só no pedaço que acabou de chegar; os pedaços da linha ainda aberta são
  * colados uma vez, quando ela fecha. medido em 2026-09-30 (bancada em Node, pedaços de 64 KiB): com
  * `resto += pedaco; resto.indexOf("\n")` cada pedaço relia a linha acumulada inteira — uma linha de 2 MB custava
@@ -81,7 +124,10 @@ export function iniciarProcesso(o: {
   sigtermParaSigkillMs?: number;
 }): Processo {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
-  const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"] });
+  // #194: líder de um grupo próprio (ver gruposVivos). stdin/stdout/stderr continuam pipes.
+  const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
+  const pid = filho.pid;
+  if (pid !== undefined) vigiarGrupo(pid);
   let stderr = "";
   const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;
@@ -113,6 +159,11 @@ export function iniciarProcesso(o: {
     });
     // 'close' (e não 'exit'): garante que o stdout foi drenado até a última linha
     filho.on("close", (code, signal) => concluir({ exitCode: code, signal, stderr, erroSpawn: null }));
+  }).then((r) => {
+    // O líder saiu e o stdout fechou: o grupo sai da lista, senão o `exit` do app mataria um grupo novo que reusasse o
+    // pid. Quem interrompeu solta o grupo no fim do interromper(), depois do SIGKILL nos netos.
+    if (pid !== undefined && !interrompido) gruposVivos.delete(pid);
+    return r;
   });
 
   /** Um neto órfão (servidor MCP que não morreu) pode segurar o pipe aberto depois do exit; fecha à força. */
@@ -122,7 +173,7 @@ export function iniciarProcesso(o: {
   };
 
   return {
-    pid: filho.pid ?? null,
+    pid: pid ?? null,
     escrever(texto) {
       if (!terminou && filho.stdin && !filho.stdin.destroyed) filho.stdin.write(texto);
     },
@@ -132,14 +183,25 @@ export function iniciarProcesso(o: {
     interrompido: () => interrompido,
     async interromper() {
       interrompido = true;
-      if (terminou || filho.pid === undefined) return;
-      filho.kill("SIGTERM");
+      if (pid === undefined) return;
+      if (terminou) {
+        // O líder já saiu; um neto do grupo pode estar vivo (Bash do modelo). Leva o grupo, sem esperar — só se ele
+        // ainda é nosso (fora da lista, o pid pode já ser de outro).
+        if (gruposVivos.delete(pid)) sinalizarGrupo(pid, "SIGKILL", () => undefined);
+        return;
+      }
+      // #194: SIGTERM no GRUPO (o CLI e o que ele abriu), com o mesmo 5 s até o SIGKILL.
+      sinalizarGrupo(pid, "SIGTERM", () => filho.kill("SIGTERM"));
       const fechou = await Promise.race([fim.then(() => true), dormir(esperaAteSigkill).then(() => false)]);
-      if (fechou) return;
-      if (!saiu) filho.kill("SIGKILL");
-      const fechouDepois = await Promise.race([fim.then(() => true), dormir(DEPOIS_DO_SIGKILL_MS).then(() => false)]);
-      if (!fechouDepois) fecharStdio();
-      await fim;
+      if (!fechou) {
+        sinalizarGrupo(pid, "SIGKILL", () => { if (!saiu) filho.kill("SIGKILL"); });
+        const fechouDepois = await Promise.race([fim.then(() => true), dormir(DEPOIS_DO_SIGKILL_MS).then(() => false)]);
+        if (!fechouDepois) fecharStdio();
+        await fim;
+      }
+      // Quem saiu no SIGTERM pode ter deixado neto no grupo: o SIGKILL final não custa nada se não houver.
+      sinalizarGrupo(pid, "SIGKILL", () => undefined);
+      gruposVivos.delete(pid);
     },
     fim,
   };

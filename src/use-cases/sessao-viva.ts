@@ -1,7 +1,7 @@
 import type { Executor } from "../contracts/evento.ts";
-import type { Turno } from "../contracts/turno.ts";
+import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
  * Sessão viva (definido em 2026-10-01, ADR-067): o turno do Claude Code não acaba na primeira resposta. Enquanto há
@@ -30,26 +30,69 @@ export const gravarFalasDaSessao: CasoDeUso<{ turnoId: string; machineId: string
   return { data: { gravadas: events.length }, events };
 };
 
+/** A raiz de uma retomada que veio de um destes não recebe mensagem da pessoa: o trabalho não é a conversa com ela. */
+const RAIZES_SEM_MENSAGEM: readonly OrigemTurno[] = ["rotina", "delegacao", "peer"];
+
 /**
- * Quem recebe mensagem no meio do trabalho: o turno vivo da conversa da pessoa com o bot — conversa, criação, rotina ou
- * a retomada de uma delas. Pedido de colega (delegação, peer, e o que corre sob procuração) e sala ficam de fora: a
- * resposta deles vai a outro bot ou passa pelos responders, e uma fala da pessoa no meio a misturaria.
+ * Quem recebe mensagem no meio do trabalho: o turno vivo da conversa da pessoa com o bot, ou a retomada de um. Pedido
+ * de colega (delegação, peer, e o que corre sob procuração), sala e ligação ficam de fora: a resposta deles vai a outro
+ * bot ou passa pelos responders, e uma fala da pessoa no meio a misturaria.
+ *
+ * revisto em 2026-10-07 (ADR-081 §6, #189): rotina e turno de trabalho (`trabalhoId`) também ficam de fora — a
+ * mensagem esperava dentro da rotina (uma esperou 71 min no diário) e a resposta virava passo do card. A mensagem fica
+ * `pendente` e vira turno de conversa próprio. A retomada cuja raiz é rotina, delegação ou peer é conferida em
+ * `aceitaNaSessao`, que sobe a cadeia.
  */
 export function aceitaMensagemNaSessao(t: Turno): boolean {
-  return t.estado === "despachando" && t.sobProcuracaoDe === null && t.origem !== "delegacao" && t.origem !== "peer" && t.origem !== "sala" && t.origem !== "ligacao";
+  return t.estado === "despachando" && t.sobProcuracaoDe === null && !t.trabalhoId && (t.origem === "conversa" || t.origem === "retomada");
+}
+
+/** `aceitaMensagemNaSessao` mais a cadeia da retomada (`retoma_turno_id` até a raiz). */
+export async function aceitaNaSessao(deps: Deps, t: Turno): Promise<boolean> {
+  if (!aceitaMensagemNaSessao(t)) return false;
+  if (t.origem !== "retomada") return true;
+  const raiz = await deps.repos.turnos.raizDaCadeia(t.id);
+  return raiz !== null && !raiz.trabalhoId && !RAIZES_SEM_MENSAGEM.includes(raiz.origem) && raiz.sobProcuracaoDe == null;
 }
 
 /**
- * As falas da pessoa que esperavam na fila desta conversa entram no turno vivo, na ordem; cada uma sai
- * interrompido/'absorvido' (a tela tira o "na fila"). Devolve os textos que o executor escreve na sessão do CLI.
+ * As falas da pessoa que esperavam na fila desta conversa e podem entrar no turno vivo, na ordem: só fala dela (com
+ * mensagem de origem), de conversa, sem anexo (o anexo espera o próximo turno, que o baixa inteiro) e fora de trabalho.
+ *
+ * definido em 2026-10-07 (#189): com `confirma` (o app confirma o que escreveu na sessão) elas NÃO saem da fila aqui —
+ * só quando o app as confirma (`confirmarNaSessao`); a que o CLI não recebeu continua `pendente` e vira turno próprio,
+ * em vez de sumir como `interrompido/absorvido` (`laco_mensagem_sem_sessao`). `jaOferecidas` evita entregá-las de novo
+ * enquanto a confirmação não volta. Sem `confirma` (app antigo), saem `absorvido` na hora, como antes.
  */
-export const absorverNaSessao: CasoDeUso<{ turnoId: string; executor: Executor }, { textos: string[] }> = async (deps, e) => {
+export const absorverNaSessao: CasoDeUso<{ turnoId: string; executor: Executor; confirma?: boolean; jaOferecidas?: readonly string[] }, { textos: string[]; ids: string[] }> = async (deps, e) => {
+  const nada = { data: { textos: [], ids: [] } };
   const turno = await deps.repos.turnos.buscar(e.turnoId);
-  if (!turno || !aceitaMensagemNaSessao(turno)) return { data: { textos: [] } };
+  if (!turno || !(await aceitaNaSessao(deps, turno))) return nada;
+  if (e.confirma) {
+    const fora = new Set(e.jaOferecidas ?? []);
+    const fila = (await deps.repos.turnos.pendentesDaPessoa(turno.conversaId)).filter((t) => t.id !== turno.id && !fora.has(t.id) && t.agenteId === turno.agenteId && t.origem === "conversa" && Boolean(t.mensagemOrigemId) && t.entradaAnexos.length === 0 && !t.trabalhoId)
+      .sort((x, y) => x.criadoEm - y.criadoEm);
+    return { data: { textos: fila.map((t) => t.entradaTexto), ids: fila.map((t) => t.id) } };
+  }
   const absorvidos = await deps.repos.turnos.absorverNaSessao(turno);
-  if (absorvidos.length === 0) return { data: { textos: [] } };
-  const agora = deps.agora();
-  const autoria = autoriaPessoa(deps.escopo, e.executor);
-  const events = absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: turno.id } }));
-  return { data: { textos: absorvidos.map((a) => a.entradaTexto) }, events };
+  if (absorvidos.length === 0) return nada;
+  return { data: { textos: absorvidos.map((a) => a.entradaTexto), ids: absorvidos.map((a) => a.id) }, events: eventosDeAbsorcao(deps, e.executor, turno.id, absorvidos) };
 };
+
+/**
+ * #189: o app escreveu estas mensagens na sessão do turno vivo. Só agora cada uma sai interrompido/'absorvido'
+ * apontando para ele (a tela tira o "na fila"). A que já não está pendente (Cancelar chegou antes) fica como está.
+ */
+export const confirmarNaSessao: CasoDeUso<{ turnoId: string; executor: Executor; ids: readonly string[] }, { confirmadas: number }> = async (deps, e) => {
+  if (e.ids.length === 0) return { data: { confirmadas: 0 } };
+  const turno = await deps.repos.turnos.buscar(e.turnoId);
+  if (!turno) return { data: { confirmadas: 0 } };
+  const absorvidos = await deps.repos.turnos.absorverNaSessao(turno, e.ids);
+  return { data: { confirmadas: absorvidos.length }, events: eventosDeAbsorcao(deps, e.executor, turno.id, absorvidos) };
+};
+
+function eventosDeAbsorcao(deps: Deps, executor: Executor, turnoId: string, absorvidos: readonly Turno[]) {
+  const agora = deps.agora();
+  const autoria = autoriaPessoa(deps.escopo, executor);
+  return absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: turnoId } }));
+}

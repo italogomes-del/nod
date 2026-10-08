@@ -76,6 +76,21 @@ describe("montarArgs — contrato empírico do claude -p (mapa-cli 2026-09-16)",
     expect(segundo.args).not.toContain("--session-id");
   });
 
+  it("#193: com bifurcar e sessão, --resume <sessão> --fork-session; o id novo vem do CLI (sessaoCli null aqui)", () => {
+    const sessao = "22222222-2222-4222-8222-222222222222";
+    const com = montarArgs({ plano: planoDeTeste({ sessaoCli: sessao, bifurcar: true }), mcpJson: "m", bifurcar: true });
+    expect(valor(com.args, "--resume")).toBe(sessao);
+    expect(com.args[com.args.indexOf("--resume") + 2]).toBe("--fork-session");
+    expect(com.args).not.toContain("--session-id");
+    expect(com.sessaoCli).toBeNull();
+    // Sem o aval do driver (flag fora do help), ou sem sessão para copiar, nada de fork.
+    expect(montarArgs({ plano: planoDeTeste({ sessaoCli: sessao, bifurcar: true }), mcpJson: "m" }).args).not.toContain("--fork-session");
+    const semSessao = montarArgs({ plano: planoDeTeste({ sessaoCli: null, bifurcar: true }), mcpJson: "m", bifurcar: true, sessaoNova: () => sessao });
+    expect(semSessao.args).not.toContain("--fork-session");
+    expect(valor(semSessao.args, "--session-id")).toBe(sessao);
+    expect(Object.keys(FLAG_FLOORS)).toContain("--fork-session");
+  });
+
   it("envia Sonnet explicitamente ao CLI, inclusive numa sessão retomada", () => {
     const { args } = montarArgs({ plano: planoDeTeste({ modelo: "sonnet", sessaoCli: "sessao-sonnet" }), mcpJson: "m" });
     expect(valor(args, "--model")).toBe("sonnet");

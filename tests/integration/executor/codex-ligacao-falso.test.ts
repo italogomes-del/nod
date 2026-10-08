@@ -266,7 +266,9 @@ it("NOD-167: com o app-server, lacoDeVoz é true; a sonda --seco mede tudo contr
   expect(r.status).toBe(0);
   const texto = await readFile(saida, "utf8");
   expect(texto).toContain(`model/list: ${MODELO_LUNA_CODEX} presente`);
-  for (const medida of ["handshake:", "1º delta:", "turn/steer:", "turn/interrupt:", "aprovação negada:", "ferramenta mcp__nod__lembrar:"]) expect(texto).toContain(medida);
+  for (const medida of ["handshake:", "1º delta:", "turn/steer:", "turn/interrupt:", "aprovação negada:", "ferramenta mcp__nod__lembrar:", "steer no chat:"]) expect(texto).toContain(medida);
+  // ADR-081 §6: a mensagem do meio do chat entra pelo steer com a moldura e a resposta sai no mesmo turno.
+  expect(texto).toMatch(/^steer no chat: .*aceito.*1ª fala depois: "Recebi: A pessoa escreveu/m);
   expect(texto).toMatch(/^veredito: aprovada/m);
   expect(texto).toMatch(/^data: \d{4}-\d{2}-\d{2}T/m);
   expect(texto).toContain("codex: codex-cli teste");
