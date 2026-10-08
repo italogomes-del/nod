@@ -193,11 +193,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; decisao: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; esperando: boolean; decisao: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente') as pendentes,
+          exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
+            where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')) as decisao,
           u.estado as ultimo_estado, u.motivo_interrupcao as ultimo_motivo
@@ -208,7 +210,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, decisaoPendente: l.decisao, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, esperandoOutro: l.esperando, decisaoPendente: l.decisao, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */

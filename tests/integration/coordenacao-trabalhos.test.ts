@@ -91,6 +91,48 @@ describeIntegracao("a conversa coordena (#193, ADR-081 §7)", () => {
     });
   });
 
+  it("\"Fazer depois\" com a task já rodando: o turno vivo para, o mesmo pedido volta à fila e a task espera a outra (achado do e2e, 2026-10-08)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const conversa = await m.turno();
+      await m.repos.turnos.assentar(conversa!.id, { estado: "concluido" });
+      const a = await abrirTask(m.deps, { ...m.ctx(conversa!.id), titulo: "Migrar relatórios", pedido: "migre os relatórios" });
+      const b = await abrirTask(m.deps, { ...m.ctx(conversa!.id), titulo: "Dashboard de churn", pedido: "monte o dashboard de churn" });
+      if (!a.data.ok || !b.data.ok) throw new Error("abrir");
+      const [idA, idB] = [a.data.trabalho_id, b.data.trabalho_id];
+      for (let i = 0; i < 2; i++) await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
+      await sincronizarTrabalho(m.deps, idA);
+      await sincronizarTrabalho(m.deps, idB);
+      const [vivoB] = await m.repos.turnos.doTrabalho(idB);
+      expect(vivoB).toMatchObject({ estado: "despachando" });
+      expect(await m.repos.trabalhos.buscar(idB)).toMatchObject({ estado: "rodando" });
+
+      const r = await fazerDepois(m.deps, { trabalhoId: idB, depoisDe: idA });
+      expect(r.data.trabalho).toMatchObject({ depoisDeTrabalhoId: idA, estado: "na_fila" });
+      const turnosB = await m.repos.turnos.doTrabalho(idB);
+      expect(turnosB.map((t) => [t.estado, t.pararSolicitadoEm !== null])).toEqual([["despachando", true], ["pendente", false]]);
+      expect(turnosB[1]).toMatchObject({ origem: vivoB!.origem, entradaTexto: vivoB!.entradaTexto, trabalhoId: idB });
+      expect((r.events ?? []).map((e) => e.kind)).toContain("turno_criado");
+
+      // O turno parado assenta; a task continua na fila, e o pedido não roda enquanto a outra não acabar.
+      await m.repos.turnos.assentar(vivoB!.id, { estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
+      await sincronizarTrabalho(m.deps, idB);
+      expect((await m.repos.trabalhos.buscar(idB))?.estado).toBe("na_fila");
+      expect(await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() })).toBeNull();
+      const [vivoA] = await m.repos.turnos.doTrabalho(idA);
+      await m.repos.turnos.assentar(vivoA!.id, { estado: "concluido" });
+      await sincronizarTrabalho(m.deps, idA);
+      expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(turnosB[1]!.id);
+
+      // Sem a outra aberta (ou numa task de rotina), "Fazer depois" só grava: nada para.
+      const c = await abrirTask(m.deps, { ...m.ctx(conversa!.id), titulo: "Outra", pedido: "outra" });
+      if (!c.data.ok) throw new Error("abrir 3");
+      await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
+      await fazerDepois(m.deps, { trabalhoId: c.data.trabalho_id, depoisDe: idA });
+      expect((await m.repos.turnos.doTrabalho(c.data.trabalho_id)).map((t) => [t.estado, t.pararSolicitadoEm])).toEqual([["despachando", null]]);
+    });
+  });
+
   it("mandar_para_task chega à task certa (mensagem + turno na faixa dela) e entra no turno vivo dela, nunca no da conversa", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

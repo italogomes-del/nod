@@ -156,19 +156,62 @@ async function dependeDe(deps: Deps, de: Trabalho, alvoId: string): Promise<bool
   return false;
 }
 
+/**
+ * "Fazer depois" com a task já rodando (definido em 2026-10-08, achado do e2e da #193): o botão fica na linha que anunciou
+ * a task, e o laço pega o primeiro turno dela em ~1 s — a pessoa quase sempre aperta com ela já rodando. Gravar só o
+ * `depois_de` deixava a task trabalhando enquanto a tela dizia "começa depois da …". O turno vivo é parado e o mesmo
+ * pedido volta à fila da task, que agora espera a outra (a sessão que o turno parado deixar é retomada). Só na task da
+ * pessoa: a de rotina e a de colega têm a janela e a resposta presas ao id do turno, e a tela não mostra o botão nelas.
+ */
+async function voltarParaAFila(deps: Deps, t: Trabalho): Promise<RuntimeEvent[]> {
+  if (t.origem !== "pessoa") return [];
+  const vivos = (await deps.repos.turnos.doTrabalho(t.id)).filter((x) => x.estado === "despachando" && x.pararSolicitadoEm === null);
+  if (vivos.length === 0) return [];
+  const agora = deps.agora();
+  const autoria = autoriaPessoa(deps.escopo);
+  await deps.repos.turnos.pedirInterrupcao(vivos.map((x) => x.id), agora);
+  const events: RuntimeEvent[] = [];
+  for (const v of vivos) {
+    const novo = await deps.repos.turnos.enfileirar({
+      conversaId: v.conversaId,
+      agenteId: v.agenteId,
+      origem: v.origem,
+      retomaTurnoId: v.retomaTurnoId ?? null,
+      trabalhoId: t.id,
+      prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+      profundidade: v.profundidade,
+      entradaTexto: v.entradaTexto,
+      entradaAnexos: v.entradaAnexos,
+      entradaConfianca: v.entradaConfianca,
+      sobProcuracaoDe: v.sobProcuracaoDe ?? null,
+      modelo: v.modelo,
+      harness: v.harness,
+    });
+    if (!novo) throw new ErroDeDominio("estado_invalido", { cause: "turno da task não voltou à fila" });
+    if (await deps.repos.turnos.contaminado(v.id)) await deps.repos.turnos.contaminar(novo.id, agora);
+    events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: v.conversaId, turnoId: novo.id, dados: { origem: novo.origem, agente_id: t.agenteId, trabalhoId: t.id, voltou_de: v.id } }));
+  }
+  // Como o Parar da task: o pedido fica gravado; o processo recebe o SIGTERM aqui e a entrega assenta como parado.
+  for (const v of vivos) await deps.services.interruptor.interromper(v.id).catch(() => false);
+  return events;
+}
+
 /** POST trabalhos/:id/depois {depoisDe}: "Fazer depois da …" — a task espera a outra terminar, parar ou falhar. null tira. */
 export const fazerDepois: CasoDeUso<{ trabalhoId: string; depoisDe: string | null }, { trabalho: TrabalhoDto }> = async (deps, input) => {
   const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
   if (!t) throw new ErroDeDominio("nao_encontrado");
   if (input.depoisDe !== null && typeof input.depoisDe !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "depoisDe" });
+  let esperaOutro = false;
   if (input.depoisDe !== null) {
     const outro = await deps.repos.trabalhos.buscar(input.depoisDe);
     if (!outro || outro.agenteId !== t.agenteId) throw new ErroDeDominio("nao_encontrado");
     if (outro.id === t.id || (await dependeDe(deps, outro, t.id))) throw new ErroDeDominio("entrada_invalida", { cause: "ciclo de depois_de" });
+    esperaOutro = trabalhoAberto(outro.estado);
   }
   const marcado = await deps.repos.trabalhos.marcarDepoisDe(t.id, input.depoisDe);
   if (!marcado) throw new ErroDeDominio("estado_invalido");
-  const events = await sincronizarTrabalho(deps, t.id);
+  const events = esperaOutro ? await voltarParaAFila(deps, marcado) : [];
+  events.push(...(await sincronizarTrabalho(deps, t.id)));
   const atual = (await deps.repos.trabalhos.buscar(t.id)) ?? marcado;
   if (events.length === 0) events.push(eventoDe(deps, atual));
   const [dto] = await trabalhosParaDto(deps, [atual]);

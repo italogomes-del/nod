@@ -875,10 +875,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const ids = new Set(dele.map((t) => t.id));
         const terminais = dele.filter((t) => (t.estado === "concluido" || t.estado === "interrompido") && t.motivoInterrupcao !== "absorvido").sort((x, y) => y.criadoEm - x.criadoEm);
         const ultimo = terminais[0];
+        const depoisDe = doTenant(b.trabalhos).find((w) => w.id === id)?.depoisDeTrabalhoId ?? null;
+        const dep = depoisDe ? doTenant(b.trabalhos).find((w) => w.id === depoisDe) : undefined;
         return {
           parando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm !== null).length,
           despachando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm === null).length,
           pendentes: dele.filter((t) => t.estado === "pendente").length,
+          esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
           decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta")),
           ultimo: ultimo ? { estado: ultimo.estado, motivo: ultimo.motivoInterrupcao } : null,
         };

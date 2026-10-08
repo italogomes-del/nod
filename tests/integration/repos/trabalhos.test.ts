@@ -41,11 +41,17 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
     });
   });
 
-  it("fatos: despachando, pendentes, decisão pendente de um turno dele e o desfecho do último (absorvido não conta)", async () => {
+  it("fatos: despachando, pendentes, a espera do depois_de, decisão pendente de um turno dele e o desfecho do último (absorvido não conta)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const w = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Fatos", origem: "pessoa" });
-      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, decisaoPendente: false, ultimo: null });
+      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, ultimo: null });
+      // "Fazer depois da …": espera enquanto a outra está aberta, e para de esperar quando ela acaba.
+      const antes = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Antes", origem: "pessoa" });
+      await repos.trabalhos.marcarDepoisDe(w!.id, antes!.id);
+      expect((await repos.trabalhos.fatos(w!.id))?.esperandoOutro).toBe(true);
+      await repos.trabalhos.mudarEstado(antes!.id, "terminado", Date.now());
+      expect((await repos.trabalhos.fatos(w!.id))?.esperandoOutro).toBe(false);
       const t1 = await repos.turnos.enfileirar(turno(conversaId, agenteId, w!.id));
       expect((await repos.trabalhos.fatos(w!.id))?.pendentes).toBe(1);
       await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() });

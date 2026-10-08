@@ -73,6 +73,8 @@ export type FatosTrabalho = {
   parando: number;
   despachando: number;
   pendentes: number;
+  /** O trabalho de `depois_de` ("Fazer depois da …") ainda não acabou: o turno na fila espera por ele. */
+  esperandoOutro: boolean;
   decisaoPendente: boolean;
   ultimo: { estado: EstadoTurno; motivo: MotivoInterrupcao | null } | null;
 };
@@ -82,18 +84,19 @@ export type FatosTrabalho = {
  * evento deixa um lugar só para a regra: quem muda um turno ou uma decisão de um trabalho chama a sincronização e o
  * estado sai daqui.
  *
- * - turno com o Parar pedido e ainda acabando: `parado` (a renovação seguinte o encerra);
+ * - turno com o Parar pedido e ainda acabando, sem outro na fila: `parado` (a renovação seguinte o encerra);
  * - turno rodando: `rodando`, ou `precisa_de_voce` se ele parou numa decisão (a aprovação dentro do turno) — ou segue
  *   `fechado_ocioso` se a memória já mandou soltar essa espera (#194) e o processo está acabando;
- * - turno na fila: `rodando` se o trabalho já começou, senão `na_fila` (inclusive esperando o `depois_de`);
+ * - turno na fila: `rodando` se o trabalho já começou, senão `na_fila`; esperando o `depois_de`, sempre `na_fila`
+ *   (revisto em 2026-10-08: "Fazer depois" com a task já começada a devolve à fila — fazerDepois);
  * - nada vivo e decisão pendente: `precisa_de_voce` (ou continua `fechado_ocioso`, #194);
  * - nada vivo nem pendente: o desfecho do último turno — concluído `terminado`, parado pela pessoa `parado`, o resto
  *   `falhou` (máquina sumiu sem "Retomar", IA indisponível, erro).
  */
 export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
-  if (f.parando > 0 && f.despachando === 0) return "parado";
+  if (f.parando > 0 && f.despachando === 0 && f.pendentes === 0) return "parado";
   if (f.despachando > 0) return f.decisaoPendente ? (f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce") : "rodando";
-  if (f.pendentes > 0) return f.iniciado ? "rodando" : "na_fila";
+  if (f.pendentes > 0) return f.iniciado && !f.esperandoOutro ? "rodando" : "na_fila";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";
   if (f.ultimo === null) return f.estadoAtual === "parado" ? "parado" : "na_fila";
   if (f.ultimo.estado === "concluido") return "terminado";

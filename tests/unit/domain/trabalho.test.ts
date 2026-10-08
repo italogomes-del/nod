@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CAPACIDADES_HARNESS, SEM_CAPACIDADES } from "../../../src/contracts/harness.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, pastaRelativa, podeAbrirTask, podeMandarParaTask, promoveNaRede, REDE_MS, slugDoTrabalho, tituloDoTrabalho, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
 
-const base: FatosTrabalho = { estadoAtual: "na_fila", iniciado: false, parando: 0, despachando: 0, pendentes: 0, decisaoPendente: false, ultimo: null };
+const base: FatosTrabalho = { estadoAtual: "na_fila", iniciado: false, parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, ultimo: null };
 
 describe("estadoDoTrabalho (a tabela de estados da #192)", () => {
   it.each([
@@ -16,6 +16,8 @@ describe("estadoDoTrabalho (a tabela de estados da #192)", () => {
     ["entregou", { iniciado: true, ultimo: { estado: "concluido", motivo: null } }, "terminado"],
     ["a pessoa parou", { iniciado: true, ultimo: { estado: "interrompido", motivo: "parado_pela_pessoa" } }, "parado"],
     ["o Parar foi pedido e o processo ainda acaba", { iniciado: true, parando: 1 }, "parado"],
+    ["\"Fazer depois\" com a task já começada: o turno volta à fila e espera a outra", { iniciado: true, pendentes: 1, esperandoOutro: true }, "na_fila"],
+    ["o turno parado pelo \"Fazer depois\" ainda acaba, e o pedido já voltou à fila", { iniciado: true, parando: 1, pendentes: 1, esperandoOutro: true }, "na_fila"],
     ["a máquina sumiu sem retomada", { iniciado: true, ultimo: { estado: "interrompido", motivo: "maquina_sem_contato" } }, "falhou"],
     ["parado sem turno nenhum continua parado", { estadoAtual: "parado" }, "parado"],
   ] as const)("%s → %s", (_nome, fatos, esperado) => {
