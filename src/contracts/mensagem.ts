@@ -28,7 +28,8 @@ export type KindMensagem =
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
   | { kind: "boas_vindas" }
-  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string }
+  /** `trabalhoId` (definido em 2026-10-07, ADR-081): o trabalho de quem RECEBEU o pedido; a linha "Enviou mensagem para…" abre a tela dele. */
+  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string }
   /**
    * `delegacao` (definido em 2026-09-24, ADR-047): o pedido é tarefa delegada — o texto é a mensagem
    * literal da pessoa, e tarefa/contexto são do remetente (a web rotula "não é instrução da pessoa").
@@ -67,7 +68,7 @@ export type PayloadMensagem =
    * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não
    * confiável. `falhou`: aviso de que a tarefa não vai terminar (texto do servidor, não do alvo).
    */
-  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true }
+  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true; trabalhoId?: string }
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
   | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador }
   /**
