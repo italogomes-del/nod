@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { criarRotasRaioX } from "../../src/adapters/http/rotas/raio-x.ts";
 import type { OrigemTrabalho } from "../../src/contracts/trabalho.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../../src/domain/memoria-mac.ts";
@@ -83,6 +84,35 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       // Mac apertado, sem o espaço: o antigo passou da espera máxima e sai; o novo espera.
       expect(await m.reivindicarTudo(true, meus)).toEqual([tAntiga.id]);
       expect(await m.reivindicarTudo(false, meus)).toEqual([tNova.id]);
+    });
+  });
+
+  it("ADR-086 (revisão do #212): a volta marcada vencida segue as regras do Mac apertado, como trabalho em segundo plano", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const daPessoa = await m.task("pessoa", "Acompanhar o CI");
+      await m.repos.trabalhos.mudarEstado(daPessoa.id, "rodando", Date.now());
+      const volta = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: daPessoa.id, acordarEm: Date.now() - 1_000 });
+      const meus = new Set([volta!.id]);
+      expect(await m.reivindicarTudo(true, meus)).toEqual([]);
+      expect(await m.reivindicarTudo(false, meus, true)).toEqual([]);
+      expect(await m.reivindicarTudo(false, meus)).toEqual([volta!.id]);
+    });
+  });
+
+  it("a rota PUT preferencias avisa o puxar depois de gravar — só quando o uso do Mac vem, e não quando a gravação falha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { deps } = depsSobre(trx, MARLON);
+      const trocou = vi.fn();
+      const services = { ...deps.services, trabalhosVivos: { ultimaFerramenta: () => null, memoria: () => null, trocouUsoDoMac: trocou } };
+      const put = criarRotasRaioX({ abrirTx: () => (fn) => fn(trx), services, useCases: deps.useCases }).find((r) => r.metodo === "PUT" && r.padrao.test("/preferencias"))!;
+      const chamar = (corpo: unknown) => put.handler({ escopo: MARLON, params: {}, corpo: async () => corpo, json: () => undefined } as never);
+      await chamar({ faixaTrabalhosRecolhida: true });
+      expect(trocou).not.toHaveBeenCalled();
+      await chamar({ usoDoMac: "pouco" });
+      expect(trocou).toHaveBeenCalledWith(PESSOA_MARLON);
+      await esperarErro(() => chamar({ usoDoMac: "turbo" }), "entrada_invalida");
+      expect(trocou).toHaveBeenCalledTimes(1);
     });
   });
 

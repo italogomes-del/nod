@@ -6,6 +6,15 @@ import type { JsonSchema } from "./json-schema.ts";
  * `abrir_task` entra no turno de conversa (sem trabalho) e no da task de rotina sem mãe; `mandar_para_task`, só na
  * conversa. O teto do título (200) é o CHECK trabalho_titulo da 0063.
  */
+/**
+ * ADR-086 (revisão do #212): de 5 min a 24 h — menos que isso, cada volta relê a sessão inteira e sai mais caro que
+ * esperar; mais que um dia é rotina. `VOLTAS_SEGUIDAS_MAX`: voltas encadeadas antes de o bot ter de falar com a pessoa.
+ */
+export const ACORDAR_MIN_MINUTOS = 5;
+export const ACORDAR_MAX_MINUTOS = 24 * 60;
+export const MOTIVO_MAX_DESPERTAR = 300;
+export const VOLTAS_SEGUIDAS_MAX = 24;
+
 export const FERRAMENTAS_TRABALHO = {
   abrir_task: {
     type: "object",
@@ -29,10 +38,23 @@ export const FERRAMENTAS_TRABALHO = {
     required: ["trabalho_id", "texto"],
     additionalProperties: false,
   },
+  // definido em 2026-10-08 (ADR-086): esperar fora do Mac. O teto de 24 h é o de um dia de trabalho; mais que isso é rotina.
+  me_chame_as: {
+    type: "object",
+    description:
+      "Sai do Mac e volta sozinho mais tarde, na mesma sessão e no mesmo ponto. Use para esperar algo demorado que não depende de você — um CI, um deploy, um build longo, uma resposta de fora — em vez de ficar num laço com sleep ou checando de tempos em tempos: enquanto espera, nada seu ocupa o Mac. Depois de chamar, pare os comandos que deixou em segundo plano e encerre o turno; a volta só é marcada quando o turno termina.",
+    properties: {
+      em_minutos: { type: "integer", description: `Daqui a quantos minutos voltar, inteiro de ${ACORDAR_MIN_MINUTOS} a ${ACORDAR_MAX_MINUTOS} (24 h).` },
+      motivo: { type: "string", description: "O que você vai conferir quando voltar, numa frase (ex.: \"ver se o CI do PR #212 passou\").", minLength: 1, maxLength: MOTIVO_MAX_DESPERTAR },
+    },
+    required: ["em_minutos", "motivo"],
+    additionalProperties: false,
+  },
 } as const satisfies Record<string, JsonSchema>;
 
 export type ArgsAbrirTask = { titulo: string; pedido: string; depois_de?: string };
 export type ArgsMandarParaTask = { trabalho_id: string; texto: string };
+export type ArgsMeChameAs = { em_minutos: number; motivo: string };
 
 export type ResultadoAbrirTask =
   | { ok: true; trabalho_id: string; instrucao: string }
@@ -40,9 +62,14 @@ export type ResultadoAbrirTask =
 export type ResultadoMandarParaTask =
   | { ok: true; entrou: "no_meio" | "na_fila"; instrucao: string }
   | { ok: false; erro: "task_nao_encontrada" | "nao_repassa" | "task_fechada"; instrucao: string };
+/** `volta_as`: a hora no fuso de São Paulo (horaDaFrase; o servidor não guarda o da pessoa); `acordar_em`: o instante (ISO). */
+export type ResultadoMeChameAs =
+  | { ok: true; volta_as: string; acordar_em: string; instrucao: string }
+  | { ok: false; erro: "turno_parado" | "task_fechada" | "voltas_demais"; instrucao: string };
 
-/** Args ↔ resultado das duas, intersectado em ContratoFerramentaNod. */
+/** Args ↔ resultado das três, intersectado em ContratoFerramentaNod. */
 export type ContratoFerramentasTrabalho = {
   abrir_task: { args: ArgsAbrirTask; resultado: ResultadoAbrirTask };
   mandar_para_task: { args: ArgsMandarParaTask; resultado: ResultadoMandarParaTask };
+  me_chame_as: { args: ArgsMeChameAs; resultado: ResultadoMeChameAs };
 };

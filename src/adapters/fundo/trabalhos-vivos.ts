@@ -27,6 +27,8 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
   const ferramentas = new Map<string, string>();
   const maquinas = new Map<string, LeituraGuardada>();
   const vistoPorPessoa = new Map<string, Visto>();
+  /** ADR-085: quando a pessoa trocou o "uso do Mac" pela última vez (o cache do puxar lido antes disso não vale). */
+  const usoTrocadoEm = new Map<string, number>();
 
   const viva = (m: LeituraGuardada) => agora() - m.em <= VALIDADE_LEITURA_MS;
 
@@ -88,6 +90,12 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
     /** Revisão do #209: o Mac desconectou — a leitura dele não segura nem soma mais nada. */
     esquecerMaquina(machineId: string): void {
       maquinas.delete(machineId);
+    },
+    trocouUsoDoMac(pessoaId: string): void {
+      usoTrocadoEm.set(pessoaId, agora());
+    },
+    usoTrocadoEm(pessoaId: string): number {
+      return usoTrocadoEm.get(pessoaId) ?? 0;
     },
     memoria: daPessoa,
     daMaquina,

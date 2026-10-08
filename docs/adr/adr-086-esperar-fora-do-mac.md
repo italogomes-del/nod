@@ -1,0 +1,69 @@
+# ADR-086 — Esperar fora do Mac: "me chame às 16:00"
+
+Status: aceito · Data: 2026-10-08 · Segue a [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md) (o segundo dos três PRs
+do "sem teto, sem desperdício", decisão do Marlon em 2026-10-08) e conversa com a [ADR-067](adr-067-sessao-viva-o-turno-segue-ate-o-bot-terminar.md)
+(sessão viva, comando demorado sem limite de tempo).
+
+## Contexto
+
+Esperar um colega já não ocupa o Mac: o turno de quem pediu acaba, e a resposta volta como retomada com `--resume`
+(ADR-058, ADR-084). Mas o bot que espera algo **de fora** (o CI no GitHub, um deploy, a resposta de alguém) não tinha como
+sair: a ADR-067 manda acompanhar até concluir, então ele ficava num laço com `sleep` ou checando de tempos em tempos,
+com o processo do CLI e a memória dele presos no Mac por horas. Do lado da tela, a task que espera um colega aparecia
+como quem trabalha. O #208 (tempo da task) trocou o relógio por "esperando X", e esta ADR completa com o "fora do Mac".
+
+## Decisão
+
+1. **Ferramenta `me_chame_as({ em_minutos, motivo })`** (contracts/ferramentas-trabalho.ts; use-cases/me-chame-as.ts),
+   de 1 a 1440 minutos. Nos modos criação, conversa, rotina e delegação; fica de fora da sala (várias pessoas) e da
+   ligação (ao vivo). Ela enfileira a **retomada do próprio turno** com `turnos.acordar_em` (0065), com a mesma
+   profundidade, confiança, procuração e trabalho, e a marca de conteúdo de fora se o turno a tinha. O resultado manda
+   encerrar o turno.
+2. **Sem varredor.** O `reivindicar` só entrega turno pendente com `acordar_em` nulo ou já passado; até lá ele não está
+   "na fila" (`pendentesRenderizaveis`). A volta é na mesma sessão, pelo caminho de toda retomada.
+3. **Estado.** O trabalho fica `rodando` enquanto a volta está marcada (há turno pendente e ele já começou, regra de
+   `estadoDoTrabalho`). `TrabalhoDto.acordaEm` traz a próxima volta.
+4. **Tela.**
+   - A linha da task diz "volta às 16:05", com o ponto vazado da espera.
+   - O cartão do tempo ganha "fora do Mac desde HH:MM · volta sozinho" (colega) ou "fora do Mac · volta às HH:MM".
+   - Seu espaço › Este Mac ganha o grupo "Fora do Mac", separado de quem trabalha.
+   - A linha do cartão é só texto: "Trabalhando" + "Esperando" continuam somando o "Aberta há".
+5. **Prompt.** Com a ferramenta no catálogo, entra uma linha: para esperar algo de fora que demora, nada de laço com
+   `sleep`; chame `me_chame_as`, diga o que espera e encerre. O comando do próprio bot (testes, build) continua no
+   terminal em segundo plano (ADR-067); tirá-lo do Mac é o PR3.
+
+## Revisão do #212 (9 revisores)
+
+- A chamada só ANOTA o pedido no turno (`despertar_em`, `despertar_motivo`); a volta nasce no assentamento, se o turno
+  concluiu, sem Parar e com a task aberta. A marca de conteúdo de fora já é final, o Parar cancela a volta, fica uma
+  volta por turno, e o trabalho é o de agora (a rede de 2 min pode ter promovido o turno).
+- Voltas seguidas apontam para a mesma origem (não alongam a cadeia de SALTOS_DE_RETOMADA). O teto é de 24 voltas, e o
+  mínimo passa a 5 min.
+- A volta usa o modelo e o harness do turno.
+- `retomadaNaFila` e `vivosDaConversa` ignoram a volta futura: uma aprovação não gruda nela e a conversa não mostra o bot
+  "em curso".
+- Na delegação, a entrega espera a volta (`aguardando_volta`).
+- "Precisa de você" vence a volta (`aguardandoDespertar` depois da decisão).
+- A rotina com volta marcada segue aberta (a próxima janela é pulada).
+- A volta vencida segue as regras do Mac apertado (ADR-085).
+- A tela diz "amanhã às" quando a volta não é hoje.
+- A 0065 usa `lock_timeout`, e o ROLLBACK interrompe as voltas pendentes antes de tirar a coluna.
+
+## Alternativas rejeitadas
+
+- **Tabela `despertares` com varredor.** Mais uma tabela, mais um laço de 30 s e a duplicação do que a retomada já faz.
+  A coluna na fila resolve com a precisão do `puxar` (1 s).
+- **Deixar o bot em `sleep`.** É o que a ADR-085 quer evitar: processo e memória presos sem trabalho.
+- **Hora absoluta ("16:00") no argumento.** O servidor não guarda o fuso da pessoa; minutos não dependem disso. A frase
+  devolvida ao bot sai no fuso de São Paulo (como `horaDaFrase`), e a tela formata no fuso dela.
+
+## Limitações conhecidas
+
+- Duas chamadas no mesmo turno marcam duas voltas. O bot é orientado a chamar uma vez; desfazer a anterior pediria um
+  motivo de interrupção novo.
+- O Parar da task cancela a volta como cancela todo turno pendente dela.
+
+## Gatilho de reversão
+
+- Turnos com `acordar_em` que voltam e chamam `me_chame_as` de novo mais de 10 vezes seguidas: o bot está usando a volta
+  como laço. Rever a orientação ou pôr um teto por trabalho.

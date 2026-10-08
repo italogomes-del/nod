@@ -82,6 +82,8 @@ export type FatosTrabalho = {
    * A resposta vira a continuação do trabalho: até lá ele está trabalhando, não terminou.
    */
   aguardandoColega: boolean;
+  /** ADR-086 (revisão do #212): uma volta marcada ("me chame às 16:00") ainda por vir. Não é fila: fica abaixo da decisão. */
+  aguardandoDespertar?: boolean;
   ultimo: { estado: EstadoTurno; motivo: MotivoInterrupcao | null } | null;
 };
 
@@ -98,7 +100,8 @@ export type FatosTrabalho = {
  * - nada vivo e já `parado`: continua `parado` (revisão do épico, S1, 2026-10-08) — nem a decisão que sobrou nem o
  *   desfecho do turno que acabou depois do Parar o reabrem; só um turno novo (a pessoa escreveu na task) o tira daí;
  * - nada vivo e decisão pendente: `precisa_de_voce` (ou continua `fechado_ocioso`, #194);
- * - nada vivo e pedido a colega sem resposta: `rodando` (S3) — a resposta volta como turno do trabalho;
+ * - nada vivo e pedido a colega sem resposta, ou uma volta marcada (ADR-086): `rodando` (S3) — a resposta ou a volta
+ *   chegam como turno do trabalho;
  * - nada vivo nem pendente: o desfecho do último turno — concluído `terminado`, parado pela pessoa `parado`, o resto
  *   `falhou` (máquina sumiu sem "Retomar", IA indisponível, erro).
  */
@@ -108,7 +111,7 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   if (f.pendentes > 0) return f.iniciado && !f.esperandoOutro ? "rodando" : "na_fila";
   if (f.estadoAtual === "parado") return "parado";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";
-  if (f.aguardandoColega) return "rodando";
+  if (f.aguardandoColega || f.aguardandoDespertar) return "rodando";
   if (f.ultimo === null) return "na_fila";
   if (f.ultimo.estado === "concluido") return "terminado";
   if (f.ultimo.motivo === "parado_pela_pessoa") return "parado";

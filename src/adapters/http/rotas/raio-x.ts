@@ -25,7 +25,10 @@ export function criarRotasRaioX(d: DepsRotas): Rota[] {
       padrao: /^\/preferencias$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        ctx.json(200, await executar(ctx.escopo, gravarPreferencias, { modoDev: corpo.modoDev, faixaTrabalhosRecolhida: corpo.faixaTrabalhosRecolhida, usoDoMac: corpo.usoDoMac }));
+        const gravado = await executar(ctx.escopo, gravarPreferencias, { modoDev: corpo.modoDev, faixaTrabalhosRecolhida: corpo.faixaTrabalhosRecolhida, usoDoMac: corpo.usoDoMac });
+        // ADR-085: já gravado (a tx fechou) — o puxar relê o "uso do Mac" agora, sem esperar os 30 s do cache.
+        if (corpo.usoDoMac !== undefined) d.services.trabalhosVivos?.trocouUsoDoMac?.(ctx.escopo.pessoaId);
+        ctx.json(200, gravado);
       },
     },
     {

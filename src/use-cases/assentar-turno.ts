@@ -22,6 +22,7 @@ import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
@@ -298,6 +299,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-09-28 (0032): aprovação já decidida que este turno não chegou a receber (a espera acabou
   // um instante antes do clique) vira UMA retomada — nunca duas, e nunca nenhuma.
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
+  // ADR-086: o turno marcou uma volta ("me chame às 16:00") — ela nasce agora, antes de o trabalho reler o estado.
+  events.push(...(await voltaMarcadaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-083: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
   events.push(...(await sincronizarDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };

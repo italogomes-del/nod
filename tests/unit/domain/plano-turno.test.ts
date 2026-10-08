@@ -85,7 +85,7 @@ describe("montarPlano", () => {
     for (const n of ["ver_colegas", "pedir_a_bot", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_task"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_task", "me_chame_as"]);
     // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
@@ -299,5 +299,17 @@ describe("montarPlano: o onboarding por ligação (ADR-077)", () => {
     for (const n of ["anotar_entrevista", "concluir_entrevista", "propor_bot", "pedir_acesso", "criar_rotina", "desligar"]) expect(onboarding).toContain(n);
     const conversa = nomes(montarPlano({ ...base, modo: "conversa", onboarding: true }));
     for (const n of ["anotar_entrevista", "concluir_entrevista", "propor_bot"]) expect(conversa).not.toContain(n);
+  });
+
+  it("ADR-086: me_chame_as entra onde o bot trabalha com tempo (não na sala nem na ligação), com a linha do prompt contra o laço de sleep", () => {
+    const conversa = montarPlano(base);
+    expect(nomes(conversa)).toContain("me_chame_as");
+    expect(conversa.promptSistema).toContain("não fique num laço com sleep");
+    for (const modo of ["criacao", "rotina", "delegacao"] as const) expect(nomes(montarPlano({ ...base, modo }))).toContain("me_chame_as");
+    for (const modo of ["sala", "ligacao", "peer"] as const) {
+      const p = montarPlano({ ...base, modo });
+      expect(nomes(p)).not.toContain("me_chame_as");
+      expect(p.promptSistema).not.toContain("me_chame_as");
+    }
   });
 });

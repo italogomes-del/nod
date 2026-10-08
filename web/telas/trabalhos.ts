@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, filtrar, memoriaLegivel, pilulaMac, pilulaMemoria, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, foraDoMac, quandoVolta, voltaMarcada, filtrar, memoriaLegivel, pilulaMac, pilulaMemoria, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { usd } from "./modo-dev.ts";
@@ -31,7 +31,7 @@ const etiqueta = (t: TrabalhoDto): string => `<span class="etiqueta-origem">${es
  * turno que roda, quando a tela a guarda — o passo anda a cada frame em vez de esperar o próximo `GET trabalhos`.
  */
 function progresso(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number, vivo?: AtividadeTurno, segurando = false): string {
-  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando);
+  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando, agora);
   return t.estado === "na_fila" ? situacao : `${situacao} · ${tempoDe(t, agora)}`;
 }
 
@@ -45,8 +45,8 @@ function atividadeDe(estado: Estado, t: TrabalhoDto): AtividadeTurno | undefined
 }
 
 /** O status curto da task, sem tempo: "esperando Eng 2", o passo de agora ou o estado. */
-function statusCurto(t: TrabalhoDto, todos: readonly TrabalhoDto[], vivo?: AtividadeTurno, segurando = false): string {
-  return vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando);
+function statusCurto(t: TrabalhoDto, todos: readonly TrabalhoDto[], vivo?: AtividadeTurno, segurando = false, agora = Date.now()): string {
+  return vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando, agora);
 }
 
 /** "trabalhou 21 min · aberta há 5 h": só no hover da linha (CSS), e nada na fila (lá ainda não há tempo a contar). */
@@ -76,7 +76,7 @@ export function renderFaixaTrabalhos(estado: Estado, agenteId: string): string {
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
   // definido em 2026-10-08 (protótipo "Nod — tempo da task"): a linha diz só o que a task faz ou espera; o tempo aparece no
   // hover (e no foco do teclado), para a faixa não pedir conta a cada olhada.
-  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo${esperandoColega(t) ? " esperando" : ""}">${esc(statusCurto(t, todos, atividadeDe(estado, t), estado.trabalhos?.segurando === true))}</span>${tempoNoHover(t, estado.agora)}<span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
+  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo${foraDoMac(t) ? " esperando" : ""}">${esc(statusCurto(t, todos, atividadeDe(estado, t), estado.trabalhos?.segurando === true, estado.agora))}</span>${tempoNoHover(t, estado.agora)}<span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
   return `<section class="faixa-trab" aria-label="Trabalhos de ${esc(nome)}"><div class="ft-cab"><span>Trabalhos do ${esc(nome)}</span><span class="ft-n">${n}</span><button type="button" class="ft-recolher" data-act="faixa-trabalhos" data-recolher="1" aria-label="Recolher em pílula" title="Recolher em pílula">${ICONE.abrir}</button></div>${linhas}</section>`;
 }
 
@@ -169,7 +169,7 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
     const bot = agente(estado, t.agenteId);
     const mem = aberto(t) && t.memoriaMb !== null ? ` · ${memoriaLegivel(t.memoriaMb)}` : "";
     const fim = aberto(t) ? (t.estado === "na_fila" ? "" : tempoDe(t, estado.agora)) : hora(t.terminadoEm ?? t.criadoEm);
-    return `<button type="button" class="tt-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="tt-bot">${bot ? iconeAgente(bot, "sm") : ""}<b>${esc(bot?.nome ?? "bot")}</b></span><span class="tt-meio"><span class="tt-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="tt-passo">${esc(situacaoDe(t, todos, segurando))}</span></span><span class="tt-fim">${esc(fim + mem)}</span></button>`;
+    return `<button type="button" class="tt-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="tt-bot">${bot ? iconeAgente(bot, "sm") : ""}<b>${esc(bot?.nome ?? "bot")}</b></span><span class="tt-meio"><span class="tt-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="tt-passo">${esc(situacaoDe(t, todos, segurando, estado.agora))}</span></span><span class="tt-fim">${esc(fim + mem)}</span></button>`;
   };
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => `<section class="tt-grupo" data-grupo="${g.chave}"><h2>${g.titulo} · ${grupos[g.chave].length}${g.chave === "trabalhando" && grupos.trabalhando.some((t) => t.memoriaMb !== null) ? " · os que mais usam memória primeiro" : ""}</h2><div class="tt-lista">${grupos[g.chave].map(linha).join("")}</div></section>`).join("");
   const vazio = filtro === "todos" ? "Nenhum bot está trabalhando agora. Quando um bot abrir uma task, rodar uma rotina ou atender um colega, aparece aqui." : "Nada com este filtro hoje.";
@@ -202,11 +202,11 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const quemPediu = pediu ? `${iconeAgente(pediu, "sm")}<span class="tk-seta" aria-label="pediu a">${ICONE.seta}</span>` : "";
   // revisto em 2026-10-08 (protótipo "Nod — tempo da task", aprovado): no lugar do tempo total, o status curto ("esperando
   // Eng 2", "trabalhando"); o tempo trabalhado e o de espera ficam no cartão que o status abre.
-  const colega = esperandoColega(t);
-  const status = !aberto(t) ? `${situacaoDe(t)} · ${tempoDe(t, estado.agora)}` : colega ? `esperando ${colega.nome}` : t.estado === "rodando" ? "trabalhando" : situacaoDe(t);
+  const fora = foraDoMac(t);
+  const status = !aberto(t) ? `${situacaoDe(t)} · ${tempoDe(t, estado.agora)}` : fora ? situacaoDe(t, [], false, estado.agora) : t.estado === "rodando" ? "trabalhando" : situacaoDe(t);
   const abertoCartao = estado.tempoTaskAberto === t.id;
-  const botaoStatus = `<button type="button" class="tk-status${colega ? " esperando" : ""}" data-act="tempo-task" data-id="${esc(t.id)}" aria-expanded="${abertoCartao}" title="Ver o tempo da task">${esc(status)}${ICONE_ABRIR_TEMPO}</button>`;
-  const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !colega ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
+  const botaoStatus = `<button type="button" class="tk-status${fora ? " esperando" : ""}" data-act="tempo-task" data-id="${esc(t.id)}" aria-expanded="${abertoCartao}" title="Ver o tempo da task">${esc(status)}${ICONE_ABRIR_TEMPO}</button>`;
+  const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !fora ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
   const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", t.custoUsd !== null ? `${usd(t.custoUsd)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
   return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}</div>`;
@@ -222,9 +222,12 @@ function cartaoDoTempo(t: TrabalhoDto, agora: number): string {
   const { abertaMs, trabalhouMs, esperouMs } = temposDaTask(t, agora);
   const pct = abertaMs > 0 ? Math.round((trabalhouMs / abertaMs) * 100) : 0;
   const colega = esperandoColega(t);
+  const volta = voltaMarcada(t);
+  // ADR-086 (combinado com o protótipo "Nod — tempo da task"): a espera não ocupa o Mac, e a pessoa vê que a task volta
+  // sozinha — no próprio rodapé, um fecho só e a hora uma vez.
   const rodape = colega
-    ? `<div class="tk-pop-rodape"><span>${esc(colega.nome)} recebeu o pedido às ${esc(hora(colega.desde))}</span>${colega.trabalhoId ? `<button type="button" class="tk-pop-link" data-act="abrir-trabalho" data-id="${esc(colega.trabalhoId)}">Ver task</button>` : ""}</div>`
-    : "";
+    ? `<div class="tk-pop-rodape"><span>${esc(colega.nome)} recebeu o pedido às ${esc(hora(colega.desde))} · fora do Mac, volta sozinha</span>${colega.trabalhoId ? `<button type="button" class="tk-pop-link" data-act="abrir-trabalho" data-id="${esc(colega.trabalhoId)}">Ver task</button>` : ""}</div>`
+    : volta ? `<div class="tk-pop-rodape"><span>fora do Mac · volta ${esc(quandoVolta(volta, agora))}</span></div>` : "";
   return `<div class="tk-pop" role="group" aria-label="Tempo da task">
     <div class="tk-pop-linha tk-pop-total"><span>${aberto(t) ? "Aberta há" : "Durou"}</span><b>${esc(duracaoCurta(abertaMs))}</b></div>
     <div class="tk-pop-barra" role="img" aria-label="Trabalhou ${esc(duracaoCurta(trabalhouMs))}, esperou ${esc(duracaoCurta(esperouMs))}"><span style="width:${pct}%"></span></div>

@@ -268,6 +268,21 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     expect(await marcado(limpa.d2)).toBe(false);
   });
 
+  it("ADR-086 (revisão do #212): quem cumpre o pedido marcou uma volta — a frase 'vou esperar o CI' não é entregue; o resultado da volta, sim", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const clarice = await bot(d, "Clarice");
+    await bot(d, "Chico");
+    const t0 = await turno(d, clarice.id, clarice.conversaId);
+    const d1 = (await pedir(d, clarice, t0.id, "Chico", "veja se o CI do PR 212 passa")).data.tarefa_id;
+    const tarefa = d.banco.turnos.find((x) => x.id === d1)!;
+    const volta = await d.deps.repos.turnos.enfileirar({ conversaId: tarefa.conversaId, agenteId: tarefa.agenteId, origem: "retomada", retomaTurnoId: d1, prazoEm: AGORA + 600_000, profundidade: tarefa.profundidade, entradaTexto: "[nod] Você marcou para voltar", entradaConfianca: "confiavel", modelo: "haiku", acordarEm: AGORA + 600_000 });
+    expect((await entregarRespostaPeer(d.deps, { tarefaId: d1, texto: "Vou esperar o CI." })).data).toEqual({ ignorado: "aguardando_volta" });
+    await d.deps.repos.turnos.assentar(volta!.id, { estado: "concluido" });
+    const r = await entregarRespostaPeer(d.deps, { tarefaId: volta!.id, texto: "CI verde: pode mergear." });
+    expect("continuacao" in r.data).toBe(true);
+    expect(d.banco.mensagens.filter((m) => m.conversaId === clarice.conversaId && m.payload?.kind === "peer_ask").map((m) => m.texto)).toEqual(["CI verde: pode mergear."]);
+  });
+
   it("a entrega espera os subpedidos: a Clarice recebe UMA entrega, a final, e não o 'pedi aos Devs, aguardo'", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const clarice = await bot(d, "Clarice");

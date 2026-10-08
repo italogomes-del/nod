@@ -1,7 +1,7 @@
 import type { EstadoTrabalho, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
 import { duracaoCurta } from "./relogio.ts";
-import { esc } from "./render.ts";
+import { esc, hora } from "./render.ts";
 
 /**
  * Trabalhos (ADR-083, épico #188): o que a faixa, a barra, a gaveta, "Todos os trabalhos" e as linhas do chat leem dos
@@ -67,6 +67,31 @@ export function esperandoColega(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | 
   return t.estado === "rodando" && !t.turnoVivoId && t.esperandoColega ? t.esperandoColega : null;
 }
 
+/**
+ * definido em 2026-10-08 (ADR-086): o bot combinou de voltar a uma hora ("me chame às 16:00") e saiu do Mac até lá —
+ * rodando, sem turno vivo, com a volta por vir.
+ */
+export function voltaMarcada(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "acordaEm">): number | null {
+  return t.estado === "rodando" && !t.turnoVivoId && t.acordaEm ? t.acordaEm : null;
+}
+
+/**
+ * ADR-086 (revisão do #212): "às 16:05" hoje, "amanhã às 09:00" no dia seguinte, "em 12/10 às 09:00" depois — a volta
+ * pode cair até 24 h à frente, e "volta às 09:00" de amanhã lia como hoje.
+ */
+export function quandoVolta(instante: number, agora: number): string {
+  const dia = (t: number) => new Date(t).toDateString();
+  if (dia(instante) === dia(agora)) return `às ${hora(instante)}`;
+  if (dia(instante) === dia(agora + 86_400_000)) return `amanhã às ${hora(instante)}`;
+  const d = new Date(instante);
+  return `em ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} às ${hora(instante)}`;
+}
+
+/** ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. */
+export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm">): boolean {
+  return esperandoColega(t) !== null || voltaMarcada(t) !== null;
+}
+
 /** O tempo da task: aberta há (do começo até agora ou o fim), quanto os turnos trabalharam e o resto, que é espera. */
 export function temposDaTask(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "terminadoEm" | "trabalhouMs">, agora: number): { abertaMs: number; trabalhouMs: number; esperouMs: number } {
   const abertaMs = Math.max(0, (t.terminadoEm ?? agora) - inicioDe(t));
@@ -78,10 +103,12 @@ export function temposDaTask(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "t
  * O que o trabalho está fazendo, em poucas palavras: o último passo, quem segura o computador, quem ele espera, ou o
  * estado. Sem o tempo (quem desenha junta o tempo quando cabe).
  */
-export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false): string {
+export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false, agora = Date.now()): string {
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
+  const volta = voltaMarcada(t);
+  if (volta) return `volta ${quandoVolta(volta, agora)}`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
@@ -189,10 +216,10 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 }
 
 /** O ponto do trabalho: na cor do bot (`c-*`), piscando enquanto roda; azul quando espera a pessoa; vazado na fila. */
-export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega">>, cor: string | undefined): string {
+export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "acordaEm">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
-  // Esperando colega: ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
-  if (esperandoColega({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null })) return '<span class="ponto-trabalho esperando" aria-hidden="true"></span>';
+  // Esperando colega ou a hora marcada (ADR-086): ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
+  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho esperando" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.

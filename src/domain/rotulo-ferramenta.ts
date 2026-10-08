@@ -26,6 +26,7 @@ const NOD: Record<string, string> = {
   // ADR-083 (#193): a conversa coordena as tasks.
   abrir_task: "Abriu uma task",
   mandar_para_task: "Repassou a uma task",
+  me_chame_as: "Saiu do Mac até a hora de voltar",
 };
 
 /**

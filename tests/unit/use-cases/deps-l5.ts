@@ -1,6 +1,7 @@
 import { desligar, iniciarTarefa } from "../../../src/use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../../src/use-cases/onboarding.ts";
 import { abrirTask, mandarParaTask } from "../../../src/use-cases/coordenar-trabalhos.ts";
+import { meChameAs } from "../../../src/use-cases/me-chame-as.ts";
 import { gerirBots } from "../../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../../src/use-cases/nod.ts";
 import type { Conector } from "../../../src/contracts/conector.ts";
@@ -94,6 +95,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     proporBot,
     abrirTask,
     mandarParaTask,
+    meChameAs,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,
