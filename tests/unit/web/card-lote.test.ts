@@ -27,7 +27,7 @@ describe("card do lote do Nod", () => {
     expect(h).not.toContain('data-lote-i="0"');
     expect(h).toContain('<span class="tag tag-ok">feito</span>');
     expect(h).toContain("em Engenharia · Revisa os PRs.");
-    expect(h).toContain("Excluir e mudar o modo de um bot são arriscados");
+    expect(h).toContain("Excluir é arriscado: o Nod sempre pergunta antes.");
     expect(h).toContain("O Nod leu conteúdo de fora nesta conversa");
     expect(h).toContain("github, ler e alterar");
     expect(h).toContain('data-act="decidir-lote"');

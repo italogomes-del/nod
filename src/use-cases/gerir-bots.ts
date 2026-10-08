@@ -148,7 +148,8 @@ async function executarEmOrdem(
       a.estado = "feita";
       a.erro = null;
       a.botId = feito.botId;
-      if (a.tipo === "criar" || a.tipo === "duplicar") a.alvoNome = feito.nome;
+      // QA de 2026-10-07: no duplicar o card e o desfecho falam do ORIGINAL ("Duplicar Dev 1"); a cópia só vira alvo de "@ref".
+      if (a.tipo === "criar") a.alvoNome = feito.nome;
       events.push(...feito.events);
     } catch (e) {
       if (!ehErroDeDominio(e)) throw e;

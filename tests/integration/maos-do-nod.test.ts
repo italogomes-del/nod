@@ -68,8 +68,11 @@ describeIntegracao("as mãos do Nod (ADR-082)", () => {
       const proposta = await d.repos.propostas.buscar(r.data.decisao_id);
       expect(proposta?.estado).toBe("confirmada");
       expect(proposta?.payload.kind === "lote_bots" && proposta.payload.acoes.map((a) => a.estado)).toEqual(["feita", "recusada", "recusada", "feita", "recusada"]);
+      // Regression: QA de 2026-10-07 — o card e o desfecho falam do ORIGINAL ("Duplicar Dev 1"), não da cópia.
+      expect(proposta?.payload.kind === "lote_bots" && proposta.payload.acoes[0]?.alvoNome).toBe("Dev 1");
       const ultima = await d.repos.mensagens.ultimaDaConversa(ctx.conversaId);
       expect(ultima?.texto).toContain("2 de 5 mudanças feitas.");
+      expect(ultima?.texto).toContain("✓ Duplicar Dev 1\n");
       await expect(executar(d, decidirLoteDeBots, { decisaoId: r.data.decisao_id, recusar: false })).rejects.toMatchObject({ codigo: "estado_invalido" });
     });
   });

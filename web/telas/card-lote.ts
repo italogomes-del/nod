@@ -14,11 +14,11 @@ const VERBO_DO_LOTE: Record<AcaoNoLote["tipo"], string> = {
   mudar_modo: "Mudar modo",
 };
 const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "manual", automatico: "automático", total: "sem aprovações" };
-/** Por que a ação esperou você, quando não foi só o modo manual. */
-const MOTIVO_DO_LOTE: Record<Exclude<MotivoCardDoLote, "manual">, string> = {
-  arriscada: "Excluir e mudar o modo de um bot são arriscados: o Nod sempre pergunta antes.",
-  conteudo_de_fora: "O Nod leu conteúdo de fora nesta conversa, então dar acesso a um app espera você.",
-};
+/** Por que a ação esperou você, quando não foi só o modo manual (QA de 2026-10-07: uma frase por tipo, não uma genérica). */
+function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">): string {
+  if (motivo === "arriscada") return a.tipo === "excluir" ? "Excluir é arriscado: o Nod sempre pergunta antes. Dá para restaurar depois em Gerenciar agentes." : "Mudar o modo de um bot é arriscado: o Nod sempre pergunta antes.";
+  return a.tipo === "dar_acesso" ? "O Nod leu conteúdo de fora nesta conversa, então dar acesso a um app espera você." : "O Nod leu conteúdo de fora nesta conversa, então esta mudança espera você.";
+}
 
 function detalheDaAcao(a: AcaoNoLote): string {
   switch (a.tipo) {
@@ -45,7 +45,7 @@ export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBo
     const marca = a.estado === "feita" ? '<span class="tag tag-ok">feito</span>' : a.estado === "falhou" ? `<span class="tag tag-ambar">não deu certo${a.erro ? ` (${esc(a.erro.replaceAll("_", " "))})` : ""}</span>` : a.estado === "recusada" ? '<span class="tag tag-cinza">não feito</span>' : !aberto ? '<span class="tag tag-cinza">não decidido</span>' : "";
     const caixa = a.estado === "esperando" && aberto ? `<input type="checkbox" data-lote-i="${a.i}" checked aria-label="${esc(`${VERBO_DO_LOTE[a.tipo]} ${a.alvoNome}`)}" />` : "";
     const detalhe = detalheDaAcao(a);
-    const motivo = a.estado === "esperando" && a.motivo && a.motivo !== "manual" ? `<small class="lote-motivo">${esc(MOTIVO_DO_LOTE[a.motivo])}</small>` : "";
+    const motivo = a.estado === "esperando" && a.motivo && a.motivo !== "manual" ? `<small class="lote-motivo">${esc(motivoDoLote(a, a.motivo))}</small>` : "";
     return `<label class="lote-acao">${caixa}<span class="lote-texto"><span><i class="lote-verbo">${esc(VERBO_DO_LOTE[a.tipo])}</i><b>${esc(a.alvoNome)}</b>${marca}</span>${detalhe ? `<small>${esc(detalhe)}</small>` : ""}${motivo}</span></label>`;
   }).join("");
   const titulo = aberto ? `${esperando} ${esperando === 1 ? "mudança espera" : "mudanças esperam"} você` : "Mudanças nos seus bots";
