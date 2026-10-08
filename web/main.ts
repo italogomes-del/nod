@@ -33,7 +33,7 @@ import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
-import { renderDetalhes } from "./telas/detalhes.ts";
+import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
@@ -67,7 +67,7 @@ import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
-import { aberto, abertosDoBot, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
+import { aberto, abertosDoBot, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
@@ -1950,9 +1950,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
   gaveta: (el) => {
-    const tipo = el.dataset.nivel;
-    const id = el.dataset.id ?? "";
-    const nivel: NivelGaveta | null = tipo === "rotina" || tipo === "acesso" ? { tipo, id } : tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" ? { tipo } : null;
+    const nivel = nivelDaGaveta(el.dataset.nivel, el.dataset.id ?? "");
     if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
   },
   "gaveta-voltar": () => voltarNivel(),
@@ -2017,7 +2015,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota", "trabalhos"] });
     });
     if (tasks.length === 0) return parar();
-    pedirGestao(textoPararTasks(tasks), `<p>${esc(botGerido(t.tipo === "conversa" ? t.agenteId : undefined)?.nome ?? "O bot")} para também o que estiver fazendo nesta conversa. O que já foi feito fica.</p>`, tasks.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
+    const nome = botGerido(t.tipo === "conversa" ? t.agenteId : undefined)?.nome;
+    pedirGestao(textoPararTasks(tasks, nome), `${listaPararTasks(tasks)}<p>${esc(nome ?? "O bot")} para também o que estiver fazendo nesta conversa. O que já foi feito fica.</p>`, tasks.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
   },
   // A tela da task (#195): Parar task para só ela; Fechar (ou Esc) volta para onde a pessoa estava.
   "abrir-trabalho": (el) => abrirTrabalho(el.dataset.id ?? ""),
@@ -2027,7 +2026,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const trabalho = el.dataset.trabalho;
     if (trabalho) { abrirTrabalho(trabalho); return; }
     const t = estado.tela;
-    navegar({ tipo: "linha", conversaId: el.dataset.conversa ?? "", mensagens: (el.dataset.mensagens ?? "").split(",").filter(Boolean), titulo: el.dataset.titulo ?? "", voltar: t.tipo === "trabalho" || t.tipo === "linha" ? t.voltar : t });
+    navegar({ tipo: "linha", conversaId: el.dataset.conversa ?? "", mensagens: (el.dataset.mensagens ?? "").split(",").filter(Boolean), titulo: el.dataset.titulo ?? "", voltar: t.tipo === "trabalho" || t.tipo === "linha" ? t.voltar : t, ...(tipo === "rotina" ? { rotina: true } : {}) });
   },
   "fechar-trabalho": () => fecharTask(),
   "parar-trabalho": (el) => agir(async () => {

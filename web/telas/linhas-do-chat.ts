@@ -99,11 +99,19 @@ export function horariosDaRotina(instantes: readonly number[]): string {
   return `${h[0]} a ${h[h.length - 1]}`;
 }
 
+/**
+ * definido em 2026-10-08 (QA do épico): o nome da rotina é a primeira linha da instrução (o servidor corta em 80); na
+ * linha "… rodou N vezes" e na etiqueta "da rotina …" ele vai até 48 caracteres, como o da lista de rotinas — com 80, a
+ * linha quebrava em duas com a seta solta na ponta e a etiqueta ficava maior que o nome do bot.
+ */
+const NOME_DA_ROTINA_MAX = 48;
+const curto = (texto: string): string => (texto.length > NOME_DA_ROTINA_MAX ? `${texto.slice(0, NOME_DA_ROTINA_MAX - 1).trimEnd()}…` : texto);
+
 function nomeDaRotina(estado: Estado, u: Unidade): string | null {
-  if (u.trabalho?.rotinaNome) return u.trabalho.rotinaNome;
+  if (u.trabalho?.rotinaNome) return curto(u.trabalho.rotinaNome);
   const r = u.rotinaId ? estado.rotinas.find((x) => x.rotina.id === u.rotinaId)?.rotina : undefined;
-  if (r) return r.instrucao.length > 48 ? `${r.instrucao.slice(0, 47).trimEnd()}…` : r.instrucao;
-  return u.trabalho?.titulo ?? null;
+  if (r) return curto(r.instrucao);
+  return u.trabalho?.titulo ? curto(u.trabalho.titulo) : null;
 }
 
 const SETA = '<span class="linha-seta" aria-hidden="true">›</span>';
@@ -163,7 +171,17 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
       const antes = u.tipo === "task" && t && t.estado === "terminado" && m === ultimoFim ? linhaTerminou(t, estado) : undefined;
       planos.set(m.id, { tipo: "balao", etiqueta, ...(antes ? { antes } : {}) });
     }
-    const recolhidas = u.mensagens.filter((m) => !planos.has(m.id) && recolhivel(m) && !(m.payload?.kind === "rotina_execucao" && DESFECHOS_A_VISTA.has(m.payload.desfecho)));
+    // definido em 2026-10-08 (QA do épico): o aviso de turno interrompido de uma task ("Turno interrompido: você pediu
+    // para parar") fica na tela dela — no chat ele aparecia uma vez por Parar task, Fazer depois e Fazer aqui, sem dizer
+    // de qual task. Só some quando a task seguiu (na fila, rodando, terminou) ou a pessoa a parou; a que falhou, a que
+    // parou esperando a pessoa (o Mac caiu no meio) e a que está fora da lista continuam com o aviso à vista.
+    if ((u.tipo === "task" || u.tipo === "colega") && u.trabalho && ["parado", "na_fila", "rodando", "terminado"].includes(u.trabalho.estado)) {
+      for (const m of u.mensagens) if (m.kind === "sistema" && !m.payload && !planos.has(m.id)) planos.set(m.id, { tipo: "oculta" });
+    }
+    // definido em 2026-10-08 (QA do épico, B1): a rotina que pede a um colega mostra a linha "Enviou mensagem para …" de
+    // quem pede, como a conversa — o pedido e a resposta não somem para dentro da execução, sem nada para abrir.
+    const pedidoDaRotina = (m: Mensagem): boolean => u.tipo === "rotina" && (m.kind === "handoff" || m.kind === "peer_ask");
+    const recolhidas = u.mensagens.filter((m) => !planos.has(m.id) && recolhivel(m) && !pedidoDaRotina(m) && !(m.payload?.kind === "rotina_execucao" && DESFECHOS_A_VISTA.has(m.payload.desfecho)));
     for (const m of recolhidas) planos.set(m.id, { tipo: "oculta" });
     // Revisão W7 (2026-10-08): "nada para você" só da execução que acabou — com o trabalho aberto, ou sem a linha da
     // execução nem a última fala do turno, ela ainda pode ter algo a dizer.

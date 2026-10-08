@@ -24,6 +24,17 @@ type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 type Concessoes = Estado["concessoes"][string];
 
 /**
+ * O nível da gaveta que um `data-act="gaveta"` pede (`data-nivel`, `data-id`); null = nível desconhecido.
+ * definido em 2026-10-08 (QA do épico #188): a lista morava no clique de main.ts e não tinha "trabalhos" — a linha
+ * "Trabalhos" da gaveta não abria nada. Mora aqui, ao lado de quem desenha os `irPara`, e o teste confere os dois.
+ */
+export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | null {
+  if (tipo === "rotina" || tipo === "acesso") return { tipo, id };
+  if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos") return { tipo };
+  return null;
+}
+
+/**
  * A gaveta do bot (ADR-032: "painel de detalhes com perfil, colegas e rotinas"). Desde 2026-09-18 ela é o lar do que É
  * DO BOT. definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): 380 px e por níveis — rotina, acesso a um app,
  * Editar perfil, Memória, Inteligência, Nova rotina e Dar acesso abrem DENTRO dela, com ‹ para voltar à visão geral e a

@@ -131,16 +131,30 @@ export function juntar(nomes: readonly string[]): string {
   return `${nomes.slice(0, -1).join(", ")} e ${nomes[nomes.length - 1]}`;
 }
 
-/** O Parar do chat com tasks abertas pergunta antes (#195): "Parar 2 tasks: Migrar relatórios e Dashboard de churn?". */
-export function textoPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): string {
+/**
+ * O Parar do chat com tasks abertas pergunta antes (#195): "Parar a task Migrar relatórios?" ou "Parar as 3 tasks do
+ * Dev 1?". definido em 2026-10-08 (QA do épico): com várias tasks, os títulos iam todos no título do diálogo — quatro
+ * títulos reais viravam um parágrafo em letra de título; agora vão numa lista no corpo (`listaPararTasks`).
+ */
+export function textoPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[], nomeDoBot = "bot"): string {
   if (lista.length === 1) return `Parar a task ${lista[0]?.titulo ?? ""}?`;
-  return `Parar ${lista.length} tasks: ${juntar(lista.map((t) => t.titulo))}?`;
+  return `Parar as ${lista.length} tasks do ${nomeDoBot}?`;
+}
+
+/** Os títulos das tasks que o Parar do chat vai parar, um por linha (vazio com uma task só: o título já diz). */
+export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): string {
+  if (lista.length <= 1) return "";
+  return `<ul class="parar-lista">${lista.map((t) => `<li>${esc(t.titulo)}</li>`).join("")}</ul>`;
 }
 
 /** O ponto do trabalho: na cor do bot (`c-*`), piscando enquanto roda; azul quando espera a pessoa; vazado na fila. */
 export function pontoTrabalho(t: Pick<TrabalhoDto, "estado">, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
+  // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
+  // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.
+  if (t.estado === "parado") return '<span class="ponto-trabalho feito parado" aria-hidden="true">■</span>';
+  if (t.estado === "falhou") return '<span class="ponto-trabalho feito falhou" aria-hidden="true">!</span>';
   if (!aberto(t)) return '<span class="ponto-trabalho feito" aria-hidden="true">✓</span>';
   return `<span class="ponto-trabalho ${esc(cor ?? "")}${t.estado === "rodando" ? " pulso-trab" : ""}" aria-hidden="true"></span>`;
 }

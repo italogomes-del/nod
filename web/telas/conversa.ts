@@ -30,7 +30,7 @@ import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoLimiteDoPlano, avisoModeloRecusado, ehIa, inventarioDaIa, linhaIaTrocada } from "./ia-fora.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
-import { planejarLinhas } from "./linhas-do-chat.ts";
+import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
@@ -606,8 +606,36 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
     return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...(plano?.tipo === "linha" ? { chave: plano.chave } : {}) };
   });
   const conversaId = mensagens[0]?.conversaId;
-  const desenhadas = (conversaId ? desenharFios(linhas, estado, conversaId) : linhas).filter((l) => l.html !== "");
+  const ordenadas = linhaDepoisDaFala(linhas, mensagens, planos);
+  const desenhadas = (conversaId ? desenharFios(ordenadas, estado, conversaId) : ordenadas).filter((l) => l.html !== "");
   return recolherAvisos(desenhadas);
+}
+
+/**
+ * definido em 2026-10-08 (QA do épico #188, pranchas K1 e B1 aprovadas): a linha que o turno grava no meio dele — "Abriu
+ * a task …" (trabalho_aberto) e "Enviou mensagem para …" (handoff) — entra DEPOIS da fala com que o bot a anunciou ("Abri
+ * uma task para isso…"), não antes. A linha nasce na hora da ferramenta e a fala no fim do turno, então pela ordem de
+ * criação ela vinha em cima. Só desce até a última fala do bot do MESMO turno que ainda está à vista; sem fala, fica.
+ */
+function linhaDepoisDaFala(linhas: readonly LinhaDaConversa[], mensagens: readonly Mensagem[], planos: ReadonlyMap<string, PlanoMensagem>): LinhaDaConversa[] {
+  const destino = new Map<number, number>();
+  mensagens.forEach((m, i) => {
+    const k = m.payload?.kind;
+    if (!m.turnoId || planos.get(m.id)?.tipo !== "linha" || (k !== "trabalho_aberto" && k !== "handoff")) return;
+    let alvo = -1;
+    for (let j = i + 1; j < mensagens.length; j++) {
+      const x = mensagens[j];
+      if (x?.turnoId === m.turnoId && x.kind === "texto" && x.autoria.autor_tipo === "agente" && (linhas[j]?.html ?? "") !== "") alvo = j;
+    }
+    if (alvo !== -1) destino.set(i, alvo);
+  });
+  if (destino.size === 0) return [...linhas];
+  const saida: LinhaDaConversa[] = [];
+  linhas.forEach((l, j) => {
+    if (!destino.has(j)) saida.push(l);
+    for (const [i, alvo] of destino) if (alvo === j && linhas[i]) saida.push(linhas[i]);
+  });
+  return saida;
 }
 
 /** Os data-* são da pílula da base (web/lib/rolagem.ts): ela sabe qual linha a pessoa já viu e o que dizer. */

@@ -4,7 +4,7 @@ import { ESTADOS_ABERTOS_TRABALHO, type TrabalhoDto } from "../../../src/contrac
 import type { FrameSse } from "../../../src/contracts/frame.ts";
 import { aplicarFrame, conversaIdNaTela, estadoInicial, invalidacoesDaTela, reduzir, type Estado, type Tela } from "../../../web/estado/reducer.ts";
 import { ESPERA_TELEMETRIA_MS, LOTE_TELEMETRIA, criarTelemetria } from "../../../web/lib/telemetria-linhas.ts";
-import { ESTADOS_ABERTOS, agrupar, filtrar, memoriaLegivel, pilulaMemoria, telaAoFechar, telaDaTask, textoPararTasks } from "../../../web/lib/trabalhos.ts";
+import { ESTADOS_ABERTOS, agrupar, filtrar, listaPararTasks, memoriaLegivel, pilulaMemoria, telaAoFechar, telaDaTask, textoPararTasks } from "../../../web/lib/trabalhos.ts";
 import { comFerramenta, comTexto, ATIVIDADE_VAZIA } from "../../../web/lib/atividade.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { renderTaxasLinhas } from "../../../web/telas/modo-dev.ts";
@@ -94,6 +94,9 @@ describe("faixa de Trabalhos e pílula (#195, K1/K6)", () => {
   it("CSS: a faixa cola no campo (o campo perde os cantos de cima) e a região some vazia", () => {
     expect(css).toMatch(/\.lugar-faixa-trabalhos:empty \{ display: none; \}/);
     expect(css).toMatch(/\.lugar-faixa-trabalhos:has\(\.faixa-trab\) \+ \.composer-wrap \.composer \.box \{ border-top-left-radius: 0; border-top-right-radius: 0; \}/);
+    // QA do épico (2026-10-08): com a faixa da pergunta entre a de Trabalhos e o campo, a faixa fecha e o campo fica redondo.
+    expect(css).toMatch(/\.lugar-faixa-trabalhos:has\(\+ \.composer-wrap \.faixa-pergunta\) \.faixa-trab \{ margin-bottom: 8px; border-bottom: 1px solid var\(--line\); border-radius: 16px; \}/);
+    expect(css).toMatch(/\.composer-wrap:has\(\.faixa-pergunta\) \.composer \.box \{ border-top-left-radius: 28px; border-top-right-radius: 28px; \}/);
     expect(readFileSync(new URL("../../../web/index.html", import.meta.url), "utf8")).toMatch(/id="pilula-novas"[^\n]*\n[^\n]*\n\s*<div class="lugar-faixa-trabalhos" id="faixa-trabalhos"><\/div>\n\s*<footer class="composer-wrap" id="composer">/);
   });
 });
@@ -157,8 +160,12 @@ describe("a tela da task (#195, K2/K7)", () => {
   });
 
   it("o Parar do chat com tasks abertas lista antes", () => {
-    expect(textoPararTasks([{ titulo: "Migrar relatórios" }, { titulo: "Dashboard de churn" }])).toBe("Parar 2 tasks: Migrar relatórios e Dashboard de churn?");
-    expect(textoPararTasks([{ titulo: "Migrar relatórios" }])).toBe("Parar a task Migrar relatórios?");
+    // QA do épico (2026-10-08): os títulos vão numa lista no corpo; o título do diálogo fica curto.
+    const duas = [{ titulo: "Migrar relatórios" }, { titulo: "Dashboard <churn>" }];
+    expect(textoPararTasks(duas, "Dev 1")).toBe("Parar as 2 tasks do Dev 1?");
+    expect(listaPararTasks(duas)).toBe('<ul class="parar-lista"><li>Migrar relatórios</li><li>Dashboard &lt;churn&gt;</li></ul>');
+    expect(textoPararTasks([{ titulo: "Migrar relatórios" }], "Dev 1")).toBe("Parar a task Migrar relatórios?");
+    expect(listaPararTasks([{ titulo: "Migrar relatórios" }])).toBe("");
   });
 });
 

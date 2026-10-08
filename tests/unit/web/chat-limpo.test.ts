@@ -267,6 +267,20 @@ describe("quem pede a um colega (padrão Grok)", () => {
     expect(ehBalao(blocos[3]!.html)).toBe(true);
     expect(blocos.map((b) => b.html).join("")).not.toContain('class="collaboration"');
   });
+
+  it("QA do épico (2026-10-08): a ROTINA que pede a um colega também mostra 'Enviou mensagem para' e 'N mensagens com'", () => {
+    const daRotina = { origemTurno: "rotina" as const, trabalhoId: "tb-rot" };
+    const handoff = msg("h1", t0, { turnoId: "t-rot", ...daRotina, kind: "handoff", texto: "x", payload: { kind: "handoff", de: "clarice", para: "chico", motivo: "revisar", tarefaId: "tarefa-2" } });
+    const pedi = msg("h2", t0 + MIN, { turnoId: "t-rot", ...daRotina, fimDoTurno: true, texto: "Pedi ao Chico." });
+    const exec = msg("h3", t0 + MIN, { turnoId: "t-rot", ...daRotina, kind: "rotina_execucao", texto: "Rotina executou", payload: { kind: "rotina_execucao", rotinaId: "rot", instanteAgendado: t0, desfecho: "executou" } });
+    const resposta = msg("h4", t0 + 5 * MIN, { turnoId: "t-volta", origemTurno: "retomada", trabalhoId: "tb-rot", kind: "peer_ask", texto: "Revisei", payload: { kind: "peer_ask", agenteId: "chico", nome: "Chico", naoSupervisionado: true, tarefaId: "tarefa-2", delegada: true } });
+    const fala = msg("h5", t0 + 6 * MIN, { turnoId: "t-volta", origemTurno: "retomada", trabalhoId: "tb-rot", fimDoTurno: true, texto: "O Chico revisou." });
+    const { e, c } = cenario([handoff, pedi, exec, resposta, fala], { trabalhos: { trabalhos: [trabalho("tb-rot", { origem: "rotina", rotinaNome: "Revisão diária", estado: "terminado", terminadoEm: t0 + 7 * MIN })], pressao: null, memoriaTotalMb: null } });
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["h2", "linha:h1", "linha:h4", "h5"]);
+    expect(blocos[1]!.html).toContain("Enviou mensagem para");
+    expect(blocos[2]!.html).toContain("2 mensagens com</span>");
+  });
 });
 
 describe("tudo que não é balão fica no centro", () => {
@@ -301,5 +315,39 @@ describe("tudo que não é balão fica no centro", () => {
     // O pedido a colega e a resposta dele, por dentro da .msg-linha, também ficam no centro (antes: margem de 52px).
     expect(css).toMatch(/\.msg-handoff, \.msg-peer \{[^}]*margin: 12px auto 22px;/);
     expect(css).not.toMatch(/\.collaboration\{margin:12px 0 20px 64px/);
+  });
+});
+
+describe("QA do épico (2026-10-08): nome de rotina longo não estica a linha nem a etiqueta", () => {
+  it("o rotinaNome de 80 caracteres sai com 48 na linha 'rodou N vezes' e na etiqueta 'da rotina'", () => {
+    const longo = "Toda manhã leia o canal #suporte e me avise se alguém marcar você ou o time";
+    const lista = [1, 2].map((i) => trabalho(`tb-r${i}`, { origem: "rotina", rotinaId: "rot", rotinaNome: longo, estado: "terminado", terminadoEm: t0 + 60 * MIN }));
+    const { e, c } = cenario([...execucaoSilenciosa(1, t0), ...execucaoSilenciosa(2, t0 + 10 * MIN)], { trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: null } });
+    const linha = itens(c, e)[0]!.html;
+    expect(linha).toContain("<b>Toda manhã leia o canal #suporte e me avise se…</b> rodou 2 vezes");
+    expect(linha).not.toContain(longo);
+    const com = cenario(execucaoComNovidade(t0), { trabalhos: { trabalhos: [trabalho("tb-r6", { origem: "rotina", rotinaNome: longo, estado: "terminado", terminadoEm: t0 + 2 * MIN })], pressao: null, memoriaTotalMb: null } });
+    expect(itens(com.c, com.e).map((b) => b.html).join("")).toContain('<span class="etiqueta-origem">da rotina Toda manhã leia o canal #suporte e me avise se…</span>');
+  });
+});
+
+describe("QA do épico (2026-10-08): o aviso de turno interrompido da task fica na tela dela", () => {
+  it("Parar task / Fazer depois / Fazer aqui não deixam 'Turno interrompido' no chat; a task que falhou deixa", () => {
+    const aviso = (id: string, trabalhoId: string): Mensagem => msg(id, t0 + MIN, { kind: "sistema", texto: "Turno interrompido: você pediu para parar.", turnoId: `t-${id}`, origemTurno: "conversa", trabalhoId });
+    const lista = [trabalho("tb-parada", { estado: "parado", terminadoEm: t0 + MIN }), trabalho("tb-fila", { estado: "na_fila" }), trabalho("tb-falhou", { estado: "falhou", terminadoEm: t0 + MIN }), trabalho("tb-espera", { estado: "precisa_de_voce" })];
+    const { e, c } = cenario([daPessoa("p1", t0), aviso("a1", "tb-parada"), aviso("a2", "tb-fila"), aviso("a3", "tb-falhou"), aviso("a4", "tb-espera")], { trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: null } });
+    // A que falhou e a que ficou esperando a pessoa porque o Mac caiu no meio continuam com o aviso.
+    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "a3", "a4"]);
+  });
+});
+
+describe("QA do épico (2026-10-08): a linha do meio do turno desce para depois da fala que a anunciou (K1, B1)", () => {
+  it("\"Abriu a task\" e \"Enviou mensagem para\" entram depois do balão do bot do mesmo turno", () => {
+    const abriu = msg("ab", t0 + MIN, { kind: "sistema", texto: "Abriu a task Migrar relatórios", turnoId: "tc", origemTurno: "conversa", payload: { kind: "trabalho_aberto", trabalhoId: "tb-m", titulo: "Migrar relatórios", origem: "pessoa" } });
+    const anuncio = msg("an", t0 + 2 * MIN, { turnoId: "tc", origemTurno: "conversa", fimDoTurno: true, texto: "Abri uma task para isso." });
+    const pediu = msg("hp", t0 + 4 * MIN, { turnoId: "tp", origemTurno: "conversa", kind: "handoff", texto: "x", payload: { kind: "handoff", de: "clarice", para: "chico", motivo: "revisar", tarefaId: "tarefa-9" } });
+    const falou = msg("fp", t0 + 5 * MIN, { turnoId: "tp", origemTurno: "conversa", fimDoTurno: true, texto: "Pedi ao Chico." });
+    const { e, c } = cenario([daPessoa("p1", t0), abriu, anuncio, daPessoa("p2", t0 + 3 * MIN), pediu, falou]);
+    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "an", "linha:ab", "p2", "fp", "linha:hp"]);
   });
 });

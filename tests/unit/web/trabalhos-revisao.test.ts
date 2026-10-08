@@ -5,7 +5,7 @@ import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { aplicarFrame, estadoInicial, invalidacoesDaTela, mudouNaTela, reduzir, type Estado, type Tela } from "../../../web/estado/reducer.ts";
 import { ATIVIDADE_VAZIA, comTexto } from "../../../web/lib/atividade.ts";
 import { lembrar } from "../../../web/lib/lembrar.ts";
-import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, renderFaixaTrabalhos, renderTelaTrabalho } from "../../../web/telas/trabalhos.ts";
+import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, renderFaixaTrabalhos, renderTelaLinha, renderTelaTrabalho, renderTopoTrabalho } from "../../../web/telas/trabalhos.ts";
 
 /**
  * Correções da revisão do épico #188 na web (definido em 2026-10-08, achados W1–W12): a tela da task por blocos, a task
@@ -194,5 +194,28 @@ describe("W12: o último lote da telemetria sobrevive ao pagehide", () => {
     expect(chamadas[0]?.url).toBe("/api/t/t/telemetria/linhas");
     expect(chamadas[0]?.init.method).toBe("POST");
     expect(chamadas[0]?.init.keepalive).toBe(true);
+  });
+});
+
+describe("QA do épico (2026-10-08): o chip da task de colega mostra quem pediu › quem faz (K7)", () => {
+  it("pedido do Leonardo ao Dev 1: mascote do Leonardo, seta, mascote do Dev 1; task da pessoa sem seta", () => {
+    const e = estadoCom([trabalho("login", { origem: "colega", pedidoPorAgenteId: "leo", pedidoPorNome: "Leonardo" }), trabalho("churn")]);
+    const chip = renderTopoTrabalho(e, "login");
+    expect(chip).toMatch(/<span class="tk-chip">.*aria-label="Leonardo[^"]*".*class="tk-seta".*aria-label="Dev 1[^"]*".*<span class="tk-titulo">login/);
+    expect(renderTopoTrabalho(e, "churn")).not.toContain("tk-seta");
+  });
+});
+
+describe("QA do épico (2026-10-08): a linha da rotina aberta separa as execuções (R2)", () => {
+  it("'2 execuções · 09:10 e 09:20' no topo e '09:10 · sem nada para você' antes das falas de cada uma", () => {
+    const f = (id: string, turno: string, h: number): Mensagem => ({ ...fala(id, 0), turnoId: turno, trabalhoId: null, origemTurno: "rotina", texto: `li o #suporte ${id}`, criadoEm: new Date(2026, 9, 8, 9, h).getTime() });
+    const ms = [f("a", "t1", 10), f("b", "t1", 11), f("c", "t2", 20)];
+    const e = estadoCom([], { conversas: { "c-dev1": { conversa: { id: "c-dev1" }, mensagens: ms, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], propostas: [], fios: [], carregadaEm: AGORA } as never } });
+    const html = renderTelaLinha(e, { tipo: "linha", conversaId: "c-dev1", mensagens: ["a", "b", "c"], titulo: "Triagem do Slack", voltar: { tipo: "inicio" }, rotina: true });
+    expect(html).toContain('<p class="tk-linha">2 execuções · 09:10 e 09:20</p>');
+    expect(html.indexOf("09:10 · sem nada para você")).toBeLessThan(html.indexOf("li o #suporte a"));
+    expect(html.indexOf("09:20 · sem nada para você")).toBeGreaterThan(html.indexOf("li o #suporte b"));
+    expect(html.indexOf("09:20 · sem nada para você")).toBeLessThan(html.indexOf("li o #suporte c"));
+    expect(html).not.toContain("3 mensagens");
   });
 });

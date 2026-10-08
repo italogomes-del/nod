@@ -22,6 +22,19 @@ function entradaDaTask(titulo: string, pedido: string, deRotina: boolean): strin
     : `[nod] Task "${titulo}", aberta por você na conversa com a pessoa. Ela acompanha pela tela da task; faça o trabalho até o fim e entregue o resultado.\n${pedido}`;
 }
 
+/**
+ * O pedido sem a moldura da task (definido em 2026-10-08, QA do épico): o "Fazer aqui" manda o pedido para a CONVERSA, e
+ * a moldura dizia ao bot que a pessoa "acompanha pela tela da task" — que ele estava numa task que acabou de ser
+ * desfeita. Entrada sem a moldura (a da rede é a mensagem da pessoa) volta como está.
+ */
+function pedidoSemMoldura(titulo: string, entrada: string): string {
+  for (const deRotina of [false, true]) {
+    const moldura = entradaDaTask(titulo, "", deRotina);
+    if (entrada.startsWith(moldura)) return entrada.slice(moldura.length);
+  }
+  return entrada;
+}
+
 /** A conversa própria do bot: é ali que a linha "Abriu a task …" e o resultado aparecem. */
 async function conversaDoBot(deps: Deps, turno: Turno): Promise<string> {
   const conversa = await deps.repos.conversas.buscar(turno.conversaId);
@@ -278,7 +291,7 @@ export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDt
   for (const id of vivos) await deps.services.interruptor.interromper(id).catch(() => false);
   events.push(...(await marcarParado(deps, t)));
   const agente = await deps.repos.agentes.buscar(t.agenteId);
-  const pedido = primeiro?.entradaTexto ?? t.titulo;
+  const pedido = primeiro ? pedidoSemMoldura(t.titulo, primeiro.entradaTexto) : t.titulo;
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: t.conversaId,
     agenteId: t.agenteId,

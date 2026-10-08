@@ -186,6 +186,9 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
       const daConversa = await m.repos.turnos.buscar(aqui.data.turnoId);
       expect(daConversa).toMatchObject({ trabalhoId: null, origem: "conversa", estado: "pendente" });
       expect(daConversa?.entradaTexto).toContain("Conserte o login do app.");
+      // QA do épico (2026-10-08): o pedido vai para a conversa sem a moldura da task ("acompanha pela tela da task").
+      expect(daConversa?.entradaTexto).not.toContain("tela da task");
+      expect(daConversa?.entradaTexto).toBe('[nod] A pessoa pediu para fazer aqui, na conversa, o que ia virar a task "Login do app". Faça agora:\nConserte o login do app.');
       await expect(fazerAqui(m.deps, { trabalhoId: id })).rejects.toMatchObject({ codigo: "estado_invalido" });
     });
   });
