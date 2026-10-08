@@ -10,6 +10,10 @@ FROM node:24.19.0-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
+# definido em 2026-10-08: o --ignore-scripts pula o postinstall; o remendo do postgres.js (queda de conexão com transação
+# em voo derrubava o processo) roda aqui à mão.
+COPY scripts/remendar-postgres.mjs ./scripts/
+RUN node scripts/remendar-postgres.mjs
 COPY src ./src
 # definido em 2026-10-02: o deploy migra com a própria imagem (docker compose run nod node scripts/migrate.ts).
 COPY scripts/migrate.ts scripts/seed.ts ./scripts/
