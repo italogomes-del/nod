@@ -131,9 +131,14 @@ export function resolverBot(alvo: string, bots: readonly BotDoLote[], pessoaId: 
 }
 
 /** O risco de uma ação no lote; null = não é arriscada. */
-export function riscoDaAcao(a: Pick<AcaoLote, "tipo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
+export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
   if (a.tipo === "excluir" || a.tipo === "mudar_modo") return "arriscada";
-  if (s.contaminado && (a.tipo === "dar_acesso" || (a.tipo === "duplicar" && s.alvoTemAcessos))) return "conteudo_de_fora";
+  if (!s.contaminado) return null;
+  // Cerca 3: depois de conteúdo de fora, o que dá ou reaproveita acesso, e o que grava instrução que um bot vai seguir
+  // depois (a descrição vira o prompt dele; a rotina roda sozinha) — revisão de 2026-10-07: sem isto, uma página lida
+  // pelo Nod no automático plantava uma rotina num bot que já tem o Gmail.
+  if (a.tipo === "dar_acesso" || a.tipo === "criar_rotina" || (a.tipo === "duplicar" && s.alvoTemAcessos)) return "conteudo_de_fora";
+  if (a.tipo === "editar" && (a.descricao !== undefined || a.titulo !== undefined)) return "conteudo_de_fora";
   return null;
 }
 

@@ -65,6 +65,7 @@ export const FERRAMENTAS_DO_NOD = {
     type: "object",
     description: "Lista os apps que a pessoa já conectou (slug, nome e os níveis de acesso possíveis). Só lê. Use antes de dar_acesso.",
     properties: {},
+    required: [],
     additionalProperties: false,
   },
   registrar_relato: {

@@ -241,7 +241,7 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
      */
     async marcarComoNod(id: string, perfil: { nome: string; titulo: string; descricao: string }): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`update agentes set papel = 'nod', nome = ${perfil.nome}, titulo = ${perfil.titulo}, descricao = ${perfil.descricao},
-          cor = 'c-black', fixado = true, oculto = false, confirmado = true
+          cor = 'c-black', fixado = true, oculto = false, confirmado = true, secao = ''
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and dono = 'pessoa' and excluido_em is null and papel is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;

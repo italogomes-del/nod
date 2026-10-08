@@ -155,14 +155,15 @@ export function relatosRepo(conn: Conn, escopo: Escopo) {
      * da falha é a da primeira (definido em 2026-09-21).
      */
     async listar(limite = 100): Promise<Relato[]> {
-      // 0062: o título e o começo do texto só dos relatos da PRÓPRIA pessoa — a prosa é privada (ADR-004); o filtro por
-      // owner_id no join repete a RLS de relato_prosa de propósito, para a lista não depender só dela.
+      // 0062: o título e o começo do texto só dos relatos que a PRÓPRIA pessoa contou ao Nod — sem eles o relato do Nod
+      // seria só "Bug" na lista. O do botão continua sem prosa na listagem (ADR-041). O filtro por owner_id no join
+      // repete a RLS de relato_prosa (privada, ADR-004) de propósito, para a lista não depender só dela.
       const linhas = await conn<(Linha & { erro_cru: string | null; ferramentas: string[] | null; negacoes: string[] | null; sessao_cli: string | null; titulo: string | null; resumo: string | null })[]>`
         select r.${conn.unsafe(COLUNAS.split(", ").join(", r."))},
                d.erro_cru, d.ferramentas, d.negacoes, d.sessao_cli,
                p.titulo, left(p.texto_pessoa, 160) as resumo
         from relatos r
-        left join relato_prosa p on p.tenant_id = r.tenant_id and p.relato_id = r.id and p.owner_id = ${escopo.pessoaId}
+        left join relato_prosa p on p.tenant_id = r.tenant_id and p.relato_id = r.id and p.owner_id = ${escopo.pessoaId} and r.origem = 'nod'
         left join (
           select distinct on (tenant_id, turno_id) tenant_id, turno_id, erro_cru, ferramentas, negacoes, sessao_cli
           from turno_diagnosticos where tenant_id = ${escopo.tenantId}

@@ -27,8 +27,10 @@ Marlon no /spec de 2026-10-07:
    pessoa, ou `"@ref"` anterior — e recusa o lote inteiro se houver qualquer problema (nome ambíguo, bot de outra pessoa
    ou da empresa, excluído, o próprio Nod, app não conectado, nível que o app não tem, nome "Nod"). Nada roda; o Nod lê
    a lista e corrige.
-3. **O modo decide cada ação** (`decidirPeloModo`). Arriscadas: `excluir` e `mudar_modo` sempre; `dar_acesso`, e
-   `duplicar` de um bot que tem acessos (a cópia os leva), depois de conteúdo de fora no turno. O Nod **não** usa o
+3. **O modo decide cada ação** (`decidirPeloModo`). Arriscadas: `excluir` e `mudar_modo` sempre; depois de conteúdo de
+   fora no turno, `dar_acesso`, `duplicar` de um bot que tem acessos (a cópia os leva), `criar_rotina` e `editar` a
+   descrição ou o título (instrução que o bot segue depois) — revisão de 2026-10-07. No "sem aprovações" tudo roda, como
+   o Marlon decidiu (a tabela do /spec: dar acesso roda no total); é o risco aceito desse modo. O Nod **não** usa o
    alívio de `conversaComAPessoa`: pedir na conversa não tira o risco de excluir. Uma ação cujo alvo é um bot que outra
    ação (que espera) vai criar também espera.
 4. **Um card só.** O que espera vira uma proposta + decisão `lote_bots` (mesmo id, 0060) na conversa do Nod, uma linha
@@ -36,8 +38,9 @@ Marlon no /spec de 2026-10-07:
    executa as marcadas, na ordem, com a pessoa como autora; as desmarcadas viram "não feito". O desfecho fica no payload
    e numa linha de sistema na conversa do Nod. Em "Sua vez" o card aprova tudo de uma vez.
 5. **Cada ação pelo caso de uso de sempre**, num SAVEPOINT: `criarAgente` (+ seção), `duplicarAgente`, `editarPerfil`,
-   `gerirAgente` (mover, excluir), `criarRotinaPelaPessoa`, `mudarModoAprovacao`. Uma que falha volta sozinha; as outras
-   seguem; não existe "desfazer o lote" (excluir já se restaura, ADR-034).
+   `gerirAgente` (mover, excluir), `criarRotinaPelaPessoa`, `mudarModoAprovacao`. Uma que o caso de uso recusa volta
+   sozinha e as outras seguem (um erro do Postgres derruba o lote inteiro); não existe "desfazer o lote" (excluir já se
+   restaura, ADR-034).
 6. **Dar acesso pela decisão de acesso.** `abrirPedidoDeAcesso` no bot alvo e `decidirAcesso` na mesma transação, com a
    regra do modo do Nod ou a pessoa que aprovou o lote. É o caminho que a trava do ESLint já permite: o
    `conceder-so-pela-pessoa.test.ts` continua de pé sem exceção nova. **Emenda à ADR-044:** além do clique da pessoa,

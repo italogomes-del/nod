@@ -113,14 +113,15 @@ const APRESENTACAO_DO_NOD = "O Nod é o seu bot fixo: tira dúvidas sobre o prod
 export const garantirNod: CasoDeUso<Record<string, never>, { nod: BotDoOnboarding; criado: boolean }> = async (deps) => {
   const existente = await deps.repos.agentes.travarNod();
   const linha = await deps.repos.onboarding.buscar();
-  if (existente && existente.excluidoEm === null) {
+  if (existente) {
     const nod = await botComConversa(deps, existente.id);
-    if (nod) {
-      if (linha.guiaId !== existente.id) await deps.repos.onboarding.definirGuia(existente.id);
-      return { data: { nod, criado: false } };
-    }
+    // Revisão de 2026-10-07: um Nod sem conversa (ou excluído por SQL) não ganha um segundo — o índice único recusaria e
+    // toda entrada no app viraria 500. A falha fica escrita; a web abre sem o onboarding.
+    if (!nod) throw new ErroDeDominio("estado_invalido", { cause: "o Nod da pessoa está sem conversa" });
+    if (linha.guiaId !== existente.id) await deps.repos.onboarding.definirGuia(existente.id);
+    return { data: { nod, criado: false } };
   }
-  const guia = !existente && linha.guiaId ? await deps.repos.agentes.buscar(linha.guiaId) : null;
+  const guia = linha.guiaId ? await deps.repos.agentes.buscar(linha.guiaId) : null;
   if (guia && !ehNod(guia) && guia.dono === "pessoa" && guia.ownerId === deps.escopo.pessoaId) {
     const marcado = await deps.repos.agentes.marcarComoNod(guia.id, { nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD });
     const nod = marcado ? await botComConversa(deps, marcado.id) : null;

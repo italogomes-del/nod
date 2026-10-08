@@ -1101,3 +1101,6 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .relatos[data-filtro="bug"] details[data-tipo]:not([data-tipo="bug"]),
 .relatos[data-filtro="melhoria"] details[data-tipo]:not([data-tipo="melhoria"]),
 .relatos[data-filtro="duvida"] details[data-tipo]:not([data-tipo="duvida"]) { display: none; }
+.lote-sua-vez { margin: 6px 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.lote-sua-vez li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lote-sua-vez small { color: var(--ink-3); font-size: 12px; }

@@ -42,7 +42,7 @@ function detalheDaAcao(a: AcaoNoLote): string {
 export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBots, aberto: boolean): string {
   const esperando = c.acoes.filter((a) => a.estado === "esperando").length;
   const linhas = c.acoes.map((a) => {
-    const marca = a.estado === "feita" ? '<span class="tag tag-ok">feito</span>' : a.estado === "falhou" ? `<span class="tag tag-ambar">não deu certo${a.erro ? ` (${esc(a.erro.replaceAll("_", " "))})` : ""}</span>` : a.estado === "recusada" ? '<span class="tag tag-cinza">não feito</span>' : "";
+    const marca = a.estado === "feita" ? '<span class="tag tag-ok">feito</span>' : a.estado === "falhou" ? `<span class="tag tag-ambar">não deu certo${a.erro ? ` (${esc(a.erro.replaceAll("_", " "))})` : ""}</span>` : a.estado === "recusada" ? '<span class="tag tag-cinza">não feito</span>' : !aberto ? '<span class="tag tag-cinza">não decidido</span>' : "";
     const caixa = a.estado === "esperando" && aberto ? `<input type="checkbox" data-lote-i="${a.i}" checked aria-label="${esc(`${VERBO_DO_LOTE[a.tipo]} ${a.alvoNome}`)}" />` : "";
     const detalhe = detalheDaAcao(a);
     const motivo = a.estado === "esperando" && a.motivo && a.motivo !== "manual" ? `<small class="lote-motivo">${esc(MOTIVO_DO_LOTE[a.motivo])}</small>` : "";
@@ -56,4 +56,14 @@ export function renderCardLote(p: Pick<Proposta, "id">, c: PayloadPropostaLoteBo
     <div class="lote-acoes">${linhas}</div>
     ${botoes ? `<div class="ft">${botoes}</div>` : ""}
   </div>`;
+}
+
+/**
+ * As ações que esperam, em lista curta, para "Sua vez" (revisão de 2026-10-07): lá o botão aprova todas de uma vez, então
+ * a pessoa vê o que está aprovando — inclusive um excluir — antes do clique. Desmarcar uma é no card da conversa do Nod.
+ */
+export function listaDoLoteParaSuaVez(c: PayloadPropostaLoteBots): string {
+  const esperando = c.acoes.filter((a) => a.estado === "esperando");
+  if (esperando.length === 0) return "";
+  return `<ul class="lote-sua-vez">${esperando.map((a) => `<li><i class="lote-verbo">${esc(VERBO_DO_LOTE[a.tipo])}</i>${esc(a.alvoNome)}${detalheDaAcao(a) ? ` <small>${esc(detalheDaAcao(a))}</small>` : ""}</li>`).join("")}</ul>`;
 }

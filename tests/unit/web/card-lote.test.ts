@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AcaoNoLote, PayloadPropostaLoteBots } from "../../../src/contracts/conversa.ts";
 import type { Relato } from "../../../src/contracts/relato.ts";
-import { renderCardLote } from "../../../web/telas/card-lote.ts";
+import { listaDoLoteParaSuaVez, renderCardLote } from "../../../web/telas/card-lote.ts";
 import { renderRelatos } from "../../../web/telas/relatos.ts";
 
 /** O card do lote do Nod (ADR-082) e a tela Relatos com tipo e origem (0062). */
@@ -32,6 +32,13 @@ describe("card do lote do Nod", () => {
     expect(h).toContain("github, ler e alterar");
     expect(h).toContain('data-act="decidir-lote"');
     expect(h).toContain('data-act="recusar-decisao"');
+  });
+
+  it("Sua vez lista só as que esperam, antes do botão que aprova todas", () => {
+    const h = listaDoLoteParaSuaVez(lote);
+    expect(h.match(/<li>/g)).toHaveLength(3);
+    expect(h).toContain("Excluir</i>Dev antigo");
+    expect(h).not.toContain("Dev 1");
   });
 
   it("decidido: sem caixas nem botões; cada ação com o desfecho", () => {

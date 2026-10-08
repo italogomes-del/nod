@@ -29,7 +29,9 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  *
  * Cada ação roda pelo caso de uso de sempre (criar, duplicar, editar, gerir, rotina, modo), e dar acesso passa pela
  * decisão de acesso (abrirPedidoDeAcesso + decidirAcesso) — o caminho que já pode conceder (ADR-044, emendada pela
- * ADR-082). Cada uma roda num SAVEPOINT: uma que falha volta sozinha e as outras seguem; não há "desfazer o lote".
+ * ADR-082). Cada uma roda num SAVEPOINT: a que o caso de uso recusa (ErroDeDominio) volta sozinha e as outras seguem; um
+ * erro do Postgres derruba a transação inteira (o postgres.js marca a transação de fora), e nada do lote fica. Não há
+ * "desfazer o lote".
  */
 
 const FONTE_ROTINA_DO_NOD = "Os apps e o que o bot já sabe.";

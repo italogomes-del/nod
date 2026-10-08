@@ -10,6 +10,7 @@ import { chaveDoItem, contarFios, ehPergunta } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
+import { listaDoLoteParaSuaVez } from "./card-lote.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -438,7 +439,7 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
     case "lote_bots": {
       const p = item.proposta?.payload.kind === "lote_bots" ? item.proposta.payload : null;
       const n = p ? p.acoes.filter((a) => a.estado === "esperando").length : 0;
-      return `<div class="acoes">${botao("decidir-proposta", n > 1 ? `Aprovar as ${n}` : "Aprovar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+      return `${p ? listaDoLoteParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", n > 1 ? `Aprovar as ${n}` : "Aprovar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
     }
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":

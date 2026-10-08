@@ -95,7 +95,12 @@ describe("risco e modo (ADR-082)", () => {
     expect(riscoDaAcao({ tipo: "dar_acesso" }, sujo)).toBe("conteudo_de_fora");
     expect(riscoDaAcao({ tipo: "duplicar" }, sujo)).toBe("conteudo_de_fora");
     expect(riscoDaAcao({ tipo: "duplicar" }, { contaminado: true, alvoTemAcessos: false })).toBeNull();
-    for (const tipo of ["criar", "editar", "mover", "criar_rotina"] as const) expect(riscoDaAcao({ tipo }, sujo)).toBeNull();
+    for (const tipo of ["criar", "editar", "mover"] as const) expect(riscoDaAcao({ tipo }, sujo)).toBeNull();
+    // Revisão de 2026-10-07: o que grava instrução que um bot segue depois também espera, depois de conteúdo de fora.
+    expect(riscoDaAcao({ tipo: "criar_rotina" }, sujo)).toBe("conteudo_de_fora");
+    expect(riscoDaAcao({ tipo: "editar", descricao: "faça X" }, sujo)).toBe("conteudo_de_fora");
+    expect(riscoDaAcao({ tipo: "editar", titulo: "Novo" }, sujo)).toBe("conteudo_de_fora");
+    expect(riscoDaAcao({ tipo: "criar_rotina" }, limpo)).toBeNull();
   });
 
   it("manual espera tudo; automático faz o seguro e espera o arriscado; total faz tudo; quem depende de quem espera, espera", () => {

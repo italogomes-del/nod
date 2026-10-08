@@ -730,6 +730,8 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   const buscas = muda.cascaMuda ? ["busca-destinatario", "busca-marketplace"].map((id) => ({ id, valor: (document.getElementById(id) as HTMLInputElement | null)?.value ?? "" })) : [];
   // A pasta marcada no card de pasta sobrevive a um frame que re-renderiza a conversa no meio da escolha.
   const pastasMarcadas = [...escopo.querySelectorAll<HTMLInputElement>("input[data-pasta-de]:checked")].map((el) => ({ de: el.dataset.pastaDe ?? "", valor: el.value, foco: document.activeElement === el }));
+  // ADR-082: a ação do lote do Nod que a pessoa desmarcou continua desmarcada depois de um frame que redesenha o card.
+  const loteDesmarcado = [...escopo.querySelectorAll<HTMLInputElement>("[data-proposta] input[data-lote-i]")].filter((el) => !el.checked).map((el) => ({ proposta: el.closest<HTMLElement>("[data-proposta]")?.dataset.proposta ?? "", i: el.dataset.loteI ?? "" }));
   const respostas = [...escopo.querySelectorAll<HTMLInputElement>("[data-decisao] input")].map((el) => ({
     decisao: el.closest<HTMLElement>("[data-decisao]")?.dataset.decisao ?? "",
     atributo: el.hasAttribute("data-resposta") ? "data-resposta" : el.hasAttribute("data-item-texto") ? "data-item-texto" : "data-item",
@@ -763,6 +765,10 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   for (const busca of buscas) {
     const campo = document.getElementById(busca.id) as HTMLInputElement | null;
     if (campo) campo.value = busca.valor;
+  }
+  for (const d of loteDesmarcado) {
+    const el = document.querySelector<HTMLInputElement>(`[data-proposta="${CSS.escape(d.proposta)}"] input[data-lote-i="${CSS.escape(d.i)}"]`);
+    if (el) el.checked = false;
   }
   for (const marcada of pastasMarcadas) {
     const el = [...document.querySelectorAll<HTMLInputElement>(`input[data-pasta-de="${CSS.escape(marcada.de)}"]`)].find((x) => x.value === marcada.valor);

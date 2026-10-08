@@ -599,6 +599,15 @@ describe("reducer: resolverInicio e o onboarding", () => {
     expect(e.tela).toMatchObject({ tipo: "conversa", conversaId: "c1" });
     expect(reduzir(comSessao, { tipo: "hidratar-onboarding", onboarding: null }).onboardingAberto).toBe(false);
   });
+
+  it("ADR-081: o Nod fixado não é onde o app abre — abre no primeiro bot da pessoa; o Nod só quando é o único", () => {
+    const nod = { ...frota.agentes[0]!, id: "nod", nome: "Nod", fixado: true, conversaId: "cn", papel: "nod" as const };
+    const concluido = reduzir(comSessao, { tipo: "hidratar-onboarding", onboarding: dados({ mostrar: false, etapa: "concluido" }) });
+    const comDois = reduzir(concluido, { tipo: "hidratar-frota", frota: { ...frota, agentes: [nod, ...frota.agentes] } });
+    expect(comDois.tela).toMatchObject({ tipo: "conversa", conversaId: "c1" });
+    const soONod = reduzir(concluido, { tipo: "hidratar-frota", frota: { ...frota, agentes: [nod] } });
+    expect(soONod.tela).toMatchObject({ tipo: "conversa", conversaId: "cn" });
+  });
 });
 
 describe("menu da conta", () => {

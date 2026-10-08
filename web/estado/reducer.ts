@@ -723,7 +723,10 @@ export function resolverInicio(entrada: Estado): Estado {
   }
   if (estado.tela.tipo !== "inicio" || !estado.frota) return estado;
   const meus = estado.frota.agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId && a.conversaId);
-  const primeiro = meus.find((a) => a.fixado) ?? meus[0];
+  // revisto em 2026-10-07 (ADR-081): o Nod é fixo mas de uso esporádico — o app abre no primeiro bot da pessoa e só cai
+  // no Nod quando ele é o único.
+  const comuns = meus.filter((a) => a.papel !== "nod");
+  const primeiro = comuns.find((a) => a.fixado) ?? comuns[0] ?? meus[0];
   const tela: Tela = primeiro ? { tipo: "conversa", conversaId: primeiro.conversaId, agenteId: primeiro.id } : { tipo: "novo-bot" };
   return { ...estado, tela };
 }

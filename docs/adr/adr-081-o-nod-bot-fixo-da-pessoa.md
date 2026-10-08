@@ -43,7 +43,7 @@ O mais perto disso era a guia "Nina" da ADR-077. Verificado na main em 2026-10-0
    como a guia.
 7. **A caixa do Nod.** `registrar_relato` grava um relato com `origem = 'nod'`, `tipo` bug/melhoria/dúvida e
    `mensagem_id` nulo (0062). Título e texto vão para `relato_prosa`, privada e apagável (ADR-004); a lista mostra o
-   título e o começo do texto só para a própria pessoa. O trecho são as 10 últimas mensagens da conversa do Nod,
+   título e o começo do texto só dos relatos que a própria pessoa contou ao Nod (o do botão segue sem prosa na lista). O trecho são as 10 últimas mensagens da conversa do Nod,
    redigidas (NOD-158). Teto de 20 por pessoa em 24 h. A tela Relatos ganha o filtro por tipo.
 
 ## Alternativas descartadas
