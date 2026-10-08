@@ -10,6 +10,7 @@ import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { expirarItensNaMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
+import { cuidarDosPedidosParados } from "../../use-cases/pedidos-parados.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
@@ -40,6 +41,22 @@ const DESFECHO_HUMANO: Readonly<Record<string, string>> = {
  * (agora − prazo) vai ao log: é como se observa um varredor que ficou parado (E7.4.3).
  */
 export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarredor): Promise<ResultadoVarredura> {
+  const resultado = await varrerDecisoes(escopo, tx, opcoes);
+  // definido em 2026-10-08: os pedidos a colega que pararam sem voltar (pedidos-parados.ts), em transação própria — um
+  // erro neles não desfaz o vencimento das decisões, e o próximo tique tenta de novo.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const r = await cuidarDosPedidosParados(deps);
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "pedidos_parados_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  return resultado;
+}
+
+async function varrerDecisoes(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarredor): Promise<ResultadoVarredura> {
   const agora = opcoes.agora();
   return tx(async (trx) => {
     const repos = criarRepos(trx, escopo);

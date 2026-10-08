@@ -941,6 +941,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return saida;
       },
+      // Os pedidos parados se provam no Postgres (tests/integration/pedidos-parados.test.ts); a memória não os vê.
+      async pedidosAColegaParados() {
+        return [];
+      },
     },
 
     turnos: {

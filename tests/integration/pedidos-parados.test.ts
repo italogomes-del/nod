@@ -1,0 +1,166 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import type { Tx } from "../../src/shared/types.ts";
+import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
+import { MAX_QUEDAS_POR_PEDIDO } from "../../src/domain/pedido-parado.ts";
+import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
+import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
+import { cuidarDosPedidosParados, REGRA_RETOMADA_AUTOMATICA } from "../../src/use-cases/pedidos-parados.ts";
+import { criarTrabalho, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
+import { depsSobre } from "../helpers/deps-l7.ts";
+import { agenteComConversa } from "../helpers/fabricas.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+/**
+ * Pedidos a colega que pararam sem voltar (2026-10-08, diagnóstico do Nod diário): 15 tasks ficaram "rodando" por horas
+ * esperando colegas cujas tasks já tinham falhado — a recusa no despacho, o Parar e a queda da máquina não avisavam quem
+ * pediu. O varredor de expiração agora entrega a falha (ou o resultado que ficou para trás) e retoma sozinho o pedido
+ * que caiu por infraestrutura quando as máquinas voltam, até MAX_QUEDAS_POR_PEDIDO quedas.
+ */
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const SINAIS = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true };
+const concluido = (texto = "feito") => ({ desfecho: "sucesso" as const, texto, sessaoCli: null, sinais: SINAIS, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] });
+
+/** A Ada, numa task, pede ao Dev; o turno dela termina e a task fica esperando o colega. */
+async function montar(trx: Tx) {
+  const ada = await agenteComConversa(trx, MARLON, { nome: "Ada" });
+  const dev = await agenteComConversa(trx, MARLON, { nome: "Dev" });
+  const { deps, repos } = depsSobre(trx, MARLON);
+  for (const a of [ada, dev]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
+  const novoTurno = async (conversaId: string, agenteId: string, trabalhoId: string | null) => {
+    const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
+    if (!t) throw new Error("turno");
+    return t;
+  };
+  const rodar = async (id: string) => {
+    const machineId = randomUUID();
+    for (let i = 0; i < 10; i++) {
+      const r = await repos.turnos.reivindicar({ machineId, agora: Date.now() });
+      if (!r || r.id === id) break;
+    }
+    return machineId;
+  };
+  const entregar = async (turnoId: string, texto = "feito") => assentarTurno(deps, { turnoId, machineId: await rodar(turnoId), seqLocal: 1, fala: { tipo: "texto", texto }, resultado: concluido(texto), executor: "catcher" });
+  const w = (await criarTrabalho(deps, { agenteId: ada.agenteId, conversaId: ada.conversaId, titulo: "Revisar o PR", origem: "pessoa" })).trabalho;
+  const t = await novoTurno(ada.conversaId, ada.agenteId, w.id);
+  const maquina = await rodar(t.id);
+  const { data } = await pedirABot(deps, { turnoId: t.id, agenteId: ada.agenteId, conversaId: ada.conversaId, agente: "Dev", pedido: "revise o PR 42" });
+  await assentarTurno(deps, { turnoId: t.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "Pedi ao Dev." }, resultado: concluido("Pedi ao Dev."), executor: "catcher" });
+  const tarefa = await repos.turnos.buscar(data.tarefa_id);
+  if (!tarefa?.trabalhoId) throw new Error("tarefa do colega sem trabalho");
+  const colegaId = tarefa.trabalhoId;
+  /** A queda de um turno do colega como a recusa no despacho a deixa: interrompido e o trabalho DELE sincronizado. */
+  const cair = async (turnoId: string, motivo: "executor_indisponivel" | "maquina_sem_contato" | "trabalho_incompleto") => {
+    await repos.turnos.interromper(turnoId, motivo);
+    await sincronizarTrabalho(deps, colegaId);
+  };
+  /** Algum turno da pessoa conclui depois da queda: as máquinas voltaram. */
+  const sinalDeVida = async () => entregar((await novoTurno(ada.conversaId, ada.agenteId, null)).id);
+  const estado = async (id: string) => (await repos.trabalhos.buscar(id))?.estado;
+  const pecasDaAda = async () => (await repos.mensagens.listarDaConversa(ada.conversaId, 500)).filter((m) => m.payload?.kind === "peer_ask");
+  const turnosDoColega = async () => (await repos.turnos.listarDaConversa(dev.conversaId, 500)).filter((x) => x.trabalhoId === colegaId);
+  return { ada, dev, deps, repos, w, tarefa, colegaId, cair, sinalDeVida, entregar, estado, pecasDaAda, turnosDoColega };
+}
+
+describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
+  it("o bug: a task do colega falha por um caminho que não avisa, e a de quem pediu fica rodando sem turno vivo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.cair(m.tarefa.id, "trabalho_incompleto");
+      expect(await m.estado(m.colegaId)).toBe("falhou");
+      expect(await m.estado(m.w.id)).toBe("rodando");
+      expect(await m.pecasDaAda()).toHaveLength(0);
+
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.avisados).toEqual([m.tarefa.id]);
+      const [aviso] = await m.pecasDaAda();
+      expect(aviso?.payload).toMatchObject({ kind: "peer_ask", tarefaId: m.tarefa.id, falhou: true });
+      expect(aviso?.texto).toContain("Dev não concluiu");
+      // A continuação da Ada nasce na task dela: ela fica sabendo e segue (ou encerra) a própria task.
+      const continuacao = aviso?.turnoId ? await m.repos.turnos.buscar(aviso.turnoId) : null;
+      expect(continuacao).toMatchObject({ origem: "retomada", trabalhoId: m.w.id, estado: "pendente" });
+      expect((await m.repos.trabalhos.fatos(m.w.id))?.aguardandoColega).toBe(false);
+
+      // Idempotente: a segunda passada não avisa de novo.
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+    });
+  });
+
+  it("queda por infraestrutura: espera as máquinas voltarem, retoma sozinho e fecha o \"Retomar\" do colega por regra", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.cair(m.tarefa.id, "maquina_sem_contato");
+      const card = await m.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: m.dev.agenteId, conversaId: m.dev.conversaId, turnoId: m.tarefa.id, prazoDecisaoEm: Date.now() + 86_400_000, frase: "O turno parou." });
+      await sincronizarTrabalho(m.deps, m.colegaId);
+      expect(await m.estado(m.colegaId)).toBe("precisa_de_voce");
+
+      // Sem sinal de que as máquinas voltaram: espera, sem avisar e sem retomar.
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+
+      await m.sinalDeVida();
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.retomados).toEqual([m.tarefa.id]);
+      const retomada = (await m.turnosDoColega()).find((x) => x.origem === "retomada");
+      expect(retomada).toMatchObject({ retomaTurnoId: m.tarefa.id, estado: "pendente", trabalhoId: m.colegaId, sobProcuracaoDe: m.tarefa.sobProcuracaoDe });
+      expect((await m.repos.decisoes.buscar(card!.id))?.estado).toBe("decidida");
+      expect((await m.repos.decisoes.buscar(card!.id))?.desfecho).toMatchObject({ tipo: "decidida_por_regra", regra: REGRA_RETOMADA_AUTOMATICA });
+      expect(await m.estado(m.colegaId)).not.toBe("precisa_de_voce");
+      const linhas = (await m.repos.mensagens.listarDaConversa(m.dev.conversaId, 500)).filter((x) => x.kind === "sistema" && x.texto.includes("retomado sozinho"));
+      expect(linhas).toHaveLength(1);
+      // Quem pediu segue esperando: nada voltou ainda.
+      expect(await m.pecasDaAda()).toHaveLength(0);
+      expect(await m.estado(m.w.id)).toBe("rodando");
+    });
+  });
+
+  it(`depois de ${MAX_QUEDAS_POR_PEDIDO} quedas, desiste e avisa quem pediu`, async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      let caiu = m.tarefa.id;
+      for (let i = 1; i < MAX_QUEDAS_POR_PEDIDO; i++) {
+        await m.cair(caiu, "executor_indisponivel");
+        await m.sinalDeVida();
+        expect((await cuidarDosPedidosParados(m.deps)).data.retomados).toEqual([m.tarefa.id]);
+        const retomadas = (await m.turnosDoColega()).filter((x) => x.origem === "retomada");
+        expect(retomadas).toHaveLength(i);
+        caiu = retomadas.at(-1)!.id;
+      }
+      await m.cair(caiu, "executor_indisponivel");
+      await m.sinalDeVida();
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data).toEqual({ retomados: [], avisados: [m.tarefa.id], entregues: [] });
+      expect((await m.pecasDaAda())[0]?.texto).toContain(`caiu ${MAX_QUEDAS_POR_PEDIDO} vezes`);
+    });
+  });
+
+  it("o colega terminou mas a resposta não voltou: entrega o resultado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.turnos.assentar(m.tarefa.id, { estado: "concluido" });
+      await m.repos.mensagens.criar({ conversaId: m.dev.conversaId, turnoId: m.tarefa.id, autoria: { autor_tipo: "agente", autor_id: m.dev.agenteId, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "regra:localidade", regra_versao: 1 }, kind: "texto", texto: "Revisado: dois comentários no PR 42.", confianca: "nao_confiavel" });
+      await sincronizarTrabalho(m.deps, m.colegaId);
+      expect(await m.estado(m.colegaId)).toBe("terminado");
+      expect(await m.estado(m.w.id)).toBe("rodando");
+
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.entregues).toEqual([m.tarefa.id]);
+      const [volta] = await m.pecasDaAda();
+      expect(volta?.texto).toBe("Revisado: dois comentários no PR 42.");
+      expect(volta?.payload).not.toMatchObject({ falhou: true });
+    });
+  });
+
+  it("pedido de mais de 24 h fica de fora; o varredor de expiração roda a regra a cada passada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.cair(m.tarefa.id, "trabalho_incompleto");
+      const depois = Date.now() + 25 * 3_600_000;
+      expect((await cuidarDosPedidosParados({ ...m.deps, agora: () => depois })).data.avisados).toEqual([]);
+
+      await varrerPessoa(MARLON, (fn) => fn(trx), { services: m.deps.services, useCases: m.deps.useCases, agora: () => Date.now() });
+      expect(await m.pecasDaAda()).toHaveLength(1);
+    });
+  });
+});
