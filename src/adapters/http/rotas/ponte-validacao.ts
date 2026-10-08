@@ -22,6 +22,7 @@ import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
+import { HARNESSES, SEM_CAPACIDADES, type CapacidadesHarness, type IdHarness } from "../../../contracts/harness.ts";
 
 export function exigir(condicao: unknown): asserts condicao {
   if (!condicao) throw new ErroDeDominio("entrada_invalida");
@@ -123,6 +124,24 @@ export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.
  * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente
  * = app antigo (undefined, e a absorção segue como antes); fora do formato, a renovação é recusada e o app reenvia.
  */
+/**
+ * definido em 2026-10-08 (revisão do épico, S15): as capacidades que a máquina anuncia por harness no conectar. Só ids
+ * integrados e só as chaves de CapacidadesHarness, cada uma `true` só se veio `true`; o resto é ignorado (o anúncio é
+ * extra: app antigo não manda, e nada que dependa dele acontece). Nunca recusa o conectar.
+ */
+export function capacidadesAnunciadas(v: unknown): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+  const anunciadas = v as Record<string, unknown>;
+  const saida: Partial<Record<IdHarness, CapacidadesHarness>> = {};
+  for (const h of HARNESSES) {
+    const c = anunciadas[h.id];
+    if (!h.integrado || typeof c !== "object" || c === null || Array.isArray(c)) continue;
+    const bruto = c as Record<string, unknown>;
+    saida[h.id] = Object.fromEntries(Object.keys(SEM_CAPACIDADES).map((k) => [k, bruto[k] === true])) as CapacidadesHarness;
+  }
+  return Object.keys(saida).length > 0 ? saida : undefined;
+}
+
 export function idsDeMensagens(v: unknown): string[] | undefined {
   if (v === undefined) return undefined;
   exigir(Array.isArray(v) && v.length <= TETO_FALAS_POR_RENOVACAO);

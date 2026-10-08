@@ -32,7 +32,7 @@ describeIntegracao("revisão #188 — pasta e sessão das tasks", () => {
       await base.repos.turnos.reivindicar({ machineId: randomUUID(), agora: relogio });
       const em = relogio;
       relogio += 121_000;
-      const r = await promoverNaRede(deps, { turnoId: vivo.id, despachadoEm: em, fezFerramenta: true, harness: "claude-cli", sessaoCli: "s-1", sessaoExecutor: "local" });
+      const r = await promoverNaRede(deps, { turnoId: vivo.id, despachadoEm: em, fezFerramenta: true, harness: "claude-cli", sessaoCli: "s-1", sessaoExecutor: "local", maquinaBifurca: true });
       const w = r.data.trabalho!;
       expect(w.pasta).toMatch(/^~\/nod\/Ada\/monte-o-relatorio-[a-z0-9]{6}$/);
       expect(w.sessaoExecutor).toBe("local");
@@ -63,6 +63,43 @@ describeIntegracao("revisão #188 — pasta e sessão das tasks", () => {
       expect(local.promptSistema).toContain('"historico"');
       const catcher = (await emitirPlanoTurno(deps, { turnoId: t2.id, machineId: randomUUID(), executor: "catcher" })).data;
       expect(catcher.entrada.sessaoCli).toBe("sessao-do-catcher");
+    });
+  });
+});
+
+describeIntegracao("revisão #188 — a sessão do turno promovido (S16)", () => {
+  const montarRede = async (trx: Parameters<Parameters<typeof withRollback>[1]>[0]) => {
+    const base = await agenteComConversa(trx, MARLON, { nome: "Ada" });
+    await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
+    const agora = () => Date.now();
+    const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
+    const vivo = (await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
+    const maquina = randomUUID();
+    await base.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() });
+    // O turno bifurcou (ou começou sessão nova): a promoção não sabe a sessão dele.
+    const w = (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo: "Promovido", origem: "rede", estado: "rodando", sessaoCli: null, pasta: null })).trabalho;
+    await base.repos.turnos.vincularTrabalho(vivo.id, w.id);
+    const entregar = () => assentarTurno(deps, { turnoId: vivo.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: sucesso("sessao-nova-f"), executor: "local", harness: "claude-cli" });
+    return { ...base, deps, w, entregar };
+  };
+
+  it("a sessão que o promovido devolve vira também a da conversa (senão a próxima bifurcava a antiga e perdia o turno)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montarRede(trx);
+      await m.entregar();
+      expect((await m.repos.conversas.buscar(m.conversaId))?.sessaoCli).toBe("sessao-nova-f");
+      expect((await m.repos.trabalhos.buscar(m.w.id))?.sessaoCli).toBe("sessao-nova-f");
+    });
+  });
+
+  it("a conversa que ganhou sessão nova depois da promoção fica com a dela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montarRede(trx);
+      await new Promise((r) => setTimeout(r, 15));
+      await m.repos.conversas.atualizarSessaoCli(m.conversaId, "sessao-da-conversa-depois", "local", "claude-cli");
+      await m.entregar();
+      expect((await m.repos.conversas.buscar(m.conversaId))?.sessaoCli).toBe("sessao-da-conversa-depois");
+      expect((await m.repos.trabalhos.buscar(m.w.id))?.sessaoCli).toBe("sessao-nova-f");
     });
   });
 });

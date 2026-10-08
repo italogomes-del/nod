@@ -91,7 +91,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * ADR-081 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
    */
-  const despachados = new Map<string, { em: number; sessaoCli: string | null }>();
+  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean }>();
 
   /** NOD-171: os harnesses das máquinas desta ponte somados aos da pessoa nas outras conexões; o pronto vence. */
   function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {
@@ -161,7 +161,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
-            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli });
+            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true });
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
@@ -231,13 +231,23 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         if (events.length) await d.repos.events.gravarComOutbox(events);
         return { ativo: r.ativo, mensagens: textos, ids, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
       });
+      // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".
+      if (ativo) for (const id of p.mensagensEntregues ?? []) jaOferecidas.delete(id);
       // A rede de 2 min, numa transação PRÓPRIA: se a entrega correr junto, só a promoção desfaz — nunca a renovação.
       const despachado = despachados.get(p.turnoId);
       const redeMs = deps.redeMs ?? REDE_MS;
-      if (ativo && conversaSemTrabalho && despachado && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
+      const harness = harnesses.get(p.turnoId) ?? null;
+      // definido em 2026-10-08 (revisão do épico, S15): só promove quando a MÁQUINA deste turno anunciou que bifurca sessão
+      // com este harness (AnuncioMaquina.capacidades, já com o piso do CLI dela). App antigo não anuncia: não promove — ele
+      // poria dois CLIs na mesma sessão, e o CLI sem --fork-session recusaria a próxima mensagem para sempre.
+      const maquinaBifurca = harness !== null && maquinas.get(p.machineId)?.capacidades?.[harness]?.bifurcaSessao === true;
+      // S17: com mensagem oferecida e ainda não confirmada (nesta renovação ou numa anterior), não promove: a resposta a
+      // ela sairia duas vezes (no turno promovido e no turno próprio que a mensagem viraria).
+      const semMensagemNoAr = ids.length === 0 && jaOferecidas.size === 0;
+      if (ativo && conversaSemTrabalho && despachado && maquinaBifurca && semMensagemNoAr && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness: harnesses.get(p.turnoId) ?? null, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, redeMs });
+          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, maquinaBifurca, redeMs });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
       }
@@ -274,7 +284,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa });
+          const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
           // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
           // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
           // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).
