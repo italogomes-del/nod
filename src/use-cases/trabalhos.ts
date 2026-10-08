@@ -162,6 +162,8 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, t
       ultimoPasso: (vivo ? deps.services.trabalhosVivos?.ultimaFerramenta(vivo) : null) ?? (e?.ultimaFala ? tituloDoTrabalho(e.ultimaFala) : null),
       turnoVivoId: vivo,
       deFora: e?.deFora ?? false,
+      esperandoColega: e?.esperandoColega ?? null,
+      trabalhouMs: e?.trabalhouMs ?? 0,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   });

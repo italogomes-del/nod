@@ -2042,6 +2042,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.trabalhoFazerAqui(el.dataset.id ?? "");
     dispatch({ tipo: "invalidar", quais: ["trabalhos", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
+  // O status do topo da task abre e fecha o cartão do tempo (protótipo "Nod — tempo da task").
+  "tempo-task": (el) => {
+    const id = el.dataset.id ?? null;
+    dispatch({ tipo: "tempo-task", id: id && estado.tempoTaskAberto !== id ? id : null });
+  },
   // A faixa recolhe numa pílula e a pílula abre a faixa; a escolha vai para as preferências da pessoa.
   "faixa-trabalhos": (el) => {
     const recolhida = el.dataset.recolher === "1";

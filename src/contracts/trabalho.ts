@@ -74,6 +74,13 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    * ou um turno dela leu conteúdo de fora). O prompt da conversa os marca com cuidado.
    */
   deFora?: boolean;
+  /**
+   * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado pelo Marlon): o colega cuja resposta a task espera
+   * (o pedido mais antigo ainda sem volta), para o status curto "esperando Eng 2". Ausente ou null: não espera colega.
+   */
+  esperandoColega?: { nome: string; desde: number; trabalhoId: string | null } | null;
+  /** Quanto os turnos do trabalho de fato rodaram (do começo ao último sinal de cada um, o que roda até agora), em ms. */
+  trabalhouMs?: number;
 };
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */

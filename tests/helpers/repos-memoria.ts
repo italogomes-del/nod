@@ -28,6 +28,7 @@ import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
 import type { ItemOutbox } from "../../src/repositories/outbox.repo.ts";
+import type { ExtrasTrabalho } from "../../src/repositories/trabalhos.repo.ts";
 import type { Parada } from "../../src/repositories/paradas.repo.ts";
 import type { Pessoa } from "../../src/repositories/pessoas.repo.ts";
 import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.repo.ts";
@@ -923,7 +924,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
       },
       async extras(ids) {
-        const saida = new Map<string, { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[]; deFora: boolean }>();
+        const saida = new Map<string, ExtrasTrabalho>();
         for (const id of ids) {
           const t = doTenant(b.trabalhos).find((x) => x.id === id);
           if (!t) continue;
@@ -937,6 +938,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             turnoVivoId: turnos.find((x) => x.estado === "despachando")?.id ?? null,
             turnosAbertos: turnos.filter((x) => x.estado === "pendente" || x.estado === "despachando").map((x) => x.id),
             deFora: t.origem === "colega" || turnos.some((x) => b.contaminados.has(x.id) || x.entradaConfianca !== "confiavel"),
+            // O tempo e o colega esperado se provam no Postgres (tests/integration/repos/trabalhos.test.ts).
+            esperandoColega: null,
+            trabalhouMs: 0,
           });
         }
         return saida;
