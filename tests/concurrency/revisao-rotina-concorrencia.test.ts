@@ -75,15 +75,18 @@ async function cenario(): Promise<Cenario> {
 }
 
 /**
- * Espera alguma conexão ficar parada no lock da linha de rotinas (o FOR UPDATE da segunda confirmação). Volta false
- * depois do prazo — sem o lock a segunda nunca espera, e o teste segue para as asserções, que é onde ele falha.
+ * Espera alguma conexão ficar parada num FOR UPDATE da segunda confirmação: o da rotina (propostas diferentes sobre a
+ * mesma rotina) ou, desde a NOD-197, o da PROPOSTA (a mesma proposta confirmada duas vezes espera já na trava dela, que
+ * vem antes da rotina). Volta false depois do prazo — sem o lock a segunda nunca espera, e o teste segue para as
+ * asserções, que é onde ele falha.
  */
 async function segundaEsperandoLock(prazoMs = 5_000): Promise<boolean> {
   const fim = Date.now() + prazoMs;
   while (Date.now() < fim) {
     const [l] = await db<{ n: number }[]>`
       select count(*)::int as n from pg_stat_activity
-      where datname = current_database() and wait_event_type = 'Lock' and query ilike '%from rotinas%for update%'`;
+      where datname = current_database() and wait_event_type = 'Lock'
+        and (query ilike '%from rotinas%for update%' or query ilike '%from propostas%for update%')`;
     if ((l?.n ?? 0) > 0) return true;
     await new Promise((ok) => setTimeout(ok, 20));
   }

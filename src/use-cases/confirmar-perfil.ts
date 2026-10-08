@@ -62,8 +62,8 @@ async function recusarObsoleta(deps: Deps, proposta: Proposta, p: PayloadPropost
   ];
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
   // Pela rota de decisões a decisão já foi fechada por quem clicou: aqui volta null e não fecha duas vezes.
-  const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, undefined);
-  if (decisao) events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: proposta.conversaId, dados: { decisaoId: decisao.id, tipo: "perfil" } }));
+  const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, undefined);
+  if (decisao) events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: proposta.conversaId, dados: { decisaoId: decisao.id, tipo: "perfil" } }), ...sincronizar);
   return { data: { proposta: recusada, agente: atual, rotina: null, decisao: null, obsoleta: true }, events };
 }
 

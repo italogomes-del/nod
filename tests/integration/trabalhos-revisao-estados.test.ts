@@ -10,6 +10,8 @@ import { dispensarDecisao } from "../../src/use-cases/dispensar-decisao.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { parar } from "../../src/use-cases/parar.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
+import { confirmarProposta } from "../../src/use-cases/confirmar-proposta.ts";
+import { recusarProposta } from "../../src/use-cases/recusar-proposta.ts";
 import { fecharComResposta, retomarComResposta } from "../../src/use-cases/responder-decisao.ts";
 import { criarTrabalho, pararTrabalho, REGRA_TRABALHO_PARADO, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
@@ -151,6 +153,43 @@ describeIntegracao("revisão #188 — estados do trabalho", () => {
       const { data } = await fecharComResposta(m.deps, { decisaoId: df.id, texto: "Setembro" });
       await retomarComResposta(m.deps, { decisao: data.decisao, texto: "Setembro", respondidaPor: { id: MARLON.pessoaId, nome: "Marlon" } });
       expect(await m.estado(f.id)).toBe("rodando");
+    });
+  });
+
+  it("S2 × NOD-197: recusar o card de rotina pela conversa fecha a decisão de \"Sua vez\" e solta a task", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const w = await m.task("Rotina diária");
+      const t = await m.turno(w.id);
+      await m.entregar(t.id, await m.rodar(t.id));
+      const p = await m.repos.propostas.criar({ conversaId: m.conversaId, agenteId: m.agenteId, payload: { kind: "rotina", cron: "0 9 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "resumo", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: Date.now(), resumo: "dias úteis às 09:00" } });
+      if (!p) throw new Error("proposta");
+      await m.repos.decisoes.criar({ id: p.id, tipo: "rotina", agenteId: m.agenteId, conversaId: m.conversaId, turnoId: t.id, prazoDecisaoEm: Date.now() + 600_000, frase: "rotina" });
+      await sincronizarTrabalho(m.deps, w.id);
+      expect(await m.estado(w.id)).toBe("precisa_de_voce");
+
+      const r = await recusarProposta(m.deps, { propostaId: p.id });
+      expect((await m.repos.decisoes.buscar(p.id))?.estado).toBe("decidida");
+      expect(await m.estado(w.id)).toBe("terminado");
+      expect((r.events ?? []).map((e) => e.kind)).toContain("trabalho_mudou");
+    });
+  });
+
+  it("S2 × NOD-197 (QA): aceitar o card de rotina pela conversa fecha a decisão de \"Sua vez\" e solta a task", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const w = await m.task("Rotina diária");
+      const t = await m.turno(w.id);
+      await m.entregar(t.id, await m.rodar(t.id));
+      const p = await m.repos.propostas.criar({ conversaId: m.conversaId, agenteId: m.agenteId, payload: { kind: "rotina", cron: "0 9 * * 1-5", fusoIana: "America/Sao_Paulo", instrucao: "resumo", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: Date.now(), resumo: "dias úteis às 09:00" } });
+      if (!p) throw new Error("proposta");
+      await m.repos.decisoes.criar({ id: p.id, tipo: "rotina", agenteId: m.agenteId, conversaId: m.conversaId, turnoId: t.id, prazoDecisaoEm: Date.now() + 600_000, frase: "rotina" });
+      await sincronizarTrabalho(m.deps, w.id);
+      expect(await m.estado(w.id)).toBe("precisa_de_voce");
+
+      await confirmarProposta(m.deps, { propostaId: p.id });
+      expect((await m.repos.decisoes.buscar(p.id))?.estado).toBe("decidida");
+      expect(await m.estado(w.id)).toBe("terminado");
     });
   });
 

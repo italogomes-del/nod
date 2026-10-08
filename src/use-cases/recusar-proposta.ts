@@ -1,8 +1,10 @@
 import type { PayloadPropostaPerfil, Proposta } from "../contracts/conversa.ts";
+import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /**
  * definido em 2026-09-28 (ADR-050): as rotinas que vieram com o perfil saem de lado junto com ele — o card era um só,
@@ -16,6 +18,9 @@ export async function recusarRotinasDoCard(deps: Deps, p: PayloadPropostaPerfil)
   }
 }
 
+/** Os cards que nascem com uma decisão de mesmo id em "Sua vez" (criar-rotina.ts, rotinas-do-agente.ts, perfil). */
+const KINDS_COM_CARD_EM_SUA_VEZ: ReadonlySet<string> = new Set(["rotina", "rotina_atualizacao", "rotina_exclusao", "perfil"]);
+
 /** Recusar deixa a proposta de lado: nada agendado, nada concedido, agente inalterado (E1.1). */
 export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Proposta }> = async (deps, input) => {
   const existente = await deps.repos.propostas.buscar(input.propostaId);
@@ -25,6 +30,23 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
   if (proposta.payload.kind === "perfil") await recusarRotinasDoCard(deps, proposta.payload);
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
+  const events: RuntimeEvent[] = [];
+  // definido em 2026-10-07 (NOD-197): recusada pela conversa, a decisão de mesmo id em "Sua vez" fecha nesta tx, na
+  // ordem proposta → decisão (a de "Sua vez" desde a NOD-197). Sem isso o card ficava pendente para sempre: o clique
+  // em "Sua vez" acha a proposta já recusada e devolve 409 sem fechar nada. Quando a recusa vem de "Sua vez", a rota
+  // já fechou a decisão e aqui volta null. O card de acesso fica de fora: decidir-acesso.ts trava a decisão antes da
+  // proposta, e fechá-la daqui poria a ordem inversa.
+  // Revisão (Eng 1): fechada aqui, a decisão também solta a task do turno que propôs (sincronizarDasDecisoes, S2 da
+  // main 8e6fe03) — sem isso ela ficava `precisa_de_voce` para sempre. Fechada pela rota de "Sua vez", quem sincroniza
+  // é a rota (aqui `decidir` volta null).
+  const sincronizar: RuntimeEvent[] = [];
+  if (KINDS_COM_CARD_EM_SUA_VEZ.has(proposta.payload.kind)) {
+    const decisao = await deps.repos.decisoes.decidir(proposta.id, { por: deps.escopo.pessoaId, agora });
+    if (decisao) {
+      events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { decisao_id: decisao.id, tipo: decisao.tipo, recusada: true } }));
+      sincronizar.push(...(await sincronizarDasDecisoes(deps, [decisao])));
+    }
+  }
   const mensagem = await deps.repos.mensagens.criar({
     conversaId: proposta.conversaId,
     autoria,
@@ -32,7 +54,8 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
     texto: redigir("proposta-recusada", agora),
     confianca: "confiavel",
   });
-  const events = [evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: proposta.conversaId, dados: { agente_id: proposta.agenteId, acao: "proposta_recusada", proposta_id: proposta.id, kind: proposta.kind } })];
+  events.unshift(evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: proposta.conversaId, dados: { agente_id: proposta.agenteId, acao: "proposta_recusada", proposta_id: proposta.id, kind: proposta.kind } }));
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
+  events.push(...sincronizar);
   return { data: { proposta }, events };
 };

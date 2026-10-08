@@ -208,13 +208,22 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
           // sai DEPOIS do commit.
           let obsoleta = false;
           await comoDona(ctx.escopo, atual, async (deps) => {
-            const proposta = await deps.repos.propostas.buscar(atual.id);
             // NOD-190: o perfil trava o AGENTE antes da decisão, na mesma ordem de POST propostas/:id/confirmar
             // (confirmar-perfil.ts trava o agente e, no card obsoleto, fecha a decisão). Na ordem inversa, o mesmo card
             // clicado na conversa e em "Sua vez" ao mesmo tempo fazia deadlock (decisão → agente × agente → decisão).
             // Vale também para RECUSAR (QA da NOD-190): a recusa fecha a decisão e depois a proposta, e a confirmação do
             // card obsoleto pela conversa trava a proposta e depois a decisão — sem o agente na frente, 40P01 e 500.
-            if (atual.tipo === "perfil" && proposta) await deps.repos.agentes.buscarParaAtualizar(proposta.agenteId);
+            // (A leitura sem trava aqui só descobre QUAL agente travar; o estado vale o da leitura travada logo abaixo.)
+            if (atual.tipo === "perfil") {
+              const lida = await deps.repos.propostas.buscar(atual.id);
+              if (lida) await deps.repos.agentes.buscarParaAtualizar(lida.agenteId);
+            }
+            // NOD-197: depois (do agente, no perfil) a PROPOSTA, e só então a decisão — a ordem da conversa, que trava a
+            // proposta em propostas.decidir e fecha a decisão depois (ativar-rotina.ts, recusar-proposta.ts). Lida sem
+            // trava, a proposta saía `pendente` daqui enquanto a conversa a recusava: a rotina nascia, mudava ou era
+            // excluída com a proposta recusada, e confirmar × confirmar dava 40P01. Travada, quem chega depois relê o
+            // estado já commitado e acha a decisão fechada (409).
+            const proposta = await deps.repos.propostas.buscarParaAtualizar(atual.id);
             const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
             if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
             if (recusada(corpo)) {

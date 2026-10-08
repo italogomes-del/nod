@@ -37,7 +37,11 @@ export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean
   }
   const agora = deps.agora();
   const proximaExecucao = proximaJanela({ cron: p.cron, fusoIana: p.fusoIana, agora });
-  if (proposta.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "confirmada");
+  // NOD-197: `decidir` só sai de pendente. Null aqui = a proposta foi recusada por outra transação depois da leitura
+  // acima: aborta (rollback, 409) em vez de criar a rotina de uma proposta recusada.
+  if (proposta.estado === "pendente" && !(await deps.repos.propostas.decidir(proposta.id, "confirmada"))) {
+    throw new ErroDeDominio("estado_invalido", { cause: "proposta já não está pendente" });
+  }
   const rotina = await deps.repos.rotinas.criar({
     id: proposta.id,
     agenteId: proposta.agenteId,
@@ -71,8 +75,8 @@ export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean
   ];
   events.push(...((await concederAcessosDaRotina(deps, { agenteId: rotina.agenteId, acessos: rotina.acessos, ...(input.porRegra ? { porRegra: input.porRegra } : {}) })).events ?? []));
   // A decisão 'rotina' de "Sua vez" tem o mesmo id; se ainda estava aberta, fica decidida aqui.
-  const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
-  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: rotina.conversaId }));
+  const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
+  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina" }, { conversaId: rotina.conversaId }), ...sincronizar);
   return { data: { rotina, jaExistia: false }, events };
 };
 

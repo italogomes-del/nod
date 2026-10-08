@@ -4,6 +4,7 @@ import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { conversaComAPessoa, decidirPeloModo, type DecisaoDoModo, type RegraDoModo } from "../domain/modo-aprovacao.ts";
 import { autoriaAgente, autoriaPessoa } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /** Quem fechou um pedido sem pessoa: a regra do modo, com a versão (ADR-042 claim 4, ADR-059). */
 export type PorRegra = { regra: RegraDoModo; regraVersao: number };
@@ -21,9 +22,17 @@ export function semCard(events: readonly RuntimeEvent[]): RuntimeEvent[] {
   return events.filter((e) => e.kind !== "decisao_criada");
 }
 
-/** Fecha a decisão de mesmo id da proposta: pela pessoa que clicou, ou pela regra (decidida_por nulo). */
-export async function fecharDecisaoDaProposta(deps: Deps, id: string, agora: number, porRegra: PorRegra | undefined): Promise<Decisao | null> {
-  return porRegra ? deps.repos.decisoes.fecharPorRegra(id, { ...porRegra, agora }) : deps.repos.decisoes.decidir(id, { por: deps.escopo.pessoaId, agora });
+/**
+ * Fecha a decisão de mesmo id da proposta: pela pessoa que clicou, ou pela regra (decidida_por nulo).
+ * QA da NOD-197 (Tarsila, 08/10): fechada aqui — confirmação pela conversa ou pelo modo —, a decisão também solta a
+ * task do turno que propôs (sincronizarDasDecisoes, S2), como a recusa já faz em recusar-proposta.ts. Sem isso,
+ * aceitar o card de rotina/perfil pela conversa deixava a task `precisa_de_voce` para sempre. Pela rota de "Sua vez"
+ * a decisão já chega fechada: aqui volta null, e quem sincroniza é a rota.
+ * `sincronizar` vai DEPOIS do "decisao_decidida" nos events de quem chama.
+ */
+export async function fecharDecisaoDaProposta(deps: Deps, id: string, agora: number, porRegra: PorRegra | undefined): Promise<{ decisao: Decisao | null; sincronizar: RuntimeEvent[] }> {
+  const decisao = porRegra ? await deps.repos.decisoes.fecharPorRegra(id, { ...porRegra, agora }) : await deps.repos.decisoes.decidir(id, { por: deps.escopo.pessoaId, agora });
+  return { decisao, sincronizar: decisao ? await sincronizarDasDecisoes(deps, [decisao]) : [] };
 }
 
 /**

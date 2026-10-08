@@ -785,6 +785,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscar(id) {
         return doTenant(b.propostas).find((p) => p.id === id) ?? null;
       },
+      async buscarParaAtualizar(id) {
+        // Espelha `buscar`; sem concorrência na memória, sem lock.
+        return doTenant(b.propostas).find((p) => p.id === id) ?? null;
+      },
       async pendentesDaConversa(conversaId) {
         return doTenant(b.propostas).filter((p) => p.conversaId === conversaId && p.estado === "pendente");
       },

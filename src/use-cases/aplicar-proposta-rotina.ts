@@ -50,8 +50,8 @@ async function recusarObsoleta(deps: Deps, proposta: Proposta, atual: Rotina, po
   const events: RuntimeEvent[] = [];
   if (mensagem) events.push(evento(deps, "mensagem_criada", autoria, { mensagem_id: mensagem.id, kind: "sistema" }, { conversaId: atual.conversaId }));
   // Na rota a decisão já foi fechada por quem clicou (decisoes.ts): aqui volta null e não fecha duas vezes.
-  const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, porRegra);
-  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: proposta.kind }, { conversaId: atual.conversaId }));
+  const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, porRegra);
+  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: proposta.kind }, { conversaId: atual.conversaId }), ...sincronizar);
   return { data: { rotina: atual, jaAplicada: false, obsoleta: true }, events };
 }
 
@@ -66,22 +66,35 @@ function jaDecidida(estado: string): boolean {
 }
 
 /**
- * definido em 2026-10-06 (NOD-182): trava a rotina (FOR UPDATE) e só DEPOIS relê a proposta. Duas confirmações
- * concorrentes da mesma revisão liam a rotina antes de qualquer uma gravar e as duas aplicavam; travada, a segunda
- * espera a primeira e relê a rotina já mudada. A proposta é relida porque foi lida antes do lock: o mesmo card
- * confirmado duas vezes acorda com ela já `confirmada` e volta jaAplicada, em vez do aviso falso de "rotina mudou".
- * A única linha travada é a rotina (a proposta só é lida): duas confirmações não se travam em ordem cruzada.
+ * definido em 2026-10-06 (NOD-182): trava a rotina (FOR UPDATE) e relê a proposta. Duas confirmações concorrentes da
+ * mesma revisão liam a rotina antes de qualquer uma gravar e as duas aplicavam; travada, a segunda espera a primeira
+ * e relê a rotina já mudada. O mesmo card confirmado duas vezes acorda com a proposta já `confirmada` e volta
+ * jaAplicada, em vez do aviso falso de "rotina mudou".
+ * definido em 2026-10-07 (NOD-197): a PROPOSTA é travada primeiro, e a rotina depois. Só lida, ela saía `pendente`
+ * enquanto a conversa a recusava, e a mudança era aplicada com a proposta recusada. A ordem é a de todos os caminhos
+ * do card — proposta, decisão, rotina —: a rota de "Sua vez" já chega com a proposta travada (decisoes.ts), e o
+ * modo do bot (porRegra) trava aqui a proposta antes da rotina e da decisão. Propostas diferentes sobre a mesma rotina
+ * seguem serializadas pela rotina, sem ciclo: cada uma trava a sua proposta e depois a rotina.
  */
 async function travarRotinaEReler(deps: Deps, propostaId: string, rotinaId: string): Promise<{ proposta: Proposta; atual: Rotina }> {
+  const proposta = await deps.repos.propostas.buscarParaAtualizar(propostaId);
+  if (!proposta) {
+    exigir(await deps.repos.propostas.buscar(propostaId), "nao_encontrado", "proposta");
+    throw new ErroDeDominio("nao_permitido", { cause: "só a dona decide a proposta" });
+  }
+  if (proposta.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
   const atual = await deps.repos.rotinas.buscarParaAtualizar(rotinaId);
   if (!atual) {
     // O FOR UPDATE só enxerga a rotina da dona; a de outra pessoa do tenant existe, mas não é dela para mudar.
     exigir(await deps.repos.rotinas.buscar(rotinaId), "nao_encontrado", "rotina");
     throw new ErroDeDominio("nao_permitido", { cause: "só a dona muda a rotina" });
   }
-  const proposta = exigir(await deps.repos.propostas.buscar(propostaId), "nao_encontrado", "proposta");
-  if (proposta.estado === "recusada") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada" });
   return { proposta, atual };
+}
+
+/** NOD-197: `decidir` só sai de pendente; null = a proposta já não estava pendente. Aborta (rollback, 409) sem aplicar. */
+async function confirmarOuAbortar(deps: Deps, propostaId: string): Promise<void> {
+  if (!(await deps.repos.propostas.decidir(propostaId, "confirmada"))) throw new ErroDeDominio("estado_invalido", { cause: "proposta já não está pendente" });
 }
 
 /** `porRegra` (ADR-059): o modo do bot confirmou no turno — sem clique; autoria do agente e decisão fechada por regra. */
@@ -104,7 +117,7 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
   // O instante guardado na proposta pode ter passado enquanto ninguém confirmava (mesma regra de
   // ativarRotina): recalcula do cron JÁ VALIDADO do payload, sem reinterpretar texto.
   const proximaExecucao = proximaJanela({ cron: p.cron ?? atual.cron, fusoIana: p.fusoIana ?? atual.fusoIana, agora });
-  await deps.repos.propostas.decidir(proposta.id, "confirmada");
+  await confirmarOuAbortar(deps, proposta.id);
   const rotina = await deps.repos.rotinas.atualizar(p.rotinaId, {
     cron: p.cron,
     fusoIana: p.fusoIana,
@@ -134,8 +147,8 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
   // concede, na mesma transação, o que ainda não estava concedido — o que já estava não vira mensagem
   // nova (concederLote é idempotente). App que saiu da lista NÃO é revogado aqui: revogar é pela tela.
   if (p.acessos) events.push(...((await concederAcessosDaRotina(deps, { agenteId: rotina.agenteId, acessos: p.acessos, ...(input.porRegra ? { porRegra: input.porRegra } : {}) })).events ?? []));
-  const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
-  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_atualizacao" }, { conversaId: rotina.conversaId }));
+  const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
+  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_atualizacao" }, { conversaId: rotina.conversaId }), ...sincronizar);
   return { data: { rotina, jaAplicada: false }, events };
 };
 
@@ -154,15 +167,15 @@ export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: P
   if (atual.excluidoEm !== null) {
     // Outra proposta já excluiu a rotina: o pedido desta está cumprido. Sem fechá-la, ela ficava pendente e o card
     // "Excluir rotina" voltava na conversa com a decisão já fechada. Fecha sem segundo aviso de "Rotina excluída".
-    await deps.repos.propostas.decidir(proposta.id, "confirmada");
-    const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
+    await confirmarOuAbortar(deps, proposta.id);
+    const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
     const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
-    const events = decisao ? [evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_exclusao" }, { conversaId: atual.conversaId })] : [];
+    const events = decisao ? [evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_exclusao" }, { conversaId: atual.conversaId }), ...sincronizar] : [];
     return { data: { rotina: atual, jaAplicada: true }, events };
   }
   if (mudouDesdeAProposta(p.revisao, atual)) return recusarObsoleta(deps, proposta, atual, input.porRegra);
 
-  await deps.repos.propostas.decidir(proposta.id, "confirmada");
+  await confirmarOuAbortar(deps, proposta.id);
   const rotina = await deps.repos.rotinas.excluir(p.rotinaId, agora);
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona exclui a rotina" });
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);
@@ -176,7 +189,7 @@ export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: P
   const events: RuntimeEvent[] = [
     evento(deps, "rotina_excluida", autoria, { rotinaId: rotina.id, propostaId: proposta.id }, { conversaId: rotina.conversaId }),
   ];
-  const decisao = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
-  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_exclusao" }, { conversaId: rotina.conversaId }));
+  const { decisao, sincronizar } = await fecharDecisaoDaProposta(deps, proposta.id, agora, input.porRegra);
+  if (decisao) events.push(evento(deps, "decisao_decidida", autoria, { decisaoId: decisao.id, tipo: "rotina_exclusao" }, { conversaId: rotina.conversaId }), ...sincronizar);
   return { data: { rotina, jaAplicada: false }, events };
 };
