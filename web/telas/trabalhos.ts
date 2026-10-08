@@ -1,3 +1,4 @@
+import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
@@ -6,6 +7,7 @@ import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { aberto, abertosDoBot, agrupar, etiquetaOrigem, filtrar, memoriaLegivel, pilulaMemoria, pontoTrabalho, situacaoDe, tempoDe, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
+import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { usd } from "./modo-dev.ts";
 
 /**
@@ -247,6 +249,23 @@ export function renderTelaLinha(estado: Estado, tela: Extract<Tela, { tipo: "lin
   const ids = new Set(tela.mensagens);
   const mensagens = (c?.mensagens ?? []).filter((m) => ids.has(m.id));
   const corpo = !c ? '<p class="mudo">carregando…</p>' : mensagens.length ? mensagens.map((m) => renderMensagem(m, estado)).join("") : '<p class="mudo">Essas mensagens saíram da janela carregada da conversa.</p>';
+  if (tela.rotina && c && mensagens.length) return telaDaLinhaDaRotina(tela.titulo, mensagens, estado);
   const quando = mensagens.length ? `<div class="time-sep">${esc(hora(mensagens[0]?.criadoEm ?? 0))}${mensagens.length > 1 ? ` a ${esc(hora(mensagens[mensagens.length - 1]?.criadoEm ?? 0))}` : ""} · ${mensagens.length} ${mensagens.length === 1 ? "mensagem" : "mensagens"}</div>` : "";
   return `<div class="tk-topo"><span class="tk-chip"><span class="tk-titulo">${esc(tela.titulo)}</span></span></div>${quando}${corpo}<div class="tk-acoes">${botao("fechar-trabalho", "Fechar", { classe: "tk-fechar" })}</div>`;
+}
+
+/**
+ * A linha "… rodou N vezes · nada para você" aberta (definido em 2026-10-08, QA do épico, prancha R2 aprovada): o chip
+ * com o relógio da rotina, "N execuções · 09:10 e 09:20" embaixo, e cada execução com a sua separação "09:10 · sem nada
+ * para você" e as falas dela. Antes a tela juntava tudo como "5 mensagens", sem dizer onde uma execução acabava.
+ */
+function telaDaLinhaDaRotina(titulo: string, mensagens: readonly Mensagem[], estado: Estado): string {
+  const execucoes = new Map<string, Mensagem[]>();
+  for (const m of mensagens) execucoes.set(m.turnoId ?? m.id, [...(execucoes.get(m.turnoId ?? m.id) ?? []), m]);
+  const grupos = [...execucoes.values()];
+  const inicios = grupos.map((g) => g[0]?.criadoEm ?? 0);
+  const n = grupos.length;
+  const topo = `<div class="tk-topo"><span class="tk-chip"><span class="linha-ic" aria-hidden="true">${ICONE.relogio}</span><span class="tk-titulo">${esc(titulo)}</span></span><p class="tk-linha">${n} ${n === 1 ? "execução" : "execuções"} · ${esc(horariosDaRotina(inicios))}</p></div>`;
+  const corpo = grupos.map((g) => `<div class="time-sep">${esc(hora(g[0]?.criadoEm ?? 0))} · sem nada para você</div>${g.map((m) => renderMensagem(m, estado)).join("")}`).join("");
+  return `${topo}${corpo}<div class="tk-acoes">${botao("fechar-trabalho", "Fechar", { classe: "tk-fechar" })}</div>`;
 }

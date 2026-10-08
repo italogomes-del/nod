@@ -2026,7 +2026,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const trabalho = el.dataset.trabalho;
     if (trabalho) { abrirTrabalho(trabalho); return; }
     const t = estado.tela;
-    navegar({ tipo: "linha", conversaId: el.dataset.conversa ?? "", mensagens: (el.dataset.mensagens ?? "").split(",").filter(Boolean), titulo: el.dataset.titulo ?? "", voltar: t.tipo === "trabalho" || t.tipo === "linha" ? t.voltar : t });
+    navegar({ tipo: "linha", conversaId: el.dataset.conversa ?? "", mensagens: (el.dataset.mensagens ?? "").split(",").filter(Boolean), titulo: el.dataset.titulo ?? "", voltar: t.tipo === "trabalho" || t.tipo === "linha" ? t.voltar : t, ...(tipo === "rotina" ? { rotina: true } : {}) });
   },
   "fechar-trabalho": () => fecharTask(),
   "parar-trabalho": (el) => agir(async () => {

@@ -60,7 +60,8 @@ export type Tela =
    * definido em 2026-10-07 (#191): a tela provisória de uma linha do chat sem trabalho por trás (execuções antigas de
    * rotina, pedido a colega de antes do ADR-083): as mensagens que a linha recolheu, na ordem, com Fechar.
    */
-  | { tipo: "linha"; conversaId: string; mensagens: string[]; titulo: string; voltar: Tela };
+  /** `rotina` (definido em 2026-10-08, QA do épico, R2): a tela separa as execuções da rotina, uma a uma. */
+  | { tipo: "linha"; conversaId: string; mensagens: string[]; titulo: string; voltar: Tela; rotina?: boolean };
 
 /** Os filtros de "Todos os trabalhos": De você (pessoa e rede), Rotinas e Entre bots (colega). */
 export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
