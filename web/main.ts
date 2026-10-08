@@ -417,7 +417,12 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   // ADR-081: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
   if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }) };
-  if (q.startsWith("trabalho:")) return { tipo: "hidratar-trabalho", detalhe: await api.trabalho(q.slice(9)), agora };
+  if (q.startsWith("trabalho:")) {
+    // Revisão W2 (2026-10-08): a task que sumiu (404) fecha a tela em vez de ficar "carregando" e pedir de novo.
+    const id = q.slice(9);
+    const detalhe = await api.trabalho(id).catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; });
+    return detalhe ? { tipo: "hidratar-trabalho", detalhe, agora } : { tipo: "trabalho-sumiu", id };
+  }
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
@@ -500,6 +505,7 @@ async function reidratar(): Promise<void> {
         if (acao) estado = reduzir(estado, acao);
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
+        if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
       } catch (e) {
         if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
       }

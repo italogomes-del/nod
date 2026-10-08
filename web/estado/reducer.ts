@@ -134,6 +134,12 @@ export type Estado = {
    */
   atividades: Record<string, Record<string, AtividadeTurno>>;
   turnosVivos: Record<string, TurnoVivo>;
+  /**
+   * Os últimos turnos que a web viu encerrar ou ser interrompidos (definido em 2026-10-08, revisão W6): o `GET
+   * trabalhos/:id` que saiu antes do `turno.encerrado` e chega depois dele traz o turno ainda vivo, e sem esta lista o
+   * bot ficava "Trabalhando" para sempre. Só os mais recentes (`ENCERRADOS_GUARDADOS`).
+   */
+  turnosEncerrados: readonly string[];
   /** Cancelar da fila tem 5 s de Desfazer antes de ir ao servidor (turnoId → instante do clique). */
   cancelando: Record<string, number>;
   salas: { sala: Sala; membros: MembroSala[] }[];
@@ -284,6 +290,8 @@ export type Acao =
   | { tipo: "onboarding-aberto"; aberto: boolean }
   | { tipo: "hidratar-trabalhos"; trabalhos: TrabalhosDto }
   | { tipo: "hidratar-trabalho"; detalhe: TrabalhoDetalheDto; agora: number }
+  /** O `GET trabalhos/:id` voltou 404: a task não existe (ou não é desta pessoa). */
+  | { tipo: "trabalho-sumiu"; id: string }
   | { tipo: "faixa-trabalhos"; recolhida: boolean }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
@@ -297,6 +305,7 @@ export const estadoInicial: Estado = {
   conversas: {},
   atividades: {},
   turnosVivos: {},
+  turnosEncerrados: [],
   cancelando: {},
   salas: [],
   suaVez: null,
@@ -367,6 +376,14 @@ function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
   return { ...estado, turnosVivos };
 }
 
+/** definido em 2026-10-08 (W6): quantos turnos encerrados a web lembra — bem mais que os GETs que podem estar em voo. */
+export const ENCERRADOS_GUARDADOS = 200;
+
+function encerrado(estado: Estado, turnoId: string | null): Estado {
+  if (!turnoId || estado.turnosEncerrados.includes(turnoId)) return estado;
+  return { ...estado, turnosEncerrados: [turnoId, ...estado.turnosEncerrados].slice(0, ENCERRADOS_GUARDADOS) };
+}
+
 function semDelta(estado: Estado, conversaId: string | null, turnoId: string | null): Estado {
   if (!conversaId || !turnoId) return estado;
   const daConversa = estado.atividades[conversaId];
@@ -374,6 +391,12 @@ function semDelta(estado: Estado, conversaId: string | null, turnoId: string | n
   const restantes = { ...daConversa };
   delete restantes[turnoId];
   return { ...estado, atividades: { ...estado.atividades, [conversaId]: restantes } };
+}
+
+function semConversa(atividades: Estado["atividades"], conversaId: string): Estado["atividades"] {
+  const restantes = { ...atividades };
+  delete restantes[conversaId];
+  return restantes;
 }
 
 /**
@@ -490,8 +513,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // ADR-067: a volta do modelo virou mensagem e o turno segue rodando — a conversa relê, e o cartão ao vivo recomeça
   // vazio para a próxima volta (senão o mesmo texto apareceria duas vezes).
   "turno.fala": (e, f) => invalidar(semDelta(e, texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f)),
-  "turno.encerrado": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
-  "turno.interrompido": (e, f) => invalidar(semDelta(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
+  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
+  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),
@@ -579,9 +602,17 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
         disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
         ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null }) };
-    case "navegar":
-      return resolverInicio({
+    case "navegar": {
+      // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
+      // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
+      // ao vivo dela — os frames dessa conversa param de ser guardados, e voltar juntaria o texto com um buraco no meio.
+      const saindo = conversaIdNaTela(estado);
+      const atividades = saindo && !estado.conversas[saindo] && estado.atividades[saindo] && conversaIdNaTela({ ...estado, tela: acao.tela }) !== saindo
+        ? semConversa(estado.atividades, saindo)
+        : estado.atividades;
+      const navegado = resolverInicio({
         ...estado,
+        atividades,
         tela: acao.tela,
         // Ir a outro lugar (o clique num aviso, por exemplo) fecha Seu espaço: a pessoa foi para onde pediu.
         espaco: null,
@@ -594,6 +625,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
         novasDesde: {},
       });
+      return acao.tela.tipo === "trabalho" ? invalidar(navegado, `trabalho:${acao.tela.id}`) : navegado;
+    }
     case "espaco":
       // A chave crua só vive enquanto a pessoa está em Computadores; trocar de seção ou fechar a descarta.
       return { ...estado, espaco: acao.secao ? { secao: acao.secao } : null, chaveEmitida: acao.secao === "computadores" ? estado.chaveEmitida : null, erro: null };
@@ -729,14 +762,29 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "onboarding-aberto":
       return estado.onboardingAberto === acao.aberto ? estado : { ...estado, onboardingAberto: acao.aberto };
     case "hidratar-trabalhos":
-      return { ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao ?? estado.pressao };
+      // O servidor manda o nível que vale agora: null (nenhum Mac falou) também limpa o amarelo antigo (revisão W4).
+      return { ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao };
     case "hidratar-trabalho": {
       // Página aberta no meio do trabalho: o turno que roda volta a ser vivo, para o ao vivo dele ser guardado e desenhado.
+      // definido em 2026-10-08 (revisão W6): o turno do trabalho que não é mais o vivo dele sai, e o que a web já viu
+      // encerrar nunca volta — o GET que saiu antes do `turno.encerrado` não recria um "Trabalhando" fantasma.
       const t = acao.detalhe.trabalho;
-      const vivo = t.turnoVivoId && !estado.turnosVivos[t.turnoVivoId]
-        ? { ...estado.turnosVivos, [t.turnoVivoId]: { turnoId: t.turnoVivoId, conversaId: t.conversaId, estado: "rodando" as const, executor: null, machineId: null, desde: t.iniciadoEm ?? acao.agora, trabalhoId: t.id } }
-        : estado.turnosVivos;
-      return { ...estado, turnosVivos: vivo, trabalhoDetalhe: { ...estado.trabalhoDetalhe, [t.id]: acao.detalhe } };
+      const velhos = Object.values(estado.turnosVivos).filter((v) => v.trabalhoId === t.id && v.turnoId !== t.turnoVivoId);
+      const volta = t.turnoVivoId && !estado.turnosVivos[t.turnoVivoId] && !estado.turnosEncerrados.includes(t.turnoVivoId) ? t.turnoVivoId : null;
+      let turnosVivos = estado.turnosVivos;
+      if (velhos.length > 0 || volta) {
+        turnosVivos = { ...estado.turnosVivos };
+        for (const v of velhos) delete turnosVivos[v.turnoId];
+        if (volta) turnosVivos[volta] = { turnoId: volta, conversaId: t.conversaId, estado: "rodando", executor: null, machineId: null, desde: t.iniciadoEm ?? acao.agora, trabalhoId: t.id };
+      }
+      return { ...estado, turnosVivos, trabalhoDetalhe: { ...estado.trabalhoDetalhe, [t.id]: acao.detalhe } };
+    }
+    case "trabalho-sumiu": {
+      // definido em 2026-10-08 (revisão W2): a task que some (404) não fica em "carregando a task…" pedindo o GET de novo
+      // a cada frame — a tela volta para onde a pessoa estava (main.ts esquece a task lembrada na aba).
+      const t = estado.tela;
+      if (t.tipo !== "trabalho" || t.id !== acao.id) return estado;
+      return resolverInicio({ ...estado, tela: t.voltar, invalidacoes: estado.invalidacoes.filter((q) => q !== `trabalho:${acao.id}`) });
     }
     case "faixa-trabalhos":
       return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
