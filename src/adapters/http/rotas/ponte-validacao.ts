@@ -1,4 +1,5 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
+import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
@@ -63,6 +64,25 @@ export function falas(v: unknown): FalaIntermediaria[] {
     exigir(typeof o.seq === "number" && Number.isSafeInteger(o.seq) && o.seq >= 1 && texto(o.texto));
     return { seq: o.seq, texto: o.texto };
   });
+}
+/** definido em 2026-10-07 (ADR-081, #194): no máximo um RSS por turno vivo; 64 cobre o pico de 25 turnos do diário. */
+const TETO_TURNOS_MEMORIA = 64;
+const TETO_MB = 1_048_576;
+/**
+ * A memória do Mac na renovação (#194), estrita: o nível do macOS, o total e o RSS por turno, só números e ids. Ausente =
+ * app antigo. Qualquer coisa fora do contrato derruba a renovação (400), como o resto da validação da ponte.
+ */
+export function memoria(v: unknown): LeituraMemoria | undefined {
+  if (v === undefined) return undefined;
+  const o = objeto(v);
+  exigir((o.nivel === "verde" || o.nivel === "amarela" || o.nivel === "vermelha") && typeof o.totalMb === "number" && Number.isFinite(o.totalMb) && o.totalMb >= 0 && o.totalMb <= TETO_MB);
+  exigir(Array.isArray(o.porTurno) && o.porTurno.length <= TETO_TURNOS_MEMORIA);
+  const porTurno = (o.porTurno as unknown[]).map((x) => {
+    const t = objeto(x);
+    exigir(typeof t.turnoId === "string" && UUID.test(t.turnoId) && typeof t.mb === "number" && Number.isFinite(t.mb) && t.mb >= 0 && t.mb <= TETO_MB);
+    return { turnoId: t.turnoId, mb: t.mb };
+  });
+  return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
 }
 const NOME_FERRAMENTA = /^[A-Za-z0-9_.-]+$/;
 const nomeDeFerramenta = (v: unknown): v is string => texto(v, 200) && NOME_FERRAMENTA.test(v);

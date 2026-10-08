@@ -50,6 +50,8 @@ afterEach(async () => {
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
+    // ADR-081 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
+    await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     await trx`delete from agentes where id in ${trx(criados.agentes)}`;
   });
@@ -106,5 +108,32 @@ describeIntegracao("concorrência: reivindicação de turno (advisory lock por p
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))).toBeNull();
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, randomUUID(), {}, Date.now()))).toEqual({ ativo: false });
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, maquinaA, { promptSubmitted: true }, Date.now()))).toEqual({ ativo: true });
+  });
+
+  it("ADR-081: dois turnos do MESMO trabalho, duas conexões ao mesmo tempo — sai um só; o do trabalho não espera a conversa", async () => {
+    const agenteId = randomUUID();
+    const conversaId = randomUUID();
+    const trabalhoId = randomUUID();
+    const doTrabalho = [randomUUID(), randomUUID()];
+    const daConversa = randomUUID();
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      await repos.agentes.criar({ id: agenteId, nome: "Faixas", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
+      await repos.trabalhos.criar({ id: trabalhoId, agenteId, conversaId, titulo: "Login do app", origem: "pessoa" });
+      for (const id of doTrabalho) await repos.turnos.enfileirar({ id, conversaId, agenteId, origem: "conversa", trabalhoId, prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    });
+    criados.agentes.push(agenteId);
+    criados.conversas.push(conversaId);
+    criados.turnos.push(...doTrabalho);
+    const disputa = () => escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
+    const ganhos = (await Promise.all([disputa(), disputa()])).flatMap((t) => (t ? [t.id] : []));
+    expect(ganhos).toHaveLength(1);
+    expect(doTrabalho).toContain(ganhos[0]);
+    // Com o trabalho rodando, a mensagem da conversa do mesmo bot sai na hora.
+    await escopado(async (trx) => criarRepos(trx, MARLON).turnos.enfileirar({ id: daConversa, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "m" }));
+    criados.turnos.push(daConversa);
+    expect((await disputa())?.id).toBe(daConversa);
+    expect(await disputa()).toBeNull();
   });
 });

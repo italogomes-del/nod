@@ -83,6 +83,20 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.computadorId}, ${e.turnoId ?? null}, ${e.autor}, ${e.tipo}, ${e.estado}, ${e.argumentosCifrados ?? null}) returning *`;
       return acao(l!);
     },
+    /**
+     * ADR-081 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"
+     * (turno sem trabalho), ou "a pessoa" (ação dela, sem turno). null = nenhuma ação executando.
+     */
+    async emUsoPor(id: string): Promise<string | null> {
+      const [l] = await conn<{ autor: string; turno_id: string | null; titulo: string | null }[]>`
+        select a.autor, a.turno_id, w.titulo from computador_acoes a
+        left join turnos t on t.tenant_id = a.tenant_id and t.id = a.turno_id
+        left join trabalhos w on w.tenant_id = t.tenant_id and w.id = t.trabalho_id
+        where a.tenant_id = ${escopo.tenantId} and a.computador_id = ${id} and a.estado = 'executando'
+        order by a.em desc limit 1`;
+      if (!l) return null;
+      return l.titulo ?? (l.turno_id ? "a conversa" : "a pessoa");
+    },
     async buscarAcao(id: string): Promise<(RegistroComputador & { argumentosCifrados: string | null }) | null> {
       const [l] = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
       return l ? { ...acao(l), argumentosCifrados: l.argumentos_cifrados } : null;

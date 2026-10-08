@@ -20,6 +20,7 @@ import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
+import { sincronizarDoTurno } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** `harness`: o que rodou o turno (vem do plano puxado, nunca da máquina); grava o dono da sessão (0030). */
@@ -156,9 +157,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-09-24 (ADR-047): a tarefa delegada roda em sessão própria (emitir-plano-turno) e não
   // pode virar a sessão da conversa do alvo com a pessoa.
   // definido em 2026-10-04 (ADR-072): a sessão do laço de voz é efêmera e nunca vira a sessão da conversa.
-  const sessaoDaConversa = turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
+  // definido em 2026-10-07 (ADR-081): o turno de um trabalho grava a sessão no TRABALHO, nunca na conversa — a conversa
+  // segue livre e na sessão dela enquanto o trabalho roda à parte.
+  const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
   if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
+  if (resultado.sessaoCli && turno.trabalhoId) await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, resultado.sessaoCli, entrega.harness ?? null);
   // 0035: o `total_cost_usd` do CLI é o total da SESSÃO; numa sessão retomada ele traz o custo dos turnos
   // anteriores. O turno custa a diferença — em gastos, no turno e nos eventos.
   const anterior = resultado.sessaoCli ? await deps.repos.turnos.totalAnteriorDaSessao(resultado.sessaoCli, turno.id) : null;
@@ -172,6 +176,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     modelo: turno.modelo,
     em: agora,
   });
+  if (turno.trabalhoId && custoUsd !== null && custoUsd > 0) await deps.repos.trabalhos.somarCusto(turno.trabalhoId, custoUsd);
   // Modo dev (0036): cada chamada e as compactações. Também na entrega tardia, que é a que mais pede explicação.
   if (resultado.execucao) await deps.repos.raioX.gravarExecucao(turno.id, resultado.execucao);
   // O "/" do chat (0038): o catálogo do Mac, quando o app mandou um novo.
@@ -204,6 +209,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
 
   if (tardia) {
     // Entrega depois do varredor/parar: aceita como anexo parcial, sem reabrir (ADR-010).
+    events.push(...(await sincronizarDoTurno(deps, turno)));
     return { data: { turno, mensagem, duplicada: false, tardia: true }, events };
   }
 
@@ -268,6 +274,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-09-28 (0032): aprovação já decidida que este turno não chegou a receber (a espera acabou
   // um instante antes do clique) vira UMA retomada — nunca duas, e nunca nenhuma.
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
+  // ADR-081: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
+  events.push(...(await sincronizarDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };
 };
 
@@ -319,6 +327,7 @@ async function aposContaSemAcesso(
       harness: turno.harness,
       reenvios: turno.reenvios + 1,
       executor: p.executor,
+      trabalhoId: turno.trabalhoId ?? null,
     });
     if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
     return events;

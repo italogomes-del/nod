@@ -12,6 +12,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
 import { preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { criarTrabalho } from "./trabalhos.ts";
 
 export type EntradaDisparo = {
   rotina: Rotina;
@@ -143,10 +144,15 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   if (rotina.soComPendencia && !input.preservarAgenda && (input.aFazer !== true || pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0)) {
     return registrarSemPendencia(deps, input, agora);
   }
+  // definido em 2026-10-07 (ADR-081, S7): cada execução é um trabalho (nunca um por rotina), com sessão própria como já
+  // era. A pasta fica a do bot (pasta: null): a rotina volta à mesma pasta a cada execução e a cerca do git (ADR-065)
+  // não pode passar a negar a worktree que ela mantém lá; quem ganha pasta própria são as tasks que ela abrir.
+  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: rotina.instrucao, origem: "rotina", rotinaId: rotina.id, pasta: null });
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,
     origem: "rotina",
+    trabalhoId: trabalho.id,
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
     entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
@@ -165,7 +171,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   const autoria = autoriaPessoa(deps.escopo.pessoaId, "regra:scheduler-rotina");
   return {
     data: { turno, proximaExecucao },
-    events: [evento(deps, "turno_criado", autoria, { turnoId: turno.id, rotinaId: rotina.id, origem: "rotina", instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turno.id })],
+    events: [...doTrabalho, evento(deps, "turno_criado", autoria, { turnoId: turno.id, rotinaId: rotina.id, origem: "rotina", instanteAgendado, trabalhoId: trabalho.id }, { conversaId: rotina.conversaId, turnoId: turno.id })],
   };
 };
 

@@ -7,6 +7,7 @@ import type { CapacidadeConector } from "./conector.ts";
 import type { MotivoNegacao, MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
 import type { Rotina } from "./rotina.ts";
+import type { NivelPressao } from "./trabalho.ts";
 
 /** Identidade derivada do token de turno — o remetente nunca vem do texto (ADR-024). */
 export type IdentidadeDeTurno = { turnoId: string; tenantId: string; pessoaId: string; agenteId: string };
@@ -43,6 +44,16 @@ export interface ServicesNod<Trx> {
   };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
+    /** ADR-081 (S5): o título do trabalho (ou "a conversa") que segura o computador que este turno pediu; null = não espera. */
+    esperandoPor?(turnoId: string): string | null;
+  };
+  /**
+   * definido em 2026-10-07 (ADR-081): o que só o processo sabe dos trabalhos — a última ferramenta de cada turno vivo
+   * (o "último passo" da faixa) e a pressão de memória dos Macs da pessoa (#194). Ausente = nada a mostrar.
+   */
+  trabalhosVivos?: {
+    ultimaFerramenta(turnoId: string): string | null;
+    memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number } | null;
   };
   relogio: () => number;
   tokenTurno: {
@@ -131,6 +142,8 @@ export interface UseCasesNod<Deps> {
   anotarEntrevista: CasoNod<Deps, "anotar_entrevista">;
   concluirEntrevista: CasoNod<Deps, "concluir_entrevista">;
   proporBot: CasoNod<Deps, "propor_bot">;
+  abrirTask: CasoNod<Deps, "abrir_task">;
+  mandarParaTask: CasoNod<Deps, "mandar_para_task">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -161,4 +174,6 @@ export const USE_CASE_POR_FERRAMENTA = {
   anotar_entrevista: "anotarEntrevista",
   concluir_entrevista: "concluirEntrevista",
   propor_bot: "proporBot",
+  abrir_task: "abrirTask",
+  mandar_para_task: "mandarParaTask",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

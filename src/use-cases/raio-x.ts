@@ -8,9 +8,14 @@ export const TURNOS_NO_RAIO_X_DA_CONVERSA = 300;
 
 export const lerPreferencias: CasoDeUso<Record<string, never>, Preferencias> = async (deps) => ({ data: await deps.repos.preferencias.buscar() });
 
-export const gravarPreferencias: CasoDeUso<{ modoDev: unknown }, Preferencias> = async (deps, input) => {
-  if (typeof input.modoDev !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "modoDev" });
-  return { data: await deps.repos.preferencias.gravar({ modoDev: input.modoDev }) };
+/**
+ * PUT preferencias: o que vier (booleano) muda, o resto fica. revisto em 2026-10-07 (ADR-081): a faixa de Trabalhos
+ * manda só `faixaTrabalhosRecolhida`; corpo sem nenhum dos dois, ou com valor que não é booleano, é entrada inválida.
+ */
+export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; faixaTrabalhosRecolhida?: unknown }, Preferencias> = async (deps, input) => {
+  const ok = (v: unknown) => v === undefined || typeof v === "boolean";
+  if (!ok(input.modoDev) || !ok(input.faixaTrabalhosRecolhida) || (input.modoDev === undefined && input.faixaTrabalhosRecolhida === undefined)) throw new ErroDeDominio("entrada_invalida", { cause: "preferencias" });
+  return { data: await deps.repos.preferencias.gravar({ ...(typeof input.modoDev === "boolean" ? { modoDev: input.modoDev } : {}), ...(typeof input.faixaTrabalhosRecolhida === "boolean" ? { faixaTrabalhosRecolhida: input.faixaTrabalhosRecolhida } : {}) }) };
 };
 
 /**

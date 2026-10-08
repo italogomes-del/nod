@@ -90,21 +90,25 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
-  type Linha = { modo_dev: boolean; avisos_fechados: string[] };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [] });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; faixa_trabalhos_recolhida: boolean };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], faixaTrabalhosRecolhida: l?.faixa_trabalhos_recolhida ?? false });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
-        select modo_dev, avisos_fechados from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+        select modo_dev, avisos_fechados, faixa_trabalhos_recolhida from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
       return paraPreferencias(l);
     },
 
-    async gravar(p: Pick<Preferencias, "modoDev">): Promise<Preferencias> {
+    /** O que vier muda; o que faltar fica como está (ADR-081: `faixaTrabalhosRecolhida` chega sozinho da faixa). */
+    async gravar(p: { modoDev?: boolean; faixaTrabalhosRecolhida?: boolean }): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
-        insert into preferencias (tenant_id, owner_id, modo_dev)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev})
-        on conflict (tenant_id, owner_id) do update set modo_dev = excluded.modo_dev, atualizado_em = clock_timestamp()
-        returning modo_dev, avisos_fechados`;
+        insert into preferencias (tenant_id, owner_id, modo_dev, faixa_trabalhos_recolhida)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.faixaTrabalhosRecolhida ?? false})
+        on conflict (tenant_id, owner_id) do update set
+          modo_dev = coalesce(${p.modoDev ?? null}::boolean, preferencias.modo_dev),
+          faixa_trabalhos_recolhida = coalesce(${p.faixaTrabalhosRecolhida ?? null}::boolean, preferencias.faixa_trabalhos_recolhida),
+          atualizado_em = clock_timestamp()
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida`;
       return paraPreferencias(l);
     },
 
@@ -117,7 +121,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
           avisos_fechados = case when ${chave} = any(preferencias.avisos_fechados) then preferencias.avisos_fechados
             else array_append(preferencias.avisos_fechados, ${chave}) end,
           atualizado_em = clock_timestamp()
-        returning modo_dev, avisos_fechados`;
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida`;
       return paraPreferencias(l);
     },
   };

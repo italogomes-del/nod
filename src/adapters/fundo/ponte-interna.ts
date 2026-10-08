@@ -13,6 +13,11 @@ import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { assentarTurno, type SaidaAssentarTurno } from "../../use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
+import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
+import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
+import { REDE_MS } from "../../domain/trabalho.ts";
+import type { MudancaDePressao } from "./trabalhos-vivos.ts";
+import type { LeituraMemoria } from "../../contracts/trabalho.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -45,6 +50,10 @@ export type DepsPonte = {
    * Somados aos das máquinas desta ponte, deixam o despacho recusar o turno fixado num harness que nenhuma tem pronto.
    */
   harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
+  /** ADR-081 (#193): o turno já chamou alguma ferramenta? (o compositor sabe pelo `turno.atividade`). Ausente = não. */
+  fezFerramenta?: (turnoId: string) => boolean;
+  /** ADR-081 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
+  registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
 };
 
 export type PonteInternaNod = PonteInterna & {
@@ -76,6 +85,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * renovação. Somem na entrega; a não confirmada continua `pendente` no banco e vira turno próprio.
    */
   const oferecidas = new Map<string, Set<string>>();
+  /**
+   * ADR-081 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
+   * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
+   */
+  const despachados = new Map<string, { em: number; sessaoCli: string | null }>();
 
   /** NOD-171: os harnesses das máquinas desta ponte somados aos da pessoa nas outras conexões; o pronto vence. */
   function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {
@@ -145,6 +159,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
+            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli });
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
@@ -153,6 +168,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         });
       } catch (e) {
         for (const turnoId of emitidos) {
+          despachados.delete(turnoId);
           escopos.delete(turnoId);
           executores.delete(turnoId);
           harnesses.delete(turnoId);
@@ -173,7 +189,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const confirma = Array.isArray(p.mensagensEntregues);
       const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
-      const { ativo, mensagens, ids } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const { ativo, mensagens, ids, conversaSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
@@ -195,9 +211,33 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           ids = a.data.ids;
           events.push(...(a.events ?? []));
         }
+        // ADR-081 (#193): a fala mandada à task (tela da task ou mandar_para_task) entra no turno vivo dela.
+        if (r.ativo && p.aceitaMensagens) {
+          const b = await absorverNoTrabalho(d, { turnoId: p.turnoId });
+          textos = [...textos, ...b.data.textos];
+          events.push(...(b.events ?? []));
+        }
+        const turno = r.ativo ? await d.repos.turnos.buscar(p.turnoId) : null;
+        // A decisão respondida DENTRO do turno não passa por outro caminho: a renovação acerta o estado da task.
+        if (turno?.trabalhoId) events.push(...(await sincronizarTrabalho(d, turno.trabalhoId)));
+        // ADR-081 (#194): a memória do Mac. A dos turnos vai para os trabalhos deles; o nível só gera evento na mudança.
+        if (p.memoria) {
+          await d.repos.trabalhos.atualizarMemoria(p.memoria.porTurno);
+          const mudanca = deps.registrarMemoria?.(escopo.pessoaId, p.machineId, p.memoria);
+          if (mudanca?.mudou) events.push(eventoPressao(d, mudanca, p.memoria));
+        }
         if (events.length) await d.repos.events.gravarComOutbox(events);
-        return { ativo: r.ativo, mensagens: textos, ids };
+        return { ativo: r.ativo, mensagens: textos, ids, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
       });
+      // A rede de 2 min, numa transação PRÓPRIA: se a entrega correr junto, só a promoção desfaz — nunca a renovação.
+      const despachado = despachados.get(p.turnoId);
+      if (ativo && conversaSemTrabalho && despachado && agora() - despachado.em >= REDE_MS && deps.fezFerramenta?.(p.turnoId)) {
+        await abrirTxEscopada(db, escopo)(async (trx) => {
+          const d = depsDe(trx, escopo);
+          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness: harnesses.get(p.turnoId) ?? null, sessaoCli: despachado.sessaoCli });
+          if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+        }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
+      }
       if (novas.length) falasGravadas.set(p.turnoId, novas.at(-1)!.seq);
       if (confirma) {
         for (const id of ids) jaOferecidas.add(id);
@@ -275,6 +315,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         harnesses.delete(e.turnoId);
         falasGravadas.delete(e.turnoId);
         oferecidas.delete(e.turnoId);
+        despachados.delete(e.turnoId);
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
       }

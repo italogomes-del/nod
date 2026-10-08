@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { montarFaixaParada, type TentativaInterrupcao } from "../domain/parada.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
+import { marcarParado } from "./trabalhos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type EntradaParar = { conversaId: string | null };
@@ -25,6 +26,12 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
 
   const parada = await deps.repos.paradas.ativar({ conversaId, agora });
   if (!parada) throw new ErroDeDominio("estado_invalido", { cause: "parada não gravada" });
+  // definido em 2026-10-07 (ADR-081): o Parar do chat para tudo do bot, inclusive as tasks dele (os turnos delas
+  // moram na conversa do bot e já caem abaixo); sem conversa, as de todos os bots. A lista volta para a tela.
+  const conversa = conversaId !== null ? await deps.repos.conversas.buscar(conversaId) : null;
+  const abertos = conversaId === null
+    ? (await deps.repos.trabalhos.listar({ terminadosDesde: agora + 1 }))
+    : conversa?.tipo === "propria" && conversa.agenteId ? await deps.repos.trabalhos.abertosDoAgente(conversa.agenteId) : [];
 
   // definido em 2026-10-04 (ADR-072): o Parar é do trabalho do bot; a ligação se encerra pelo Desligar.
   const pendentes = (await deps.repos.turnos.pendentesDaPessoa(conversaId ?? undefined)).filter((t) => t.origem !== "ligacao");
@@ -36,7 +43,8 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
     events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente" } }));
   }
 
-  const despachando = (await deps.repos.turnos.despachandoDaPessoa()).filter((t) => t.origem !== "ligacao" && (conversaId === null || t.conversaId === conversaId));
+  const dosTrabalhos = new Set(abertos.map((t) => t.id));
+  const despachando = (await deps.repos.turnos.despachandoDaPessoa()).filter((t) => t.origem !== "ligacao" && (conversaId === null || t.conversaId === conversaId || (t.trabalhoId !== null && t.trabalhoId !== undefined && dosTrabalhos.has(t.trabalhoId))));
   await deps.repos.turnos.pedirInterrupcao(despachando.map((t) => t.id), agora);
   const tentativas: TentativaInterrupcao[] = [];
   for (const t of despachando) {
@@ -53,7 +61,8 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
   const framesCancelados = await deps.repos.outbox.cancelarPendentesDaPessoa(agora);
   // definido em 2026-09-16: nesta rodada o único efeito externo é item aprovado (L5) e ele é síncrono ao
   // decidir; não há emissão "a caminho" para listar como já entregue — a lista nasce vazia e honesta.
-  const faixa = montarFaixaParada({ pendentesInterrompidos, despachando: tentativas, entregues: [] });
+  const faixa: FaixaParada = { ...montarFaixaParada({ pendentesInterrompidos, despachando: tentativas, entregues: [] }), ...(abertos.length > 0 ? { trabalhosParados: abertos.map((t) => ({ id: t.id, titulo: t.titulo })) } : {}) };
+  for (const t of abertos) events.push(...(await marcarParado(deps, t)));
 
   if (conversaId !== null) {
     const texto = faixa.nadaRodando

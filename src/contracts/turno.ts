@@ -195,5 +195,5 @@ export type FaixaParada = {
   interrompidas: number;
   naoInterrompidas: { turnoId: string; motivo: string }[];
   jaEntregues: { id: string; em: EpochMs }[];
-  nadaRodando: boolean;
+  nadaRodando: boolean; trabalhosParados?: { id: string; titulo: string }[]; // ADR-081: as tasks que este Parar parou
 };

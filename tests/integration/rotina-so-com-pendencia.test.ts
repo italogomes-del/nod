@@ -80,7 +80,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
       expect(new Date(r.data.proximaExecucao).toISOString()).toBe(SEGUINTE);
       expect((await c.repos.rotinaJanelas.listar(c.rotina.id)).map((j) => j.turnoId)).toEqual([r.data.turno.id]);
       expect(await c.repos.rotinaExecucoes.listar(c.rotina.id)).toEqual([]);
-      expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+      expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
     });
   });
 

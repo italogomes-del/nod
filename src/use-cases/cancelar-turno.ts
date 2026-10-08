@@ -2,6 +2,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
+import { sincronizarDoTurno } from "./trabalhos.ts";
 
 /**
  * Cancelar UMA mensagem da fila (definido em 2026-09-24): interrompe só o turno pendente que ela
@@ -19,6 +20,6 @@ export const cancelarTurno: CasoDeUso<{ turnoId: string }, { turno: Turno }> = a
   const autoria = autoriaPessoa(deps.escopo);
   return {
     data: { turno },
-    events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente" } })],
+    events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente" } }), ...(await sincronizarDoTurno(deps, turno))],
   };
 };

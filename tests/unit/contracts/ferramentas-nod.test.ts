@@ -13,10 +13,11 @@ const ESPERADAS = [
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia",
   "iniciar_tarefa", "desligar",
   "anotar_entrevista", "concluir_entrevista", "propor_bot",
+  "abrir_task", "mandar_para_task",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as VINTE E SEIS ferramentas (2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
+  it("lista fechada com as VINTE E OITO ferramentas (2026-10-07 traz abrir_task e mandar_para_task, ADR-081; 2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
   });

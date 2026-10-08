@@ -80,6 +80,8 @@ import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
 import { criarRotasPendencias } from "./rotas/pendencias.ts";
+import { criarRotasTrabalhos } from "./rotas/trabalhos.ts";
+import { criarTrabalhosVivos } from "../fundo/trabalhos-vivos.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
@@ -112,6 +114,7 @@ import { criarRotasLigacoes } from "./rotas/ligacoes.ts";
 import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
 import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, estadoOnboardingParaVoz, proporBot } from "../../use-cases/onboarding.ts";
+import { abrirTask, mandarParaTask } from "../../use-cases/coordenar-trabalhos.ts";
 import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
 import type { IaNoMac } from "../../contracts/onboarding.ts";
 import { criarRotasOnboarding } from "./rotas/onboarding.ts";
@@ -265,7 +268,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -349,7 +352,10 @@ export function comporApp(o: OpcoesCompor): App {
   // O detector aquece no boot: o primeiro pedir_acesso não espera o `gh auth status` dentro da transação.
   if (detectorGh) void detectorGh.logado().catch(() => false);
 
+  // ADR-081: a última ferramenta de cada turno vivo e a memória dos Macs, em memória do processo.
+  const trabalhosVivos = criarTrabalhosVivos(relogio);
   const services: Services = {
+    trabalhosVivos,
     relogio,
     tokenTurno: tokens,
     planos: {
@@ -407,7 +413,13 @@ export function comporApp(o: OpcoesCompor): App {
     executor: () => executorAtual,
     agora: relogio,
     listarPessoas: o.listarPessoas,
-    esquecerTurno: (id) => interruptor.esquecer(id),
+    esquecerTurno: (id) => {
+      interruptor.esquecer(id);
+      trabalhosVivos.esquecerTurno(id);
+    },
+    // ADR-081: a rede de 2 min só promove quem já chamou ferramenta; a memória do Mac fica em memória do processo.
+    fezFerramenta: (id) => trabalhosVivos.ultimaFerramenta(id) !== null,
+    registrarMemoria: (pessoaId, machineId, leitura) => trabalhosVivos.registrarMemoria(pessoaId, machineId, leitura),
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];
@@ -823,6 +835,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
     ...(aFazer ? criarRotasPendencias(depsRotas) : []),
     ...criarRotasConversas(depsRotas),
+    ...criarRotasTrabalhos(depsRotas),
     ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),
@@ -872,7 +885,7 @@ export function comporApp(o: OpcoesCompor): App {
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),
-    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
+    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
@@ -899,6 +912,8 @@ export function comporApp(o: OpcoesCompor): App {
   ];
 
   function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
+    // ADR-081: o "último passo" da faixa de Trabalhos é o rótulo da última ferramenta do turno vivo.
+    if (tipo === "turno.atividade" && typeof dados.rotulo === "string") trabalhosVivos.ferramenta(plano.turnoId, dados.rotulo);
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
   // NOD-73: o vigia do turno (só avisa), igual para o app do Mac e o modo servidor — frame e log saem do mesmo lugar.

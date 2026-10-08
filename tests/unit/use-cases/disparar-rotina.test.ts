@@ -57,7 +57,10 @@ describe("dispararRotina", () => {
     expect(new Date(r.data.proximaExecucao).toISOString()).toBe("2026-09-18T11:00:00.000Z");
     expect(d.banco.rotinas[0]?.proximaExecucao).toBe(r.data.proximaExecucao);
     expect(d.banco.janelas).toEqual([{ tenantId: rotina.tenantId, rotinaId: rotina.id, instanteAgendado: JANELA, executor: "catcher", machineId: "m1", turnoId: r.data.turno.id }]);
-    expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
+    // ADR-081 (S7): cada execução é um trabalho `rotina`, na pasta do bot; o turno nasce nele.
+    expect(d.banco.trabalhos).toMatchObject([{ origem: "rotina", rotinaId: rotina.id, estado: "na_fila", pasta: null }]);
+    expect(r.data.turno.trabalhoId).toBe(d.banco.trabalhos[0]?.id);
     // nenhuma execução ainda: o enum não tem 'pendente'; a janela com turno é o "em curso"
     expect(d.banco.execucoes).toHaveLength(0);
 
@@ -375,7 +378,7 @@ describe("pré-voo da rotina (emenda da ADR-044)", () => {
     expect(d.banco.propostas.find((p) => p.id === decisao?.id)).toMatchObject({ estado: "confirmada", payload: { rotinaId: rotina.id } });
     expect(d.banco.execucoes.filter((e) => e.desfecho === "bloqueada")).toHaveLength(0);
     // A concessão vai direto ao outbox (o disparo só devolve os eventos do turno); o card nunca piscou na tela.
-    expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
     expect(d.banco.events.map((e) => e.kind)).not.toContain("decisao_criada");
     expect(d.banco.events.map((e) => e.kind)).toContain("decisao_decidida");
     expect(d.banco.mensagens.find((m) => m.kind === "consentimento")?.autoria).toMatchObject({ decidido_por: "regra:modo_automatico" });

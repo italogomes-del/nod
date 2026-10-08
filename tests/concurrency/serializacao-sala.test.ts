@@ -36,6 +36,8 @@ afterEach(async () => {
     await trx`delete from turno_raio_x where turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
     await trx`delete from turno_entregas where turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
     await trx`delete from turnos where conversa_id in ${trx(criados.conversas)}`;
+    // ADR-081 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
+    await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from sala_membros where sala_id in ${trx(criados.salas)}`;
     // sala ↔ conversa: FK cíclica DEFERRABLE (0002) — as duas somem na mesma tx, em qualquer ordem.
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;

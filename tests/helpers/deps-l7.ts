@@ -93,6 +93,8 @@ export function useCasesFalsos(): UseCasesNod {
     anotarEntrevista: naoImplementado("useCases.anotarEntrevista"),
     concluirEntrevista: naoImplementado("useCases.concluirEntrevista"),
     proporBot: naoImplementado("useCases.proporBot"),
+    abrirTask: naoImplementado("useCases.abrirTask"),
+    mandarParaTask: naoImplementado("useCases.mandarParaTask"),
   };
 }
 
