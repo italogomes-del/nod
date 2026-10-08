@@ -281,7 +281,7 @@ describe("gaveta e 'Todos os trabalhos' (#196, K3/K9/M3)", () => {
     const html = renderTodosOsTrabalhos(e);
     expect(html).toContain("3 rodando · 1 na fila · 1 precisa de você · os bots usam 3,1 GB do seu Mac");
     // QA (2026-10-08): com 0 MB (nenhum harness com processo próprio) a frase da memória some, em vez de "0 MB".
-    expect(renderTodosOsTrabalhos({ ...e, trabalhos: { ...e.trabalhos, memoriaTotalMb: 0 } })).not.toContain("os bots usam");
+    expect(renderTodosOsTrabalhos({ ...e, trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: 0 } })).not.toContain("os bots usam");
     expect(html.indexOf("Login do app")).toBeLessThan(html.indexOf("Revisar dados"));
     expect(html.indexOf("Revisar dados")).toBeLessThan(html.indexOf("Migrar relatórios"));
     expect(html).toContain("2,1 GB");
