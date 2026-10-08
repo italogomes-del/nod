@@ -24,7 +24,7 @@ import type { Turno } from "../../src/contracts/turno.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
-import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { ESPERA_MAXIMA_FUNDO_MS, seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
@@ -181,6 +181,8 @@ export function reposMemoria(escopo?: Escopo): Repos {
 }
 
 const agora = () => Date.now();
+/** ADR-086: o pedido de volta anotado em cada turno (no Postgres, turnos.despertar_em/despertar_motivo). */
+const despertares = new Map<string, { em: number; motivo: string }>();
 const iso = (n: number) => new Date(n).toISOString();
 const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
 const semDonoTrabalho = ({ ownerId: _dona, ...t }: Trabalho & { ownerId: string }): Trabalho => ({ ...t });
@@ -920,7 +922,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return {
           parando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm !== null).length,
           despachando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm === null).length,
-          pendentes: dele.filter((t) => t.estado === "pendente").length,
+          pendentes: dele.filter((t) => t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).length,
+          aguardandoDespertar: dele.some((t) => t.estado === "pendente" && (t.acordarEm ?? 0) > agora()),
           esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
           decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta")),
           aguardandoColega: doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
@@ -947,7 +950,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             // O tempo e o colega esperado se provam no Postgres (tests/integration/repos/trabalhos.test.ts).
             esperandoColega: null,
             trabalhouMs: 0,
-            acordaEm: turnos.filter((x) => x.estado === "pendente" && (x.acordarEm ?? 0) > agora()).map((x) => x.acordarEm!).sort((a, z) => a - z)[0] ?? null,
+            acordaEm: turnos.filter((x) => x.estado === "pendente" && x.acordarEm).map((x) => x.acordarEm!).sort((a, z) => a - z)[0] ?? null,
           });
         }
         return saida;
@@ -969,7 +972,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         // Em memória tudo roda em série: não há o que travar.
       },
       async retomadaNaFila(retomaTurnoId: string) {
-        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente").sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
+      },
+      async marcarDespertar(id: string, em: number, motivo: string) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "despachando" && x.pararSolicitadoEm === null);
+        if (!t) return false;
+        despertares.set(id, { em, motivo });
+        return true;
+      },
+      async despertarDoTurno(id: string) {
+        return despertares.get(id) ?? null;
+      },
+      async voltasMarcadas(retomaTurnoId: string) {
+        return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null).length;
       },
       async juntarEntrada(id: string, texto: string) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
@@ -1064,6 +1079,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             if (dep && !["terminado", "parado", "falhou"].includes(dep.estado)) return false;
             // ADR-085: a mesma regra do SQL (seguravelPeloMac; o espaço segura também o que passou da espera máxima).
             if (dono && p.espacarFundo === true && seguravelPeloMac({ ...dono, criadoEm: p.agora }, p.agora)) return false;
+            if (t.acordarEm && (p.espacarFundo === true || (p.segurarFundo === true && t.acordarEm > p.agora - ESPERA_MAXIMA_FUNDO_MS))) return false;
             return !(dono && p.segurarFundo === true && seguravelPeloMac(dono, p.agora));
           })
           .sort((x, y) => Number(fimDaFila(x)) - Number(fimDaFila(y)) || x.criadoEm - y.criadoEm);
@@ -1200,12 +1216,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId));
       },
       async vivosDaConversa(conversaId) {
-        return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando"));
+        return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando") && (t.acordarEm ?? 0) <= agora());
       },
       async pendentesRenderizaveis(conversaId) {
         const todos = doTenant(b.turnos);
         const saida: { id: string; motivo: "agente_ocupado_em"; conversaId: string }[] = [];
-        for (const p of todos.filter((t) => t.conversaId === conversaId && t.estado === "pendente" && !t.trabalhoId)) {
+        for (const p of todos.filter((t) => t.conversaId === conversaId && t.estado === "pendente" && !t.trabalhoId && (t.acordarEm ?? 0) <= agora())) {
           const daConversa = todos.filter((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === conversaId);
           const ocupado = daConversa.find((d) => d.agenteId === p.agenteId) ?? daConversa[0];
           if (ocupado) saida.push({ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversaId });
@@ -1545,7 +1561,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async turnoAberto(rotinaId) {
         const abertas = doTenant(b.janelas)
           .filter((j) => j.rotinaId === rotinaId && j.turnoId !== null)
-          .filter((j) => ["pendente", "despachando"].includes(doTenant(b.turnos).find((t) => t.id === j.turnoId)?.estado ?? ""))
+          .filter((j) => {
+            const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
+            const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
+            return t !== undefined && (vivo(t) || (Boolean(t.trabalhoId) && doTenant(b.turnos).some((v) => v.trabalhoId === t.trabalhoId && vivo(v))));
+          })
           .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
         return abertas[0]?.turnoId ?? null;
       },

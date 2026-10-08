@@ -75,6 +75,18 @@ export function voltaMarcada(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "ac
   return t.estado === "rodando" && !t.turnoVivoId && t.acordaEm ? t.acordaEm : null;
 }
 
+/**
+ * ADR-086 (revisão do #212): "às 16:05" hoje, "amanhã às 09:00" no dia seguinte, "em 12/10 às 09:00" depois — a volta
+ * pode cair até 24 h à frente, e "volta às 09:00" de amanhã lia como hoje.
+ */
+export function quandoVolta(instante: number, agora: number): string {
+  const dia = (t: number) => new Date(t).toDateString();
+  if (dia(instante) === dia(agora)) return `às ${hora(instante)}`;
+  if (dia(instante) === dia(agora + 86_400_000)) return `amanhã às ${hora(instante)}`;
+  const d = new Date(instante);
+  return `em ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} às ${hora(instante)}`;
+}
+
 /** ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. */
 export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm">): boolean {
   return esperandoColega(t) !== null || voltaMarcada(t) !== null;
@@ -91,12 +103,12 @@ export function temposDaTask(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "t
  * O que o trabalho está fazendo, em poucas palavras: o último passo, quem segura o computador, quem ele espera, ou o
  * estado. Sem o tempo (quem desenha junta o tempo quando cabe).
  */
-export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false): string {
+export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false, agora = Date.now()): string {
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
   const volta = voltaMarcada(t);
-  if (volta) return `volta às ${hora(volta)}`;
+  if (volta) return `volta ${quandoVolta(volta, agora)}`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;

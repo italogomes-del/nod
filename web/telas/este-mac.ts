@@ -29,7 +29,7 @@ function medidor(nome: string, fracao: number | null, situacao: string, nivel: N
 
 function linhaBot(estado: Estado, t: TrabalhoDto, fim: string, segurando: boolean): string {
   const bot = agente(estado, t.agenteId);
-  return `<button type="button" class="mac-bot" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}${bot ? iconeAgente(bot, "sm") : ""}<span class="mac-bot-txt"><b>${esc(bot?.nome ?? "bot")}</b><span>${esc(t.titulo)} · ${esc(situacaoDe(t, [], segurando))}</span></span><span class="mac-bot-fim">${esc(fim)}</span></button>`;
+  return `<button type="button" class="mac-bot" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}${bot ? iconeAgente(bot, "sm") : ""}<span class="mac-bot-txt"><b>${esc(bot?.nome ?? "bot")}</b><span>${esc(t.titulo)} · ${esc(situacaoDe(t, [], segurando, estado.agora))}</span></span><span class="mac-bot-fim">${esc(fim)}</span></button>`;
 }
 
 function grupo(titulo: string, legenda: string, linhas: string[]): string {
@@ -66,7 +66,7 @@ export function renderEsteMac(estado: Estado): string {
       + medidor("Processador", carga, processador ? NOME_PROCESSADOR[processador] : "sem leitura (atualize o app)", processador);
   const grupos = grupo("Trabalhando", "os que mais usam memória primeiro", trabalhando.map((t) => linhaBot(estado, t, t.memoriaMb ? memoriaLegivel(t.memoriaMb) : tempoDe(t, estado.agora), segurando)))
     + grupo("Esperando o Mac aliviar", "começam sozinhos, na ordem da fila", esperandoVez.map((t) => linhaBot(estado, t, "", segurando)))
-    + grupo("Fora do Mac", "esperando sem ocupar o Mac; voltam sozinhos", fora.map((t) => linhaBot(estado, t, "", segurando)));
+    + grupo("Fora do Mac", "esperando sem ocupar o Mac; voltam sozinhas", fora.map((t) => linhaBot(estado, t, "", segurando)));
   const uso = estado.usoDoMac;
   const botoes = USOS.map((u) => `<button type="button" class="seg${u.id === uso ? " ativo" : ""}" data-act="uso-do-mac" data-uso="${u.id}" aria-pressed="${u.id === uso}">${esc(u.nome)}</button>`).join("");
   const explicacao = USOS.find((u) => u.id === uso)?.explicacao ?? "";

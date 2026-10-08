@@ -7,7 +7,7 @@ import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
-import { data, ms, msOuNull } from "./conversao.ts";
+import { data, dataOuNull, ms, msOuNull } from "./conversao.ts";
 
 interface Linha {
   tenant_id: string;
@@ -150,7 +150,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
-          ${t.acordarEm === undefined || t.acordarEm === null ? null : data(t.acordarEm)})
+          ${dataOuNull(t.acordarEm)})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },
@@ -232,6 +232,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id
                     and w.iniciado_em is null and w.origem in ('rotina', 'colega') and not w.pessoa_esperando
                     ${p.espacarFundo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
+                  -- ADR-086 (revisão do #212): a volta marcada ("me chame às 16:00") também é processo novo no Mac sem
+                  -- ninguém esperando: segue as mesmas regras, contando a espera máxima a partir da hora marcada.
+                  ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not (t.acordar_em is not null and (${p.espacarFundo === true} or t.acordar_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}))`}
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
             -- Ligação primeiro; depois o que não é rotina nem pedido de colega (o turno ou o trabalho dele); depois a ordem.
@@ -303,8 +306,36 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and retoma_turno_id = ${retomaTurnoId} and origem = 'retomada' and estado = 'pendente'
+          -- ADR-086 (revisão do #212): a volta marcada não recebe a continuação — uma aprovação colada nela esperaria a hora.
+          and (acordar_em is null or acordar_em <= now())
         order by criado_em desc limit 1`;
       return l ? paraTurno(l) : null;
+    },
+
+    /**
+     * ADR-086 (revisão do #212): `me_chame_as` só anota o pedido no turno que está rodando — a volta nasce no
+     * assentamento. Só turno vivo e sem Parar pedido; a última chamada vale (uma volta por turno).
+     */
+    async marcarDespertar(id: string, em: number, motivo: string): Promise<boolean> {
+      const linhas = await conn`
+        update turnos set despertar_em = ${data(em)}, despertar_motivo = ${motivo}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'despachando' and parar_solicitado_em is null
+        returning id`;
+      return linhas.length > 0;
+    },
+
+    /** ADR-086: o pedido de volta que o turno anotou (null = nenhum). */
+    async despertarDoTurno(id: string): Promise<{ em: number; motivo: string } | null> {
+      const [l] = await conn<{ despertar_em: Date | null; despertar_motivo: string | null }[]>`
+        select despertar_em, despertar_motivo from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.despertar_em ? { em: ms(l.despertar_em), motivo: l.despertar_motivo ?? "" } : null;
+    },
+
+    /** ADR-086: quantas voltas marcadas já retomaram este turno (o teto de voltas seguidas). */
+    async voltasMarcadas(retomaTurnoId: string): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`
+        select count(*)::int as n from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId} and acordar_em is not null`;
+      return l?.n ?? 0;
     },
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
@@ -520,7 +551,10 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async vivosDaConversa(conversaId: string): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos
-        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado in ('pendente', 'despachando') and origem <> 'ligacao' order by criado_em`;
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado in ('pendente', 'despachando') and origem <> 'ligacao'
+          -- ADR-086: a volta marcada não está "em curso" — a tela mostraria o bot ocupado por horas.
+          and (acordar_em is null or acordar_em <= now())
+        order by criado_em`;
       return linhas.map(paraTurno);
     },
 

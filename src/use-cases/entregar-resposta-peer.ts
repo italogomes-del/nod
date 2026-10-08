@@ -8,7 +8,7 @@ import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
-export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "ja_entregue" };
+export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "ja_entregue" };
 
 /** Moldura do SERVIDOR: a resposta chega ao remetente marcada como não supervisionada e não confiável. */
 export function moldurarResposta(alvoNome: string, texto: string): string {
@@ -80,11 +80,14 @@ async function pedidosEmAberto(deps: Deps, cadeia: readonly Turno[], exceto: str
  * cumpre o pedido pediu a um colega e a resposta dele ainda não voltou. Sem a segunda, "pedi ao Dev, aguardo" saía
  * como resultado final e a resposta de verdade era descartada como ja_entregue (a entrega é uma por raiz).
  */
-async function aindaNaoEntrega(deps: Deps, tarefa: Turno): Promise<"aguardando_pessoa" | "aguardando_colega" | null> {
+async function aindaNaoEntrega(deps: Deps, tarefa: Turno): Promise<"aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | null> {
   if (tarefa.origem !== "delegacao") return null;
   const cadeia = await cadeiaDaDelegacao(deps, tarefa);
   if (await aguardandoPessoa(deps, cadeia)) return "aguardando_pessoa";
   if ((await pedidosEmAberto(deps, cadeia)).length > 0) return "aguardando_colega";
+  // ADR-086 (revisão do #212): quem cumpre o pedido marcou uma volta ("vou esperar o CI"). Essa frase não é o resultado:
+  // sem esta espera ela saía como entrega final e o resultado de verdade, na volta, era descartado como ja_entregue.
+  if (cadeia.some((t) => t.estado === "pendente" && t.acordarEm != null)) return "aguardando_volta";
   return null;
 }
 

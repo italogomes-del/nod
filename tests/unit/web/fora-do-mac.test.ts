@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
-import { foraDoMac, pontoTrabalho, situacaoDe, voltaMarcada } from "../../../web/lib/trabalhos.ts";
+import { foraDoMac, pontoTrabalho, quandoVolta, situacaoDe, voltaMarcada } from "../../../web/lib/trabalhos.ts";
 import { hora } from "../../../web/lib/render.ts";
 import { renderEsteMac } from "../../../web/telas/este-mac.ts";
 import { renderTopoTrabalho } from "../../../web/telas/trabalhos.ts";
@@ -33,7 +33,7 @@ describe("fora do Mac (ADR-086)", () => {
     expect(voltaMarcada(comVolta)).toBe(VOLTA);
     expect(voltaMarcada({ ...comVolta, turnoVivoId: "turno-2" })).toBeNull();
     expect(voltaMarcada({ ...comVolta, estado: "terminado" })).toBeNull();
-    expect(situacaoDe(comVolta)).toBe(`volta às ${hora(VOLTA)}`);
+    expect(situacaoDe(comVolta, [], false, AGORA)).toBe(`volta às ${hora(VOLTA)}`);
     expect(pontoTrabalho(comVolta, "c-amber")).toContain("ponto-trabalho esperando");
   });
 
@@ -46,7 +46,7 @@ describe("fora do Mac (ADR-086)", () => {
   it("Este Mac: quem espera fora do Mac aparece à parte de quem trabalha", () => {
     const html = renderEsteMac(estadoCom([trabalhando, comVolta, comColega]));
     expect(html).toContain("Fora do Mac · 2");
-    expect(html).toContain("esperando sem ocupar o Mac; voltam sozinhos");
+    expect(html).toContain("esperando sem ocupar o Mac; voltam sozinhas");
     expect(html).toContain(`volta às ${hora(VOLTA)}`);
     expect(html).toContain("esperando Eng 2");
     expect(html).toContain("Trabalhando · 1");
@@ -54,9 +54,20 @@ describe("fora do Mac (ADR-086)", () => {
 
   it("o cartão do tempo diz que a espera não ocupa o Mac e que volta sozinha", () => {
     const colega = renderTopoTrabalho(estadoCom([comColega], { tempoTaskAberto: comColega.id }), comColega.id);
-    expect(colega).toContain(`fora do Mac desde ${hora(comColega.esperandoColega!.desde)} · volta sozinho`);
+    // Um fecho só, no rodapé, com a hora uma vez (revisão do #212).
+    expect(colega).toContain(`Eng 2 recebeu o pedido às ${hora(comColega.esperandoColega!.desde)} · fora do Mac, volta sozinha`);
+    expect(colega).not.toContain("tk-pop-fora");
     const volta = renderTopoTrabalho(estadoCom([comVolta], { tempoTaskAberto: comVolta.id }), comVolta.id);
-    expect(volta).toContain(`fora do Mac · volta às ${hora(VOLTA)}`);
+    expect(volta).toContain(`<div class="tk-pop-rodape"><span>fora do Mac · volta às ${hora(VOLTA)}</span></div>`);
     expect(volta).toMatch(/class="tk-status esperando"[^>]*>volta às/);
+  });
+
+  it("revisão do #212: a volta de outro dia diz o dia — 'amanhã às 09:00' não lê como hoje", () => {
+    const amanha = new Date(2026, 9, 9, 9, 0).getTime();
+    const depois = new Date(2026, 9, 12, 9, 0).getTime();
+    expect(quandoVolta(VOLTA, AGORA)).toBe(`às ${hora(VOLTA)}`);
+    expect(quandoVolta(amanha, AGORA)).toBe(`amanhã às ${hora(amanha)}`);
+    expect(quandoVolta(depois, AGORA)).toBe(`em 12/10 às ${hora(depois)}`);
+    expect(situacaoDe({ ...comVolta, acordaEm: amanha }, [], false, AGORA)).toBe(`volta amanhã às ${hora(amanha)}`);
   });
 });

@@ -32,6 +32,23 @@ como quem trabalha. O #208 (tempo da task) trocou o relógio por "esperando X", 
    `sleep`; chame `me_chame_as`, diga o que espera e encerre. O comando do próprio bot (testes, build) continua no
    terminal em segundo plano (ADR-067); tirá-lo do Mac é o PR3.
 
+## Revisão do #212 (9 revisores)
+
+- A chamada só ANOTA o pedido no turno (`despertar_em`, `despertar_motivo`); a volta nasce no assentamento, se o turno
+  concluiu, sem Parar e com a task aberta. A marca de conteúdo de fora já é final, o Parar cancela a volta, fica uma
+  volta por turno, e o trabalho é o de agora (a rede de 2 min pode ter promovido o turno).
+- Voltas seguidas apontam para a mesma origem (não alongam a cadeia de SALTOS_DE_RETOMADA). O teto é de 24 voltas, e o
+  mínimo passa a 5 min.
+- A volta usa o modelo e o harness do turno.
+- `retomadaNaFila` e `vivosDaConversa` ignoram a volta futura: uma aprovação não gruda nela e a conversa não mostra o bot
+  "em curso".
+- Na delegação, a entrega espera a volta (`aguardando_volta`).
+- "Precisa de você" vence a volta (`aguardandoDespertar` depois da decisão).
+- A rotina com volta marcada segue aberta (a próxima janela é pulada).
+- A volta vencida segue as regras do Mac apertado (ADR-085).
+- A tela diz "amanhã às" quando a volta não é hoje.
+- A 0065 usa `lock_timeout`, e o ROLLBACK interrompe as voltas pendentes antes de tirar a coluna.
+
 ## Alternativas rejeitadas
 
 - **Tabela `despertares` com varredor.** Mais uma tabela, mais um laço de 30 s e a duplicação do que a retomada já faz.

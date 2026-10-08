@@ -27,6 +27,9 @@ describe("estadoDoTrabalho (a tabela de estados da #192)", () => {
     // S3: o turno acabou mas pediu a um colega; a resposta ainda não voltou.
     ["aguardando a resposta de um colega", { estadoAtual: "rodando", iniciado: true, aguardandoColega: true, ultimo: { estado: "concluido", motivo: null } }, "rodando"],
     ["aguardando colega e com pergunta aberta: precisa de você", { iniciado: true, aguardandoColega: true, decisaoPendente: true, ultimo: { estado: "concluido", motivo: null } }, "precisa_de_voce"],
+    // ADR-086 (revisão do #212): a volta marcada segura a task rodando, mas não esconde o "precisa de você".
+    ["com a volta marcada (me chame às): segue rodando", { estadoAtual: "rodando", iniciado: true, aguardandoDespertar: true, ultimo: { estado: "concluido", motivo: null } }, "rodando"],
+    ["volta marcada e pergunta aberta: precisa de você", { estadoAtual: "rodando", iniciado: true, aguardandoDespertar: true, decisaoPendente: true, ultimo: { estado: "concluido", motivo: null } }, "precisa_de_voce"],
   ] as const)("%s → %s", (_nome, fatos, esperado) => {
     expect(estadoDoTrabalho({ ...base, ...fatos })).toBe(esperado);
   });

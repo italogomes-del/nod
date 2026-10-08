@@ -7,10 +7,7 @@ import type { CatalogoDeComandos } from "./comandos.ts";
 import type { ExecucaoRaioX } from "./raio-x.ts";
 import type { UsoDoPlano } from "./uso-do-plano.ts";
 
-/**
- * Os quatro sinais write-ahead (ADR-009) — definição ÚNICA, usada pelo turno, pelo SPI e pela ponte.
- * promptSubmitted é gravado ANTES de escrever no stdin do CLI; viajam a cada renovação de lease.
- */
+/** Os quatro sinais write-ahead (ADR-009), definição ÚNICA (turno, SPI, ponte); promptSubmitted antes do stdin do CLI. */
 export type SinaisTurno = {
   attempted: boolean;
   rejected: boolean;
@@ -74,7 +71,8 @@ export type Turno = {
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
   absorvidoPor?: string | null;
-  trabalhoId?: string | null; acordarEm?: number | null; // ADR-083: o trabalho (null = a conversa); ADR-086: a volta marcada (a fila só o entrega a partir dela)
+  trabalhoId?: string | null; // ADR-083: o trabalho deste turno; null = turno da conversa
+  acordarEm?: number | null; // ADR-086: a volta marcada ("me chame às 16:00") — a fila só a entrega a partir daqui
   /**
    * Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Preenchido só no turno de delegação: a autoria do
    * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.

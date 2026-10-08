@@ -103,6 +103,18 @@ describe("dispararRotina", () => {
     expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
   });
 
+  it("ADR-086 (revisão do #212): a execução que marcou uma volta segue aberta — o turno da janela concluiu, mas a próxima janela é pulada", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const primeira = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in primeira.data)) throw new Error("deveria ter disparado");
+    const t = primeira.data.turno;
+    await d.deps.repos.turnos.assentar(t.id, { estado: "concluido" });
+    await d.deps.repos.turnos.enfileirar({ conversaId: t.conversaId, agenteId: t.agenteId, origem: "retomada", retomaTurnoId: t.id, prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: t.modelo, acordarEm: AGORA + 600_000 });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    expect((await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toMatchObject({ pulada: true, turnoAbertoId: t.id });
+  });
+
   /** Revisão do épico #188 (S12, 2026-10-08): a task que a execução anterior abriu ainda aberta também pula a janela. */
   it("S12: task filha da execução anterior ainda aberta → a janela do agendador é pulada; acabada, roda", async () => {
     const d = depsMemoria({ agora: () => AGORA });

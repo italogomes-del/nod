@@ -1207,7 +1207,6 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .tk-pop-ponto { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .tk-pop-ponto.trabalhou { background: var(--success); }
 .tk-pop-ponto.esperou { background: var(--warning); }
-.tk-pop-fora { margin: 8px 0 0; font-size: 12px; color: var(--ink-3); }
 .tk-pop-rodape { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 /* revisto em 2026-10-08 (QA visual no diário): "Ver a task do Eng 2" quebrava em duas linhas dentro dos detalhes. */
 .tk-pop-link, .pf-link { flex: none; margin-left: auto; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 12px; white-space: nowrap; text-decoration: underline;

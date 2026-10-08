@@ -183,7 +183,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
 
   async function usoDoMac(escopo: Escopo): Promise<UsoDoMac> {
     const guardado = usos.get(escopo.pessoaId);
-    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.usoTrocadoEm?.(escopo.pessoaId) ?? -1)) return guardado.uso;
+    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.usoTrocadoEm?.(escopo.pessoaId) ?? 0)) return guardado.uso;
     try {
       const lidoEm = agora();
       const uso = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).preferencias.buscar())).usoDoMac ?? USO_DO_MAC_PADRAO;
@@ -251,9 +251,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
             // ADR-085 (revisão do #209): começou trabalho novo em segundo plano — o próximo deste Mac espera ESPACO_FUNDO_MS.
             const w = uso !== "livre" && r.data.turno.trabalhoId ? await d.repos.trabalhos.buscar(r.data.turno.trabalhoId) : null;
-            if (w && (w.origem === "rotina" || w.origem === "colega") && w.pessoaEsperando !== true && (w.iniciadoEm === null || w.iniciadoEm >= antes)) {
+            // ADR-086: a volta marcada também conta (processo novo no Mac sem ninguém esperando).
+            const volta = r.data.turno.acordarEm != null;
+            if (w && (volta || ((w.origem === "rotina" || w.origem === "colega") && w.pessoaEsperando !== true && (w.iniciadoEm === null || w.iniciadoEm >= antes)))) {
               ultimoFundo.set(maquina.machineId, agora());
-              log("info", "fundo_comecou", { pessoa_id: pessoaId, machine_id: maquina.machineId, trabalho_id: w.id, origem: w.origem, espera_ms: agora() - w.criadoEm, segurando: segurarFundo });
+              log("info", "fundo_comecou", { pessoa_id: pessoaId, machine_id: maquina.machineId, trabalho_id: w.id, origem: w.origem, volta, espera_ms: agora() - (volta ? r.data.turno.acordarEm! : w.criadoEm), segurando: segurarFundo });
             }
           }
           return r.data.plano;

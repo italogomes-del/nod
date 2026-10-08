@@ -116,12 +116,19 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     const pouco = await montar("pouco");
     const r2 = await pouco.tarefa("rotina", "Rotina B");
     expect(await pouco.puxar(leitura("amarela"))).toBeNull();
-    // Gravada por fora da rota (sem aviso), a troca espera o cache de USO_VALE_MS; pela rota, vale na hora.
+    // Gravada por fora da rota (sem aviso), a troca espera o cache de USO_VALE_MS…
     await pouco.gravarUso("equilibrado", false);
     expect(await pouco.puxar(leitura("amarela"))).toBeNull();
-    await pouco.gravarUso("equilibrado");
+    pouco.avancar(USO_VALE_MS + 1);
     expect(await pouco.puxar(leitura("amarela"))).toBe(r2);
-    expect(USO_VALE_MS).toBe(30_000);
+  });
+
+  it("a troca pela rota (o aviso trocouUsoDoMac) vale no puxar na hora, sem esperar o cache", async () => {
+    const m = await montar("pouco");
+    const r = await m.tarefa("rotina", "Rotina C");
+    expect(await m.puxar(leitura("amarela"))).toBeNull();
+    await m.gravarUso("equilibrado");
+    expect(await m.puxar(leitura("amarela"))).toBe(r);
   });
 
   it("o espaço: com o Mac folgado, duas rotinas não começam na mesma leitura — a segunda espera ESPACO_FUNDO_MS", async () => {

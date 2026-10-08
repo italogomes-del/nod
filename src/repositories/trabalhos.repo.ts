@@ -249,11 +249,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
-          (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente') as pendentes,
+          -- ADR-086 (revisão do #212): a volta marcada para mais tarde não é fila — conta à parte, abaixo da decisão.
+          (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente' and (t.acordar_em is null or t.acordar_em <= now())) as pendentes,
+          exists (select 1 from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente' and t.acordar_em > now()) as despertar,
           exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
             where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
@@ -275,7 +277,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
@@ -294,8 +296,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = w.tenant_id and t.trabalho_id = w.id) as trabalhou_ms,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
-          (select array_agg(t.id order by t.criado_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as abertos,
-          (select min(t.acordar_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'pendente' and t.acordar_em > clock_timestamp()) as acorda_em
+          ab.abertos, ab.acorda_em
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
         left join rotinas r on r.tenant_id = w.tenant_id and r.id = w.rotina_id
@@ -307,6 +308,12 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         left join lateral (
           select t.id from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'despachando' order by t.criado_em limit 1
         ) v on true
+        -- Os abertos e a volta marcada (ADR-086) numa leitura só dos turnos vivos do trabalho. A volta aparece até ser
+        -- reivindicada (a hora pode ter passado com o Mac fora).
+        left join lateral (
+          select array_agg(t.id order by t.criado_em) as abertos, min(t.acordar_em) filter (where t.estado = 'pendente') as acorda_em
+          from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')
+        ) ab on true
         left join lateral (
           -- O pedido a colega em aberto mais antigo, pela regra de fatos.colega (sem peer_ask da tarefa, task do colega não final).
           select g.nome, h.criado_em as desde, h.payload->>'trabalhoId' as trabalho_id
