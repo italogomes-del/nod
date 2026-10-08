@@ -58,7 +58,7 @@ import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type It
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
-import { criarEnvios } from "./lib/envio-idempotente.ts";
+import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
@@ -1450,11 +1450,12 @@ async function enviarParaTrabalho(id: string): Promise<void> {
   if (!ta || !api || !texto) return;
   const a = api;
   rolagem.colar();
-  await agir(async () => {
+  // Revisão W3 (2026-10-08): Enter + botão não mandam o mesmo recado duas vezes (a rota da task não leva `idEnvio`).
+  await enviarUmaVez(envios, `trabalho:${id}`, texto, () => agir(async () => {
     await a.escreverNoTrabalho(id, texto);
     limparDepoisDeEnviar(ta, chave, texto);
     dispatch({ tipo: "invalidar", quais: [`trabalho:${id}`, "trabalhos"] });
-  });
+  }));
 }
 
 async function enviarComposer(): Promise<void> {
