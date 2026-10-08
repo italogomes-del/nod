@@ -63,8 +63,11 @@ export function lerTemaDesktop(valor: unknown): TemaDesktop | null {
   return valor === "sistema" || valor === "claro" || valor === "escuro" ? valor : null;
 }
 
-/** preferencias.json: sem arquivo, corrompido ou sem o campo, os avisos nascem ligados e o tema segue o sistema. */
-export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDesktop, "avisos" | "tema"> {
+/**
+ * preferencias.json: sem arquivo, corrompido ou sem o campo, os avisos e o som (NOD-196) nascem ligados e o tema segue
+ * o sistema.
+ */
+export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDesktop, "avisos" | "tema" | "som"> {
   let lido: unknown = null;
   try {
     lido = conteudo === null ? null : JSON.parse(conteudo);
@@ -75,5 +78,18 @@ export function lerPreferencias(conteudo: string | null): Pick<PreferenciasDeskt
   return {
     avisos: "avisos" in obj && typeof obj.avisos === "boolean" ? obj.avisos : true,
     tema: ("tema" in obj ? lerTemaDesktop(obj.tema) : null) ?? "sistema",
+    som: "som" in obj && typeof obj.som === "boolean" ? obj.som : true,
   };
+}
+
+/** O agrupamento dos avisos no Centro de Notificações: um só grupo para o nod. */
+export const GRUPO_AVISOS = "nod-sua-vez";
+
+/**
+ * As opções do `new Notification` do Electron para um aviso (NOD-196). Som desligado → `silent: true`: o aviso aparece
+ * igual (banner, clique, Dock), só sem som. Som ligado → `silent: false`, que só deixa o macOS tocar o som padrão; o Foco
+ * e os Ajustes do Sistema continuam mandando.
+ */
+export function opcoesDoAviso(aviso: AvisoDesktop, p: { som: boolean }): { title: string; body: string; groupId: string; silent: boolean } {
+  return { title: aviso.titulo, body: aviso.corpo, groupId: GRUPO_AVISOS, silent: !p.som };
 }

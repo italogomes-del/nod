@@ -60,11 +60,28 @@ export function tempoDe(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "termin
 }
 
 /**
- * O que o trabalho está fazendo, em poucas palavras: o último passo, quem segura o computador, ou o estado. Sem o tempo
- * (quem desenha junta "· 15 min" quando cabe).
+ * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado): a task rodando sem turno vivo e com pedido a colega
+ * em aberto está ESPERANDO esse colega, não trabalhando. A frase base é "esperando X" (combinada com o protótipo do Ritmo).
+ */
+export function esperandoColega(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega">): { nome: string; desde: number; trabalhoId: string | null } | null {
+  return t.estado === "rodando" && !t.turnoVivoId && t.esperandoColega ? t.esperandoColega : null;
+}
+
+/** O tempo da task: aberta há (do começo até agora ou o fim), quanto os turnos trabalharam e o resto, que é espera. */
+export function temposDaTask(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "terminadoEm" | "trabalhouMs">, agora: number): { abertaMs: number; trabalhouMs: number; esperouMs: number } {
+  const abertaMs = Math.max(0, (t.terminadoEm ?? agora) - inicioDe(t));
+  const trabalhouMs = Math.min(abertaMs, Math.max(0, t.trabalhouMs ?? 0));
+  return { abertaMs, trabalhouMs, esperouMs: abertaMs - trabalhouMs };
+}
+
+/**
+ * O que o trabalho está fazendo, em poucas palavras: o último passo, quem segura o computador, quem ele espera, ou o
+ * estado. Sem o tempo (quem desenha junta o tempo quando cabe).
  */
 export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false): string {
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
+  const colega = esperandoColega(t);
+  if (colega) return `esperando ${colega.nome}`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
@@ -172,8 +189,10 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 }
 
 /** O ponto do trabalho: na cor do bot (`c-*`), piscando enquanto roda; azul quando espera a pessoa; vazado na fila. */
-export function pontoTrabalho(t: Pick<TrabalhoDto, "estado">, cor: string | undefined): string {
+export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
+  // Esperando colega: ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
+  if (esperandoColega({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null })) return '<span class="ponto-trabalho esperando" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.

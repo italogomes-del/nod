@@ -22,7 +22,7 @@ import { versaoAceita } from "../src/domain/versao-app.ts";
 import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, lerIaDesktop, textoDaImpressao, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
-import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "./avisos-mac.ts";
+import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
 import { focarJanela, LARGURA_MINIMA, lerEstadoJanela, medirEstadoJanela, resolverEstadoJanela, type EstadoJanela } from "./janela.ts";
 import { estadoDoMicrofone, lerEmLigacao, permitirChecagemDeMidia, permitirPedidoDeMidia, TEXTO_FECHAR_EM_LIGACAO } from "./permissoes-midia.ts";
@@ -117,7 +117,7 @@ function caminhoConfig() { return join(app.getPath("userData"), "conexao.enc"); 
 // A preferência mora em userData/preferencias.json: o localStorage da janela web é apagado a cada
 // conexão (clearStorageData abaixo). O aviso sai daqui, do processo principal — a página continua sem
 // permissão nenhuma (proteger) —, e só com a janela fora de foco.
-let preferencias: Pick<PreferenciasDesktop, "avisos" | "tema"> = { avisos: true, tema: "sistema" };
+let preferencias: Pick<PreferenciasDesktop, "avisos" | "tema" | "som"> = { avisos: true, tema: "sistema", som: true };
 /** O último aviso falhou ao aparecer (o macOS bloqueou); o próximo que aparecer desfaz. */
 let bloqueados = false;
 let contadorAtual = 0;
@@ -125,7 +125,7 @@ let contadorAtual = 0;
 const avisosVivos: Notification[] = [];
 const MAX_AVISOS_VIVOS = 20;
 function caminhoPreferencias() { return join(app.getPath("userData"), "preferencias.json"); }
-function estadoPreferencias(): PreferenciasDesktop { return { avisos: preferencias.avisos, tema: preferencias.tema, bloqueados }; }
+function estadoPreferencias(): PreferenciasDesktop { return { avisos: preferencias.avisos, tema: preferencias.tema, som: preferencias.som, bloqueados }; }
 async function carregarPreferencias() {
   preferencias = lerPreferencias(await readFile(caminhoPreferencias(), "utf8").catch(() => null));
 }
@@ -182,6 +182,12 @@ async function definirAvisos(ligado: boolean): Promise<PreferenciasDesktop> {
   await gravarPreferencias();
   return estadoPreferencias();
 }
+/** Som dos avisos (NOD-196): só muda o `silent` do próximo aviso; com os avisos desligados, a escolha fica guardada. */
+async function definirSom(ligado: boolean): Promise<PreferenciasDesktop> {
+  preferencias = { ...preferencias, som: ligado };
+  await gravarPreferencias();
+  return estadoPreferencias();
+}
 function montarMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(templateDoMenu({ avisos: preferencias.avisos, empacotado: app.isPackaged }, { conexao: () => { void parar().then(mostrarSetup); }, definirAvisos: (ligado) => { void definirAvisos(ligado); }, exportarDiagnostico: () => { void exportarDiagnostico(); } })));
 }
@@ -197,7 +203,7 @@ function entradaDiagnostico(): EntradaDiagnostico {
     conexao: { servidor: configuracao?.url ?? null, conectado, maquinaId: maquinaIdAtual, status: mensagem },
     ia: inventariosAtuais ? Object.entries(inventariosAtuais).map(([harness, i]) => ({ harness, estado: i?.estado ?? "desconhecido", motivo: i && "motivo" in i ? i.motivo : null, versao: i && "versao" in i ? i.versao ?? null : null })) : null,
     execucao: { conectado, lacoAtivo: laco !== null, sondandoIa: vigiaIas !== null && laco === null, emLigacao, githubNoMac: ghLogado },
-    preferencias: { avisos: preferencias.avisos, tema: preferencias.tema, avisosBloqueados: bloqueados },
+    preferencias: { avisos: preferencias.avisos, tema: preferencias.tema, som: preferencias.som, avisosBloqueados: bloqueados },
     registros: lerCaudaDoLog(app.getPath("logs"), TETO_REGISTROS_BYTES),
   };
 }
@@ -226,7 +232,7 @@ function janelaWeb(): BrowserWindow | null {
 function avisar(aviso: AvisoDesktop): boolean {
   const w = janelaWeb();
   if (!preferencias.avisos || !w || w.isFocused() || !Notification.isSupported()) return false;
-  const n = new Notification({ title: aviso.titulo, body: aviso.corpo, groupId: "nod-sua-vez" });
+  const n = new Notification(opcoesDoAviso(aviso, { som: preferencias.som }));
   const soltar = () => { const i = avisosVivos.indexOf(n); if (i >= 0) avisosVivos.splice(i, 1); };
   avisosVivos.push(n);
   if (avisosVivos.length > MAX_AVISOS_VIVOS) avisosVivos.shift();
@@ -526,6 +532,11 @@ else {
       validarRemetenteWeb(e);
       if (typeof ligado !== "boolean") throw new Error("entrada_invalida");
       return definirAvisos(ligado);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.definirSom, (e, ligado: unknown) => {
+      validarRemetenteWeb(e);
+      if (typeof ligado !== "boolean") throw new Error("entrada_invalida");
+      return definirSom(ligado);
     });
     ipcMain.handle(CANAIS_DESKTOP.definirTema, (e, tema: unknown) => {
       validarRemetenteWeb(e);

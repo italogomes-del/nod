@@ -170,6 +170,8 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       memoriaMb: vivo ? t.memoriaMb : null,
       seguravel: t.estado === "na_fila" && seguravelPeloMac(t, deps.agora()),
       deFora: e?.deFora ?? false,
+      esperandoColega: e?.esperandoColega ?? null,
+      trabalhouMs: e?.trabalhouMs ?? 0,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   });

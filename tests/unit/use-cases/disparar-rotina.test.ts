@@ -52,7 +52,8 @@ describe("dispararRotina", () => {
     const rotina = await rotinaAtiva(d);
     const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
     if (!("turno" in r.data)) throw new Error("deveria ter disparado");
-    expect(d.banco.trabalhos.find((w) => w.id === r.data.turno.trabalhoId)?.pessoaEsperando).toBe(false);
+    const trabalhoId = r.data.turno.trabalhoId;
+    expect(d.banco.trabalhos.find((w) => w.id === trabalhoId)?.pessoaEsperando).toBe(false);
     expect(r.data.turno).toMatchObject({ origem: "rotina", estado: "pendente", profundidade: 0, agenteId: rotina.agenteId, conversaId: rotina.conversaId, entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
     expect(r.data.turno.entradaTexto).toContain("poste o resumo");
     expect(r.data.turno.entradaTexto).toContain(`17/09/2026, 08:00 (${TZ})`);

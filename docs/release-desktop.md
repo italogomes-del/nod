@@ -94,7 +94,7 @@ casos é a seção H de [aceite-desktop.md](aceite-desktop.md).
 Quando o app não conecta, não acha o Claude ou o Codex, ou cai, peça à pessoa **nod › Exportar diagnóstico…**. O app
 abre "Salvar" com `nod-diagnostico-AAAAMMDD-HHMMSS.txt` sugerido em Downloads. Depois de salvar, o Finder mostra o
 arquivo; cancelar não grava nada. O item fica no menu nativo, e não na página: funciona na tela de conexão, sem
-servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` continua com 11 funções.
+servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` não ganhou função para isso.
 
 **Onde fica o log.** O `log()` do app do Mac grava a mesma linha JSON do stdout, já redigida pela NOD-158, em
 `~/Library/Logs/nod/nod.log` (modo `0600`). Passou de 1 MiB, ela vira `nod.1.log`. São duas gerações, no máximo 2 MiB.

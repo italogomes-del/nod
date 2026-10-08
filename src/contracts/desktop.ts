@@ -24,6 +24,11 @@ export type PreferenciasDesktop = {
   avisos: boolean;
   /** O tema da janela: o processo principal o aplica em nativeTheme, que é o que o prefers-color-scheme da página lê. */
   tema: TemaDesktop;
+  /**
+   * O aviso toca o som padrão do macOS (definido em 2026-10-07, NOD-196); desligado, ele aparece em silêncio. Local a
+   * cada Mac, como o tema; o Foco e os Ajustes do Sistema continuam mandando (o nod nunca força o som).
+   */
+  som: boolean;
   /** O último aviso falhou ao aparecer: as notificações do nod estão desligadas nos Ajustes do Sistema. */
   bloqueados: boolean;
 };
@@ -64,6 +69,11 @@ export type NodDesktop = {
    */
   definirTema?(tema: TemaDesktop): Promise<PreferenciasDesktop>;
   /**
+   * Liga ou desliga o som dos avisos (NOD-196); com os avisos desligados, a escolha continua guardada. Opcional porque o
+   * app instalado antes de 2026-10-07 não tem: a web confere antes de chamar.
+   */
+  definirSom?(ligado: boolean): Promise<PreferenciasDesktop>;
+  /**
    * Modo ligação (definido em 2026-10-04, ADR-071): confere e, se o macOS ainda não perguntou, pede o acesso ao
    * microfone. Opcional porque o app instalado antes desta versão não tem: a web confere antes de chamar.
    */
@@ -97,6 +107,7 @@ export const CANAIS_DESKTOP = {
   preferencias: "nod:preferencias",
   definirAvisos: "nod:definir-avisos",
   definirTema: "nod:definir-tema",
+  definirSom: "nod:definir-som",
   abrir: "nod:abrir",
   microfone: "nod:microfone",
   emLigacao: "nod:em-ligacao",

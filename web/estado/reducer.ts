@@ -243,6 +243,8 @@ export type Estado = {
   faixaTrabalhosRecolhida: boolean;
   /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
   usoDoMac: UsoDoMac;
+  /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
+  tempoTaskAberto: string | null;
 };
 
 export type Acao =
@@ -297,6 +299,7 @@ export type Acao =
   | { tipo: "trabalho-sumiu"; id: string }
   | { tipo: "faixa-trabalhos"; recolhida: boolean }
   | { tipo: "uso-do-mac"; uso: UsoDoMac }
+  | { tipo: "tempo-task"; id: string | null }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
 export const estadoInicial: Estado = {
@@ -351,6 +354,7 @@ export const estadoInicial: Estado = {
   pressao: null,
   faixaTrabalhosRecolhida: false,
   usoDoMac: "equilibrado",
+  tempoTaskAberto: null,
 };
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
@@ -795,6 +799,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
     case "uso-do-mac":
       return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
+    case "tempo-task":
+      return estado.tempoTaskAberto === acao.id ? estado : { ...estado, tempoTaskAberto: acao.id };
     case "hidratar-taxas-linhas":
       return estado.modoDev.ligado ? { ...estado, modoDev: { ...estado.modoDev, taxasLinhas: acao.taxas } } : estado;
     case "esquecer-disponibilidade-ligacao": {

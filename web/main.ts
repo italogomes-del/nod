@@ -2056,6 +2056,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     focar(uso);
     void api.gravarPreferencias({ usoDoMac: uso }).then(() => dispatch({ tipo: "invalidar", quais: ["trabalhos"] }), () => { dispatch({ tipo: "uso-do-mac", uso: antes }); focar(antes); });
   },
+  // O status do topo da task abre e fecha o cartão do tempo (protótipo "Nod — tempo da task").
+  "tempo-task": (el) => {
+    const id = el.dataset.id ?? null;
+    dispatch({ tipo: "tempo-task", id: id && estado.tempoTaskAberto !== id ? id : null });
+  },
   // A faixa recolhe numa pílula e a pílula abre a faixa; a escolha vai para as preferências da pessoa.
   "faixa-trabalhos": (el) => {
     const recolhida = el.dataset.recolher === "1";
