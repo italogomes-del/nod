@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import type { ModoAprovacao } from "../../../src/contracts/agente.ts";
 import { partesDoPromptSistema, type EntradaPromptSistema } from "../../../src/domain/prompt-sistema.ts";
+import { MANUAL_DO_NOD } from "../../../src/domain/manual-do-nod.ts";
 import { agente, conectorTarefas, daOrigem, doConector, f, mem, pend } from "./_fixtures-prompt.ts";
 
 /** Quanto a parte estável pode crescer sobre a referência antes de o teste falhar (sugestão da issue). */
@@ -136,6 +137,17 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
     colegas,
     conectores: [],
     memorias: [],
+  },
+  // 7. O Nod, o bot fixo (ADR-081/082): o manual do produto na parte estável e as ferramentas dele.
+  nod: {
+    agente: { nome: "Nod", titulo: "Ajudante", descricao: "Seu bot fixo no Nod. Tira dúvidas sobre o produto, cria e ajusta seus bots e anota bugs e ideias para o time do Nod.", modoAprovacao: "manual" },
+    ferramentas: [f("gerir_bots"), f("ver_apps_conectados"), f("registrar_relato"), f("ver_colegas"), f("pedir_aprovacao"), f("lembrar")],
+    pessoaNome: "Pessoa Exemplo",
+    modo: "conversa",
+    colegas,
+    conectores: [],
+    memorias: [],
+    manualDoNod: MANUAL_DO_NOD,
   },
   // 6. Sem terminal (um motivo) e computador fora do ar (ADR-065; emenda da ADR-037).
   "sem-terminal-computador-fora": {

@@ -1,4 +1,4 @@
-import type { CategoriaRelato, Relato } from "../../src/contracts/relato.ts";
+import type { CategoriaRelato, Relato, TipoRelato } from "../../src/contracts/relato.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { dataHora, esc } from "../lib/render.ts";
 
@@ -10,6 +10,15 @@ const ROTULOS: Record<CategoriaRelato, string> = {
   interface: "Problema na tela",
   outro: "Outra coisa",
 };
+
+/** definido em 2026-10-07 (0062, a caixa do Nod): o que o relato é. */
+const TIPO_HUMANO: Record<TipoRelato, string> = { bug: "Bug", melhoria: "Melhoria", duvida: "Dúvida" };
+const FILTROS: readonly { id: "todos" | TipoRelato; nome: string }[] = [
+  { id: "todos", nome: "Todos" },
+  { id: "bug", nome: "Bugs" },
+  { id: "melhoria", nome: "Melhorias" },
+  { id: "duvida", nome: "Dúvidas" },
+];
 
 /** Um par rótulo/valor só aparece quando há valor: linha vazia não ajuda a investigar. */
 function campo(rotulo: string, valor: string | number | null | undefined): string {
@@ -41,13 +50,19 @@ function renderRelato(r: Relato): string {
   const falha = m.motivoFalha ?? m.motivoInterrupcao;
   const anexo = r.alcance === "janela" ? `${r.mensagensAnexadas} ${r.mensagensAnexadas === 1 ? "mensagem" : "mensagens"}` : "só a mensagem";
   const diag = r.diagnostico;
-  return `<details class="card-prop" data-disclosure="relato-${esc(r.id)}">
+  // 0062: o contado ao Nod tem título (só a dona vê) e não tem categoria de falha; o do botão segue como era.
+  const doNod = r.origem === "nod";
+  const titulo = doNod ? r.titulo ?? TIPO_HUMANO[r.tipo] : ROTULOS[r.categoria];
+  return `<details class="card-prop" data-disclosure="relato-${esc(r.id)}" data-tipo="${esc(r.tipo)}">
     <summary>
-      <b>${esc(ROTULOS[r.categoria])}</b>
-      <span class="tag tag-cinza">${esc(anexo)}</span>
+      <span class="tag tag-cinza">${esc(TIPO_HUMANO[r.tipo])}</span>
+      <b>${esc(titulo)}</b>
+      <span class="tag tag-cinza">${esc(doNod ? "conversa com o Nod" : anexo)}</span>
       ${falha ? `<span class="tag tag-ambar">${esc(falha.replaceAll("_", " "))}</span>` : ""}
       <time>${esc(dataHora(r.criadoEm))}</time>
     </summary>
+    ${doNod && r.resumo ? `<div class="it"><b>o que você contou</b>${esc(r.resumo)}${r.resumo.length >= 160 ? "…" : ""}</div>` : ""}
+    ${doNod && r.categoria !== "outro" ? campo("categoria", ROTULOS[r.categoria]) : ""}
     ${campo("estado do turno", m.estadoTurno)}
     ${campo("origem", m.origemTurno)}
     ${sinais(r)}
@@ -74,15 +89,21 @@ function renderRelato(r: Relato): string {
  * O texto que a pessoa escreveu e o trecho da conversa NÃO vêm aqui: moram na tabela apagável e só
  * são lidos ao abrir um relato específico (ADR-002/004).
  */
-export function renderRelatos(estado: Estado): string {
+export function renderRelatos(estado: Pick<Estado, "relatos">): string {
   const relatos = estado.relatos;
   if (relatos === null) return `<div class="mudo">carregando relatos…</div>`;
   if (relatos.length === 0) {
-    return `<section class="tela"><h1>Relatos</h1><p class="mudo">Nenhum relato ainda. Eles chegam pelo ícone de inseto que aparece ao passar o mouse numa mensagem.</p></section>`;
+    return `<section class="tela"><h1>Relatos</h1><p class="mudo">Nenhum relato ainda. Eles chegam pelo ícone de inseto que aparece ao passar o mouse numa mensagem, ou contando ao Nod um bug, uma ideia ou uma dúvida.</p></section>`;
   }
-  return `<section class="tela">
+  // definido em 2026-10-07 (0062): o filtro por tipo é atributo na seção + CSS (filtrar-relatos em main.ts) — redesenhar a
+  // lista a cada clique trocaria os <details> abertos.
+  const conta = (id: (typeof FILTROS)[number]["id"]) => (id === "todos" ? relatos.length : relatos.filter((r) => r.tipo === id).length);
+  const filtros = FILTROS.filter((f) => f.id === "todos" || conta(f.id) > 0)
+    .map((f) => `<button type="button" class="filtro-relato" data-act="filtrar-relatos" data-filtro-tipo="${f.id}" aria-pressed="${f.id === "todos"}">${esc(f.nome)} · ${conta(f.id)}</button>`).join("");
+  return `<section class="tela relatos" data-filtro="todos">
     <h1>Relatos</h1>
-    <p class="mudo">${relatos.length} ${relatos.length === 1 ? "relato" : "relatos"} · o mais recente primeiro. Cada um traz o estado técnico do instante em que foi enviado.</p>
+    <p class="mudo">${relatos.length} ${relatos.length === 1 ? "relato" : "relatos"} · o mais recente primeiro. Bugs, melhorias e dúvidas, pelo botão de uma mensagem ou conversando com o Nod. Cada um traz o estado técnico do instante em que foi enviado.</p>
+    <div class="filtros-relato" role="group" aria-label="Filtrar por tipo">${filtros}</div>
     ${relatos.map((r) => renderRelato(r)).join("")}
   </section>`;
 }

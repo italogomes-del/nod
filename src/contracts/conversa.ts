@@ -1,3 +1,4 @@
+import type { AcaoLote } from "./ferramentas-do-nod.ts";
 import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { CorAgente, FormaAgente, Visibilidade } from "./agente.ts";
@@ -31,7 +32,7 @@ export type Conversa = {
   criadoEm: EpochMs;
 };
 
-export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot";
+export type KindProposta = "perfil" | "rotina" | "acesso" | "pasta" | "rotina_atualizacao" | "rotina_exclusao" | "bot" | "lote_bots";
 export type EstadoProposta = "pendente" | "confirmada" | "recusada";
 
 /**
@@ -152,7 +153,29 @@ export type PayloadPropostaPasta = {
  * proposta é da Nina (agente/conversa dela); confirmar cria o bot novo com estes campos (confirmar-proposta.ts).
  */
 export type PayloadPropostaBot = { kind: "bot"; nome: string; descricao: string; forma: FormaAgente; cor: CorAgente; voz: string | null; turnoId?: string };
-export type PayloadProposta = PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
+/**
+ * definido em 2026-10-07 (ADR-082, 0060): o lote do Nod (gerir_bots) — as ações que esperam a pessoa, num card só, cada
+ * uma marcável. As que o modo já fez entram com estado 'feita' (o card mostra o lote inteiro). O card é do Nod (agente e
+ * conversa dele); confirmar executa as marcadas, na ordem (gerir-bots.ts, decidirLoteDeBots).
+ */
+export type EstadoAcaoNoLote = "esperando" | "feita" | "recusada" | "falhou";
+export type MotivoCardDoLote = "manual" | "arriscada" | "conteudo_de_fora";
+export type AcaoNoLote = AcaoLote & {
+  i: number;
+  estado: EstadoAcaoNoLote;
+  /** Por que esperou a pessoa (null nas feitas na hora). */
+  motivo: MotivoCardDoLote | null;
+  /** O nome do bot alvo (ou do bot novo) para o card ler sem consultar nada. */
+  alvoNome: string;
+  /** O bot em que a ação rodou ou vai rodar; null = ainda não existe (criar/duplicar esperando, ou alvo por "@ref"). */
+  botId: string | null;
+  /** O índice da ação que cria o alvo (alvo por "@ref"); null = alvo existente ou criar. */
+  alvoDaAcao: number | null;
+  erro?: string | null;
+};
+export type PayloadPropostaLoteBots = { kind: "lote_bots"; resumo: string; acoes: AcaoNoLote[]; turnoId?: string };
+
+export type PayloadProposta = PayloadPropostaLoteBots | PayloadPropostaBot | PayloadPropostaPerfil | PayloadPropostaRotina | PayloadPropostaAcesso | PayloadPropostaPasta | PayloadPropostaRotinaAtualizacao | PayloadPropostaRotinaExclusao;
 
 /** Proposta do modelo (ferramenta tipada) — nada é aplicado antes da confirmação da pessoa (E1.1). */
 export type Proposta = {

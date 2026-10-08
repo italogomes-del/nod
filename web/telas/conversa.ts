@@ -20,6 +20,7 @@ import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
+import { renderCardLote } from "./card-lote.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
@@ -343,6 +344,8 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
   // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
   if (p.payload.kind === "pasta") return renderCardPasta(p, p.payload, estado, a);
+  // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
+  if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   let itens = "";
   if (p.payload.kind === "perfil") {
     const c = p.payload;

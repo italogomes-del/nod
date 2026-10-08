@@ -21,6 +21,8 @@ import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
 import { FERRAMENTAS_PENDENCIA } from "./pendencia.ts";
+import { MANUAL_DO_NOD } from "./manual-do-nod.ts";
+import { ehNod } from "./nod.ts";
 import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
@@ -97,6 +99,14 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
  * quando o plano é da ligação que o produto iniciou com o onboarding da pessoa em curso (`EntradaPlano.onboarding`).
  */
 export const FERRAMENTAS_NOD_ONBOARDING: readonly NomeFerramentaNod[] = ["anotar_entrevista", "concluir_entrevista", "propor_bot"];
+
+/**
+ * definido em 2026-10-07 (ADR-081/082): as ferramentas que só o Nod tem. Somam-se ao catálogo quando o bot do turno é o
+ * Nod E quem fala é a pessoa (conversa, criação) — a cerca 2: nem rotina, nem sala, nem ligação, nem pedido de colega.
+ * O caso de uso confere de novo (turnoDoNodComAPessoa).
+ */
+export const FERRAMENTAS_DO_NOD: readonly NomeFerramentaNod[] = ["gerir_bots", "ver_apps_conectados", "registrar_relato"];
+const MODOS_DAS_MAOS_DO_NOD: readonly ModoTurno[] = ["conversa", "criacao"];
 
 export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
@@ -177,6 +187,8 @@ export type EntradaPlano = {
   harness?: IdHarness | null;
   /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
   onboarding?: boolean;
+  /** ADR-082: NOD_GERIR_BOTS=0 tira as ferramentas do Nod do catálogo (o interruptor de rollback sem reverter o PR). */
+  semFerramentasDoNod?: boolean;
   agora: number;
 };
 
@@ -194,7 +206,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // salto (montarFerramentas tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
-  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : [])]
+  const doNod = ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semFerramentasDoNod ? FERRAMENTAS_DO_NOD : [];
+  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod]
     .filter((n) => entrada.aFazer === true || !FERRAMENTAS_PENDENCIA.includes(n))
     .map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
@@ -259,7 +272,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}) }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,

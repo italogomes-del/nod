@@ -1,5 +1,6 @@
 import type { Agente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehNod } from "../domain/nod.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -13,6 +14,8 @@ async function alternar(
   const existente = await deps.repos.agentes.buscar(agenteId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
   const novo = valor ?? !existente[campo];
+  // ADR-081: o Nod fica — desafixar o leva à barra de cima (discreto), mas ocultar não existe para ele.
+  if (campo === "oculto" && novo && ehNod(existente)) throw new ErroDeDominio("nod_protegido", { cause: "ocultar" });
   const agente = campo === "fixado" ? await deps.repos.agentes.fixar(agenteId, novo) : await deps.repos.agentes.ocultar(agenteId, novo);
   if (!agente) throw new ErroDeDominio("nao_permitido");
   const agora = deps.agora();

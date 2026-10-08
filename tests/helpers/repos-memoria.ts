@@ -401,6 +401,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         a.oculto = oculto;
         return a;
       },
+      // ADR-081: sem concorrência na memória, travar é só buscar.
+      async travarNod() {
+        return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;
+      },
+      async buscarNod() {
+        return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;
+      },
+      async marcarComoNod(id, perfil) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.dono === "pessoa" && !x.excluidoEm && !x.papel);
+        if (!a || doTenant(b.agentes).some((x) => x.ownerId === escopo.pessoaId && x.papel === "nod")) return null;
+        Object.assign(a, { ...perfil, papel: "nod", cor: "c-black", fixado: true, oculto: false, confirmado: true });
+        return a;
+      },
       async definirVoz(id, p) {
         const a = doTenant(b.agentes).find((x) => x.id === id);
         if (!a) return null;
@@ -743,6 +756,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const p = doTenant(b.propostas).find((x) => x.id === id && x.estado === "pendente");
         if (!p) return null;
         p.estado = estado;
+        return p;
+      },
+      async atualizarPayload(id, payload) {
+        const p = doTenant(b.propostas).find((x) => x.id === id && x.kind === payload.kind);
+        if (!p) return null;
+        p.payload = payload;
         return p;
       },
     },
@@ -1567,6 +1586,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           tenantId: escopo.tenantId,
           id: randomUUID(),
           mensagemId: r.mensagemId,
+          tipo: r.tipo ?? "bug",
+          origem: r.origem ?? "botao",
           conversaId: r.conversaId,
           turnoId: r.turnoId,
           categoria: r.categoria,
@@ -1604,6 +1625,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async prosaDe() {
         return null;
+      },
+      async contarDoNodDesde(desde) {
+        return doTenant(b.relatos).filter((r) => r.ownerId === escopo.pessoaId && r.origem === "nod" && r.criadoEm >= desde).length;
       },
       async registrarDiagnostico() {},
       async diagnosticoDoTurno() {

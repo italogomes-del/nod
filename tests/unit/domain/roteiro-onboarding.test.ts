@@ -6,17 +6,17 @@ import {
   camposQueFaltam, linhasDoPromptOnboarding, MODELOS_DE_BOT, modeloDoObjetivo, normalizarCampo, objetivoDoTexto, passoDaConfiguracao, PERGUNTAS_ENTREVISTA, resumoDaEntrevista,
   saudacaoDoOnboarding, sugestoesDoOnboarding, tamanhoDoTexto, textoTudoMontado,
 } from "../../../src/domain/roteiro-onboarding.ts";
-import { nomeLivreDaGuia } from "../../../src/use-cases/onboarding.ts";
+import { ehNod, nomeReservadoAoNod, NOME_DO_NOD } from "../../../src/domain/nod.ts";
 
 const VAZIO: CamposEntrevista = { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null };
 const CHEIO: CamposEntrevista = { apelido: "Ana", comoConheceu: "Indicação", objetivo: "Responder clientes mais rápido", tamanhoTime: "2_10" };
 
 /** O roteiro do onboarding por ligação (definido em 2026-10-04, ADR-077; textos do protótipo HiFiMac). */
 describe("roteiro do onboarding", () => {
-  it("a primeira fala leva o nome da guia e não tem dois-pontos (é falada)", () => {
-    expect(saudacaoDoOnboarding("Nina")).toBe("Oi! Eu sou a Nina, sua primeira bot aqui no nod. Como você quer que eu te chame?");
-    for (const fala of [saudacaoDoOnboarding("Nina"), resumoDaEntrevista(CHEIO), ...Object.values(PERGUNTAS_ENTREVISTA)]) expect(fala).not.toContain(":");
-    expect(textoTudoMontado("Nina")).toBe("Tudo montado. Quando quiser, é só chamar a Nina por aqui.");
+  it("a primeira fala leva o nome do Nod (a guia desde a ADR-081) e não tem dois-pontos (é falada)", () => {
+    expect(saudacaoDoOnboarding(NOME_DO_NOD)).toBe("Oi! Eu sou o Nod, seu bot fixo aqui no nod. Como você quer que eu te chame?");
+    for (const fala of [saudacaoDoOnboarding(NOME_DO_NOD), resumoDaEntrevista(CHEIO), ...Object.values(PERGUNTAS_ENTREVISTA)]) expect(fala).not.toContain(":");
+    expect(textoTudoMontado(NOME_DO_NOD)).toBe("Tudo montado. Quando quiser, é só chamar o Nod por aqui.");
   });
 
   it("as perguntas seguem a ordem apelido → como conheceu → objetivo → time", () => {
@@ -109,9 +109,12 @@ describe("roteiro do onboarding", () => {
     expect(roteiro).not.toContain("Assim que ela responder uma pergunta, chame anotar_entrevista");
   });
 
-  it("as três ferramentas do onboarding e o nome livre da guia", () => {
+  it("as três ferramentas do onboarding; o nome Nod é reservado ao bot fixo (ADR-081)", () => {
     expect([...FERRAMENTAS_NOD_ONBOARDING]).toEqual(["anotar_entrevista", "concluir_entrevista", "propor_bot"]);
-    expect(nomeLivreDaGuia(["Vera"])).toBe("Nina");
-    expect(nomeLivreDaGuia(["nina", "Nina 2"])).toBe("Nina 3");
+    for (const nome of ["Nod", "nod", " NOD "]) expect(nomeReservadoAoNod(nome)).toBe(true);
+    for (const nome of ["Nod (seu)", "Nodo", "Nina"]) expect(nomeReservadoAoNod(nome)).toBe(false);
+    expect(ehNod({ papel: "nod" })).toBe(true);
+    expect(ehNod({ papel: null })).toBe(false);
+    expect(ehNod(null)).toBe(false);
   });
 });

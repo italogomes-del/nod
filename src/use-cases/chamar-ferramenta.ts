@@ -85,6 +85,9 @@ const DESPACHO: Despacho = {
   anotar_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.anotar_entrevista](deps, { ...ctx, ...args }),
   concluir_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.concluir_entrevista](deps, { ...ctx, ...args }),
   propor_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.propor_bot](deps, { ...ctx, ...args }),
+  gerir_bots: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_bots](deps, { ...ctx, ...args }),
+  ver_apps_conectados: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_apps_conectados](deps, { ...ctx, ...args }),
+  registrar_relato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.registrar_relato](deps, { ...ctx, ...args }),
 };
 
 /**

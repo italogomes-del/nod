@@ -4,6 +4,7 @@ import type { Agente, CorAgente, DonoAgente, FormaAgente } from "../contracts/ag
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { nomeReservadoAoNod } from "../domain/nod.ts";
 import { nomeDeBoasVindas, proximaCor, proximaForma } from "../domain/proposta-agente.ts";
 import { proximaVoz } from "../domain/vozes.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -36,6 +37,13 @@ export type SaidaCriarAgente = { agente: Agente; conversa: Conversa; mensagem: M
  * de sistema 'agente-nasceu'. Sem acessos, sem rotina, sem memória — nada é concedido aqui.
  */
 export const criarAgente: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = async (deps, input) => {
+  // ADR-081: "Nod" é o nome do bot fixo; outro bot com esse nome confundiria o pedido por nome (gerir_bots, pedir_a_bot).
+  if (typeof input.nome === "string" && nomeReservadoAoNod(input.nome)) throw new ErroDeDominio("entrada_invalida", { cause: "nome reservado ao Nod" });
+  return criarAgenteSemReserva(deps, input);
+};
+
+/** O criar-agente sem a reserva do nome: só o garantirNod (onboarding.ts) chama, para criar o próprio Nod. */
+export const criarAgenteSemReserva: CasoDeUso<EntradaCriarAgente, SaidaCriarAgente> = async (deps, input) => {
   if (input.dono !== "pessoa" && input.dono !== "empresa") throw new ErroDeDominio("entrada_invalida", { cause: "dono" });
   if (input.nome !== undefined && typeof input.nome !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "nome" });
   validarInteligencia(input.harness ?? "auto", input.modelo ?? "auto");

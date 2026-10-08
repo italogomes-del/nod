@@ -15,6 +15,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehNod } from "../domain/nod.ts";
 import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
@@ -48,6 +49,8 @@ export type EntradaEmitirPlano = {
   modelosLigacao?: ModelosLigacao;
   /** O "A fazer" ligado (NOD_PENDENCIAS=1, lido pelo compositor). Ausente = desligado: nem ferramentas nem lista. */
   aFazer?: boolean;
+  /** ADR-082: NOD_GERIR_BOTS=0 desliga as ferramentas do Nod (o interruptor de rollback). Ausente = ligadas. */
+  semFerramentasDoNod?: boolean;
 };
 
 /**
@@ -203,7 +206,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const onboarding = ligacaoDoTurno?.iniciadaPor === "produto" && onb.guiaId === agente.id && (onb.etapa === "chamando" || onb.etapa === "entrevista" || onb.etapa === "configurando");
   // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE) no chat; um modelo
   // escolhido no perfil dela vale como em qualquer bot. revisto em 2026-10-05 (NOD-164): na ligação, não — ver abaixo.
-  const guiaNoMaisPotente = onb.guiaId === agente.id && turno.modelo === "auto";
+  // revisto em 2026-10-07 (ADR-081): o Nod é a guia — ele no "auto" roda no mais potente, com ou sem onboarding.
+  const guiaNoMaisPotente = (ehNod(agente) || onb.guiaId === agente.id) && turno.modelo === "auto";
   const modeloEscolhido = escolha ? (guiaNoMaisPotente ? modeloMaisPotente(escolha.harness) : null) ?? escolha.modelo : null;
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
@@ -237,6 +241,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     }),
     pendencias,
     aFazer: input.aFazer === true,
+    semFerramentasDoNod: input.semFerramentasDoNod === true,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).

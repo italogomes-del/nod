@@ -154,6 +154,8 @@ export const CODIGOS_ERRO = [
   "conector_indisponivel",
   "integracao_nao_configurada",
   "integracao_autenticacao",
+  // ADR-081 (0060): o Nod não se exclui, não se oculta, não se renomeia, não se move nem se duplica.
+  "nod_protegido",
 ] as const;
 export type CodigoErro = (typeof CODIGOS_ERRO)[number];
 

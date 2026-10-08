@@ -93,6 +93,9 @@ export function useCasesFalsos(): UseCasesNod {
     anotarEntrevista: naoImplementado("useCases.anotarEntrevista"),
     concluirEntrevista: naoImplementado("useCases.concluirEntrevista"),
     proporBot: naoImplementado("useCases.proporBot"),
+    gerirBots: naoImplementado("useCases.gerirBots"),
+    verAppsConectados: naoImplementado("useCases.verAppsConectados"),
+    registrarRelatoDoNod: naoImplementado("useCases.registrarRelatoDoNod"),
   };
 }
 

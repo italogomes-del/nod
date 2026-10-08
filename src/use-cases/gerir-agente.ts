@@ -1,5 +1,6 @@
 import type { Agente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehNod } from "../domain/nod.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -14,6 +15,8 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
   const atual = await deps.repos.agentes.buscar(input.agenteId, true);
   if (!atual) throw new ErroDeDominio("nao_encontrado");
   if (atual.ownerId !== deps.escopo.pessoaId) throw new ErroDeDominio("nao_permitido");
+  // ADR-081: o Nod não se exclui nem entra numa seção (ele vive no topo dos fixados ou na barra de cima).
+  if (ehNod(atual) && (input.acao === "excluir" || (typeof input.secao === "string" && input.secao.trim() !== ""))) throw new ErroDeDominio("nod_protegido", { cause: input.acao });
   if (input.secao !== undefined && (typeof input.secao !== "string" || input.secao.trim().length > 60)) throw new ErroDeDominio("entrada_invalida");
   if (input.naoLido !== undefined && typeof input.naoLido !== "boolean") throw new ErroDeDominio("entrada_invalida");
   if (input.fixado !== undefined && typeof input.fixado !== "boolean") throw new ErroDeDominio("entrada_invalida");

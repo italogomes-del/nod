@@ -1,4 +1,5 @@
 import type { Agente } from "../contracts/agente.ts";
+import { ehNod } from "../domain/nod.ts";
 import type { AppDoColega, ColegaListado } from "../contracts/ferramentas-perfil.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT } from "../domain/prompt-sistema.ts";
@@ -23,8 +24,9 @@ function cortar(texto: string, teto: number): string {
  * (emitir-plano-turno.ts) — outro bot do mesmo dono, confirmado e visível. Também decide de quem é a
  * rotina que ele pode pausar a pedido da pessoa (rotinas-do-agente.ts).
  */
-export function ehColega(eu: Pick<Agente, "id" | "ownerId">, a: Pick<Agente, "id" | "ownerId" | "confirmado" | "oculto">): boolean {
-  return a.id !== eu.id && a.ownerId === eu.ownerId && a.confirmado && !a.oculto;
+export function ehColega(eu: Pick<Agente, "id" | "ownerId">, a: Pick<Agente, "id" | "ownerId" | "confirmado" | "oculto" | "papel">): boolean {
+  // ADR-081: o Nod não é colega de ninguém — só a pessoa fala com ele (as mãos dele sobre os bots são da pessoa).
+  return a.id !== eu.id && a.ownerId === eu.ownerId && a.confirmado && !a.oculto && !ehNod(a);
 }
 
 /**
