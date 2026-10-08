@@ -5,7 +5,7 @@ import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.t
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, etiquetaOrigem, filtrar, memoriaLegivel, pilulaMemoria, pontoTrabalho, situacaoDe, tempoDe, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, agrupar, etiquetaOrigem, filtrar, memoriaLegivel, pilulaMac, pilulaMemoria, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { usd } from "./modo-dev.ts";
@@ -29,8 +29,8 @@ const etiqueta = (t: TrabalhoDto): string => `<span class="etiqueta-origem">${es
  * "lendo a planilha de receita · 15 min": o que faz e há quanto tempo (na fila, só o que espera). `vivo`: a atividade do
  * turno que roda, quando a tela a guarda — o passo anda a cada frame em vez de esperar o próximo `GET trabalhos`.
  */
-function progresso(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number, vivo?: AtividadeTurno): string {
-  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos);
+function progresso(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number, vivo?: AtividadeTurno, segurando = false): string {
+  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando);
   return t.estado === "na_fila" ? situacao : `${situacao} · ${tempoDe(t, agora)}`;
 }
 
@@ -61,7 +61,7 @@ export function renderFaixaTrabalhos(estado: Estado, agenteId: string): string {
     return `<div class="faixa-trab-lugar"><button type="button" class="pilula-trab" data-act="faixa-trabalhos" data-recolher="0" aria-label="Abrir os trabalhos de ${esc(nome)}: ${n} ${n === 1 ? "aberto" : "abertos"}">${ponto}<span><b>${n}</b> trabalhando</span>${ICONE.recolher}</button></div>`;
   }
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
-  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo">${esc(progresso(t, todos, estado.agora, atividadeDe(estado, t)))}</span><span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
+  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo">${esc(progresso(t, todos, estado.agora, atividadeDe(estado, t), estado.trabalhos?.segurando === true))}</span><span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
   return `<section class="faixa-trab" aria-label="Trabalhos de ${esc(nome)}"><div class="ft-cab"><span>Trabalhos do ${esc(nome)}</span><span class="ft-n">${n}</span><button type="button" class="ft-recolher" data-act="faixa-trabalhos" data-recolher="1" aria-label="Recolher em pílula" title="Recolher em pílula">${ICONE.abrir}</button></div>${linhas}</section>`;
 }
 
@@ -100,9 +100,9 @@ const GRUPOS: { chave: keyof GruposTrabalhos; titulo: string }[] = [
   { chave: "terminados", titulo: "Terminados hoje" },
 ];
 
-function detalheDaLinha(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number): string {
+function detalheDaLinha(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number, segurando = false): string {
   if (!aberto(t)) return `${hora(t.terminadoEm ?? t.criadoEm)} · ${tempoDe(t, agora)}${t.estado === "terminado" ? "" : ` · ${situacaoDe(t)}`}`;
-  return progresso(t, todos, agora);
+  return progresso(t, todos, agora, undefined, segurando);
 }
 
 /** O nível "Trabalhos" da gaveta do bot: os quatro grupos, só os que têm algo. */
@@ -111,7 +111,7 @@ export function renderGavetaTrabalhos(estado: Estado, agenteId: string): string 
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
   const grupos = agrupar(todos.filter((t) => t.agenteId === agenteId), estado.agora);
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => {
-    const linhas = grupos[g.chave].map((t) => `<button type="button" class="gv-linha tr-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="gv-linha-txt"><b>${esc(t.titulo)} ${etiqueta(t)}</b><small>${esc(detalheDaLinha(t, todos, estado.agora))}</small></span></button>`).join("");
+    const linhas = grupos[g.chave].map((t) => `<button type="button" class="gv-linha tr-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="gv-linha-txt"><b>${esc(t.titulo)} ${etiqueta(t)}</b><small>${esc(detalheDaLinha(t, todos, estado.agora, estado.trabalhos?.segurando === true))}</small></span></button>`).join("");
     return `<section class="gv-secao tr-grupo" data-grupo="${g.chave}"><h3>${g.titulo} · ${grupos[g.chave].length}</h3><div class="gv-cartao">${linhas}</div></section>`;
   });
   if (!estado.trabalhos && secoes.length === 0) return '<p class="mudo">carregando…</p>';
@@ -147,12 +147,14 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   const grupos = agrupar(filtrar(todos, filtro), estado.agora);
   const filtros = FILTROS.map((f) => `<button type="button" class="tt-filtro${f.id === filtro ? " ativo" : ""}" data-act="filtro-trabalhos" data-id="${f.id}" aria-pressed="${f.id === filtro}">${f.nome}</button>`).join("");
   const abertos = todos.filter(aberto).length;
-  const pilula = pilulaMemoria(estado.pressao, abertos, false);
+  // ADR-085: a pílula de memória já diz que o Mac está apertado; sem ela, a do Mac ocupado (pelo uso que a pessoa escolheu).
+  const segurando = estado.trabalhos.segurando === true;
+  const pilula = pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, todos.filter((t) => seguradoPeloMac(t, segurando)).length);
   const linha = (t: TrabalhoDto): string => {
     const bot = agente(estado, t.agenteId);
     const mem = aberto(t) && t.memoriaMb !== null ? ` · ${memoriaLegivel(t.memoriaMb)}` : "";
     const fim = aberto(t) ? (t.estado === "na_fila" ? "" : tempoDe(t, estado.agora)) : hora(t.terminadoEm ?? t.criadoEm);
-    return `<button type="button" class="tt-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="tt-bot">${bot ? iconeAgente(bot, "sm") : ""}<b>${esc(bot?.nome ?? "bot")}</b></span><span class="tt-meio"><span class="tt-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="tt-passo">${esc(situacaoDe(t, todos))}</span></span><span class="tt-fim">${esc(fim + mem)}</span></button>`;
+    return `<button type="button" class="tt-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="tt-bot">${bot ? iconeAgente(bot, "sm") : ""}<b>${esc(bot?.nome ?? "bot")}</b></span><span class="tt-meio"><span class="tt-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="tt-passo">${esc(situacaoDe(t, todos, segurando))}</span></span><span class="tt-fim">${esc(fim + mem)}</span></button>`;
   };
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => `<section class="tt-grupo" data-grupo="${g.chave}"><h2>${g.titulo} · ${grupos[g.chave].length}${g.chave === "trabalhando" && grupos.trabalhando.some((t) => t.memoriaMb !== null) ? " · os que mais usam memória primeiro" : ""}</h2><div class="tt-lista">${grupos[g.chave].map(linha).join("")}</div></section>`).join("");
   const vazio = filtro === "todos" ? "Nenhum bot está trabalhando agora. Quando um bot abrir uma task, rodar uma rotina ou atender um colega, aparece aqui." : "Nada com este filtro hoje.";

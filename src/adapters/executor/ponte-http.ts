@@ -41,8 +41,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
   }
   const ponte: PonteInterna = {
     async conectar(m) { anuncio = m; await chamar("conectar", m); },
-    async puxar() {
-      try { return (await chamar<{ plano: PlanoTurno | null }>("puxar", {})).plano; }
+    async puxar(_pessoaId, maquina) {
+      try { return (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano; }
       catch (e) {
         if (e instanceof FalhaPonte && e.codigo === "reconectar" && anuncio) await ponte.conectar(anuncio);
         throw e;

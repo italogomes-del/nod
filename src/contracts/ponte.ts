@@ -105,7 +105,8 @@ export type VigiaVivo = { mudoMs: number; aberta?: string; emFundo: number; repe
  */
 export interface PonteInterna {
   conectar(m: AnuncioMaquina): Promise<void>;
-  puxar(pessoaId: string): Promise<PlanoTurno | null>;
+  /** ADR-085 (2026-10-08): `maquina` é a leitura do Mac que pede (memória e processador); ausente = app antigo ou sem leitura. */
+  puxar(pessoaId: string, maquina?: LeituraMemoria): Promise<PlanoTurno | null>;
   renovar(p: PedidoRenovar): Promise<RespostaRenovar>;
   entregar(e: Entrega): Promise<void>;
   desconectar(machineId: string): Promise<void>;

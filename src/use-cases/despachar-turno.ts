@@ -24,6 +24,8 @@ export type EntradaDespacharTurno = {
   harnessesDaPessoa?: Partial<Record<IdHarness, Inventario>>;
   /** ADR-072: a máquina anunciou o laço de voz; só então recebe o turno da ligação. */
   aceitaLigacao?: boolean;
+  /** ADR-085: o Mac está apertado pelo "uso do Mac" da pessoa — trabalho novo em segundo plano espera. */
+  segurarFundo?: boolean;
 };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
@@ -47,7 +49,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
     : undefined;
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao });
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);

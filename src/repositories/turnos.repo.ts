@@ -191,7 +191,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fixado num harness que não está pronto em NENHUMA delas; o despacho o recusa nomeando o harness. Sem isso ele
      * ficava pendente sem aviso no app do Mac. O fixado que outra máquina tem pronto continua esperando por ela.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         const [l] = await trx<Linha[]>`
@@ -215,6 +215,10 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   -- O turno de um trabalho espera só outro turno do MESMO trabalho e o trabalho de que ele depende
                   -- ("Fazer depois da …"), até ele terminar, parar ou falhar.
                   and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando')
+                  -- definido em 2026-10-08 (ADR-085): com o Mac apertado (pelo "uso do Mac" da pessoa), trabalho NOVO em
+                  -- segundo plano — rotina ou pedido de colega que ainda não começou — espera. O que já começou segue,
+                  -- e a task que a pessoa abriu também: ela está esperando.
+                  and not (${p.segurarFundo === true} and exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null and w.origem in ('rotina', 'colega')))
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
             -- Ligação primeiro; depois o que não é rotina nem pedido de colega (o turno ou o trabalho dele); depois a ordem.

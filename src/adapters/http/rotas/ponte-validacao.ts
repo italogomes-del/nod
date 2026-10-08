@@ -83,7 +83,12 @@ export function memoria(v: unknown): LeituraMemoria | undefined {
     exigir(typeof t.turnoId === "string" && UUID.test(t.turnoId) && typeof t.mb === "number" && Number.isFinite(t.mb) && t.mb >= 0 && t.mb <= TETO_MB);
     return { turnoId: t.turnoId, mb: t.mb };
   });
-  return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
+  // ADR-085: o processador é opcional (app anterior à 0.4.0-rc.6 não manda); a carga por núcleo vai até 1000 (um Mac
+  // travado passa de 20 — medido em 06/10: 265 em 12 núcleos).
+  if (o.processador === undefined) return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
+  const p = objeto(o.processador);
+  exigir((p.nivel === "verde" || p.nivel === "amarela" || p.nivel === "vermelha") && typeof p.carga === "number" && Number.isFinite(p.carga) && p.carga >= 0 && p.carga <= 1000);
+  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, processador: { nivel: p.nivel, carga: p.carga } };
 }
 const NOME_FERRAMENTA = /^[A-Za-z0-9_.-]+$/;
 const nomeDeFerramenta = (v: unknown): v is string => texto(v, 200) && NOME_FERRAMENTA.test(v);

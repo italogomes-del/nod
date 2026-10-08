@@ -119,8 +119,10 @@ export function criarPonteHttpServidor(d: {
       }
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),
-    rota("puxar", async (ctx) => {
+    rota("puxar", async (ctx, b) => {
       const c = conexao(ctx);
+      // ADR-085: a leitura do Mac (memória e processador) vem no corpo; app antigo manda `{}`.
+      const mem = memoria(b.memoria);
       if (c.puxando) throw new ErroDeDominio("estado_invalido");
       c.puxando = true;
       try {
@@ -134,7 +136,7 @@ export function criarPonteHttpServidor(d: {
           if (drenando) break;
           if (c.inv.estado === "pronto") {
             reservando++;
-            try { plano = await c.ponte.puxar(ctx.escopo.pessoaId); } finally { reservando--; }
+            try { plano = await c.ponte.puxar(ctx.escopo.pessoaId, mem); } finally { reservando--; }
           }
           if (plano) { c.planos.set(plano.turnoId, plano); break; }
           if (drenando) break;

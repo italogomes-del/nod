@@ -63,12 +63,13 @@ export function tempoDe(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "termin
  * O que o trabalho está fazendo, em poucas palavras: o último passo, quem segura o computador, ou o estado. Sem o tempo
  * (quem desenha junta "· 15 min" quando cabe).
  */
-export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = []): string {
+export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false): string {
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
-      return antes ? `começa depois da ${antes.titulo}` : "na fila";
+      if (antes) return `começa depois da ${antes.titulo}`;
+      return seguradoPeloMac(t, segurando) ? "esperando o Mac aliviar" : "na fila";
     }
     case "precisa_de_voce":
       return t.ultimoPasso ?? "precisa de você";
@@ -83,6 +84,28 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = []): 
     case "falhou":
       return "não terminou";
   }
+}
+
+/**
+ * ADR-085 (definido em 2026-10-08): o Mac está apertado e este trabalho é dos que esperam — rotina ou pedido de colega
+ * que ainda não começou (a mesma regra do `reivindicar`, src/repositories/turnos.repo.ts).
+ */
+export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "origem" | "iniciadoEm">, segurando: boolean): boolean {
+  return segurando && t.estado === "na_fila" && t.iniciadoEm === null && (t.origem === "rotina" || t.origem === "colega");
+}
+
+/**
+ * A pílula "Seu Mac está ocupado" (ADR-085): o Mac passou do que a pessoa escolheu em Este Mac e trabalho novo em
+ * segundo plano espera. Mesma forma da pílula de memória (#196), com o "Ver" levando a Este Mac. A de memória, quando
+ * existe, já diz o mesmo: esta não entra junto.
+ */
+export function pilulaMac(segurando: boolean, esperando: number, comVer = true): string {
+  if (!segurando) return "";
+  const n = esperando > 0 ? `<span class="pm-detalhe">· ${esperando} ${esperando === 1 ? "trabalho espera" : "trabalhos esperam"} o Mac aliviar</span>` : '<span class="pm-detalhe">· trabalho novo espera o Mac aliviar</span>';
+  const miolo = `${ICONE_MEMORIA}<b>Seu Mac está ocupado</b>${n}`;
+  return comVer
+    ? `<div class="linha-centro-wrap" role="status"><button type="button" class="pilula-memoria amarela" data-act="secao-espaco" data-secao="este-mac">${miolo}<span class="pm-ver">Ver ›</span></button></div>`
+    : `<div class="linha-centro-wrap" role="status"><span class="pilula-memoria amarela">${miolo}</span></div>`;
 }
 
 /** "620 MB", "1,4 GB". */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leituraDoTurno, nivelDaPressao, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
+import { cargaDoLoadavg, deveSegurar, leituraDoTurno, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
 
 /** #194 (ADR-083 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
 describe("nível de pressão", () => {
@@ -39,5 +39,58 @@ describe("memória por grupo (ps -A -o pgid=,rss=)", () => {
     const rss = somarPorGrupo(PS);
     expect(leituraDoTurno({ nivel: "verde", rssPorGrupo: rss, gruposVivos: [101], turnoId: "t2", grupo: null })).toEqual({ nivel: "verde", totalMb: 3, porTurno: [] });
     expect(leituraDoTurno({ nivel: "verde", rssPorGrupo: rss, gruposVivos: [404], turnoId: "t3", grupo: 404 })).toEqual({ nivel: "verde", totalMb: 0, porTurno: [] });
+  });
+});
+
+/** ADR-085 (definido em 2026-10-08): o processador do Mac e a regra de segurar trabalho novo em segundo plano. */
+describe("processador", () => {
+  it("vm.loadavg do macOS: a primeira carga é a do último minuto; saída estranha = sem leitura", () => {
+    expect(cargaDoLoadavg("{ 2.43 2.12 1.98 }\n")).toBe(2.43);
+    expect(cargaDoLoadavg("265.08 180.3 120.1")).toBe(265.08);
+    expect(cargaDoLoadavg("")).toBeNull();
+    expect(cargaDoLoadavg("{ abc }")).toBeNull();
+  });
+
+  it("carga por núcleo: verde abaixo de 0,7, amarela até 1,0, vermelha a partir de 1,0 (06/10: 265 em 12 núcleos)", () => {
+    expect(nivelDoProcessador(4, 12)).toEqual({ nivel: "verde", carga: 0.33 });
+    expect(nivelDoProcessador(9, 12)).toEqual({ nivel: "amarela", carga: 0.75 });
+    expect(nivelDoProcessador(12, 12)).toEqual({ nivel: "vermelha", carga: 1 });
+    expect(nivelDoProcessador(265, 12).nivel).toBe("vermelha");
+    expect(nivelDoProcessador(3, 0)).toEqual({ nivel: "verde", carga: 0 });
+  });
+
+  it("a leitura da máquina leva o processador; sem turno, sem linha por turno", () => {
+    const rss = somarPorGrupo(["  101  2048", "  101  1024"].join("\n"));
+    expect(leituraDoTurno({ nivel: "amarela", rssPorGrupo: rss, gruposVivos: [101], turnoId: null, grupo: null, processador: { nivel: "verde", carga: 0.2 } }))
+      .toEqual({ nivel: "amarela", totalMb: 3, porTurno: [], processador: { nivel: "verde", carga: 0.2 } });
+  });
+
+  it("o pior de dois níveis; sem leitura não piora nada", () => {
+    expect(piorNivel("verde", "vermelha")).toBe("vermelha");
+    expect(piorNivel(null, "amarela")).toBe("amarela");
+    expect(piorNivel(null, null)).toBeNull();
+  });
+});
+
+describe("segurar trabalho novo (uso do Mac)", () => {
+  it("livre nunca segura, nem com o Mac vermelho", () => {
+    expect(deveSegurar("livre", "vermelha", "vermelha")).toBe(false);
+  });
+
+  it("equilibrado: memória em alerta ou processador cheio", () => {
+    expect(deveSegurar("equilibrado", "amarela", "verde")).toBe(true);
+    expect(deveSegurar("equilibrado", "verde", "vermelha")).toBe(true);
+    expect(deveSegurar("equilibrado", "verde", "amarela")).toBe(false);
+    expect(deveSegurar("equilibrado", "verde", "verde")).toBe(false);
+  });
+
+  it("pouco: já com o processador começando a apertar", () => {
+    expect(deveSegurar("pouco", "verde", "amarela")).toBe(true);
+    expect(deveSegurar("pouco", "verde", "verde")).toBe(false);
+  });
+
+  it("sem leitura (nenhum Mac falou, ou app sem processador) não segura", () => {
+    expect(deveSegurar("pouco", null, null)).toBe(false);
+    expect(deveSegurar("equilibrado", "verde", null)).toBe(false);
   });
 });

@@ -426,6 +426,7 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-083: a rede de 2 min só promove quem já chamou ferramenta; a memória do Mac fica em memória do processo.
     fezFerramenta: (id) => trabalhosVivos.ultimaFerramenta(id) !== null,
     registrarMemoria: (pessoaId, machineId, leitura) => trabalhosVivos.registrarMemoria(pessoaId, machineId, leitura),
+    pressaoDaMaquina: (machineId) => trabalhosVivos.daMaquina(machineId),
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;

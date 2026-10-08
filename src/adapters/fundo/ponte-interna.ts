@@ -18,7 +18,8 @@ import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-tr
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
-import type { LeituraMemoria } from "../../contracts/trabalho.ts";
+import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
+import { deveSegurar } from "../../domain/memoria-mac.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -55,6 +56,8 @@ export type DepsPonte = {
   fezFerramenta?: (turnoId: string) => boolean;
   /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
+  /** ADR-085: a última leitura viva deste Mac (memória e processador); null = sem leitura, e então nada é segurado. */
+  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null } | null;
   /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
   redeMs?: number;
 };
@@ -169,12 +172,14 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       maquinas.delete(machineId);
     },
 
-    async puxar(pessoaId): Promise<PlanoTurno | null> {
+    async puxar(pessoaId, leituraDoMac): Promise<PlanoTurno | null> {
       esquecerVencidos();
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return null;
       const maquina = maquinas.values().next().value;
       if (!maquina) return null;
+      // ADR-085: a leitura que veio no puxar entra como a da renovação; a mudança de nível vira o mesmo frame.
+      const mudanca = leituraDoMac ? deps.registrarMemoria?.(pessoaId, maquina.machineId, leituraDoMac) : undefined;
       // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do
       // `cunhar` (composição, outbox, commit), o turno volta a `pendente` e ninguém recebe o plano: o token cunhado
       // aqui é revogado, senão ele conta em `ativos()` para sempre e segura a drenagem do SIGTERM até o prazo.
@@ -186,7 +191,12 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
-          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
+          if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
+          const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
+          // "Pouco" é o mais apertado: se nem ele seguraria, nenhum segura, e a preferência nem é lida (puxar a cada 1 s).
+          const segurarFundo = pressao !== null && deveSegurar("pouco", pressao.memoria, pressao.processador)
+            && deveSegurar((await d.repos.preferencias.buscar()).usoDoMac ?? "equilibrado", pressao.memoria, pressao.processador);
+          const r = await despacharTurno(d, { segurarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());

@@ -2120,13 +2120,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     preferencias: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
-      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false };
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false, usoDoMac: "equilibrado" };
       return {
         async buscar() {
           return atual();
         },
         async gravar(p) {
-          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}) };
+          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}) };
           b.preferencias.set(chave, nova);
           return nova;
         },

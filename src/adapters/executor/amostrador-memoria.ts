@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
-import { leituraDoTurno, nivelDaPressao, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
+import { availableParallelism } from "node:os";
+import type { LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
+import { cargaDoLoadavg, leituraDoTurno, nivelDaPressao, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 
 /**
@@ -14,6 +15,11 @@ import { log } from "../../obs/log.ts";
 export type FonteMemoria = {
   /** A última leitura, com a linha deste turno quando ele tem grupo (null = turno sem processo próprio). */
   leitura(turnoId: string, grupo: number | null): LeituraMemoria;
+  /**
+   * definido em 2026-10-08 (ADR-085): a leitura da máquina sem turno (o nível, o total dos grupos vivos e o processador),
+   * que vai no `puxar`: com ela o servidor sabe se o Mac está apertado antes de entregar trabalho novo.
+   */
+  daMaquina?(): LeituraMemoria;
   /** O turno acabou: o grupo dele sai da soma. */
   soltar(turnoId: string): void;
   /**
@@ -42,12 +48,14 @@ const executarPadrao: Executar = (bin, args) =>
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; nucleos?: number }): AmostradorMemoria {
+  const nucleos = o.nucleos ?? availableParallelism();
   const executar = o.executar ?? executarPadrao;
   const intervaloMs = o.intervaloMs ?? INTERVALO_AMOSTRA_MEMORIA_MS;
   const grupos = new Map<string, number>();
   let nivel: NivelPressao = "verde";
   let rss = new Map<number, number>();
+  let processador: LeituraProcessador | null = null;
   let numeroDaAmostra = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   let amostrando: Promise<void> | null = null;
@@ -72,6 +80,22 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     }
   }
 
+  /**
+   * ADR-085: a carga do último minuto por núcleo. `NOD_SIMULAR_PROCESSADOR` (carga por núcleo, ex.: 1.2) força a leitura
+   * para testes e UAT, como `NOD_SIMULAR_PRESSAO` faz com a memória. Falha = sem leitura (null), nunca um aviso falso.
+   */
+  async function lerProcessador(): Promise<LeituraProcessador | null> {
+    const simulado = Number(o.env.NOD_SIMULAR_PROCESSADOR);
+    if (o.env.NOD_SIMULAR_PROCESSADOR && Number.isFinite(simulado) && simulado >= 0) return nivelDoProcessador(simulado * nucleos, nucleos);
+    try {
+      const carga = cargaDoLoadavg(await executar("/usr/sbin/sysctl", ["-n", "vm.loadavg"]));
+      return carga === null ? null : nivelDoProcessador(carga, nucleos);
+    } catch (erro) {
+      avisar("processador_sem_leitura", erro);
+      return null;
+    }
+  }
+
   async function lerGrupos(): Promise<Map<number, number>> {
     if (grupos.size === 0) return new Map();
     try {
@@ -85,10 +109,11 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   function amostrar(): Promise<void> {
     amostrando ??= (async () => {
       try {
-        const [n, r] = await Promise.all([lerNivel(), lerGrupos()]);
-        if (n !== nivel || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
+        const [n, r, p] = await Promise.all([lerNivel(), lerGrupos(), lerProcessador()]);
+        if (n !== nivel || p?.nivel !== processador?.nivel || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
         nivel = n;
         rss = r;
+        processador = p;
       } finally {
         amostrando = null;
       }
@@ -111,7 +136,11 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       comecar();
       // Grupo novo: a próxima amostra já o mede, sem esperar a batida de 30 s.
       if (novo && !rss.has(grupo)) void amostrar();
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador });
+    },
+    daMaquina() {
+      comecar();
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador });
     },
     soltar(turnoId) {
       grupos.delete(turnoId);

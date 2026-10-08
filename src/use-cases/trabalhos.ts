@@ -5,6 +5,7 @@ import type { Mensagem } from "../contracts/mensagem.ts";
 import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { deveSegurar } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { NovoTrabalho } from "../repositories/trabalhos.repo.ts";
@@ -161,6 +162,10 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, t
       // O nome da última ferramenta do turno vivo (o processo sabe) ganha da última fala, que pode ser de minutos atrás.
       ultimoPasso: (vivo ? deps.services.trabalhosVivos?.ultimaFerramenta(vivo) : null) ?? (e?.ultimaFala ? tituloDoTrabalho(e.ultimaFala) : null),
       turnoVivoId: vivo,
+      // revisto em 2026-10-08 (ADR-085): a memória é a do processo vivo. Sem turno vivo (esperando você, um colega ou a
+      // vez na fila) não há processo, e a última leitura gravada fazia "Todos os trabalhos" somar vários GB que o Mac
+      // não usava (o topo dizia 606 MB e as linhas, 18 × 200–400 MB).
+      memoriaMb: vivo ? t.memoriaMb : null,
       deFora: e?.deFora ?? false,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
@@ -178,7 +183,11 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   if (input.agenteId && !(await deps.repos.agentes.buscar(input.agenteId))) throw new ErroDeDominio("nao_encontrado");
   const trabalhos = await deps.repos.trabalhos.listar({ agenteId: input.agenteId, terminadosDesde: deps.agora() - JANELA_TERMINADOS_MS });
   const memoria = deps.services.trabalhosVivos?.memoria(deps.escopo.pessoaId) ?? null;
-  return { data: { trabalhos: await trabalhosParaDto(deps, trabalhos), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null } };
+  const processador = memoria?.processador ?? null;
+  // ADR-085: a pessoa vê que trabalho novo está esperando pelo mesmo critério do puxar (o pior Mac dela).
+  const segurando = memoria !== null && deveSegurar("pouco", memoria.nivel, processador)
+    && deveSegurar((await deps.repos.preferencias.buscar()).usoDoMac ?? "equilibrado", memoria.nivel, processador);
+  return { data: { trabalhos: await trabalhosParaDto(deps, trabalhos), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando } };
 };
 
 /** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */

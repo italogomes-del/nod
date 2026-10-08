@@ -12,7 +12,7 @@ import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
-import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
+import type { RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
@@ -71,7 +71,7 @@ export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
  * camada de tela cheia POR CIMA da tela atual, que continua montada embaixo — sair devolve a conversa exata (rolagem,
  * rascunho, gaveta). Gerenciar agentes, Relatos e Computadores deixaram de ser telas e viraram seções daqui.
  */
-export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "computadores" | "agentes" | "relatos";
+export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "computadores" | "agentes" | "relatos";
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
@@ -241,6 +241,8 @@ export type Estado = {
   pressao: NivelPressao | null;
   /** A faixa de Trabalhos em cima do campo recolhida numa pílula (preferência da pessoa, `PUT preferencias`). */
   faixaTrabalhosRecolhida: boolean;
+  /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
+  usoDoMac: UsoDoMac;
 };
 
 export type Acao =
@@ -294,6 +296,7 @@ export type Acao =
   /** O `GET trabalhos/:id` voltou 404: a task não existe (ou não é desta pessoa). */
   | { tipo: "trabalho-sumiu"; id: string }
   | { tipo: "faixa-trabalhos"; recolhida: boolean }
+  | { tipo: "uso-do-mac"; uso: UsoDoMac }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
 export const estadoInicial: Estado = {
@@ -347,6 +350,7 @@ export const estadoInicial: Estado = {
   trabalhoDetalhe: {},
   pressao: null,
   faixaTrabalhosRecolhida: false,
+  usoDoMac: "equilibrado",
 };
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
@@ -789,6 +793,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "faixa-trabalhos":
       return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
+    case "uso-do-mac":
+      return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
     case "hidratar-taxas-linhas":
       return estado.modoDev.ligado ? { ...estado, modoDev: { ...estado.modoDev, taxasLinhas: acao.taxas } } : estado;
     case "esquecer-disponibilidade-ligacao": {

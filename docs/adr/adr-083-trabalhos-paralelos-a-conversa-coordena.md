@@ -29,7 +29,8 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
    só outro turno de conversa da mesma conversa; turno de trabalho espera só outro turno do mesmo trabalho e o trabalho
    de `depois_de_trabalho_id`. O mesmo bot pode responder na conversa direta e numa sala ao mesmo tempo (conversas
    diferentes). O ramo da ligação não muda. Ordem: ligação primeiro, depois o que não é rotina nem colega.
-4. **Sem teto.** O limite é a máquina: o Mac lê a pressão de memória do macOS
+4. **Sem teto.** (Emendado em 2026-10-08 pela [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md): a pessoa escolhe o
+   uso do Mac, o processador também é medido, e o Mac apertado segura trabalho novo em segundo plano.) O limite é a máquina: o Mac lê a pressão de memória do macOS
    (`kern.memorystatus_vm_pressure_level`: 1 verde, 2 amarela, 4 vermelha) uma vez por máquina a cada 30 s e manda na
    renovação. Amarela: aviso e o processo de trabalho parado esperando a pessoa fecha em 5 min (verde: 1 h) e volta
    com `--resume`. Vermelha: aviso em tom de alerta. Nunca para trabalho rodando.

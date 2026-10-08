@@ -349,7 +349,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     while (!parado) {
       let plano: PlanoTurno | null = null;
       try {
-        plano = await o.ponte.puxar(o.pessoaId);
+        // ADR-085: a leitura do Mac vai junto — sem ela o servidor não sabe se o Mac está apertado sem turno rodando.
+        plano = await o.ponte.puxar(o.pessoaId, o.memoria?.daMaquina?.());
       } catch (erro) {
         log("aviso", "laco_puxar_falhou", { erro: erro instanceof Error ? erro.name : "desconhecido" });
       }
