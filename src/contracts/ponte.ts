@@ -1,4 +1,4 @@
-import type { IdHarness } from "./harness.ts";
+import type { CapacidadesHarness, IdHarness } from "./harness.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
 import type { MotivoPasse } from "./motivos.ts";
@@ -28,6 +28,12 @@ export type AnuncioMaquina = {
    * de um bot com essa IA com o motivo `codex_sem_app_server`. Ausente = app antigo, ou todas rodam.
    */
   semLacoDeVoz?: IdHarness[];
+  /**
+   * definido em 2026-10-08 (ADR-081, revisão do épico): as capacidades que os drivers DESTA máquina declaram, já com os
+   * pisos do CLI instalado (ex.: `bifurcaSessao` só com `--fork-session` no help). O servidor só promove pela rede de
+   * 2 min quando a máquina do turno anunciou `bifurcaSessao`. Ausente = app antigo: nada que dependa disso acontece.
+   */
+  capacidades?: Partial<Record<IdHarness, CapacidadesHarness>>;
 };
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */
@@ -40,6 +46,8 @@ export type Entrega = {
   seqLocal: number;
   fala: FalaEntrega;
   resultado: ResultadoTurno;
+  /** #189: mensagens escritas na sessão cuja confirmação não chegou numa renovação (a última falhou); a entrega confirma. */
+  mensagensEntregues?: string[];
 };
 
 /**
@@ -74,7 +82,8 @@ export type PedidoRenovar = {
  * O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067).
  * `mensagensIds` (#189): o id do turno de cada uma, na mesma ordem, para o app confirmar em `mensagensEntregues`.
  */
-export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; ligacaoEncerrada?: boolean };
+/** `mensagensSemMoldura`: ids (de `mensagensIds`) que são recado para a task, não fala da pessoa — entram sem a moldura. */
+export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
