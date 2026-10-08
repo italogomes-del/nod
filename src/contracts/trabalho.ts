@@ -69,6 +69,11 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   turnoVivoId: string | null;
   /** Título do trabalho que segura o computador do bot, quando este está esperando por ele. */
   esperandoComputadorDe: string | null;
+  /**
+   * definido em 2026-10-08 (revisão do épico, S24): o título e o último passo podem trazer texto de fora (task de colega,
+   * ou um turno dela leu conteúdo de fora). O prompt da conversa os marca com cuidado.
+   */
+  deFora?: boolean;
 };
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */

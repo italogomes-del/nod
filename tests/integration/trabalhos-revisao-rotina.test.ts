@@ -49,4 +49,27 @@ describeIntegracao("revisão #188 — rotina e tasks (S12)", () => {
       expect(await base.repos.trabalhos.filhos(mae.id)).toHaveLength(TETO_TASKS_POR_EXECUCAO_DE_ROTINA);
     });
   });
+
+  it("S24: na conversa, a task de colega e a que leu conteúdo de fora vêm marcadas com cuidado; a limpa, não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const base = await agenteComConversa(trx, MARLON, { nome: "Ada" });
+      await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
+      const agora = () => Date.now();
+      const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
+      const turno = async (trabalhoId: string | null) => (await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId }))!;
+      const task = async (titulo: string, origem: "pessoa" | "colega") => (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem })).trabalho;
+      const colega = await task("Pedido do Chico", "colega");
+      const lida = await task("Leu a página", "pessoa");
+      const limpa = await task("Limpa", "pessoa");
+      await base.repos.turnos.contaminar((await turno(lida.id)).id, Date.now());
+      await turno(limpa.id);
+      const volatil = (await emitirPlanoTurno(deps, { turnoId: (await turno(null)).id, machineId: randomUUID(), executor: "local", harnesses })).data.promptSistemaPartes?.volatil ?? "";
+      const linha = volatil.split("\n").find((l) => l.startsWith("Trabalhos em andamento")) ?? "";
+      expect(linha).toContain("As marcadas com cuidado trazem texto de fora");
+      const lista = JSON.parse(linha.slice(linha.indexOf("["))) as { id: string; cuidado?: boolean }[];
+      expect(lista.find((t) => t.id === colega.id)?.cuidado).toBe(true);
+      expect(lista.find((t) => t.id === lida.id)?.cuidado).toBe(true);
+      expect(lista.find((t) => t.id === limpa.id)?.cuidado).toBeUndefined();
+    });
+  });
 });

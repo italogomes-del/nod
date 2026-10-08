@@ -76,7 +76,11 @@ export type NovoTrabalho = {
 
 /** O que a faixa, as listas e o prompt mostram além da linha: lido junto, numa consulta. */
 /** `turnosAbertos`: pendentes e rodando (o computador ocupado olha os dois). */
-export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[] };
+/**
+ * `deFora` (revisão do épico, S24, 2026-10-08): o título e o último passo podem trazer texto de fora — a task é de um
+ * colega (o título é o pedido de outro bot) ou um turno dela leu conteúdo de fora (ADR-062) ou nasceu não confiável.
+ */
+export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[]; deFora: boolean };
 
 /**
  * Trabalhos do bot (ADR-081, 0060). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
@@ -259,8 +263,10 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
     async extras(ids: readonly string[]): Promise<Map<string, ExtrasTrabalho>> {
       if (ids.length === 0) return new Map();
-      const linhas = await conn<{ id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null }[]>`
+      const linhas = await conn<{ id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
+          (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
+            and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
           (select array_agg(t.id order by t.criado_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as abertos
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
@@ -274,7 +280,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           select t.id from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'despachando' order by t.criado_em limit 1
         ) v on true
         where w.tenant_id = ${escopo.tenantId} and w.id = any(${[...ids]}::uuid[])`;
-      return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id, turnosAbertos: l.abertos ?? [] }]));
+      return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id, turnosAbertos: l.abertos ?? [], deFora: l.de_fora }]));
     },
   };
 }

@@ -346,11 +346,13 @@ export function criarComputadores(o: Opcoes) {
         const args = argumentos as Record<string, unknown>;
         // ADR-081 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
         if (c.ocupadoAte && c.ocupadoAte > d.agora()) {
-          const emUsoPor = (await d.repos.computadores.emUsoPor(c.id)) ?? "outra tarefa";
-          esperando.set(plano.turnoId, emUsoPor);
+          const uso = (await d.repos.computadores.emUsoPor(c.id)) ?? { titulo: "outra tarefa", deFora: false };
+          esperando.set(plano.turnoId, uso.titulo);
           // Turno que acabou esperando não volta para tirar a marca: guarda as 500 mais novas.
           if (esperando.size > 500) esperando.delete(esperando.keys().next().value!);
-          return { ok: true, isError: true, conteudo: ocupadoParaAgente(emUsoPor, c.ocupadoAte, d.agora()), confianca: "confiavel" };
+          // Revisão do épico (S24, 2026-10-08): o título de uma task de colega (ou que leu conteúdo de fora) é texto de
+          // fora — o resultado vai marcado não confiável, como todo conteúdo de fora que entra no turno.
+          return { ok: true, isError: true, conteudo: ocupadoParaAgente(uso.titulo, c.ocupadoAte, d.agora()), confianca: uso.deFora ? "nao_confiavel" : "confiavel" };
         }
         esperando.delete(plano.turnoId);
         if (nome === "computador_pedir_ajuda") {

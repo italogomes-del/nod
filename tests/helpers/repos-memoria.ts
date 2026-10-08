@@ -904,7 +904,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
       },
       async extras(ids) {
-        const saida = new Map<string, { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[] }>();
+        const saida = new Map<string, { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[]; deFora: boolean }>();
         for (const id of ids) {
           const t = doTenant(b.trabalhos).find((x) => x.id === id);
           if (!t) continue;
@@ -917,6 +917,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             ultimaFala: falas.at(-1)?.texto ?? null,
             turnoVivoId: turnos.find((x) => x.estado === "despachando")?.id ?? null,
             turnosAbertos: turnos.filter((x) => x.estado === "pendente" || x.estado === "despachando").map((x) => x.id),
+            deFora: t.origem === "colega" || turnos.some((x) => b.contaminados.has(x.id) || x.entradaConfianca !== "confiavel"),
           });
         }
         return saida;
