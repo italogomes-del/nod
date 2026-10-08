@@ -864,8 +864,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         for (const p of porTurno) {
           const turno = doTenant(b.turnos).find((x) => x.id === p.turnoId);
           const t = turno?.trabalhoId ? doTenant(b.trabalhos).find((x) => x.id === turno.trabalhoId && x.ownerId === escopo.pessoaId) : undefined;
-          if (!t) continue;
-          t.memoriaMb = Math.max(0, Math.round(p.mb));
+          const mb = Math.max(0, Math.round(p.mb));
+          if (!t || t.memoriaMb === mb) continue;
+          t.memoriaMb = mb;
           n += 1;
         }
         return n;
@@ -1192,6 +1193,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((t) => t.ownerId === escopo.pessoaId && t.origem === "conversa" && t.estado === "interrompido" && t.motivoInterrupcao === "executor_indisponivel" && t.criadoEm >= desde)
           .filter((t) => !meus.some((n) => n.conversaId === t.conversaId && n.criadoEm > t.criadoEm))
           .sort((x, y) => x.criadoEm - y.criadoEm);
+      },
+      async travarAbertosDoTrabalho(trabalhoId: string) {
+        return doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId && (t.estado === "pendente" || t.estado === "despachando")).sort((x, y) => x.criadoEm - y.criadoEm);
       },
       async doTrabalho(trabalhoId) {
         return doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId).sort((x, y) => x.criadoEm - y.criadoEm);

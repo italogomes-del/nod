@@ -571,6 +571,18 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraTurno);
     },
 
+    /**
+     * definido em 2026-10-08 (revisão do épico, S20): trava (FOR UPDATE) os turnos pendentes e rodando de um trabalho, em
+     * ordem de criação — a mesma em que a renovação e a entrega os pegam (o turno vivo, mais velho, antes dos recados).
+     */
+    async travarAbertosDoTrabalho(trabalhoId: string): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and trabalho_id = ${trabalhoId} and estado in ('pendente', 'despachando')
+        order by criado_em, id for update`;
+      return linhas.map(paraTurno);
+    },
+
     /** Os turnos de um trabalho, em ordem (ADR-081): o Parar da task, a retomada e a tela da task. */
     async doTrabalho(trabalhoId: string): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`

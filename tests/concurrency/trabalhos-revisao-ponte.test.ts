@@ -7,6 +7,7 @@ import type { ResultadoTurno } from "../../src/contracts/turno.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { criarInterruptor } from "../../src/services/interruptor.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
@@ -83,9 +84,9 @@ afterEach(async () => {
 const resultado = (r: Partial<ResultadoTurno> = {}): ResultadoTurno => ({ desfecho: "sucesso", texto: "feito", sessaoCli: null, sinais: SINAIS, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [], ...r });
 
 /** Um bot com conversa, a ponte com relógio do teste e a rede de 2 min em 1 s; a máquina anuncia o que o teste disser. */
-async function montar(o: { capacidades?: boolean } = {}) {
+async function montar(o: { capacidades?: boolean; depoisDeAssentar?: DepsPonte["depoisDeAssentar"] } = {}) {
   let relogio = Date.now();
-  const deps: DepsPonte = { services, useCases, executor: "local", listarPessoas, agora: () => relogio, fezFerramenta: () => true, redeMs: 1_000 };
+  const deps: DepsPonte = { services, useCases, executor: "local", listarPessoas, agora: () => relogio, fezFerramenta: () => true, redeMs: 1_000, ...(o.depoisDeAssentar ? { depoisDeAssentar: o.depoisDeAssentar } : {}) };
   const ponte = criarPonteInterna(db, deps);
   const machineId = randomUUID();
   const conectar = (capacidades: boolean) => ponte.conectar({ machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1, harnesses: { "claude-cli": PRONTO }, ...(capacidades ? { capacidades: { "claude-cli": CAPACIDADES_HARNESS["claude-cli"] } } : {}) });
@@ -193,5 +194,41 @@ describeIntegracao("revisão #188 pela ponte: o recado da task em duas fases", (
     await m.ponte.entregar({ turnoId: plano!.turnoId, machineId: m.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "feito, com setembro" }, resultado: resultado({ texto: "feito, com setembro" }), mensagensEntregues: [segunda] });
     expect(await m.ler((x) => x.turnos.buscar(segunda))).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: plano!.turnoId });
     expect((await m.ler((x) => x.turnos.buscar(plano!.turnoId)))?.estado).toBe("concluido");
+  });
+});
+
+describeIntegracao("revisão #188 pela ponte: os mapas da ponte", () => {
+  it("S20: o assentar vítima de impasse é repetido; a falha que sobra deixa o escopo para a entrega repetida assentar", async () => {
+    const impasse = () => Object.assign(new Error("deadlock detected"), { code: "40P01" });
+    let falhas = 1;
+    const m = await montar({ depoisDeAssentar: async () => { if (falhas-- > 0) throw impasse(); return []; } });
+    await m.falar("primeira");
+    const p1 = await m.ponte.puxar(PESSOA.pessoaId);
+    const entrega = (turnoId: string) => ({ turnoId, machineId: m.machineId, seqLocal: 1, fala: { tipo: "texto" as const, texto: "feito" }, resultado: resultado() });
+    await m.ponte.entregar(entrega(p1!.turnoId));
+    expect((await m.ler((r) => r.turnos.buscar(p1!.turnoId)))?.estado).toBe("concluido");
+    expect(m.ponte.emMemoria?.()).toEqual({ escopos: 0, oferecidas: 0, despachados: 0 });
+
+    // Três impasses seguidos: a entrega falha, mas o escopo fica — a entrega repetida pelo app assenta.
+    falhas = 3;
+    await m.falar("segunda");
+    const p2 = await m.ponte.puxar(PESSOA.pessoaId);
+    await expect(m.ponte.entregar(entrega(p2!.turnoId))).rejects.toMatchObject({ code: "40P01" });
+    expect(m.ponte.escopoDoTurno(p2!.turnoId)).not.toBeNull();
+    await m.ponte.entregar(entrega(p2!.turnoId));
+    expect((await m.ler((r) => r.turnos.buscar(p2!.turnoId)))?.estado).toBe("concluido");
+    expect(m.ponte.escopoDoTurno(p2!.turnoId)).toBeNull();
+  });
+
+  it("S21: o turno que some sem entregar sai de oferecidas e despachados quando o lease vence (o escopo fica para a entrega tardia)", async () => {
+    const m = await montar();
+    await m.falar("primeira");
+    const plano = await m.ponte.puxar(PESSOA.pessoaId);
+    await m.falar("segunda");
+    await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [] });
+    expect(m.ponte.emMemoria?.()).toEqual({ escopos: 1, oferecidas: 1, despachados: 1 });
+    m.avancar(LEASE_MS + 1_000);
+    expect(await m.ponte.puxar(PESSOA.pessoaId)).toBeNull();
+    expect(m.ponte.emMemoria?.()).toEqual({ escopos: 1, oferecidas: 0, despachados: 0 });
   });
 });

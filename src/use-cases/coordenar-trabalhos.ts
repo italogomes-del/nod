@@ -8,7 +8,7 @@ import { podeAbrirTask, promoveNaRede, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, trabal
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
-import { criarTrabalho, linhaTrabalhoAberto, marcarParado, sincronizarTrabalho, trabalhosParaDto } from "./trabalhos.ts";
+import { criarTrabalho, linhaTrabalhoAberto, marcarParado, sincronizarTrabalho, trabalhosParaDto, travarTrabalhoComTurnos } from "./trabalhos.ts";
 
 /**
  * A conversa coordena (definido em 2026-10-07, ADR-081 §7, issue #193): abrir uma task, repassar um recado, "Fazer
@@ -229,8 +229,9 @@ export const fazerDepois: CasoDeUso<{ trabalhoId: string; depoisDe: string | nul
   // Revisão do épico (S11, 2026-10-08): as esperas do bot mudam uma de cada vez. Duas "Fazer depois" cruzadas (A depois
   // de B e B depois de A) liam a corrente sem trava e gravavam o ciclo, e as duas tasks nunca mais começavam.
   await deps.repos.trabalhos.travarEsperas(atual0.agenteId);
-  const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
-  if (!t) throw new ErroDeDominio("nao_encontrado");
+  // Revisão do épico (S20): o "Fazer depois" com a task rodando pede a interrupção do turno vivo (voltarParaAFila) —
+  // turnos antes do trabalho, como em toda parte.
+  const { turnos: _turnos, ...t } = await travarTrabalhoComTurnos(deps, input.trabalhoId);
   // Revisão do épico (S9): só a task da pessoa ou da rede espera outra; a de colega e a de rotina têm quem espera por
   // elas (o bot que pediu, a janela da rotina).
   if (!origemDaPessoa(t)) throw new ErroDeDominio("estado_invalido", { cause: `"Fazer depois" só vale para task da pessoa ou da rede, não de ${t.origem}` });
@@ -260,13 +261,13 @@ function eventoDe(deps: Deps, t: Trabalho): RuntimeEvent {
  * abriu vira um turno da CONVERSA, que roda na sessão dela.
  */
 export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDto; turnoId: string }> = async (deps, input) => {
-  const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
-  if (!t) throw new ErroDeDominio("nao_encontrado");
+  // Revisão do épico (S20): turnos abertos antes do trabalho, a ordem da renovação e da entrega.
+  const { turnos: abertos, ...t } = await travarTrabalhoComTurnos(deps, input.trabalhoId);
   if (trabalhoFinal(t.estado)) throw new ErroDeDominio("estado_invalido", { cause: "task já acabou" });
   if (!origemDaPessoa(t)) throw new ErroDeDominio("estado_invalido", { cause: `"Fazer aqui" só vale para task da pessoa ou da rede, não de ${t.origem}` });
   const agora = deps.agora();
-  const turnos = await deps.repos.turnos.doTrabalho(t.id);
-  const primeiro = turnos[0];
+  const primeiro = (await deps.repos.turnos.doTrabalho(t.id))[0];
+  const turnos = abertos;
   const autoria = autoriaPessoa(deps.escopo);
   const events: RuntimeEvent[] = [];
   for (const p of turnos.filter((x) => x.estado === "pendente")) {

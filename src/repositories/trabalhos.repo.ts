@@ -101,9 +101,12 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
-    /** Com trava de linha: quem recalcula o estado serializa com o Parar e com a outra sincronização. */
+    /**
+     * Com trava de linha: quem recalcula o estado serializa com o Parar e com a outra sincronização. revisto em 2026-10-08
+     * (revisão do épico, S20): FOR NO KEY UPDATE — o turno novo que aponta para o trabalho (FK, FOR KEY SHARE) não espera.
+     */
     async buscarTravado(id: string): Promise<Trabalho | null> {
-      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from trabalhos where tenant_id = ${escopo.tenantId} and id = ${id} for update`;
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from trabalhos where tenant_id = ${escopo.tenantId} and id = ${id} for no key update`;
       return l ? paraTrabalho(l) : null;
     },
 
@@ -186,7 +189,9 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         update trabalhos w set memoria_mb = l.mb
         from (select unnest(${porTurno.map((p) => p.turnoId)}::uuid[]) as turno_id, unnest(${porTurno.map((p) => Math.max(0, Math.round(p.mb)))}::int[]) as mb) l
         join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = l.turno_id
-        where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.id = t.trabalho_id`;
+        where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.id = t.trabalho_id
+          -- definido em 2026-10-08 (revisão do épico, S22): a mesma leitura a cada 30 s não reescreve a linha (nem a trava).
+          and w.memoria_mb is distinct from l.mb`;
       return r.count;
     },
 

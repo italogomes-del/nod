@@ -9,6 +9,7 @@ import { log } from "../../obs/log.ts";
 import { metricas as registroPadrao } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
+import { LEASE_MS } from "../../shared/constantes.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { assentarTurno, type SaidaAssentarTurno } from "../../use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../use-cases/despachar-turno.ts";
@@ -61,7 +62,18 @@ export type DepsPonte = {
 export type PonteInternaNod = PonteInterna & {
   maquinasConectadas(): AnuncioMaquina[];
   escopoDoTurno(turnoId: string): Escopo | null;
+  /** Quantos turnos cada mapa da ponte guarda (revisão do épico, S21): o log de saúde e os testes olham por aqui. */
+  emMemoria?(): { escopos: number; oferecidas: number; despachados: number };
 };
+
+/** definido em 2026-10-08 (revisão do épico, S20): o assentar vítima de impasse é repetido até isto de vezes. */
+const TENTATIVAS_DO_ASSENTAR = 3;
+
+/** 40P01 (impasse) e 40001 (serialização): a transação perdeu a corrida e pode ser repetida inteira. */
+function ehConflitoTransitorio(err: unknown): boolean {
+  const codigo = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+  return codigo === "40P01" || codigo === "40001";
+}
 
 /**
  * PonteInterna in-process (ADR-021, EMENDA 3): os cinco verbos falados por chamada de função, sem
@@ -92,6 +104,21 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
    */
   const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean }>();
+  /**
+   * Revisão do épico (S21, 2026-10-08): a última vez que o turno foi puxado ou renovado. Passado o lease sem notícia, o
+   * varredor de lease o encerra no banco e a entrega talvez nunca chegue: `oferecidas` e `despachados` dele saem aqui
+   * (o escopo fica: a entrega tardia ainda assenta, ADR-045). Antes só a entrega os limpava.
+   */
+  const vistos = new Map<string, number>();
+  function esquecerVencidos(): void {
+    const limite = agora() - LEASE_MS;
+    for (const [turnoId, em] of vistos) {
+      if (em >= limite) continue;
+      vistos.delete(turnoId);
+      oferecidas.delete(turnoId);
+      despachados.delete(turnoId);
+    }
+  }
 
   /** NOD-171: os harnesses das máquinas desta ponte somados aos da pessoa nas outras conexões; o pronto vence. */
   function harnessesDaPessoa(pessoaId: string): Partial<Record<IdHarness, Inventario>> {
@@ -143,6 +170,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     },
 
     async puxar(pessoaId): Promise<PlanoTurno | null> {
+      esquecerVencidos();
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return null;
       const maquina = maquinas.values().next().value;
@@ -161,6 +189,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
+            vistos.set(r.data.plano.turnoId, agora());
             despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true });
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
@@ -171,6 +200,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       } catch (e) {
         for (const turnoId of emitidos) {
           despachados.delete(turnoId);
+          vistos.delete(turnoId);
           escopos.delete(turnoId);
           executores.delete(turnoId);
           harnesses.delete(turnoId);
@@ -182,6 +212,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     },
 
     async renovar(p: PedidoRenovar): Promise<RespostaRenovar> {
+      esquecerVencidos();
       const escopo = escopos.get(p.turnoId);
       if (!escopo) return { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP };
       const executor = executores.get(p.turnoId) ?? executorAtual();
@@ -257,7 +288,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
       }
       if (novas.length) falasGravadas.set(p.turnoId, novas.at(-1)!.seq);
-      if (confirma) {
+      if (ativo) vistos.set(p.turnoId, agora());
+      if (confirma && ativo) {
         for (const id of ids) jaOferecidas.add(id);
         oferecidas.set(p.turnoId, jaOferecidas);
       }
@@ -286,57 +318,79 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       }
       const harnessDoTurno = harnesses.get(e.turnoId) ?? null;
       const outraIa = e.resultado.causaSemIa && harnessDoTurno ? reprovarHarness(e.machineId, harnessDoTurno, e.resultado.causaSemIa) : null;
-      try {
-        await abrirTxEscopada(db, escopo)(async (trx) => {
-          const d = depsDe(trx, escopo);
-          const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
-          // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
-          // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
-          // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).
-          // Best-effort: um SAVEPOINT isola a escrita para que ela NUNCA derrube o assentamento.
-          // erro_cru vem do fornecedor sem teto de tamanho, e um timeout no insert do toast levaria
-          // junto a mensagem do agente, o gasto e o outbox — o observador não pode destruir o
-          // observado. Truncado em 8 KiB, o mesmo teto do corte de resultado do proxy, e redigido
-          // antes do corte (NOD-158): o relato e a exportação do diagnóstico leem daqui.
-          if (e.resultado.desfecho !== "sucesso" && !r.data.duplicada) {
-            try {
-              await d.tx(async (t) => {
-                await t`savepoint diagnostico`;
-                try {
-                  await criarRepos(t, escopo).relatos.registrarDiagnostico({
-                    turnoId: e.turnoId,
-                    erroCru: redigirECortar(e.resultado.erroCru, 8000),
-                    ferramentas: e.resultado.ferramentasChamadas,
-                    negacoes: e.resultado.negacoesPermissao,
-                    sessaoCli: e.resultado.sessaoCli,
-                    em: agora(),
-                  });
-                  await t`release savepoint diagnostico`;
-                } catch (err) {
-                  await t`rollback to savepoint diagnostico`;
-                  throw err;
-                }
-              });
-            } catch {
-              log("aviso", "diagnostico_nao_gravado", { turno_id: e.turnoId });
-            }
+      // Revisão do épico (S20, 2026-10-08): o assentar é repetido quando o Postgres o escolhe como vítima de um impasse
+      // (40P01) ou de serialização (40001) — a transação inteira volta, inclusive o registro da entrega (idempotência
+      // por seq_local), então repetir é seguro. E os mapas só saem depois do assentar com sucesso: antes o `finally`
+      // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
+      const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
+        const d = depsDe(trx, escopo);
+        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
+        // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
+        // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
+        // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).
+        // Best-effort: um SAVEPOINT isola a escrita para que ela NUNCA derrube o assentamento.
+        // erro_cru vem do fornecedor sem teto de tamanho, e um timeout no insert do toast levaria
+        // junto a mensagem do agente, o gasto e o outbox — o observador não pode destruir o
+        // observado. Truncado em 8 KiB, o mesmo teto do corte de resultado do proxy, e redigido
+        // antes do corte (NOD-158): o relato e a exportação do diagnóstico leem daqui.
+        if (e.resultado.desfecho !== "sucesso" && !r.data.duplicada) {
+          try {
+            await d.tx(async (t) => {
+              await t`savepoint diagnostico`;
+              try {
+                await criarRepos(t, escopo).relatos.registrarDiagnostico({
+                  turnoId: e.turnoId,
+                  erroCru: redigirECortar(e.resultado.erroCru, 8000),
+                  ferramentas: e.resultado.ferramentasChamadas,
+                  negacoes: e.resultado.negacoesPermissao,
+                  sessaoCli: e.resultado.sessaoCli,
+                  em: agora(),
+                });
+                await t`release savepoint diagnostico`;
+              } catch (err) {
+                await t`rollback to savepoint diagnostico`;
+                throw err;
+              }
+            });
+          } catch {
+            log("aviso", "diagnostico_nao_gravado", { turno_id: e.turnoId });
           }
-          // ADR-017 #4 / ADR-045: a entrega que chegou com o lease vencido é um turno perdido pela máquina.
-          if (!r.data.tardia && r.data.turno?.motivoInterrupcao === "maquina_sem_contato") registroPadrao.incrementar({ metrica: "pos_restart", desfecho: "perdido", origem: "maquina_sumida", tenant_id: escopo.tenantId });
-          const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
-          const events = [...(r.events ?? []), ...extras];
-          if (events.length) await d.repos.events.gravarComOutbox(events);
-        });
-      } finally {
-        escopos.delete(e.turnoId);
-        executores.delete(e.turnoId);
-        harnesses.delete(e.turnoId);
-        falasGravadas.delete(e.turnoId);
-        oferecidas.delete(e.turnoId);
-        despachados.delete(e.turnoId);
+        }
+        // ADR-017 #4 / ADR-045: a entrega que chegou com o lease vencido é um turno perdido pela máquina.
+        if (!r.data.tardia && r.data.turno?.motivoInterrupcao === "maquina_sem_contato") registroPadrao.incrementar({ metrica: "pos_restart", desfecho: "perdido", origem: "maquina_sumida", tenant_id: escopo.tenantId });
+        const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
+        const events = [...(r.events ?? []), ...extras];
+        if (events.length) await d.repos.events.gravarComOutbox(events);
+      });
+      try {
+        for (let tentativa = 1; ; tentativa++) {
+          try {
+            await assentar();
+            break;
+          } catch (err) {
+            if (tentativa >= TENTATIVAS_DO_ASSENTAR || !ehConflitoTransitorio(err)) throw err;
+            log("aviso", "ponte_entrega_repetida", { turno_id: e.turnoId, tentativa, codigo: (err as { code?: string }).code ?? null });
+          }
+        }
+      } catch (err) {
+        // O processo do turno já acabou: o token e o interruptor saem. O escopo e os mapas ficam para a entrega repetida.
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
+        throw err;
       }
+      escopos.delete(e.turnoId);
+      executores.delete(e.turnoId);
+      harnesses.delete(e.turnoId);
+      falasGravadas.delete(e.turnoId);
+      oferecidas.delete(e.turnoId);
+      despachados.delete(e.turnoId);
+      vistos.delete(e.turnoId);
+      deps.services.tokenTurno.revogar(e.turnoId);
+      deps.esquecerTurno?.(e.turnoId);
+    },
+
+    emMemoria() {
+      return { escopos: escopos.size, oferecidas: oferecidas.size, despachados: despachados.size };
     },
 
     maquinasConectadas() {

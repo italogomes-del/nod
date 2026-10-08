@@ -231,17 +231,30 @@ export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<Run
 }
 
 /**
+ * definido em 2026-10-08 (revisão do épico, S20): a ORDEM ÚNICA das travas de um trabalho — as linhas dos turnos abertos
+ * dele primeiro (em ordem de criação), depois a do trabalho. É a ordem da renovação e da entrega (turno → recados →
+ * trabalho, via sincronizarTrabalho). O Parar e o "Fazer aqui" travavam o trabalho e depois os turnos: 40P01 contra uma
+ * entrega em curso, e se a vítima era a entrega a resposta do bot se perdia.
+ */
+export async function travarTrabalhoComTurnos(deps: Pick<Deps, "repos">, trabalhoId: string): Promise<Trabalho & { turnos: Turno[] }> {
+  if (!(await deps.repos.trabalhos.buscar(trabalhoId))) throw new ErroDeDominio("nao_encontrado");
+  const turnos = await deps.repos.turnos.travarAbertosDoTrabalho(trabalhoId);
+  const t = await deps.repos.trabalhos.buscarTravado(trabalhoId);
+  if (!t) throw new ErroDeDominio("nao_encontrado");
+  return { ...t, turnos };
+}
+
+/**
  * Parar uma task só (POST trabalhos/:id/parar): interrompe os pendentes dela, pede a interrupção do que roda (a
  * próxima renovação devolve {ativo:false}) e tenta o SIGTERM pelo interruptor. Não abre parada: a conversa e as outras
  * tasks seguem.
  */
 export const pararTrabalho: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDto; interrompidos: number }> = async (deps, input) => {
-  const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
-  if (!t) throw new ErroDeDominio("nao_encontrado");
+  const t = await travarTrabalhoComTurnos(deps, input.trabalhoId);
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
   const events: RuntimeEvent[] = [];
-  const turnos = await deps.repos.turnos.doTrabalho(t.id);
+  const turnos = t.turnos;
   let interrompidos = 0;
   for (const p of turnos.filter((x) => x.estado === "pendente")) {
     if (!(await deps.repos.turnos.interromper(p.id, "parado_pela_pessoa"))) continue;
@@ -251,8 +264,9 @@ export const pararTrabalho: CasoDeUso<{ trabalhoId: string }, { trabalho: Trabal
   const vivos = turnos.filter((x) => x.estado === "despachando").map((x) => x.id);
   interrompidos += await deps.repos.turnos.pedirInterrupcao(vivos, agora);
   for (const id of vivos) await deps.services.interruptor.interromper(id).catch(() => false);
-  events.push(...(await marcarParado(deps, t)));
-  const atual = (await deps.repos.trabalhos.buscar(t.id)) ?? t;
+  const { turnos: _turnos, ...trabalho } = t;
+  events.push(...(await marcarParado(deps, trabalho)));
+  const atual = (await deps.repos.trabalhos.buscar(t.id)) ?? trabalho;
   const [dto] = await trabalhosParaDto(deps, [atual]);
   return { data: { trabalho: dto!, interrompidos }, events };
 };
