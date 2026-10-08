@@ -32,6 +32,7 @@ import type { rotinasRepo } from "./rotinas.repo.ts";
 import type { salasRepo } from "./salas.repo.ts";
 import type { trilhaRepo } from "./trilha.repo.ts";
 import type { turnosRepo } from "./turnos.repo.ts";
+import type { trabalhosRepo } from "./trabalhos.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
@@ -67,6 +68,7 @@ export interface Repos {
   propostas: ReturnType<typeof propostasRepo>;
   relatos: ReturnType<typeof relatosRepo>;
   turnos: ReturnType<typeof turnosRepo>;
+  trabalhos: ReturnType<typeof trabalhosRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;
   itensAprovacao: ReturnType<typeof itensAprovacaoRepo>;
   rotinas: ReturnType<typeof rotinasRepo>;
