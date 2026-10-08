@@ -1,10 +1,12 @@
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, TokensTurno } from "../../../contracts/turno.ts";
+import { SEM_CAPACIDADES } from "../../../contracts/harness.ts";
+import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { classificarResultado } from "../../../domain/stream-json.ts";
 // Importado por caminho, como o plano autoriza (L3 registrou): o roteiro é módulo puro sem vitest e a
 // gramática dos marcadores tem que ser UMA — copiar aqui faria as duas divergirem.
-import { roteiroPadrao, type Roteiro } from "../../../../tests/helpers/catcher-roteiro.ts";
+import { roteiroPadrao, sessaoDoRoteiro, type Roteiro } from "../../../../tests/helpers/catcher-roteiro.ts";
 import { criarClienteNod, type ClienteNod } from "../cliente-nod.ts";
 import { conectarCerebro, type FabricaSocket } from "../cerebro-ligacao.ts";
 import type { SinksTurno } from "../spi.ts";
@@ -29,9 +31,24 @@ export type OpcoesCatcher = {
   clienteNod?: (lig: { url: string; token: string }) => ClienteNod;
   /** Testes: o WebSocket do canal do cérebro (padrão: o global). */
   fabricaSocket?: FabricaSocket;
+  /**
+   * definido em 2026-10-07 (ADR-081 §6, S9): o catcher aceita mensagem no meio do roteiro, como a sessão viva do
+   * Claude — responde "Respondendo: <mensagem>" logo depois do passo em curso. Desligado por padrão: com ele, um turno
+   * de catcher com ferramenta absorveria a fala seguinte da pessoa, e os e2e de fila contam turnos separados.
+   */
+  sessaoViva?: boolean;
 };
 
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** A pausa do `[[espera]]` acorda a cada 50 ms para o Parar não esperar o roteiro inteiro. */
+async function esperarAte(ms: number, parado: () => boolean): Promise<void> {
+  const ate = Date.now() + ms;
+  while (!parado() && Date.now() < ate) await dormir(Math.min(50, ate - Date.now()));
+}
+
+/** A mensagem que chega com a moldura (molduraMensagemNoMeio) volta só com o que a pessoa escreveu. */
+const semMoldura = (texto: string) => /«([\s\S]*)»/.exec(texto)?.[1] ?? texto;
 
 function ehRoteiro(v: unknown): v is Roteiro {
   return typeof v === "object" && v !== null && Array.isArray((v as { passos?: unknown }).passos);
@@ -41,7 +58,8 @@ const TOKENS_ZERADOS: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cac
 
 export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
   return {
-    meta: { id: "catcher", locality: "ambos" },
+    // O catcher não é harness (não está em CAPACIDADES_HARNESS): declara só o que simula — a sessão viva, se ligada.
+    meta: { id: "catcher", locality: "ambos", capacidades: { ...SEM_CAPACIDADES, mensagemNoMeio: o.sessaoViva === true } },
     async create(cfg: ConfigDriver): Promise<Instance> {
       const roteiroFixo = ehRoteiro(cfg.roteiro) ? cfg.roteiro : null;
       return {
@@ -59,8 +77,21 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
           };
           const ferramentas = plano.catalogo.ferramentas.map((f) => f.nomeMcp);
           const cliente = o.urlNod ? (o.clienteNod ?? criarClienteNod)({ url: o.urlNod, token: plano.tokenDeTurno }) : null;
+          // ADR-081 §6: as mensagens do meio, respondidas entre um passo e outro; `rodando` = ainda há passo pela frente.
+          const fila: string[] = [];
+          const meio = criarFalaDoMeio();
+          let rodando = false;
 
           return {
+            aceitaMensagens: () => o.sessaoViva === true && rodando && !interrompido,
+            receberMensagem(texto: string): boolean {
+              if (o.sessaoViva !== true || !rodando || interrompido) return false;
+              fila.push(texto);
+              meio.absorveu();
+              registrar("mensagem_no_meio", { chars: texto.length });
+              return true;
+            },
+
             async rodarTurno(sinks): Promise<ResultadoTurno> {
               sinksDoTurno = sinks;
               await sinks.sinal("attempted");
@@ -68,8 +99,9 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
               if (plano.modoTurno === "ligacao" && plano.ligacaoVoz && o.urlNod) return rodarLigacaoCatcher({ plano, sinks, urlNod: o.urlNod, cliente, registrar, interrompido: () => interrompido, fabricaSocket: o.fabricaSocket });
               const roteiro = roteiroFixo ?? roteiroPadrao({ prompt: plano.entrada.texto, ferramentas });
               // 0005: o catcher NÃO fabrica sessão do CLI — um uuid aqui virava `--resume` fantasma no claude-cli
-              // quando a pessoa trocava de executor na mesma conversa (medido 2026-09-16).
-              const sessaoCli: string | null = null;
+              // quando a pessoa trocava de executor na mesma conversa (medido 2026-09-16). Só o `[[sessao: …]]` do
+              // roteiro (S9, 2026-10-07) reporta uma, para os testes de retomada e de fork.
+              const sessaoCli: string | null = sessaoDoRoteiro(roteiro);
               registrar("plano_recebido", { ferramentas, modelo: plano.entrada.modelo, sessaoCli, passos: roteiro.passos.length, executor: plano.executor });
 
               const emitidos: EventoStream[] = [];
@@ -79,8 +111,18 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                 emitidos.push(ev);
                 sinks.evento(ev);
                 if (ev.tipo === "delta") sinks.delta(ev.texto);
+                const resposta = meio.avaliar(ev, sinks.falaIntermediaria !== undefined);
+                if (resposta !== null) sinks.falaIntermediaria?.(resposta);
                 if (ev.tipo === "delta" || ev.tipo === "tool_use" || ev.tipo === "result") await sinks.sinal("producedOutput");
                 return true;
+              };
+              /** Responde cada mensagem do meio que chegou durante o passo que acabou, como o modelo faria. */
+              const responderFila = async () => {
+                while (fila.length > 0 && !interrompido) {
+                  const resposta = `Respondendo: ${semMoldura(fila.shift()!)}`;
+                  if (!(await emitir({ tipo: "delta", texto: resposta }))) return;
+                  await emitir({ tipo: "texto_bloco", texto: resposta });
+                }
               };
 
               await sinks.sinal("promptSubmitted");
@@ -90,9 +132,13 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
               let custoUsd = 0;
               let falha: string | null = null;
               let numTurnos = 1;
+              rodando = true;
               for (const p of roteiro.passos) {
                 if (interrompido) break;
-                if (p.tipo === "delta") {
+                await responderFila();
+                if (p.tipo === "espera") {
+                  await esperarAte(p.ms, () => interrompido);
+                } else if (p.tipo === "delta") {
                   if (!(await emitir({ tipo: "delta", texto: p.texto }))) break;
                 } else if (p.tipo === "texto") texto = p.texto;
                 else if (p.tipo === "custo") custoUsd = p.custoUsd;
@@ -119,6 +165,8 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                 }
               }
 
+              rodando = false;
+              await responderFila();
               if (!interrompido) {
                 await emitir({
                   tipo: "result",
@@ -133,7 +181,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                   erroCru: falha,
                 });
               }
-              const resultado = classificarResultado({ eventos: emitidos, exitCode: interrompido ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: interrompido });
+              const resultado = classificarResultado({ eventos: emitidos, exitCode: interrompido ? 143 : 0, signal: null, stderr: "", interrompidoPeloDriver: interrompido, falaDoMeio: meio });
               registrar("resultado", { desfecho: resultado.desfecho, custoUsd: resultado.custoUsd, ferramentasChamadas: resultado.ferramentasChamadas, interrompido });
               return resultado;
             },
