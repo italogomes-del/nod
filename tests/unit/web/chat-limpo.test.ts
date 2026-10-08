@@ -267,6 +267,20 @@ describe("quem pede a um colega (padrão Grok)", () => {
     expect(ehBalao(blocos[3]!.html)).toBe(true);
     expect(blocos.map((b) => b.html).join("")).not.toContain('class="collaboration"');
   });
+
+  it("QA do épico (2026-10-08): a ROTINA que pede a um colega também mostra 'Enviou mensagem para' e 'N mensagens com'", () => {
+    const daRotina = { origemTurno: "rotina" as const, trabalhoId: "tb-rot" };
+    const handoff = msg("h1", t0, { turnoId: "t-rot", ...daRotina, kind: "handoff", texto: "x", payload: { kind: "handoff", de: "clarice", para: "chico", motivo: "revisar", tarefaId: "tarefa-2" } });
+    const pedi = msg("h2", t0 + MIN, { turnoId: "t-rot", ...daRotina, fimDoTurno: true, texto: "Pedi ao Chico." });
+    const exec = msg("h3", t0 + MIN, { turnoId: "t-rot", ...daRotina, kind: "rotina_execucao", texto: "Rotina executou", payload: { kind: "rotina_execucao", rotinaId: "rot", instanteAgendado: t0, desfecho: "executou" } });
+    const resposta = msg("h4", t0 + 5 * MIN, { turnoId: "t-volta", origemTurno: "retomada", trabalhoId: "tb-rot", kind: "peer_ask", texto: "Revisei", payload: { kind: "peer_ask", agenteId: "chico", nome: "Chico", naoSupervisionado: true, tarefaId: "tarefa-2", delegada: true } });
+    const fala = msg("h5", t0 + 6 * MIN, { turnoId: "t-volta", origemTurno: "retomada", trabalhoId: "tb-rot", fimDoTurno: true, texto: "O Chico revisou." });
+    const { e, c } = cenario([handoff, pedi, exec, resposta, fala], { trabalhos: { trabalhos: [trabalho("tb-rot", { origem: "rotina", rotinaNome: "Revisão diária", estado: "terminado", terminadoEm: t0 + 7 * MIN })], pressao: null, memoriaTotalMb: null } });
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["h2", "linha:h1", "linha:h4", "h5"]);
+    expect(blocos[1]!.html).toContain("Enviou mensagem para");
+    expect(blocos[2]!.html).toContain("2 mensagens com</span>");
+  });
 });
 
 describe("tudo que não é balão fica no centro", () => {

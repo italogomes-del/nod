@@ -163,7 +163,10 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
       const antes = u.tipo === "task" && t && t.estado === "terminado" && m === ultimoFim ? linhaTerminou(t, estado) : undefined;
       planos.set(m.id, { tipo: "balao", etiqueta, ...(antes ? { antes } : {}) });
     }
-    const recolhidas = u.mensagens.filter((m) => !planos.has(m.id) && recolhivel(m) && !(m.payload?.kind === "rotina_execucao" && DESFECHOS_A_VISTA.has(m.payload.desfecho)));
+    // definido em 2026-10-08 (QA do épico, B1): a rotina que pede a um colega mostra a linha "Enviou mensagem para …" de
+    // quem pede, como a conversa — o pedido e a resposta não somem para dentro da execução, sem nada para abrir.
+    const pedidoDaRotina = (m: Mensagem): boolean => u.tipo === "rotina" && (m.kind === "handoff" || m.kind === "peer_ask");
+    const recolhidas = u.mensagens.filter((m) => !planos.has(m.id) && recolhivel(m) && !pedidoDaRotina(m) && !(m.payload?.kind === "rotina_execucao" && DESFECHOS_A_VISTA.has(m.payload.desfecho)));
     for (const m of recolhidas) planos.set(m.id, { tipo: "oculta" });
     // Revisão W7 (2026-10-08): "nada para você" só da execução que acabou — com o trabalho aberto, ou sem a linha da
     // execução nem a última fala do turno, ela ainda pode ter algo a dizer.
