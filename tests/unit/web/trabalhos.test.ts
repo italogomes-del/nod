@@ -280,6 +280,8 @@ describe("gaveta e 'Todos os trabalhos' (#196, K3/K9/M3)", () => {
     const e = estadoCom(lista, { tela: { tipo: "trabalhos" }, trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: 3174 } });
     const html = renderTodosOsTrabalhos(e);
     expect(html).toContain("3 rodando · 1 na fila · 1 precisa de você · os bots usam 3,1 GB do seu Mac");
+    // QA (2026-10-08): com 0 MB (nenhum harness com processo próprio) a frase da memória some, em vez de "0 MB".
+    expect(renderTodosOsTrabalhos({ ...e, trabalhos: { ...e.trabalhos, memoriaTotalMb: 0 } })).not.toContain("os bots usam");
     expect(html.indexOf("Login do app")).toBeLessThan(html.indexOf("Revisar dados"));
     expect(html.indexOf("Revisar dados")).toBeLessThan(html.indexOf("Migrar relatórios"));
     expect(html).toContain("2,1 GB");
@@ -300,7 +302,10 @@ describe("memória (#196, M1/M2/M3)", () => {
     expect(pilulaMemoria(null, 3)).toBe("");
     const amarela = pilulaMemoria("amarela", 18);
     expect(amarela).toMatch(/^<div class="linha-centro-wrap"/);
-    expect(amarela).toContain("<b>Pouca memória no seu Mac</b><span class=\"pm-detalhe\">· 18 trabalhos abertos</span><span class=\"pm-ver\">Ver</span>");
+    expect(amarela).toContain("<b>Pouca memória no seu Mac</b><span class=\"pm-detalhe\">· 18 trabalhos abertos</span><span class=\"pm-ver\">Ver ›</span>");
+    // QA × pranchas M1–M3 (2026-10-08): a pílula abre com o chip de memória, nas duas cores.
+    expect(amarela).toMatch(/data-tela="trabalhos"><svg class="pm-icone"/);
+    expect(pilulaMemoria("vermelha", 24, false)).toMatch(/<span class="pilula-memoria vermelha"><svg class="pm-icone"/);
     expect(amarela).toContain('data-act="navegar" data-tela="trabalhos"');
     expect(pilulaMemoria("vermelha", 24)).toContain("<b>Seu Mac está quase sem memória</b><span class=\"pm-detalhe\">· pode travar; 24 trabalhos abertos</span>");
   });

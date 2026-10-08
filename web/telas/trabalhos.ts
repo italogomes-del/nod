@@ -124,7 +124,8 @@ function resumoDosTrabalhos(g: GruposTrabalhos, memoriaMb: number | null): strin
     `${g.trabalhando.length} rodando`,
     g.fila.length ? `${g.fila.length} na fila` : "",
     g.precisa.length ? `${g.precisa.length} ${g.precisa.length === 1 ? "precisa" : "precisam"} de você` : "",
-    memoriaMb !== null ? `os bots usam ${memoriaLegivel(memoriaMb)} do seu Mac` : "",
+    // definido em 2026-10-08 (QA): sem leitura útil (0 MB, harness sem processo próprio) a frase some em vez de dizer "0 MB".
+    memoriaMb !== null && memoriaMb > 0 ? `os bots usam ${memoriaLegivel(memoriaMb)} do seu Mac` : "",
   ];
   return partes.filter(Boolean).join(" · ");
 }

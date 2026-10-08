@@ -1174,6 +1174,7 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .pilula-memoria.amarela { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
 .pilula-memoria.vermelha { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 .pilula-memoria b { font-weight: 500; }
+.pilula-memoria .pm-icone { flex: none; }
 .pm-detalhe { opacity: .85; }
 .pm-ver { padding: 3px 9px; border-radius: 11px; background: color-mix(in srgb, var(--surface) 70%, transparent); font-weight: 500; }
 

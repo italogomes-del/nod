@@ -159,6 +159,9 @@ export function pontoTrabalho(t: Pick<TrabalhoDto, "estado">, cor: string | unde
   return `<span class="ponto-trabalho ${esc(cor ?? "")}${t.estado === "rodando" ? " pulso-trab" : ""}" aria-hidden="true"></span>`;
 }
 
+/** O chip de memória das pranchas M1–M3: traço na cor do texto da pílula (currentColor), sem cor própria. */
+const ICONE_MEMORIA = '<svg class="pm-icone" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="2"></rect><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2"></path></svg>';
+
 /**
  * A pílula de memória (#196): amarela "Pouca memória no seu Mac · N trabalhos abertos · Ver" e vermelha "Seu Mac está
  * quase sem memória · pode travar". Centralizada; o "Ver" abre "Todos os trabalhos". Verde ou sem leitura, nada.
@@ -170,9 +173,11 @@ export function pilulaMemoria(nivel: NivelPressao | null, abertos: number, comVe
     ? `<b>Pouca memória no seu Mac</b><span class="pm-detalhe">· ${n}</span>`
     : `<b>Seu Mac está quase sem memória</b><span class="pm-detalhe">· pode travar; ${n}</span>`;
   const papel = nivel === "vermelha" ? ' role="alert"' : ' role="status"';
+  // definido em 2026-10-08 (QA × pranchas M1–M3): o chip de memória abre a pílula e o "Ver" leva a seta, como no protótipo.
+  const comIcone = `${ICONE_MEMORIA}${miolo}`;
   return comVer
-    ? `<div class="linha-centro-wrap"${papel}><button type="button" class="pilula-memoria ${nivel}" data-act="navegar" data-tela="trabalhos">${miolo}<span class="pm-ver">Ver</span></button></div>`
-    : `<div class="linha-centro-wrap"${papel}><span class="pilula-memoria ${nivel}">${miolo}</span></div>`;
+    ? `<div class="linha-centro-wrap"${papel}><button type="button" class="pilula-memoria ${nivel}" data-act="navegar" data-tela="trabalhos">${comIcone}<span class="pm-ver">Ver ›</span></button></div>`
+    : `<div class="linha-centro-wrap"${papel}><span class="pilula-memoria ${nivel}">${comIcone}</span></div>`;
 }
 
 /**
