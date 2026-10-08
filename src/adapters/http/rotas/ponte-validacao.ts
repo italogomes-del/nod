@@ -99,6 +99,15 @@ function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {
   return saida;
 }
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
+/**
+ * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente
+ * = app antigo (undefined, e a absorção segue como antes); fora do formato, a renovação é recusada e o app reenvia.
+ */
+export function idsDeMensagens(v: unknown): string[] | undefined {
+  if (v === undefined) return undefined;
+  exigir(Array.isArray(v) && v.length <= TETO_FALAS_POR_RENOVACAO);
+  return (v as unknown[]).map(uuid);
+}
 export function sinais(v: unknown): SinaisTurno {
   const s = objeto(v);
   exigir(["attempted", "rejected", "promptSubmitted", "producedOutput"].every((k) => typeof s[k] === "boolean"));

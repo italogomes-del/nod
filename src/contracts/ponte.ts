@@ -59,11 +59,22 @@ export type PedidoRenovar = {
    * conversa e as devolve; sem isto elas esperam na fila, como antes.
    */
   aceitaMensagens?: boolean;
+  /**
+   * definido em 2026-10-07 (ADR-081, #189): os ids (`mensagensIds`) que o CLI recebeu desde a última renovação. Só estes
+   * saem da fila como absorvidos; os que nunca chegam aqui continuam `pendente` e viram turno próprio. A presença do
+   * campo (mesmo vazio) diz que o app confirma: app antigo, sem ele, tem a mensagem absorvida na hora, como antes.
+   */
+  mensagensEntregues?: string[];
+  /** #189: ids que o adapter não conseguiu escrever (a sessão fechou entre o pedido e a resposta): ficam na fila. */
+  mensagensDevolvidas?: string[];
   /** definido em 2026-10-07 (ADR-081, #194): a memória do Mac, amostrada uma vez por máquina a cada 30 s. */
   memoria?: LeituraMemoria;
 };
-/** O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067). */
-export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; ligacaoEncerrada?: boolean };
+/**
+ * O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067).
+ * `mensagensIds` (#189): o id do turno de cada uma, na mesma ordem, para o app confirmar em `mensagensEntregues`.
+ */
+export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes
