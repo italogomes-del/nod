@@ -17,7 +17,7 @@ import { argsAppServer } from "./codex-ligacao.ts";
 /**
  * O chat do Codex no `codex app-server` (definido em 2026-10-07, ADR-081 §6, decisão S4). O `codex exec` é um prompt
  * por turno, sem sessão: a mensagem da pessoa no meio do trabalho esperava o turno acabar. Aqui o turno é uma thread
- * (não efêmera) aberta enquanto o bot trabalha, com a mesma sessão viva do Claude (ADR-067): cada volta do modelo
+ * (efêmera, X8) aberta enquanto o bot trabalha, com a mesma sessão viva do Claude (ADR-067): cada volta do modelo
  * fecha com um `turn/completed` (vira um `result`), a mensagem nova entra pelo `turn/steer` no turno ativo (ou abre o
  * próximo `turn/start`) e, sem nada novo, a entrada fecha e o processo sai.
  *
@@ -283,7 +283,9 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       await cliente.abrirThread({
         versaoNod: c.versaoNod ?? "0",
         prazoMs: PRAZO_HANDSHAKE_MS,
-                threadStart: (id) => pedidoThreadStart(id, { modelo: plano.entrada.modelo, instrucoes: plano.promptSistema, cwd, sandbox, efemera: false }),
+                // X8 (revisto em 2026-10-08): efêmera. Sem `thread/resume` medido (retomaSessao=false), o histórico que a thread
+        // não efêmera deixava em ~/.codex/sessions nunca era lido de novo; só ocupava o disco da pessoa.
+        threadStart: (id) => pedidoThreadStart(id, { modelo: plano.entrada.modelo, instrucoes: plano.promptSistema, cwd, sandbox, efemera: true }),
       });
     } catch (e) {
       // Nada foi escrito para o modelo ainda: o turno segue no `codex exec`, como sem app-server.

@@ -31,7 +31,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-it("com app-server, o chat abre uma thread não efêmera, nega a aprovação pedida e fala a resposta; sessaoCli segue null", async () => {
+it("com app-server, o chat abre uma thread efêmera (X8), nega a aprovação pedida e fala a resposta; sessaoCli segue null", async () => {
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const deltas: string[] = [];
   const r = await instance.adapter(planoHarness({ texto: "olá", esforco: "max" })).rodarTurno({ sinal: async () => {}, delta: (d) => deltas.push(d), evento: () => {} });
@@ -40,7 +40,8 @@ it("com app-server, o chat abre uma thread não efêmera, nega a aprovação ped
   const reg = await registro();
   expect(reg.args).toContain("app-server");
   expect(reg.args).toContain('sandbox_mode="read-only"');
-  expect(reg.thread).toMatchObject({ ephemeral: false, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
+  // X8: sem `thread/resume` medido, nada fica em ~/.codex/sessions.
+  expect(reg.thread).toMatchObject({ ephemeral: true, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
   // O `max` do Claude não existe no Codex: vai o maior que existe.
   expect(reg.turnos).toEqual([{ texto: "olá", effort: "xhigh" }]);
   expect(reg.aprovacao).toEqual({ decision: "decline" });
