@@ -163,6 +163,12 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
       const antes = u.tipo === "task" && t && t.estado === "terminado" && m === ultimoFim ? linhaTerminou(t, estado) : undefined;
       planos.set(m.id, { tipo: "balao", etiqueta, ...(antes ? { antes } : {}) });
     }
+    // definido em 2026-10-08 (QA do épico): o aviso de turno interrompido de uma task ("Turno interrompido: você pediu
+    // para parar") fica na tela dela — no chat ele aparecia uma vez por Parar task, Fazer depois e Fazer aqui, sem dizer
+    // de qual task. A task que FALHOU (ou fora da lista) continua com o aviso à vista; avisos com payload também.
+    if ((u.tipo === "task" || u.tipo === "colega") && u.trabalho && u.trabalho.estado !== "falhou") {
+      for (const m of u.mensagens) if (m.kind === "sistema" && !m.payload && !planos.has(m.id)) planos.set(m.id, { tipo: "oculta" });
+    }
     // definido em 2026-10-08 (QA do épico, B1): a rotina que pede a um colega mostra a linha "Enviou mensagem para …" de
     // quem pede, como a conversa — o pedido e a resposta não somem para dentro da execução, sem nada para abrir.
     const pedidoDaRotina = (m: Mensagem): boolean => u.tipo === "rotina" && (m.kind === "handoff" || m.kind === "peer_ask");

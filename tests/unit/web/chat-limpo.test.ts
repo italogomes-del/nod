@@ -318,6 +318,15 @@ describe("tudo que não é balão fica no centro", () => {
   });
 });
 
+describe("QA do épico (2026-10-08): o aviso de turno interrompido da task fica na tela dela", () => {
+  it("Parar task / Fazer depois / Fazer aqui não deixam 'Turno interrompido' no chat; a task que falhou deixa", () => {
+    const aviso = (id: string, trabalhoId: string): Mensagem => msg(id, t0 + MIN, { kind: "sistema", texto: "Turno interrompido: você pediu para parar.", turnoId: `t-${id}`, origemTurno: "conversa", trabalhoId });
+    const lista = [trabalho("tb-parada", { estado: "parado", terminadoEm: t0 + MIN }), trabalho("tb-fila", { estado: "na_fila" }), trabalho("tb-falhou", { estado: "falhou", terminadoEm: t0 + MIN })];
+    const { e, c } = cenario([daPessoa("p1", t0), aviso("a1", "tb-parada"), aviso("a2", "tb-fila"), aviso("a3", "tb-falhou")], { trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: null } });
+    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "a3"]);
+  });
+});
+
 describe("QA do épico (2026-10-08): a linha do meio do turno desce para depois da fala que a anunciou (K1, B1)", () => {
   it("\"Abriu a task\" e \"Enviou mensagem para\" entram depois do balão do bot do mesmo turno", () => {
     const abriu = msg("ab", t0 + MIN, { kind: "sistema", texto: "Abriu a task Migrar relatórios", turnoId: "tc", origemTurno: "conversa", payload: { kind: "trabalho_aberto", trabalhoId: "tb-m", titulo: "Migrar relatórios", origem: "pessoa" } });
