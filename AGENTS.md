@@ -102,7 +102,13 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
   persistência e opções, colunas, constraints, índices, tipos/enums, funções, views, triggers, policies,
   regras, grants; ACL nula conta como a padrão do dono, que é o que o `REVOKE` deixa), aplica a
   migração, aplica o rollback, exige a mesma foto e reaplica. Rollback que esquece algo falha dizendo o
-  objeto que sobrou ou faltou.
+  objeto que sobrou ou faltou. `ALTER TYPE … ADD VALUE` não tem volta direta: o rollback renomeia o tipo,
+  recria com os valores de antes (mesmo nome e ordem), converte as colunas com `USING col::text::tipo` e
+  apaga o renomeado; índice parcial ou default que cita o tipo sai antes e volta igual (modelo na 0060).
+  Linha que ainda usa o valor novo faz o cast falhar e a transação voltar inteira — por isso o bloco roda
+  numa transação só (`psql -1 -v ON_ERROR_STOP=1`); colado solto, cada instrução se confirma e o erro deixa
+  o schema pela metade. O teste de ida e volta prova com uma linha `lote_bots` que o rollback da 0060 falha
+  sem apagar nada.
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e

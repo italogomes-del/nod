@@ -17,7 +17,7 @@ ALTER TABLE relato_prosa ADD CONSTRAINT relato_prosa_titulo CHECK (titulo IS NUL
 CREATE INDEX IF NOT EXISTS relatos_por_tipo ON relatos (tenant_id, tipo, criado_em DESC);
 
 -- ROLLBACK:
--- (apague ou arquive antes os relatos com origem 'nod': são os únicos sem mensagem)
+-- -- (apague ou arquive antes os relatos com origem 'nod': são os únicos sem mensagem)
 -- DROP INDEX IF EXISTS relatos_por_tipo;
 -- ALTER TABLE relato_prosa DROP CONSTRAINT IF EXISTS relato_prosa_titulo;
 -- ALTER TABLE relato_prosa DROP COLUMN IF EXISTS titulo;

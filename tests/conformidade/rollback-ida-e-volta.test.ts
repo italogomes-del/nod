@@ -182,4 +182,64 @@ describeIntegracao("NOD-195: o ROLLBACK de cada migração nova volta o schema e
     const grant = await idaVolta("grant insert on qa_foto.t to public", "select 1");
     expect(grant.join("\n")).toMatch(/sobrou relacoes: qa_foto\.t .*=a\//);
   }, 60_000);
+
+  // Regressão (QA NOD-195, #205): o rollback da 0060 recria kind_proposta/tipo_decisao sem 'lote_bots'. Com uma
+  // linha ainda usando o valor, ele tem de FALHAR sem apagar nem trocar nada — nunca descartar a linha (um
+  // `USING CASE … ELSE NULL` ou um DELETE antes passariam no ida-e-volta, que roda com as tabelas vazias).
+  // Tudo numa transação descartada no fim: o dono tira o FORCE RLS e as FKs só para semear as linhas.
+  it("o rollback da 0060 com linha 'lote_bots' falha inteiro e não apaga nada", async () => {
+    if (!sql) throw new Error("banco descartável não foi criado");
+    const ler = (nome: string) => readFile(new URL(nome, DIR), "utf8");
+    const DESCARTA = Symbol("descarta");
+    const estado = async (trx: Sql) =>
+      (
+        await trx.unsafe<{ l: string }[]>(`select 'kind_proposta=' || (select string_agg(enumlabel, ',' order by enumsortorder)
+            from pg_enum where enumtypid = 'kind_proposta'::regtype) as l
+          union all select 'tipo_decisao=' || (select string_agg(enumlabel, ',' order by enumsortorder)
+            from pg_enum where enumtypid = 'tipo_decisao'::regtype)
+          union all select 'renomeados=' || coalesce(string_agg(typname, ',' order by typname), '-') from pg_type where typname ~ '_0060$'
+          union all select 'indice=' || coalesce((select indexdef from pg_indexes where indexname = 'propostas_acesso_de_rotina_aberta'), '-')
+          union all select 'propostas=' || string_agg(kind::text, ',' order by kind::text) from propostas
+          union all select 'decisoes=' || string_agg(tipo::text, ',' order by tipo::text) from decisoes`)
+      ).map((x) => x.l);
+    let erro: unknown;
+    await sql
+      .begin(async (trx) => {
+        const t = trx as unknown as Sql;
+        // A 0061-0063 saem antes, como num rollback de verdade (ordem inversa).
+        for (const nome of ["0063_trabalhos.sql", "0062_relatos_do_nod.sql", "0061_nod.sql"]) {
+          await t.unsafe(trechoDeRollback(await ler(nome)) ?? "");
+        }
+        await t.unsafe(`alter table propostas no force row level security;
+          alter table decisoes no force row level security;
+          do $$ declare r record; begin
+            for r in select conname, conrelid::regclass as t from pg_constraint
+                     where contype = 'f' and conrelid in ('propostas'::regclass, 'decisoes'::regclass) loop
+              execute format('alter table %s drop constraint %I', r.t, r.conname);
+            end loop;
+          end $$;
+          insert into propostas (owner_id, conversa_id, agente_id, kind, estado, payload) values
+            (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'lote_bots', 'pendente', '{}'),
+            (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'acesso', 'pendente', '{"conector":"slack","rotinaId":"r"}');
+          insert into decisoes (owner_id, decisor_id, agente_id, conversa_id, tipo, prazo_decisao_em, frase) values
+            (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'lote_bots', now(), 'qa');`);
+        const antes = await estado(t);
+        expect(antes).toContain("propostas=acesso,lote_bots");
+        expect(antes).toContain("renomeados=-");
+
+        await trx
+          .savepoint(async (sp) => {
+            await (sp as unknown as Sql).unsafe(trechoDeRollback(await ler("0060_nod_enums.sql")) ?? "");
+          })
+          .catch((e: unknown) => {
+            erro = e;
+          });
+        expect(String(erro)).toMatch(/invalid input value for enum kind_proposta: "lote_bots"/);
+        expect(await estado(t)).toEqual(antes);
+        throw DESCARTA;
+      })
+      .catch((e: unknown) => {
+        if (e !== DESCARTA) throw e;
+      });
+  }, 60_000);
 });

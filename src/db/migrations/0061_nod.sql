@@ -55,4 +55,4 @@ CREATE TRIGGER nod_agente_nod_protegido BEFORE UPDATE ON agentes FOR EACH ROW EX
 -- DROP INDEX IF EXISTS agentes_um_nod_por_pessoa;
 -- ALTER TABLE agentes DROP CONSTRAINT IF EXISTS agentes_papel;
 -- ALTER TABLE agentes DROP COLUMN IF EXISTS papel;
--- (o nome "Nod" dos bots promovidos e o "Nod (seu)" ficam: o nome anterior não é guardado)
+-- -- (o nome "Nod" dos bots promovidos e o "Nod (seu)" ficam: o nome anterior não é guardado)
