@@ -1,11 +1,11 @@
 import type { TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
-import { linhaAtual, resumoEtapa } from "../lib/atividade.ts";
+import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
 import { aberto, abertosDoBot, agrupar, etiquetaOrigem, filtrar, memoriaLegivel, pilulaMemoria, pontoTrabalho, situacaoDe, tempoDe, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
-import { renderMensagem } from "./conversa.ts";
+import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { usd } from "./modo-dev.ts";
 
 /**
@@ -23,10 +23,22 @@ function agente(estado: Estado, id: string | null | undefined): Agente | undefin
 
 const etiqueta = (t: TrabalhoDto): string => `<span class="etiqueta-origem">${esc(etiquetaOrigem(t))}</span>`;
 
-/** "lendo a planilha de receita · 15 min": o que faz e há quanto tempo (na fila, só o que espera). */
-function progresso(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number): string {
-  const situacao = situacaoDe(t, todos);
+/**
+ * "lendo a planilha de receita · 15 min": o que faz e há quanto tempo (na fila, só o que espera). `vivo`: a atividade do
+ * turno que roda, quando a tela a guarda — o passo anda a cada frame em vez de esperar o próximo `GET trabalhos`.
+ */
+function progresso(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number, vivo?: AtividadeTurno): string {
+  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos);
   return t.estado === "na_fila" ? situacao : `${situacao} · ${tempoDe(t, agora)}`;
+}
+
+/**
+ * O ao vivo do turno do trabalho (definido em 2026-10-08, revisão W9): a faixa lê `atividades`, que só a tela da
+ * conversa aberta redesenha a cada frame. A gaveta e "Todos os trabalhos" não leem — a gaveta é lembrada pelo que lê
+ * (web/lib/lembrar.ts), e ler `atividades` a redesenharia a cada pedaço de texto de qualquer bot (ADR-061).
+ */
+function atividadeDe(estado: Estado, t: TrabalhoDto): AtividadeTurno | undefined {
+  return t.turnoVivoId ? estado.atividades[t.conversaId]?.[t.turnoVivoId] : undefined;
 }
 
 // ---- faixa de Trabalhos e pílula (#195, K1/K6) --------------------------------------------------------------------------
@@ -47,7 +59,7 @@ export function renderFaixaTrabalhos(estado: Estado, agenteId: string): string {
     return `<div class="faixa-trab-lugar"><button type="button" class="pilula-trab" data-act="faixa-trabalhos" data-recolher="0" aria-label="Abrir os trabalhos de ${esc(nome)}: ${n} ${n === 1 ? "aberto" : "abertos"}">${ponto}<span><b>${n}</b> trabalhando</span>${ICONE.recolher}</button></div>`;
   }
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
-  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo">${esc(progresso(t, todos, estado.agora))}</span><span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
+  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo">${esc(progresso(t, todos, estado.agora, atividadeDe(estado, t)))}</span><span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
   return `<section class="faixa-trab" aria-label="Trabalhos de ${esc(nome)}"><div class="ft-cab"><span>Trabalhos do ${esc(nome)}</span><span class="ft-n">${n}</span><button type="button" class="ft-recolher" data-act="faixa-trabalhos" data-recolher="1" aria-label="Recolher em pílula" title="Recolher em pílula">${ICONE.abrir}</button></div>${linhas}</section>`;
 }
 
@@ -181,14 +193,32 @@ function aberturaDaTask(t: TrabalhoDto, estado: Estado): string {
 /**
  * O corpo da tela da task: a conversa com quem pediu (as mensagens do trabalho, inclusive as falas do meio, que não vão
  * ao chat) e os passos centralizados do turno que está rodando — os já feitos com ✓ e o de agora com o ponto vivo.
+ * A junção das duas partes abaixo (os testes das telas leem a string inteira).
  */
 export function renderTelaTrabalho(estado: Estado, id: string): string {
+  return [...blocosDoHistoricoDaTask(estado, id), ...blocosAoVivoDaTask(estado, id)].map((b) => b.html).join("");
+}
+
+/**
+ * O HISTÓRICO da tela da task em blocos com chave (definido em 2026-10-08, revisão W1, ADR-061): a abertura e uma
+ * mensagem por bloco. Não lê `atividades`: main.ts o lembra (web/lib/lembrar.ts) e só o refaz quando chega mensagem
+ * nova; o texto ao vivo não o toca — antes cada `turno.delta` regravava até 300 mensagens, perdia a seleção de texto e
+ * re-hidratava os artefatos.
+ */
+export function blocosDoHistoricoDaTask(estado: Estado, id: string): BlocoDaTimeline[] {
   const d = estado.trabalhoDetalhe[id];
   const t = d?.trabalho ?? trabalhoPorId(estado, id);
-  if (!t) return '<p class="mudo tk-carregando">carregando a task…</p>';
+  if (!t) return [{ chave: "carregando", html: '<p class="mudo tk-carregando">carregando a task…</p>' }];
+  const mensagens = d ? d.mensagens.map((m) => ({ chave: m.id, html: renderMensagem(m, estado) })) : [{ chave: "carregando", html: '<p class="mudo tk-carregando">carregando a conversa da task…</p>' }];
+  return [{ chave: "abertura", html: aberturaDaTask(t, estado) }, ...mensagens];
+}
+
+/** O AO VIVO da tela da task: os passos feitos, o de agora (ou o texto que o bot escreve) e a linha do fim. */
+export function blocosAoVivoDaTask(estado: Estado, id: string): BlocoDaTimeline[] {
+  const t = estado.trabalhoDetalhe[id]?.trabalho ?? trabalhoPorId(estado, id);
+  if (!t) return [];
   const bot = agente(estado, t.agenteId);
-  const mensagens = (d?.mensagens ?? []).map((m) => renderMensagem(m, estado)).join("");
-  const a = t.turnoVivoId ? estado.atividades[t.conversaId]?.[t.turnoVivoId] : undefined;
+  const a = atividadeDe(estado, t);
   const feitos = (a?.etapas ?? []).map((e) => `<div class="passo"><span class="passo-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span></div>`).join("");
   const agora = t.estado === "rodando" && a
     ? a.atual.trim() && a.ferramentas === 0
@@ -198,8 +228,7 @@ export function renderTelaTrabalho(estado: Estado, id: string): string {
       ? `<div class="passo passo-agora"><span class="ponto-trabalho ${esc(bot?.cor ?? "")} pulso-trab" aria-hidden="true"></span><span>${esc(t.ultimoPasso ?? "trabalhando…")}</span></div>`
       : "";
   const fim = !aberto(t) ? `<div class="linha-centro-wrap"><span class="linha-centro estatica"><span class="linha-ok" aria-hidden="true">${t.estado === "terminado" ? "✓" : "■"}</span><b>${esc(t.titulo)}</b><span>${esc(situacaoDe(t))} · ${esc(tempoDe(t, estado.agora))}${t.custoUsd !== null ? ` · ${esc(usd(t.custoUsd))}` : ""}</span></span></div>` : "";
-  const carregando = d ? "" : '<p class="mudo tk-carregando">carregando a conversa da task…</p>';
-  return `${aberturaDaTask(t, estado)}${carregando}${mensagens}${feitos}${agora}${fim}`;
+  return [{ chave: "passos", html: feitos }, { chave: "agora", html: agora }, { chave: "fim", html: fim }].filter((b) => b.html !== "");
 }
 
 /** Os botões embaixo do campo da task: Parar task (só com ela aberta; main.ts esconde ao terminar) e Fechar. */

@@ -58,7 +58,7 @@ import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type It
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
-import { criarEnvios } from "./lib/envio-idempotente.ts";
+import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
@@ -70,7 +70,7 @@ import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
-import { chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTelaTrabalho, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
+import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -417,7 +417,12 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   // ADR-081: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
   if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }) };
-  if (q.startsWith("trabalho:")) return { tipo: "hidratar-trabalho", detalhe: await api.trabalho(q.slice(9)), agora };
+  if (q.startsWith("trabalho:")) {
+    // Revisão W2 (2026-10-08): a task que sumiu (404) fecha a tela em vez de ficar "carregando" e pedir de novo.
+    const id = q.slice(9);
+    const detalhe = await api.trabalho(id).catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; });
+    return detalhe ? { tipo: "hidratar-trabalho", detalhe, agora } : { tipo: "trabalho-sumiu", id };
+  }
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
@@ -500,6 +505,7 @@ async function reidratar(): Promise<void> {
         if (acao) estado = reduzir(estado, acao);
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
+        if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
       } catch (e) {
         if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
       }
@@ -697,7 +703,9 @@ function renderPrincipal(): void {
       break;
     case "trabalho":
       cabecalho = renderTopoTrabalho(estado, t.id);
-      corpo = `<div class="timeline tk-timeline">${renderTelaTrabalho(estado, t.id)}</div>`;
+      // Por blocos como a conversa (definido em 2026-10-08, revisão W1, ADR-061): o texto ao vivo só mexe na parte ao vivo.
+      partes = partesDaTask(t.id);
+      corpo = CASCA_TIMELINE_TASK;
       composer = { chave: `trabalho:${t.id}`, html: htmlComposer("Escreva para esta task…") + htmlAcoesDaTask(t.id) };
       break;
     case "linha":
@@ -766,6 +774,14 @@ type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[
  * algo que ele lê muda; a parte ao vivo é refeita a cada quadro, e só o bloco do turno que escreveu é regravado.
  */
 const CASCA_TIMELINE = '<div class="timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/** A casca da tela da task: as mesmas duas partes da conversa, com o desenho da task (`tk-timeline`). */
+const CASCA_TIMELINE_TASK = '<div class="timeline tk-timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/** A tela da task em duas partes: o histórico lembrado (só muda com mensagem nova) e o ao vivo do turno do trabalho. */
+function partesDaTask(id: string): PartesDaTimeline {
+  return { historico: lembrar("task-historico", estado, [id], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
+}
 
 function partesDaTimeline(): PartesDaTimeline | null {
   const c = conversaDaTela(estado);
@@ -1434,11 +1450,12 @@ async function enviarParaTrabalho(id: string): Promise<void> {
   if (!ta || !api || !texto) return;
   const a = api;
   rolagem.colar();
-  await agir(async () => {
+  // Revisão W3 (2026-10-08): Enter + botão não mandam o mesmo recado duas vezes (a rota da task não leva `idEnvio`).
+  await enviarUmaVez(envios, `trabalho:${id}`, texto, () => agir(async () => {
     await a.escreverNoTrabalho(id, texto);
     limparDepoisDeEnviar(ta, chave, texto);
     dispatch({ tipo: "invalidar", quais: [`trabalho:${id}`, "trabalhos"] });
-  });
+  }));
 }
 
 async function enviarComposer(): Promise<void> {
