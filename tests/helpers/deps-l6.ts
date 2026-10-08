@@ -11,6 +11,7 @@ import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts"
 import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
 import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-cases/onboarding.ts";
+import { abrirTask, mandarParaTask } from "../../src/use-cases/coordenar-trabalhos.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../src/use-cases/nod.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
@@ -144,6 +145,8 @@ export function useCasesDeTeste(): UseCasesNod {
     anotarEntrevista,
     concluirEntrevista,
     proporBot,
+    abrirTask,
+    mandarParaTask,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

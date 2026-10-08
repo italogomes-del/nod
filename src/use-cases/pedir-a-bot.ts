@@ -6,6 +6,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
 import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, resolverAlvo } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
+import { criarTrabalho } from "./trabalhos.ts";
 
 /**
  * Classes de procuração que autorizam pedir a bot de OUTRO dono (ADR-025). definido em 2026-09-29 (ADR-058):
@@ -75,10 +76,14 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   const pessoaNome = (await deps.repos.pessoas.buscar(pessoaId))?.nome ?? "a pessoa";
   const pedidos = (await mensagensDaPessoa(deps, turnoRemetente)).map((m) => m.texto);
   const agora = deps.agora();
+  // definido em 2026-10-07 (ADR-083, S7): o pedido de colega é sempre uma task de quem RECEBE (origem `colega`), na
+  // conversa dele, com os acessos dele (ADR-058): roda em paralelo com a conversa e com as outras tasks dele.
+  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: alvo.id, conversaId: conversaAlvo.id, titulo: pedido, origem: "colega", pedidoPorAgenteId: remetente.id });
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: conversaAlvo.id,
     agenteId: alvo.id,
     origem: "delegacao",
+    trabalhoId: trabalho.id,
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: proximaProfundidade(turnoRemetente.profundidade),
     entradaTexto: entradaDoPedido({ pessoaNome, remetenteNome: remetente.nome, pedidos, pedido, contexto }),
@@ -105,12 +110,13 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     autoria,
     kind: "handoff",
     texto: `${remetente.nome} pediu a ${alvo.nome}: ${pedido}`,
-    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pedido, tarefaId: turno.id },
+    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pedido, tarefaId: turno.id, trabalhoId: trabalho.id },
     confianca: "nao_confiavel",
   });
   return {
     data: { tarefa_id: turno.id },
     events: [
+      ...doTrabalho,
       evento(deps, "mensagem_criada", autoria, { mensagemId: handoff?.id ?? null, kind: "handoff", tarefaId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }),
       evento(deps, "turno_criado", autoria, { turnoId: turno.id, agenteId: alvo.id, origem: "delegacao", profundidade: turno.profundidade, remetenteAgenteId: remetente.id, mensagemId: mensagem?.id ?? null }, { conversaId: conversaAlvo.id, turnoId: turno.id }),
     ],

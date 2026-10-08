@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { OrigemTurno } from "../../../src/contracts/turno.ts";
-import { absorverNaSessao, aceitaMensagemNaSessao, gravarFalasDaSessao } from "../../../src/use-cases/sessao-viva.ts";
+import { absorverNaSessao, aceitaMensagemNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../../src/use-cases/sessao-viva.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
 
 /**
@@ -18,7 +18,7 @@ async function cenario() {
   return { d, agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "" };
 }
 
-async function turno(d: D, agenteId: string, conversaId: string, o: { origem?: OrigemTurno; estado?: "pendente" | "despachando" | "concluido"; texto?: string; daPessoa?: boolean; anexos?: string[]; sobProcuracaoDe?: string } = {}) {
+async function turno(d: D, agenteId: string, conversaId: string, o: { origem?: OrigemTurno; estado?: "pendente" | "despachando" | "concluido" | "interrompido"; texto?: string; daPessoa?: boolean; anexos?: string[]; sobProcuracaoDe?: string; retomaTurnoId?: string; trabalhoId?: string } = {}) {
   const t = await d.deps.repos.turnos.enfileirar({
     conversaId, agenteId, origem: o.origem ?? "conversa", prazoEm: AGORA + 60_000, profundidade: o.origem === "delegacao" ? 1 : 0,
     entradaTexto: o.texto ?? "trabalho", entradaConfianca: "confiavel", modelo: "m",
@@ -32,6 +32,8 @@ async function turno(d: D, agenteId: string, conversaId: string, o: { origem?: O
     linha.machineId = "m1";
   }
   if (o.sobProcuracaoDe) linha.sobProcuracaoDe = o.sobProcuracaoDe;
+  if (o.retomaTurnoId) linha.retomaTurnoId = o.retomaTurnoId;
+  if (o.trabalhoId) linha.trabalhoId = o.trabalhoId;
   return linha;
 }
 
@@ -97,7 +99,58 @@ describe("absorverNaSessao (ADR-067)", () => {
     expect(pendente.estado).toBe("pendente");
     expect(aceitaMensagemNaSessao({ ...delegacao, origem: "retomada", sobProcuracaoDe: "pessoa" })).toBe(false);
     expect(aceitaMensagemNaSessao({ ...delegacao, origem: "sala" })).toBe(false);
-    expect(aceitaMensagemNaSessao({ ...delegacao, origem: "rotina" })).toBe(true);
     expect(aceitaMensagemNaSessao({ ...delegacao, origem: "conversa", estado: "concluido" })).toBe(false);
+  });
+});
+
+describe("mensagem no meio só em turno de conversa (ADR-083 §6, #189)", () => {
+  it("rotina, retomada de rotina e turno de trabalho não absorvem: a mensagem fica pendente e vira turno próprio", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const rotina = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "rotina", daPessoa: false });
+    const rotinaParada = await turno(d, agenteId, conversaId, { estado: "interrompido", origem: "rotina", daPessoa: false });
+    const retomadaDaRotina = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "retomada", daPessoa: false, retomaTurnoId: rotinaParada.id });
+    const deTrabalho = await turno(d, agenteId, conversaId, { estado: "despachando", trabalhoId: randomUUID() });
+    const daPessoa = await turno(d, agenteId, conversaId, { texto: "chegou agora" });
+    for (const vivo of [rotina, retomadaDaRotina, deTrabalho]) {
+      expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local" })).data).toEqual({ textos: [], ids: [] });
+      expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local", confirma: true })).data).toEqual({ textos: [], ids: [] });
+    }
+    expect(daPessoa.estado).toBe("pendente");
+    expect(aceitaMensagemNaSessao(rotina)).toBe(false);
+    expect(aceitaMensagemNaSessao(deTrabalho)).toBe(false);
+  });
+
+  it("retomada de uma retomada de pedido de colega também fica de fora; a de uma conversa recebe", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const delegacao = await turno(d, agenteId, conversaId, { estado: "interrompido", origem: "delegacao", daPessoa: false });
+    const r1 = await turno(d, agenteId, conversaId, { estado: "interrompido", origem: "retomada", daPessoa: false, retomaTurnoId: delegacao.id });
+    const r2 = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "retomada", daPessoa: false, retomaTurnoId: r1.id });
+    await turno(d, agenteId, conversaId, { texto: "oi" });
+    expect((await absorverNaSessao(d.deps, { turnoId: r2.id, executor: "local", confirma: true })).data.ids).toEqual([]);
+    r2.estado = "interrompido";
+    const conversa = await turno(d, agenteId, conversaId, { estado: "interrompido" });
+    const retomada = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "retomada", daPessoa: false, retomaTurnoId: conversa.id });
+    expect((await absorverNaSessao(d.deps, { turnoId: retomada.id, executor: "local", confirma: true })).data.textos).toEqual(["oi"]);
+  });
+
+  it("#189 com confirmação: oferecer não tira da fila; só a confirmada sai 'absorvido', a outra segue pendente", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    const a = await turno(d, agenteId, conversaId, { texto: "primeira" });
+    const b = await turno(d, agenteId, conversaId, { texto: "segunda" });
+    const oferta = await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local", confirma: true });
+    expect(oferta.data).toEqual({ textos: ["primeira", "segunda"], ids: [a.id, b.id] });
+    expect(oferta.events ?? []).toEqual([]);
+    expect([a.estado, b.estado]).toEqual(["pendente", "pendente"]);
+    // As já oferecidas não voltam na próxima renovação.
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local", confirma: true, jaOferecidas: [a.id, b.id] })).data.ids).toEqual([]);
+    // O CLI recebeu só a primeira (a sessão fechou antes da segunda).
+    const c = await confirmarNaSessao(d.deps, { turnoId: vivo.id, executor: "local", ids: [a.id] });
+    expect(c.data.confirmadas).toBe(1);
+    expect(a).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: vivo.id });
+    expect(b.estado).toBe("pendente");
+    expect(c.events?.map((e) => [e.kind, e.turnoId, e.dados])).toEqual([["turno_interrompido", a.id, { motivo: "absorvido", absorvido_por: vivo.id }]]);
+    // Confirmar de novo não faz nada (já não está pendente).
+    expect((await confirmarNaSessao(d.deps, { turnoId: vivo.id, executor: "local", ids: [a.id] })).data.confirmadas).toBe(0);
   });
 });

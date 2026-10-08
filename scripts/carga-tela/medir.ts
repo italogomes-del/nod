@@ -14,6 +14,8 @@ const DELTAS = Number(process.env.CARGA_DELTAS ?? 160);
 /** O turno pesado, na conversa aberta. */
 const DELTAS_PESADO = Number(process.env.CARGA_DELTAS_PESADO ?? 600);
 const TETO_MS = 150_000;
+/** Os itens de primeiro nível da conversa (cada bloco do histórico: um balão, uma linha centralizada, um card), sem a data. */
+const ITENS_DA_TIMELINE = "document.querySelectorAll('#timeline-historico > .bloco:not(:has(> .time-sep:only-child))').length";
 /**
  * Quanto esperar a aba voltar depois de os turnos terminarem no servidor. medido em 2026-09-30: com o código de
  * antes, o turno pesado na conversa aberta deixou a aba presa por mais de 5 min; passado o teto, o cenário vira
@@ -137,9 +139,11 @@ export async function medir(rotulo: string, cenarios: readonly Cenario[] = CENAR
     const linha = `[data-act="abrir-conversa"][data-agente="${pesada.id}"]`;
     for (let i = 0; i < 150 && !(await avaliar<boolean>(cdp, `!!document.querySelector('${linha}')`)); i++) await new Promise((r) => setTimeout(r, 200));
     await avaliar(cdp, `document.querySelector('${linha}').click()`);
-    for (let i = 0; i < 150 && (await avaliar<number>(cdp, "document.querySelectorAll('#timeline .message').length")) < 100; i++) await new Promise((r) => setTimeout(r, 200));
+    // S10 (definido em 2026-10-07, ADR-083): conta os itens da timeline (balões e linhas centralizadas, um bloco cada), não só
+    // `.message` — com o chat limpo, execuções de rotina e pedidos entre bots viram uma linha só e a conta de balões cai.
+    for (let i = 0; i < 150 && (await avaliar<number>(cdp, ITENS_DA_TIMELINE)) < 100; i++) await new Promise((r) => setTimeout(r, 200));
     await new Promise((r) => setTimeout(r, 3000));
-    const dom = await avaliar<Record<string, number>>(cdp, "({ nos: document.getElementsByTagName('*').length, mascotes: document.querySelectorAll('nod-mascote').length, mensagens: document.querySelectorAll('#timeline .message').length })");
+    const dom = await avaliar<Record<string, number>>(cdp, `({ nos: document.getElementsByTagName('*').length, mascotes: document.querySelectorAll('nod-mascote').length, mensagens: document.querySelectorAll('#timeline .message').length, itens: ${ITENS_DA_TIMELINE} })`);
     escrever(`[${rotulo}] conversa aberta: ${JSON.stringify(dom)}`);
 
     for (const cenario of cenarios) {

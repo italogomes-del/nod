@@ -39,6 +39,8 @@ export type OpcoesServidorCompleto = {
   drivers?: OpcoesBoot["drivers"];
   /** Provedores de voz prontos (NOD-180), para observar o TTS falso. */
   voz?: OpcoesBoot["voz"];
+  /** O prazo da rede de 2 min (ADR-083 §2) para o e2e da #193 não esperar 120 s; ausente = REDE_MS. */
+  redeMs?: number;
 };
 
 /**
@@ -85,6 +87,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     drivers: o.drivers,
     computador: o.computador,
     voz: o.voz,
+    redeMs: o.redeMs,
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

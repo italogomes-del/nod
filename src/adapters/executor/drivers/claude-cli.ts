@@ -17,12 +17,14 @@ import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
 import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
+import { capacidadesDe } from "../../../domain/harness.ts";
+import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
 import { compararVersoes, conferirFloors, conferirPisoCli, FLAG_FLOORS, inventarioAbaixoDoPiso, type FlagComPiso } from "../flag-floors.ts";
 import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
-import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
+import type { Adapter, ConfigDriver, Driver, Instance, SinksTurno } from "../spi.ts";
 import { MARCADOR_PARTE_DINAMICA } from "../../../domain/marcador-prompt.ts";
 import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
@@ -231,8 +233,16 @@ export function comandoDoHook(p: { nodePath: string; hookPath: string; config: s
  */
 export const FERRAMENTA_DE_BUSCA = "ToolSearch";
 
-/** Args do `claude -p` para um plano (função pura: é o que os testes de args conferem). */
-export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean; snapshotOff?: boolean }): { args: string[]; sessaoCli: string } {
+/**
+ * Args do `claude -p` para um plano (função pura: é o que os testes de args conferem).
+ *
+ * `bifurcar` (definido em 2026-10-07, ADR-083, #193, rede de 2 min): com `plano.entrada.bifurcar` e uma sessão, o turno
+ * continua NUMA CÓPIA dela (`--resume <sessão> --fork-session`), porque a original segue com o trabalho promovido. O CLI
+ * escolhe o id novo, que volta no `init`/`result` (e daí no `sessaoCli` do resultado); por isso `sessaoCli` é null aqui.
+ * Só com a flag no help (`bifurcar` = o driver conferiu): sem ela, quem chama recusa o turno antes, para nunca continuar
+ * a mesma sessão em dois processos.
+ */
+export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessaoNova?: () => string; compactar?: boolean; streamJson?: boolean; terminal?: TurnoTerminal; esforco?: boolean; systemPrompt?: boolean; snapshotOff?: boolean; bifurcar?: boolean }): { args: string[]; sessaoCli: string | null } {
   const { plano, terminal } = entrada;
   const pastas = terminal ? null : plano.workspacePastas ?? null;
   // Sem projeto autorizado nada muda: nativas desligadas e cwd no diretório temporário vazio. As nativas vêm
@@ -240,6 +250,7 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
   // ADR-052: no kit do terminal elas são exatamente as do plano, sob o hook do nod (ADR-055: sem sandbox).
   const nativas = terminal ? (plano.nativas ?? []) : pastas ? (plano.nativas ?? NATIVAS_DE_ARQUIVO).filter((n) => (NATIVAS_DE_ARQUIVO as readonly string[]).includes(n)) : [];
   const permitidas = [...plano.catalogo.ferramentas.map((f) => f.nomeMcp), ...nativas, FERRAMENTA_DE_BUSCA].join(",");
+  const bifurca = entrada.bifurcar === true && plano.entrada.bifurcar === true && plano.entrada.sessaoCli !== null;
   const sessaoCli = plano.entrada.sessaoCli ?? (entrada.sessaoNova ?? randomUUID)();
   // Todos os projetos aprovados entram: o bot transita entre eles sem reautorizar (decisão de 2026-09-18).
   const extras = terminal ? terminal.dirsExtras : (pastas?.aprovadas ?? []).filter((p) => p !== pastas?.ativa);
@@ -281,9 +292,9 @@ export function montarArgs(entrada: { plano: PlanoTurno; mcpJson: string; sessao
     // estável, então o `off` não custa cache (99% do 3º turno com histórico longo) e mantém a estável atualizada quando
     // o bot muda de nome ou ganha conector no meio da conversa.
     ...(entrada.snapshotOff ? ["--system-prompt-snapshot", "off"] : []),
-    ...(plano.entrada.sessaoCli ? ["--resume", plano.entrada.sessaoCli] : ["--session-id", sessaoCli]),
+    ...(plano.entrada.sessaoCli ? ["--resume", plano.entrada.sessaoCli, ...(bifurca ? ["--fork-session"] : [])] : ["--session-id", sessaoCli]),
   ];
-  return { args, sessaoCli };
+  return { args, sessaoCli: bifurca ? null : sessaoCli };
 }
 
 /**
@@ -320,8 +331,9 @@ const chavesSinais: readonly (keyof SinaisTurno)[] = ["attempted", "rejected", "
 
 export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
   const prazoSondaMs = lig.prazoSondaMs ?? PRAZO_SONDA_PADRAO_MS;
+  const capacidadesDoDriver = capacidadesDe("claude-cli");
   return {
-    meta: { id: "claude-cli", locality: "local" },
+    meta: { id: "claude-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg: ConfigDriver): Promise<Instance> {
       const home = cfg.env.HOME ?? homedir();
       const path = caminhoAumentado(cfg.env.PATH, home);
@@ -394,22 +406,47 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           return { inventario: s.inventario, resposta: s.resposta };
         },
 
+        // X9 (definido em 2026-10-08, revisão do épico #188): o que o app anuncia é a promessa do driver com os pisos do
+        // CLI instalado — sem `--fork-session` no help o turno de cópia é recusado (rodarTurno), e sem `--input-format` a
+        // sessão não fica viva. Sem conseguir ler o help, fecha as duas (o servidor cai no caminho sem a capacidade).
+        async capacidades() {
+          const flags = await garantirVersao().then(() => flagsNoHelp ?? [], () => [] as string[]);
+          return {
+            ...capacidadesDoDriver,
+            bifurcaSessao: capacidadesDoDriver.bifurcaSessao && flags.includes("--fork-session"),
+            mensagemNoMeio: capacidadesDoDriver.mensagemNoMeio && flags.includes("--input-format"),
+          };
+        },
+
         adapter(plano: PlanoTurno): Adapter {
           let processo: Processo | null = null;
           let interromperPedido = false;
           // ADR-067: a entrada da sessão viva fica aberta até o modelo responder sem nada em segundo plano e sem
           // mensagem nova; só então fecha e o processo sai. Fora da sessão viva ela fecha logo depois do prompt.
           let entradaAberta = false;
+          // ADR-083 §6: a primeira fala depois de uma mensagem do meio sai na hora, de qualquer tamanho.
+          const meio = criarFalaDoMeio();
+          // X1 (revisto em 2026-10-08): o modelo está parado entre voltas (o último evento foi um `result`). Uma mensagem
+          // escrita agora abre a próxima volta, sem narração de antes no caminho: a próxima fala já é a resposta.
+          let entreVoltas = false;
+          let sinksDoTurno: SinksTurno | null = null;
 
           return {
             aceitaMensagens: () => entradaAberta && processo !== null,
-            receberMensagem(texto: string): boolean {
+            receberMensagem(texto: string, id?: string): boolean {
               if (!entradaAberta || !processo) return false;
               processo.escrever(mensagemClaude(texto, []));
+              // X1: no meio da volta, o CLI só lê a mensagem na fronteira seguinte (tool_result ou result).
+              if (entreVoltas) meio.armar();
+              else meio.absorveu();
+              // X2: o stdin aceitou a escrita: a mensagem entrou na sessão.
+              if (id !== undefined) sinksDoTurno?.mensagemEntrou?.(id);
               return true;
             },
+            grupoDeProcessos: () => processo?.pid ?? null,
 
             async rodarTurno(sinks): Promise<ResultadoTurno> {
+              sinksDoTurno = sinks;
               // `sinais` é marcado ANTES de cada sinal síncrono sair, para o `aoLinha` (que pode
               // receber o init enquanto um `await sinks.sinal` ainda está pendente) não o repetir.
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
@@ -418,6 +455,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               if (!conferirPisoCli("claude-cli", v).ok) throw new ErroDeDominio("executor_indisponivel", { cause: "cli_antigo" });
               const floors = conferirFloors({ versao: v, flags: FLAGS_DO_TURNO, flagsNoHelp });
               if (!floors.ok) throw new ErroDeDominio("executor_indisponivel", { cause: floors.motivo });
+              // #193: a cópia da sessão exige a flag; sem ela o turno é recusado em vez de continuar a original.
+              const bifurcar = plano.entrada.bifurcar === true && plano.entrada.sessaoCli !== null;
+              if (bifurcar && !(flagsNoHelp ?? []).includes("--fork-session")) throw new ErroDeDominio("executor_indisponivel", { cause: "cli_sem_fork_session" });
 
               // ADR-072: o turno-cérebro de uma ligação é um laço de voz, não um turno de chat.
               if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
@@ -516,7 +556,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const entradaStdin = streamJson
                   ? mensagemClaude(texto, anexos)
                   : [texto, ...anexos.map((a) => `[anexo "${a.meta.nome}" não pôde ser lido: esta versão do Claude Code não aceita arquivos. Diga isso à pessoa.]`)].join("\n\n");
-                const { args } = montarArgs({ plano: { ...planoDoTurno, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff });
+                const { args } = montarArgs({ plano: { ...planoDoTurno, ...(pastas || terminal ? {} : { workspacePastas: null }) }, mcpJson, compactar, streamJson, terminal, esforco, systemPrompt, snapshotOff, bifurcar });
                 const env = montarEnvDoFilho(cfg.env, home, plano.politicaExecucao.prazoMs, { claudeMdDasPastas: Boolean(terminal) });
 
                 const pendentes: Promise<void>[] = [];
@@ -532,7 +572,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 const falarRodadas = () => {
                   if (!falaNaHora) return;
                   for (; rodadasFaladas < rodadas.length; rodadasFaladas++) {
-                    const texto = textoDaRodada(rodadas[rodadasFaladas]!);
+                    const texto = textoDaRodada(rodadas[rodadasFaladas]!, meio);
                     if (texto.trim() !== "") sinks.falaIntermediaria!(texto);
                   }
                 };
@@ -563,6 +603,11 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     momentos.push(Date.now() - inicio);
                     sinks.evento(ev);
                     if (ev.tipo === "delta") sinks.delta(ev.texto);
+                    // ADR-083 §6: a resposta à mensagem do meio vira fala gravada agora, não passo do card.
+                    const resposta = meio.avaliar(ev, falaNaHora);
+                    if (resposta !== null && falaNaHora) sinks.falaIntermediaria!(resposta);
+                    if (ev.tipo === "result") entreVoltas = true;
+                    else if (ev.tipo === "delta" || ev.tipo === "texto_bloco" || ev.tipo === "tool_use" || ev.tipo === "init") entreVoltas = false;
                     if (ev.tipo === "tarefa_fundo") {
                       if (ev.estado === "iniciada") emFundo.add(ev.id);
                       else emFundo.delete(ev.id);
@@ -595,7 +640,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 await Promise.all(pendentes);
                 const exitCode = fim.erroSpawn ? null : fim.exitCode;
                 const signal = fim.erroSpawn ? null : fim.signal;
-                return finalizar(classificarSessao({ eventos, exitCode, signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido(), rodadasJaFaladas: rodadasFaladas }));
+                return finalizar(classificarSessao({ eventos, exitCode, signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido(), rodadasJaFaladas: rodadasFaladas, falaDoMeio: meio }));
               } finally {
                 processo = null;
                 entradaAberta = false;

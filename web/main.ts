@@ -33,7 +33,7 @@ import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
-import { renderDetalhes } from "./telas/detalhes.ts";
+import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
@@ -58,7 +58,7 @@ import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type It
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
-import { criarEnvios } from "./lib/envio-idempotente.ts";
+import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
@@ -66,6 +66,11 @@ import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-con
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
+import type { TipoLinha } from "../src/contracts/trabalho.ts";
+import { aberto, abertosDoBot, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
+import { criarTelemetria } from "./lib/telemetria-linhas.ts";
+import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
+import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -89,6 +94,44 @@ const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { re
 const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 let reidratando = false;
 let ambienteBanco: AmbienteBancoDto | null = null;
+/**
+ * Telemetria das linhas do chat (definido em 2026-10-07, #191): cada linha mostrada conta uma vez por carga da página e
+ * cada clique conta; o lote vai para `POST telemetria/linhas` e a falha some (web/lib/telemetria-linhas.ts).
+ */
+const telemetria = criarTelemetria((eventos) => api?.telemetriaLinhas(eventos) ?? Promise.resolve(), (fn, ms) => window.setTimeout(fn, ms));
+window.addEventListener("pagehide", () => telemetria.descarregar());
+const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" ? v : null);
+
+/** As linhas que o histórico desenhou entram na telemetria (cada chave uma vez por carga). */
+function contarLinhasMostradas(): void {
+  for (const el of document.querySelectorAll<HTMLElement>("#timeline [data-linha-chave]")) {
+    const tipo = tipoLinha(el.dataset.linhaTipo);
+    if (tipo) telemetria.mostrada({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });
+  }
+}
+
+/**
+ * A tela da task sobrevive a recarregar a página (definido em 2026-10-07, #195): o id e a tela de volta ficam na
+ * sessionStorage desta aba e, na próxima sessão, a task abre de novo. As outras telas abrem como sempre.
+ */
+const CHAVE_TASK_ABERTA = "nod.taskAberta";
+function lembrarTaskAberta(tela: Tela): void {
+  try {
+    if (tela.tipo === "trabalho") window.sessionStorage.setItem(CHAVE_TASK_ABERTA, JSON.stringify({ id: tela.id, voltar: tela.voltar.tipo === "conversa" || tela.voltar.tipo === "trabalhos" ? tela.voltar : { tipo: "inicio" } }));
+    else window.sessionStorage.removeItem(CHAVE_TASK_ABERTA);
+  } catch { /* sem storage, a task não volta sozinha */ }
+}
+function taskLembrada(): Extract<Tela, { tipo: "trabalho" }> | null {
+  try {
+    const v = JSON.parse(window.sessionStorage.getItem(CHAVE_TASK_ABERTA) ?? "null") as { id?: unknown; voltar?: { tipo?: unknown; conversaId?: unknown; agenteId?: unknown } } | null;
+    if (!v || typeof v.id !== "string") return null;
+    const w = v.voltar;
+    const voltar: Tela = w?.tipo === "conversa" && typeof w.conversaId === "string" && typeof w.agenteId === "string" ? { tipo: "conversa", conversaId: w.conversaId, agenteId: w.agenteId } : w?.tipo === "trabalhos" ? { tipo: "trabalhos" } : { tipo: "inicio" };
+    return { tipo: "trabalho", id: v.id, voltar };
+  } catch {
+    return null;
+  }
+}
 /** Tela de entrada (ADR-030): o modo vem do servidor; `recusado` vem do redirect do callback do Google. */
 let entrada: { modo: ModoSessaoDto | null; recusado: boolean } = { modo: null, recusado: false };
 
@@ -374,6 +417,14 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
+  // ADR-083: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
+  if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }) };
+  if (q.startsWith("trabalho:")) {
+    // Revisão W2 (2026-10-08): a task que sumiu (404) fecha a tela em vez de ficar "carregando" e pedir de novo.
+    const id = q.slice(9);
+    const detalhe = await api.trabalho(id).catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; });
+    return detalhe ? { tipo: "hidratar-trabalho", detalhe, agora } : { tipo: "trabalho-sumiu", id };
+  }
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
@@ -420,6 +471,12 @@ async function carregarRaioX(conversaId: string): Promise<void> {
   } catch {
     // Telemetria: sem o Raio-X, a conversa segue igual e a faixa só não aparece.
   }
+  // #191: a taxa de abertura das linhas do chat, por tipo, junto do custo (só no Modo dev; sem a rota, nada aparece).
+  try {
+    dispatch({ tipo: "hidratar-taxas-linhas", taxas: await api.taxasLinhas() });
+  } catch {
+    // Sem a taxa, o selo do Modo dev mostra só o custo.
+  }
 }
 
 async function alternarModoDev(): Promise<void> {
@@ -450,6 +507,7 @@ async function reidratar(): Promise<void> {
         if (acao) estado = reduzir(estado, acao);
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
+        if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
       } catch (e) {
         if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
       }
@@ -468,7 +526,8 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
-  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao") return true;
+  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos") return true;
+  if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
   const secao = estado.espaco?.secao;
   if (q === "gestao") return secao === "agentes";
@@ -476,7 +535,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
   if (q === "relatos") return secao === "relatos";
-  if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala") && t.conversaId === q.slice(9);
+  if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
   if (q.startsWith("concessoes:")) return t.tipo === "conversa" && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
   // ADR-064: o "a fazer" só aparece na conversa do bot (embaixo da última mensagem e na gaveta).
@@ -530,7 +589,8 @@ function renderSidebar(estado: Estado): string {
     // definido em 2026-10-04 (ADR-071): "Em ligação" ganha da última mensagem, discreto, com o fone.
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
     const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
-    const chip = a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "";
+    // ADR-083 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
+    const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + chipTrabalhosDoBot(estado, a);
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
     return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
@@ -555,7 +615,7 @@ function renderSidebar(estado: Estado): string {
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : ""}</button></div>`;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : chipTrabalhosDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button></div>`;
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
@@ -599,7 +659,7 @@ function renderSidebar(estado: Estado): string {
     ? `<button class="icone-topo nao-lidos-bt" data-act="navegar" data-tela="nao-lidos" aria-current="${t.tipo === "nao-lidos" ? "page" : "false"}" aria-label="${esc(rotuloNaoLidos(estado))}" title="Não lidos">${BANDEJA}${comNovas ? '<span class="ponto-novo" aria-hidden="true"></span>' : ""}</button>`
     : "";
   return `<div class="search-wrap">
-      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+      <div class="sh">${nodDiscreto}<button class="icone-topo" data-act="abrir-busca" aria-label="Buscar agentes" aria-keyshortcuts="Meta+K Control+K" title="Buscar (⌘K)">${LUPA}</button>${naoLidos}${renderIconeTrabalhos(estado)}${renderChamada(estado)}<span class="create-actions"><button class="create-trigger" data-act="navegar" data-tela="novo-bot" data-segurar="criar-rapido" aria-label="Nova conversa (segure para criar um bot direto)" aria-keyshortcuts="Shift+Enter Shift+Space"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
       <label class="search"${buscando ? "" : " hidden"}><span>⌕</span><input id="busca-bots" placeholder="Buscar agentes…" aria-label="Buscar agentes" autocomplete="off" /><kbd>esc</kbd></label>
     </div>
     ${renderIncidentes(estado)}
@@ -648,6 +708,20 @@ function renderPrincipal(): void {
     case "nova-sala":
       corpo = renderNovaSala(estado);
       break;
+    // ADR-083 (#195/#196): "Todos os trabalhos", a tela da task e a tela provisória de uma linha do chat.
+    case "trabalhos":
+      corpo = renderTodosOsTrabalhos(estado, t.filtro);
+      break;
+    case "trabalho":
+      cabecalho = renderTopoTrabalho(estado, t.id);
+      // Por blocos como a conversa (definido em 2026-10-08, revisão W1, ADR-061): o texto ao vivo só mexe na parte ao vivo.
+      partes = partesDaTask(t.id);
+      corpo = CASCA_TIMELINE_TASK;
+      composer = { chave: `trabalho:${t.id}`, html: htmlComposer("Escreva para esta task…") + htmlAcoesDaTask(t.id) };
+      break;
+    case "linha":
+      corpo = `<div class="timeline tk-timeline">${renderTelaLinha(estado, t)}</div>`;
+      break;
     case "conversa":
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       partes = partesDaTimeline();
@@ -667,7 +741,10 @@ function renderPrincipal(): void {
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
   regiao("cabecalho", cabecalho);
+  document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   regiao("erro", erro);
+  // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
+  regiao("faixa-trabalhos", t.tipo === "conversa" ? renderFaixaTrabalhos(estado, t.agenteId) : "");
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
   const aoVivoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-ao-vivo", partes.aoVivo));
@@ -692,6 +769,11 @@ function renderPrincipal(): void {
     redesenharAnexos();
   }
   atualizarComposer();
+  // O Parar da task some quando ela termina; o campo continua (escrever retoma a task do mesmo ponto).
+  if (t.tipo === "trabalho") {
+    const tr = trabalhoPorId(estado, t.id);
+    document.querySelector<HTMLElement>('#composer [data-act="parar-trabalho"]')?.toggleAttribute("hidden", !tr || !aberto(tr));
+  }
   document.body.classList.toggle("ocupado", estado.ocupado);
 }
 
@@ -703,6 +785,14 @@ type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[
  * algo que ele lê muda; a parte ao vivo é refeita a cada quadro, e só o bloco do turno que escreveu é regravado.
  */
 const CASCA_TIMELINE = '<div class="timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/** A casca da tela da task: as mesmas duas partes da conversa, com o desenho da task (`tk-timeline`). */
+const CASCA_TIMELINE_TASK = '<div class="timeline tk-timeline"><div id="timeline-historico" class="timeline-parte"></div><div id="timeline-ao-vivo" class="timeline-parte"></div></div>';
+
+/** A tela da task em duas partes: o histórico lembrado (só muda com mensagem nova) e o ao vivo do turno do trabalho. */
+function partesDaTask(id: string): PartesDaTimeline {
+  return { historico: lembrar("task-historico", estado, [id], (e) => blocosDoHistoricoDaTask(e, id)), aoVivo: blocosAoVivoDaTask(estado, id) };
+}
 
 function partesDaTimeline(): PartesDaTimeline | null {
   const c = conversaDaTela(estado);
@@ -783,7 +873,8 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   }
   for (const el of escopo.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
   if (muda.historicoMuda) artefatos.hidratar(timeline ?? document);
-  rolagem.depoisDeDesenhar(t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null, muda.historicoMuda || muda.cascaMuda);
+  if ((muda.historicoMuda || muda.cascaMuda) && t.tipo === "conversa") contarLinhasMostradas();
+  rolagem.depoisDeDesenhar(t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : t.tipo === "trabalho" ? `trabalho:${t.id}` : null, muda.historicoMuda || muda.cascaMuda);
 }
 
 const PLACEHOLDER_SALA = "Mensagem para a sala — @Nome dirige a pergunta";
@@ -981,6 +1072,10 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   dispatch({ tipo: "sessao", escopo });
   void api.preferencias().then((p) => {
     hidratarAvisosFechados(p.avisosFechados ?? []);
+    if (typeof p.faixaTrabalhosRecolhida === "boolean") {
+      guardarFaixaRecolhida(p.faixaTrabalhosRecolhida);
+      dispatch({ tipo: "faixa-trabalhos", recolhida: p.faixaTrabalhosRecolhida });
+    }
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
     const c = conversaDaTela(estado);
@@ -1005,10 +1100,15 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "salas", "executor", "rotinas"] });
   const pedido = pedidoPendente();
   if (pedido) abrirPareamento(api, pedido, esquecerPedido);
+  // #195: a task que estava aberta antes de recarregar volta aberta.
+  const task = taskLembrada();
+  if (task) navegar(task);
 }
 
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
+  // A faixa de Trabalhos nasce como a pessoa a deixou (cache local até as preferências chegarem).
+  dispatch({ tipo: "faixa-trabalhos", recolhida: lerFaixaRecolhida() });
   let ticks = 0;
   window.setInterval(() => {
     ticks += 1;
@@ -1108,6 +1208,7 @@ function navegar(tela: Tela): void {
   // A linha "Novas" some ao navegar (reducer); a conta das levas vai junto.
   levaContada.clear();
   dispatch({ tipo: "navegar", tela });
+  lembrarTaskAberta(tela);
   lerConversaDaTela();
   if (tela.tipo !== "conversa" && tela.tipo !== "sala") document.getElementById("timeline")?.scrollTo({ top: 0 });
 }
@@ -1120,6 +1221,16 @@ function abrirMarketplace(avancado = false): void {
   const t = estado.tela;
   const voltar = t.tipo === "conectores" ? t.voltar : t.tipo === "inicio" ? undefined : t;
   navegar({ tipo: "conectores", ...(avancado ? { avancado: true as const } : {}), ...(voltar ? { voltar } : {}) });
+}
+
+/** Abre a tela da task; de dentro de outra task (ou de uma linha), o Fechar continua voltando para a tela de fora. */
+function abrirTrabalho(id: string): void {
+  if (id) navegar(telaDaTask(estado.tela, id));
+}
+
+function fecharTask(): void {
+  const voltar = telaAoFechar(estado.tela);
+  if (voltar) navegar(voltar);
 }
 
 async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
@@ -1348,7 +1459,25 @@ function limparDepoisDeEnviar(ta: HTMLTextAreaElement, chave: string | null, tex
   else if (rascunhos.ler(chave).trim() === texto) rascunhos.guardar(chave, "");
 }
 
+/** O campo da tela da task (#195): o texto vai para a task (`POST trabalhos/:id/mensagens`), nunca para a conversa. */
+async function enviarParaTrabalho(id: string): Promise<void> {
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  const chave = composerDe;
+  const texto = ta?.value.trim() ?? "";
+  if (!ta || !api || !texto) return;
+  const a = api;
+  rolagem.colar();
+  // Revisão W3 (2026-10-08): Enter + botão não mandam o mesmo recado duas vezes (a rota da task não leva `idEnvio`).
+  await enviarUmaVez(envios, `trabalho:${id}`, texto, () => agir(async () => {
+    await a.escreverNoTrabalho(id, texto);
+    limparDepoisDeEnviar(ta, chave, texto);
+    dispatch({ tipo: "invalidar", quais: [`trabalho:${id}`, "trabalhos"] });
+  }));
+}
+
 async function enviarComposer(): Promise<void> {
+  const tela = estado.tela;
+  if (tela.tipo === "trabalho") return enviarParaTrabalho(tela.id);
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
   const chave = composerDe;
   const alvo = conversaAtual();
@@ -1631,7 +1760,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   navegar: (el) => {
     const tela = el.dataset.tela;
     if (tela === "conectores") abrirMarketplace();
-    else if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina") navegar({ tipo: tela });
+    else if (tela === "sua-vez" || tela === "nao-lidos" || tela === "rotinas" || tela === "nova-sala" || tela === "novo-bot" || tela === "nova-rotina" || tela === "trabalhos") navegar({ tipo: tela });
     // As antigas telas da conta são seções de Seu espaço desde 2026-09-30.
     else if (tela === "chaves") abrirEspaco("computadores");
     else if (tela === "relatos") abrirEspaco("relatos");
@@ -1821,9 +1950,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
   gaveta: (el) => {
-    const tipo = el.dataset.nivel;
-    const id = el.dataset.id ?? "";
-    const nivel: NivelGaveta | null = tipo === "rotina" || tipo === "acesso" ? { tipo, id } : tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" ? { tipo } : null;
+    const nivel = nivelDaGaveta(el.dataset.nivel, el.dataset.id ?? "");
     if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
   },
   "gaveta-voltar": () => voltarNivel(),
@@ -1875,13 +2002,57 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       dispatch({ tipo: "hidratar-executor", executor: estadoNovo });
       dispatch({ tipo: "invalidar", quais: ["inventario", "frota"] });
     }),
-  "parar-conversa": () =>
-    agir(async () => {
+  // ADR-083 (#195): com tasks abertas, o Parar do chat para tudo do bot — e mostra a lista antes; sem tasks, igual a antes.
+  "parar-conversa": () => {
+    const t = estado.tela;
+    const tasks = t.tipo === "conversa" ? abertosDoBot(estado, t.agenteId, t.conversaId) : [];
+    const parar = (): Promise<void> => agir(async () => {
       const alvo = conversaAtual();
       if (!alvo) return;
       dispatch({ tipo: "faixa", faixa: await api!.pararConversa(alvo.conversaId) });
-      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota"] });
-    }),
+      // O servidor para as tasks do bot junto (parar.ts); cada uma é pedida de novo, e a que já parou responde sem efeito.
+      await Promise.allSettled(tasks.map((x) => api!.pararTrabalho(x.id)));
+      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota", "trabalhos"] });
+    });
+    if (tasks.length === 0) return parar();
+    const nome = botGerido(t.tipo === "conversa" ? t.agenteId : undefined)?.nome;
+    pedirGestao(textoPararTasks(tasks, nome), `${listaPararTasks(tasks)}<p>${esc(nome ?? "O bot")} para também o que estiver fazendo nesta conversa. O que já foi feito fica.</p>`, tasks.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
+  },
+  // A tela da task (#195): Parar task para só ela; Fechar (ou Esc) volta para onde a pessoa estava.
+  "abrir-trabalho": (el) => abrirTrabalho(el.dataset.id ?? ""),
+  "abrir-linha": (el) => {
+    const tipo = tipoLinha(el.dataset.linhaTipo);
+    if (tipo) telemetria.aberta({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });
+    const trabalho = el.dataset.trabalho;
+    if (trabalho) { abrirTrabalho(trabalho); return; }
+    const t = estado.tela;
+    navegar({ tipo: "linha", conversaId: el.dataset.conversa ?? "", mensagens: (el.dataset.mensagens ?? "").split(",").filter(Boolean), titulo: el.dataset.titulo ?? "", voltar: t.tipo === "trabalho" || t.tipo === "linha" ? t.voltar : t, ...(tipo === "rotina" ? { rotina: true } : {}) });
+  },
+  "fechar-trabalho": () => fecharTask(),
+  "parar-trabalho": (el) => agir(async () => {
+    const id = el.dataset.id ?? "";
+    await api!.pararTrabalho(id);
+    dispatch({ tipo: "invalidar", quais: [`trabalho:${id}`, "trabalhos"] });
+  }),
+  "trabalho-depois": (el) => estado.ocupado ? undefined : agir(async () => {
+    await api!.trabalhoDepois(el.dataset.id ?? "", el.dataset.depois ?? "");
+    dispatch({ tipo: "invalidar", quais: ["trabalhos", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  }),
+  "trabalho-fazer-aqui": (el) => estado.ocupado ? undefined : agir(async () => {
+    await api!.trabalhoFazerAqui(el.dataset.id ?? "");
+    dispatch({ tipo: "invalidar", quais: ["trabalhos", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  }),
+  // A faixa recolhe numa pílula e a pílula abre a faixa; a escolha vai para as preferências da pessoa.
+  "faixa-trabalhos": (el) => {
+    const recolhida = el.dataset.recolher === "1";
+    guardarFaixaRecolhida(recolhida);
+    dispatch({ tipo: "faixa-trabalhos", recolhida });
+    void api?.gravarPreferencias({ faixaTrabalhosRecolhida: recolhida }).catch(() => undefined);
+  },
+  "filtro-trabalhos": (el) => {
+    const f = el.dataset.id;
+    if (f === "todos" || f === "voce" || f === "rotinas" || f === "bots") navegar({ tipo: "trabalhos", filtro: f });
+  },
   "parar-sala": (el) =>
     agir(async () => {
       dispatch({ tipo: "faixa", faixa: await api!.pararSala(el.dataset.id ?? "") });
@@ -2254,6 +2425,8 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
   // Sem gaveta, Esc no Marketplace volta para onde a pessoa estava (definido em 2026-10-04) — menos digitando num campo.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.voltar && !(ev.target as HTMLElement).closest?.("dialog, input, textarea, select")) { ev.preventDefault(); void ACOES["voltar-conexao"]?.(document.body); return; }
+  // A tela da task (e a provisória de uma linha) fecha no Esc — menos com algo digitado no campo dela.
+  if (ev.key === "Escape" && (estado.tela.tipo === "trabalho" || estado.tela.tipo === "linha") && !(ev.target as HTMLElement).closest?.("dialog, input, select, #detalhes") && !((ev.target as HTMLTextAreaElement).id === "composer-texto" && (ev.target as HTMLTextAreaElement).value.trim())) { ev.preventDefault(); fecharTask(); return; }
   // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
   if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;

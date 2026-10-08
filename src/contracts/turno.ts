@@ -74,6 +74,7 @@ export type Turno = {
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
   absorvidoPor?: string | null;
+  trabalhoId?: string | null; // ADR-083: o trabalho deste turno; null = turno da conversa
   /**
    * Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Preenchido só no turno de delegação: a autoria do
    * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
@@ -194,5 +195,5 @@ export type FaixaParada = {
   interrompidas: number;
   naoInterrompidas: { turnoId: string; motivo: string }[];
   jaEntregues: { id: string; em: EpochMs }[];
-  nadaRodando: boolean;
+  nadaRodando: boolean; trabalhosParados?: { id: string; titulo: string }[]; // ADR-083: as tasks que este Parar parou
 };

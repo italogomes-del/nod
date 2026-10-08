@@ -83,6 +83,27 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.computadorId}, ${e.turnoId ?? null}, ${e.autor}, ${e.tipo}, ${e.estado}, ${e.argumentosCifrados ?? null}) returning *`;
       return acao(l!);
     },
+    /**
+     * ADR-083 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"
+     * (turno sem trabalho), ou "a pessoa" (ação dela, sem turno). null = nenhuma ação executando.
+     */
+    /**
+     * Quem segura o computador agora. revisto em 2026-10-08 (revisão do épico, S24): `deFora` quando o título é de uma
+     * task de colega ou de uma que leu conteúdo de fora — quem repassa o título ao modelo o marca não confiável.
+     */
+    async emUsoPor(id: string): Promise<{ titulo: string; deFora: boolean } | null> {
+      const [l] = await conn<{ autor: string; turno_id: string | null; titulo: string | null; de_fora: boolean | null }[]>`
+        select a.autor, a.turno_id, w.titulo,
+          (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
+            and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora
+        from computador_acoes a
+        left join turnos t on t.tenant_id = a.tenant_id and t.id = a.turno_id
+        left join trabalhos w on w.tenant_id = t.tenant_id and w.id = t.trabalho_id
+        where a.tenant_id = ${escopo.tenantId} and a.computador_id = ${id} and a.estado = 'executando'
+        order by a.em desc limit 1`;
+      if (!l) return null;
+      return l.titulo ? { titulo: l.titulo, deFora: l.de_fora === true } : { titulo: l.turno_id ? "a conversa" : "a pessoa", deFora: false };
+    },
     async buscarAcao(id: string): Promise<(RegistroComputador & { argumentosCifrados: string | null }) | null> {
       const [l] = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
       return l ? { ...acao(l), argumentosCifrados: l.argumentos_cifrados } : null;

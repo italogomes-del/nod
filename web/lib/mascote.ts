@@ -31,9 +31,16 @@ export function atualizarMascote(elemento: ElementoMascote, forma: FormaAgente, 
   elemento.setAttribute("shape", forma);
 }
 
-/** Traduz somente fatos já tipados da web em expressão visual; o estado não é persistido no avatar. */
+/**
+ * Traduz somente fatos já tipados da web em expressão visual; o estado não é persistido no avatar.
+ * definido em 2026-10-08 (QA do épico #188, K8 variante 3: "um sinal por bot"): o turno de uma task não anima o mascote —
+ * quem diz que o bot tem task rodando é o chip com o número ao lado do nome. Antes, com uma task rodando, o mascote
+ * girava (a variante 1, recusada) e o chip piscava ao mesmo tempo. A lista de `GET trabalhos` diz qual turno é de task
+ * (`turnoVivoId`), além do `trabalhoId` que o turno vivo já traz; `conversas` fica de fora (a barra relê pelo que lê).
+ */
 export function estadoMascoteNaConversa(estado: Estado, conversaId: string): EstadoMascote {
-  const vivos = Object.values(estado.turnosVivos).filter((turno) => turno.conversaId === conversaId);
+  const deTask = new Set((estado.trabalhos?.trabalhos ?? []).flatMap((t) => (t.turnoVivoId ? [t.turnoVivoId] : [])));
+  const vivos = Object.values(estado.turnosVivos).filter((turno) => turno.conversaId === conversaId && !turno.trabalhoId && !deTask.has(turno.turnoId));
   if (vivos.some(t => t.estado === "rodando")) return "trabalhando";
   if (vivos.some(t => t.estado === "na_fila")) return "pensando";
   const aguarda = estado.suaVez?.itens.some((item) => item.decisao.conversaId === conversaId && item.estadoColuna !== "vencido");

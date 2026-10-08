@@ -118,7 +118,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       // ADR-044: pedir_acesso entra na rotina. ADR-051: publicar/ler artefato também. ADR-064: as pendências não, desde
       // 2026-10-06 (o "A fazer" desligado sem NOD_PENDENCIAS=1).
       // ADR-066: ver_colegas também (leitura que não incomoda ninguém).
-      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato"]);
+      expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_task"]);
 
       // A ligação turno → rotina é a JANELA reivindicada (rotinaJanelas.buscarPorTurno, 0004). Com ou sem ela — e com
       // exige_aprovacao false ou true —, a política é a mesma: quem decide quando parar é o modo do bot.

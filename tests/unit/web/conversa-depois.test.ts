@@ -98,6 +98,15 @@ describe("3. o pedido fica junto do turno que o pediu", () => {
     expect(renderTimeline(vazio.c, vazio.e)).toContain("Preciso da sua decisão para continuar");
   });
 
+  // definido em 2026-10-07 (#191, chat limpo): o pedido de uma execução de rotina que virou linha fica logo depois da
+  // linha (a chave do bloco é `linha:<primeira mensagem>`), e não volta para depois da fala anterior.
+  it("o pedido de uma rotina recolhida numa linha fica depois da linha", () => {
+    const rotina = (id: string, criadoEm: number) => msg(id, "agente", criadoEm, { turnoId: "tr1", origemTurno: "rotina", trabalhoId: "tb-r1", fimDoTurno: true });
+    const mensagens = [msg("m1", "pessoa", 1, { origemTurno: null, trabalhoId: null, fimDoTurno: false }), rotina("r1", 2), msg("m3", "pessoa", 3, { origemTurno: null, trabalhoId: null, fimDoTurno: false })];
+    const { e, c } = cenario(mensagens, [pedido("d1", { turnoId: "tr1" })]);
+    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep", "m1", "linha:r1", "decisao:d1", "m3"]);
+  });
+
   it("com o turno ainda rodando, fica embaixo da mensagem que o disparou", () => {
     const { e, c } = cenario([msg("m1", "pessoa", 1), msg("m2", "pessoa", 2)], [pedido("d1", { turnoId: "t9" })], { turnosEmCurso: [{ id: "t9", estado: "despachando", desde: 1, mensagemId: "m1" }] as never });
     expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep", "m1", "decisao:d1", "m2"]);

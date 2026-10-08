@@ -89,7 +89,8 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const [pedido] = (await repos.mensagens.listarDaConversa(dev1.conversaId)).filter((m) => m.payload?.kind === "peer_pedido");
       expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/acme/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id } });
       expect(pedido?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: taga.agenteId, sob_procuracao_de: PESSOA_MARLON, conta_de_execucao: PESSOA_MARLON });
-      expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(2);
+      // ADR-083: + o trabalho_mudou da task que nasce em quem recebe.
+      expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(3);
 
       const plano = await planoDe(deps, tarefa?.id ?? "");
       expect(plano.events?.[0]?.dados.modo).toBe("delegacao");

@@ -8,16 +8,16 @@
     "volatil": 1178
   },
   "conversa-automatico": {
-    "estavel": 13997,
-    "volatil": 896
+    "estavel": 14617,
+    "volatil": 1099
   },
   "conversa-manual": {
-    "estavel": 12947,
-    "volatil": 896
+    "estavel": 13567,
+    "volatil": 1099
   },
   "conversa-total": {
-    "estavel": 13736,
-    "volatil": 896
+    "estavel": 14356,
+    "volatil": 1099
   },
   "criacao-de-bot": {
     "estavel": 6816,
@@ -28,15 +28,19 @@
     "volatil": 0
   },
   "rotina-com-inventario": {
-    "estavel": 7930,
-    "volatil": 1373
+    "estavel": 8174,
+    "volatil": 1590
   },
   "segundo-turno": {
-    "estavel": 13736,
+    "estavel": 14356,
     "volatil": 455
   },
   "sem-terminal-computador-fora": {
     "estavel": 2558,
     "volatil": 1080
+  },
+  "task-filha-de-rotina": {
+    "estavel": 5197,
+    "volatil": 1083
   }
 }

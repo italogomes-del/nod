@@ -18,7 +18,9 @@ import { PRAZO_SONDA_PADRAO_MS } from "../sonda.ts";
 import type { Driver } from "../spi.ts";
 import type { LigacaoClaudeCli } from "./claude-cli.ts";
 import { ambienteCodex, configMcpCodex, escreverLauncherProxy, negociarConfigCodex, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
+import { rodarChatCodex, type SessaoChatCodex } from "./codex-chat.ts";
 import { rodarLigacaoCodex } from "./codex-ligacao.ts";
+import { capacidadesDe } from "../../../domain/harness.ts";
 
 export { configMcpCodex } from "./codex-comum.ts";
 
@@ -33,7 +35,9 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * definido em 2026-09-18 (ADR-040): o Codex nunca teve teto de passos, então é o Claude que se
  * alinha a ele quando `--max-turns` sai — nada a mudar aqui. `interpretarCodex` produz os mesmos
  * EventoStream do Claude. revisto em 2026-10-01 (ADR-067): o vigia de atividade de `laco.ts` saiu, e o
- * Codex segue um prompt por turno, sem sessão viva.
+ * Codex segue um prompt por turno, sem sessão viva. revisto em 2026-10-07 (ADR-083 §6): com o `app-server` na sonda,
+ * o chat roda lá, com sessão viva e mensagem no meio por `turn/steer` (codex-chat.ts); o `codex exec` daqui fica de
+ * reserva (sem app-server, com anexo, ou se o app-server não subir).
  *
  * LACUNA NÃO HOMOLOGADA: não há equivalente a `--autocompact` no conjunto FLAGS_CODEX sondado, e o
  * binário não estava instalado na máquina onde a medição foi feita. Não inventar flag de janela de
@@ -66,8 +70,9 @@ const MODELO_TESTE_CODEX = "gpt-5.6-sol";
 const TIMEOUT_TESTE_MS = 90_000;
 
 export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
+  const capacidadesDoDriver = capacidadesDe("codex-cli");
   return {
-    meta: { id: "codex-cli", locality: "local" },
+    meta: { id: "codex-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg) {
       const home = cfg.env.HOME ?? "";
       const env = ambienteCodex(cfg.env);
@@ -159,11 +164,26 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
           if ((await sondar()).estado !== "pronto" || !bin) return null;
           try { return (await sondarAppServer(bin)) !== null; } catch { return null; }
         },
+        // X9 (definido em 2026-10-08, revisão do épico #188): a mensagem no meio só existe no chat do app-server; sem ele
+        // (Codex antigo, ou a sonda não o achou) o turno roda no `codex exec` e o app não a anuncia.
+        async capacidades() {
+          if (!capacidadesDoDriver.mensagemNoMeio) return capacidadesDoDriver;
+          let appServer = false;
+          if ((await sondar()).estado === "pronto" && bin) {
+            try { appServer = (await sondarAppServer(bin)) !== null; } catch { appServer = false; }
+          }
+          return { ...capacidadesDoDriver, mensagemNoMeio: appServer };
+        },
         adapter(plano) {
           let proc: Processo | null = null;
           let parado = false;
+          // ADR-083 §6: a thread do app-server enquanto o chat roda nele; null no `codex exec` (sem sessão viva).
+          let sessao: SessaoChatCodex | null = null;
           return {
             async interromper() { parado = true; if (proc) await proc.interromper(); },
+            aceitaMensagens: () => sessao?.aceitaMensagens() ?? false,
+            receberMensagem: (texto, id) => sessao?.receberMensagem(texto, id) ?? false,
+            grupoDeProcessos: () => proc?.pid ?? null,
             async rodarTurno(sinks) {
               const eventos: EventoStream[] = [];
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
@@ -189,6 +209,25 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 });
               }
               await mkdir(cfg.cwdBase, { recursive: true });
+              // ADR-083 §6: o chat no app-server quando a sonda o acha. Anexo segue no `codex exec` (a imagem entra por
+              // --image, e o `localImage` do app-server não foi medido) — definido em 2026-10-07.
+              if (!plano.entrada.anexos?.length) {
+                const flagsAppServer = await sondarAppServer(bin).catch(() => null);
+                if (flagsAppServer) {
+                  const r = await rodarChatCodex({
+                    plano, sinks, bin, flagsNoHelp: flagsAppServer, recusadas, env, cwdBase: cfg.cwdBase,
+                    urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
+                    sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
+                    aoProcesso: (p) => {
+                      proc = p;
+                      if (p && parado) void p.interromper();
+                    },
+                    aoSessao: (s) => { sessao = s; },
+                  });
+                  // null: o app-server não subiu e nada foi escrito para o modelo; segue no `codex exec` (que respeita o Parar).
+                  if (r) return r;
+                }
+              }
               const dir = await mkdtemp(join(cfg.cwdBase, "codex-"));
               try {
                 const launcher = await escreverLauncherProxy(dir, { urlNod: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath });

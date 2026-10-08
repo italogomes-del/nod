@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { corpoDoEnvio, criarEnvios } from "../../../web/lib/envio-idempotente.ts";
+import { corpoDoEnvio, criarEnvios, enviarUmaVez } from "../../../web/lib/envio-idempotente.ts";
 import { enviarPeloComposer, type ApiDeEnvio } from "../../../web/lib/perguntas.ts";
 
 function contador(): () => string {
@@ -55,5 +55,26 @@ describe("NOD-156: idEnvio no envio da web", () => {
     expect(api.postarNaSala).toHaveBeenCalledWith("s1", "oi, sala");
     await enviarPeloComposer(api, { conversaId: "c", salaId: null }, { tipo: "resposta", decisaoId: "d1" }, "sim", [], "chave-3");
     expect(api.responder).toHaveBeenCalledWith("d1", "sim");
+  });
+});
+
+describe("revisão W3 (2026-10-08): o campo da task com a trava do chat", () => {
+  it("com um envio em voo para a mesma task, o segundo (Enter + botão) não sai; depois de terminar — ou falhar — sai de novo", async () => {
+    const envios = criarEnvios(contador());
+    const chamadas: string[] = [];
+    let soltar: () => void = () => undefined;
+    const primeiro = enviarUmaVez(envios, "trabalho:login", "cobre o cadastro", async () => {
+      chamadas.push("1");
+      await new Promise<void>((r) => { soltar = r; });
+    });
+    expect(await enviarUmaVez(envios, "trabalho:login", "cobre o cadastro", async () => { chamadas.push("2"); })).toBe(false);
+    // Outra task não espera esta.
+    expect(await enviarUmaVez(envios, "trabalho:outra", "oi", async () => { chamadas.push("outra"); })).toBe(true);
+    soltar();
+    expect(await primeiro).toBe(true);
+    expect(await enviarUmaVez(envios, "trabalho:login", "cobre o cadastro", async () => { chamadas.push("3"); })).toBe(true);
+    expect(chamadas).toEqual(["1", "outra", "3"]);
+    await expect(enviarUmaVez(envios, "trabalho:login", "x", async () => { throw new Error("sem rede"); })).rejects.toThrow("sem rede");
+    expect(await enviarUmaVez(envios, "trabalho:login", "x", async () => undefined)).toBe(true);
   });
 });

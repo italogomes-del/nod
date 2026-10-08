@@ -4,6 +4,8 @@ import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
 import type { CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
+import type { OrigemTrabalho } from "./trabalho.ts";
+import type { OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
@@ -26,7 +28,8 @@ export type KindMensagem =
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
   | { kind: "boas_vindas" }
-  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string }
+  /** `trabalhoId` (definido em 2026-10-07, ADR-083): o trabalho de quem RECEBEU o pedido; a linha "Enviou mensagem para…" abre a tela dele. */
+  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string }
   /**
    * `delegacao` (definido em 2026-09-24, ADR-047): o pedido é tarefa delegada — o texto é a mensagem
    * literal da pessoa, e tarefa/contexto são do remetente (a web rotula "não é instrução da pessoa").
@@ -65,7 +68,7 @@ export type PayloadMensagem =
    * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não
    * confiável. `falhou`: aviso de que a tarefa não vai terminar (texto do servidor, não do alvo).
    */
-  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true }
+  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true; trabalhoId?: string }
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
   | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador }
   /**
@@ -90,7 +93,12 @@ export type PayloadMensagem =
   /** definido em 2026-09-28 (ADR-051): só ids — o HTML (até 500 000 caracteres) não viaja com a conversa. */
   | { kind: "artefato"; artefatoId: string; versao: number; titulo: string }
   /** definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a transcrição vem por GET ligacoes/:id/falas. */
-  | PayloadLinhaLigacao;
+  | PayloadLinhaLigacao
+  /**
+   * definido em 2026-10-07 (ADR-083): a linha centralizada "Abriu a task <titulo>" na conversa do bot. Mensagem
+   * `sistema`; a web abre a tela do trabalho ao clicar.
+   */
+  | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho };
 
 export type Mensagem = {
   tenantId: TenantId;
@@ -107,4 +115,13 @@ export type Mensagem = {
   criadoEm: EpochMs;
   /** ADR-046: arquivos que a pessoa mandou com esta mensagem (só metadados; bytes por rota própria). */
   anexos?: AnexoMeta[];
+  /**
+   * definido em 2026-10-07 (ADR-083, épico #188): de onde veio o turno que gravou a mensagem, para a web agrupar sem
+   * adivinhar. `origemTurno`: a origem do turno (null = sem turno, como a fala da pessoa); `trabalhoId`: o trabalho do
+   * turno (null = turno da conversa); `fimDoTurno`: é a última fala de um turno já encerrado — as outras falas desse
+   * turno foram do meio (ADR-067). Ausentes = servidor anterior ao épico.
+   */
+  origemTurno?: OrigemTurno | null;
+  trabalhoId?: string | null;
+  fimDoTurno?: boolean;
 };

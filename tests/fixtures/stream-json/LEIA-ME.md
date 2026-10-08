@@ -23,3 +23,8 @@ Origem: scratchpad/sondas da sessão de 2026-09-16 (mapa-cli.json descreve cada 
   `assistant` por bloco, deltas antes do bloco completo): o modelo escreve um relatório de mais de 280
   caracteres, chama `mcp__nod__lembrar`, recebe o tool_result e fecha com "Anotado.". O `result` traz só
   "Anotado." — é o caso em que a fala perdia o relatório (comporFala em src/domain/stream-json.ts).
+- `mensagem-no-meio.jsonl` — SINTÉTICO (2026-10-07, ADR-083 §6, #189), no formato das linhas reais: o modelo narra
+  ("Vou revisar as três tasks.") e chama `consultar`; depois do resultado, a pessoa escreveu no meio (o CLI lê a
+  mensagem no limite da ferramenta; a linha dela não aparece porque o stdout não a ecoa sem `--replay-user-messages`) e
+  o modelo responde numa frase curta ("O prazo é sexta-feira, dia 9.") antes de chamar `lembrar` e fechar. Sem a regra
+  da mensagem do meio, essa resposta (< 280 caracteres antes de uma ferramenta) era narração e sumia.

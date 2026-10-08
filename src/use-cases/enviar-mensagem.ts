@@ -13,6 +13,7 @@ import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fiosDaConversa } from "./fios-da-pergunta.ts";
+import { trabalhosAbertosDaConversa } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaEnviarMensagem = {
@@ -160,12 +161,15 @@ export async function mensagemExecutorIndisponivel(
 /**
  * GET conversas/:id/mensagens (EMENDA 13): mensagens + turnos pendentes renderizáveis ("na fila — ocupado em …").
  * definido em 2026-09-24 (fio da pergunta): + os fios das perguntas com mensagem na janela, já com o estado.
+ * definido em 2026-10-07 (ADR-083, S2): cada mensagem leva `origemTurno`, `trabalhoId` e `fimDoTurno`, e a conversa, as
+ * tasks abertas do bot dela (a faixa). As falas do meio dos turnos de trabalho continuam na página: quem as esconde é a
+ * web, e elas contam no `limite` (documentado: uma task muito falante empurra as mais antigas para fora da janela).
  */
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
   const [lidas, turnosPendentes, vivos, propostas] = await Promise.all([
-    deps.repos.mensagens.listarDaConversa(conversa.id, input.limite),
+    deps.repos.mensagens.listarComTurno(conversa.id, input.limite),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
     deps.repos.turnos.vivosDaConversa(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),
@@ -179,7 +183,8 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
     .map((t) => ({ id: t.id, mensagemId: t.mensagemOrigemId as string }));
   const turnosEmCurso = vivos
     .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
-    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null }));
+    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null, trabalhoId: t.trabalhoId ?? null }));
   const fios = await fiosDaConversa(deps.repos, mensagens);
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios } };
+  const trabalhos = await trabalhosAbertosDaConversa(deps, conversa.tipo === "propria" ? conversa.agenteId : null);
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos } };
 };

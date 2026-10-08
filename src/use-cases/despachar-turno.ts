@@ -8,6 +8,7 @@ import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } from "../domain/harness.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from "./autoria-evento.ts";
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
+import { sincronizarDoTurno } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaDespacharTurno = {
@@ -56,7 +57,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     const autoria = autoriaPessoa(deps.escopo, executor);
     return {
       data: { plano: null, turno: interrompido ?? turno, motivo: "parada_ativa" },
-      events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } })],
+      events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } }), ...(await sincronizarDoTurno(deps, turno))],
     };
   }
 
@@ -82,6 +83,8 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
 
   try {
     const plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
+    // ADR-083: o trabalho do turno passa a rodando (ou a precisa de você, se uma decisão dele segue aberta).
+    events.push(...(await sincronizarDoTurno(deps, comFila)));
     return { data: { plano, turno: comFila, motivo: null }, events };
   } catch (e) {
     // montarPlano recusa a localidade (inventário mudou entre o gate e o plano): mesmo caminho, nunca silêncio.
@@ -109,5 +112,6 @@ async function recusarPorExecutor(
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: motivoFalha, inventario: p.inventario.estado } }),
   ];
   if (negacao) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { mensagem_id: negacao.id, kind: "negacao" } }));
+  events.push(...(await sincronizarDoTurno(deps, p.turno)));
   return { data: { plano: null, turno: assentado ?? p.turno, motivo: "executor_indisponivel" }, events };
 }

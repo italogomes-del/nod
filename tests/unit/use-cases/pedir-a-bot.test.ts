@@ -46,7 +46,13 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     const pedido = d.banco.mensagens.find((m) => m.conversaId === tuca.conversaId && m.payload?.kind === "peer_pedido");
     expect(pedido).toMatchObject({ turnoId: r.data.tarefa_id, autoria: { autor_tipo: "agente", autor_id: vera.id, sob_procuracao_de: d.deps.escopo.pessoaId }, payload: { turnoOrigemId: t.id, conversaOrigemId: vera.conversaId } });
     expect(d.banco.mensagens.find((m) => m.kind === "handoff")).toMatchObject({ conversaId: vera.conversaId, texto: "Vera pediu a Tuca: Explique como a busca por nome funciona hoje.", payload: { tarefaId: r.data.tarefa_id } });
-    expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada", "turno_criado"]);
+    // ADR-083: o pedido nasce como task de quem recebe (trabalho_mudou) antes do handoff e do turno.
+    expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada", "turno_criado"]);
+    // ADR-083 (S7): uma task `colega` de quem recebe, na conversa dele, com quem pediu; o handoff aponta para ela.
+    const trabalho = d.banco.trabalhos.find((w) => w.id === tarefa?.trabalhoId);
+    expect(trabalho).toMatchObject({ agenteId: tuca.id, conversaId: tuca.conversaId, origem: "colega", pedidoPorAgenteId: vera.id, titulo: "Explique como a busca por nome funciona hoje.", estado: "na_fila" });
+    expect(trabalho?.pasta?.startsWith("~/nod/Tuca/explique-como-a-busca")).toBe(true);
+    expect(d.banco.mensagens.find((m) => m.kind === "handoff")?.payload).toMatchObject({ trabalhoId: trabalho?.id });
   });
 
   it("de uma rotina também — o caso da Clarice e do Chico —, e sem o bloco da pessoa (ninguém escreveu)", async () => {

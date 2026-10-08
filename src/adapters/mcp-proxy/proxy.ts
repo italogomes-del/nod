@@ -171,6 +171,8 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
         const a = await cliente.aguardar(r.aguardar, longpoll);
         if (ehFalhaTransporte(a)) break;
         if (a.estado === "decidida") return resposta(id, decididaComResultados(a.itens, orcamento));
+        // ADR-083 (#194): sob pressão de memória o servidor solta a espera; o turno encerra e a decisão retoma depois.
+        if (a.soltar === true) break;
       }
       return resposta(id, texto(JSON.stringify({ estado: "pendente", decisao_id: r.aguardar, instrucao: INSTRUCAO_PENDENTE })));
     }

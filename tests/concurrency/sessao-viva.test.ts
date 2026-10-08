@@ -14,6 +14,12 @@ import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { SEM_CAPACIDADES } from "../../src/contracts/harness.ts";
+import { molduraMensagemNoMeio } from "../../src/domain/mensagem-no-meio.ts";
+
+/** O driver de teste declara a sessão viva (ADR-083 §5): sem isso o laço nem pede mensagens. */
+const SESSAO_VIVA = { ...SEM_CAPACIDADES, mensagemNoMeio: true };
+const semMoldura = (t: string) => /«([\s\S]*)»/.exec(t)?.[1] ?? t;
 
 /**
  * ADR-067 de ponta a ponta: laço real, ponte in-process real e Postgres (transações commitadas, como em
@@ -52,6 +58,8 @@ afterEach(async () => {
     await trx`delete from agente_memorias where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
+    // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
+    await trx`delete from trabalhos where owner_id = ${p}`;
     await trx`delete from inventario_motores where owner_id = ${p}`;
     if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     if (criados.agentes.length) await trx`delete from agentes where id in ${trx(criados.agentes)}`;
@@ -78,14 +86,17 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
     const etapa = { falou: false, liberado: false, rodados: [] as string[] };
     const recebidas: string[] = [];
     let aberta = true;
+    // X2 (revisão do épico #188): a escrita aceita avisa o laço por `mensagemEntrou`, como o stdin do Claude.
+    let sinksVivos: SinksTurno | null = null;
     const driverVivo: Driver = {
-      meta: { id: "catcher", locality: "ambos" },
+      meta: { id: "catcher", locality: "ambos", capacidades: SESSAO_VIVA },
       async create() {
         return {
           sondar: async () => PRONTO,
           dispose: async () => {},
           adapter: (plano): Adapter => ({
             async rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno> {
+              sinksVivos = sinks;
               etapa.rodados.push(plano.turnoId);
               await sinks.sinal("attempted");
               await sinks.sinal("promptSubmitted");
@@ -95,14 +106,15 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
               const chegou = await sinks.ocioso!();
               const depois = await sinks.ocioso!();
               aberta = false;
-              const texto = chegou && !depois ? `Recebi: ${recebidas.join(" | ")}` : "nada chegou";
+              const texto = chegou && !depois ? `Recebi: ${recebidas.map(semMoldura).join(" | ")}` : "nada chegou";
               return { desfecho: "sucesso", texto, sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
             },
             async interromper() { etapa.liberado = true; },
             aceitaMensagens: () => aberta,
-            receberMensagem(texto) {
+            receberMensagem(texto, id) {
               if (!aberta) return false;
               recebidas.push(texto);
+              if (id !== undefined) sinksVivos?.mensagemEntrou?.(id);
               return true;
             },
           }),
@@ -139,7 +151,8 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
         estado = await lido();
       }
 
-      expect(recebidas).toEqual(["quanto é 2+2?"]);
+      // ADR-083 §6: chega com a moldura; #189: só sai "absorvido" depois que o app confirma a escrita.
+      expect(recebidas).toEqual([molduraMensagemNoMeio("quanto é 2+2?")]);
       expect(etapa.rodados).toEqual([primeiro]);
       expect(estado.primeiro?.estado).toBe("concluido");
       expect(estado.segundo).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: primeiro });
@@ -156,4 +169,139 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
       await laco.parar();
     }
   });
+
+  /**
+   * O driver dos testes abaixo: o turno longo fala, espera ser liberado e fica ocioso duas vezes; qualquer outro turno
+   * (a mensagem da pessoa rodando à parte) responde na hora. `escreve` = o CLI aceita a escrita da mensagem.
+   */
+  function driverDeTurnoLongo(o: { longo: () => string | null; escreve: boolean }) {
+    const etapa = { falou: false, liberado: false, rodados: [] as string[], ofertas: 0 };
+    const recebidas: string[] = [];
+    const driver: Driver = {
+      meta: { id: "catcher", locality: "ambos", capacidades: SESSAO_VIVA },
+      async create() {
+        return {
+          sondar: async () => PRONTO,
+          dispose: async () => {},
+          adapter: (plano): Adapter => {
+            let aberta = true;
+            let sinksDoTurno: SinksTurno | null = null;
+            return {
+              async rodarTurno(sinks: SinksTurno): Promise<ResultadoTurno> {
+                sinksDoTurno = sinks;
+                etapa.rodados.push(plano.turnoId);
+                await sinks.sinal("attempted");
+                await sinks.sinal("promptSubmitted");
+                let texto = `Respondi: ${plano.entrada.texto}`;
+                if (plano.turnoId === o.longo()) {
+                  sinks.falaIntermediaria!("Trabalhando na rotina.");
+                  etapa.falou = true;
+                  await esperarAte(() => etapa.liberado);
+                  await sinks.ocioso!();
+                  await sinks.ocioso!();
+                  texto = "Rotina feita.";
+                }
+                aberta = false;
+                return { desfecho: "sucesso", texto, sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+              },
+              async interromper() { etapa.liberado = true; },
+              aceitaMensagens: () => aberta,
+              receberMensagem(texto, id) {
+                etapa.ofertas += 1;
+                if (!aberta || !o.escreve) return false;
+                recebidas.push(texto);
+                if (id !== undefined) sinksDoTurno?.mensagemEntrou?.(id);
+                return true;
+              },
+            };
+          },
+        };
+      },
+    };
+    return { driver, etapa, recebidas };
+  }
+
+  async function rodarCenario(p: { montar: (deps: ReturnType<typeof depsSobreTrx>, agenteId: string, conversaId: string) => Promise<string>; escreve: boolean }) {
+    const machineId = randomUUID();
+    const ponte = criarPonteInterna(db, { services, useCases, executor: "catcher", listarPessoas, esquecerTurno: (id) => services.interruptor.esquecer(id) });
+    await ponte.conectar({ machineId, nome: "teste", inventario: PRONTO, versaoContrato: 1 });
+    let longo: string | null = null;
+    const d = driverDeTurnoLongo({ longo: () => longo, escreve: p.escreve });
+    const instance = await d.driver.create({ env: {}, cwdBase: "/tmp/nao-usado" });
+    const registry: Registry = { "claude-cli": { estado: "sombra", motivo: "teste" }, catcher: { estado: "pronto", driver: d.driver, instance } };
+    const { conversaId } = await escopado(async (trx) => {
+      const deps = depsSobreTrx(trx, PESSOA, { services });
+      const c = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 5" })).data;
+      criados.agentes.push(c.agente.id);
+      criados.conversas.push(c.conversa.id);
+      longo = await p.montar(deps, c.agente.id, c.conversa.id);
+      return { conversaId: c.conversa.id };
+    });
+    const laco = iniciarLaco({ ponte, registry, pessoaId: PESSOA.pessoaId, machineId, relogio: Date.now, esperaVaziaMs: 20, jitterMs: 5, renovacaoMs: 10_000, checagemMensagensMs: 10_000 });
+    return { d, conversaId, longo: longo as unknown as string, laco };
+  }
+
+  async function lerTurno(id: string) {
+    return escopado(async (trx) => criarRepos(trx, PESSOA).turnos.buscar(id));
+  }
+
+  it("#189: a sessão fechou entre o pedido e a escrita — a mensagem não some: continua pendente e roda como turno próprio", { timeout: 25_000 }, async () => {
+    const { d, conversaId, longo, laco } = await rodarCenario({
+      escreve: false,
+      montar: async (deps, _agenteId, conversaId) => (await executar(deps, enviarMensagem, { conversaId, texto: "implemente a 86akr9u9u", inventario: PRONTO, executor: "catcher" })).data.turno.id,
+    });
+    try {
+      await esperarAte(() => d.etapa.falou);
+      const segundo = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), enviarMensagem, { conversaId, texto: "quanto é 2+2?", inventario: PRONTO, executor: "catcher" })).data.turno.id);
+      d.etapa.liberado = true;
+      await esperarAte(() => d.etapa.rodados.includes(segundo), 15_000);
+      // O servidor ofereceu a mensagem, o CLI não a recebeu: ela não saiu como 'absorvido' e rodou à parte.
+      expect(d.etapa.ofertas).toBeGreaterThan(0);
+      expect(d.recebidas).toEqual([]);
+      expect(d.etapa.rodados).toEqual([longo, segundo]);
+      let t = await lerTurno(segundo);
+      const fim = Date.now() + 8_000;
+      while (t?.estado !== "concluido" && Date.now() < fim) {
+        await new Promise((r) => setTimeout(r, 50));
+        t = await lerTurno(segundo);
+      }
+      expect(t).toMatchObject({ estado: "concluido", motivoInterrupcao: null });
+      expect(t?.absorvidoPor ?? null).toBeNull();
+    } finally {
+      await laco.parar();
+    }
+  });
+
+  for (const caso of ["rotina", "retomada de uma rotina"] as const) {
+    it(`ADR-083 §6: mensagem durante a ${caso} fica pendente e roda como turno de conversa próprio`, { timeout: 25_000 }, async () => {
+      const { d, conversaId, longo, laco } = await rodarCenario({
+        escreve: true,
+        montar: async (deps, agenteId, conversaId) => {
+          const base = { conversaId, agenteId, prazoEm: Date.now() + 3_600_000, profundidade: 0 as const, entradaTexto: "rotina das 9h", entradaConfianca: "confiavel" as const, modelo: "claude-haiku-4-5-20251001", executor: "catcher" as const };
+          const rotina = await deps.repos.turnos.enfileirar({ ...base, origem: "rotina", ...(caso === "rotina" ? {} : { interrompidoCom: "sem_progresso" as const }) });
+          if (caso === "rotina") return rotina!.id;
+          return (await deps.repos.turnos.enfileirar({ ...base, origem: "retomada", retomaTurnoId: rotina!.id, entradaTexto: "continue a rotina" }))!.id;
+        },
+      });
+      try {
+        await esperarAte(() => d.etapa.falou);
+        const segundo = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), enviarMensagem, { conversaId, texto: "e o relatório de ontem?", inventario: PRONTO, executor: "catcher" })).data.turno.id);
+        // O ocioso da rotina pergunta ao servidor, que não oferece nada: a mensagem espera, pendente.
+        d.etapa.liberado = true;
+        await esperarAte(() => d.etapa.rodados.includes(segundo), 15_000);
+        expect(d.etapa.ofertas).toBe(0);
+        expect(d.recebidas).toEqual([]);
+        expect(d.etapa.rodados).toEqual([longo, segundo]);
+        let t = await lerTurno(segundo);
+        const fim = Date.now() + 8_000;
+        while (t?.estado !== "concluido" && Date.now() < fim) {
+          await new Promise((r) => setTimeout(r, 50));
+          t = await lerTurno(segundo);
+        }
+        expect(t).toMatchObject({ estado: "concluido", origem: "conversa" });
+      } finally {
+        await laco.parar();
+      }
+    });
+  }
 });

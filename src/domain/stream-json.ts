@@ -1,6 +1,9 @@
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../contracts/turno.ts";
 import { redigirECortar } from "./segredos.ts";
 
+/** Os blocos de resposta a mensagens do meio (criarFalaDoMeio em mensagem-no-meio.ts), pelo próprio objeto do evento. */
+export type FalaDoMeioNoTurno = { falados: ReadonlySet<EventoStream>; obrigatorios: ReadonlySet<EventoStream> };
+
 /**
  * Parser PURO do `claude -p --output-format stream-json --verbose --include-partial-messages`
  * (contrato empírico de 2026-09-16, mapa-cli + fixtures reais em tests/fixtures/stream-json).
@@ -234,14 +237,15 @@ const juntarBlocos = (partes: readonly string[]) => partes.map((p) => p.trim()).
 /**
  * Fala = relatórios escritos antes da última ferramenta (> NARRACAO_MAX_CHARS, ainda não contidos no
  * texto final) + texto final, separados por linha em branco. Sem relatório a acrescentar, o texto final
- * sai intacto.
+ * sai intacto. `obrigatorios` (definido em 2026-10-07, ADR-083 §6): índices de `antesDaUltimaFerramenta` que entram
+ * de qualquer tamanho — a resposta a uma mensagem do meio que não pôde sair como fala na hora.
  */
-export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string): string {
+export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string, obrigatorios: ReadonlySet<number> = new Set()): string {
   const alvo = normalizar(final);
   const relatorios: string[] = [];
-  for (const bloco of antesDaUltimaFerramenta) {
+  for (const [i, bloco] of antesDaUltimaFerramenta.entries()) {
     const t = bloco.trim();
-    if (t.length <= NARRACAO_MAX_CHARS) continue;
+    if (t.length <= NARRACAO_MAX_CHARS && !obrigatorios.has(i)) continue;
     const n = normalizar(t);
     if (alvo.includes(n) || relatorios.some((r) => normalizar(r).includes(n))) continue;
     relatorios.push(t);
@@ -270,6 +274,10 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
  *    eles, todos os blocos; sem blocos, os deltas colados, como antes;
  *  - sem result (interrompido): tudo o que foi escrito — os blocos separados por linha em branco mais o
  *    trecho em streaming que não chegou a fechar um bloco; sem blocos, os deltas colados, como antes.
+ *
+ * `falaDoMeio` (definido em 2026-10-07, ADR-083 §6): a resposta a uma mensagem da pessoa no meio do turno. A que o
+ * driver já mandou como fala intermediária (`falados`) sai da fala, e o `result.texto` igual a ela também; a que não
+ * saiu (`obrigatorios`) entra mesmo curta, antes de outra ferramenta. Sem nenhuma, tudo como antes.
  */
 export function classificarResultado(entrada: {
   eventos: readonly EventoStream[];
@@ -279,6 +287,7 @@ export function classificarResultado(entrada: {
   sinais?: Partial<SinaisTurno>;
   /** true quando o driver chamou interromper() (SIGTERM) — antes ou depois do init. */
   interrompidoPeloDriver?: boolean;
+  falaDoMeio?: FalaDoMeioNoTurno;
 }): ResultadoTurno {
   let sinais: SinaisTurno = { ...SINAIS_ZERADOS, ...entrada.sinais };
   let init: Extract<EventoStream, { tipo: "init" }> | null = null;
@@ -290,7 +299,11 @@ export function classificarResultado(entrada: {
   let textoStream = "";
   // Deltas desde o último bloco completo: o trecho que um SIGTERM deixa sem o `assistant` que o fecharia.
   let textoAberto = "";
-  const blocos: { texto: string; posicao: number }[] = [];
+  const blocos: { texto: string; posicao: number; obrigatorio: boolean }[] = [];
+  const falados = entrada.falaDoMeio?.falados;
+  const obrigatorios = entrada.falaDoMeio?.obrigatorios;
+  const jaFaladas: string[] = [];
+  const jaFaladasCruas: string[] = [];
   let ultimaFerramenta = -1;
   for (const [posicao, ev] of entrada.eventos.entries()) {
     sinais = reduzirSinais(sinais, ev);
@@ -307,8 +320,12 @@ export function classificarResultado(entrada: {
       textoStream += ev.texto;
       textoAberto += ev.texto;
     } else if (ev.tipo === "texto_bloco") {
-      blocos.push({ texto: ev.texto, posicao });
       textoAberto = "";
+      if (falados?.has(ev)) {
+        jaFaladas.push(normalizar(ev.texto));
+        jaFaladasCruas.push(ev.texto);
+      }
+      else blocos.push({ texto: ev.texto, posicao, obrigatorio: obrigatorios?.has(ev) === true });
     }
   }
   const lancou = entrada.exitCode !== null || entrada.signal !== null || entrada.eventos.length > 0;
@@ -317,14 +334,19 @@ export function classificarResultado(entrada: {
   const tokensZerados: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 };
 
   const todos = blocos.map((b) => b.texto);
+  // A resposta do meio já foi fala: o `result.texto` que a repete (era o último bloco) e os deltas dela não voltam.
+  const jaFalado = (t: string) => jaFaladas.includes(normalizar(t));
+  const deltas = jaFaladasCruas.reduce((t, falada) => t.replace(falada, ""), textoStream);
   if (result) {
     const depois = blocos.filter((b) => b.posicao > ultimaFerramenta).map((b) => b.texto);
     // NOD-174: na falha, o `result` é o erro do CLI em inglês, não fala do bot — fica só no `erroCru`. O que o modelo
     // escreveu antes do erro continua (vira parcial no servidor).
-    const final = (result.sucesso ? result.texto : "") || juntarBlocos(depois) || juntarBlocos(todos) || textoStream;
-    const antes = blocos.filter((b) => b.posicao < ultimaFerramenta).map((b) => b.texto);
+    const doResult = result.sucesso && !jaFalado(result.texto) ? result.texto : "";
+    const final = doResult || juntarBlocos(depois) || juntarBlocos(todos) || deltas;
+    const anteriores = blocos.filter((b) => b.posicao < ultimaFerramenta);
+    const antes = anteriores.map((b) => b.texto);
     const base = {
-      texto: comporFala(antes, final),
+      texto: comporFala(antes, final, new Set(anteriores.flatMap((b, i) => (b.obrigatorio ? [i] : [])))),
       sessaoCli,
       sinais,
       custoUsd: result.custoUsd,
@@ -341,7 +363,7 @@ export function classificarResultado(entrada: {
     return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base };
   }
 
-  const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : textoStream;
+  const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : deltas;
   const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
@@ -368,8 +390,8 @@ function rodadas(eventos: readonly EventoStream[]): { fechadas: EventoStream[][]
 }
 
 /** A fala de UMA rodada fechada (eventos até o `result`): a mesma composição do fim do turno. */
-export function textoDaRodada(eventos: readonly EventoStream[]): string {
-  return classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "" }).texto;
+export function textoDaRodada(eventos: readonly EventoStream[], falaDoMeio?: FalaDoMeioNoTurno): string {
+  return classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "", falaDoMeio }).texto;
 }
 
 const somarTokens = (a: TokensTurno, b: TokensTurno): TokensTurno => ({
@@ -409,8 +431,8 @@ export function classificarSessao(entrada: Parameters<typeof classificarResultad
   // A sessão de uma rodada só (o turno de sempre): nada muda, nem os espaços do texto.
   if (fechadas.length === 1 && !(entrada.rodadasJaFaladas ?? 0) && !(pendente && parou)) return classificarResultado(entrada);
   const cortado = pendente && parou;
-  const textoAberto = trabalhouDepois ? classificarResultado({ eventos: aberta, exitCode: null, signal: null, stderr: "", interrompidoPeloDriver: true }).texto : "";
-  const texto = juntarBlocos([...fechadas.slice(entrada.rodadasJaFaladas ?? 0).map(textoDaRodada), textoAberto]);
+  const textoAberto = trabalhouDepois ? classificarResultado({ eventos: aberta, exitCode: null, signal: null, stderr: "", interrompidoPeloDriver: true, falaDoMeio: entrada.falaDoMeio }).texto : "";
+  const texto = juntarBlocos([...fechadas.slice(entrada.rodadasJaFaladas ?? 0).map((r) => textoDaRodada(r, entrada.falaDoMeio)), textoAberto]);
   const geral = classificarResultado(entrada);
   if (cortado) {
     const init = entrada.eventos.find((e) => e.tipo === "init");

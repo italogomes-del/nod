@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Registry, TesteDoMotor } from "../../../src/adapters/executor/spi.ts";
 import { INTERVALO_SONDA_IA_MS } from "../../../desktop/ia-mac.ts";
-import { criarVigiaDasIas, ESPERA_RETESTE_MS, INTERVALO_COM_REPROVADA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
+import { criarVigiaDasIas, ESPERA_RETESTE_MS, INTERVALO_COM_REPROVADA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type CapacidadesAnunciadas, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
+import { SEM_CAPACIDADES, type CapacidadesHarness } from "../../../src/contracts/harness.ts";
+import { capacidadesDe } from "../../../src/domain/harness.ts";
 
 type Ia = "claude-cli" | "codex-cli";
 /** O que o teste de verdade devolve: um resultado, uma promessa dele (teste pendurado) ou o CLI morrendo. */
@@ -16,7 +18,7 @@ const ausente = (): Inventario => ({ estado: "ausente", motivo: "instale", em: T
  * Um Mac de mentira: o login de cada IA (a sonda grátis), o que o teste de verdade devolve, a "impressão" da conta e o
  * que foi anunciado ao servidor. O timer é manual: `tique()` roda a passada agendada.
  */
-function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown; lacoDeVoz?: Partial<Record<Ia, boolean | null>> }) {
+function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown; lacoDeVoz?: Partial<Record<Ia, boolean | null>>; capacidades?: Partial<Record<Ia, CapacidadesHarness | "explode">> }) {
   const m = {
     login: { ...o.login },
     teste: { ...(o.teste ?? {}) } as Partial<Record<Ia, Roteiro>>,
@@ -27,6 +29,9 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
     /** NOD-167: o `semLacoDeVoz` de cada anúncio, na mesma ordem. */
     semVoz: [] as string[][],
     lacoDeVoz: { ...(o.lacoDeVoz ?? {}) } as Partial<Record<Ia, boolean | null>>,
+    /** X9: o que o CLI de cada IA diz que faz (Instance.capacidades) e o `capacidades` de cada anúncio. */
+    capacidades: { ...(o.capacidades ?? {}) } as Partial<Record<Ia, CapacidadesHarness | "explode">>,
+    anunciadas: [] as CapacidadesAnunciadas[],
     testes: [] as { ia: Ia; pergunta: string }[],
     sondas: 0,
     gravacoes: 0,
@@ -42,6 +47,7 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
         adapter: () => { throw new Error("não usado"); },
         dispose: async () => {},
         ...(ia in m.lacoDeVoz ? { lacoDeVoz: async () => m.lacoDeVoz[ia] ?? null } : {}),
+        ...(ia in m.capacidades ? { capacidades: async () => { const c = m.capacidades[ia]; if (!c || c === "explode") throw new Error("help falhou"); return c; } } : {}),
         testar: async (pergunta: string) => {
           m.testes.push({ ia, pergunta });
           const t = m.teste[ia];
@@ -57,8 +63,9 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
   const deps: DepsVigia = {
     sondar: async () => { m.sondas++; return { registry: registry(), inventarios: { ...m.login } }; },
     impressao: async (ia) => m.impressao[ia],
-    anunciar: async (inventarios, principal, semLacoDeVoz) => {
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => {
       m.semVoz.push([...semLacoDeVoz]);
+      m.anunciadas.push(capacidades);
       m.anuncios.push({
         estados: Object.fromEntries(Object.entries(inventarios).map(([k, v]) => [k, v?.estado ?? "?"])),
         causas: Object.fromEntries(Object.entries(inventarios).map(([k, v]) => [k, v && v.estado === "nao_autenticado" ? v.causa ?? null : null])),
@@ -87,6 +94,25 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
 const SEM_ACESSO: TesteDoMotor = { inventario: { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "1.0", em: T0 }, resposta: null };
 
 describe("vigia das IAs do Mac (2026-10-05)", () => {
+  it("X9: anuncia as capacidades de cada IA pronta com os pisos do CLI; CLI sem --fork-session sai com bifurcaSessao false", async () => {
+    const semFork = { ...capacidadesDe("claude-cli"), bifurcaSessao: false };
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": semLogin() }, capacidades: { "claude-cli": semFork } });
+    await vigia.iniciar(sondagem());
+    // Só a pronta entra; a sem login não promete nada.
+    expect(m.anunciadas.at(-1)).toEqual({ "claude-cli": semFork });
+    // O CLI atualizado (ganhou --fork-session) é novidade: reanuncia.
+    const antes = m.anunciadas.length;
+    m.capacidades["claude-cli"] = capacidadesDe("claude-cli");
+    await vigia.reanunciar();
+    expect(m.anunciadas.length).toBe(antes + 1);
+    expect(m.anunciadas.at(-1)!["claude-cli"]!.bifurcaSessao).toBe(true);
+    // A sonda que falha não promete nada.
+    m.capacidades["claude-cli"] = "explode";
+    await vigia.reanunciar();
+    expect(m.anunciadas.at(-1)).toEqual({ "claude-cli": SEM_CAPACIDADES });
+    vigia.parar();
+  });
+
   it("NOD-167: Codex pronto sem app-server vai em semLacoDeVoz; 'não sei' não entra; atualizar o Codex reanuncia", async () => {
     const { m, vigia, sondagem } = mac({ login: { "claude-cli": semLogin(), "codex-cli": pronto() }, lacoDeVoz: { "codex-cli": false } });
     await vigia.iniciar(sondagem());

@@ -11,6 +11,10 @@ import type { EventoStream } from "../../src/contracts/turno.ts";
  *   [[texto: resposta final]]     → o texto do result
  *   [[custo: 0.0207631]]          → custo do result (default 0)
  *   [[falha: erro_max_turns]]     → result com subtype ≠ success
+ *   [[espera: 5000]]              → o roteiro pausa N ms ali (teto ESPERA_MAX_MS = 60 s): uma ferramenta longa, para
+ *                                    a mensagem do meio chegar com o turno rodando (decisão S9, 2026-10-07)
+ *   [[sessao: <uuid>]]            → o init e o result reportam este `sessaoCli` (sem ele, null: o catcher não
+ *                                    fabrica sessão, 0005); uuid inválido é ignorado
  *
  * Sem marcador, `roteiroPadrao` responde "catcher: recebi N caracteres; ferramentas: […]".
  */
@@ -19,11 +23,17 @@ export type PassoRoteiro =
   | { tipo: "tool_use"; nome: string; input: Record<string, unknown> }
   | { tipo: "texto"; texto: string }
   | { tipo: "custo"; custoUsd: number }
-  | { tipo: "falha"; subtype: string };
+  | { tipo: "falha"; subtype: string }
+  | { tipo: "espera"; ms: number }
+  | { tipo: "sessao"; id: string };
+
+/** definido em 2026-10-07 (S9): teto da pausa de um `[[espera]]`; um roteiro nunca segura o turno mais que isso por marcador. */
+export const ESPERA_MAX_MS = 60_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type Roteiro = { passos: PassoRoteiro[] };
 
-const ABERTURA = /^\[\[(delta|tool|texto|custo|falha):/;
+const ABERTURA = /^\[\[(delta|tool|texto|custo|falha|espera|sessao):/;
 
 /**
  * Marcadores com `[[`/`]]` BALANCEADOS (definido em 2026-09-16, L9): um marcador pode carregar outro
@@ -67,6 +77,10 @@ export function interpretarRoteiro(prompt: string): Roteiro {
     else if (tipo === "texto") passos.push({ tipo: "texto", texto: corpo });
     else if (tipo === "custo") passos.push({ tipo: "custo", custoUsd: Number(corpo) || 0 });
     else if (tipo === "falha") passos.push({ tipo: "falha", subtype: corpo || "error_during_execution" });
+    else if (tipo === "espera") passos.push({ tipo: "espera", ms: Math.min(ESPERA_MAX_MS, Math.max(0, Math.floor(Number(corpo) || 0))) });
+    else if (tipo === "sessao") {
+      if (UUID.test(corpo)) passos.push({ tipo: "sessao", id: corpo });
+    }
     else if (tipo === "tool") {
       const espaco = corpo.search(/\s/);
       const nome = espaco === -1 ? corpo : corpo.slice(0, espaco);
@@ -83,6 +97,13 @@ export function interpretarRoteiro(prompt: string): Roteiro {
     }
   }
   return { passos };
+}
+
+/** O `[[sessao: …]]` do roteiro (o último vale), ou null. */
+export function sessaoDoRoteiro(roteiro: Roteiro): string | null {
+  let id: string | null = null;
+  for (const p of roteiro.passos) if (p.tipo === "sessao") id = p.id;
+  return id;
 }
 
 /** Roteiro default do catcher: um delta descritivo + result custo 0 (definido em 2026-09-16). */
@@ -102,8 +123,9 @@ export function eventosDoRoteiro(
   roteiro: Roteiro,
   ctx: { sessaoCli: string; ferramentas: readonly string[]; modelo: string; responder?: (nome: string, input: Record<string, unknown>) => string },
 ): EventoStream[] {
+  const sessaoCli = sessaoDoRoteiro(roteiro) ?? ctx.sessaoCli;
   const eventos: EventoStream[] = [
-    { tipo: "init", sessaoCli: ctx.sessaoCli, ferramentas: [...ctx.ferramentas], modelo: ctx.modelo, versaoCli: "catcher", apiKeySource: "none" },
+    { tipo: "init", sessaoCli, ferramentas: [...ctx.ferramentas], modelo: ctx.modelo, versaoCli: "catcher", apiKeySource: "none" },
   ];
   let texto = "";
   let custoUsd = 0;
@@ -126,7 +148,7 @@ export function eventosDoRoteiro(
     tipo: "result",
     sucesso: falha === null,
     subtype: falha ?? "success",
-    sessaoCli: ctx.sessaoCli,
+    sessaoCli,
     texto,
     custoUsd,
     tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 },

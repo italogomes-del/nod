@@ -18,6 +18,7 @@ import { autoriaDaPessoa } from "../../../use-cases/registrar-negacao.ts";
 import { fecharComResposta, retomarComResposta } from "../../../use-cases/responder-decisao.ts";
 import { retomarTurno } from "../../../use-cases/retomar-turno.ts";
 import type { Deps, Services } from "../../../use-cases/tipos.ts";
+import { sincronizarDasDecisoes } from "../../../use-cases/trabalhos.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, textoDoCorpo, type DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -181,7 +182,8 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
             const r = await executar(deps, decidirPropostaDeBot, { propostaId: atual.id, recusar: recusada(corpo), nome: c.nome, descricao: c.descricao });
             if (r.agenteId) ids.agente = r.agenteId;
-            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) })]);
+            // Revisão do épico (S2, 2026-10-08): a task do turno que propôs relê o estado.
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) }), ...(await sincronizarDasDecisoes(deps, [decidida]))]);
           });
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
@@ -235,7 +237,8 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
               obsoleta = r.obsoleta === true;
             }
             // Obsoleta: a pessoa clicou em confirmar, mas a proposta saiu recusada — o frame diz o que ficou no banco.
-            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) || obsoleta })]);
+            // Revisão do épico (S2, 2026-10-08): a task do turno que propôs relê o estado.
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) || obsoleta }), ...(await sincronizarDasDecisoes(deps, [decidida]))]);
           });
           if (obsoleta) throw atual.tipo === "perfil" ? erroPerfilMudou() : erroRotinaMudou();
           const resposta: RespostaMutacao = { ok: true, ids };

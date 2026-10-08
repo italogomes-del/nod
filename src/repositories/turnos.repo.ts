@@ -41,10 +41,11 @@ interface Linha {
   absorvido_por: string | null;
   sob_procuracao_de: string | null;
   ligacao_id: string | null;
+  trabalho_id: string | null;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -77,6 +78,7 @@ function paraTurno(l: Linha): Turno {
     absorvidoPor: l.absorvido_por,
     sobProcuracaoDe: l.sob_procuracao_de,
     ligacaoId: l.ligacao_id,
+    trabalhoId: l.trabalho_id,
   };
 }
 
@@ -106,6 +108,11 @@ export type NovoTurno = {
   interrompidoCom?: MotivoInterrupcao;
   /** definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação e os turnos de trabalho pedidos durante ela. */
   ligacaoId?: string | null;
+  /**
+   * definido em 2026-10-07 (ADR-083): o trabalho do turno. Ausente numa retomada = o do turno que ela continua (a
+   * retomada nunca sai do trabalho, como nunca sai do salto); null explícito = turno da conversa.
+   */
+  trabalhoId?: string | null;
 };
 
 export type Assentamento = {
@@ -132,11 +139,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
-          ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null})
+          ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
+          ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },
@@ -168,8 +176,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * Reivindicação por UPDATE condicional + FOR UPDATE SKIP LOCKED numa tx curta (ADR-010).
      * EMENDA 12: turno de conversa/sala/retomada passa na frente de rotina enfileirada.
-     * EMENDA 13 (agente serial): NOT EXISTS 'despachando' na MESMA CONVERSA e NOT EXISTS
-     * 'despachando' do MESMO AGENTE.
+     * EMENDA 13 (agente serial) revista em 2026-10-07 pela ADR-083: a serialização é por FAIXA — a conversa (turno sem
+     * trabalho) ou o trabalho —, não mais por agente. O mesmo bot roda a conversa e vários trabalhos ao mesmo tempo.
      *
      * medido em 2026-09-16 (tests/concurrency/serializacao-por-conversa.test.ts, duas conexões
      * reivindicando ao mesmo tempo): só NOT EXISTS + SKIP LOCKED SOBREPÔS — a segunda conexão pulou
@@ -198,10 +206,21 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só
               -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).
               and ((t.origem = 'ligacao' and ${p.aceitaLigacao === true})
-                or (t.origem <> 'ligacao'
-                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.estado = 'despachando' and d.origem <> 'ligacao')
-                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.agente_id = t.agente_id and d.estado = 'despachando' and d.origem <> 'ligacao')))
-            order by (t.origem = 'ligacao') desc, (t.origem = 'rotina') asc, t.criado_em asc, t.id asc
+                or (t.origem <> 'ligacao' and t.trabalho_id is null
+                  -- revisto em 2026-10-07 (ADR-083 §3): a faixa é coalesce(trabalho_id, conversa_id). O turno da conversa
+                  -- espera só outro turno da MESMA conversa sem trabalho. De propósito: o mesmo bot responde ao mesmo
+                  -- tempo na conversa direta e numa sala (conversas diferentes), e o trabalho dele não segura a conversa.
+                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao'))
+                or (t.origem <> 'ligacao' and t.trabalho_id is not null
+                  -- O turno de um trabalho espera só outro turno do MESMO trabalho e o trabalho de que ele depende
+                  -- ("Fazer depois da …"), até ele terminar, parar ou falhar.
+                  and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando')
+                  and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
+                    where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
+            -- Ligação primeiro; depois o que não é rotina nem pedido de colega (o turno ou o trabalho dele); depois a ordem.
+            order by (t.origem = 'ligacao') desc,
+              (t.origem in ('rotina', 'delegacao', 'peer') or (t.trabalho_id is not null and exists (select 1 from trabalhos x where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and x.origem in ('rotina', 'colega')))) asc,
+              t.criado_em asc, t.id asc
             for update skip locked limit 1)
           returning ${trx.unsafe(COLUNAS)}`;
         return l ? paraTurno(l) : null;
@@ -379,7 +398,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * Fila lida junta (definido em 2026-09-24): logo depois de reivindicar um turno disparado por fala da
      * pessoa, os OUTROS pendentes da mesma conversa e do mesmo agente, também disparados por fala dela,
      * saem como interrompido/'absorvido' apontando para ele, e a entrada dele vira a lista de todas as
-     * falas (entradaDaFila). Rotina, retomada e peer nunca entram nem absorvem. Só toca 'pendente', então
+     * falas (entradaDaFila). Rotina, retomada e peer nunca entram nem absorvem; ADR-083: só da MESMA faixa (a fala
+     * mandada a uma task não entra no turno da conversa, nem o contrário). Só toca 'pendente', então
      * um Cancelar que chegou antes deixa aquela mensagem de fora e um que chega depois recebe estado_invalido.
      */
     async absorverPendentes(turno: Turno, entrada: (textos: readonly string[]) => string): Promise<{ turno: Turno; absorvidos: Turno[] }> {
@@ -388,6 +408,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
           and estado = 'pendente' and origem in ('conversa', 'sala') and mensagem_origem_id is not null and id <> ${turno.id}
+          and trabalho_id is not distinct from ${turno.trabalhoId ?? null}::uuid
         returning ${conn.unsafe(COLUNAS)}`;
       const absorvidos = linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
       if (absorvidos.length === 0) return { turno, absorvidos };
@@ -405,12 +426,34 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fila lida junta, mas o texto vai à sessão do CLI em vez de mudar a entrada. Só fala da pessoa (conversa), e só
      * sem anexo: o anexo espera o próximo turno, que o baixa e o entrega inteiro. Quem decide se o turno vivo aceita
      * é o caso de uso (absorverNaSessao).
+     * definido em 2026-10-07 (#189): com `ids`, só estas — as que o app confirmou ter escrito na sessão
+     * (confirmarNaSessao); sem, todas as da fila, como antes (app que não confirma).
      */
-    async absorverNaSessao(turno: Turno): Promise<Turno[]> {
+    async absorverNaSessao(turno: Turno, ids?: readonly string[]): Promise<Turno[]> {
+      if (ids && ids.length === 0) return [];
       const linhas = await conn<Linha[]>`
         update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${turno.conversaId} and agente_id = ${turno.agenteId}
           and estado = 'pendente' and origem = 'conversa' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
+          and trabalho_id is null
+          ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
+        returning ${conn.unsafe(COLUNAS)}`;
+      return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+    },
+
+    /**
+     * definido em 2026-10-07 (ADR-083, #193): as falas que esperam na faixa DESTE trabalho (a da pessoa na tela da task
+     * e o recado da conversa, os dois com mensagem de origem) entram no turno vivo dele, como absorverNaSessao faz com a
+     * conversa. Sem anexo, e nunca a retomada de uma decisão (que não tem mensagem de origem).
+     * revisto em 2026-10-08 (revisão do épico, S18): com `ids`, só estas — as que o app confirmou (confirmarNaSessao).
+     */
+    async absorverDoTrabalho(turno: Turno, ids?: readonly string[]): Promise<Turno[]> {
+      if (!turno.trabalhoId || (ids && ids.length === 0)) return [];
+      const linhas = await conn<Linha[]>`
+        update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${turno.trabalhoId}
+          and estado = 'pendente' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
+          ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
         returning ${conn.unsafe(COLUNAS)}`;
       return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
     },
@@ -465,9 +508,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * EMENDA 13: turno pendente bloqueado é renderizável — "na fila — Vera está respondendo em #revisão".
-     * conversaId aponta para ONDE o agente está ocupado (outra conversa) ou para a própria, quando a
-     * serialização é por conversa. Pendente sem bloqueio conhecido não entra (vai ser reivindicado já).
+     * EMENDA 13: turno pendente bloqueado é renderizável — "na fila". Desde a ADR-083 (2026-10-07) o bloqueio é só a
+     * faixa da conversa, então `conversaId` aponta para a própria. Pendente sem bloqueio conhecido não entra.
      *
      * revisto em 2026-09-30: em dois passos, e o segundo só quando há pendente (o caso comum é nenhum). A versão com as
      * duas subconsultas correlacionadas custava uma varredura de turnos por linha estimada, e a estimativa sob RLS
@@ -476,20 +518,20 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * (o custo seguiu acima de 500 mil), porque a subconsulta por agente seguia varrendo a tabela.
      */
     async pendentesRenderizaveis(conversaId: string): Promise<TurnoPendenteDto[]> {
+      // ADR-083: turno de trabalho não é "agente ocupado" de ninguém, nem espera por isso: tem faixa própria.
       const pendentes = await conn<{ id: string; agente_id: string }[]>`
         select id, agente_id from turnos
-        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' and origem <> 'ligacao'
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' and origem <> 'ligacao' and trabalho_id is null
         order by criado_em`;
       if (pendentes.length === 0) return [];
-      // O mais antigo despachando de cada agente ganha, como o `order by criado_em limit 1` de antes; sem nenhum do
-      // agente, um despachando na própria conversa (serialização por conversa) aponta para ela mesma.
-      const agentes = [...new Set(pendentes.map((p) => p.agente_id))];
+      // revisto em 2026-10-07 (ADR-083): só a faixa da conversa segura um turno dela — o despachando sem trabalho NESTA
+      // conversa (o do mesmo agente primeiro). O bot ocupado em outra conversa ou num trabalho não segura mais.
       const ocupados = await conn<{ agente_id: string; conversa_id: string }[]>`
         select agente_id, conversa_id from turnos
-        where tenant_id = ${escopo.tenantId} and estado = 'despachando' and origem <> 'ligacao' and (agente_id = any(${agentes}::uuid[]) or conversa_id = ${conversaId})
+        where tenant_id = ${escopo.tenantId} and estado = 'despachando' and origem <> 'ligacao' and trabalho_id is null and conversa_id = ${conversaId}
         order by criado_em`;
       return pendentes.flatMap((p): TurnoPendenteDto[] => {
-        const ocupado = ocupados.find((d) => d.agente_id === p.agente_id) ?? ocupados.find((d) => d.conversa_id === conversaId);
+        const ocupado = ocupados.find((d) => d.agente_id === p.agente_id) ?? ocupados[0];
         return ocupado ? [{ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversa_id }] : [];
       });
     },
@@ -527,6 +569,37 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           and not exists (select 1 from turnos n where n.tenant_id = t.tenant_id and n.conversa_id = t.conversa_id and n.criado_em > t.criado_em)
         order by t.criado_em`;
       return linhas.map(paraTurno);
+    },
+
+    /**
+     * definido em 2026-10-08 (revisão do épico, S20): trava (FOR UPDATE) os turnos pendentes e rodando de um trabalho, em
+     * ordem de criação — a mesma em que a renovação e a entrega os pegam (o turno vivo, mais velho, antes dos recados).
+     */
+    async travarAbertosDoTrabalho(trabalhoId: string): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and trabalho_id = ${trabalhoId} and estado in ('pendente', 'despachando')
+        order by criado_em, id for update`;
+      return linhas.map(paraTurno);
+    },
+
+    /** Os turnos de um trabalho, em ordem (ADR-083): o Parar da task, a retomada e a tela da task. */
+    async doTrabalho(trabalhoId: string): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos where tenant_id = ${escopo.tenantId} and trabalho_id = ${trabalhoId} order by criado_em, id`;
+      return linhas.map(paraTurno);
+    },
+
+    /**
+     * A rede de 2 min (ADR-083, #193): o turno de conversa que está rodando passa a ser do trabalho. Só o que ainda roda
+     * e ainda não tem trabalho — duas renovações seguidas não promovem duas vezes.
+     */
+    async vincularTrabalho(id: string, trabalhoId: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set trabalho_id = ${trabalhoId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and trabalho_id is null and estado = 'despachando'
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
     },
 
     async listarDaConversa(conversaId: string, limite = 50): Promise<Turno[]> {

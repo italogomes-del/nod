@@ -57,7 +57,7 @@ const rotinas = [
 /** O kit de um bot de conversa completo: colegas, rotinas, apps, computador, pasta, artefato e pendência. */
 const kitConversa = [
   f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("anotar_pendencia"),
-  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"),
+  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_task"), f("mandar_para_task"),
   daOrigem("computador_observar", "computador"), daOrigem("workspace_propor_pasta", "workspace"),
   doConector(conectorTarefas, "TAREFAS_LISTAR"),
 ];
@@ -66,11 +66,14 @@ const kitConversa = [
 const turno1 = {
   memorias: [mem("mem-1", "o time usa um quadro de tarefas fictício", 1), mem("mem-2", "prefere respostas curtas", 2)],
   pendencias: [pend("pend-1", "revisar o PR de exemplo #1", 1_700_000_000_000)],
+  // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot.
+  trabalhosAbertos: [{ id: "trab-1", titulo: "Dashboard de exemplo", estado: "rodando", ultimoPasso: "Rodou um comando" }],
   contextoConversa: '{"historico":[{"autor":"Pessoa Exemplo","texto":"bom dia","confianca":"confiavel"}]}',
 };
 const turno2 = {
   memorias: [...turno1.memorias, mem("mem-3", "o repositório de exemplo usa vitest", 3)],
   pendencias: [],
+  trabalhosAbertos: [],
   contextoConversa: '{"historico":[{"autor":"Pessoa Exemplo","texto":"e o PR?","confianca":"confiavel"}]}',
 };
 
@@ -118,7 +121,8 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 4. Rotina acordada, com inventário de rotinas.
   "rotina-com-inventario": {
     agente,
-    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("listar_rotinas"), f("pausar_rotina"), f("atualizar_rotina"), f("criar_rotina"), f("pedir_acesso"), f("anotar_pendencia")],
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("listar_rotinas"), f("pausar_rotina"), f("atualizar_rotina"), f("criar_rotina"), f("pedir_acesso"), f("anotar_pendencia"), f("abrir_task")],
+    trabalho: { titulo: "Triagem de exemplo", origem: "rotina", trabalhoMaeId: null },
     pessoaNome: "Pessoa Exemplo",
     modo: "rotina",
     colegas,
@@ -137,6 +141,18 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
     colegas,
     conectores: [],
     memorias: [],
+  },
+  // 8. Task filha de uma rotina (ADR-083, #193): não abre outra, e a linha da task diz por quê.
+  "task-filha-de-rotina": {
+    agente,
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("anotar_pendencia")],
+    pessoaNome: "Pessoa Exemplo",
+    modo: "rotina",
+    colegas,
+    conectores: [conectorTarefas],
+    memorias: turno1.memorias,
+    trabalho: { titulo: "Responder o chamado de exemplo", origem: "rotina", trabalhoMaeId: "trab-mae" },
+    semTerminal: "rotina",
   },
   // 7. O Nod, o bot fixo (ADR-081/082): o manual do produto na parte estável e as ferramentas dele.
   nod: {

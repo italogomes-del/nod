@@ -59,7 +59,7 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
     });
   });
 
-  it("EMENDA 13: o mesmo agente não roda em duas conversas ao mesmo tempo, e o pendente diz ONDE ele está ocupado", async () => {
+  it("revisto em 2026-10-07 (ADR-083 §3): o mesmo agente roda na sala e na conversa própria ao mesmo tempo; o pendente da MESMA conversa diz que ela está ocupada", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const sala = await repos.conversas.criar({ tipo: "sala", salaId: randomUUID() });
@@ -70,8 +70,17 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
       const naPropria = await repos.turnos.enfileirar(base(conversaId, agenteId));
       const ganhou = await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() });
       expect(ganhou?.id).toBe(naSala?.id);
+      // Conversas diferentes, faixas diferentes: a própria sai também, e nada fica "ocupado em outra conversa".
+      expect(await repos.turnos.pendentesRenderizaveis(conversaId)).toEqual([]);
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() }))?.id).toBe(naPropria?.id);
+      const segunda = await repos.turnos.enfileirar(base(conversaId, agenteId));
       expect(await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() })).toBeNull();
-      expect(await repos.turnos.pendentesRenderizaveis(conversaId)).toEqual([{ id: naPropria?.id, motivo: "agente_ocupado_em", conversaId: sala?.id }]);
+      expect(await repos.turnos.pendentesRenderizaveis(conversaId)).toEqual([{ id: segunda?.id, motivo: "agente_ocupado_em", conversaId }]);
+      // O turno de um trabalho do mesmo bot não entra no "na fila" da conversa nem espera por ela.
+      const trabalho = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Relatório", origem: "pessoa" });
+      const doTrabalho = await repos.turnos.enfileirar(base(conversaId, agenteId, { trabalhoId: trabalho?.id ?? null }));
+      expect((await repos.turnos.pendentesRenderizaveis(conversaId)).map((p) => p.id)).toEqual([segunda?.id]);
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() }))?.id).toBe(doTrabalho?.id);
     });
   });
 

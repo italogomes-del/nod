@@ -1,8 +1,9 @@
-import type { IdHarness } from "./harness.ts";
+import type { CapacidadesHarness, IdHarness } from "./harness.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
 import type { MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
+import type { LeituraMemoria } from "./trabalho.ts";
 import type { ResultadoTurno, SinaisTurno, TarefaDoBot } from "./turno.ts";
 
 /** A máquina se anuncia (ADR-021 conectar). */
@@ -27,6 +28,12 @@ export type AnuncioMaquina = {
    * de um bot com essa IA com o motivo `codex_sem_app_server`. Ausente = app antigo, ou todas rodam.
    */
   semLacoDeVoz?: IdHarness[];
+  /**
+   * definido em 2026-10-08 (ADR-083, revisão do épico): as capacidades que os drivers DESTA máquina declaram, já com os
+   * pisos do CLI instalado (ex.: `bifurcaSessao` só com `--fork-session` no help). O servidor só promove pela rede de
+   * 2 min quando a máquina do turno anunciou `bifurcaSessao`. Ausente = app antigo: nada que dependa disso acontece.
+   */
+  capacidades?: Partial<Record<IdHarness, CapacidadesHarness>>;
 };
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */
@@ -39,6 +46,8 @@ export type Entrega = {
   seqLocal: number;
   fala: FalaEntrega;
   resultado: ResultadoTurno;
+  /** #189: mensagens escritas na sessão cuja confirmação não chegou numa renovação (a última falhou); a entrega confirma. */
+  mensagensEntregues?: string[];
 };
 
 /**
@@ -58,9 +67,23 @@ export type PedidoRenovar = {
    * conversa e as devolve; sem isto elas esperam na fila, como antes.
    */
   aceitaMensagens?: boolean;
+  /**
+   * definido em 2026-10-07 (ADR-083, #189): os ids (`mensagensIds`) que o CLI recebeu desde a última renovação. Só estes
+   * saem da fila como absorvidos; os que nunca chegam aqui continuam `pendente` e viram turno próprio. A presença do
+   * campo (mesmo vazio) diz que o app confirma: app antigo, sem ele, tem a mensagem absorvida na hora, como antes.
+   */
+  mensagensEntregues?: string[];
+  /** #189: ids que o adapter não conseguiu escrever (a sessão fechou entre o pedido e a resposta): ficam na fila. */
+  mensagensDevolvidas?: string[];
+  /** definido em 2026-10-07 (ADR-083, #194): a memória do Mac, amostrada uma vez por máquina a cada 30 s. */
+  memoria?: LeituraMemoria;
 };
-/** O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067). */
-export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; ligacaoEncerrada?: boolean };
+/**
+ * O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067).
+ * `mensagensIds` (#189): o id do turno de cada uma, na mesma ordem, para o app confirmar em `mensagensEntregues`.
+ */
+/** `mensagensSemMoldura`: ids (de `mensagensIds`) que são recado para a task, não fala da pessoa — entram sem a moldura. */
+export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes

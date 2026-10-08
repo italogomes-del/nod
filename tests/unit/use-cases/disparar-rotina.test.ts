@@ -57,7 +57,10 @@ describe("dispararRotina", () => {
     expect(new Date(r.data.proximaExecucao).toISOString()).toBe("2026-09-18T11:00:00.000Z");
     expect(d.banco.rotinas[0]?.proximaExecucao).toBe(r.data.proximaExecucao);
     expect(d.banco.janelas).toEqual([{ tenantId: rotina.tenantId, rotinaId: rotina.id, instanteAgendado: JANELA, executor: "catcher", machineId: "m1", turnoId: r.data.turno.id }]);
-    expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
+    // ADR-083 (S7): cada execução é um trabalho `rotina`; o turno nasce nele. Revisão do épico (S13): com pasta própria.
+    expect(d.banco.trabalhos).toMatchObject([{ origem: "rotina", rotinaId: rotina.id, estado: "na_fila", pasta: expect.stringMatching(/^~\/nod\/Vera\/poste-o-resumo-[a-z0-9]{6}$/) }]);
+    expect(r.data.turno.trabalhoId).toBe(d.banco.trabalhos[0]?.id);
     // nenhuma execução ainda: o enum não tem 'pendente'; a janela com turno é o "em curso"
     expect(d.banco.execucoes).toHaveLength(0);
 
@@ -93,6 +96,22 @@ describe("dispararRotina", () => {
     if ("turno" in daPessoa.data) await d.deps.repos.turnos.reivindicar({ machineId: "m1", agora: AGORA });
     expect("pulada" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
     if ("turno" in daPessoa.data) await d.deps.repos.turnos.assentar(daPessoa.data.turno.id, { estado: "concluido" });
+    expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
+  });
+
+  /** Revisão do épico #188 (S12, 2026-10-08): a task que a execução anterior abriu ainda aberta também pula a janela. */
+  it("S12: task filha da execução anterior ainda aberta → a janela do agendador é pulada; acabada, roda", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const primeira = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in primeira.data)) throw new Error("deveria ter disparado");
+    const mae = d.banco.trabalhos[0]!;
+    const filha = await d.deps.repos.trabalhos.criar({ agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: "Responder o chamado 42", origem: "rotina", rotinaId: rotina.id, trabalhoMaeId: mae.id });
+    await d.deps.repos.turnos.assentar(primeira.data.turno.id, { estado: "concluido" });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    const pulada = await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" });
+    expect(pulada.data).toEqual({ pulada: true, turnoAbertoId: null, trabalhoAbertoId: filha!.id, proximaExecucao: Date.parse("2026-09-21T08:00:00-03:00") });
+    await d.deps.repos.trabalhos.mudarEstado(filha!.id, "terminado", AGORA);
     expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
   });
 
@@ -375,7 +394,7 @@ describe("pré-voo da rotina (emenda da ADR-044)", () => {
     expect(d.banco.propostas.find((p) => p.id === decisao?.id)).toMatchObject({ estado: "confirmada", payload: { rotinaId: rotina.id } });
     expect(d.banco.execucoes.filter((e) => e.desfecho === "bloqueada")).toHaveLength(0);
     // A concessão vai direto ao outbox (o disparo só devolve os eventos do turno); o card nunca piscou na tela.
-    expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
     expect(d.banco.events.map((e) => e.kind)).not.toContain("decisao_criada");
     expect(d.banco.events.map((e) => e.kind)).toContain("decisao_decidida");
     expect(d.banco.mensagens.find((m) => m.kind === "consentimento")?.autoria).toMatchObject({ decidido_por: "regra:modo_automatico" });

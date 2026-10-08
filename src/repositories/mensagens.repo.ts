@@ -1,5 +1,6 @@
 import type { Autoria } from "../contracts/evento.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
+import type { OrigemTurno } from "../contracts/turno.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms } from "./conversao.ts";
 
@@ -74,6 +75,34 @@ export type NovaMensagem = {
   idEnvio?: string;
 };
 
+/** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
+type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null };
+
+function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true };
+}
+
+/**
+ * definido em 2026-10-07 (ADR-083, S2): o que a web usa para agrupar sem adivinhar, no MESMO select (S3 da revisão: a
+ * janela `max(criado_em) over (partition by turno_id)`, nunca subconsulta por linha). A fala da pessoa não tem turno
+ * próprio: o trabalho dela é o do turno que ela abriu (`mensagem_origem_id`, índice da 0063). `fimDoTurno` olha só as
+ * falas de texto do bot e só turno já encerrado; a janela é a mesma página lida, e a última fala de um turno é sempre a
+ * mais nova dele, então ela está na página sempre que alguma fala dele estiver.
+ */
+function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
+  return conn<LinhaComTurno[]>`
+    select m.*, t.origem as turno_origem, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id,
+      (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
+        and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
+    from (${recorte}) m
+    left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
+    left join lateral (
+      select x.trabalho_id from turnos x where x.tenant_id = ${tenantId} and x.mensagem_origem_id = m.id and m.turno_id is null
+      order by x.criado_em limit 1
+    ) o on true
+    order by m.criado_em, m.id`;
+}
+
 /** Mensagens com autoria composta (ADR-023/025). A da sala é lida por quem tem grant (perna via sala_id). */
 export function mensagensRepo(conn: Conn, escopo: Escopo) {
   return {
@@ -111,6 +140,30 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
           order by criado_em desc, id desc limit ${limite}
         ) recentes order by criado_em, id`;
       return linhas.map(paraMensagem);
+    },
+
+    /** listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-083). */
+    async listarComTurno(conversaId: string, limite = 200): Promise<Mensagem[]> {
+      const linhas = await selectComTurno(conn, escopo.tenantId, conn`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
+        order by criado_em desc, id desc limit ${limite}`);
+      return linhas.map(paraMensagemComTurno);
+    },
+
+    /**
+     * As mensagens de um trabalho (a tela da task, ADR-083): as falas dos turnos dele, inclusive as do meio, e as da
+     * pessoa que abriram um turno dele. As mais recentes, até `limite`.
+     */
+    async doTrabalho(trabalhoId: string, limite = 300): Promise<Mensagem[]> {
+      const linhas = await selectComTurno(conn, escopo.tenantId, conn`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and id in (
+          select mm.id from mensagens mm join turnos t on t.tenant_id = mm.tenant_id and t.id = mm.turno_id
+          where mm.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${trabalhoId}
+          union all
+          select t.mensagem_origem_id from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${trabalhoId} and t.mensagem_origem_id is not null)
+        order by criado_em desc, id desc limit ${limite}`);
+      return linhas.map(paraMensagemComTurno);
     },
 
     /**

@@ -18,7 +18,7 @@ export type NovaRetomada = {
  * porque acesso ao ClickUp, acesso à agenda e rotinas foram aprovados com segundos de diferença.
  * A trava por turno de origem serializa decisões simultâneas e o assentamento do próprio turno.
  * `nova` diz se nasceu turno (quem chama emite `turno_criado` só nesse caso).
- * Profundidade, confiança, harness, modelo e `sob_procuracao_de` são sempre os do turno de origem
+ * Profundidade, confiança, harness, modelo, `sob_procuracao_de` e o trabalho (ADR-083) são sempre os do turno de origem
  * (revisão da ADR-047: uma retomada nunca lava a marca nem sai do salto).
  */
 export async function enfileirarRetomada(deps: Deps, r: NovaRetomada): Promise<{ turno: Turno | null; nova: boolean }> {
@@ -40,6 +40,8 @@ export async function enfileirarRetomada(deps: Deps, r: NovaRetomada): Promise<{
     harness: r.original.harness,
     retomaTurnoId: r.original.id,
     sobProcuracaoDe: r.original.sobProcuracaoDe ?? null,
+    // ADR-083: a retomada continua no trabalho do turno que retoma (a mesma faixa, a mesma sessão).
+    trabalhoId: r.original.trabalhoId ?? null,
     ...(r.reenvios !== undefined ? { reenvios: r.reenvios } : {}),
     ...(r.executor ? { executor: r.executor } : {}),
   });

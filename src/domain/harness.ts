@@ -1,5 +1,5 @@
-import { HARNESSES } from "../contracts/harness.ts";
-import type { CatalogoHarness, IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import { CAPACIDADES_HARNESS, HARNESSES, SEM_CAPACIDADES } from "../contracts/harness.ts";
+import type { CapacidadesHarness, CatalogoHarness, IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
 import { ErroDeDominio } from "./erro.ts";
@@ -91,4 +91,13 @@ export function motivoHarnessIndisponivel(harness: string, inventario: Inventari
 export function iaAtualDoCatalogo(catalogo: CatalogoHarness): IdHarness {
   const noMac = catalogo.opcoes.find((h) => h.integrado && ((h.inventario.estado === "ausente" && h.inventario.causa === "cli_antigo") || h.inventario.estado === "nao_autenticado"));
   return catalogo.padrao ?? noMac?.id ?? "claude-cli";
+}
+
+/**
+ * definido em 2026-10-07 (ADR-083): o que o harness sabe fazer. Toda diferença entre harnesses fora do driver passa
+ * por aqui; harness desconhecido (ou ausente) não tem nenhuma capacidade.
+ */
+export function capacidadesDe(harness: string | null | undefined): CapacidadesHarness {
+  if (!harness || !Object.hasOwn(CAPACIDADES_HARNESS, harness)) return SEM_CAPACIDADES;
+  return CAPACIDADES_HARNESS[harness as IdHarness];
 }

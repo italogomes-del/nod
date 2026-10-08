@@ -8,6 +8,9 @@ import { NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
 import type { Relogio } from "../../../shared/types.ts";
+import type { NivelPressao } from "../../../contracts/trabalho.ts";
+import { soltarPorMemoria } from "../../../domain/trabalho.ts";
+import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
 import { chamarFerramenta, REGRA_CHAMADA, registrarExecucaoLocal, VERSAO_REGRA_CHAMADA } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
@@ -26,6 +29,8 @@ export type DepsRotasInternas = {
   /** Intervalo entre consultas (1 s + jitter até 250 ms, definido em 2026-09-16); injetável no teste. */
   intervaloMs?: number;
   dormir?: (ms: number) => Promise<void>;
+  /** ADR-083 (#194): a pressão de memória dos Macs da pessoa; amarela ou pior solta a espera longa de uma task. */
+  pressao?: (pessoaId: string) => NivelPressao | null;
 };
 
 const CLASSES: readonly ClasseNegacao[] = ["ferramenta_negada", "conector_indisponivel", "plano_ausente"];
@@ -134,8 +139,21 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
               if (decisao.estado === "decidida" && (await d.repos.decisoes.reivindicarContinuacao(decisaoId, "turno", deps.agora())) === "retomada") return { estado: "pendente" as const };
               return { estado: "decidida" as const, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho, acaoId: i.destino.conector === "computador" && typeof i.destino.argumentos?.acaoId === "string" ? i.destino.argumentos.acaoId : null })) };
             }
-            return { estado: "pendente" as const };
+            return { estado: "pendente" as const, desde: Date.parse(decisao.criadoEm) };
           });
+          // ADR-083 (#194): sob pressão, a task que espera a pessoa há mais de 5 min solta a espera — o turno encerra, o
+          // processo fecha e a decisão vira retomada (--resume) quando ela responder.
+          if (olhada.estado === "pendente" && deps.pressao && soltarPorMemoria({ nivel: deps.pressao(ctx.escopo.pessoaId), esperandoDesde: olhada.desde ?? deps.agora(), agora: deps.agora() })) {
+            const fechou = await deps.dentro(ctx.escopo, async (d) => {
+              const r = await fecharPorMemoria(d, turnoId);
+              if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
+              return r.fechou;
+            });
+            if (fechou) {
+              ctx.json(200, { estado: "pendente", soltar: true });
+              return;
+            }
+          }
           if (olhada.estado === "inexistente") {
             ctx.json(404, { codigo: "nao_encontrado", mensagem: "decisão não pertence a este turno" });
             return;

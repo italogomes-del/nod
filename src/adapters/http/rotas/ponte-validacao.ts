@@ -1,4 +1,5 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
+import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
@@ -21,6 +22,7 @@ import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
+import { HARNESSES, SEM_CAPACIDADES, type CapacidadesHarness, type IdHarness } from "../../../contracts/harness.ts";
 
 export function exigir(condicao: unknown): asserts condicao {
   if (!condicao) throw new ErroDeDominio("entrada_invalida");
@@ -64,6 +66,25 @@ export function falas(v: unknown): FalaIntermediaria[] {
     return { seq: o.seq, texto: o.texto };
   });
 }
+/** definido em 2026-10-07 (ADR-083, #194): no máximo um RSS por turno vivo; 64 cobre o pico de 25 turnos do diário. */
+const TETO_TURNOS_MEMORIA = 64;
+const TETO_MB = 1_048_576;
+/**
+ * A memória do Mac na renovação (#194), estrita: o nível do macOS, o total e o RSS por turno, só números e ids. Ausente =
+ * app antigo. Qualquer coisa fora do contrato derruba a renovação (400), como o resto da validação da ponte.
+ */
+export function memoria(v: unknown): LeituraMemoria | undefined {
+  if (v === undefined) return undefined;
+  const o = objeto(v);
+  exigir((o.nivel === "verde" || o.nivel === "amarela" || o.nivel === "vermelha") && typeof o.totalMb === "number" && Number.isFinite(o.totalMb) && o.totalMb >= 0 && o.totalMb <= TETO_MB);
+  exigir(Array.isArray(o.porTurno) && o.porTurno.length <= TETO_TURNOS_MEMORIA);
+  const porTurno = (o.porTurno as unknown[]).map((x) => {
+    const t = objeto(x);
+    exigir(typeof t.turnoId === "string" && UUID.test(t.turnoId) && typeof t.mb === "number" && Number.isFinite(t.mb) && t.mb >= 0 && t.mb <= TETO_MB);
+    return { turnoId: t.turnoId, mb: t.mb };
+  });
+  return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
+}
 const NOME_FERRAMENTA = /^[A-Za-z0-9_.-]+$/;
 const nomeDeFerramenta = (v: unknown): v is string => texto(v, 200) && NOME_FERRAMENTA.test(v);
 const inteiroAte = (v: unknown, max: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= max;
@@ -99,6 +120,33 @@ function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {
   return saida;
 }
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
+/**
+ * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente
+ * = app antigo (undefined, e a absorção segue como antes); fora do formato, a renovação é recusada e o app reenvia.
+ */
+/**
+ * definido em 2026-10-08 (revisão do épico, S15): as capacidades que a máquina anuncia por harness no conectar. Só ids
+ * integrados e só as chaves de CapacidadesHarness, cada uma `true` só se veio `true`; o resto é ignorado (o anúncio é
+ * extra: app antigo não manda, e nada que dependa dele acontece). Nunca recusa o conectar.
+ */
+export function capacidadesAnunciadas(v: unknown): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+  const anunciadas = v as Record<string, unknown>;
+  const saida: Partial<Record<IdHarness, CapacidadesHarness>> = {};
+  for (const h of HARNESSES) {
+    const c = anunciadas[h.id];
+    if (!h.integrado || typeof c !== "object" || c === null || Array.isArray(c)) continue;
+    const bruto = c as Record<string, unknown>;
+    saida[h.id] = Object.fromEntries(Object.keys(SEM_CAPACIDADES).map((k) => [k, bruto[k] === true])) as CapacidadesHarness;
+  }
+  return Object.keys(saida).length > 0 ? saida : undefined;
+}
+
+export function idsDeMensagens(v: unknown): string[] | undefined {
+  if (v === undefined) return undefined;
+  exigir(Array.isArray(v) && v.length <= TETO_FALAS_POR_RENOVACAO);
+  return (v as unknown[]).map(uuid);
+}
 export function sinais(v: unknown): SinaisTurno {
   const s = objeto(v);
   exigir(["attempted", "rejected", "promptSubmitted", "producedOutput"].every((k) => typeof s[k] === "boolean"));
@@ -210,7 +258,9 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   const erroCru = typeof r.erroCru === "string" && r.erroCru.length <= ERRO_CRU_MAX_CHARS ? r.erroCru : null;
   // NOD-171: extra como o uso do plano. Só com o limite e até 31 dias à frente; fora disso some (a frase fica sem hora).
   const voltaEm = r.motivoFalha === "limite_do_plano" && Number.isSafeInteger(r.limiteVoltaEm) && Number(r.limiteVoltaEm) > 0 && Number(r.limiteVoltaEm) <= agora + 31 * 86_400_000 ? Number(r.limiteVoltaEm) : null;
-  return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], resultado: {
+  // Revisão do épico (S19, 2026-10-08): o que o CLI recebeu e não foi confirmado numa renovação.
+  const entregues = idsDeMensagens(e.mensagensEntregues);
+  return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
     ferramentasChamadas: r.ferramentasChamadas as string[], negacoesPermissao: r.negacoesPermissao as string[],

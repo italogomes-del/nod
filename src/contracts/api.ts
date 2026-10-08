@@ -10,6 +10,7 @@ import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
 import type { FioDaPergunta, FioDoItem } from "./pedido.ts";
 import type { BloqueioRotina, ParadaDaRotina, Rotina } from "./rotina.ts";
+import type { TrabalhoDto } from "./trabalho.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
@@ -54,7 +55,7 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  * página no meio de um turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não
  * se repete, e o cartão de atividade sumia até o turno acabar.
  */
-export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null };
+export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null };
 
 export type ConversaDto = {
   conversa: Conversa;
@@ -67,6 +68,7 @@ export type ConversaDto = {
   propostas: Proposta[];
   /** definido em 2026-09-24 (fio da pergunta): os fios com mensagem na janela carregada, com o estado derivado. */
   fios: FioDaPergunta[];
+  trabalhos?: TrabalhoDto[]; // ADR-083: trabalhos abertos do bot desta conversa (faixa); ausente = servidor antigo
 };
 
 export type SuaVezDto = {

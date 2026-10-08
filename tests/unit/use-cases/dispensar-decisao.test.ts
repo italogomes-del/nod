@@ -66,7 +66,8 @@ describe("dispensar o pedido ABERTO de uma execução de rotina (definido em 202
     const c = await rotinaQuePediu(d);
     const r = await dispensarDecisao(d.deps, { decisaoId: c.pedidoId });
     expect(d.banco.execucoes.map((e) => [e.instanteAgendado, e.desfecho, e.motivo])).toEqual([[JANELA, "passou_em_branco", "pedido_dispensado"]]);
-    expect(r.events.map((e) => e.kind)).toEqual(["decisao_decidida", "rotina_executou"]);
+    // Revisão do épico (S2, 2026-10-08): a execução é uma task de rotina; dispensado o pedido, ela relê o estado.
+    expect(r.events.map((e) => e.kind)).toEqual(["decisao_decidida", "rotina_executou", "trabalho_mudou"]);
     const aviso = d.banco.mensagens.filter((m) => m.kind === "rotina_execucao").at(-1);
     expect(aviso?.texto).toContain("A rotina passou em branco: o pedido foi dispensado sem resposta. Nada foi enviado.");
   });

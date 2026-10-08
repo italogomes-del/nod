@@ -74,26 +74,32 @@ export function notificacaoInitialized(): string {
   return linha({ method: "initialized" });
 }
 
+export type SandboxCodex = "read-only" | "workspace-write";
+
 /**
  * Thread efêmera do laço de voz: nada vai para o histórico do Codex, sem aprovação interativa (o nod decide pelo
  * proxy), sandbox só de leitura. As instruções de voz vão como `developerInstructions`, o mesmo canal que o
  * `codex exec` usa (`-c developer_instructions`).
+ *
+ * definido em 2026-10-07 (ADR-083 §6): o chat do Codex abre a thread NÃO efêmera (`efemera: false`) e com a sandbox
+ * das pastas autorizadas (`workspace-write` com projeto, como o `codex exec`); a ligação segue com os padrões.
  */
-export function pedidoThreadStart(id: IdRpc, p: { modelo: string; instrucoes: string; cwd: string }): string {
+export function pedidoThreadStart(id: IdRpc, p: { modelo: string; instrucoes: string; cwd: string; sandbox?: SandboxCodex; efemera?: boolean }): string {
   return pedido(id, "thread/start", {
     model: p.modelo,
     cwd: p.cwd,
     approvalPolicy: "never",
-    sandbox: "read-only",
+    sandbox: p.sandbox ?? "read-only",
     developerInstructions: p.instrucoes,
-    ephemeral: true,
+    ephemeral: p.efemera ?? true,
   });
 }
 
 const entradaTexto = (t: string) => [{ type: "text", text: t }];
 
-export function pedidoTurnStart(id: IdRpc, p: { threadId: string; texto: string; esforco: EsforcoCodex }): string {
-  return pedido(id, "turn/start", { threadId: p.threadId, input: entradaTexto(p.texto), effort: p.esforco });
+/** Sem `esforco` (o chat com o esforço padrão do modelo), o campo não vai: vale o do modelo. */
+export function pedidoTurnStart(id: IdRpc, p: { threadId: string; texto: string; esforco?: EsforcoCodex }): string {
+  return pedido(id, "turn/start", { threadId: p.threadId, input: entradaTexto(p.texto), ...(p.esforco ? { effort: p.esforco } : {}) });
 }
 
 /** Fala nova no meio de um turno: entra no turno em andamento, sem abrir outro. */

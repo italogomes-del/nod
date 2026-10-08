@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { HARNESSES, type CapacidadesHarness, type IdHarness } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import type { PonteInterna } from "../../contracts/ponte.ts";
 import { log } from "../../obs/log.ts";
@@ -53,6 +54,20 @@ async function inventarioDoRegistry(registry: Registry, executor: IdDriver, agor
 }
 
 /**
+ * definido em 2026-10-08 (revisão do épico, S15): o executor do próprio processo anuncia o que os drivers prontos dele
+ * declaram (`meta.capacidades`), como o app do Mac faz no conectar — a rede de 2 min só promove com `bifurcaSessao`
+ * anunciado. O catcher puro não é harness e fica de fora.
+ */
+export function capacidadesDoRegistry(registry: Registry): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
+  const saida: Partial<Record<IdHarness, CapacidadesHarness>> = {};
+  for (const h of HARNESSES) {
+    const r = registry[h.id];
+    if (r?.estado === "pronto" && r.driver.meta.capacidades) saida[h.id] = r.driver.meta.capacidades;
+  }
+  return Object.keys(saida).length > 0 ? saida : undefined;
+}
+
+/**
  * Orquestrador local (ADR-021 in-process, EMENDA 3): anuncia a máquina à ponte com o inventário da
  * sonda e, a cada 2 s, passa por paraCadaPessoa garantindo UM laço por pessoa (o laço da L4 faz
  * puxar → rodar → entregar). Pessoa que some da lista mantém o laço até parar(); nada aqui abre
@@ -67,7 +82,8 @@ export async function iniciarOrquestrador(o: OpcoesOrquestrador): Promise<Orques
   const anunciar = async (): Promise<Inventario> => {
     const executor = o.executor ?? "catcher";
     const inventario = await inventarioDoRegistry(o.registry, executor, relogio());
-    await o.ponte.conectar({ machineId: o.machineId, nome, inventario, versaoContrato: 1, ligacao: true });
+    const capacidades = capacidadesDoRegistry(o.registry);
+    await o.ponte.conectar({ machineId: o.machineId, nome, inventario, versaoContrato: 1, ligacao: true, ...(capacidades ? { capacidades } : {}) });
     anunciadoEm = relogio();
     return inventario;
   };
