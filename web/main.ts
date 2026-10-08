@@ -2049,8 +2049,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const uso = USOS.find((u) => u.id === el.dataset.uso)?.id;
     if (!uso || !api) return;
     const antes = estado.usoDoMac;
+    const comFoco = document.activeElement === el;
+    // A seção é refeita: quem escolheu pelo teclado continua na escolha (a de antes, se a gravação falhar).
+    const focar = (u: string) => { if (comFoco) document.querySelector<HTMLElement>(`[data-act="uso-do-mac"][data-uso="${CSS.escape(u)}"]`)?.focus({ preventScroll: true }); };
     dispatch({ tipo: "uso-do-mac", uso });
-    void api.gravarPreferencias({ usoDoMac: uso }).then(() => dispatch({ tipo: "invalidar", quais: ["trabalhos"] }), () => dispatch({ tipo: "uso-do-mac", uso: antes }));
+    focar(uso);
+    void api.gravarPreferencias({ usoDoMac: uso }).then(() => dispatch({ tipo: "invalidar", quais: ["trabalhos"] }), () => { dispatch({ tipo: "uso-do-mac", uso: antes }); focar(antes); });
   },
   // A faixa recolhe numa pílula e a pílula abre a faixa; a escolha vai para as preferências da pessoa.
   "faixa-trabalhos": (el) => {

@@ -18,7 +18,7 @@ import { usd } from "./modo-dev.ts";
 
 type Agente = NonNullable<Estado["frota"]>["agentes"][number];
 
-function agente(estado: Estado, id: string | null | undefined): Agente | undefined {
+export function agente(estado: Estado, id: string | null | undefined): Agente | undefined {
   if (!id) return undefined;
   return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
 }

@@ -134,12 +134,13 @@ describe("desktop: fronteiras HTTP", () => {
     expect(enviados.reduce((n, t) => n + (t.texto?.length ?? 0), 0)).toBe(16_000);
     expect(enviados.at(-1)?.texto).toBe("b".repeat(10_000));
   });
-  it("ADR-085: a leitura de memória aceita o processador (opcional); nível ou carga fora do formato recusam", () => {
+  it("ADR-085: a leitura de memória aceita o processador (opcional); fora do formato ele é ignorado, não a leitura toda (revisão do #209)", () => {
     expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [] })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [] });
     expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "amarela", carga: 0.8 } })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "amarela", carga: 0.8 } });
-    for (const processador of [{ nivel: "laranja", carga: 1 }, { nivel: "verde", carga: -1 }, { nivel: "verde", carga: 5000 }, { nivel: "verde" }, "alto"]) {
-      expect(() => memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador })).toThrow();
+    for (const processador of [{ nivel: "laranja", carga: 1 }, { nivel: "verde", carga: -1 }, { nivel: "verde", carga: 5000 }, { nivel: "verde" }, "alto", null]) {
+      expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [] });
     }
+    expect(() => memoria({ nivel: "laranja", totalMb: 10, porTurno: [] })).toThrow();
   });
 
   it("servidor: trecho fora do formato cai sozinho; acima do teto, nada passa", () => {
@@ -204,6 +205,18 @@ describe("NOD-175: ponte do servidor na drenagem", () => {
     await chamar("puxar", { memoria: leitura });
     expect(puxar).toHaveBeenLastCalledWith(escopo.pessoaId, leitura);
     await chamar("puxar", {});
+    expect(puxar).toHaveBeenLastCalledWith(escopo.pessoaId, undefined);
+  });
+
+  it("revisão do #209: leitura com defeito no puxar vai como 'sem leitura' (nunca 400); a leitura entra uma vez por pedido, não a cada volta da espera", async () => {
+    const puxar = vi.fn<PonteInternaNod["puxar"]>().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(plano);
+    const { chamar } = montar(puxar);
+    await chamar("conectar", conectar);
+    const leitura = { nivel: "amarela", totalMb: 900, porTurno: [] };
+    expect(await chamar("puxar", { memoria: leitura })).toEqual({ status: 200, body: { plano } });
+    expect(puxar.mock.calls.map((c) => c[1])).toEqual([leitura, undefined, undefined]);
+    puxar.mockClear();
+    expect(await chamar("puxar", { memoria: { nivel: "laranja" } })).toEqual({ status: 200, body: { plano } });
     expect(puxar).toHaveBeenLastCalledWith(escopo.pessoaId, undefined);
   });
 

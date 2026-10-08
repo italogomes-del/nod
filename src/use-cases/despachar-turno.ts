@@ -26,6 +26,8 @@ export type EntradaDespacharTurno = {
   aceitaLigacao?: boolean;
   /** ADR-085: o Mac está apertado pelo "uso do Mac" da pessoa — trabalho novo em segundo plano espera. */
   segurarFundo?: boolean;
+  /** ADR-085 (revisão do #209): um trabalho novo em segundo plano acabou de começar neste Mac — o próximo espera a vez. */
+  espacarFundo?: boolean;
 };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
@@ -49,7 +51,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
     : undefined;
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo });
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, espacarFundo: input.espacarFundo });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);

@@ -52,6 +52,11 @@ export type Trabalho = {
   /** Última leitura de memória do Mac para o grupo de processos do trabalho (#194). */
   memoriaMb: number | null;
   custoUsd: number | null;
+  /**
+   * definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando — "Executar agora" numa rotina,
+   * ou um pedido a colega feito na conversa com ela. O Mac apertado não segura este trabalho.
+   */
+  pessoaEsperando?: boolean;
   criadoEm: EpochMs;
   iniciadoEm: EpochMs | null;
   terminadoEm: EpochMs | null;
@@ -74,6 +79,11 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    * ou um turno dela leu conteúdo de fora). O prompt da conversa os marca com cuidado.
    */
   deFora?: boolean;
+  /**
+   * ADR-085 (revisão do #209): o Mac apertado seguraria este trabalho agora — em segundo plano, ainda não começou,
+   * ninguém esperando e dentro da espera máxima. A linha diz "esperando o Mac aliviar" só com ele e `segurando`.
+   */
+  seguravel?: boolean;
 };
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */

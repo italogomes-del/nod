@@ -1,5 +1,5 @@
 import type { UsoDoMac } from "../contracts/raio-x.ts";
-import type { LeituraMemoria, LeituraProcessador, NivelPressao } from "../contracts/trabalho.ts";
+import type { LeituraMemoria, LeituraProcessador, NivelPressao, Trabalho } from "../contracts/trabalho.ts";
 
 /**
  * Memória do Mac (definido em 2026-10-07, ADR-083 §4, #194): o mapa do nível de pressão do macOS e a soma da memória
@@ -43,6 +43,7 @@ const kibParaMb = (kib: number) => Math.round(kib / 1024);
 /**
  * A leitura de um turno: o nível, o total dos grupos dos turnos vivos desta máquina e a linha do turno que renova
  * (só se ele tem grupo medido). Turno sem grupo (harness sem `processoProprio`) leva só o nível e o total.
+ * ADR-085: `turnoId` null é a leitura da máquina (a do `puxar`), sem linha de turno; o processador vai junto.
  */
 export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string | null; grupo: number | null; processador?: LeituraProcessador | null }): LeituraMemoria {
   const totalKib = [...new Set(p.gruposVivos)].reduce((t, g) => t + (p.rssPorGrupo.get(g) ?? 0), 0);
@@ -92,6 +93,28 @@ export function deveSegurar(uso: UsoDoMac, memoria: NivelPressao | null, process
   if (uso === "livre") return false;
   if (peloMenos(memoria, "amarela")) return true;
   return peloMenos(processador, uso === "pouco" ? "amarela" : "vermelha");
+}
+
+/**
+ * definido em 2026-10-08 (ADR-085, revisão do #209): o Mac apertado segura trabalho por no máximo 1 h. Depois ele roda
+ * mesmo assim, um por vez (ESPACO_FUNDO_MS): rotina que nunca roda e pedido de colega que nunca volta são piores que
+ * um Mac lento por alguns minutos. O log `fundo_comecou` traz a espera de cada um.
+ */
+export const ESPERA_MAXIMA_FUNDO_MS = 60 * 60_000;
+
+/**
+ * definido em 2026-10-08 (ADR-085, revisão do #209): entre dois trabalhos novos em segundo plano no mesmo Mac, 30 s — a
+ * batida do amostrador. A leitura é de até 30 s atrás e a carga é a média do último minuto: sem o espaço, quando o Mac
+ * alivia, tudo o que esperava começa na mesma leitura verde (o pico de 06/10 de novo).
+ */
+export const ESPACO_FUNDO_MS = 30_000;
+
+/**
+ * O Mac apertado seguraria este trabalho? Em segundo plano (rotina ou pedido de colega), ainda não começou, ninguém
+ * esperando por ele (`pessoaEsperando`) e dentro da espera máxima. É a mesma regra do `reivindicar` (turnos.repo.ts).
+ */
+export function seguravelPeloMac(t: Pick<Trabalho, "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando">, agora: number): boolean {
+  return (t.origem === "rotina" || t.origem === "colega") && t.iniciadoEm === null && t.pessoaEsperando !== true && agora - t.criadoEm < ESPERA_MAXIMA_FUNDO_MS;
 }
 
 /** O pior de dois níveis (null = sem leitura). */

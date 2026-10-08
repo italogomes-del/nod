@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cargaDoLoadavg, deveSegurar, leituraDoTurno, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
+import { cargaDoLoadavg, deveSegurar, ESPERA_MAXIMA_FUNDO_MS, leituraDoTurno, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
 
 /** #194 (ADR-083 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
 describe("nível de pressão", () => {
@@ -92,5 +92,18 @@ describe("segurar trabalho novo (uso do Mac)", () => {
   it("sem leitura (nenhum Mac falou, ou app sem processador) não segura", () => {
     expect(deveSegurar("pouco", null, null)).toBe(false);
     expect(deveSegurar("equilibrado", "verde", null)).toBe(false);
+  });
+
+  it("revisão do #209: o que o Mac apertado segura — segundo plano, não começou, ninguém esperando, dentro da espera máxima", () => {
+    const agora = 10 * ESPERA_MAXIMA_FUNDO_MS;
+    const base = { origem: "rotina" as const, iniciadoEm: null, criadoEm: agora - 60_000, pessoaEsperando: false };
+    expect(seguravelPeloMac(base, agora)).toBe(true);
+    expect(seguravelPeloMac({ ...base, origem: "colega" }, agora)).toBe(true);
+    expect(seguravelPeloMac({ ...base, origem: "pessoa" }, agora)).toBe(false);
+    expect(seguravelPeloMac({ ...base, origem: "rede" }, agora)).toBe(false);
+    expect(seguravelPeloMac({ ...base, iniciadoEm: agora - 1 }, agora)).toBe(false);
+    expect(seguravelPeloMac({ ...base, pessoaEsperando: true }, agora)).toBe(false);
+    expect(seguravelPeloMac({ ...base, pessoaEsperando: undefined }, agora)).toBe(true);
+    expect(seguravelPeloMac({ ...base, criadoEm: agora - ESPERA_MAXIMA_FUNDO_MS }, agora)).toBe(false);
   });
 });

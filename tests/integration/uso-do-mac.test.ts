@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { OrigemTrabalho } from "../../src/contracts/trabalho.ts";
 import type { Tx } from "../../src/shared/types.ts";
+import { ESPERA_MAXIMA_FUNDO_MS } from "../../src/domain/memoria-mac.ts";
 import { gravarPreferencias, lerPreferencias } from "../../src/use-cases/raio-x.ts";
 import { criarTrabalho, listarTrabalhos } from "../../src/use-cases/trabalhos.ts";
 import { esperarErro } from "../helpers/deps-l6.ts";
@@ -25,12 +26,12 @@ async function montar(trx: Tx) {
     if (!t) throw new Error("turno");
     return t;
   };
-  const task = async (origem: OrigemTrabalho, titulo: string) => (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem })).trabalho;
+  const task = async (origem: OrigemTrabalho, titulo: string, pessoaEsperando = false) => (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem, pessoaEsperando })).trabalho;
   /** Todos os turnos que o reivindicar entrega, um por faixa, até a fila (desta pessoa) não ter mais o que dar. */
-  const reivindicarTudo = async (segurarFundo: boolean, meus: ReadonlySet<string>) => {
+  const reivindicarTudo = async (segurarFundo: boolean, meus: ReadonlySet<string>, espacarFundo = false) => {
     const pegos: string[] = [];
     for (let i = 0; i < 40; i++) {
-      const r = await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), segurarFundo });
+      const r = await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), segurarFundo, espacarFundo });
       if (!r) break;
       if (meus.has(r.id)) pegos.push(r.id);
     }
@@ -65,6 +66,26 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
     });
   });
 
+  it("revisão do #209: quem a pessoa espera não é segurado; a espera máxima solta o antigo; o espaço segura até ele", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const agora = await m.task("rotina", "Executar agora", true);
+      const antiga = await m.task("rotina", "Rotina das 9h");
+      await trx`update trabalhos set criado_em = now() - make_interval(secs => ${(ESPERA_MAXIMA_FUNDO_MS + 60_000) / 1000}) where id = ${antiga.id}`;
+      const nova = await m.task("colega", "Pedido de um bot");
+      const tAgora = await m.turno(agora.id, "rotina");
+      const tAntiga = await m.turno(antiga.id, "rotina");
+      const tNova = await m.turno(nova.id);
+      const meus = new Set([tAgora.id, tAntiga.id, tNova.id]);
+
+      // Logo depois de um trabalho em segundo plano começar: só o que a pessoa espera sai, nem o antigo.
+      expect(await m.reivindicarTudo(false, meus, true)).toEqual([tAgora.id]);
+      // Mac apertado, sem o espaço: o antigo passou da espera máxima e sai; o novo espera.
+      expect(await m.reivindicarTudo(true, meus)).toEqual([tAntiga.id]);
+      expect(await m.reivindicarTudo(false, meus)).toEqual([tNova.id]);
+    });
+  });
+
   it("a preferência: padrão 'equilibrado', grava 'pouco' e 'livre', recusa valor fora do tipo e não apaga o resto", async () => {
     await withRollback(MARLON, async (trx) => {
       const { deps } = depsSobre(trx, MARLON);
@@ -86,8 +107,12 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       let leitura: { nivel: "verde" | "amarela" | "vermelha"; totalMb: number; processador: "verde" | "amarela" | "vermelha" | null; carga: number | null } | null = { nivel: "verde", totalMb: 600, processador: "vermelha", carga: 1.4 };
       const deps = { ...m.deps, services: { ...m.deps.services, trabalhosVivos: { ultimaFerramenta: () => null, memoria: () => leitura } } };
 
+      const rotina = await m.task("rotina", "Verificar o Slack");
       const dto = (await listarTrabalhos(deps, {})).data;
       expect(dto.trabalhos.find((t) => t.id === parada.id)?.memoriaMb).toBeNull();
+      // A linha diz "esperando o Mac aliviar" pela marca do servidor (a mesma regra do reivindicar).
+      expect(dto.trabalhos.find((t) => t.id === rotina.id)?.seguravel).toBe(true);
+      expect(dto.trabalhos.find((t) => t.id === parada.id)?.seguravel).toBe(false);
       expect(dto).toMatchObject({ pressao: "verde", processador: "vermelha", cargaProcessador: 1.4, segurando: true });
 
       await gravarPreferencias(m.deps, { usoDoMac: "livre" });

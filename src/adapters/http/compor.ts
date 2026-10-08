@@ -427,6 +427,8 @@ export function comporApp(o: OpcoesCompor): App {
     fezFerramenta: (id) => trabalhosVivos.ultimaFerramenta(id) !== null,
     registrarMemoria: (pessoaId, machineId, leitura) => trabalhosVivos.registrarMemoria(pessoaId, machineId, leitura),
     pressaoDaMaquina: (machineId) => trabalhosVivos.daMaquina(machineId),
+    desfazerMemoria: (pessoaId, mudanca) => trabalhosVivos.desfazer(pessoaId, mudanca),
+    esquecerMaquina: (machineId) => trabalhosVivos.esquecerMaquina(machineId),
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
@@ -942,7 +944,8 @@ export function comporApp(o: OpcoesCompor): App {
     if (plano) publicarDoPlano(plano, "turno.tarefas", { tarefas });
   });
   // definido em 2026-10-07 (ADR-083 §4, #194): a memória desta máquina (o executor local roda aqui), um amostrador só
-  // para todos os pools; preguiçoso — sem turno rodando, nem `sysctl` nem `ps` rodam.
+  // para todos os pools. revisto em 2026-10-08 (ADR-085): no macOS ele amostra desde o primeiro `puxar` (a leitura da
+  // máquina vai em cada um); fora do macOS, sem NOD_SIMULAR_*, não lê nada e o puxar vai sem leitura.
   const memoriaDaMaquina = criarAmostradorMemoria({ env });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
   const iniciar: IniciarLaco = (p) =>

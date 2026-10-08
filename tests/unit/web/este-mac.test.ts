@@ -26,15 +26,16 @@ function estadoCom(trabalhos: TrabalhoDto[], extra: Partial<TrabalhosDto> = {}, 
 }
 
 const rodando = trabalho("Orquestrar a etapa de engenharia", { turnoVivoId: "turno-1", memoriaMb: 420 });
-const rotinaNova = trabalho("Verificar o Slack", { estado: "na_fila", iniciadoEm: null });
-const daPessoaNova = trabalho("Liberar espaço", { estado: "na_fila", iniciadoEm: null, origem: "pessoa" });
+// `seguravel` vem do servidor (seguravelPeloMac, tests/unit/domain/memoria-mac.test.ts).
+const rotinaNova = trabalho("Verificar o Slack", { estado: "na_fila", iniciadoEm: null, seguravel: true });
+const daPessoaNova = trabalho("Liberar espaço", { estado: "na_fila", iniciadoEm: null, origem: "pessoa", seguravel: false });
 
 describe("quem espera o Mac aliviar", () => {
-  it("só rotina e pedido de colega que ainda não começaram, e só com o Mac segurando (a regra do reivindicar)", () => {
+  it("o que o servidor marca como seguravel, na fila, e só com o Mac segurando", () => {
     expect(seguradoPeloMac(rotinaNova, true)).toBe(true);
-    expect(seguradoPeloMac(trabalho("pedido", { estado: "na_fila", iniciadoEm: null, origem: "colega" }), true)).toBe(true);
     expect(seguradoPeloMac(daPessoaNova, true)).toBe(false);
-    expect(seguradoPeloMac(trabalho("já começou", { estado: "na_fila" }), true)).toBe(false);
+    expect(seguradoPeloMac(trabalho("sem a marca (servidor antigo)", { estado: "na_fila", iniciadoEm: null }), true)).toBe(false);
+    expect(seguradoPeloMac({ ...rotinaNova, estado: "rodando" }, true)).toBe(false);
     expect(seguradoPeloMac(rotinaNova, false)).toBe(false);
   });
 
@@ -69,7 +70,7 @@ describe("Seu espaço › Este Mac", () => {
   it("o resumo, a memória e o processador, quem trabalha (com a memória) e o uso escolhido", () => {
     const html = renderEsteMac(estadoCom([rodando, rotinaNova]));
     expect(html).toContain("1 trabalhando");
-    expect(html).toContain("usam 1,7 GB do seu Mac");
+    expect(html).toContain("usa 1,7 GB do seu Mac");
     expect(html).toContain("Nada esperando");
     expect(html).toMatch(/<b>Memória<\/b>.*folgada/);
     expect(html).toMatch(/<b>Processador<\/b><span class="mac-barra nivel-verde" aria-hidden="true"><i style="width: 40%"><\/i><\/span><span>folgado<\/span>/);
@@ -87,6 +88,12 @@ describe("Seu espaço › Este Mac", () => {
     expect(segurando).toContain('mac-barra nivel-vermelha" aria-hidden="true"><i style="width: 100%">');
     const semLeitura = renderEsteMac(estadoCom([], { pressao: null, processador: null, cargaProcessador: null, memoriaTotalMb: null }));
     expect(semLeitura).toContain("O Mac ainda não mandou leitura");
+    const nadaAinda = renderEsteMac(estadoCom([rodando], { segurando: true, processador: "vermelha" }));
+    expect(nadaAinda).toContain("Nada esperando ainda");
+    expect(nadaAinda).not.toContain("0 esperando");
+    const doisSemMemoria = renderEsteMac(estadoCom([rodando, { ...rodando, id: "outro", turnoVivoId: "turno-2" }], { memoriaTotalMb: null }));
+    expect(doisSemMemoria).toContain("2 trabalhando");
+    expect(doisSemMemoria).toContain("sem leitura de memória");
   });
 
   it("o uso escolhido muda pela ação do reducer; o padrão é equilibrado", () => {

@@ -3,6 +3,7 @@ import type { IdHarness } from "../../../contracts/harness.ts";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
+import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import type { VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
@@ -56,6 +57,8 @@ export function criarPonteHttpServidor(d: {
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
+  /** Revisão do #209: um aviso por máquina para a leitura com defeito no puxar (ela chega a cada pedido). */
+  const leiturasInvalidas = new Set<string>();
   /**
    * definido em 2026-10-05 (NOD-175): na drenagem do SIGTERM o puxar não reserva turno novo — o turno fica `pendente` no
    * Postgres (ADR-010) para o próximo processo. `reservando` conta os `ponte.puxar` em voo: o que já reservou antes da
@@ -121,8 +124,15 @@ export function criarPonteHttpServidor(d: {
     }),
     rota("puxar", async (ctx, b) => {
       const c = conexao(ctx);
-      // ADR-085: a leitura do Mac (memória e processador) vem no corpo; app antigo manda `{}`.
-      const mem = memoria(b.memoria);
+      // ADR-085: a leitura do Mac (memória e processador) vem no corpo; app antigo manda `{}`. Revisão do #209: leitura
+      // com defeito vai como "sem leitura" (nada é segurado), nunca um 400 — o puxar é o que entrega trabalho ao Mac.
+      let mem: LeituraMemoria | undefined;
+      try {
+        mem = memoria(b.memoria);
+      } catch {
+        if (!leiturasInvalidas.has(ctx.params.chaveId!)) log("aviso", "puxar_leitura_invalida", { machine_id: ctx.params.chaveId });
+        leiturasInvalidas.add(ctx.params.chaveId!);
+      }
       if (c.puxando) throw new ErroDeDominio("estado_invalido");
       c.puxando = true;
       try {
@@ -136,7 +146,9 @@ export function criarPonteHttpServidor(d: {
           if (drenando) break;
           if (c.inv.estado === "pronto") {
             reservando++;
-            try { plano = await c.ponte.puxar(ctx.escopo.pessoaId, mem); } finally { reservando--; }
+            // Revisão do #209: a leitura entra uma vez por pedido. Repetida a cada 250 ms durante a espera de até 20 s,
+            // ela passava por cima da mais nova que a renovação trouxe e o nível ia e voltava na tela.
+            try { plano = await c.ponte.puxar(ctx.escopo.pessoaId, mem); } finally { reservando--; mem = undefined; }
           }
           if (plano) { c.planos.set(plano.turnoId, plano); break; }
           if (drenando) break;

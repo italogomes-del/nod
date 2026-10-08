@@ -1,5 +1,5 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
-import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
+import type { LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
 import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
@@ -84,11 +84,12 @@ export function memoria(v: unknown): LeituraMemoria | undefined {
     return { turnoId: t.turnoId, mb: t.mb };
   });
   // ADR-085: o processador é opcional (app anterior à 0.4.0-rc.6 não manda); a carga por núcleo vai até 1000 (um Mac
-  // travado passa de 20 — medido em 06/10: 265 em 12 núcleos).
-  if (o.processador === undefined) return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
-  const p = objeto(o.processador);
-  exigir((p.nivel === "verde" || p.nivel === "amarela" || p.nivel === "vermelha") && typeof p.carga === "number" && Number.isFinite(p.carga) && p.carga >= 0 && p.carga <= 1000);
-  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, processador: { nivel: p.nivel, carga: p.carga } };
+  // travado passa de 20 — medido em 06/10: 265 em 12 núcleos). Revisão do #209: fora disso o processador é ignorado, e
+  // não a leitura toda — um campo novo com defeito não pode derrubar a renovação do turno.
+  const p = o.processador !== null && typeof o.processador === "object" && !Array.isArray(o.processador) ? (o.processador as Record<string, unknown>) : null;
+  const valido = p !== null && (p.nivel === "verde" || p.nivel === "amarela" || p.nivel === "vermelha") && typeof p.carga === "number" && Number.isFinite(p.carga) && p.carga >= 0 && p.carga <= 1000;
+  if (!valido) return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
+  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, processador: { nivel: p.nivel as NivelPressao, carga: p.carga as number } };
 }
 const NOME_FERRAMENTA = /^[A-Za-z0-9_.-]+$/;
 const nomeDeFerramenta = (v: unknown): v is string => texto(v, 200) && NOME_FERRAMENTA.test(v);

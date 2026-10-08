@@ -109,7 +109,7 @@ describe("amostrador de memória da máquina", () => {
   it("ADR-085: o processador entra na leitura, muda o número da amostra e vai na leitura da máquina (o puxar)", async () => {
     let loadavg = "{ 1.00 0.9 0.8 }";
     const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? loadavg : bin.endsWith("sysctl") ? "1" : "");
-    const a = criarAmostradorMemoria({ env: {}, executar, intervaloMs: 10 ** 6, nucleos: 4 });
+    const a = criarAmostradorMemoria({ env: {}, executar, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
     expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [] });
     await a.amostrar();
     const primeira = a.amostra();
@@ -117,7 +117,7 @@ describe("amostrador de memória da máquina", () => {
     loadavg = "{ 5.00 3 2 }";
     await a.amostrar();
     expect(a.amostra()).toBe(primeira + 1);
-    expect(a.daMaquina?.().processador).toEqual({ nivel: "vermelha", carga: 1.25 });
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 1.25 });
     a.parar();
   });
 
@@ -126,8 +126,17 @@ describe("amostrador de memória da máquina", () => {
     const a = criarAmostradorMemoria({ env: { NOD_SIMULAR_PROCESSADOR: "0.8" }, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 10 });
     a.daMaquina?.();
     await a.amostrar();
-    expect(a.daMaquina?.().processador).toEqual({ nivel: "amarela", carga: 0.8 });
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "amarela", carga: 0.8 });
     expect(f.chamadas).not.toContain("/usr/sbin/sysctl vm.loadavg");
+    a.parar();
+  });
+
+  it("revisão do #209: fora do macOS, sem simulação, a leitura da máquina não existe e nada é amostrado por ela", async () => {
+    const f = executorFalso();
+    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6, plataforma: "linux" });
+    expect(a.daMaquina?.()).toBeUndefined();
+    await Promise.resolve();
+    expect(f.chamadas).toEqual([]);
     a.parar();
   });
 });

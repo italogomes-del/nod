@@ -88,10 +88,11 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
 
 /**
  * ADR-085 (definido em 2026-10-08): o Mac está apertado e este trabalho é dos que esperam — rotina ou pedido de colega
- * que ainda não começou (a mesma regra do `reivindicar`, src/repositories/turnos.repo.ts).
+ * que ainda não começou, sem ninguém esperando e dentro da espera máxima. O servidor decide (`seguravel`, a mesma regra
+ * do `reivindicar`); a tela só junta com o `segurando`.
  */
-export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "origem" | "iniciadoEm">, segurando: boolean): boolean {
-  return segurando && t.estado === "na_fila" && t.iniciadoEm === null && (t.origem === "rotina" || t.origem === "colega");
+export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel">, segurando: boolean): boolean {
+  return segurando && t.estado === "na_fila" && t.seguravel === true;
 }
 
 /**

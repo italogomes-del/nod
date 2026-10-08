@@ -10,7 +10,9 @@ import { log } from "../../obs/log.ts";
  * nível de pressão do macOS e a memória somada por grupo de processos; cada renovação leva a última leitura, com a
  * linha do próprio turno. Nada aqui para trabalho nenhum: o servidor decide o que fazer com o nível.
  *
- * Preguiçoso: só começa a amostrar na primeira leitura pedida (o servidor de dev sem turno não roda `sysctl`).
+ * Preguiçoso: só começa a amostrar na primeira leitura pedida. revisto em 2026-10-08 (ADR-085): no macOS a leitura da
+ * máquina vai em cada `puxar`, então ele amostra desde o primeiro laço; fora do macOS (o servidor em Linux), sem
+ * NOD_SIMULAR_*, `daMaquina` não devolve nada e nenhum `sysctl` roda por ela.
  */
 export type FonteMemoria = {
   /** A última leitura, com a linha deste turno quando ele tem grupo (null = turno sem processo próprio). */
@@ -19,7 +21,7 @@ export type FonteMemoria = {
    * definido em 2026-10-08 (ADR-085): a leitura da máquina sem turno (o nível, o total dos grupos vivos e o processador),
    * que vai no `puxar`: com ela o servidor sabe se o Mac está apertado antes de entregar trabalho novo.
    */
-  daMaquina?(): LeituraMemoria;
+  daMaquina?(): LeituraMemoria | undefined;
   /** O turno acabou: o grupo dele sai da soma. */
   soltar(turnoId: string): void;
   /**
@@ -48,8 +50,10 @@ const executarPadrao: Executar = (bin, args) =>
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; nucleos?: number }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; nucleos?: number; plataforma?: NodeJS.Platform }): AmostradorMemoria {
   const nucleos = o.nucleos ?? availableParallelism();
+  // ADR-085: a leitura da máquina só existe no macOS (ou simulada); fora dele seria um "verde" que ninguém mediu.
+  const daMaquinaLe = (o.plataforma ?? process.platform) === "darwin" || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR);
   const executar = o.executar ?? executarPadrao;
   const intervaloMs = o.intervaloMs ?? INTERVALO_AMOSTRA_MEMORIA_MS;
   const grupos = new Map<string, number>();
@@ -139,6 +143,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador });
     },
     daMaquina() {
+      if (!daMaquinaLe) return undefined;
       comecar();
       return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador });
     },

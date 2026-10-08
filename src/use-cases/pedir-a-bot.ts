@@ -78,7 +78,10 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   const agora = deps.agora();
   // definido em 2026-10-07 (ADR-083, S7): o pedido de colega é sempre uma task de quem RECEBE (origem `colega`), na
   // conversa dele, com os acessos dele (ADR-058): roda em paralelo com a conversa e com as outras tasks dele.
-  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: alvo.id, conversaId: conversaAlvo.id, titulo: pedido, origem: "colega", pedidoPorAgenteId: remetente.id });
+  // ADR-085 (revisão do #209): pedido feito na conversa com a pessoa (turno dela, fora de task) — ela espera a resposta,
+  // e o Mac apertado não o segura. O pedido que nasce numa task ou numa rotina segue a regra do segundo plano.
+  const pessoaEsperando = !turnoRemetente.trabalhoId && ["conversa", "sala", "ligacao"].includes(turnoRemetente.origem);
+  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: alvo.id, conversaId: conversaAlvo.id, titulo: pedido, origem: "colega", pedidoPorAgenteId: remetente.id, pessoaEsperando });
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: conversaAlvo.id,
     agenteId: alvo.id,

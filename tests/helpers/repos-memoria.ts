@@ -24,6 +24,7 @@ import type { Turno } from "../../src/contracts/turno.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
+import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
@@ -825,6 +826,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           pasta: n.pasta ?? null,
           memoriaMb: null,
           custoUsd: null,
+          pessoaEsperando: n.pessoaEsperando === true,
           criadoEm: agora() + b.trabalhos.length / 1000,
           iniciadoEm: n.iniciadoEm ?? null,
           terminadoEm: null,
@@ -1049,7 +1051,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             if (vivos.some((d) => d.estado === "despachando" && d.trabalhoId === t.trabalhoId)) return false;
             const dono = doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId);
             const dep = dono?.depoisDeTrabalhoId ? doTenant(b.trabalhos).find((x) => x.id === dono.depoisDeTrabalhoId) : null;
-            return !dep || ["terminado", "parado", "falhou"].includes(dep.estado);
+            if (dep && !["terminado", "parado", "falhou"].includes(dep.estado)) return false;
+            // ADR-085: a mesma regra do SQL (seguravelPeloMac; o espaço segura também o que passou da espera máxima).
+            if (dono && p.espacarFundo === true && seguravelPeloMac({ ...dono, criadoEm: p.agora }, p.agora)) return false;
+            return !(dono && p.segurarFundo === true && seguravelPeloMac(dono, p.agora));
           })
           .sort((x, y) => Number(fimDaFila(x)) - Number(fimDaFila(y)) || x.criadoEm - y.criadoEm);
         const t = candidatos[0];
