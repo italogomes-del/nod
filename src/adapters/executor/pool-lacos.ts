@@ -34,7 +34,7 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
     vagas.add(vaga);
     const envolvida: PonteInterna = {
       ...ponte,
-      puxar: async (pessoaId) => {
+      puxar: async (pessoaId, maquina) => {
         vaga.ocupado = false;
         if (parando || vaga.aposentado) return null;
         if (ociosos() > 1) {
@@ -45,7 +45,7 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
           void vaga.laco?.parar();
           return null;
         }
-        const plano = await ponte.puxar(pessoaId);
+        const plano = await ponte.puxar(pessoaId, maquina);
         if (plano) {
           vaga.ocupado = true;
           if (!parando && ociosos() === 0) subir();

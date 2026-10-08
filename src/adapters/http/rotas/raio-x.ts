@@ -25,7 +25,7 @@ export function criarRotasRaioX(d: DepsRotas): Rota[] {
       padrao: /^\/preferencias$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        ctx.json(200, await executar(ctx.escopo, gravarPreferencias, { modoDev: corpo.modoDev, faixaTrabalhosRecolhida: corpo.faixaTrabalhosRecolhida }));
+        ctx.json(200, await executar(ctx.escopo, gravarPreferencias, { modoDev: corpo.modoDev, faixaTrabalhosRecolhida: corpo.faixaTrabalhosRecolhida, usoDoMac: corpo.usoDoMac }));
       },
     },
     {

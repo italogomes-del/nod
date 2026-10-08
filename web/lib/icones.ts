@@ -9,6 +9,8 @@ export const ICONE = {
   plug: svg('<path d="M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"/>'),
   sino: svg('<path d="M18 9a6 6 0 0 0-12 0c0 6.5-2.5 7.5-2.5 8.5h17c0-1-2.5-2-2.5-8.5M10 20.5h4"/>'),
   codigo: svg('<path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"/>'),
+  // ADR-085: Este Mac — o medidor de quanto o Mac está sendo usado.
+  medidor: svg('<path d="M4 16a8 8 0 0 1 16 0M12 16l3.5-4.5M3 20h18"/>'),
   monitor: svg('<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>'),
   agentes: svg('<rect x="4" y="4" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"/>'),
   bandeira: svg('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'),

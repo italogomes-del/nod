@@ -52,6 +52,11 @@ export type Trabalho = {
   /** Última leitura de memória do Mac para o grupo de processos do trabalho (#194). */
   memoriaMb: number | null;
   custoUsd: number | null;
+  /**
+   * definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando — "Executar agora" numa rotina,
+   * ou um pedido a colega feito na conversa com ela. O Mac apertado não segura este trabalho.
+   */
+  pessoaEsperando?: boolean;
   criadoEm: EpochMs;
   iniciadoEm: EpochMs | null;
   terminadoEm: EpochMs | null;
@@ -75,6 +80,11 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    */
   deFora?: boolean;
   /**
+   * ADR-085 (revisão do #209): o Mac apertado seguraria este trabalho agora — em segundo plano, ainda não começou,
+   * ninguém esperando e dentro da espera máxima. A linha diz "esperando o Mac aliviar" só com ele e `segurando`.
+   */
+  seguravel?: boolean;
+  /**
    * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado pelo Marlon): o colega cuja resposta a task espera
    * (o pedido mais antigo ainda sem volta), para o status curto "esperando Eng 2". Ausente ou null: não espera colega.
    */
@@ -86,8 +96,13 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */
 export type NivelPressao = "verde" | "amarela" | "vermelha";
 
-/** GET trabalhos(?agenteId=): os abertos e os terminados hoje, e a pressão do Mac da pessoa (null = nenhum Mac falou). */
-export type TrabalhosDto = { trabalhos: TrabalhoDto[]; pressao: NivelPressao | null; memoriaTotalMb: number | null };
+/**
+ * GET trabalhos(?agenteId=): os abertos e os terminados hoje, e a pressão do Mac da pessoa (null = nenhum Mac falou).
+ * ADR-085 (definido em 2026-10-08): `processador` é o pior nível de processador entre os Macs dela (null = nenhum Mac
+ * mandou; app anterior à 0.4.0-rc.6 não manda) e `segurando` diz que trabalho novo em segundo plano está esperando o
+ * Mac aliviar, pelo "uso do Mac" que a pessoa escolheu.
+ */
+export type TrabalhosDto = { trabalhos: TrabalhoDto[]; pressao: NivelPressao | null; memoriaTotalMb: number | null; processador?: NivelPressao | null; cargaProcessador?: number | null; segurando?: boolean };
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
 export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };
@@ -98,5 +113,14 @@ export type EventoLinha = { acao: "mostrada" | "aberta"; tipo: TipoLinha; agente
 /** GET telemetria/linhas: por tipo, nos últimos 14 dias; `taxa` = abertas / mostradas (distintas por chaveLinha). */
 export type TaxaDeAbertura = { tipo: TipoLinha; mostradas: number; abertas: number; taxa: number | null };
 
-/** Memória que o Mac manda na renovação (#194): o nível do macOS e a soma do RSS do grupo de processos de cada turno. */
-export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: { turnoId: string; mb: number }[] };
+/**
+ * Processador do Mac (definido em 2026-10-08, ADR-085): a carga média de 1 minuto (`vm.loadavg`) dividida pelos
+ * núcleos, e o nível que sai dela (domain/memoria-mac.ts, nivelDoProcessador).
+ */
+export type LeituraProcessador = { nivel: NivelPressao; carga: number };
+
+/**
+ * Memória que o Mac manda na renovação (#194): o nível do macOS e a soma do RSS do grupo de processos de cada turno.
+ * ADR-085: também no `puxar` (sem `porTurno`), para o servidor saber do Mac mesmo sem turno rodando, e com o processador.
+ */
+export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: { turnoId: string; mb: number }[]; processador?: LeituraProcessador };

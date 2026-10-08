@@ -18,7 +18,10 @@ import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-tr
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
-import type { LeituraMemoria } from "../../contracts/trabalho.ts";
+import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
+import type { UsoDoMac } from "../../contracts/raio-x.ts";
+import { USO_DO_MAC_PADRAO } from "../../contracts/raio-x.ts";
+import { deveSegurar, ESPACO_FUNDO_MS } from "../../domain/memoria-mac.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -55,6 +58,12 @@ export type DepsPonte = {
   fezFerramenta?: (turnoId: string) => boolean;
   /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
+  /** ADR-085: a última leitura viva deste Mac (memória e processador); null = sem leitura, e então nada é segurado. */
+  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null } | null;
+  /** Revisão do #209: o evento da mudança de pressão não foi gravado (a tx desfez) — a próxima leitura refaz o frame. */
+  desfazerMemoria?: (pessoaId: string, mudanca: MudancaDePressao) => void;
+  /** Revisão do #209: o Mac desconectou — a leitura dele sai. */
+  esquecerMaquina?: (machineId: string) => void;
   /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
   redeMs?: number;
 };
@@ -68,6 +77,8 @@ export type PonteInternaNod = PonteInterna & {
 
 /** definido em 2026-10-08 (revisão do épico, S20): o assentar vítima de impasse é repetido até isto de vezes. */
 const TENTATIVAS_DO_ASSENTAR = 3;
+/** ADR-085 (revisão do #209): a troca do "uso do Mac" vale no puxar em até 30 s (a tela já mostra na hora). */
+export const USO_VALE_MS = 30_000;
 
 /** 40P01 (impasse) e 40001 (serialização): a transação perdeu a corrida e pode ser repetida inteira. */
 function ehConflitoTransitorio(err: unknown): boolean {
@@ -110,6 +121,15 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * (o escopo fica: a entrega tardia ainda assenta, ADR-045). Antes só a entrega os limpava.
    */
   const vistos = new Map<string, number>();
+  /**
+   * ADR-085 (revisão do #209): o "uso do Mac" de cada pessoa, lido no máximo a cada USO_VALE_MS e fora da tx do puxar
+   * (antes era uma consulta por puxar apertado, dentro da trava da fila; e um erro dela virava "nenhum trabalho").
+   */
+  const usos = new Map<string, { uso: UsoDoMac; ate: number }>();
+  /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
+  const ultimoFundo = new Map<string, number>();
+  /** ADR-085 (revisão do #209): se cada Mac está segurando agora — o log sai só na mudança. */
+  const segurando = new Map<string, boolean>();
   function esquecerVencidos(): void {
     const limite = agora() - LEASE_MS;
     for (const [turnoId, em] of vistos) {
@@ -156,6 +176,19 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     return outra?.[0] ?? null;
   }
 
+  async function usoDoMac(escopo: Escopo): Promise<UsoDoMac> {
+    const guardado = usos.get(escopo.pessoaId);
+    if (guardado && guardado.ate > agora()) return guardado.uso;
+    try {
+      const uso = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).preferencias.buscar())).usoDoMac ?? USO_DO_MAC_PADRAO;
+      usos.set(escopo.pessoaId, { uso, ate: agora() + USO_VALE_MS });
+      return uso;
+    } catch (e) {
+      log("aviso", "uso_do_mac_sem_leitura", { pessoa_id: escopo.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
+      return guardado?.uso ?? USO_DO_MAC_PADRAO;
+    }
+  }
+
   function depsDe(trx: Tx, escopo: Escopo): Deps {
     return { repos: criarRepos(trx, escopo), services: deps.services, useCases: deps.useCases, tx: (fn) => fn(trx), escopo, agora };
   }
@@ -167,14 +200,29 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
 
     async desconectar(machineId) {
       maquinas.delete(machineId);
+      ultimoFundo.delete(machineId);
+      segurando.delete(machineId);
+      deps.esquecerMaquina?.(machineId);
     },
 
-    async puxar(pessoaId): Promise<PlanoTurno | null> {
+    async puxar(pessoaId, leituraDoMac): Promise<PlanoTurno | null> {
       esquecerVencidos();
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return null;
       const maquina = maquinas.values().next().value;
       if (!maquina) return null;
+      // ADR-085: a leitura que veio no puxar entra como a da renovação; a mudança de nível vira o mesmo frame.
+      const mudanca = leituraDoMac ? deps.registrarMemoria?.(pessoaId, maquina.machineId, leituraDoMac) : undefined;
+      // ADR-085: sem leitura deste Mac (app antigo, fora do macOS) nada é segurado nem espaçado.
+      const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
+      const uso = pressao ? await usoDoMac(escopo) : "livre";
+      const segurarFundo = pressao !== null && deveSegurar(uso, pressao.memoria, pressao.processador);
+      const espacarFundo = uso !== "livre" && agora() - (ultimoFundo.get(maquina.machineId) ?? -Infinity) < ESPACO_FUNDO_MS;
+      if ((segurando.get(maquina.machineId) ?? false) !== segurarFundo) {
+        segurando.set(maquina.machineId, segurarFundo);
+        log("info", segurarFundo ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null });
+      }
+      const antes = agora();
       // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do
       // `cunhar` (composição, outbox, commit), o turno volta a `pendente` e ninguém recebe o plano: o token cunhado
       // aqui é revogado, senão ele conta em `ativos()` para sempre e segura a drenagem do SIGTERM até o prazo.
@@ -186,7 +234,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       try {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
-          const r = await despacharTurno(d, { machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
+          if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
+          const r = await despacharTurno(d, { segurarFundo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
@@ -194,10 +243,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
+            // ADR-085 (revisão do #209): começou trabalho novo em segundo plano — o próximo deste Mac espera ESPACO_FUNDO_MS.
+            const w = uso !== "livre" && r.data.turno.trabalhoId ? await d.repos.trabalhos.buscar(r.data.turno.trabalhoId) : null;
+            if (w && (w.origem === "rotina" || w.origem === "colega") && w.pessoaEsperando !== true && (w.iniciadoEm === null || w.iniciadoEm >= antes)) {
+              ultimoFundo.set(maquina.machineId, agora());
+              log("info", "fundo_comecou", { pessoa_id: pessoaId, machine_id: maquina.machineId, trabalho_id: w.id, origem: w.origem, espera_ms: agora() - w.criadoEm, segurando: segurarFundo });
+            }
           }
           return r.data.plano;
         });
       } catch (e) {
+        if (mudanca) deps.desfazerMemoria?.(pessoaId, mudanca);
         for (const turnoId of emitidos) {
           despachados.delete(turnoId);
           vistos.delete(turnoId);
@@ -259,12 +315,19 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         // A decisão respondida DENTRO do turno não passa por outro caminho: a renovação acerta o estado da task.
         if (turno?.trabalhoId) events.push(...(await sincronizarTrabalho(d, turno.trabalhoId)));
         // ADR-083 (#194): a memória do Mac. A dos turnos vai para os trabalhos deles; o nível só gera evento na mudança.
+        let mudanca: MudancaDePressao | undefined;
         if (p.memoria) {
           await d.repos.trabalhos.atualizarMemoria(p.memoria.porTurno);
-          const mudanca = deps.registrarMemoria?.(escopo.pessoaId, p.machineId, p.memoria);
+          mudanca = deps.registrarMemoria?.(escopo.pessoaId, p.machineId, p.memoria);
           if (mudanca?.mudou) events.push(eventoPressao(d, mudanca, p.memoria));
         }
-        if (events.length) await d.repos.events.gravarComOutbox(events);
+        // Revisão do #209: o evento só existe se a tx gravar — senão o "visto" volta e a próxima leitura refaz o frame.
+        try {
+          if (events.length) await d.repos.events.gravarComOutbox(events);
+        } catch (e) {
+          if (mudanca) deps.desfazerMemoria?.(escopo.pessoaId, mudanca);
+          throw e;
+        }
         return { ativo: r.ativo, mensagens: textos, ids, semMoldura, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
       });
       // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".

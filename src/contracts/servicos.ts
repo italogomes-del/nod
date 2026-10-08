@@ -53,7 +53,8 @@ export interface ServicesNod<Trx> {
    */
   trabalhosVivos?: {
     ultimaFerramenta(turnoId: string): string | null;
-    memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number } | null;
+    /** ADR-085: com o pior processador e a maior carga por núcleo entre os Macs vivos dela (null = nenhum mandou). */
+    memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador?: NivelPressao | null; carga?: number | null } | null;
   };
   relogio: () => number;
   tokenTurno: {

@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
+import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { deveSegurar, seguravelPeloMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { NovoTrabalho } from "../repositories/trabalhos.repo.ts";
@@ -67,12 +69,13 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
  * O evento `pressao_memoria` (#194): o nível que a pessoa vê mudou. Pelo outbox ele vira o frame `memoria.mudou {nivel}`
  * (despachar-outbox.ts); grava também o anterior e o total, só números (DadosEvento é escalar).
  */
-export function eventoPressao(deps: DepsTrabalho, mudanca: { nivel: NivelPressao; anterior: NivelPressao | null }, leitura: Pick<LeituraMemoria, "totalMb">): RuntimeEvent {
+export function eventoPressao(deps: DepsTrabalho, mudanca: { nivel: NivelPressao; anterior: NivelPressao | null; processador?: NivelPressao | null }, leitura: Pick<LeituraMemoria, "totalMb">): RuntimeEvent {
   return evento(deps.escopo, {
     kind: "pressao_memoria",
     autoria: autoriaPessoa(deps.escopo),
     agora: deps.agora(),
-    dados: { nivel: mudanca.nivel, anterior: mudanca.anterior, totalMb: Math.round(leitura.totalMb) },
+    // ADR-085: o processador vai junto (a mudança só dele também vira o frame, e a lista relê o `segurando`).
+    dados: { nivel: mudanca.nivel, anterior: mudanca.anterior, processador: mudanca.processador ?? null, totalMb: Math.round(leitura.totalMb) },
   });
 }
 
@@ -148,7 +151,7 @@ export async function linhaTrabalhoAberto(deps: DepsTrabalho, t: Trabalho, turno
  * instrução), o último passo (a última fala do bot no trabalho, curta) e o turno vivo. `esperandoComputadorDe` vem do
  * serviço do computador (S5), quando há.
  */
-export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, trabalhos: readonly Trabalho[]): Promise<TrabalhoDto[]> {
+export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "agora">, trabalhos: readonly Trabalho[]): Promise<TrabalhoDto[]> {
   const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id));
   return trabalhos.map((t): TrabalhoDto => {
     const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, sessaoExecutor: _executor, ...publico } = t;
@@ -161,6 +164,11 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, t
       // O nome da última ferramenta do turno vivo (o processo sabe) ganha da última fala, que pode ser de minutos atrás.
       ultimoPasso: (vivo ? deps.services.trabalhosVivos?.ultimaFerramenta(vivo) : null) ?? (e?.ultimaFala ? tituloDoTrabalho(e.ultimaFala) : null),
       turnoVivoId: vivo,
+      // revisto em 2026-10-08 (ADR-085): a memória é a do processo vivo. Sem turno vivo (esperando você, um colega ou a
+      // vez na fila) não há processo, e a última leitura gravada fazia "Todos os trabalhos" somar vários GB que o Mac
+      // não usava (o topo dizia 606 MB e as linhas, 18 × 200–400 MB).
+      memoriaMb: vivo ? t.memoriaMb : null,
+      seguravel: t.estado === "na_fila" && seguravelPeloMac(t, deps.agora()),
       deFora: e?.deFora ?? false,
       esperandoColega: e?.esperandoColega ?? null,
       trabalhouMs: e?.trabalhouMs ?? 0,
@@ -180,11 +188,15 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   if (input.agenteId && !(await deps.repos.agentes.buscar(input.agenteId))) throw new ErroDeDominio("nao_encontrado");
   const trabalhos = await deps.repos.trabalhos.listar({ agenteId: input.agenteId, terminadosDesde: deps.agora() - JANELA_TERMINADOS_MS });
   const memoria = deps.services.trabalhosVivos?.memoria(deps.escopo.pessoaId) ?? null;
-  return { data: { trabalhos: await trabalhosParaDto(deps, trabalhos), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null } };
+  const processador = memoria?.processador ?? null;
+  // ADR-085: o puxar decide por Mac (a leitura daquele Mac); a tela junta os Macs da pessoa e mostra pelo pior deles —
+  // com dois Macs, um apertado já diz "Seu Mac está ocupado", mesmo que o outro ainda entregue trabalho.
+  const segurando = memoria !== null && deveSegurar((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, memoria.nivel, processador);
+  return { data: { trabalhos: await trabalhosParaDto(deps, trabalhos), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando } };
 };
 
 /** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */
-export async function trabalhosAbertosDaConversa(deps: Pick<Deps, "repos" | "services">, agenteId: string | null): Promise<TrabalhoDto[]> {
+export async function trabalhosAbertosDaConversa(deps: Pick<Deps, "repos" | "services" | "agora">, agenteId: string | null): Promise<TrabalhoDto[]> {
   if (!agenteId) return [];
   return trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agenteId));
 }

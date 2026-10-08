@@ -12,7 +12,7 @@ import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Negacao } from "../../src/contracts/negacao.ts";
 import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
-import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
+import type { RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
@@ -71,7 +71,7 @@ export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
  * camada de tela cheia POR CIMA da tela atual, que continua montada embaixo — sair devolve a conversa exata (rolagem,
  * rascunho, gaveta). Gerenciar agentes, Relatos e Computadores deixaram de ser telas e viraram seções daqui.
  */
-export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "computadores" | "agentes" | "relatos";
+export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "computadores" | "agentes" | "relatos";
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
@@ -241,6 +241,8 @@ export type Estado = {
   pressao: NivelPressao | null;
   /** A faixa de Trabalhos em cima do campo recolhida numa pílula (preferência da pessoa, `PUT preferencias`). */
   faixaTrabalhosRecolhida: boolean;
+  /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
+  usoDoMac: UsoDoMac;
   /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
   tempoTaskAberto: string | null;
 };
@@ -296,6 +298,7 @@ export type Acao =
   /** O `GET trabalhos/:id` voltou 404: a task não existe (ou não é desta pessoa). */
   | { tipo: "trabalho-sumiu"; id: string }
   | { tipo: "faixa-trabalhos"; recolhida: boolean }
+  | { tipo: "uso-do-mac"; uso: UsoDoMac }
   | { tipo: "tempo-task"; id: string | null }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
@@ -350,6 +353,7 @@ export const estadoInicial: Estado = {
   trabalhoDetalhe: {},
   pressao: null,
   faixaTrabalhosRecolhida: false,
+  usoDoMac: "equilibrado",
   tempoTaskAberto: null,
 };
 
@@ -793,6 +797,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "faixa-trabalhos":
       return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
+    case "uso-do-mac":
+      return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
     case "tempo-task":
       return estado.tempoTaskAberto === acao.id ? estado : { ...estado, tempoTaskAberto: acao.id };
     case "hidratar-taxas-linhas":

@@ -3,6 +3,7 @@ import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
+import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -191,7 +192,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fixado num harness que não está pronto em NENHUMA delas; o despacho o recusa nomeando o harness. Sem isso ele
      * ficava pendente sem aviso no app do Mac. O fixado que outra máquina tem pronto continua esperando por ela.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         const [l] = await trx<Linha[]>`
@@ -215,6 +216,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   -- O turno de um trabalho espera só outro turno do MESMO trabalho e o trabalho de que ele depende
                   -- ("Fazer depois da …"), até ele terminar, parar ou falhar.
                   and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando')
+                  -- definido em 2026-10-08 (ADR-085): com o Mac apertado (pelo "uso do Mac" da pessoa), trabalho NOVO em
+                  -- segundo plano — rotina ou pedido de colega que ainda não começou — espera. O que já começou segue,
+                  -- e o que a pessoa espera também (a task que ela abriu, "Executar agora", o pedido feito na conversa).
+                  -- Revisão do #209: a espera vai até ESPERA_MAXIMA_FUNDO_MS; e, logo depois de um trabalho novo em
+                  -- segundo plano começar neste Mac (espacarFundo), o próximo espera, mesmo o que passou da espera máxima.
+                  -- Mesma regra de seguravelPeloMac (domain/memoria-mac.ts).
+                  ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id
+                    and w.iniciado_em is null and w.origem in ('rotina', 'colega') and not w.pessoa_esperando
+                    ${p.espacarFundo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
             -- Ligação primeiro; depois o que não é rotina nem pedido de colega (o turno ou o trabalho dele); depois a ordem.

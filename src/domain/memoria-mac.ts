@@ -1,4 +1,5 @@
-import type { LeituraMemoria, NivelPressao } from "../contracts/trabalho.ts";
+import type { UsoDoMac } from "../contracts/raio-x.ts";
+import type { LeituraMemoria, LeituraProcessador, NivelPressao, Trabalho } from "../contracts/trabalho.ts";
 
 /**
  * Memória do Mac (definido em 2026-10-07, ADR-083 §4, #194): o mapa do nível de pressão do macOS e a soma da memória
@@ -42,9 +43,83 @@ const kibParaMb = (kib: number) => Math.round(kib / 1024);
 /**
  * A leitura de um turno: o nível, o total dos grupos dos turnos vivos desta máquina e a linha do turno que renova
  * (só se ele tem grupo medido). Turno sem grupo (harness sem `processoProprio`) leva só o nível e o total.
+ * ADR-085: `turnoId` null é a leitura da máquina (a do `puxar`), sem linha de turno; o processador vai junto.
  */
-export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string; grupo: number | null }): LeituraMemoria {
+export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string | null; grupo: number | null; processador?: LeituraProcessador | null }): LeituraMemoria {
   const totalKib = [...new Set(p.gruposVivos)].reduce((t, g) => t + (p.rssPorGrupo.get(g) ?? 0), 0);
   const doTurno = p.grupo !== null ? p.rssPorGrupo.get(p.grupo) : undefined;
-  return { nivel: p.nivel, totalMb: kibParaMb(totalKib), porTurno: doTurno !== undefined ? [{ turnoId: p.turnoId, mb: kibParaMb(doTurno) }] : [] };
+  return {
+    nivel: p.nivel,
+    totalMb: kibParaMb(totalKib),
+    porTurno: doTurno !== undefined && p.turnoId !== null ? [{ turnoId: p.turnoId, mb: kibParaMb(doTurno) }] : [],
+    ...(p.processador ? { processador: p.processador } : {}),
+  };
+}
+
+/**
+ * Processador (definido em 2026-10-08, ADR-085). `vm.loadavg` do macOS sai como "{ 2.43 2.12 1.98 }": a primeira é a
+ * carga média do último minuto. Saída estranha = null (sem leitura, nunca um aviso que a máquina não deu).
+ */
+export function cargaDoLoadavg(bruto: string): number | null {
+  const n = Number(/[\d.]+/.exec(bruto)?.[0]);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/**
+ * A carga por núcleo vira nível. definido em 2026-10-08: amarela a partir de 0,7 (o Mac já disputa processador com o
+ * que a pessoa está fazendo) e vermelha a partir de 1,0 (fila de processos esperando núcleo: tudo fica lento). Em 06/10
+ * o diário chegou a 265 em 12 núcleos (22 por núcleo) com 8 bots ao mesmo tempo.
+ */
+export const CARGA_AMARELA = 0.7;
+export const CARGA_VERMELHA = 1.0;
+
+export function nivelDoProcessador(carga: number, nucleos: number): LeituraProcessador {
+  const porNucleo = nucleos > 0 ? carga / nucleos : 0;
+  const arredondada = Math.round(porNucleo * 100) / 100;
+  return { nivel: porNucleo >= CARGA_VERMELHA ? "vermelha" : porNucleo >= CARGA_AMARELA ? "amarela" : "verde", carga: arredondada };
+}
+
+const GRAVIDADE: Record<NivelPressao, number> = { verde: 0, amarela: 1, vermelha: 2 };
+const peloMenos = (n: NivelPressao | null | undefined, minimo: NivelPressao): boolean => n !== null && n !== undefined && GRAVIDADE[n] >= GRAVIDADE[minimo];
+
+/**
+ * Trabalho novo em segundo plano espera? (definido em 2026-10-08, ADR-085). Conversa com a pessoa e ligação nunca
+ * passam por aqui (o `reivindicar` só segura trabalho que ainda não começou). Sem leitura de um lado, ele não segura.
+ * - pouco: a memória em alerta ou o processador começando a apertar (amarela);
+ * - equilibrado: a memória em alerta ou o processador cheio (vermelha);
+ * - livre: nunca — só o aviso da ADR-083.
+ */
+export function deveSegurar(uso: UsoDoMac, memoria: NivelPressao | null, processador: NivelPressao | null): boolean {
+  if (uso === "livre") return false;
+  if (peloMenos(memoria, "amarela")) return true;
+  return peloMenos(processador, uso === "pouco" ? "amarela" : "vermelha");
+}
+
+/**
+ * definido em 2026-10-08 (ADR-085, revisão do #209): o Mac apertado segura trabalho por no máximo 1 h. Depois ele roda
+ * mesmo assim, um por vez (ESPACO_FUNDO_MS): rotina que nunca roda e pedido de colega que nunca volta são piores que
+ * um Mac lento por alguns minutos. O log `fundo_comecou` traz a espera de cada um.
+ */
+export const ESPERA_MAXIMA_FUNDO_MS = 60 * 60_000;
+
+/**
+ * definido em 2026-10-08 (ADR-085, revisão do #209): entre dois trabalhos novos em segundo plano no mesmo Mac, 30 s — a
+ * batida do amostrador. A leitura é de até 30 s atrás e a carga é a média do último minuto: sem o espaço, quando o Mac
+ * alivia, tudo o que esperava começa na mesma leitura verde (o pico de 06/10 de novo).
+ */
+export const ESPACO_FUNDO_MS = 30_000;
+
+/**
+ * O Mac apertado seguraria este trabalho? Em segundo plano (rotina ou pedido de colega), ainda não começou, ninguém
+ * esperando por ele (`pessoaEsperando`) e dentro da espera máxima. É a mesma regra do `reivindicar` (turnos.repo.ts).
+ */
+export function seguravelPeloMac(t: Pick<Trabalho, "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando">, agora: number): boolean {
+  return (t.origem === "rotina" || t.origem === "colega") && t.iniciadoEm === null && t.pessoaEsperando !== true && agora - t.criadoEm < ESPERA_MAXIMA_FUNDO_MS;
+}
+
+/** O pior de dois níveis (null = sem leitura). */
+export function piorNivel(a: NivelPressao | null, b: NivelPressao | null): NivelPressao | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return GRAVIDADE[b] > GRAVIDADE[a] ? b : a;
 }

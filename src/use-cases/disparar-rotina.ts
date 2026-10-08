@@ -151,7 +151,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   // era. revisto em 2026-10-08 (revisão do épico, S13): e com pasta própria `~/nod/<bot>/<slug>`, como toda task — na
   // pasta do bot ela rodava em paralelo com a conversa. A cerca do git (ADR-065) aceita qualquer pasta dentro de
   // `~/nod/<bot>`, então a rotina continua entrando nas worktrees que mantém lá.
-  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: rotina.instrucao, origem: "rotina", rotinaId: rotina.id });
+  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: rotina.instrucao, origem: "rotina", rotinaId: rotina.id, pessoaEsperando: input.preservarAgenda === true });
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,

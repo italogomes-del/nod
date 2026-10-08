@@ -44,12 +44,16 @@ describe("dispararRotina", () => {
     expect(b.data.turnoId).toBeNull();
     expect(d.banco.turnos).toHaveLength(1);
     expect(await d.deps.repos.rotinas.buscar(rotina.id)).toMatchObject({ estado: "pausada", proximaExecucao: JANELA });
+    // ADR-085 (revisão do #209): "Executar agora" é a pessoa esperando — o Mac apertado não segura.
+    expect(d.banco.trabalhos[0]?.pessoaEsperando).toBe(true);
   });
   it("reivindica a janela canônica, enfileira turno origem 'rotina' ligado à janela e reagenda a próxima; a mesma janela de novo é de outro processo", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const rotina = await rotinaAtiva(d);
     const r = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
     if (!("turno" in r.data)) throw new Error("deveria ter disparado");
+    const trabalhoId = r.data.turno.trabalhoId;
+    expect(d.banco.trabalhos.find((w) => w.id === trabalhoId)?.pessoaEsperando).toBe(false);
     expect(r.data.turno).toMatchObject({ origem: "rotina", estado: "pendente", profundidade: 0, agenteId: rotina.agenteId, conversaId: rotina.conversaId, entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
     expect(r.data.turno.entradaTexto).toContain("poste o resumo");
     expect(r.data.turno.entradaTexto).toContain(`17/09/2026, 08:00 (${TZ})`);

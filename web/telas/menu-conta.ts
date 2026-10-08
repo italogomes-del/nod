@@ -13,6 +13,8 @@ export type DadosMenuConta = {
   avisos: string;
   modoDev: boolean;
   banco: { texto: string; regime: string } | null;
+  /** ADR-085: o que o item Este Mac diz à direita ("Equilibrado", ou "Ocupado" quando segura trabalho novo). */
+  esteMac?: string;
 };
 
 /** "Gmail e ClickUp fora do ar"; com mais de três, os dois primeiros e quantos faltam. */
@@ -29,6 +31,7 @@ export function htmlMenuConta(d: DadosMenuConta): string {
     ${item("conexao", ICONE.plug, "Conexão", d.conexao)}
     ${item("avisos", ICONE.sino, "Avisos", d.avisos)}
     <button type="button" role="menuitemcheckbox" aria-checked="${d.modoDev}" data-modo-dev>${ICONE.codigo}<span class="mc-nome">Modo dev</span><kbd>⌘⇧D</kbd><span class="mc-chave" aria-hidden="true"><span></span></span></button>
+    ${item("este-mac", ICONE.medidor, "Este Mac", d.esteMac ?? "")}
     ${item("computadores", ICONE.monitor, "Computadores")}
     <hr>
     ${item("agentes", ICONE.agentes, "Gerenciar agentes")}

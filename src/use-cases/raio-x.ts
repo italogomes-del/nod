@@ -1,4 +1,4 @@
-import type { Preferencias, RaioXConversa, RaioXTurno } from "../contracts/raio-x.ts";
+import { USOS_DO_MAC, type Preferencias, type RaioXConversa, type RaioXTurno, type UsoDoMac } from "../contracts/raio-x.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { resumoDoRaioX } from "../domain/raio-x.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -9,13 +9,22 @@ export const TURNOS_NO_RAIO_X_DA_CONVERSA = 300;
 export const lerPreferencias: CasoDeUso<Record<string, never>, Preferencias> = async (deps) => ({ data: await deps.repos.preferencias.buscar() });
 
 /**
- * PUT preferencias: o que vier (booleano) muda, o resto fica. revisto em 2026-10-07 (ADR-083): a faixa de Trabalhos
- * manda só `faixaTrabalhosRecolhida`; corpo sem nenhum dos dois, ou com valor que não é booleano, é entrada inválida.
+ * PUT preferencias: o que vier muda, o resto fica. revisto em 2026-10-07 (ADR-083): a faixa de Trabalhos manda só
+ * `faixaTrabalhosRecolhida`. revisto em 2026-10-08 (ADR-085): `usoDoMac` ('pouco' | 'equilibrado' | 'livre'), de Seu
+ * espaço › Este Mac. Corpo sem nenhum dos três, ou com valor fora do tipo, é entrada inválida.
  */
-export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; faixaTrabalhosRecolhida?: unknown }, Preferencias> = async (deps, input) => {
+export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; faixaTrabalhosRecolhida?: unknown; usoDoMac?: unknown }, Preferencias> = async (deps, input) => {
   const ok = (v: unknown) => v === undefined || typeof v === "boolean";
-  if (!ok(input.modoDev) || !ok(input.faixaTrabalhosRecolhida) || (input.modoDev === undefined && input.faixaTrabalhosRecolhida === undefined)) throw new ErroDeDominio("entrada_invalida", { cause: "preferencias" });
-  return { data: await deps.repos.preferencias.gravar({ ...(typeof input.modoDev === "boolean" ? { modoDev: input.modoDev } : {}), ...(typeof input.faixaTrabalhosRecolhida === "boolean" ? { faixaTrabalhosRecolhida: input.faixaTrabalhosRecolhida } : {}) }) };
+  const usoOk = input.usoDoMac === undefined || (typeof input.usoDoMac === "string" && (USOS_DO_MAC as readonly string[]).includes(input.usoDoMac));
+  const nenhum = input.modoDev === undefined && input.faixaTrabalhosRecolhida === undefined && input.usoDoMac === undefined;
+  if (!ok(input.modoDev) || !ok(input.faixaTrabalhosRecolhida) || !usoOk || nenhum) throw new ErroDeDominio("entrada_invalida", { cause: "preferencias" });
+  return {
+    data: await deps.repos.preferencias.gravar({
+      ...(typeof input.modoDev === "boolean" ? { modoDev: input.modoDev } : {}),
+      ...(typeof input.faixaTrabalhosRecolhida === "boolean" ? { faixaTrabalhosRecolhida: input.faixaTrabalhosRecolhida } : {}),
+      ...(input.usoDoMac !== undefined ? { usoDoMac: input.usoDoMac as UsoDoMac } : {}),
+    }),
+  };
 };
 
 /**

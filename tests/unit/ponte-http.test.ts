@@ -7,7 +7,7 @@ import { VERSAO_MINIMA_APP, type PonteInternaNod } from "../../src/adapters/fund
 import { criarPonteHttpServidor } from "../../src/adapters/http/rotas/ponte.ts";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
 import { versaoAceita } from "../../src/domain/versao-app.ts";
-import { entrega, falas, inventario, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { entrega, falas, inventario, memoria, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../src/shared/constantes.ts";
 
 describe("desktop: fronteiras HTTP", () => {
@@ -134,6 +134,15 @@ describe("desktop: fronteiras HTTP", () => {
     expect(enviados.reduce((n, t) => n + (t.texto?.length ?? 0), 0)).toBe(16_000);
     expect(enviados.at(-1)?.texto).toBe("b".repeat(10_000));
   });
+  it("ADR-085: a leitura de memória aceita o processador (opcional); fora do formato ele é ignorado, não a leitura toda (revisão do #209)", () => {
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [] })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [] });
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "amarela", carga: 0.8 } })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "amarela", carga: 0.8 } });
+    for (const processador of [{ nivel: "laranja", carga: 1 }, { nivel: "verde", carga: -1 }, { nivel: "verde", carga: 5000 }, { nivel: "verde" }, "alto", null]) {
+      expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [] });
+    }
+    expect(() => memoria({ nivel: "laranja", totalMb: 10, porTurno: [] })).toThrow();
+  });
+
   it("servidor: trecho fora do formato cai sozinho; acima do teto, nada passa", () => {
     expect(trechos([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }, { ferramenta: "rm -rf /" }, { texto: "a", ferramenta: "b" }, 3])).toEqual([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }]);
     expect(trechos([{ texto: "a".repeat(9_000) }, { texto: "b".repeat(9_000) }])).toEqual([]);
@@ -186,6 +195,29 @@ describe("NOD-175: ponte do servidor na drenagem", () => {
     soltar(plano);
     expect(await puxando).toEqual({ status: 200, body: { plano } });
     expect(p.reservasEmVoo()).toBe(0);
+  });
+
+  it("ADR-085: o puxar leva a leitura do Mac (com o processador) até a ponte; app antigo manda {} e a ponte recebe undefined", async () => {
+    const puxar = vi.fn<PonteInternaNod["puxar"]>().mockResolvedValue(plano);
+    const { chamar } = montar(puxar);
+    await chamar("conectar", conectar);
+    const leitura = { nivel: "verde", totalMb: 900, porTurno: [], processador: { nivel: "vermelha", carga: 1.4 } };
+    await chamar("puxar", { memoria: leitura });
+    expect(puxar).toHaveBeenLastCalledWith(escopo.pessoaId, leitura);
+    await chamar("puxar", {});
+    expect(puxar).toHaveBeenLastCalledWith(escopo.pessoaId, undefined);
+  });
+
+  it("revisão do #209: leitura com defeito no puxar vai como 'sem leitura' (nunca 400); a leitura entra uma vez por pedido, não a cada volta da espera", async () => {
+    const puxar = vi.fn<PonteInternaNod["puxar"]>().mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(plano);
+    const { chamar } = montar(puxar);
+    await chamar("conectar", conectar);
+    const leitura = { nivel: "amarela", totalMb: 900, porTurno: [] };
+    expect(await chamar("puxar", { memoria: leitura })).toEqual({ status: 200, body: { plano } });
+    expect(puxar.mock.calls.map((c) => c[1])).toEqual([leitura, undefined, undefined]);
+    puxar.mockClear();
+    expect(await chamar("puxar", { memoria: { nivel: "laranja" } })).toEqual({ status: 200, body: { plano } });
+    expect(puxar).toHaveBeenLastCalledWith(escopo.pessoaId, undefined);
   });
 
   it("drenando: o puxar volta {plano:null} na hora, sem chamar a ponte; drenagem no meio do long-poll também corta a espera", async () => {

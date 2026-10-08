@@ -50,7 +50,7 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada", "turno_criado"]);
     // ADR-083 (S7): uma task `colega` de quem recebe, na conversa dele, com quem pediu; o handoff aponta para ela.
     const trabalho = d.banco.trabalhos.find((w) => w.id === tarefa?.trabalhoId);
-    expect(trabalho).toMatchObject({ agenteId: tuca.id, conversaId: tuca.conversaId, origem: "colega", pedidoPorAgenteId: vera.id, titulo: "Explique como a busca por nome funciona hoje.", estado: "na_fila" });
+    expect(trabalho).toMatchObject({ agenteId: tuca.id, conversaId: tuca.conversaId, origem: "colega", pedidoPorAgenteId: vera.id, titulo: "Explique como a busca por nome funciona hoje.", estado: "na_fila", pessoaEsperando: true });
     expect(trabalho?.pasta?.startsWith("~/nod/Tuca/explique-como-a-busca")).toBe(true);
     expect(d.banco.mensagens.find((m) => m.kind === "handoff")?.payload).toMatchObject({ trabalhoId: trabalho?.id });
   });
@@ -64,6 +64,8 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     const tarefa = d.banco.turnos.find((x) => x.id === r.data.tarefa_id);
     expect(tarefa).toMatchObject({ origem: "delegacao", entradaConfianca: "confiavel" });
     expect(tarefa?.entradaTexto).not.toContain("pedido_da_pessoa");
+    // ADR-085 (revisão do #209): ninguém está na conversa esperando — o Mac apertado pode segurar este pedido.
+    expect(d.banco.trabalhos.find((w) => w.id === tarefa?.trabalhoId)?.pessoaEsperando).toBe(false);
   });
 
   it("até o limite da corrente (ADR-063): quem está em 1 ou 2 pede, e o alvo nasce um passe mais fundo; em 3 não pede", async () => {

@@ -11,6 +11,7 @@ import { desatualizado, ehIa, linhaAtualizarIa } from "./ia-fora.ts";
 import { logoApp } from "./marketplace.ts";
 import { renderNegacoes, textoMotivo } from "./negacao.ts";
 import { renderPreferenciaModoDev } from "./modo-dev.ts";
+import { renderEsteMac } from "./este-mac.ts";
 import { renderRelatos } from "./relatos.ts";
 
 /**
@@ -23,6 +24,7 @@ export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: str
   { id: "conexao", nome: "Conexão", icone: ICONE.plug },
   { id: "avisos", nome: "Avisos", icone: ICONE.sino },
   { id: "preferencias", nome: "Preferências", icone: ICONE.codigo },
+  { id: "este-mac", nome: "Este Mac", icone: ICONE.medidor },
   { id: "computadores", nome: "Computadores", icone: ICONE.monitor },
   { id: "agentes", nome: "Gerenciar agentes", icone: ICONE.agentes },
   { id: "relatos", nome: "Relatos", icone: ICONE.bandeira },
@@ -59,6 +61,8 @@ function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos): str
       return renderAvisos(avisos);
     case "preferencias":
       return renderPreferenciaModoDev(estado);
+    case "este-mac":
+      return renderEsteMac(estado);
     case "computadores":
       return `<section class="espaco-secao"><h2>Computadores</h2><p class="intro">Uma chave por computador. Perdeu ou trocou de computador? Cancele a chave dele aqui e gere outra.</p>${renderChaves(estado, false)}</section>`;
     case "agentes":

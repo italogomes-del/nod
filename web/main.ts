@@ -35,6 +35,7 @@ import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
+import { USOS } from "./telas/este-mac.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
@@ -1119,6 +1120,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
       guardarFaixaRecolhida(p.faixaTrabalhosRecolhida);
       dispatch({ tipo: "faixa-trabalhos", recolhida: p.faixaTrabalhosRecolhida });
     }
+    if (p.usoDoMac) dispatch({ tipo: "uso-do-mac", uso: p.usoDoMac });
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
     const c = conversaDaTela(estado);
@@ -2085,6 +2087,18 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.trabalhoFazerAqui(el.dataset.id ?? "");
     dispatch({ tipo: "invalidar", quais: ["trabalhos", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
+  // ADR-085: Seu espaço › Este Mac. Otimista: a tela muda já; se o servidor recusar, volta ao que estava.
+  "uso-do-mac": (el) => {
+    const uso = USOS.find((u) => u.id === el.dataset.uso)?.id;
+    if (!uso || !api) return;
+    const antes = estado.usoDoMac;
+    const comFoco = document.activeElement === el;
+    // A seção é refeita: quem escolheu pelo teclado continua na escolha (a de antes, se a gravação falhar).
+    const focar = (u: string) => { if (comFoco) document.querySelector<HTMLElement>(`[data-act="uso-do-mac"][data-uso="${CSS.escape(u)}"]`)?.focus({ preventScroll: true }); };
+    dispatch({ tipo: "uso-do-mac", uso });
+    focar(uso);
+    void api.gravarPreferencias({ usoDoMac: uso }).then(() => dispatch({ tipo: "invalidar", quais: ["trabalhos"] }), () => { dispatch({ tipo: "uso-do-mac", uso: antes }); focar(antes); });
+  },
   // O status do topo da task abre e fecha o cartão do tempo (protótipo "Nod — tempo da task").
   "tempo-task": (el) => {
     const id = el.dataset.id ?? null;
@@ -2869,6 +2883,7 @@ function dadosMenuConta(): DadosMenuConta {
     avisos: situacaoCurtaAvisos(canalAvisos.estado()),
     modoDev: estado.modoDev.ligado,
     banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
+    esteMac: estado.trabalhos?.segurando ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? ""),
   };
 }
 

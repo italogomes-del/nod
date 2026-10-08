@@ -1,4 +1,4 @@
-import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../contracts/raio-x.ts";
+import { USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, jsonb, ms } from "./conversao.ts";
 
@@ -90,25 +90,26 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
-  type Linha = { modo_dev: boolean; avisos_fechados: string[]; faixa_trabalhos_recolhida: boolean };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], faixaTrabalhosRecolhida: l?.faixa_trabalhos_recolhida ?? false });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; faixa_trabalhos_recolhida: boolean; uso_do_mac: UsoDoMac };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], faixaTrabalhosRecolhida: l?.faixa_trabalhos_recolhida ?? false, usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
-        select modo_dev, avisos_fechados, faixa_trabalhos_recolhida from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+        select modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
       return paraPreferencias(l);
     },
 
     /** O que vier muda; o que faltar fica como está (ADR-083: `faixaTrabalhosRecolhida` chega sozinho da faixa). */
-    async gravar(p: { modoDev?: boolean; faixaTrabalhosRecolhida?: boolean }): Promise<Preferencias> {
+    async gravar(p: { modoDev?: boolean; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac }): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
-        insert into preferencias (tenant_id, owner_id, modo_dev, faixa_trabalhos_recolhida)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.faixaTrabalhosRecolhida ?? false})
+        insert into preferencias (tenant_id, owner_id, modo_dev, faixa_trabalhos_recolhida, uso_do_mac)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.faixaTrabalhosRecolhida ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO})
         on conflict (tenant_id, owner_id) do update set
           modo_dev = coalesce(${p.modoDev ?? null}::boolean, preferencias.modo_dev),
           faixa_trabalhos_recolhida = coalesce(${p.faixaTrabalhosRecolhida ?? null}::boolean, preferencias.faixa_trabalhos_recolhida),
+          uso_do_mac = coalesce(${p.usoDoMac ?? null}::text, preferencias.uso_do_mac),
           atualizado_em = clock_timestamp()
-        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida`;
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac`;
       return paraPreferencias(l);
     },
 
@@ -121,7 +122,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
           avisos_fechados = case when ${chave} = any(preferencias.avisos_fechados) then preferencias.avisos_fechados
             else array_append(preferencias.avisos_fechados, ${chave}) end,
           atualizado_em = clock_timestamp()
-        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida`;
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac`;
       return paraPreferencias(l);
     },
   };
