@@ -303,3 +303,14 @@ describe("tudo que não é balão fica no centro", () => {
     expect(css).not.toMatch(/\.collaboration\{margin:12px 0 20px 64px/);
   });
 });
+
+describe("QA do épico (2026-10-08): a linha do meio do turno desce para depois da fala que a anunciou (K1, B1)", () => {
+  it("\"Abriu a task\" e \"Enviou mensagem para\" entram depois do balão do bot do mesmo turno", () => {
+    const abriu = msg("ab", t0 + MIN, { kind: "sistema", texto: "Abriu a task Migrar relatórios", turnoId: "tc", origemTurno: "conversa", payload: { kind: "trabalho_aberto", trabalhoId: "tb-m", titulo: "Migrar relatórios", origem: "pessoa" } });
+    const anuncio = msg("an", t0 + 2 * MIN, { turnoId: "tc", origemTurno: "conversa", fimDoTurno: true, texto: "Abri uma task para isso." });
+    const pediu = msg("hp", t0 + 4 * MIN, { turnoId: "tp", origemTurno: "conversa", kind: "handoff", texto: "x", payload: { kind: "handoff", de: "clarice", para: "chico", motivo: "revisar", tarefaId: "tarefa-9" } });
+    const falou = msg("fp", t0 + 5 * MIN, { turnoId: "tp", origemTurno: "conversa", fimDoTurno: true, texto: "Pedi ao Chico." });
+    const { e, c } = cenario([daPessoa("p1", t0), abriu, anuncio, daPessoa("p2", t0 + 3 * MIN), pediu, falou]);
+    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "an", "linha:ab", "p2", "fp", "linha:hp"]);
+  });
+});
