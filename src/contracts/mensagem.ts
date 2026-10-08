@@ -4,6 +4,7 @@ import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
 import type { CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
+import type { OrigemTrabalho } from "./trabalho.ts";
 import type { OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
@@ -91,7 +92,12 @@ export type PayloadMensagem =
   /** definido em 2026-09-28 (ADR-051): só ids — o HTML (até 500 000 caracteres) não viaja com a conversa. */
   | { kind: "artefato"; artefatoId: string; versao: number; titulo: string }
   /** definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a transcrição vem por GET ligacoes/:id/falas. */
-  | PayloadLinhaLigacao;
+  | PayloadLinhaLigacao
+  /**
+   * definido em 2026-10-07 (ADR-081): a linha centralizada "Abriu a task <titulo>" na conversa do bot. Mensagem
+   * `sistema`; a web abre a tela do trabalho ao clicar.
+   */
+  | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho };
 
 export type Mensagem = {
   tenantId: TenantId;

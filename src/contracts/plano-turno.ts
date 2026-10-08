@@ -101,7 +101,11 @@ export type PlanoTurno = {
    * `anexos` (ADR-046): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
-  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente };
+  /**
+   * `bifurcar` (definido em 2026-10-07, ADR-081, rede de 2 min): continuar `sessaoCli` numa CÓPIA (`--fork-session` no
+   * Claude), porque a original segue com o trabalho promovido. Só vem com harness que declara `bifurcaSessao`.
+   */
+  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente; bifurcar?: boolean };
   /**
    * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram o gate da rotina
    * (`efeitoExternoSoPorAprovacao`, EMENDA 15) e a trava herdada (ADR-058/059). Quem decide quando o bot para e
