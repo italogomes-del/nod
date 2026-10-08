@@ -310,7 +310,10 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
     it("#193: mandar_para_task com a task rodando chega no meio do turno dela (renovação com aceitaMensagens) e nunca no da conversa", { timeout: 90_000 }, async () => {
       const ESPERA = 15_000;
       const lia = await c.criarBot("Lia");
-      const t1 = await c.enviar(lia.conversaId, `Monte o relatório. ${abrirTask("Relatório de vendas", `monte o relatório [[tool: lembrar {"texto":"relatório de vendas"}]] [[espera: ${ESPERA}]] [[texto: Relatório pronto]]`)} [[texto: Abri a task.]]`);
+      // definido em 2026-10-08 (revisão do épico): a espera em duas metades. O catcher responde à mensagem do meio no começo
+      // do passo SEGUINTE; com uma espera só, a resposta saía colada no fim do turno (medido: 39 ms entre a fala e a
+      // entrega) e a leitura do "ainda rodando" abaixo virava sorteio, nas duas formas da absorção (#189 e a antiga).
+      const t1 = await c.enviar(lia.conversaId, `Monte o relatório. ${abrirTask("Relatório de vendas", `monte o relatório [[tool: lembrar {"texto":"relatório de vendas"}]] [[espera: ${ESPERA / 2}]] [[espera: ${ESPERA / 2}]] [[texto: Relatório pronto]]`)} [[texto: Abri a task.]]`);
       await c.esperarTurno(t1);
       const task = await c.comDiagnostico(lia, () => c.srv.esperar(async () => (await c.trabalhos(lia.agenteId)).trabalhos.find((t) => t.estado === "rodando" && t.turnoVivoId !== null) ?? null, { nome: "task rodando", timeoutMs: 15_000 }));
       const turnoDaTask = task.turnoVivoId!;

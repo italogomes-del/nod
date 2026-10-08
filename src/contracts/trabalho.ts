@@ -1,3 +1,4 @@
+import type { Executor } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
 
@@ -44,6 +45,8 @@ export type Trabalho = {
   estado: EstadoTrabalho;
   sessaoCli: string | null;
   sessaoHarness: string | null;
+  /** definido em 2026-10-08 (revisão do épico, S14): o executor que criou a sessão; o --resume só vale para o mesmo. */
+  sessaoExecutor?: Executor | null;
   /** Pasta do trabalho (convenção da ADR-065): `~/nod/<bot>/<slug>`; null = a pasta do bot. */
   pasta: string | null;
   /** Última leitura de memória do Mac para o grupo de processos do trabalho (#194). */
@@ -55,7 +58,7 @@ export type Trabalho = {
 };
 
 /** O que a web recebe: o trabalho mais o que a faixa e as listas mostram sem outra ida ao servidor. */
-export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarness"> & {
+export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarness" | "sessaoExecutor"> & {
   /** Nome do bot que pediu (origem = colega), para a etiqueta "pedido do Chico". */
   pedidoPorNome: string | null;
   /** Nome da rotina (origem = rotina), para a etiqueta "rotina". */
@@ -66,6 +69,11 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   turnoVivoId: string | null;
   /** Título do trabalho que segura o computador do bot, quando este está esperando por ele. */
   esperandoComputadorDe: string | null;
+  /**
+   * definido em 2026-10-08 (revisão do épico, S24): o título e o último passo podem trazer texto de fora (task de colega,
+   * ou um turno dela leu conteúdo de fora). O prompt da conversa os marca com cuidado.
+   */
+  deFora?: boolean;
 };
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */

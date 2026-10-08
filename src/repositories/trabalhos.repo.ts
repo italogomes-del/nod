@@ -1,4 +1,5 @@
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
+import type { Executor } from "../contracts/evento.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
@@ -19,6 +20,7 @@ interface Linha {
   estado: EstadoTrabalho;
   sessao_cli: string | null;
   sessao_harness: string | null;
+  sessao_executor: string | null;
   pasta: string | null;
   memoria_mb: number | null;
   custo_usd: string | null;
@@ -28,7 +30,7 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, pasta, memoria_mb, custo_usd, criado_em, iniciado_em, terminado_em";
+  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, criado_em, iniciado_em, terminado_em";
 
 const paraTrabalho = (l: Linha): Trabalho => ({
   tenantId: l.tenant_id,
@@ -44,6 +46,7 @@ const paraTrabalho = (l: Linha): Trabalho => ({
   estado: l.estado,
   sessaoCli: l.sessao_cli,
   sessaoHarness: l.sessao_harness,
+  sessaoExecutor: l.sessao_executor === "local" || l.sessao_executor === "catcher" ? l.sessao_executor : null,
   pasta: l.pasta,
   memoriaMb: l.memoria_mb,
   custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
@@ -66,13 +69,18 @@ export type NovoTrabalho = {
   estado?: EstadoTrabalho;
   sessaoCli?: string | null;
   sessaoHarness?: string | null;
+  sessaoExecutor?: Executor | null;
   pasta?: string | null;
   iniciadoEm?: number | null;
 };
 
 /** O que a faixa, as listas e o prompt mostram além da linha: lido junto, numa consulta. */
 /** `turnosAbertos`: pendentes e rodando (o computador ocupado olha os dois). */
-export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[] };
+/**
+ * `deFora` (revisão do épico, S24, 2026-10-08): o título e o último passo podem trazer texto de fora — a task é de um
+ * colega (o título é o pedido de outro bot) ou um turno dela leu conteúdo de fora (ADR-062) ou nasceu não confiável.
+ */
+export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[]; deFora: boolean };
 
 /**
  * Trabalhos do bot (ADR-081, 0060). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
@@ -84,10 +92,10 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async criar(n: NovoTrabalho): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         insert into trabalhos (tenant_id, id, owner_id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id,
-          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, pasta, iniciado_em)
+          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em)
         values (${escopo.tenantId}, ${n.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.titulo}, ${n.origem},
           ${n.pedidoPorAgenteId ?? null}, ${n.rotinaId ?? null}, ${n.trabalhoMaeId ?? null}, ${n.depoisDeTrabalhoId ?? null}, ${n.estado ?? "na_fila"},
-          ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)})
+          ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.sessaoCli ? (n.sessaoExecutor ?? null) : null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTrabalho(l) : null;
     },
@@ -97,9 +105,12 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
-    /** Com trava de linha: quem recalcula o estado serializa com o Parar e com a outra sincronização. */
+    /**
+     * Com trava de linha: quem recalcula o estado serializa com o Parar e com a outra sincronização. revisto em 2026-10-08
+     * (revisão do épico, S20): FOR NO KEY UPDATE — o turno novo que aponta para o trabalho (FK, FOR KEY SHARE) não espera.
+     */
     async buscarTravado(id: string): Promise<Trabalho | null> {
-      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from trabalhos where tenant_id = ${escopo.tenantId} and id = ${id} for update`;
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from trabalhos where tenant_id = ${escopo.tenantId} and id = ${id} for no key update`;
       return l ? paraTrabalho(l) : null;
     },
 
@@ -132,6 +143,19 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraTrabalho);
     },
 
+    /**
+     * definido em 2026-10-08 (revisão do épico, S12): uma task aberta por uma execução desta rotina (filha, com mãe) que
+     * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada.
+     */
+    async filhaAbertaDaRotina(rotinaId: string): Promise<Trabalho | null> {
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from trabalhos
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and trabalho_mae_id is not null
+          and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')
+        order by criado_em limit 1`;
+      return l ? paraTrabalho(l) : null;
+    },
+
     /** Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0060). */
     async mudarEstado(id: string, estado: EstadoTrabalho, agora: number): Promise<Trabalho | null> {
       const final = estado === "terminado" || estado === "parado" || estado === "falhou";
@@ -144,10 +168,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
-    /** A sessão do CLI do trabalho (nunca a da conversa) e o harness que a criou, como conversas.sessao_harness (0030). */
-    async atualizarSessao(id: string, sessaoCli: string, harness: string | null): Promise<boolean> {
+    /**
+     * A sessão do CLI do trabalho (nunca a da conversa), o harness e o executor que a criaram, como conversas.sessao_harness
+     * (0030) e conversas.sessao_executor (0005).
+     */
+    async atualizarSessao(id: string, sessaoCli: string, harness: string | null, executor: Executor | null = null): Promise<boolean> {
       const r = await conn`
-        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}
+        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}, sessao_executor = ${executor}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
     },
@@ -166,8 +193,19 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         update trabalhos w set memoria_mb = l.mb
         from (select unnest(${porTurno.map((p) => p.turnoId)}::uuid[]) as turno_id, unnest(${porTurno.map((p) => Math.max(0, Math.round(p.mb)))}::int[]) as mb) l
         join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = l.turno_id
-        where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.id = t.trabalho_id`;
+        where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.id = t.trabalho_id
+          -- definido em 2026-10-08 (revisão do épico, S22): a mesma leitura a cada 30 s não reescreve a linha (nem a trava).
+          and w.memoria_mb is distinct from l.mb`;
       return r.count;
+    },
+
+    /**
+     * definido em 2026-10-08 (revisão do épico, S11): serializa quem mexe nas esperas (`depois_de`) dos trabalhos de um
+     * bot até o fim da transação — a checagem de ciclo lê a corrente inteira, e duas transações cruzadas a liam antes
+     * de a outra gravar.
+     */
+    async travarEsperas(agenteId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`depois_de:${agenteId}`}))`;
     },
 
     /** "Fazer depois da …": grava a espera. Null tira. */
@@ -193,7 +231,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; esperando: boolean; decisao: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
@@ -202,6 +240,15 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')) as decisao,
+          -- definido em 2026-10-08 (revisão do épico, S3): pedido a colega feito por um turno do trabalho que não voltou —
+          -- handoff com tarefaId sem peer_ask da mesma tarefa (a regra de pedidosEmAberto). O trabalho do colega já
+          -- acabado sem peer_ask (a pessoa o parou) não segura este: senão ele ficaria rodando para sempre.
+          exists (select 1 from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
+            where h.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
+              and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
+                and r.payload->>'tarefaId' = h.payload->>'tarefaId')
+              and not exists (select 1 from trabalhos c where c.tenant_id = h.tenant_id and c.id::text = h.payload->>'trabalhoId'
+                and c.estado in ('terminado', 'parado', 'falhou'))) as colega,
           u.estado as ultimo_estado, u.motivo_interrupcao as ultimo_motivo
         from (select 1) um
         left join lateral (
@@ -210,14 +257,16 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, esperandoOutro: l.esperando, decisaoPendente: l.decisao, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
     async extras(ids: readonly string[]): Promise<Map<string, ExtrasTrabalho>> {
       if (ids.length === 0) return new Map();
-      const linhas = await conn<{ id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null }[]>`
+      const linhas = await conn<{ id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
+          (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
+            and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
           (select array_agg(t.id order by t.criado_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as abertos
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
@@ -231,7 +280,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           select t.id from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'despachando' order by t.criado_em limit 1
         ) v on true
         where w.tenant_id = ${escopo.tenantId} and w.id = any(${[...ids]}::uuid[])`;
-      return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id, turnosAbertos: l.abertos ?? [] }]));
+      return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id, turnosAbertos: l.abertos ?? [], deFora: l.de_fora }]));
     },
   };
 }

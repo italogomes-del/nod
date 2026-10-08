@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
@@ -30,8 +31,8 @@ export function eventoTrabalhoMudou(deps: DepsTrabalho, t: Pick<Trabalho, "id" |
 }
 
 /**
- * Cria o trabalho. A pasta é `~/nod/<bot>/<slug>` (ADR-065), salvo quando quem chama já decidiu outra (a rotina usa
- * uma por rotina; a rede de 2 min, nenhuma: o processo já roda na pasta do bot). `pasta: null` = a pasta do bot.
+ * Cria o trabalho. A pasta é `~/nod/<bot>/<slug>` (ADR-065), salvo quando quem chama já decidiu outra. revisto em
+ * 2026-10-08 (revisão do épico, S13): toda origem ganha a sua — rotina e rede também. `pasta: null` = a pasta do bot.
  */
 export async function criarTrabalho(deps: DepsTrabalho, n: Omit<NovoTrabalho, "titulo"> & { titulo: string }): Promise<{ trabalho: Trabalho; events: RuntimeEvent[] }> {
   const titulo = tituloDoTrabalho(n.titulo);
@@ -81,6 +82,49 @@ export function sincronizarDoTurno(deps: DepsTrabalho, turno: Pick<Turno, "traba
 }
 
 /**
+ * definido em 2026-10-08 (revisão do épico, S2): uma decisão saiu de aberta (decidida, respondida, dispensada, vencida,
+ * fechada por regra) — o trabalho do turno dela relê os fatos. Sem isto a task ficava `precisa_de_voce` para sempre, e
+ * a que esperava por ela (`depois_de`) nunca começava. É o ponto comum de todos esses caminhos; roda na transação da
+ * DONA (mudarEstado exige owner = pessoa) e depois de a retomada, se houver, já estar na fila.
+ */
+export async function sincronizarDasDecisoes(deps: DepsTrabalho, decisoes: readonly Pick<Decisao, "turnoId">[]): Promise<RuntimeEvent[]> {
+  const trabalhos = new Set<string>();
+  for (const d of decisoes) {
+    const turno = d.turnoId ? await deps.repos.turnos.buscar(d.turnoId) : null;
+    if (turno?.trabalhoId) trabalhos.add(turno.trabalhoId);
+  }
+  const events: RuntimeEvent[] = [];
+  for (const id of trabalhos) events.push(...(await sincronizarTrabalho(deps, id)));
+  return events;
+}
+
+/** A regra que fecha as decisões de uma task parada (revisão do épico, S1). */
+export const REGRA_TRABALHO_PARADO = "regra:trabalho_parado" as const;
+
+/**
+ * definido em 2026-10-08 (revisão do épico, S1): o Parar da task, o "Fazer aqui" e o Parar do chat fecham por regra as
+ * decisões ainda abertas dos turnos do trabalho (a proposta de mesmo id, pendente, sai recusada, como em fecharGemeas).
+ * Antes a aprovação aberta voltava a task para `precisa_de_voce` e, aprovada depois do Parar, abria uma retomada que a
+ * reabria. Na transação da dona (fecharPorRegra exige owner = pessoa).
+ */
+export async function fecharDecisoesDoTrabalho(deps: DepsTrabalho, trabalhoId: string): Promise<RuntimeEvent[]> {
+  const agora = deps.agora();
+  const events: RuntimeEvent[] = [];
+  const autoria = { ...autoriaPessoa(deps.escopo), decidido_por: REGRA_TRABALHO_PARADO };
+  for (const d of await deps.repos.decisoes.abertasDoTrabalho(trabalhoId)) {
+    const fechada = await deps.repos.decisoes.fecharPorRegra(d.id, { regra: REGRA_TRABALHO_PARADO, regraVersao: 1, agora });
+    if (!fechada) continue;
+    // Ninguém continua esta decisão: sem a marca, o assentamento do turno parado (continuarAprovacoesDoTurno) via uma
+    // aprovação 'decidida' sem continuação e abria a retomada que reabria a task (medido no teste da S1).
+    await deps.repos.decisoes.reivindicarContinuacao(fechada.id, "turno", agora);
+    const proposta = await deps.repos.propostas.buscar(fechada.id);
+    if (proposta?.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "recusada");
+    events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: fechada.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_TRABALHO_PARADO, trabalho_id: trabalhoId } }));
+  }
+  return events;
+}
+
+/**
  * A linha centralizada "Abriu a task …" (mensagem `sistema` com payload `trabalho_aberto`) na conversa do trabalho.
  * `turnoId`: o turno que abriu (a conversa coordenadora, ou o turno promovido pela rede); null quando a fixture ou a
  * pessoa abre.
@@ -107,7 +151,7 @@ export async function linhaTrabalhoAberto(deps: DepsTrabalho, t: Trabalho, turno
 export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, trabalhos: readonly Trabalho[]): Promise<TrabalhoDto[]> {
   const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id));
   return trabalhos.map((t): TrabalhoDto => {
-    const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, ...publico } = t;
+    const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, sessaoExecutor: _executor, ...publico } = t;
     const e = extras.get(t.id);
     const vivo = e?.turnoVivoId ?? null;
     return {
@@ -117,6 +161,7 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, t
       // O nome da última ferramenta do turno vivo (o processo sabe) ganha da última fala, que pode ser de minutos atrás.
       ultimoPasso: (vivo ? deps.services.trabalhosVivos?.ultimaFerramenta(vivo) : null) ?? (e?.ultimaFala ? tituloDoTrabalho(e.ultimaFala) : null),
       turnoVivoId: vivo,
+      deFora: e?.deFora ?? false,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   });
@@ -174,11 +219,30 @@ export async function fecharPorMemoria(deps: DepsTrabalho, turnoId: string): Pro
   return { fechou: true, events };
 }
 
-/** Os abertos de um trabalho que o Parar mexe: o trabalho é parado mesmo que o turno ainda esteja acabando. */
+/**
+ * Os abertos de um trabalho que o Parar mexe: o trabalho é parado mesmo que o turno ainda esteja acabando, e as decisões
+ * abertas dele fecham por regra (S1) — `parado` vence a decisão na derivação, e nenhuma aprovação depois o reabre.
+ */
 export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<RuntimeEvent[]> {
   if (trabalhoFinal(t.estado)) return [];
+  const events = await fecharDecisoesDoTrabalho(deps, t.id);
   const parado = await deps.repos.trabalhos.mudarEstado(t.id, "parado", deps.agora());
-  return parado ? [eventoTrabalhoMudou(deps, parado)] : [];
+  if (parado) events.push(eventoTrabalhoMudou(deps, parado));
+  return events;
+}
+
+/**
+ * definido em 2026-10-08 (revisão do épico, S20): a ORDEM ÚNICA das travas de um trabalho — as linhas dos turnos abertos
+ * dele primeiro (em ordem de criação), depois a do trabalho. É a ordem da renovação e da entrega (turno → recados →
+ * trabalho, via sincronizarTrabalho). O Parar e o "Fazer aqui" travavam o trabalho e depois os turnos: 40P01 contra uma
+ * entrega em curso, e se a vítima era a entrega a resposta do bot se perdia.
+ */
+export async function travarTrabalhoComTurnos(deps: Pick<Deps, "repos">, trabalhoId: string): Promise<Trabalho & { turnos: Turno[] }> {
+  if (!(await deps.repos.trabalhos.buscar(trabalhoId))) throw new ErroDeDominio("nao_encontrado");
+  const turnos = await deps.repos.turnos.travarAbertosDoTrabalho(trabalhoId);
+  const t = await deps.repos.trabalhos.buscarTravado(trabalhoId);
+  if (!t) throw new ErroDeDominio("nao_encontrado");
+  return { ...t, turnos };
 }
 
 /**
@@ -187,12 +251,11 @@ export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<Run
  * tasks seguem.
  */
 export const pararTrabalho: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDto; interrompidos: number }> = async (deps, input) => {
-  const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
-  if (!t) throw new ErroDeDominio("nao_encontrado");
+  const t = await travarTrabalhoComTurnos(deps, input.trabalhoId);
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
   const events: RuntimeEvent[] = [];
-  const turnos = await deps.repos.turnos.doTrabalho(t.id);
+  const turnos = t.turnos;
   let interrompidos = 0;
   for (const p of turnos.filter((x) => x.estado === "pendente")) {
     if (!(await deps.repos.turnos.interromper(p.id, "parado_pela_pessoa"))) continue;
@@ -202,8 +265,9 @@ export const pararTrabalho: CasoDeUso<{ trabalhoId: string }, { trabalho: Trabal
   const vivos = turnos.filter((x) => x.estado === "despachando").map((x) => x.id);
   interrompidos += await deps.repos.turnos.pedirInterrupcao(vivos, agora);
   for (const id of vivos) await deps.services.interruptor.interromper(id).catch(() => false);
-  events.push(...(await marcarParado(deps, t)));
-  const atual = (await deps.repos.trabalhos.buscar(t.id)) ?? t;
+  const { turnos: _turnos, ...trabalho } = t;
+  events.push(...(await marcarParado(deps, trabalho)));
+  const atual = (await deps.repos.trabalhos.buscar(t.id)) ?? trabalho;
   const [dto] = await trabalhosParaDto(deps, [atual]);
   return { data: { trabalho: dto!, interrompidos }, events };
 };

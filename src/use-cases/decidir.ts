@@ -13,6 +13,7 @@ import { fecharGemeas } from "./fechar-gemeas.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 export type MarcacaoItem = { id: string; selecionado: boolean; textoFinal?: string };
 
@@ -225,7 +226,9 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       confianca: "confiavel",
     });
     const aviso: RuntimeEvent[] = espera ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "mensagem_criada", autoria: autoriaEspera, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { mensagem_id: espera.id, kind: "sistema", decisao_id: decisao.id, aguardando_maquina: noMac.length } }] : [];
-    return { data: { mensagemId: espera?.id ?? null, turnoRetomadaId: null, itens }, events: aviso };
+    // Revisão do épico (S2): a decisão fechou; a task espera o Mac como qualquer turno sem nada vivo (o resultado volta
+    // como retomada, que a reabre).
+    return { data: { mensagemId: espera?.id ?? null, turnoRetomadaId: null, itens }, events: [...aviso, ...(await sincronizarDasDecisoes(deps, [decisao]))] };
   }
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
   const aprovadorNome = pessoa?.nome ?? "A pessoa";
@@ -268,6 +271,8 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       dados: { mensagem_id: mensagem.id, kind: "resultado_aprovacao", decisao_id: decisao.id, executados: itens.filter((i) => i.desfecho === "executado").length, total: itens.length },
     });
   }
+  // Revisão do épico (S2, 2026-10-08): a task do turno que pediu relê o estado — com a retomada na fila, ou sem ela.
+  events.push(...(await sincronizarDasDecisoes(deps, [decisao])));
   return { data: { mensagemId: mensagem?.id ?? null, turnoRetomadaId, itens }, events };
 };
 
@@ -311,5 +316,6 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
   const events: RuntimeEvent[] = turno && nova
     ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria: autoriaDaPessoa(deps.escopo), pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: decisao.id } }]
     : [];
-  return { data: { turnoRetomadaId: turno?.id ?? null }, events: [...gemeas.events, ...events] };
+  // Revisão do épico (S2): a task do turno caído relê o estado (com a retomada na fila) — as gêmeas são da mesma faixa (S4).
+  return { data: { turnoRetomadaId: turno?.id ?? null }, events: [...gemeas.events, ...events, ...(await sincronizarDasDecisoes(deps, [decisao]))] };
 };

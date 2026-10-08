@@ -51,7 +51,7 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
         }
         if ("pulada" in r.data) {
           resultado.puladas.push(rotina.id);
-          log("aviso", "rotina_janela_pulada", { rotina_id: rotina.id, turno_aberto_id: r.data.turnoAbertoId, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
+          log("aviso", "rotina_janela_pulada", { rotina_id: rotina.id, turno_aberto_id: r.data.turnoAbertoId, trabalho_aberto_id: r.data.trabalhoAbertoId ?? null, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
         // Sem turno e sem crédito gasto: a execução 'bloqueada', o card e o evento vão juntos nesta tx.

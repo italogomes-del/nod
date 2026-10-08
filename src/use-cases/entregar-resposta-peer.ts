@@ -6,6 +6,7 @@ import { proximaProfundidade } from "../domain/profundidade.ts";
 import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { sincronizarTrabalho } from "./trabalhos.ts";
 
 export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "ja_entregue" };
 
@@ -209,9 +210,13 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
     confianca: "nao_confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });
+  // Revisão do épico (S3, 2026-10-08): o trabalho de quem pediu esperava esta resposta como `rodando` (aguardandoColega);
+  // a continuação já está na fila e a peer_ask gravada, então ele relê o estado agora — nunca passa por `terminado`.
+  const doTrabalho = await sincronizarTrabalho(deps, continuacao.trabalhoId ?? null);
   return {
     data: { mensagem, continuacao, remetenteAgenteId: remetente.id },
     events: [
+      ...doTrabalho,
       evento(deps, "mensagem_criada", autoria, { mensagemId: mensagem.id, kind: "peer_ask", tarefaId: tarefa.id }, { conversaId: conversaRemetente.id, turnoId: continuacao.id }),
       evento(deps, "turno_criado", autoria, { turnoId: continuacao.id, agenteId: remetente.id, origem: continuacao.origem, profundidade: continuacao.profundidade }, { conversaId: conversaRemetente.id, turnoId: continuacao.id }),
     ],

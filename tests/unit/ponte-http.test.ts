@@ -244,4 +244,15 @@ describe("NOD-167: Codex sem app-server no anúncio do Mac", () => {
     await conectar({ ...base, harnesses: { "claude-cli": pronto, "codex-cli": { estado: "ausente", motivo: "x", em: 0 } }, semLacoDeVoz: ["codex-cli"] });
     expect(p.semLacoDeVozDaPessoa(escopo.pessoaId, "codex-cli")).toBe(false);
   });
+
+  /** Revisão do épico #188 (S15, 2026-10-08): o anúncio das capacidades chega à ponte só com chaves e harnesses conhecidos. */
+  it("S15: as capacidades anunciadas chegam à ponte; ausentes ou lixo, o anúncio sai sem elas", async () => {
+    const { maquinas, conectar } = montar();
+    await conectar({ ...base, harnesses: { "claude-cli": pronto }, capacidades: { "claude-cli": { bifurcaSessao: true, retomaSessao: "sim", inventada: true }, hermes: { bifurcaSessao: true }, __proto__: { x: 1 } } });
+    expect(maquinas.get("m1")?.capacidades).toEqual({ "claude-cli": { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: true, processoProprio: false, terminal: false } });
+    await conectar({ ...base, harnesses: { "claude-cli": pronto } });
+    expect(maquinas.get("m1")?.capacidades).toBeUndefined();
+    await conectar({ ...base, harnesses: { "claude-cli": pronto }, capacidades: ["claude-cli"] });
+    expect(maquinas.get("m1")?.capacidades).toBeUndefined();
+  });
 });

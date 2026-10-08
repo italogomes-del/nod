@@ -129,6 +129,10 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado = 'despachando'`;
       await conn`update propostas set estado = 'recusada' where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado = 'pendente'`;
       await conn`update decisoes set estado = 'vencida' where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado in ('pendente', 'reaberta')`;
+      // definido em 2026-10-08 (revisão do épico, S5): as tasks abertas do bot excluído param junto — os turnos delas
+      // acabaram de ser interrompidos acima, e ninguém mais as sincronizaria (ficavam "Trabalhando" na tela para sempre).
+      await conn`update trabalhos set estado = 'parado', terminado_em = ${new Date(agora)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and agente_id = ${id} and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')`;
       return paraAgente(l);
     },
     async restaurar(id: string): Promise<Agente | null> {

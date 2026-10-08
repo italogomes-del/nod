@@ -6,6 +6,7 @@ import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import type { DepsSuaVez } from "./listar-sua-vez.ts";
 import type { CasoDeUso } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /**
  * Abertas que saem pelo × / "Dispensar" (TIPOS_DISPENSAVEIS_ABERTOS): as que se respondem com texto
@@ -69,7 +70,10 @@ export async function depoisDeDispensar(deps: DepsSuaVez, input: { decisao: Deci
       events.push(...(r.events ?? []));
     }
   }
-  return { data: { gemeas: gemeas.data.fechadas, rotinaId, computadorDevolvido: await devolverComputador(deps, d) }, events };
+  const computadorDevolvido = await devolverComputador(deps, d);
+  // Revisão do épico (S2, 2026-10-08): dispensada, a decisão não segura mais a task do turno dela.
+  events.push(...(await sincronizarDasDecisoes(deps, [d])));
+  return { data: { gemeas: gemeas.data.fechadas, rotinaId, computadorDevolvido }, events };
 }
 
 /**

@@ -15,6 +15,7 @@ import { pausarRotina } from "./pausar-rotina.ts";
 import { recusarProposta } from "./recusar-proposta.ts";
 import { retomarAposAcesso } from "./retomar-apos-acesso.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 export type EntradaDecidirAcesso = {
   decisaoId: string;
@@ -88,6 +89,12 @@ async function rotinaDoPedido(deps: Deps, agenteId: string, rotinaId: string | u
  * acesso ela pediria de novo a cada disparo.
  */
 export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> = async (deps, input) => {
+  const r = await decidirAcessoDaDona(deps, input);
+  // Revisão do épico (S2, 2026-10-08): o trabalho do turno que pediu relê o estado (com a retomada, se nasceu, na fila).
+  return { ...r, events: [...(r.events ?? []), ...(await sincronizarDasDecisoes(deps, [r.data.decisao]))] };
+};
+
+const decidirAcessoDaDona: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> = async (deps, input) => {
   const agora = deps.agora();
   const proposta = await deps.repos.propostas.buscar(input.decisaoId);
   // definido em 2026-09-24 (emenda da ADR-044): trava (agente, conector) ANTES de mexer em qualquer linha —

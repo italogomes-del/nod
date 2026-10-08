@@ -12,7 +12,7 @@ import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 
 /**
@@ -108,7 +108,9 @@ export function criarPonteHttpServidor(d: {
       }
       // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
       const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
-      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}) });
+      // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (a rede de 2 min só promove com bifurcaSessao).
+      const capacidades = capacidadesAnunciadas(b.capacidades);
+      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}), ...(capacidades ? { capacidades } : {}) });
       await persistir(c);
       // Melhor esforço: a conexão não pode falhar porque a repetição falhou.
       if (c.inv.estado === "pronto" && d.repetirBarrados) {

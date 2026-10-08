@@ -20,6 +20,7 @@ import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
+import { confirmarNaSessao } from "./sessao-viva.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -28,7 +29,11 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * `outraIa` (definido em 2026-10-05): quando o turno voltou com `causaSemIa`, a outra IA que a máquina tem pronta
  * (quem sabe é a ponte, que guarda o inventário anunciado); null = nenhuma.
  */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null };
+/**
+ * `bifurcou` (definido em 2026-10-08, revisão do épico, S15): o plano deste turno pediu a cópia da sessão (`bifurcar`).
+ * Quem sabe é a ponte, que guardou o plano puxado.
+ */
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -83,6 +88,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const executor = entrega.executor ?? "catcher";
   const resultado = entrega.resultado;
   const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
+  // Revisão do épico (S19, 2026-10-08): mensagens que o CLI recebeu e cuja confirmação não chegou numa renovação (a
+  // última falhou) — a entrega as confirma ANTES de assentar, senão viravam turno próprio e a resposta saía duas vezes.
+  // Com a linha do turno já travada (a ordem de sempre: turno, depois os recados, depois o trabalho).
+  const confirmadas = entrega.mensagensEntregues?.length && !tardia ? await confirmarNaSessao(deps, { turnoId: turno.id, executor, ids: entrega.mensagensEntregues }) : null;
   const desfecho = desfechoDaEntrega(turno, resultado, agora);
   const interrompido = tardia || desfecho.estado === "interrompido";
   // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia).
@@ -102,7 +111,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // silêncio só é honesto quando a execução foi completa.
   const silencioso = turno.semNovidadeMotivo !== null && !interrompido && (turno.origem === "rotina" || turno.origem === "retomada");
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, machineId: entrega.machineId });
-  const events: RuntimeEvent[] = [];
+  const events: RuntimeEvent[] = [...(confirmadas?.events ?? [])];
 
   // Comando da conversa (0038): /uso e /contexto voltam do Claude Code em inglês; a pessoa lê em português. O
   // /compactar não tem resposta para a pessoa: medido ao vivo em 28/09, o CLI devolveu como resultado a saída do
@@ -162,7 +171,22 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
   if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
-  if (resultado.sessaoCli && turno.trabalhoId) await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, resultado.sessaoCli, entrega.harness ?? null);
+  // Revisão do épico (S15, 2026-10-08): o turno que devia continuar numa cópia da sessão voltou recusado (o CLI daquela
+  // máquina não bifurca). A conversa larga a sessão: o próximo plano sai em sessão nova com o histórico recente, em vez de
+  // pedir a cópia de novo e ser recusado em laço.
+  if (entrega.bifurcou && !turno.trabalhoId && desfecho.motivoInterrupcao === "executor_indisponivel" && !resultado.causaSemIa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, null);
+  if (resultado.sessaoCli && turno.trabalhoId) {
+    // Revisão do épico (S16, 2026-10-08): o turno promovido pela rede que NÃO seguia a sessão da conversa (bifurcou, ou
+    // começou uma sessão nova) devolve a sessão que tem o contexto mais novo da conversa. Ela vira também a da conversa —
+    // senão a próxima mensagem bifurcava a sessão antiga (de uma promoção anterior) e perdia este turno inteiro. Só se a
+    // conversa não ganhou sessão nova depois da promoção.
+    const doTrabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+    if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null) {
+      const conversa = await deps.repos.conversas.buscar(turno.conversaId);
+      if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
+    }
+    await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, resultado.sessaoCli, entrega.harness ?? null, executor);
+  }
   // 0035: o `total_cost_usd` do CLI é o total da SESSÃO; numa sessão retomada ele traz o custo dos turnos
   // anteriores. O turno custa a diferença — em gastos, no turno e nos eventos.
   const anterior = resultado.sessaoCli ? await deps.repos.turnos.totalAnteriorDaSessao(resultado.sessaoCli, turno.id) : null;

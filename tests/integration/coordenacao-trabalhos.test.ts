@@ -200,12 +200,15 @@ describeIntegracao("a conversa coordena (#193, ADR-081 §7)", () => {
       await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: relogio });
       const despachadoEm = relogio;
       relogio += 119_000;
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s })).data.trabalho).toBeNull();
+      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
       relogio += 1_000;
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: false, harness: "claude-cli", sessaoCli: s })).data.trabalho).toBeNull();
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "codex-cli", sessaoCli: s })).data.trabalho).toBeNull();
-      const r = await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s });
-      expect(r.data.trabalho).toMatchObject({ origem: "rede", estado: "rodando", sessaoCli: s, pasta: null });
+      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: false, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
+      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "codex-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
+      // Revisão do épico (S15): sem a máquina anunciar que bifurca, não promove (app antigo).
+      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s })).data.trabalho).toBeNull();
+      const r = await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true });
+      // Revisão do épico (S13): a task da rede ganha pasta própria (os turnos seguintes rodam nela).
+      expect(r.data.trabalho).toMatchObject({ origem: "rede", estado: "rodando", sessaoCli: s, pasta: expect.stringMatching(/^~\/nod\/Ada\//) });
       expect((await m.repos.turnos.buscar(vivo!.id))?.trabalhoId).toBe(r.data.trabalho?.id);
       expect((r.events ?? []).map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada"]);
 

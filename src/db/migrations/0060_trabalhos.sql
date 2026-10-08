@@ -22,6 +22,9 @@ CREATE TABLE trabalhos (
   estado text NOT NULL DEFAULT 'na_fila',
   sessao_cli text,
   sessao_harness text,
+  -- definido em 2026-10-08 (revisão do épico, S14): o executor que criou a sessão, como conversas.sessao_executor (0005):
+  -- o --resume do trabalho só vale para o mesmo executor (o catcher não retoma a sessão de um CLI real, nem o contrário).
+  sessao_executor text,
   pasta text,
   memoria_mb integer,
   custo_usd numeric(12, 6),
@@ -31,6 +34,7 @@ CREATE TABLE trabalhos (
   CONSTRAINT trabalho_titulo CHECK (char_length(titulo) BETWEEN 1 AND 200),
   CONSTRAINT trabalho_origem CHECK (origem IN ('pessoa', 'rotina', 'colega', 'rede')),
   CONSTRAINT trabalho_estado CHECK (estado IN ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso', 'terminado', 'parado', 'falhou')),
+  CONSTRAINT trabalho_sessao_executor CHECK (sessao_executor IS NULL OR sessao_executor IN ('local', 'catcher')),
   CONSTRAINT trabalho_pasta CHECK (pasta IS NULL OR char_length(pasta) <= 300),
   CONSTRAINT trabalho_memoria CHECK (memoria_mb IS NULL OR memoria_mb >= 0),
   -- Um trabalho não espera a si mesmo nem é mãe de si mesmo (o ciclo maior o caso de uso recusa).
@@ -50,6 +54,12 @@ ALTER TABLE trabalhos ADD FOREIGN KEY (tenant_id, depois_de_trabalho_id) REFEREN
 CREATE INDEX trabalhos_abertos_por_agente ON trabalhos (tenant_id, agente_id) WHERE estado IN ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso');
 -- "Terminados hoje" e a rede de 2 min (o trabalho `rede` da conversa) leem pela conversa.
 CREATE INDEX trabalhos_por_conversa ON trabalhos (tenant_id, conversa_id, criado_em);
+-- definido em 2026-10-08 (revisão do épico, S23): GET trabalhos sem agenteId lê os abertos (o índice acima pelo prefixo
+-- tenant_id) OU os terminados desde ontem — este; sem ele a perna do OR varria a tabela.
+CREATE INDEX trabalhos_terminados ON trabalhos (tenant_id, terminado_em) WHERE terminado_em IS NOT NULL;
+-- definido em 2026-10-08 (revisão do épico, S23): o estado do trabalho (`fatos`) junta as decisões pelos turnos dele, e
+-- decisoes.doTurno já lia por turno_id sem índice nenhum (só decisor e fio tinham).
+CREATE INDEX IF NOT EXISTS decisoes_por_turno ON decisoes (tenant_id, turno_id) WHERE turno_id IS NOT NULL;
 
 -- O turno do trabalho. Nulo = turno da conversa (a faixa é a conversa, como antes).
 ALTER TABLE turnos ADD COLUMN trabalho_id uuid;
@@ -65,6 +75,8 @@ CREATE INDEX turnos_por_mensagem_origem ON turnos (tenant_id, mensagem_origem_id
 ALTER TABLE preferencias ADD COLUMN IF NOT EXISTS faixa_trabalhos_recolhida boolean NOT NULL DEFAULT false;
 
 -- ROLLBACK:
+-- DROP INDEX decisoes_por_turno;
+-- DROP INDEX trabalhos_terminados;
 -- ALTER TABLE preferencias DROP COLUMN faixa_trabalhos_recolhida;
 -- DROP INDEX turnos_por_mensagem_origem;
 -- DROP INDEX turnos_por_trabalho;

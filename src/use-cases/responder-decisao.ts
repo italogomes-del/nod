@@ -9,6 +9,7 @@ import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /**
  * Os três tipos de pedir_a_pessoa (EMENDA 16): a resposta é TEXTO da pessoa, nunca um botão.
@@ -101,5 +102,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
   if (!mensagem) throw new ErroDeDominio("nao_permitido");
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: d.conversaId, turnoId: d.turnoId, dados: { mensagem_id: mensagem.id, kind: "texto", decisao_id: d.id, destravou: true } })];
   if (original && turno && turnoNovo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: d.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: d.id } }));
+  // Revisão do épico (S2, 2026-10-08): a task da pergunta relê o estado (rodando com a retomada na fila).
+  events.push(...(await sincronizarDasDecisoes(deps, [d])));
   return { data: { mensagem, turno }, events };
 };

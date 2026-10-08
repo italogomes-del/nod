@@ -42,18 +42,24 @@ export function eventsRepo(conn: Conn, escopo: Escopo) {
      * frame sai dela (a web que mandou já sabe). Mesmas colunas de gravarComOutbox.
      */
     async gravarSemOutbox(eventos: EventoGravavel[]): Promise<number> {
-      let n = 0;
-      for (const ev of eventos) {
-        const a = ev.autoria;
-        await conn`
-          insert into events (tenant_id, owner_id, kind, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality,
-            locality_reason, machine_id, decidido_por, regra_versao, pessoa_destino_id, conversa_id, turno_id, dados)
-          values (${escopo.tenantId}, ${escopo.pessoaId}, ${ev.kind}, ${a.autor_tipo}, ${a.autor_id}, ${a.sob_procuracao_de}, ${a.conta_de_execucao},
-            ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por}, ${a.regra_versao}, ${ev.pessoaDestinoId},
-            ${ev.conversaId ?? null}, ${ev.turnoId ?? null}, ${conn.json(ev.dados ?? {})})`;
-        n += 1;
-      }
-      return n;
+      if (eventos.length === 0) return 0;
+      // revisto em 2026-10-08 (revisão do épico, S23): um INSERT só para o lote (até 200 da web), coluna a coluna por
+      // unnest — antes era uma ida ao banco por evento.
+      const col = <T>(f: (ev: EventoGravavel) => T): T[] => eventos.map(f);
+      const r = await conn`
+        insert into events (tenant_id, owner_id, kind, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality,
+          locality_reason, machine_id, decidido_por, regra_versao, pessoa_destino_id, conversa_id, turno_id, dados)
+        select ${escopo.tenantId}, ${escopo.pessoaId}, u.kind, u.autor_tipo, u.autor_id, u.sob_procuracao_de, u.conta_de_execucao, u.executor, u.locality,
+          u.locality_reason, u.machine_id, u.decidido_por, u.regra_versao, u.pessoa_destino_id, u.conversa_id, u.turno_id,
+          ${conn.json(col((e) => e.dados ?? {}))}::jsonb -> (u.n - 1)::int
+        from unnest(${col((e) => e.kind)}::text[], ${col((e) => e.autoria.autor_tipo)}::autor_tipo[], ${col((e) => e.autoria.autor_id)}::uuid[],
+          ${col((e) => e.autoria.sob_procuracao_de)}::uuid[], ${col((e) => e.autoria.conta_de_execucao)}::uuid[], ${col((e) => e.autoria.executor)}::text[],
+          ${col((e) => e.autoria.locality)}::text[], ${col((e) => e.autoria.locality_reason)}::motivo_localidade[], ${col((e) => e.autoria.machine_id)}::uuid[],
+          ${col((e) => e.autoria.decidido_por)}::text[], ${col((e) => e.autoria.regra_versao)}::int[], ${col((e) => e.pessoaDestinoId)}::uuid[],
+          ${col((e) => e.conversaId ?? null)}::uuid[], ${col((e) => e.turnoId ?? null)}::uuid[]) with ordinality
+          as u(kind, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality, locality_reason, machine_id, decidido_por,
+            regra_versao, pessoa_destino_id, conversa_id, turno_id, n)`;
+      return r.count;
     },
 
     /** #191: por tipo de linha, quantas chaves distintas a pessoa viu e abriu desde `desde` (a taxa do Modo dev). */

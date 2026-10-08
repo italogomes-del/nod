@@ -36,6 +36,8 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
       expect(await repos.trabalhos.somarCusto(a!.id, 0.5)).toBe(true);
       const t = await repos.turnos.enfileirar(turno(conversaId, agenteId, a!.id));
       expect(await repos.trabalhos.atualizarMemoria([{ turnoId: t!.id, mb: 412.6 }, { turnoId: randomUUID(), mb: 1 }])).toBe(1);
+      // Revisão do épico (S22): a mesma leitura de novo não reescreve a linha.
+      expect(await repos.trabalhos.atualizarMemoria([{ turnoId: t!.id, mb: 413 }])).toBe(0);
       expect(await repos.trabalhos.buscar(a!.id)).toMatchObject({ sessaoCli: "sessao-1", sessaoHarness: "claude-cli", custoUsd: 0.75, memoriaMb: 413, pasta: "~/nod/Vera/login-do-app-abc123" });
       expect((await repos.trabalhos.redeComSessao(conversaId, "sessao-1"))).toBeNull();
     });
@@ -45,7 +47,7 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const w = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Fatos", origem: "pessoa" });
-      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, ultimo: null });
+      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null });
       // "Fazer depois da …": espera enquanto a outra está aberta, e para de esperar quando ela acaba.
       const antes = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Antes", origem: "pessoa" });
       await repos.trabalhos.marcarDepoisDe(w!.id, antes!.id);
@@ -73,7 +75,7 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
       const autoria = { autor_tipo: "agente" as const, autor_id: agenteId, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
       await repos.mensagens.criar({ conversaId, turnoId: t!.id, autoria, kind: "texto", texto: "Lendo o PR", confianca: "confiavel" });
       const extras = (await repos.trabalhos.extras([w!.id])).get(w!.id);
-      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id] });
+      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id], deFora: true });
     });
   });
 

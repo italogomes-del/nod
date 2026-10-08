@@ -445,13 +445,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * definido em 2026-10-07 (ADR-081, #193): as falas que esperam na faixa DESTE trabalho (a da pessoa na tela da task
      * e o recado da conversa, os dois com mensagem de origem) entram no turno vivo dele, como absorverNaSessao faz com a
      * conversa. Sem anexo, e nunca a retomada de uma decisão (que não tem mensagem de origem).
+     * revisto em 2026-10-08 (revisão do épico, S18): com `ids`, só estas — as que o app confirmou (confirmarNaSessao).
      */
-    async absorverDoTrabalho(turno: Turno): Promise<Turno[]> {
-      if (!turno.trabalhoId) return [];
+    async absorverDoTrabalho(turno: Turno, ids?: readonly string[]): Promise<Turno[]> {
+      if (!turno.trabalhoId || (ids && ids.length === 0)) return [];
       const linhas = await conn<Linha[]>`
         update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${turno.id}, lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${turno.trabalhoId}
           and estado = 'pendente' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
+          ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
         returning ${conn.unsafe(COLUNAS)}`;
       return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
     },
@@ -566,6 +568,18 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           and t.motivo_interrupcao = 'executor_indisponivel' and t.criado_em >= ${data(desde)}
           and not exists (select 1 from turnos n where n.tenant_id = t.tenant_id and n.conversa_id = t.conversa_id and n.criado_em > t.criado_em)
         order by t.criado_em`;
+      return linhas.map(paraTurno);
+    },
+
+    /**
+     * definido em 2026-10-08 (revisão do épico, S20): trava (FOR UPDATE) os turnos pendentes e rodando de um trabalho, em
+     * ordem de criação — a mesma em que a renovação e a entrega os pegam (o turno vivo, mais velho, antes dos recados).
+     */
+    async travarAbertosDoTrabalho(trabalhoId: string): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and trabalho_id = ${trabalhoId} and estado in ('pendente', 'despachando')
+        order by criado_em, id for update`;
       return linhas.map(paraTurno);
     },
 
