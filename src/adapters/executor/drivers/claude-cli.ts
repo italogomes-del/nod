@@ -24,7 +24,7 @@ import { compararVersoes, conferirFloors, conferirPisoCli, FLAG_FLOORS, inventar
 import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
-import type { Adapter, ConfigDriver, Driver, Instance } from "../spi.ts";
+import type { Adapter, ConfigDriver, Driver, Instance, SinksTurno } from "../spi.ts";
 import { MARCADOR_PARTE_DINAMICA } from "../../../domain/marcador-prompt.ts";
 import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
@@ -331,8 +331,9 @@ const chavesSinais: readonly (keyof SinaisTurno)[] = ["attempted", "rejected", "
 
 export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
   const prazoSondaMs = lig.prazoSondaMs ?? PRAZO_SONDA_PADRAO_MS;
+  const capacidadesDoDriver = capacidadesDe("claude-cli");
   return {
-    meta: { id: "claude-cli", locality: "local", capacidades: capacidadesDe("claude-cli") },
+    meta: { id: "claude-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg: ConfigDriver): Promise<Instance> {
       const home = cfg.env.HOME ?? homedir();
       const path = caminhoAumentado(cfg.env.PATH, home);
@@ -405,6 +406,18 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           return { inventario: s.inventario, resposta: s.resposta };
         },
 
+        // X9 (definido em 2026-10-08, revisão do épico #188): o que o app anuncia é a promessa do driver com os pisos do
+        // CLI instalado — sem `--fork-session` no help o turno de cópia é recusado (rodarTurno), e sem `--input-format` a
+        // sessão não fica viva. Sem conseguir ler o help, fecha as duas (o servidor cai no caminho sem a capacidade).
+        async capacidades() {
+          const flags = await garantirVersao().then(() => flagsNoHelp ?? [], () => [] as string[]);
+          return {
+            ...capacidadesDoDriver,
+            bifurcaSessao: capacidadesDoDriver.bifurcaSessao && flags.includes("--fork-session"),
+            mensagemNoMeio: capacidadesDoDriver.mensagemNoMeio && flags.includes("--input-format"),
+          };
+        },
+
         adapter(plano: PlanoTurno): Adapter {
           let processo: Processo | null = null;
           let interromperPedido = false;
@@ -413,18 +426,27 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           let entradaAberta = false;
           // ADR-081 §6: a primeira fala depois de uma mensagem do meio sai na hora, de qualquer tamanho.
           const meio = criarFalaDoMeio();
+          // X1 (revisto em 2026-10-08): o modelo está parado entre voltas (o último evento foi um `result`). Uma mensagem
+          // escrita agora abre a próxima volta, sem narração de antes no caminho: a próxima fala já é a resposta.
+          let entreVoltas = false;
+          let sinksDoTurno: SinksTurno | null = null;
 
           return {
             aceitaMensagens: () => entradaAberta && processo !== null,
-            receberMensagem(texto: string): boolean {
+            receberMensagem(texto: string, id?: string): boolean {
               if (!entradaAberta || !processo) return false;
               processo.escrever(mensagemClaude(texto, []));
-              meio.absorveu();
+              // X1: no meio da volta, o CLI só lê a mensagem na fronteira seguinte (tool_result ou result).
+              if (entreVoltas) meio.armar();
+              else meio.absorveu();
+              // X2: o stdin aceitou a escrita: a mensagem entrou na sessão.
+              if (id !== undefined) sinksDoTurno?.mensagemEntrou?.(id);
               return true;
             },
             grupoDeProcessos: () => processo?.pid ?? null,
 
             async rodarTurno(sinks): Promise<ResultadoTurno> {
+              sinksDoTurno = sinks;
               // `sinais` é marcado ANTES de cada sinal síncrono sair, para o `aoLinha` (que pode
               // receber o init enquanto um `await sinks.sinal` ainda está pendente) não o repetir.
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
@@ -584,6 +606,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     // ADR-081 §6: a resposta à mensagem do meio vira fala gravada agora, não passo do card.
                     const resposta = meio.avaliar(ev, falaNaHora);
                     if (resposta !== null && falaNaHora) sinks.falaIntermediaria!(resposta);
+                    if (ev.tipo === "result") entreVoltas = true;
+                    else if (ev.tipo === "delta" || ev.tipo === "texto_bloco" || ev.tipo === "tool_use" || ev.tipo === "init") entreVoltas = false;
                     if (ev.tipo === "tarefa_fundo") {
                       if (ev.estado === "iniciada") emFundo.add(ev.id);
                       else emFundo.delete(ev.id);

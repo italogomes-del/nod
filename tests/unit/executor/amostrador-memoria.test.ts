@@ -66,6 +66,29 @@ describe("amostrador de memória da máquina", () => {
     a.parar();
   });
 
+  it("X5: o número da amostra só sobe quando o nível ou a memória de um grupo vivo mudou", async () => {
+    let nivel = "1";
+    let ps = " 4242 1024\n 9999 1\n";
+    const executar: Executar = async (bin) => (bin.endsWith("sysctl") ? nivel : ps);
+    const a = criarAmostradorMemoria({ env: {}, executar, intervaloMs: 10 ** 6 });
+    a.leitura("t1", 4242);
+    await a.amostrar();
+    const primeira = a.amostra();
+    await a.amostrar();
+    expect(a.amostra()).toBe(primeira);
+    // Grupo que não é de turno nenhum não conta.
+    ps = " 4242 1024\n 9999 2\n";
+    await a.amostrar();
+    expect(a.amostra()).toBe(primeira);
+    ps = " 4242 4096\n";
+    await a.amostrar();
+    expect(a.amostra()).toBe(primeira + 1);
+    nivel = "4";
+    await a.amostrar();
+    expect(a.amostra()).toBe(primeira + 2);
+    a.parar();
+  });
+
   it("preguiçoso: só amostra depois da primeira leitura; uma amostra por vez", async () => {
     const f = executorFalso();
     const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6 });

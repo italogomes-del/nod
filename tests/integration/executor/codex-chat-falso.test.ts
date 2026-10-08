@@ -31,7 +31,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-it("com app-server, o chat abre uma thread não efêmera, nega a aprovação pedida e fala a resposta; sessaoCli segue null", async () => {
+it("com app-server, o chat abre uma thread efêmera (X8), nega a aprovação pedida e fala a resposta; sessaoCli segue null", async () => {
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const deltas: string[] = [];
   const r = await instance.adapter(planoHarness({ texto: "olá", esforco: "max" })).rodarTurno({ sinal: async () => {}, delta: (d) => deltas.push(d), evento: () => {} });
@@ -40,7 +40,8 @@ it("com app-server, o chat abre uma thread não efêmera, nega a aprovação ped
   const reg = await registro();
   expect(reg.args).toContain("app-server");
   expect(reg.args).toContain('sandbox_mode="read-only"');
-  expect(reg.thread).toMatchObject({ ephemeral: false, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
+  // X8: sem `thread/resume` medido, nada fica em ~/.codex/sessions.
+  expect(reg.thread).toMatchObject({ ephemeral: true, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
   // O `max` do Claude não existe no Codex: vai o maior que existe.
   expect(reg.turnos).toEqual([{ texto: "olá", effort: "xhigh" }]);
   expect(reg.aprovacao).toEqual({ decision: "decline" });
@@ -52,6 +53,7 @@ it("mensagem no meio entra por turn/steer e a resposta vira fala na hora; a fala
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const adapter: Adapter = instance.adapter(planoHarness({ texto: "[[chat-steer]] revisa as tasks" }));
   const falas: string[] = [];
+  const entraram: string[] = [];
   let entregue = false;
   const r = await adapter.rodarTurno({
     sinal: async () => {},
@@ -59,12 +61,16 @@ it("mensagem no meio entra por turn/steer e a resposta vira fala na hora; a fala
     evento: (e) => {
       if (e.tipo === "tool_use" && e.nome === "mcp__nod__consultar" && !entregue) {
         expect(adapter.aceitaMensagens?.()).toBe(true);
-        entregue = adapter.receberMensagem?.(molduraMensagemNoMeio("e o prazo?")) ?? false;
+        entregue = adapter.receberMensagem?.(molduraMensagemNoMeio("e o prazo?"), "m1") ?? false;
+        // X2: aceita para entrar, mas só entrou quando o app-server aceitar o steer.
+        expect(entraram).toEqual([]);
       }
     },
     falaIntermediaria: (t) => falas.push(t),
+    mensagemEntrou: (id) => entraram.push(id),
   });
   expect(entregue).toBe(true);
+  expect(entraram).toEqual(["m1"]);
   const reg = await registro();
   expect(reg.steers).toHaveLength(1);
   expect(reg.steers[0]).toContain("«e o prazo?»");
@@ -79,18 +85,22 @@ it("mensagem depois da volta: o ocioso a entrega, ela abre outro turn/start; sem
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const adapter = instance.adapter(planoHarness({ texto: "oi" }));
   const falas: string[] = [];
+  const entraram: string[] = [];
   let perguntas = 0;
   const r = await adapter.rodarTurno({
     sinal: async () => {},
     delta: () => {},
     evento: () => {},
     falaIntermediaria: (t) => falas.push(t),
+    mensagemEntrou: (id) => entraram.push(id),
     async ocioso() {
       perguntas += 1;
-      return perguntas === 1 ? (adapter.receberMensagem?.(molduraMensagemNoMeio("mais uma")) ?? false) : false;
+      return perguntas === 1 ? (adapter.receberMensagem?.(molduraMensagemNoMeio("mais uma"), "m1") ?? false) : false;
     },
   });
   expect(perguntas).toBe(2);
+  // X2: entrou quando o turn/start que a levava abriu.
+  expect(entraram).toEqual(["m1"]);
   const reg = await registro();
   expect(reg.turnos.map((t) => t.texto)).toEqual(["oi", molduraMensagemNoMeio("mais uma")]);
   // A 1ª volta vira fala quando a sessão segue; a resposta à mensagem nova sai na hora, e a entrega não a repete.
@@ -98,6 +108,61 @@ it("mensagem depois da volta: o ocioso a entrega, ela abre outro turn/start; sem
   expect(falas[1]).toContain("«mais uma»");
   expect(r.desfecho).toBe("sucesso");
   expect(r.texto).toBe("");
+});
+
+it("X1: steer aceito enquanto a narração ainda sai — \"Começando.\" não vira a resposta; a fala depois do item seguinte, sim", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const adapter: Adapter = instance.adapter(planoHarness({ texto: "[[chat-steer]] revisa as tasks" }));
+  const falas: string[] = [];
+  let entregue = false;
+  const r = await adapter.rodarTurno({
+    sinal: async () => {},
+    delta: () => {},
+    evento: (e) => {
+      // O primeiro delta de "Começando.": a mensagem vai antes de o item da narração fechar.
+      if (e.tipo === "delta" && !entregue) entregue = adapter.receberMensagem?.(molduraMensagemNoMeio("e o prazo?"), "m1") ?? false;
+    },
+    falaIntermediaria: (t) => falas.push(t),
+  });
+  expect(entregue).toBe(true);
+  expect(falas).toHaveLength(1);
+  expect(falas[0]).toMatch(/^Recebi: A pessoa escreveu enquanto você trabalhava: «e o prazo\?»/);
+  expect(r).toMatchObject({ desfecho: "sucesso", texto: "Terminei." });
+});
+
+it("X2: o turn/start que levaria a mensagem é recusado — ela nunca é confirmada e volta como devolvida", async () => {
+  cfg.env.TESTE_NOD_RECUSAR_TURNO = "2";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const adapter = instance.adapter(planoHarness({ texto: "oi" }));
+  const entraram: string[] = [];
+  const devolvidas: string[] = [];
+  let perguntas = 0;
+  const r = await adapter.rodarTurno({
+    sinal: async () => {},
+    delta: () => {},
+    evento: () => {},
+    falaIntermediaria: () => {},
+    mensagemEntrou: (id) => entraram.push(id),
+    mensagemDevolvida: (id) => devolvidas.push(id),
+    async ocioso() {
+      perguntas += 1;
+      return perguntas === 1 ? (adapter.receberMensagem?.(molduraMensagemNoMeio("mais uma"), "m1") ?? false) : false;
+    },
+  });
+  const reg = await registro();
+  expect(reg.turnos.map((t) => t.texto)).toEqual(["oi", molduraMensagemNoMeio("mais uma")]);
+  // Continua `pendente` no servidor: vira turno próprio em vez de sumir.
+  expect(entraram).toEqual([]);
+  expect(devolvidas).toEqual(["m1"]);
+  expect(r.desfecho).toBeDefined();
+});
+
+it("X9: capacidades anunciadas — mensagem no meio só com o app-server achado pela sonda", async () => {
+  const comAppServer = await criarCodexCliDriver(lig).create(cfg);
+  expect(await comAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: true, bifurcaSessao: false, retomaSessao: false });
+  cfg.env.TESTE_NOD_SEM_APP_SERVER = "1";
+  const semAppServer = await criarCodexCliDriver(lig).create(cfg);
+  expect(await semAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: false, bifurcaSessao: false });
 });
 
 it("Parar no meio do chat encerra o app-server e sai interrompido; o grupo do processo é medível enquanto roda", async () => {

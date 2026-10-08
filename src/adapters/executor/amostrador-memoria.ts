@@ -16,6 +16,12 @@ export type FonteMemoria = {
   leitura(turnoId: string, grupo: number | null): LeituraMemoria;
   /** O turno acabou: o grupo dele sai da soma. */
   soltar(turnoId: string): void;
+  /**
+   * definido em 2026-10-08 (revisão do épico #188, X5): o número da amostra, que só sobe quando o nível ou a memória
+   * de um grupo vivo mudou. O laço renova a cada 1 s no app e só manda a leitura quando este número muda (ou a cada
+   * 30 s); antes a mesma leitura ia em toda renovação.
+   */
+  amostra(): number;
 };
 
 export type AmostradorMemoria = FonteMemoria & {
@@ -42,6 +48,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   const grupos = new Map<string, number>();
   let nivel: NivelPressao = "verde";
   let rss = new Map<number, number>();
+  let numeroDaAmostra = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   let amostrando: Promise<void> | null = null;
   let parado = false;
@@ -79,6 +86,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     amostrando ??= (async () => {
       try {
         const [n, r] = await Promise.all([lerNivel(), lerGrupos()]);
+        if (n !== nivel || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
         nivel = n;
         rss = r;
       } finally {
@@ -108,6 +116,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     soltar(turnoId) {
       grupos.delete(turnoId);
     },
+    amostra: () => numeroDaAmostra,
     amostrar,
     parar() {
       parado = true;

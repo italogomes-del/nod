@@ -48,6 +48,24 @@ describe("grupo de processos do turno", () => {
     expect(gruposDeProcessoVivos()).not.toContain(pid);
   });
 
+  it("X6: o líder que sai sozinho leva o neto que deixou no grupo (`sleep 60 &`), em vez de deixá-lo órfão", async () => {
+    // O neto não segura o stdout (stdio ignore), como um `sleep 60 &` com a saída redirecionada: o `close` chega na hora.
+    const SAI_E_DEIXA = `
+const { spawn } = require("node:child_process");
+const neto = spawn("sleep", ["60"], { stdio: "ignore" });
+neto.unref();
+process.stdout.write("neto " + neto.pid + "\\n");
+`;
+    const linhas: string[] = [];
+    const p = iniciarProcesso({ bin: process.execPath, args: ["-e", SAI_E_DEIXA], env: { PATH: process.env.PATH ?? "" }, cwd: process.cwd(), aoLinha: (l) => linhas.push(l) });
+    const pid = p.pid!;
+    await p.fim;
+    const neto = Number(linhas.find((l) => l.startsWith("neto "))!.slice(5));
+    expect(neto).toBeGreaterThan(0);
+    expect(await esperarAte(() => !vivo(neto), 2_000)).toBe(true);
+    expect(gruposDeProcessoVivos()).not.toContain(pid);
+  });
+
   it("o processo que termina sozinho sai da lista de grupos (o encerramento do app não mataria um pid reusado)", async () => {
     const p = iniciarProcesso({ bin: process.execPath, args: ["-e", "process.stdout.write('ok\\n')"], env: { PATH: process.env.PATH ?? "" }, cwd: process.cwd(), aoLinha: () => {} });
     const pid = p.pid!;

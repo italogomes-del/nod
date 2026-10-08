@@ -13,6 +13,7 @@ import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts"
 import type { VigiaVivo } from "../../../src/contracts/ponte.ts";
 import { criarVigiaTurno } from "../../../src/domain/vigia-turno.ts";
 import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
+import { capacidadesDe } from "../../../src/domain/harness.ts";
 
 /**
  * Spawn REAL do binário falso (tests/fixtures/claude-falso.mjs, L3) por trás de um `claude` de
@@ -599,6 +600,42 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       expect(resultado).toMatchObject({ desfecho: "sucesso", texto: "Revisei as três." });
       const entradas = (await readFile(stdin, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { message: { content: { text: string }[] } });
       expect(entradas[1]!.message.content[0]!.text).toBe(molduraMensagemNoMeio("qual é o prazo?"));
+    });
+
+    it("X1: a mensagem escrita enquanto a narração ainda sai — a narração não vira a resposta; a fala depois do tool_result, sim", async () => {
+      const { instance } = await instanciar("mensagem-no-meio", {}, { ...HELP, NOD_FALSO_MEIO_CEDO: "1" });
+      const adapter = instance.adapter(planoDeTeste(dir));
+      const falas: string[] = [];
+      const entraram: string[] = [];
+      let mandou = false;
+      const espiao = sinksEspiao({});
+      const resultado = await adapter.rodarTurno({
+        ...espiao.sinks,
+        evento: (e) => {
+          espiao.sinks.evento(e);
+          if (e.tipo === "delta" && !mandou) mandou = adapter.receberMensagem!(molduraMensagemNoMeio("qual é o prazo?"), "m1");
+        },
+        falaIntermediaria: (t) => falas.push(t),
+        // X2: o stdin aceitou a escrita: a mensagem entrou.
+        mensagemEntrou: (id) => entraram.push(id),
+        ocioso: async () => false,
+      });
+      expect(mandou).toBe(true);
+      expect(entraram).toEqual(["m1"]);
+      expect(falas).toHaveLength(1);
+      expect(falas[0]).toMatch(/^Recebi: A pessoa escreveu enquanto você trabalhava: «qual é o prazo\?»/);
+      expect(resultado).toMatchObject({ desfecho: "sucesso", texto: "Revisei as três." });
+    });
+  });
+
+  describe("capacidades anunciadas (X9, revisão do épico #188)", () => {
+    it("CLI sem --fork-session no help: bifurcaSessao sai false; com a flag e --input-format, a promessa inteira", async () => {
+      const sem = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --input-format" });
+      expect(await sem.instance.capacidades!()).toMatchObject({ bifurcaSessao: false, mensagemNoMeio: true, retomaSessao: true, processoProprio: true });
+      const com = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --input-format --fork-session" });
+      expect(await com.instance.capacidades!()).toEqual(capacidadesDe("claude-cli"));
+      const semEntrada = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --fork-session" });
+      expect(await semEntrada.instance.capacidades!()).toMatchObject({ bifurcaSessao: true, mensagemNoMeio: false });
     });
   });
 

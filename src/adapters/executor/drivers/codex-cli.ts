@@ -70,8 +70,9 @@ const MODELO_TESTE_CODEX = "gpt-5.6-sol";
 const TIMEOUT_TESTE_MS = 90_000;
 
 export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
+  const capacidadesDoDriver = capacidadesDe("codex-cli");
   return {
-    meta: { id: "codex-cli", locality: "local", capacidades: capacidadesDe("codex-cli") },
+    meta: { id: "codex-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg) {
       const home = cfg.env.HOME ?? "";
       const env = ambienteCodex(cfg.env);
@@ -163,6 +164,16 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
           if ((await sondar()).estado !== "pronto" || !bin) return null;
           try { return (await sondarAppServer(bin)) !== null; } catch { return null; }
         },
+        // X9 (definido em 2026-10-08, revisão do épico #188): a mensagem no meio só existe no chat do app-server; sem ele
+        // (Codex antigo, ou a sonda não o achou) o turno roda no `codex exec` e o app não a anuncia.
+        async capacidades() {
+          if (!capacidadesDoDriver.mensagemNoMeio) return capacidadesDoDriver;
+          let appServer = false;
+          if ((await sondar()).estado === "pronto" && bin) {
+            try { appServer = (await sondarAppServer(bin)) !== null; } catch { appServer = false; }
+          }
+          return { ...capacidadesDoDriver, mensagemNoMeio: appServer };
+        },
         adapter(plano) {
           let proc: Processo | null = null;
           let parado = false;
@@ -171,7 +182,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
           return {
             async interromper() { parado = true; if (proc) await proc.interromper(); },
             aceitaMensagens: () => sessao?.aceitaMensagens() ?? false,
-            receberMensagem: (texto) => sessao?.receberMensagem(texto) ?? false,
+            receberMensagem: (texto, id) => sessao?.receberMensagem(texto, id) ?? false,
             grupoDeProcessos: () => proc?.pid ?? null,
             async rodarTurno(sinks) {
               const eventos: EventoStream[] = [];
