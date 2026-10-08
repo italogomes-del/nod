@@ -189,6 +189,8 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
     sobProcuracaoDe: pediu?.sobProcuracaoDe ?? null,
     modelo: remetente.modelo,
     harness: remetente.harness,
+    // ADR-081: a continuação de quem pediu segue no trabalho dele (null = a conversa dele).
+    trabalhoId: pediu?.trabalhoId ?? null,
   });
   if (!continuacao) throw new ErroDeDominio("estado_invalido", { cause: "turno de continuação não criado" });
   // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a resposta traz o que o colega leu. Se a tarefa dele
@@ -203,7 +205,7 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
     autoria,
     kind: "peer_ask",
     texto: e.falha ? `${alvo.nome} não concluiu: ${e.texto}` : e.texto,
-    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(e.falha ? { falhou: true as const } : {}) },
+    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(e.falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}) },
     confianca: "nao_confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });
