@@ -152,8 +152,12 @@ async function subir(o: { nomePessoa: string; env?: Record<string, string>; rede
       // abort no fim
     }
   })();
+  const ctx = ajudantes(srv, frames, planos, criados);
+  // ADR-085: o servidor sobe com o amostrador de verdade e, num Mac carregado, seguraria e espaçaria a rotina e o pedido
+  // de colega — que é outro assunto (tests/concurrency/uso-do-mac-ponte.test.ts). Aqui os bots usam o Mac o quanto precisarem.
+  await ctx.json("PUT", "preferencias", { usoDoMac: "livre" });
   return {
-    ctx: ajudantes(srv, frames, planos, criados),
+    ctx,
     async descer() {
       sse.abort();
       await srv.fechar();

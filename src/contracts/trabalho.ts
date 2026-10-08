@@ -91,6 +91,11 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   esperandoColega?: { nome: string; desde: number; trabalhoId: string | null } | null;
   /** Quanto os turnos do trabalho de fato rodaram (do começo ao último sinal de cada um, o que roda até agora), em ms. */
   trabalhouMs?: number;
+  /**
+   * definido em 2026-10-08 (ADR-086): o bot combinou de voltar a esta hora ("me chame às 16:00") e saiu do Mac até lá.
+   * Ausente ou null: nenhuma volta marcada.
+   */
+  acordaEm?: number | null;
 };
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */

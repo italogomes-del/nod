@@ -64,6 +64,8 @@ export type DepsPonte = {
   desfazerMemoria?: (pessoaId: string, mudanca: MudancaDePressao) => void;
   /** Revisão do #209: o Mac desconectou — a leitura dele sai. */
   esquecerMaquina?: (machineId: string) => void;
+  /** ADR-085: quando a pessoa trocou o "uso do Mac" (gravado); o que foi lido antes não vale mais. Ausente = 0. */
+  usoTrocadoEm?: (pessoaId: string) => number;
   /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
   redeMs?: number;
 };
@@ -77,7 +79,10 @@ export type PonteInternaNod = PonteInterna & {
 
 /** definido em 2026-10-08 (revisão do épico, S20): o assentar vítima de impasse é repetido até isto de vezes. */
 const TENTATIVAS_DO_ASSENTAR = 3;
-/** ADR-085 (revisão do #209): a troca do "uso do Mac" vale no puxar em até 30 s (a tela já mostra na hora). */
+/**
+ * ADR-085 (revisão do #209): o "uso do Mac" lido vale 30 s no puxar. A troca pela tela vale na hora (`usoTrocadoEm`); os
+ * 30 s só cobrem quem mudou por fora da rota (direto no banco).
+ */
 export const USO_VALE_MS = 30_000;
 
 /** 40P01 (impasse) e 40001 (serialização): a transação perdeu a corrida e pode ser repetida inteira. */
@@ -125,7 +130,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * ADR-085 (revisão do #209): o "uso do Mac" de cada pessoa, lido no máximo a cada USO_VALE_MS e fora da tx do puxar
    * (antes era uma consulta por puxar apertado, dentro da trava da fila; e um erro dela virava "nenhum trabalho").
    */
-  const usos = new Map<string, { uso: UsoDoMac; ate: number }>();
+  const usos = new Map<string, { uso: UsoDoMac; ate: number; lidoEm: number }>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
   /** ADR-085 (revisão do #209): se cada Mac está segurando agora — o log sai só na mudança. */
@@ -178,10 +183,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
 
   async function usoDoMac(escopo: Escopo): Promise<UsoDoMac> {
     const guardado = usos.get(escopo.pessoaId);
-    if (guardado && guardado.ate > agora()) return guardado.uso;
+    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.usoTrocadoEm?.(escopo.pessoaId) ?? -1)) return guardado.uso;
     try {
+      const lidoEm = agora();
       const uso = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).preferencias.buscar())).usoDoMac ?? USO_DO_MAC_PADRAO;
-      usos.set(escopo.pessoaId, { uso, ate: agora() + USO_VALE_MS });
+      usos.set(escopo.pessoaId, { uso, ate: lidoEm + USO_VALE_MS, lidoEm });
       return uso;
     } catch (e) {
       log("aviso", "uso_do_mac_sem_leitura", { pessoa_id: escopo.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });

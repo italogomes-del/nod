@@ -96,6 +96,8 @@ export type ExtrasTrabalho = {
   esperandoColega: { nome: string; desde: number; trabalhoId: string | null } | null;
   /** Soma, por turno com Raio-X, do começo ao último sinal (o que roda conta até agora), em ms. */
   trabalhouMs: number;
+  /** ADR-086: a volta marcada ("me chame às 16:00") ainda por vir — a mais próxima; null = nenhuma. */
+  acordaEm: number | null;
 };
 
 /**
@@ -281,7 +283,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       if (ids.length === 0) return new Map();
       const linhas = await conn<{
         id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean;
-        colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null;
+        colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
           c.nome as colega_nome, c.desde as colega_desde, c.trabalho_id as colega_trabalho_id,
@@ -292,7 +294,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = w.tenant_id and t.trabalho_id = w.id) as trabalhou_ms,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
-          (select array_agg(t.id order by t.criado_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as abertos
+          (select array_agg(t.id order by t.criado_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as abertos,
+          (select min(t.acordar_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'pendente' and t.acordar_em > clock_timestamp()) as acorda_em
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
         left join rotinas r on r.tenant_id = w.tenant_id and r.id = w.rotina_id
@@ -329,6 +332,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             deFora: l.de_fora,
             esperandoColega: l.colega_desde ? { nome: l.colega_nome ?? "um colega", desde: ms(l.colega_desde), trabalhoId: l.colega_trabalho_id } : null,
             trabalhouMs: Math.max(0, Math.round(Number(l.trabalhou_ms ?? 0))),
+            acordaEm: l.acorda_em ? ms(l.acorda_em) : null,
           },
         ]),
       );

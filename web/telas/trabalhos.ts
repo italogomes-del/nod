@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, filtrar, memoriaLegivel, pilulaMac, pilulaMemoria, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, foraDoMac, voltaMarcada, filtrar, memoriaLegivel, pilulaMac, pilulaMemoria, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { usd } from "./modo-dev.ts";
@@ -76,7 +76,7 @@ export function renderFaixaTrabalhos(estado: Estado, agenteId: string): string {
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
   // definido em 2026-10-08 (protótipo "Nod — tempo da task"): a linha diz só o que a task faz ou espera; o tempo aparece no
   // hover (e no foco do teclado), para a faixa não pedir conta a cada olhada.
-  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo${esperandoColega(t) ? " esperando" : ""}">${esc(statusCurto(t, todos, atividadeDe(estado, t), estado.trabalhos?.segurando === true))}</span>${tempoNoHover(t, estado.agora)}<span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
+  const linhas = lista.map((t) => `<button type="button" class="ft-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="ft-titulo">${esc(t.titulo)}</span>${etiqueta(t)}<span class="ft-passo${foraDoMac(t) ? " esperando" : ""}">${esc(statusCurto(t, todos, atividadeDe(estado, t), estado.trabalhos?.segurando === true))}</span>${tempoNoHover(t, estado.agora)}<span class="ft-seta" aria-hidden="true">${ICONE.seta}</span></button>`).join("");
   return `<section class="faixa-trab" aria-label="Trabalhos de ${esc(nome)}"><div class="ft-cab"><span>Trabalhos do ${esc(nome)}</span><span class="ft-n">${n}</span><button type="button" class="ft-recolher" data-act="faixa-trabalhos" data-recolher="1" aria-label="Recolher em pílula" title="Recolher em pílula">${ICONE.abrir}</button></div>${linhas}</section>`;
 }
 
@@ -202,11 +202,11 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const quemPediu = pediu ? `${iconeAgente(pediu, "sm")}<span class="tk-seta" aria-label="pediu a">${ICONE.seta}</span>` : "";
   // revisto em 2026-10-08 (protótipo "Nod — tempo da task", aprovado): no lugar do tempo total, o status curto ("esperando
   // Eng 2", "trabalhando"); o tempo trabalhado e o de espera ficam no cartão que o status abre.
-  const colega = esperandoColega(t);
-  const status = !aberto(t) ? `${situacaoDe(t)} · ${tempoDe(t, estado.agora)}` : colega ? `esperando ${colega.nome}` : t.estado === "rodando" ? "trabalhando" : situacaoDe(t);
+  const fora = foraDoMac(t);
+  const status = !aberto(t) ? `${situacaoDe(t)} · ${tempoDe(t, estado.agora)}` : fora ? situacaoDe(t) : t.estado === "rodando" ? "trabalhando" : situacaoDe(t);
   const abertoCartao = estado.tempoTaskAberto === t.id;
-  const botaoStatus = `<button type="button" class="tk-status${colega ? " esperando" : ""}" data-act="tempo-task" data-id="${esc(t.id)}" aria-expanded="${abertoCartao}" title="Ver o tempo da task">${esc(status)}${ICONE_ABRIR_TEMPO}</button>`;
-  const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !colega ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
+  const botaoStatus = `<button type="button" class="tk-status${fora ? " esperando" : ""}" data-act="tempo-task" data-id="${esc(t.id)}" aria-expanded="${abertoCartao}" title="Ver o tempo da task">${esc(status)}${ICONE_ABRIR_TEMPO}</button>`;
+  const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !fora ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
   const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", t.custoUsd !== null ? `${usd(t.custoUsd)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
   return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}</div>`;
@@ -222,15 +222,20 @@ function cartaoDoTempo(t: TrabalhoDto, agora: number): string {
   const { abertaMs, trabalhouMs, esperouMs } = temposDaTask(t, agora);
   const pct = abertaMs > 0 ? Math.round((trabalhouMs / abertaMs) * 100) : 0;
   const colega = esperandoColega(t);
+  const volta = voltaMarcada(t);
   const rodape = colega
     ? `<div class="tk-pop-rodape"><span>${esc(colega.nome)} recebeu o pedido às ${esc(hora(colega.desde))}</span>${colega.trabalhoId ? `<button type="button" class="tk-pop-link" data-act="abrir-trabalho" data-id="${esc(colega.trabalhoId)}">Ver task</button>` : ""}</div>`
     : "";
+  // ADR-086 (combinado com o protótipo "Nod — tempo da task"): a espera não ocupa o Mac, e a pessoa vê que ela volta sozinha.
+  const fora = colega
+    ? `<p class="tk-pop-fora">fora do Mac desde ${esc(hora(colega.desde))} · volta sozinho</p>`
+    : volta ? `<p class="tk-pop-fora">fora do Mac · volta às ${esc(hora(volta))}</p>` : "";
   return `<div class="tk-pop" role="group" aria-label="Tempo da task">
     <div class="tk-pop-linha tk-pop-total"><span>${aberto(t) ? "Aberta há" : "Durou"}</span><b>${esc(duracaoCurta(abertaMs))}</b></div>
     <div class="tk-pop-barra" role="img" aria-label="Trabalhou ${esc(duracaoCurta(trabalhouMs))}, esperou ${esc(duracaoCurta(esperouMs))}"><span style="width:${pct}%"></span></div>
     <div class="tk-pop-linha"><span class="tk-pop-ponto trabalhou" aria-hidden="true"></span><span>Trabalhando</span><b>${esc(duracaoCurta(trabalhouMs))}</b></div>
     <div class="tk-pop-linha"><span class="tk-pop-ponto esperou" aria-hidden="true"></span><span>Esperando</span><b>${esc(duracaoCurta(esperouMs))}</b></div>
-    ${rodape}
+    ${rodape}${fora}
   </div>`;
 }
 

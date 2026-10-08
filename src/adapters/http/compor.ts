@@ -115,6 +115,7 @@ import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
 import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, estadoOnboardingParaVoz, proporBot } from "../../use-cases/onboarding.ts";
 import { abrirTask, mandarParaTask } from "../../use-cases/coordenar-trabalhos.ts";
+import { meChameAs } from "../../use-cases/me-chame-as.ts";
 import { gerirBots } from "../../use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../use-cases/nod.ts";
 import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
@@ -274,7 +275,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, gerirBots, verAppsConectados, registrarRelatoDoNod };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, gerirBots, verAppsConectados, registrarRelatoDoNod };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -429,6 +430,7 @@ export function comporApp(o: OpcoesCompor): App {
     pressaoDaMaquina: (machineId) => trabalhosVivos.daMaquina(machineId),
     desfazerMemoria: (pessoaId, mudanca) => trabalhosVivos.desfazer(pessoaId, mudanca),
     esquecerMaquina: (machineId) => trabalhosVivos.esquecerMaquina(machineId),
+    usoTrocadoEm: (pessoaId) => trabalhosVivos.usoTrocadoEm(pessoaId),
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;

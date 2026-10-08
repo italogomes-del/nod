@@ -947,6 +947,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             // O tempo e o colega esperado se provam no Postgres (tests/integration/repos/trabalhos.test.ts).
             esperandoColega: null,
             trabalhouMs: 0,
+            acordaEm: turnos.filter((x) => x.estado === "pendente" && (x.acordarEm ?? 0) > agora()).map((x) => x.acordarEm!).sort((a, z) => a - z)[0] ?? null,
           });
         }
         return saida;
@@ -1041,6 +1042,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           sobProcuracaoDe: t.sobProcuracaoDe ?? null,
           // A retomada herda o trabalho do turno que continua, como o INSERT do repo real.
           trabalhoId: t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? (doTenant(b.turnos).find((r) => r.id === t.retomaTurnoId)?.trabalhoId ?? null) : null,
+          acordarEm: t.acordarEm ?? null,
         };
         b.turnos.push(turno);
         return turno;
@@ -1052,7 +1054,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const fimDaFila = (t: Turno) => ["rotina", "delegacao", "peer"].includes(t.origem) || ["rotina", "colega"].includes(doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId)?.origem ?? "");
         const vivos = doTenant(b.turnos);
         const candidatos = vivos
-          .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente")
+          .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (t.acordarEm ?? 0) <= p.agora)
           // ADR-083: a faixa é o trabalho ou, sem ele, a conversa; o trabalho espera o de que depende.
           .filter((t) => {
             if (!t.trabalhoId) return !vivos.some((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === t.conversaId && d.origem !== "ligacao");

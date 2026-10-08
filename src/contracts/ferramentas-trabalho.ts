@@ -29,10 +29,23 @@ export const FERRAMENTAS_TRABALHO = {
     required: ["trabalho_id", "texto"],
     additionalProperties: false,
   },
+  // definido em 2026-10-08 (ADR-086): esperar fora do Mac. O teto de 24 h é o de um dia de trabalho; mais que isso é rotina.
+  me_chame_as: {
+    type: "object",
+    description:
+      "Sai do Mac e volta sozinho mais tarde, na mesma sessão e no mesmo ponto. Use para esperar algo demorado que não depende de você — um CI, um deploy, um build longo, uma resposta de fora — em vez de ficar num laço com sleep ou checando de tempos em tempos: enquanto espera, nada seu ocupa o Mac. Depois de chamar, encerre o turno.",
+    properties: {
+      em_minutos: { type: "integer", description: "Daqui a quantos minutos voltar, inteiro de 1 a 1440 (24 h)." },
+      motivo: { type: "string", description: "O que você vai conferir quando voltar, numa frase (ex.: \"ver se o CI do PR #212 passou\").", minLength: 1, maxLength: 300 },
+    },
+    required: ["em_minutos", "motivo"],
+    additionalProperties: false,
+  },
 } as const satisfies Record<string, JsonSchema>;
 
 export type ArgsAbrirTask = { titulo: string; pedido: string; depois_de?: string };
 export type ArgsMandarParaTask = { trabalho_id: string; texto: string };
+export type ArgsMeChameAs = { em_minutos: number; motivo: string };
 
 export type ResultadoAbrirTask =
   | { ok: true; trabalho_id: string; instrucao: string }
@@ -40,9 +53,12 @@ export type ResultadoAbrirTask =
 export type ResultadoMandarParaTask =
   | { ok: true; entrou: "no_meio" | "na_fila"; instrucao: string }
   | { ok: false; erro: "task_nao_encontrada" | "nao_repassa" | "task_fechada"; instrucao: string };
+/** `volta_as`: a hora no fuso da pessoa ("16:05"); `acordar_em`: o instante (ISO). */
+export type ResultadoMeChameAs = { ok: true; volta_as: string; acordar_em: string; instrucao: string };
 
-/** Args ↔ resultado das duas, intersectado em ContratoFerramentaNod. */
+/** Args ↔ resultado das três, intersectado em ContratoFerramentaNod. */
 export type ContratoFerramentasTrabalho = {
   abrir_task: { args: ArgsAbrirTask; resultado: ResultadoAbrirTask };
   mandar_para_task: { args: ArgsMandarParaTask; resultado: ResultadoMandarParaTask };
+  me_chame_as: { args: ArgsMeChameAs; resultado: ResultadoMeChameAs };
 };

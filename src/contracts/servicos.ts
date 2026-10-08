@@ -55,6 +55,8 @@ export interface ServicesNod<Trx> {
     ultimaFerramenta(turnoId: string): string | null;
     /** ADR-085: com o pior processador e a maior carga por núcleo entre os Macs vivos dela (null = nenhum mandou). */
     memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador?: NivelPressao | null; carga?: number | null } | null;
+    /** ADR-085: a pessoa trocou o "uso do Mac" (gravado) — o puxar relê na próxima vez em vez de esperar o cache. */
+    trocouUsoDoMac?(pessoaId: string): void;
   };
   relogio: () => number;
   tokenTurno: {
@@ -145,6 +147,7 @@ export interface UseCasesNod<Deps> {
   proporBot: CasoNod<Deps, "propor_bot">;
   abrirTask: CasoNod<Deps, "abrir_task">;
   mandarParaTask: CasoNod<Deps, "mandar_para_task">;
+  meChameAs: CasoNod<Deps, "me_chame_as">;
   gerirBots: CasoNod<Deps, "gerir_bots">;
   verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
@@ -180,6 +183,7 @@ export const USE_CASE_POR_FERRAMENTA = {
   propor_bot: "proporBot",
   abrir_task: "abrirTask",
   mandar_para_task: "mandarParaTask",
+  me_chame_as: "meChameAs",
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",

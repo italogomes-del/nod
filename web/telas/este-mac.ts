@@ -2,7 +2,7 @@ import type { UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { esc, iconeAgente } from "../lib/render.ts";
-import { aberto, memoriaLegivel, pilulaMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe } from "../lib/trabalhos.ts";
+import { aberto, foraDoMac, memoriaLegivel, pilulaMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe } from "../lib/trabalhos.ts";
 import { agente } from "./trabalhos.ts";
 
 /**
@@ -44,6 +44,9 @@ export function renderEsteMac(estado: Estado): string {
   const porMemoria = (a: TrabalhoDto, b: TrabalhoDto) => (b.memoriaMb ?? 0) - (a.memoriaMb ?? 0);
   const trabalhando = lista.filter((t) => t.estado === "rodando" && t.turnoVivoId !== null).sort(porMemoria);
   const esperandoVez = lista.filter((t) => seguradoPeloMac(t, segurando));
+  // ADR-086: quem espera um colega ou a hora marcada não ocupa o Mac — aparece à parte, para a pessoa ver que a espera
+  // não custa nada aqui (protótipo "Nod — Ritmo do Mac", quadros 1–2).
+  const fora = lista.filter((t) => foraDoMac(t));
   const memoria = dto?.pressao ?? null;
   const processador = dto?.processador ?? null;
   const carga = dto?.cargaProcessador ?? null;
@@ -62,7 +65,8 @@ export function renderEsteMac(estado: Estado): string {
     : medidor("Memória", memoria ? FRACAO_MEMORIA[memoria] : null, memoria ? NOME_MEMORIA[memoria] : "sem leitura", memoria)
       + medidor("Processador", carga, processador ? NOME_PROCESSADOR[processador] : "sem leitura (atualize o app)", processador);
   const grupos = grupo("Trabalhando", "os que mais usam memória primeiro", trabalhando.map((t) => linhaBot(estado, t, t.memoriaMb ? memoriaLegivel(t.memoriaMb) : tempoDe(t, estado.agora), segurando)))
-    + grupo("Esperando o Mac aliviar", "começam sozinhos, na ordem da fila", esperandoVez.map((t) => linhaBot(estado, t, "", segurando)));
+    + grupo("Esperando o Mac aliviar", "começam sozinhos, na ordem da fila", esperandoVez.map((t) => linhaBot(estado, t, "", segurando)))
+    + grupo("Fora do Mac", "esperando sem ocupar o Mac; voltam sozinhos", fora.map((t) => linhaBot(estado, t, "", segurando)));
   const uso = estado.usoDoMac;
   const botoes = USOS.map((u) => `<button type="button" class="seg${u.id === uso ? " ativo" : ""}" data-act="uso-do-mac" data-uso="${u.id}" aria-pressed="${u.id === uso}">${esc(u.nome)}</button>`).join("");
   const explicacao = USOS.find((u) => u.id === uso)?.explicacao ?? "";

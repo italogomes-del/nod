@@ -172,6 +172,7 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       deFora: e?.deFora ?? false,
       esperandoColega: e?.esperandoColega ?? null,
       trabalhouMs: e?.trabalhouMs ?? 0,
+      acordaEm: e?.acordaEm ?? null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   });

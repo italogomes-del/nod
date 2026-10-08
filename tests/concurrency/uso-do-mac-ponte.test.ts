@@ -67,6 +67,7 @@ async function montar(uso?: UsoDoMac) {
     registrarMemoria: (p, m, l) => vivos.registrarMemoria(p, m, l),
     pressaoDaMaquina: (m) => vivos.daMaquina(m),
     desfazerMemoria: (p, m) => vivos.desfazer(p, m),
+    usoTrocadoEm: (p) => vivos.usoTrocadoEm(p),
     esquecerMaquina: (m) => vivos.esquecerMaquina(m),
   };
   const ponte = criarPonteInterna(db, deps);
@@ -90,7 +91,11 @@ async function montar(uso?: UsoDoMac) {
   });
   const puxar = async (l?: LeituraMemoria) => (await ponte.puxar(PESSOA.pessoaId, l))?.turnoId ?? null;
   const eventosDePressao = () => escopado(async (trx) => trx<{ dados: Record<string, unknown> }[]>`select dados from events where owner_id = ${PESSOA.pessoaId} and kind = 'pressao_memoria' order by created_at`);
-  return { ponte, machineId, tarefa, puxar, eventosDePressao, gravarUso: (u: UsoDoMac) => escopado((trx) => criarRepos(trx, PESSOA).preferencias.gravar({ usoDoMac: u })), avancar: (ms: number) => (relogio += ms) };
+  return { ponte, machineId, tarefa, puxar, eventosDePressao, gravarUso: async (u: UsoDoMac, avisar = true) => {
+    await escopado((trx) => criarRepos(trx, PESSOA).preferencias.gravar({ usoDoMac: u }));
+    // A rota PUT preferencias avisa depois de gravar (rotas/raio-x.ts); sem o aviso, vale o cache de USO_VALE_MS.
+    if (avisar) vivos.trocouUsoDoMac(PESSOA.pessoaId);
+  }, avancar: (ms: number) => (relogio += ms) };
 }
 
 describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
@@ -111,10 +116,12 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     const pouco = await montar("pouco");
     const r2 = await pouco.tarefa("rotina", "Rotina B");
     expect(await pouco.puxar(leitura("amarela"))).toBeNull();
-    // A troca de preferência vale no puxar em até USO_VALE_MS (cache por pessoa).
+    // Gravada por fora da rota (sem aviso), a troca espera o cache de USO_VALE_MS; pela rota, vale na hora.
+    await pouco.gravarUso("equilibrado", false);
+    expect(await pouco.puxar(leitura("amarela"))).toBeNull();
     await pouco.gravarUso("equilibrado");
-    pouco.avancar(USO_VALE_MS + 1);
     expect(await pouco.puxar(leitura("amarela"))).toBe(r2);
+    expect(USO_VALE_MS).toBe(30_000);
   });
 
   it("o espaço: com o Mac folgado, duas rotinas não começam na mesma leitura — a segunda espera ESPACO_FUNDO_MS", async () => {
