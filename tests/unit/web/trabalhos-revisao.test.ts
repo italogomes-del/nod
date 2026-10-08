@@ -153,10 +153,10 @@ describe("W9: o passo da faixa anda ao vivo", () => {
   it("com o ao vivo do turno do trabalho guardado, a faixa mostra o passo dele; sem ele, o último passo do servidor", () => {
     const migrar = trabalho("migrar", { agenteId: "leo", conversaId: "c-leo", titulo: "Migrar relatórios", ultimoPasso: "18 de 42", turnoVivoId: "tm", iniciadoEm: AGORA - 15 * MIN });
     const e = estadoCom([migrar]);
-    expect(renderFaixaTrabalhos(e, "leo")).toContain("18 de 42 · 15 min");
+    expect(renderFaixaTrabalhos(e, "leo")).toContain('<span class="ft-passo">18 de 42</span>');
     const vivo = { ...e, atividades: { "c-leo": { tm: comTexto(ATIVIDADE_VAZIA, "Convertendo o lote 19.") } } };
     const html = renderFaixaTrabalhos(vivo, "leo");
-    expect(html).toContain("Convertendo o lote 19… · 15 min");
+    expect(html).toContain('<span class="ft-passo">Convertendo o lote 19…</span>');
     expect(html).not.toContain("18 de 42");
   });
 });

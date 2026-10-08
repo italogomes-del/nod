@@ -1190,6 +1190,38 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .tk-tempo { color: var(--ink-3); font-weight: 400; white-space: nowrap; }
 .tk-linha { margin: 0; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
 .tk-espera { margin: 0; font-size: 12px; color: var(--warning); }
+/* Protótipo "Nod — tempo da task" (aprovado em 2026-10-08): no topo, só o status curto; o tempo trabalhado e o de espera
+   ficam no cartão que ele abre. Esperando colega = ponto vazado âmbar, sem pulsar. */
+.ponto-trabalho.esperando { background: transparent; border: 1.5px solid var(--warning); box-sizing: border-box; }
+.tk-status { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; padding: 2px 8px; border: 0; border-radius: 12px; background: none;
+  color: var(--ink-3); font: inherit; font-weight: 400; white-space: nowrap; cursor: pointer; }
+.tk-status:hover, .tk-status:focus-visible, .tk-status[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink-2); }
+.tk-status.esperando { color: var(--warning); }
+.tk-pop { display: flex; flex-direction: column; gap: 10px; width: 280px; max-width: 100%; margin-top: 4px; padding: 16px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-pop); text-align: left; font-size: 13px; }
+.tk-pop-linha { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.tk-pop-linha b { margin-left: auto; color: var(--ink); font-weight: 500; }
+.tk-pop-total { color: var(--ink-3); }
+.tk-pop-barra { height: 4px; border-radius: 2px; background: var(--warning-soft); overflow: hidden; }
+.tk-pop-barra span { display: block; height: 100%; background: var(--success); }
+.tk-pop-ponto { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.tk-pop-ponto.trabalhou { background: var(--success); }
+.tk-pop-ponto.esperou { background: var(--warning); }
+.tk-pop-rodape { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.tk-pop-link, .pf-link { margin-left: auto; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 12px; text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer; }
+/* Na faixa, o tempo só no hover ou no foco do teclado. */
+.ft-passo.esperando { color: var(--warning); }
+.ft-tempo { display: none; flex: none; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.ft-linha:hover .ft-tempo, .ft-linha:focus-visible .ft-tempo { display: inline; }
+/* O colega que não terminou: uma linha centrada; motivo e atalho atrás de "detalhes". */
+.msg-peer-falhou { max-width: 620px; margin: 10px auto 18px; text-align: center; font-size: 13px; color: var(--ink-3); }
+.msg-peer-falhou summary { display: inline-flex; gap: 8px; list-style: none; cursor: pointer; }
+.msg-peer-falhou summary::-webkit-details-marker { display: none; }
+.pf-detalhes { text-decoration: underline; text-underline-offset: 3px; }
+.msg-peer-falhou details[open] .pf-detalhes { color: var(--ink-2); }
+.pf-corpo { display: flex; align-items: center; gap: 10px; max-width: 420px; margin: 8px auto 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-side); text-align: left; font-size: 12px; color: var(--ink-2); }
 .tk-timeline .time-sep { margin: 6px 0 14px; }
 .tk-carregando { text-align: center; }
 .passo { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 3px 0; font-size: 13px; color: var(--ink-3); text-align: center; }

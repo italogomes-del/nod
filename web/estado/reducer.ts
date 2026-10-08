@@ -241,6 +241,8 @@ export type Estado = {
   pressao: NivelPressao | null;
   /** A faixa de Trabalhos em cima do campo recolhida numa pílula (preferência da pessoa, `PUT preferencias`). */
   faixaTrabalhosRecolhida: boolean;
+  /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
+  tempoTaskAberto: string | null;
 };
 
 export type Acao =
@@ -294,6 +296,7 @@ export type Acao =
   /** O `GET trabalhos/:id` voltou 404: a task não existe (ou não é desta pessoa). */
   | { tipo: "trabalho-sumiu"; id: string }
   | { tipo: "faixa-trabalhos"; recolhida: boolean }
+  | { tipo: "tempo-task"; id: string | null }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
 export const estadoInicial: Estado = {
@@ -347,6 +350,7 @@ export const estadoInicial: Estado = {
   trabalhoDetalhe: {},
   pressao: null,
   faixaTrabalhosRecolhida: false,
+  tempoTaskAberto: null,
 };
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
@@ -789,6 +793,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     }
     case "faixa-trabalhos":
       return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
+    case "tempo-task":
+      return estado.tempoTaskAberto === acao.id ? estado : { ...estado, tempoTaskAberto: acao.id };
     case "hidratar-taxas-linhas":
       return estado.modoDev.ligado ? { ...estado, modoDev: { ...estado.modoDev, taxasLinhas: acao.taxas } } : estado;
     case "esquecer-disponibilidade-ligacao": {

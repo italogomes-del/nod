@@ -63,7 +63,8 @@ describe("faixa de Trabalhos e pílula (#195, K1/K6)", () => {
     expect(html).toContain('<span class="ponto-trabalho c-purple pulso-trab"');
     expect(html).toContain('<span class="etiqueta-origem">de você</span>');
     expect(html).toContain('<span class="etiqueta-origem">pedido do Chico</span>');
-    expect(html).toContain("18 de 42 · 15 min");
+    // Protótipo "Nod — tempo da task" (aprovado em 2026-10-08): o passo sem tempo; o tempo só no hover.
+    expect(html).toContain('<span class="ft-passo">18 de 42</span><span class="ft-tempo">trabalhou menos de 1 min · aberta há 15 min</span>');
     expect(html).toContain("começa depois da Migrar relatórios");
     expect(html).toContain('data-act="faixa-trabalhos" data-recolher="1"');
     expect(html).not.toContain("feito");
@@ -109,10 +110,11 @@ describe("a tela da task (#195, K2/K7)", () => {
     iniciadoEm: AGORA - 19 * MIN, turnoVivoId: "tv", esperandoComputadorDe: "Soft delete",
   });
 
-  it("o topo: chip com ponto vivo, mascote, título e tempo; a linha de quem pediu, acessos e pasta; a espera do computador", () => {
+  it("o topo: chip com ponto vivo, mascote, título e o status curto (sem tempo); a linha de quem pediu, acessos e pasta; a espera do computador", () => {
     const html = renderTopoTrabalho(estadoCom([login]), "login");
     expect(html).toContain('<span class="tk-chip"><span class="ponto-trabalho c-green pulso-trab"');
-    expect(html).toContain('<span class="tk-titulo">Login do app</span><span class="tk-tempo">· 19 min</span>');
+    expect(html).toContain('<span class="tk-titulo">Login do app</span><button type="button" class="tk-status" data-act="tempo-task" data-id="login" aria-expanded="false" title="Ver o tempo da task">trabalhando<svg');
+    expect(html).not.toContain("tk-pop");
     expect(html).toContain("task do Dev 1, pedida pelo Chico · com os acessos do Dev 1 · pasta ~/nod/Dev 1/leapy-86akr9u9u");
     expect(html).toContain("esperando o computador do Dev 1 (em uso por: Soft delete)");
   });
@@ -350,5 +352,53 @@ describe("telemetria das linhas (#191)", () => {
     const e = { ...estadoInicial, modoDev: { ligado: true, raioX: {}, taxasLinhas: [{ tipo: "rotina" as const, mostradas: 50, abertas: 6, taxa: 0.12 }, { tipo: "task" as const, mostradas: 0, abertas: 0, taxa: null }] } };
     expect(renderTaxasLinhas(e)).toContain("Linhas abertas: rotina 12% · task —");
     expect(renderTaxasLinhas({ ...e, modoDev: { ...e.modoDev, ligado: false } })).toBe("");
+  });
+});
+
+describe("tempo da task: esperando x trabalhando (protótipo aprovado em 2026-10-08)", () => {
+  const pedidoAoDev = { nome: "Dev 1", desde: AGORA - 80 * MIN, trabalhoId: "w-dev1" };
+  const esperando = trabalho("resumo", { titulo: "Resumo do time", iniciadoEm: AGORA - 300 * MIN, trabalhouMs: 21 * MIN, esperandoColega: pedidoAoDev });
+
+  it("rodando sem turno vivo e com pedido em aberto é \"esperando Dev 1\": ponto vazado, sem pulsar; com turno vivo volta a trabalhar", () => {
+    const e = estadoCom([esperando]);
+    const faixa = renderFaixaTrabalhos(e, "leo");
+    expect(faixa).toContain('<span class="ponto-trabalho esperando" aria-hidden="true"></span>');
+    expect(faixa).toContain('<span class="ft-passo esperando">esperando Dev 1</span>');
+    expect(faixa).toContain('<span class="ft-tempo">trabalhou 21 min · aberta há 5h</span>');
+    const vivo = renderFaixaTrabalhos(estadoCom([{ ...esperando, turnoVivoId: "tv" }]), "leo");
+    expect(vivo).not.toContain("esperando Dev 1");
+    expect(vivo).toContain("pulso-trab");
+  });
+
+  it("no topo, o status curto abre o cartão: aberta há, trabalhando, esperando e o atalho para a task do colega", () => {
+    const fechado = renderTopoTrabalho(estadoCom([esperando]), "resumo");
+    expect(fechado).toContain('class="tk-status esperando" data-act="tempo-task" data-id="resumo" aria-expanded="false" title="Ver o tempo da task">esperando Dev 1<svg');
+    expect(fechado).not.toContain("tk-pop");
+
+    const e = reduzir(estadoCom([esperando]), { tipo: "tempo-task", id: "resumo" });
+    const aberto = renderTopoTrabalho(e, "resumo");
+    expect(aberto).toContain('aria-expanded="true"');
+    expect(aberto).toContain("<span>Aberta há</span><b>5h</b>");
+    expect(aberto).toContain("<span>Trabalhando</span><b>21 min</b>");
+    expect(aberto).toContain("<span>Esperando</span><b>5h</b>");
+    expect(aberto).toContain('<span style="width:7%"></span>');
+    expect(aberto).toContain("Dev 1 recebeu o pedido às");
+    expect(aberto).toContain('data-act="abrir-trabalho" data-id="w-dev1">Ver task</button>');
+    expect(reduzir(e, { tipo: "tempo-task", id: null }).tempoTaskAberto).toBeNull();
+  });
+
+  it("o tempo trabalhado nunca passa do tempo aberto, e o resto é espera", () => {
+    const e = reduzir(estadoCom([{ ...esperando, trabalhouMs: 999 * MIN, esperandoColega: null }]), { tipo: "tempo-task", id: "resumo" });
+    const html = renderTopoTrabalho(e, "resumo");
+    expect(html).toContain("<span>Trabalhando</span><b>5h</b>");
+    expect(html).toContain("<span>Esperando</span><b>menos de 1 min</b>");
+    expect(html).not.toContain("recebeu o pedido");
+  });
+
+  it("o CSS tem o ponto de espera, o cartão e o tempo que só aparece no hover ou no foco", () => {
+    expect(css).toContain(".ponto-trabalho.esperando {");
+    expect(css).toContain(".ft-tempo { display: none;");
+    expect(css).toContain(".ft-linha:hover .ft-tempo, .ft-linha:focus-visible .ft-tempo { display: inline; }");
+    expect(css).toContain(".tk-pop {");
   });
 });
