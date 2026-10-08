@@ -16,6 +16,7 @@ import type { RaioXConversa } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
+import type { NivelPressao, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
@@ -47,7 +48,22 @@ export type Tela =
   | { tipo: "sua-vez" }
   /** Não lidos (definido em 2026-09-29, 0039): tudo o que chegou, a conversa mais recente em cima. */
   | { tipo: "nao-lidos" }
-  | { tipo: "nova-sala" };
+  | { tipo: "nova-sala" }
+  /** ADR-081 (#196): "Todos os trabalhos" — os de todos os bots da pessoa, com os filtros De você / Rotinas / Entre bots. */
+  | { tipo: "trabalhos"; filtro?: FiltroTrabalhos }
+  /**
+   * ADR-081 (#195): a tela da task. `voltar` é a tela de onde a pessoa veio (o Fechar e o Esc voltam para ela); abrir
+   * outra task de dentro de uma task mantém o `voltar` de fora.
+   */
+  | { tipo: "trabalho"; id: string; voltar: Tela }
+  /**
+   * definido em 2026-10-07 (#191): a tela provisória de uma linha do chat sem trabalho por trás (execuções antigas de
+   * rotina, pedido a colega de antes do ADR-081): as mensagens que a linha recolheu, na ordem, com Fechar.
+   */
+  | { tipo: "linha"; conversaId: string; mensagens: string[]; titulo: string; voltar: Tela };
+
+/** Os filtros de "Todos os trabalhos": De você (pessoa e rede), Rotinas e Entre bots (colega). */
+export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
 
 /**
  * "Seu espaço" (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é da CONTA abre pelo menu do avatar numa
@@ -68,7 +84,9 @@ export type NivelGaveta =
   | { tipo: "perfil" }
   | { tipo: "memoria" }
   | { tipo: "inteligencia" }
-  | { tipo: "nova-rotina" };
+  | { tipo: "nova-rotina" }
+  /** ADR-081 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
+  | { tipo: "trabalhos" };
 
 export type ConexaoApp = { url: string | null; falhou: string | null };
 
@@ -78,7 +96,8 @@ export type ConexaoApp = { url: string | null; falhou: string | null };
  */
 export type LigacaoVivaNaTela = { ligacaoId: string; agenteId: string; conversaId: string; local: boolean };
 
-export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number };
+/** `trabalhoId` (ADR-081): o turno é de um trabalho — o ao vivo dele aparece na tela da task, nunca no chat. */
+export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null };
 
 export type ConversaEstado = ConversaDto & {
   carregadaEm: number;
@@ -94,7 +113,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -176,7 +195,7 @@ export type Estado = {
    * Modo dev (definido em 2026-09-28, 0036): a preferência vem do servidor (o app desktop limpa o localStorage)
    * e, ligada, cada conversa aberta traz o resumo do Raio-X de cada turno e o total do dia.
    */
-  modoDev: { ligado: boolean; raioX: Record<string, RaioXConversa> };
+  modoDev: { ligado: boolean; raioX: Record<string, RaioXConversa>; taxasLinhas?: TaxaDeAbertura[] };
   /**
    * A chave crua recém-emitida: mostrada UMA vez e descartada ao sair da tela. Fica só na memória da
    * aba — nunca em storage — e o servidor não tem como mostrá-la de novo.
@@ -204,6 +223,17 @@ export type Estado = {
   onboardingAberto: boolean;
   /** A primeira leitura já decidiu se o onboarding abre (só uma vez por sessão; depois só pelo menu da conta). */
   onboardingResolvido?: boolean;
+  /**
+   * ADR-081 (#195/#196): os trabalhos da pessoa (abertos e terminados hoje, de todos os bots) como `GET trabalhos` os
+   * devolveu; null = ainda não leu. A faixa, o chip da barra, o ícone do topo, a gaveta e "Todos os trabalhos" leem daqui.
+   */
+  trabalhos: TrabalhosDto | null;
+  /** A tela da task de cada trabalho já aberto (`GET trabalhos/:id`), com as mensagens dele. */
+  trabalhoDetalhe: Record<string, TrabalhoDetalheDto>;
+  /** Pressão de memória do Mac (#194): do `GET trabalhos` e do frame `memoria.mudou`; null = nenhum Mac falou. */
+  pressao: NivelPressao | null;
+  /** A faixa de Trabalhos em cima do campo recolhida numa pílula (preferência da pessoa, `PUT preferencias`). */
+  faixaTrabalhosRecolhida: boolean;
 };
 
 export type Acao =
@@ -251,7 +281,11 @@ export type Acao =
   | { tipo: "hidratar-disponibilidade-ligacao"; agenteId: string; disponibilidade: DisponibilidadeLigacao | null }
   | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string }
   | { tipo: "hidratar-onboarding"; onboarding: EstadoOnboarding | null }
-  | { tipo: "onboarding-aberto"; aberto: boolean };
+  | { tipo: "onboarding-aberto"; aberto: boolean }
+  | { tipo: "hidratar-trabalhos"; trabalhos: TrabalhosDto }
+  | { tipo: "hidratar-trabalho"; detalhe: TrabalhoDetalheDto; agora: number }
+  | { tipo: "faixa-trabalhos"; recolhida: boolean }
+  | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
 export const estadoInicial: Estado = {
   sessao: null,
@@ -299,6 +333,10 @@ export const estadoInicial: Estado = {
   ligacaoViva: null,
   disponibilidadeLigacao: {},
   onboardingAberto: false,
+  trabalhos: null,
+  trabalhoDetalhe: {},
+  pressao: null,
+  faixaTrabalhosRecolhida: false,
 };
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
@@ -338,10 +376,15 @@ function semDelta(estado: Estado, conversaId: string | null, turnoId: string | n
   return { ...estado, atividades: { ...estado.atividades, [conversaId]: restantes } };
 }
 
-/** A conversa que a tela mostra (conversa ou sala), já carregada ou ainda chegando. */
-function conversaIdNaTela(estado: Estado): string | null {
+/**
+ * A conversa que a tela mostra (conversa ou sala), já carregada ou ainda chegando. ADR-081: a tela da task mostra o ao
+ * vivo do turno do trabalho, que chega pelos frames da conversa do bot dele — mesmo de outro bot, nunca aberta.
+ */
+export function conversaIdNaTela(estado: Estado): string | null {
   const t = estado.tela;
-  return t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : null;
+  if (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") return t.conversaId;
+  if (t.tipo === "trabalho") return estado.trabalhoDetalhe[t.id]?.trabalho.conversaId ?? estado.trabalhos?.trabalhos.find((x) => x.id === t.id)?.conversaId ?? null;
+  return null;
 }
 
 /**
@@ -402,7 +445,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     // dados.kind distingue "na fila" (turno_criado) de "rodando" (turno_despachado) — pendência L8 §5.
     const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
     const anterior = e.turnosVivos[turnoId];
-    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: anterior?.desde ?? agora };
+    const trabalhoId = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id) ?? anterior?.trabalhoId ?? null;
+    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: anterior?.desde ?? agora, trabalhoId };
     return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f));
   },
   "turno.delta": (e, f) => {
@@ -495,15 +539,32 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "relato.criado": (e) => e,
   // A linha "Chat de voz" da conversa e a ligação viva (a barra lateral marca o bot "Em ligação").
   "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
-  // ADR-081: o lane da web (#195/#196) troca estes dois por releitura dos trabalhos e da pressão.
-  "trabalho.mudou": (e, f) => (conv(f) ? invalidar(e, conv(f)) : e),
-  "memoria.mudou": (e) => e,
+  // ADR-081: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
+  // task", a pergunta e o resultado) e a tela da task, se ela já foi aberta.
+  "trabalho.mudou": (e, f) => {
+    const id = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id);
+    const aberta = id && (e.trabalhoDetalhe[id] || (e.tela.tipo === "trabalho" && e.tela.id === id)) ? (`trabalho:${id}` as Invalidacao) : null;
+    return invalidar(e, "trabalhos", conv(f), aberta);
+  },
+  // #194: o nível vale na hora (a pílula aparece sem esperar o REST); a lista relê para o total de memória.
+  "memoria.mudou": (e, f) => {
+    const nivel = f.dados.nivel;
+    if (nivel !== "verde" && nivel !== "amarela" && nivel !== "vermelha") return e;
+    return invalidar(e.pressao === nivel ? e : { ...e, pressao: nivel }, "trabalhos");
+  },
   resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
+/** Frames que trazem fala nova (ou o fim de um turno) para a conversa do bot: a tela da task aberta relê as mensagens dela. */
+const RELEEM_A_TASK: ReadonlySet<TipoFrame> = new Set<TipoFrame>(["mensagem.nova", "turno.fala", "turno.encerrado", "turno.interrompido", "decisao.nova", "decisao.decidida"]);
+
 export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Estado {
   const handler = POR_FRAME[frame.tipo];
-  return handler ? handler(estado, frame, agora) : estado;
+  const depois = handler ? handler(estado, frame, agora) : estado;
+  // ADR-081 (#195): a tela da task mostra as mensagens do trabalho, que chegam pelos frames da conversa do bot dele.
+  const t = depois.tela;
+  if (t.tipo !== "trabalho" || !RELEEM_A_TASK.has(frame.tipo) || texto(frame.dados.conversaId) !== conversaIdNaTela(depois)) return depois;
+  return invalidar(depois, `trabalho:${t.id}`);
 }
 
 export function reduzir(estado: Estado, acao: Acao): Estado {
@@ -517,7 +578,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
         disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
-        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false }) };
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null }) };
     case "navegar":
       return resolverInicio({
         ...estado,
@@ -570,7 +631,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // `lerConversa` já exclui o turno `ligacao`. Se ele vier, a web o ignora aqui pelo campo `origem` (ou `modo`).
       const novos = (acao.conversa.turnosEmCurso ?? []).filter((t) => !estado.turnosVivos[t.id] && !("origem" in t && t.origem === "ligacao") && !("modo" in t && t.modo === "ligacao"));
       const turnosVivos = novos.length === 0 ? estado.turnosVivos : { ...estado.turnosVivos };
-      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde };
+      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde, trabalhoId: t.trabalhoId ?? null };
       // O texto em streaming de um turno que já acabou sai; o dos que continuam vivos fica.
       const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
       const anteriores = estado.atividades[conversaId] ?? {};
@@ -667,6 +728,20 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return resolverInicio({ ...estado, onboarding: acao.onboarding });
     case "onboarding-aberto":
       return estado.onboardingAberto === acao.aberto ? estado : { ...estado, onboardingAberto: acao.aberto };
+    case "hidratar-trabalhos":
+      return { ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao ?? estado.pressao };
+    case "hidratar-trabalho": {
+      // Página aberta no meio do trabalho: o turno que roda volta a ser vivo, para o ao vivo dele ser guardado e desenhado.
+      const t = acao.detalhe.trabalho;
+      const vivo = t.turnoVivoId && !estado.turnosVivos[t.turnoVivoId]
+        ? { ...estado.turnosVivos, [t.turnoVivoId]: { turnoId: t.turnoVivoId, conversaId: t.conversaId, estado: "rodando" as const, executor: null, machineId: null, desde: t.iniciadoEm ?? acao.agora, trabalhoId: t.id } }
+        : estado.turnosVivos;
+      return { ...estado, turnosVivos: vivo, trabalhoDetalhe: { ...estado.trabalhoDetalhe, [t.id]: acao.detalhe } };
+    }
+    case "faixa-trabalhos":
+      return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
+    case "hidratar-taxas-linhas":
+      return estado.modoDev.ligado ? { ...estado, modoDev: { ...estado.modoDev, taxasLinhas: acao.taxas } } : estado;
     case "esquecer-disponibilidade-ligacao": {
       if (!(acao.agenteId in estado.disponibilidadeLigacao)) return estado;
       const disponibilidadeLigacao = { ...estado.disponibilidadeLigacao };
@@ -765,6 +840,10 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (!estado.suaVez) faltas.push("sua-vez");
   // O ícone de Não lidos e o ponto de cada linha da barra valem em qualquer tela, como a fila.
   if (!estado.naoLidos) faltas.push("nao-lidos");
+  // ADR-081: o chip de cada bot na barra e o ícone "Trabalhos" do topo também (e a faixa, a gaveta, a tela da task).
+  if (estado.sessao && !estado.trabalhos) faltas.push("trabalhos");
+  if (t.tipo === "trabalho" && !estado.trabalhoDetalhe[t.id]) faltas.push(`trabalho:${t.id}`);
+  if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
