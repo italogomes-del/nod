@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BASE_ADITIVA, ehNova, semComentarios, verificarMigracao, verificarPasta } from "../../../scripts/migracao-aditiva.ts";
+import { BASE_ADITIVA, ehNova, formatar, semComentarios, verificarMigracao, verificarPasta, verificarRollback } from "../../../scripts/migracao-aditiva.ts";
 
 /** NOD-186: migração nova só adiciona; o rollback de código (NOD-173) depende disso. */
 const MIGRACOES = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "db", "migrations");
@@ -299,7 +299,7 @@ DO $$ BEGIN RAISE NOTICE 'DROP TYPE y'; END $$;
     const dir = await mkdtemp(join(tmpdir(), "nod-186-"));
     try {
       await writeFile(join(dir, "0058_antiga.sql"), "DROP TABLE antiga;\n");
-      await writeFile(join(dir, "0059_nova.sql"), "ALTER TABLE t RENAME TO u;\n");
+      await writeFile(join(dir, "0059_nova.sql"), "ALTER TABLE t RENAME TO u;\n-- ROLLBACK:\n-- ALTER TABLE u RENAME TO t;\n");
       const r = await verificarPasta(dir);
       expect(r.verificadas).toEqual(["0059_nova.sql"]);
       expect(r.problemas).toEqual([{ arquivo: "0059_nova.sql", linha: 1, comando: "RENAME", motivo: "destrutiva" }]);
@@ -310,8 +310,18 @@ DO $$ BEGIN RAISE NOTICE 'DROP TYPE y'; END $$;
 
   it("o repositório real passa, e sem o corte as duas antigas conhecidas seriam barradas", async () => {
     expect((await verificarPasta(MIGRACOES)).problemas).toEqual([]);
-    const todas = (await verificarPasta(MIGRACOES, 0)).problemas.map((p) => `${p.arquivo}:${p.linha} ${p.comando}`);
-    expect(todas).toEqual(["0003_decisora_escreve.sql:114 ALTER COLUMN … TYPE", "0046_codigo_dado_pessoal.sql:11 RENAME"]);
+    const todas = (await verificarPasta(MIGRACOES, 0)).problemas;
+    const destrutivas = todas.filter((p) => p.motivo === "destrutiva").map((p) => `${p.arquivo}:${p.linha} ${p.comando}`);
+    expect(destrutivas).toEqual(["0003_decisora_escreve.sql:114 ALTER COLUMN … TYPE", "0046_codigo_dado_pessoal.sql:11 RENAME"]);
+    // NOD-195: as 4 sem marcador da issue e a 0013 (comando na linha do marcador) seriam barradas sem o corte.
+    const semRollback = todas.filter((p) => p.motivo !== "destrutiva").map((p) => `${p.arquivo}:${p.linha} ${p.motivo}`);
+    expect(semRollback).toEqual([
+      "0008_conectores_https.sql:5 sem_rollback",
+      "0010_rotinas_utc.sql:5 sem_rollback",
+      "0013_harnesses.sql:6 rollback_vazio",
+      "0043_profundidade_ate_3.sql:11 sem_rollback",
+      "0055_ligacao_sem_ia.sql:22 sem_rollback",
+    ]);
   });
 
   it("semComentarios preserva posições e quebras de linha", () => {
@@ -320,5 +330,43 @@ DO $$ BEGIN RAISE NOTICE 'DROP TYPE y'; END $$;
     expect(limpo).toHaveLength(sql.length);
     expect(limpo.split("\n")).toHaveLength(3);
     expect(limpo.replace(/\s+/g, "")).toBe("a''b");
+  });
+  describe("NOD-195: migração nova traz o bloco -- ROLLBACK: com comando", () => {
+    const ida = "ALTER TABLE a ADD COLUMN b int;\n";
+    it("com rollback de verdade passa", () => {
+      expect(verificarRollback("0060_x.sql", `${ida}\n-- ROLLBACK:\n-- -- tira a coluna\n-- ALTER TABLE a DROP COLUMN b;\n`)).toEqual([]);
+    });
+    it("sem marcador: sai com a última linha do arquivo", () => {
+      expect(verificarRollback("0060_x.sql", `-- cabeçalho\n${ida}`)).toEqual([{ arquivo: "0060_x.sql", linha: 2, comando: "-- ROLLBACK:", motivo: "sem_rollback" }]);
+    });
+    it("marcador que não está no início da linha não conta", () => {
+      expect(verificarRollback("0060_x.sql", `${ida}  -- ROLLBACK:\n-- ALTER TABLE a DROP COLUMN b;\n`)[0]?.motivo).toBe("sem_rollback");
+    });
+    it("bloco vazio, só com linhas em branco, `--` ou comentário `-- --`: sai com a linha do marcador", () => {
+      for (const bloco of ["", "\n\n", "--\n-- \n", "-- -- não há o que desfazer\n", "-- /* nada */\n", "-- ;\n--  ;\n"]) {
+        expect(verificarRollback("0060_x.sql", `${ida}\n-- ROLLBACK:\n${bloco}`)).toEqual([{ arquivo: "0060_x.sql", linha: 3, comando: "-- ROLLBACK:", motivo: "rollback_vazio" }]);
+      }
+    });
+    it("comando na mesma linha do marcador não vale (é comentário): o SQL vai nas linhas de baixo", () => {
+      expect(verificarRollback("0060_x.sql", `${ida}-- ROLLBACK: ALTER TABLE a DROP COLUMN b;\n`)[0]?.motivo).toBe("rollback_vazio");
+    });
+    it("verificarPasta junta as duas regras, e as ≤ 0058 continuam ignoradas", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "nod-195-"));
+      try {
+        await writeFile(join(dir, "0058_antiga.sql"), ida);
+        await writeFile(join(dir, "0059_sem.sql"), ida);
+        await writeFile(join(dir, "0060_vazia.sql"), `${ida}-- ROLLBACK:\n`);
+        await writeFile(join(dir, "0061_ok.sql"), `${ida}-- ROLLBACK:\n-- ALTER TABLE a DROP COLUMN b;\n`);
+        const r = await verificarPasta(dir);
+        expect(r.verificadas).toEqual(["0059_sem.sql", "0060_vazia.sql", "0061_ok.sql"]);
+        expect(r.problemas.map((p) => `${p.arquivo}:${p.linha} ${p.motivo}`)).toEqual(["0059_sem.sql:1 sem_rollback", "0060_vazia.sql:2 rollback_vazio"]);
+        expect(r.problemas.map(formatar)).toEqual([
+          expect.stringMatching(/^src\/db\/migrations\/0059_sem\.sql:1 {2}falta o bloco "-- ROLLBACK:"/),
+          expect.stringMatching(/^src\/db\/migrations\/0060_vazia\.sql:2 {2}bloco "-- ROLLBACK:" sem comando/),
+        ]);
+      } finally {
+        await rm(dir, { recursive: true });
+      }
+    });
   });
 });

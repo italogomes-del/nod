@@ -92,6 +92,17 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
   seguinte nem para o resto do arquivo; motivo vazio falha. Exemplo legítimo: `DROP FUNCTION f(int)`
   antes de recriar `f(bigint)` com outra assinatura leva a marca com o motivo (o gate não analisa se o
   código antigo usa o objeto; barra sempre e a exceção decide caso a caso).
+  **E traz um rollback que desfaz de verdade** (NOD-195). O mesmo gate exige, nas > 0058, o marcador
+  `-- ROLLBACK:` sozinho no início da linha (texto depois dele na mesma linha é comentário) e pelo menos um
+  comando no bloco abaixo; sem marcador ou com bloco vazio sai com 1 e `arquivo:linha`. Formato do bloco:
+  cada linha de SQL comentada com `-- ` (o runner não aplica nada depois do marcador) e `-- -- texto` para
+  comentário de verdade, que não vira SQL (`trechoDeRollback` em `src/db/migrar.ts`). O rollback é
+  executado: `tests/conformidade/rollback-ida-e-volta.test.ts` cria um banco descartável como `nod_dono`,
+  aplica até a 0058 e, para cada nova, tira uma foto do schema pelo `pg_catalog` (relações com RLS,
+  persistência e opções, colunas, constraints, índices, tipos/enums, funções, views, triggers, policies,
+  regras, grants; ACL nula conta como a padrão do dono, que é o que o `REVOKE` deixa), aplica a
+  migração, aplica o rollback, exige a mesma foto e reaplica. Rollback que esquece algo falha dizendo o
+  objeto que sobrou ou faltou.
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e

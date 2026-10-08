@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { trechoAplicavel } from "../src/db/migrar.ts";
+import { trechoAplicavel, trechoDeRollback } from "../src/db/migrar.ts";
 
 /**
  * NOD-186: migração nova só ADICIONA. O rollback de código (NOD-173) volta a imagem e deixa o banco
@@ -19,7 +19,12 @@ import { trechoAplicavel } from "../src/db/migrar.ts";
  */
 export const BASE_ADITIVA = 58;
 
-export type Problema = { arquivo: string; linha: number; comando: string; motivo: "destrutiva" | "excecao_sem_motivo" };
+export type Problema = {
+  arquivo: string;
+  linha: number;
+  comando: string;
+  motivo: "destrutiva" | "excecao_sem_motivo" | "sem_rollback" | "rollback_vazio";
+};
 
 // [^\n]: com CRLF o `\r` fica no motivo (e sai no trim); com `.` e `$` a marca nunca casava.
 const EXCECAO = /^\s*--\s*destrutiva-ok:([^\n]*)$/i;
@@ -225,6 +230,23 @@ export function verificarMigracao(arquivo: string, conteudo: string): Problema[]
   return problemas;
 }
 
+/**
+ * NOD-195: migração nova traz o bloco `-- ROLLBACK:` com pelo menos um comando (depois de `trechoDeRollback`,
+ * sem comentários). O teste tests/conformidade/rollback-ida-e-volta.test.ts executa esse bloco e prova que ele
+ * volta o schema; aqui só se garante que ele existe. Sem marcador, a linha é a última do arquivo; vazio, a do marcador.
+ */
+export function verificarRollback(arquivo: string, conteudo: string): Problema[] {
+  const rollback = trechoDeRollback(conteudo);
+  if (rollback === null) {
+    const linhas = conteudo.replace(/\n$/, "").split("\n").length;
+    return [{ arquivo, linha: linhas, comando: "-- ROLLBACK:", motivo: "sem_rollback" }];
+  }
+  // Só `;` (ou só espaço) não desfaz nada: conta como vazio.
+  if (semComentarios(rollback).replace(/[\s;]/g, "") !== "") return [];
+  const linha = linhaDe(conteudo, trechoAplicavel(conteudo).length);
+  return [{ arquivo, linha, comando: "-- ROLLBACK:", motivo: "rollback_vazio" }];
+}
+
 /** Arquivos com prefixo numérico ≤ BASE_ADITIVA são ignorados; sem prefixo numérico, verificados. */
 export function ehNova(nome: string, base = BASE_ADITIVA): boolean {
   const n = Number.parseInt(nome, 10);
@@ -234,15 +256,25 @@ export function ehNova(nome: string, base = BASE_ADITIVA): boolean {
 export async function verificarPasta(dir: string, base = BASE_ADITIVA): Promise<{ verificadas: string[]; problemas: Problema[] }> {
   const novas = (await readdir(dir)).filter((f) => f.endsWith(".sql") && ehNova(f, base)).sort();
   const problemas: Problema[] = [];
-  for (const nome of novas) problemas.push(...verificarMigracao(nome, await readFile(join(dir, nome), "utf8")));
+  for (const nome of novas) {
+    const conteudo = await readFile(join(dir, nome), "utf8");
+    problemas.push(...verificarMigracao(nome, conteudo), ...verificarRollback(nome, conteudo));
+  }
   return { verificadas: novas, problemas };
 }
 
 export function formatar(p: Problema): string {
   const onde = `src/db/migrations/${p.arquivo}:${p.linha}`;
-  return p.motivo === "destrutiva"
-    ? `${onde}  ${p.comando} — migração nova só adiciona; se for inevitável, ponha "-- destrutiva-ok: <motivo>" na linha anterior`
-    : `${onde}  ${p.comando} — "-- destrutiva-ok:" sem motivo; escreva o porquê`;
+  switch (p.motivo) {
+    case "destrutiva":
+      return `${onde}  ${p.comando} — migração nova só adiciona; se for inevitável, ponha "-- destrutiva-ok: <motivo>" na linha anterior`;
+    case "excecao_sem_motivo":
+      return `${onde}  ${p.comando} — "-- destrutiva-ok:" sem motivo; escreva o porquê`;
+    case "sem_rollback":
+      return `${onde}  falta o bloco "-- ROLLBACK:" (sozinho na linha, com o SQL que desfaz a migração em linhas "-- ")`;
+    case "rollback_vazio":
+      return `${onde}  bloco "-- ROLLBACK:" sem comando; escreva o SQL que desfaz a migração em linhas "-- "`;
+  }
 }
 
 async function principal(): Promise<void> {
@@ -250,11 +282,11 @@ async function principal(): Promise<void> {
   const { verificadas, problemas } = await verificarPasta(dir);
   if (problemas.length) {
     for (const p of problemas) process.stderr.write(`${formatar(p)}\n`);
-    process.stderr.write(`FALHA: ${problemas.length} comando(s) destrutivo(s) em migração nova (NOD-186/NOD-191, AGENTS.md).\n`);
+    process.stderr.write(`FALHA: ${problemas.length} problema(s) em migração nova: destrutiva ou sem rollback (NOD-186/191/195, AGENTS.md).\n`);
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(`migrações aditivas ok: ${verificadas.length} nova(s) depois da ${String(BASE_ADITIVA).padStart(4, "0")}\n`);
+  process.stdout.write(`migrações aditivas e com rollback ok: ${verificadas.length} nova(s) depois da ${String(BASE_ADITIVA).padStart(4, "0")}\n`);
 }
 
 // realpath: o loader ESM resolve symlink em import.meta.url e o argv[1] não. Sem isso, rodar o gate
