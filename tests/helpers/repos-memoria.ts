@@ -245,6 +245,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return { ids };
       },
+      async gravarSemOutbox(eventos: EventoGravavel[]) {
+        for (const ev of eventos) b.events.push({ ...ev, tenantId: escopo.tenantId, id: ev.id ?? randomUUID(), createdAt: ev.createdAt ?? agora() });
+        return eventos.length;
+      },
+      async contarLinhas(desde: number) {
+        const linhas = doTenant(b.events).filter((e) => (e.kind === "linha_mostrada" || e.kind === "linha_aberta") && e.pessoaDestinoId === escopo.pessoaId && e.createdAt >= desde);
+        const tipos = [...new Set(linhas.map((e) => String(e.dados?.tipo)))];
+        const distintas = (tipo: string, kind: string) => new Set(linhas.filter((e) => e.kind === kind && String(e.dados?.tipo) === tipo).map((e) => String(e.dados?.chave_linha))).size;
+        return tipos.map((tipo) => ({ tipo, mostradas: distintas(tipo, "linha_mostrada"), abertas: distintas(tipo, "linha_aberta") }));
+      },
       async listarRecentes(limite = 50) {
         return doTenant(b.events)
           .sort((x, y) => y.createdAt - x.createdAt)
@@ -2054,13 +2064,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     preferencias: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
-      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [] };
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false };
       return {
         async buscar() {
           return atual();
         },
         async gravar(p) {
-          const nova = { ...atual(), modoDev: p.modoDev };
+          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}) };
           b.preferencias.set(chave, nova);
           return nova;
         },

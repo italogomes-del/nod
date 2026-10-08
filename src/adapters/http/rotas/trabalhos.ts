@@ -2,6 +2,7 @@ import type { RespostaMutacao } from "../../../contracts/api.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { fazerAqui, fazerDepois, mensagemParaTrabalho } from "../../../use-cases/coordenar-trabalhos.ts";
 import { detalharTrabalho, listarTrabalhos, pararTrabalho } from "../../../use-cases/trabalhos.ts";
+import { registrarLinhas, taxasDasLinhas } from "../../../use-cases/telemetria-linhas.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, texto, type DepsRotas } from "./executar-caso.ts";
 
@@ -72,6 +73,22 @@ export function criarRotasTrabalhos(d: DepsRotas): Rota[] {
       async handler(ctx) {
         const r = await executar(ctx.escopo, fazerAqui, { trabalhoId: ctx.params.id ?? "" });
         ctx.json(200, { ok: true, ids: { trabalho: r.trabalho.id, turno: r.turnoId }, trabalho: r.trabalho });
+      },
+    },
+    {
+      // #191: a web manda em lote o que mostrou e o que a pessoa abriu; vai só para events (sem frame).
+      metodo: "POST",
+      padrao: /^\/telemetria\/linhas$/,
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        ctx.json(200, await executar(ctx.escopo, registrarLinhas, { eventos: corpo.eventos }));
+      },
+    },
+    {
+      metodo: "GET",
+      padrao: /^\/telemetria\/linhas$/,
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, taxasDasLinhas, {}));
       },
     },
   ];

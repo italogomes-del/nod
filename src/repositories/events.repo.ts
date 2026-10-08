@@ -37,6 +37,36 @@ export function eventsRepo(conn: Conn, escopo: Escopo) {
       return { ids };
     },
 
+    /**
+     * definido em 2026-10-07 (ADR-081, #191): a telemetria das linhas do chat vai só para `events`, sem outbox — nenhum
+     * frame sai dela (a web que mandou já sabe). Mesmas colunas de gravarComOutbox.
+     */
+    async gravarSemOutbox(eventos: EventoGravavel[]): Promise<number> {
+      let n = 0;
+      for (const ev of eventos) {
+        const a = ev.autoria;
+        await conn`
+          insert into events (tenant_id, owner_id, kind, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality,
+            locality_reason, machine_id, decidido_por, regra_versao, pessoa_destino_id, conversa_id, turno_id, dados)
+          values (${escopo.tenantId}, ${escopo.pessoaId}, ${ev.kind}, ${a.autor_tipo}, ${a.autor_id}, ${a.sob_procuracao_de}, ${a.conta_de_execucao},
+            ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por}, ${a.regra_versao}, ${ev.pessoaDestinoId},
+            ${ev.conversaId ?? null}, ${ev.turnoId ?? null}, ${conn.json(ev.dados ?? {})})`;
+        n += 1;
+      }
+      return n;
+    },
+
+    /** #191: por tipo de linha, quantas chaves distintas a pessoa viu e abriu desde `desde` (a taxa do Modo dev). */
+    async contarLinhas(desde: number): Promise<{ tipo: string; mostradas: number; abertas: number }[]> {
+      return conn<{ tipo: string; mostradas: number; abertas: number }[]>`
+        select dados->>'tipo' as tipo,
+          count(distinct dados->>'chave_linha') filter (where kind = 'linha_mostrada')::int as mostradas,
+          count(distinct dados->>'chave_linha') filter (where kind = 'linha_aberta')::int as abertas
+        from events
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and kind in ('linha_mostrada', 'linha_aberta') and created_at >= ${new Date(desde)}
+        group by 1`;
+    },
+
     async listarRecentes(limite = 50): Promise<{ id: string; kind: string; createdAt: string }[]> {
       const linhas = await conn<{ id: string; kind: string; created_at: string }[]>`
         select id, kind, created_at from events where tenant_id = ${escopo.tenantId}
