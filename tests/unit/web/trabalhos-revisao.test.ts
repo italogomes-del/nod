@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FrameSse } from "../../../src/contracts/frame.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
@@ -177,5 +177,22 @@ describe("W11: sair da task de um bot cuja conversa não está carregada esquece
     const e = aplicarFrame(naTask(1), frame("turno.delta", { turnoId: "tv", conversaId: "c-dev1", texto: "Gravando" }), AGORA);
     const carregada = { ...e, conversas: { "c-dev1": { mensagens: [] } as never } };
     expect(reduzir(carregada, { tipo: "navegar", tela: conversaLeo }).atividades["c-dev1"]?.tv?.atual).toBe("Gravando");
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+/** O cliente REST da web entra por `vi.importActual` (lib DOM fora do tsconfig.server.json; ver trabalhos.test.ts). */
+type ApiDeTeste = { criarApi: (escopo: { tenantId: string; pessoaId: string }) => { telemetriaLinhas(eventos: readonly unknown[]): Promise<unknown> } };
+
+describe("W12: o último lote da telemetria sobrevive ao pagehide", () => {
+  it("o POST telemetria/linhas sai com keepalive", async () => {
+    const chamadas: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => { chamadas.push({ url, init }); return new Response(JSON.stringify({ ok: true, ids: {} })); });
+    const api = (await vi.importActual<ApiDeTeste>("../../../web/lib/api.ts")).criarApi({ tenantId: "t", pessoaId: "p" });
+    await api.telemetriaLinhas([{ tipo: "rotina", agenteId: "leo", chaveLinha: "k", acao: "mostrada" }]);
+    expect(chamadas[0]?.url).toBe("/api/t/t/telemetria/linhas");
+    expect(chamadas[0]?.init.method).toBe("POST");
+    expect(chamadas[0]?.init.keepalive).toBe(true);
   });
 });

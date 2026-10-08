@@ -56,11 +56,12 @@ export class ErroApi extends Error {
 export type SalaDto = { sala: Sala; membros: MembroSala[] };
 export type RegistroCatcher = { id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number };
 
-async function pedir<T>(metodo: string, url: string, corpo?: unknown): Promise<T> {
+async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoes: { keepalive?: true } = {}): Promise<T> {
   const r = await fetch(url, {
     method: metodo,
     headers: corpo === undefined ? {} : { "content-type": "application/json" },
     body: corpo === undefined ? undefined : JSON.stringify(corpo),
+    ...opcoes,
   });
   const texto = await r.text();
   let lido: unknown = null;
@@ -169,7 +170,8 @@ export function criarApi(escopo: Escopo) {
     trabalhoDepois: (id: string, depoisDe: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/depois`, { depoisDe }),
     trabalhoFazerAqui: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/fazer-aqui`),
     // #191: o que a tela mostrou e o que a pessoa abriu, em lote; a taxa por tipo aparece no Modo dev.
-    telemetriaLinhas: (eventos: readonly EventoLinha[]) => post<RespostaMutacao>("telemetria/linhas", { eventos }),
+    // Revisão W12 (2026-10-08): o último lote sai no `pagehide`; com keepalive o POST termina depois de a aba fechar.
+    telemetriaLinhas: (eventos: readonly EventoLinha[]) => pedir<RespostaMutacao>("POST", `${base}/telemetria/linhas`, { eventos }, { keepalive: true }),
     taxasLinhas: () => get<TaxaDeAbertura[]>("telemetria/linhas"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
