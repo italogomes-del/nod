@@ -318,6 +318,19 @@ describe("tudo que não é balão fica no centro", () => {
   });
 });
 
+describe("QA do épico (2026-10-08): nome de rotina longo não estica a linha nem a etiqueta", () => {
+  it("o rotinaNome de 80 caracteres sai com 48 na linha 'rodou N vezes' e na etiqueta 'da rotina'", () => {
+    const longo = "Toda manhã leia o canal #suporte e me avise se alguém marcar você ou o time";
+    const lista = [1, 2].map((i) => trabalho(`tb-r${i}`, { origem: "rotina", rotinaId: "rot", rotinaNome: longo, estado: "terminado", terminadoEm: t0 + 60 * MIN }));
+    const { e, c } = cenario([...execucaoSilenciosa(1, t0), ...execucaoSilenciosa(2, t0 + 10 * MIN)], { trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: null } });
+    const linha = itens(c, e)[0]!.html;
+    expect(linha).toContain("<b>Toda manhã leia o canal #suporte e me avise se…</b> rodou 2 vezes");
+    expect(linha).not.toContain(longo);
+    const com = cenario(execucaoComNovidade(t0), { trabalhos: { trabalhos: [trabalho("tb-r6", { origem: "rotina", rotinaNome: longo, estado: "terminado", terminadoEm: t0 + 2 * MIN })], pressao: null, memoriaTotalMb: null } });
+    expect(itens(com.c, com.e).map((b) => b.html).join("")).toContain('<span class="etiqueta-origem">da rotina Toda manhã leia o canal #suporte e me avise se…</span>');
+  });
+});
+
 describe("QA do épico (2026-10-08): o aviso de turno interrompido da task fica na tela dela", () => {
   it("Parar task / Fazer depois / Fazer aqui não deixam 'Turno interrompido' no chat; a task que falhou deixa", () => {
     const aviso = (id: string, trabalhoId: string): Mensagem => msg(id, t0 + MIN, { kind: "sistema", texto: "Turno interrompido: você pediu para parar.", turnoId: `t-${id}`, origemTurno: "conversa", trabalhoId });

@@ -99,11 +99,19 @@ export function horariosDaRotina(instantes: readonly number[]): string {
   return `${h[0]} a ${h[h.length - 1]}`;
 }
 
+/**
+ * definido em 2026-10-08 (QA do épico): o nome da rotina é a primeira linha da instrução (o servidor corta em 80); na
+ * linha "… rodou N vezes" e na etiqueta "da rotina …" ele vai até 48 caracteres, como o da lista de rotinas — com 80, a
+ * linha quebrava em duas com a seta solta na ponta e a etiqueta ficava maior que o nome do bot.
+ */
+const NOME_DA_ROTINA_MAX = 48;
+const curto = (texto: string): string => (texto.length > NOME_DA_ROTINA_MAX ? `${texto.slice(0, NOME_DA_ROTINA_MAX - 1).trimEnd()}…` : texto);
+
 function nomeDaRotina(estado: Estado, u: Unidade): string | null {
-  if (u.trabalho?.rotinaNome) return u.trabalho.rotinaNome;
+  if (u.trabalho?.rotinaNome) return curto(u.trabalho.rotinaNome);
   const r = u.rotinaId ? estado.rotinas.find((x) => x.rotina.id === u.rotinaId)?.rotina : undefined;
-  if (r) return r.instrucao.length > 48 ? `${r.instrucao.slice(0, 47).trimEnd()}…` : r.instrucao;
-  return u.trabalho?.titulo ?? null;
+  if (r) return curto(r.instrucao);
+  return u.trabalho?.titulo ? curto(u.trabalho.titulo) : null;
 }
 
 const SETA = '<span class="linha-seta" aria-hidden="true">›</span>';
