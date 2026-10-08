@@ -11,7 +11,7 @@ function entrada(o: Partial<EntradaDiagnostico> = {}): EntradaDiagnostico {
     conexao: { servidor: "https://nod.exemplo.com.br/caminho?x=1", conectado: true, maquinaId: "7d0c8a47-3a49-4f1e-9a0e-1c8a7e1d2f3b", status: "Conectado." },
     ia: [{ harness: "claude-cli", estado: "pronto", motivo: null, versao: "2.1.0" }, { harness: "codex-cli", estado: "ausente", motivo: "Instale o Codex", versao: null }],
     execucao: { conectado: true, lacoAtivo: true, sondandoIa: false, emLigacao: false, githubNoMac: true },
-    preferencias: { avisos: true, tema: "sistema", avisosBloqueados: false },
+    preferencias: { avisos: true, tema: "sistema", som: true, avisosBloqueados: false },
     registros: "",
     ...o,
   };
@@ -30,6 +30,7 @@ describe("montarDiagnostico", () => {
     expect(t).toContain("Gerado em: 2026-10-05T21:07:03.000Z");
     expect(t).toContain("claude-cli: pronto (versão 2.1.0)");
     expect(t).toContain("codex-cli: ausente — Instale o Codex");
+    expect(t).toContain("Som dos avisos: ligado\n");
   });
 
   it("usuario:senha na URL do servidor nunca sai", () => {

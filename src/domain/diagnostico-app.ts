@@ -46,7 +46,7 @@ export type EntradaDiagnostico = {
   /** `null` = desconectado (antes de conectar ou depois de parar). */
   ia: readonly IaDiagnostico[] | null;
   execucao: { conectado: boolean; lacoAtivo: boolean; sondandoIa: boolean; emLigacao: boolean; githubNoMac: boolean | null };
-  preferencias: { avisos: boolean; tema: string; avisosBloqueados: boolean };
+  preferencias: { avisos: boolean; tema: string; som: boolean; avisosBloqueados: boolean };
   /** A cauda do log local (as duas gerações), crua; `""` se não houver ou se o arquivo foi recusado. */
   registros: string;
 };
@@ -161,6 +161,7 @@ export function montarDiagnostico(e: EntradaDiagnostico, agora: number): string 
       : [`Estado: ${DESCONECTADO}`, `Ligação aberta: ${simNao(e.execucao.emLigacao)}`]),
     secao("Preferências", [
       `Avisos no Mac: ${e.preferencias.avisos ? "ligados" : "desligados"}${e.preferencias.avisosBloqueados ? " (bloqueados pelo macOS)" : ""}`,
+      `Som dos avisos: ${e.preferencias.som ? "ligado" : "desligado"}`,
       `Tema: ${e.preferencias.tema}`,
     ]),
     secao("Quedas recentes", quedas),
