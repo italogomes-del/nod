@@ -4,7 +4,7 @@ import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { podeAbrirTask, promoveNaRede, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
+import { podeAbrirTask, promoveNaRede, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -47,8 +47,12 @@ export const abrirTask: CasoNod<Deps, "abrir_task"> = async (deps, input) => {
   if (input.depois_de && (!depoisDe || depoisDe.agenteId !== turno.agenteId || !trabalhoAberto(depoisDe.estado))) {
     return { data: { ok: false, erro: "depois_de_invalido", instrucao: "depois_de precisa ser o id de uma task sua ainda aberta, como veio em \"Trabalhos em andamento\". Abra sem depois_de ou corrija o id." } };
   }
-  const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const deRotina = atual?.origem === "rotina";
+  // Revisão do épico (S12, 2026-10-08): a execução da rotina abre até TETO_TASKS_POR_EXECUCAO_DE_ROTINA tasks.
+  if (deRotina && (await deps.repos.trabalhos.filhos(atual.id)).length >= TETO_TASKS_POR_EXECUCAO_DE_ROTINA) {
+    return { data: { ok: false, erro: "teto_de_tasks", instrucao: `Esta execução da rotina já abriu ${TETO_TASKS_POR_EXECUCAO_DE_ROTINA} tasks, o máximo. Não abra outras: faça o que faltar aqui mesmo, ou deixe para a próxima execução e diga isso no resultado.` } };
+  }
+  const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const conversaId = await conversaDoBot(deps, turno);
   const { trabalho, events } = await criarTrabalho(deps, {
     agenteId: turno.agenteId,

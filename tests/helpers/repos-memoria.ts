@@ -829,6 +829,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async abertosDoAgente(agenteId) {
         return doTenant(b.trabalhos).filter((t) => t.agenteId === agenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoTrabalho);
       },
+      async filhaAbertaDaRotina(rotinaId) {
+        const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && x.trabalhoMaeId !== null && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado));
+        return t ? semDonoTrabalho(t) : null;
+      },
       async filhos(maeId) {
         return doTenant(b.trabalhos).filter((t) => t.trabalhoMaeId === maeId).map(semDonoTrabalho);
       },

@@ -99,6 +99,22 @@ describe("dispararRotina", () => {
     expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
   });
 
+  /** Revisão do épico #188 (S12, 2026-10-08): a task que a execução anterior abriu ainda aberta também pula a janela. */
+  it("S12: task filha da execução anterior ainda aberta → a janela do agendador é pulada; acabada, roda", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const primeira = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in primeira.data)) throw new Error("deveria ter disparado");
+    const mae = d.banco.trabalhos[0]!;
+    const filha = await d.deps.repos.trabalhos.criar({ agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: "Responder o chamado 42", origem: "rotina", rotinaId: rotina.id, trabalhoMaeId: mae.id });
+    await d.deps.repos.turnos.assentar(primeira.data.turno.id, { estado: "concluido" });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    const pulada = await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" });
+    expect(pulada.data).toEqual({ pulada: true, turnoAbertoId: null, trabalhoAbertoId: filha!.id, proximaExecucao: Date.parse("2026-09-21T08:00:00-03:00") });
+    await d.deps.repos.trabalhos.mudarEstado(filha!.id, "terminado", AGORA);
+    expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
+  });
+
   it("janelas perdidas não são repostas: a próxima execução é calculada a partir de agora, nunca da janela", async () => {
     const tarde = Date.parse("2026-09-20T15:00:00-03:00"); // domingo, três dias depois
     const d = depsMemoria({ agora: () => tarde });

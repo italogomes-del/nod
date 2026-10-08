@@ -361,7 +361,11 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
     volatil.push(`Task atual: você está na task "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e entregue o resultado; a pergunta e o resultado chegam à pessoa como balão da task.${naoAbre}`);
   }
   const abertos = entrada.trabalhosAbertos ?? [];
-  if (abertos.length > 0) volatil.push(`Trabalhos em andamento (JSON das suas tasks abertas; o id serve para mandar_para_task e depois_de): ${JSON.stringify(abertos.map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimo_passo: t.ultimoPasso })))}`);
+  // revisto em 2026-10-08 (revisão do épico, S12): a task de rotina também vê as abertas do bot — a execução anterior
+  // pode ter aberto a mesma, e sem a lista ela abria de novo a cada execução.
+  const naRotina = entrada.trabalho ? " Antes de abrir uma task, confira se ela já não está aqui: não abra de novo o que já está em andamento." : "";
+  const usos = entrada.ferramentas.some((f) => f.nome === "mandar_para_task") ? "mandar_para_task e depois_de" : "depois_de";
+  if (abertos.length > 0) volatil.push(`Trabalhos em andamento (JSON das suas tasks abertas; o id serve para ${usos}):${naRotina} ${JSON.stringify(abertos.map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimo_passo: t.ultimoPasso })))}`);
   if (entrada.contextoConversa) volatil.push(`${CABECALHO_CONTEXTO_RECENTE}\n${entrada.contextoConversa}`);
   return { estavel: linhas, volatil };
 }

@@ -123,6 +123,12 @@ export function podeAbrirTask(trabalho: { origem: OrigemTrabalho; trabalhoMaeId:
   return trabalho === null || (trabalho.origem === "rotina" && trabalho.trabalhoMaeId === null);
 }
 
+/**
+ * definido em 2026-10-08 (revisão do épico, S12, decisão do Marlon): uma execução de rotina abre no máximo isto de tasks;
+ * a seguinte é recusada com instrução. Sem teto por bot — o limite é a máquina (ADR-081 §4).
+ */
+export const TETO_TASKS_POR_EXECUCAO_DE_ROTINA = 10;
+
 /** `mandar_para_task` é da conversa coordenadora: só turno sem trabalho repassa a uma task. */
 export function podeMandarParaTask(trabalho: unknown): boolean {
   return trabalho === null || trabalho === undefined;

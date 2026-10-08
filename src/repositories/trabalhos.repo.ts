@@ -132,6 +132,19 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraTrabalho);
     },
 
+    /**
+     * definido em 2026-10-08 (revisão do épico, S12): uma task aberta por uma execução desta rotina (filha, com mãe) que
+     * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada.
+     */
+    async filhaAbertaDaRotina(rotinaId: string): Promise<Trabalho | null> {
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from trabalhos
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and trabalho_mae_id is not null
+          and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')
+        order by criado_em limit 1`;
+      return l ? paraTrabalho(l) : null;
+    },
+
     /** Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0060). */
     async mudarEstado(id: string, estado: EstadoTrabalho, agora: number): Promise<Trabalho | null> {
       const final = estado === "terminado" || estado === "parado" || estado === "falhou";
