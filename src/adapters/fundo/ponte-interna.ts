@@ -54,6 +54,8 @@ export type DepsPonte = {
   fezFerramenta?: (turnoId: string) => boolean;
   /** ADR-081 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
+  /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
+  redeMs?: number;
 };
 
 export type PonteInternaNod = PonteInterna & {
@@ -231,10 +233,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       });
       // A rede de 2 min, numa transação PRÓPRIA: se a entrega correr junto, só a promoção desfaz — nunca a renovação.
       const despachado = despachados.get(p.turnoId);
-      if (ativo && conversaSemTrabalho && despachado && agora() - despachado.em >= REDE_MS && deps.fezFerramenta?.(p.turnoId)) {
+      const redeMs = deps.redeMs ?? REDE_MS;
+      if (ativo && conversaSemTrabalho && despachado && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness: harnesses.get(p.turnoId) ?? null, sessaoCli: despachado.sessaoCli });
+          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness: harnesses.get(p.turnoId) ?? null, sessaoCli: despachado.sessaoCli, redeMs });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
       }
