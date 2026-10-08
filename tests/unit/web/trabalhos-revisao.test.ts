@@ -5,7 +5,7 @@ import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { aplicarFrame, estadoInicial, invalidacoesDaTela, mudouNaTela, reduzir, type Estado, type Tela } from "../../../web/estado/reducer.ts";
 import { ATIVIDADE_VAZIA, comTexto } from "../../../web/lib/atividade.ts";
 import { lembrar } from "../../../web/lib/lembrar.ts";
-import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, renderFaixaTrabalhos, renderTelaTrabalho } from "../../../web/telas/trabalhos.ts";
+import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, renderFaixaTrabalhos, renderTelaTrabalho, renderTopoTrabalho } from "../../../web/telas/trabalhos.ts";
 
 /**
  * Correções da revisão do épico #188 na web (definido em 2026-10-08, achados W1–W12): a tela da task por blocos, a task
@@ -194,5 +194,14 @@ describe("W12: o último lote da telemetria sobrevive ao pagehide", () => {
     expect(chamadas[0]?.url).toBe("/api/t/t/telemetria/linhas");
     expect(chamadas[0]?.init.method).toBe("POST");
     expect(chamadas[0]?.init.keepalive).toBe(true);
+  });
+});
+
+describe("QA do épico (2026-10-08): o chip da task de colega mostra quem pediu › quem faz (K7)", () => {
+  it("pedido do Leonardo ao Dev 1: mascote do Leonardo, seta, mascote do Dev 1; task da pessoa sem seta", () => {
+    const e = estadoCom([trabalho("login", { origem: "colega", pedidoPorAgenteId: "leo", pedidoPorNome: "Leonardo" }), trabalho("churn")]);
+    const chip = renderTopoTrabalho(e, "login");
+    expect(chip).toMatch(/<span class="tk-chip">.*aria-label="Leonardo[^"]*".*class="tk-seta".*aria-label="Dev 1[^"]*".*<span class="tk-titulo">login/);
+    expect(renderTopoTrabalho(e, "churn")).not.toContain("tk-seta");
   });
 });

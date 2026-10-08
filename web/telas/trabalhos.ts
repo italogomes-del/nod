@@ -178,7 +178,10 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const bot = agente(estado, t.agenteId);
   const nome = bot?.nome ?? "bot";
   const estadoCurto = t.estado === "rodando" ? "" : `${situacaoDe(t)} · `;
-  const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span><span class="tk-tempo">· ${esc(estadoCurto + tempoDe(t, estado.agora))}</span></span>`;
+  // definido em 2026-10-08 (QA do épico, K7): no pedido de colega, o chip mostra quem pediu › quem faz.
+  const pediu = t.origem === "colega" ? agente(estado, t.pedidoPorAgenteId) : undefined;
+  const quemPediu = pediu ? `${iconeAgente(pediu, "sm")}<span class="tk-seta" aria-label="pediu a">${ICONE.seta}</span>` : "";
+  const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span><span class="tk-tempo">· ${esc(estadoCurto + tempoDe(t, estado.agora))}</span></span>`;
   const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", t.custoUsd !== null ? `${usd(t.custoUsd)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
   return `<div class="tk-topo">${chip}<p class="tk-linha">${esc(linha)}</p>${espera}</div>`;
