@@ -1146,6 +1146,10 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .lugar-faixa-trabalhos:empty { display: none; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap { padding-top: 0; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap .composer .box { border-top-left-radius: 0; border-top-right-radius: 0; }
+/* definido em 2026-10-08 (QA do épico): com a faixa da pergunta no alto do campo ("Dev 1 está esperando sua resposta"), a
+   faixa de Trabalhos ficava em cima dela, aberta embaixo, e o campo perdia os cantos de cima sem nada colado nele. */
+.lugar-faixa-trabalhos:has(+ .composer-wrap .faixa-pergunta) .faixa-trab { margin-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: 16px; }
+.lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap:has(.faixa-pergunta) .composer .box { border-top-left-radius: 28px; border-top-right-radius: 28px; }
 .faixa-trab { margin-top: 8px; padding: 6px 4px 4px; border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--surface-side); }
 .ft-cab { display: flex; align-items: center; gap: 8px; padding: 2px 6px 4px 12px; font-size: 12px; color: var(--ink-3); }
 .ft-n { margin-right: auto; }

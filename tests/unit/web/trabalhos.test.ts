@@ -94,6 +94,9 @@ describe("faixa de Trabalhos e pílula (#195, K1/K6)", () => {
   it("CSS: a faixa cola no campo (o campo perde os cantos de cima) e a região some vazia", () => {
     expect(css).toMatch(/\.lugar-faixa-trabalhos:empty \{ display: none; \}/);
     expect(css).toMatch(/\.lugar-faixa-trabalhos:has\(\.faixa-trab\) \+ \.composer-wrap \.composer \.box \{ border-top-left-radius: 0; border-top-right-radius: 0; \}/);
+    // QA do épico (2026-10-08): com a faixa da pergunta entre a de Trabalhos e o campo, a faixa fecha e o campo fica redondo.
+    expect(css).toMatch(/\.lugar-faixa-trabalhos:has\(\+ \.composer-wrap \.faixa-pergunta\) \.faixa-trab \{ margin-bottom: 8px; border-bottom: 1px solid var\(--line\); border-radius: 16px; \}/);
+    expect(css).toMatch(/\.composer-wrap:has\(\.faixa-pergunta\) \.composer \.box \{ border-top-left-radius: 28px; border-top-right-radius: 28px; \}/);
     expect(readFileSync(new URL("../../../web/index.html", import.meta.url), "utf8")).toMatch(/id="pilula-novas"[^\n]*\n[^\n]*\n\s*<div class="lugar-faixa-trabalhos" id="faixa-trabalhos"><\/div>\n\s*<footer class="composer-wrap" id="composer">/);
   });
 });
