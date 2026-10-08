@@ -2,6 +2,7 @@ import type { MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Executor } from "../contracts/evento.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
+import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
@@ -281,6 +282,68 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         ) v on true
         where w.tenant_id = ${escopo.tenantId} and w.id = any(${[...ids]}::uuid[])`;
       return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id, turnosAbertos: l.abertos ?? [], deFora: l.de_fora }]));
+    },
+
+    /**
+     * Pedidos a colega que pararam sem voltar (definido em 2026-10-08, src/domain/pedido-parado.ts): handoff com tarefa,
+     * feito desde `desde`, sem peer_ask da mesma tarefa na conversa de quem pediu, com a task do colega acabada ou
+     * esperando a pessoa — e quem pediu não está numa task parada. Até 20 por vez, os mais antigos primeiro.
+     */
+    async pedidosAColegaParados(desde: number, agora: number): Promise<PedidoParado[]> {
+      const linhas = await conn<{
+        tarefa_id: string; colega_id: string; colega_estado: EstadoTrabalho; ultimo_id: string | null; ultimo_motivo: string | null; queda_em: Date | null;
+        quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; texto_final: string | null; turno_texto: string | null;
+      }[]>`
+        select h.payload->>'tarefaId' as tarefa_id, c.id as colega_id, c.estado as colega_estado,
+          u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.lease_ate, u.criado_em) as queda_em,
+          (select count(*)::int from turnos q where q.tenant_id = c.tenant_id and q.trabalho_id = c.id and q.estado = 'interrompido'
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
+          k.id as card_id, k.estado as card_estado,
+          exists (select 1 from turnos v where v.tenant_id = c.tenant_id and v.owner_id = c.owner_id and u.id is not null
+            and v.criado_em > coalesce(u.lease_ate, u.criado_em)
+            and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal,
+          f.texto as texto_final, f.turno_id as turno_texto
+        from mensagens h
+        join trabalhos c on c.tenant_id = h.tenant_id and c.id::text = h.payload->>'trabalhoId'
+        left join turnos tp on tp.tenant_id = h.tenant_id and tp.id = h.turno_id
+        left join trabalhos rp on rp.tenant_id = h.tenant_id and rp.id = tp.trabalho_id
+        left join lateral (
+          select t.id, t.motivo_interrupcao, t.lease_ate, t.criado_em from turnos t
+          where t.tenant_id = c.tenant_id and t.trabalho_id = c.id and t.estado in ('concluido', 'interrompido')
+            and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
+          order by t.criado_em desc, t.id desc limit 1
+        ) u on true
+        left join lateral (
+          select d.id, d.estado from decisoes d where d.tenant_id = c.tenant_id and d.turno_id = u.id and d.tipo = 'retomar_turno'
+          order by d.criado_em desc limit 1
+        ) k on true
+        left join lateral (
+          select m.texto, m.turno_id from mensagens m join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
+          where m.tenant_id = c.tenant_id and t.trabalho_id = c.id and m.kind = 'texto' and m.autor_tipo = 'agente' and m.autor_id = c.agente_id
+            and coalesce(m.parcial, false) = false
+          order by m.criado_em desc, m.id desc limit 1
+        ) f on true
+        where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and h.kind = 'handoff'
+          and h.payload->>'tarefaId' is not null and h.criado_em >= ${data(desde)}
+          and c.estado in ('terminado', 'parado', 'falhou', 'precisa_de_voce')
+          and coalesce(rp.estado, '') <> 'parado'
+          and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
+            and r.payload->>'tarefaId' = h.payload->>'tarefaId')
+        order by h.criado_em, h.id
+        limit 20`;
+      return linhas.map((l) => ({
+        tarefaId: l.tarefa_id,
+        trabalhoColegaId: l.colega_id,
+        estadoColega: l.colega_estado,
+        ultimoTurnoId: l.ultimo_id,
+        ultimoMotivo: l.ultimo_motivo,
+        quedaEm: msOuNull(l.queda_em),
+        quedas: l.quedas,
+        cardRetomar: l.card_id ? { id: l.card_id, aberto: l.card_estado === "pendente" || l.card_estado === "reaberta" } : null,
+        sinalDepoisDaQueda: l.sinal,
+        textoFinal: l.texto_final,
+        turnoDoTextoFinal: l.turno_texto,
+      }));
     },
   };
 }

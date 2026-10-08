@@ -23,6 +23,7 @@ export type ChaveRedacao =
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
+  | "retomada-automatica"
   | "parei-falta-dado"
   | "anotei"
   | "permissao-permanente"
@@ -60,6 +61,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",
   retomada: "Retomando o turno interrompido ({motivo}) a partir de onde parou; nada foi reenviado.",
+  // definido em 2026-10-08 (pedidos-parados.ts): o pedido de um colega caiu por infraestrutura e o servidor o retomou.
+  "retomada-automatica": "Este pedido caiu ({motivo}) e foi retomado sozinho quando as máquinas voltaram: tentativa {tentativa} de {maximo}.",
   // definido em 2026-09-24 (emenda da ADR-045): só a frase curta da fila ("Sua vez", decisoes.frase); na
   // conversa a pergunta é a fala do próprio agente (pedir-a-pessoa.ts).
   "parei-falta-dado": "parei: falta {dado}; quem destrava: {quem}; não vou tentar de novo.",
