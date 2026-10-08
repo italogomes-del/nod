@@ -56,6 +56,8 @@ export type OpcoesBoot = {
   drivers?: (p: { urlNod: string; app: App }) => Driver[];
   /** Provedores de voz prontos (NOD-180); só em teste. Default: pelas envs NOD_VOZ_*. */
   voz?: ProvedoresVoz;
+  /** Só em teste: o prazo da rede de 2 min (OpcoesCompor.redeMs). */
+  redeMs?: number;
   segredoSessao?: string;
   staticDir?: string;
 };
@@ -139,7 +141,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
-  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
+  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,

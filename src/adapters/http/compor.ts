@@ -161,6 +161,8 @@ export type OpcoesCompor = {
   detectorGh?: DetectorGh;
   /** Provedores de voz prontos (NOD-180); só em teste, para observar o TTS falso. Default: pelas envs NOD_VOZ_*. */
   voz?: ProvedoresVoz;
+  /** Só em teste (definido em 2026-10-08): o prazo da rede de 2 min (ADR-081 §2), para o e2e não esperar 120 s. Default: REDE_MS. */
+  redeMs?: number;
 };
 
 export type App = {
@@ -420,6 +422,7 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-081: a rede de 2 min só promove quem já chamou ferramenta; a memória do Mac fica em memória do processo.
     fezFerramenta: (id) => trabalhosVivos.ultimaFerramenta(id) !== null,
     registrarMemoria: (pessoaId, machineId, leitura) => trabalhosVivos.registrarMemoria(pessoaId, machineId, leitura),
+    ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];

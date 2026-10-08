@@ -62,4 +62,10 @@ describe("promoveNaRede (rede de 2 min)", () => {
     expect(promoveNaRede({ ...ok, capacidades: CAPACIDADES_HARNESS["codex-cli"] })).toBe(false);
     expect(promoveNaRede({ ...ok, capacidades: SEM_CAPACIDADES })).toBe(false);
   });
+  it("o prazo do e2e (redeMs) troca só o limite de tempo; ausente vale REDE_MS", () => {
+    expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000, redeMs: 3_000 })).toBe(true);
+    expect(promoveNaRede({ ...ok, despachadoHaMs: 2_999, redeMs: 3_000 })).toBe(false);
+    expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000, redeMs: 3_000, capacidades: SEM_CAPACIDADES })).toBe(false);
+    expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000 })).toBe(false);
+  });
 });

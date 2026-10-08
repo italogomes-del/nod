@@ -132,9 +132,10 @@ export const REDE_MS = 120_000;
  * A rede de 2 min (#193): só o turno de CONVERSA da pessoa (nada de sala, ligação, rotina, colega ou retomada), sem
  * trabalho, rodando há REDE_MS, que já chamou ao menos uma ferramenta, e só com harness que bifurca sessão — sem
  * isso a próxima mensagem não teria como seguir a conversa sem atropelar a sessão do trabalho promovido.
+ * `redeMs` existe só para o e2e (definido em 2026-10-08): ausente, vale REDE_MS.
  */
-export function promoveNaRede(p: { origem: OrigemTurno; trabalhoId: string | null | undefined; estado: EstadoTurno; despachadoHaMs: number; fezFerramenta: boolean; capacidades: CapacidadesHarness }): boolean {
-  return p.origem === "conversa" && !p.trabalhoId && p.estado === "despachando" && p.despachadoHaMs >= REDE_MS && p.fezFerramenta && p.capacidades.bifurcaSessao;
+export function promoveNaRede(p: { origem: OrigemTurno; trabalhoId: string | null | undefined; estado: EstadoTurno; despachadoHaMs: number; fezFerramenta: boolean; capacidades: CapacidadesHarness; redeMs?: number }): boolean {
+  return p.origem === "conversa" && !p.trabalhoId && p.estado === "despachando" && p.despachadoHaMs >= (p.redeMs ?? REDE_MS) && p.fezFerramenta && p.capacidades.bifurcaSessao;
 }
 
 /** O que a linha "Abriu a task …" diz por origem (texto da mensagem `sistema`; a web desenha pelo payload). */

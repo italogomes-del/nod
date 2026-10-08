@@ -240,11 +240,11 @@ export const absorverNoTrabalho: CasoDeUso<{ turnoId: string }, { textos: string
  * ferramenta) vira o trabalho `rede`. O processo segue intocado; a sessão dele passa a ser do trabalho, e a próxima
  * mensagem da conversa sai com `bifurcar` (emitir-plano-turno). Só com harness que `bifurcaSessao`.
  */
-export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null }, { trabalho: Trabalho | null }> = async (deps, input) => {
+export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null; redeMs?: number }, { trabalho: Trabalho | null }> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   if (!turno) return { data: { trabalho: null } };
   const capacidades = capacidadesDe(input.harness);
-  if (!promoveNaRede({ origem: turno.origem, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades })) return { data: { trabalho: null } };
+  if (!promoveNaRede({ origem: turno.origem, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades, redeMs: input.redeMs })) return { data: { trabalho: null } };
   const { trabalho, events } = await criarTrabalho(deps, {
     agenteId: turno.agenteId,
     conversaId: turno.conversaId,
