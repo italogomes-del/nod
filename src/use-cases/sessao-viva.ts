@@ -1,6 +1,7 @@
 import type { Executor } from "../contracts/evento.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { contaminarSeAbsorveuDeFora } from "./coordenar-trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -87,7 +88,10 @@ export const confirmarNaSessao: CasoDeUso<{ turnoId: string; executor: Executor;
   if (e.ids.length === 0) return { data: { confirmadas: 0 } };
   const turno = await deps.repos.turnos.buscar(e.turnoId);
   if (!turno) return { data: { confirmadas: 0 } };
-  const absorvidos = await deps.repos.turnos.absorverNaSessao(turno, e.ids);
+  // Revisão do épico (S18, 2026-10-08): no turno de um trabalho, as confirmadas são os recados da faixa DELE (a fala da
+  // pessoa na tela da task, o mandar_para_task) — o absorverNaSessao só olha a conversa (`trabalho_id is null`).
+  const absorvidos = turno.trabalhoId ? await deps.repos.turnos.absorverDoTrabalho(turno, e.ids) : await deps.repos.turnos.absorverNaSessao(turno, e.ids);
+  if (turno.trabalhoId) await contaminarSeAbsorveuDeFora(deps, turno.id, absorvidos);
   return { data: { confirmadas: absorvidos.length }, events: eventosDeAbsorcao(deps, e.executor, turno.id, absorvidos) };
 };
 

@@ -301,16 +301,23 @@ export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDt
  * vivo dele, como a absorção da conversa (ADR-067) faz com a conversa. Só falas com mensagem de origem (a da pessoa
  * na tela da task e o recado da conversa) e sem anexo; a retomada de uma decisão nunca é absorvida.
  */
-export const absorverNoTrabalho: CasoDeUso<{ turnoId: string }, { textos: string[] }> = async (deps, input) => {
+export const absorverNoTrabalho: CasoDeUso<{ turnoId: string; confirma?: boolean; jaOferecidas?: readonly string[] }, { textos: string[]; ids: string[] }> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
-  if (!turno?.trabalhoId || turno.estado !== "despachando") return { data: { textos: [] } };
+  if (!turno?.trabalhoId || turno.estado !== "despachando") return { data: { textos: [], ids: [] } };
+  // Revisão do épico (S18, 2026-10-08): com `confirma` (o app confirma o que escreveu, #189) o recado NÃO sai da fila
+  // aqui — só em confirmarNaSessao. Antes ele saía `absorvido` na hora, e o CLI que morria antes de escrever o perdia.
+  if (input.confirma) {
+    const fora = new Set(input.jaOferecidas ?? []);
+    const fila = (await deps.repos.turnos.doTrabalho(turno.trabalhoId)).filter((t) => t.id !== turno.id && t.estado === "pendente" && Boolean(t.mensagemOrigemId) && t.entradaAnexos.length === 0 && !fora.has(t.id));
+    return { data: { textos: fila.map((t) => t.entradaTexto), ids: fila.map((t) => t.id) } };
+  }
   const absorvidos = await deps.repos.turnos.absorverDoTrabalho(turno);
-  if (absorvidos.length === 0) return { data: { textos: [] } };
+  if (absorvidos.length === 0) return { data: { textos: [], ids: [] } };
   const agora = deps.agora();
   const autoria = autoriaPessoa(deps.escopo);
   const events = absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: turno.id, trabalho_id: turno.trabalhoId ?? null } }));
   await contaminarSeAbsorveuDeFora(deps, turno.id, absorvidos);
-  return { data: { textos: absorvidos.map((a) => a.entradaTexto) }, events };
+  return { data: { textos: absorvidos.map((a) => a.entradaTexto), ids: absorvidos.map((a) => a.id) }, events };
 };
 
 /**

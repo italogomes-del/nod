@@ -20,6 +20,7 @@ import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
+import { confirmarNaSessao } from "./sessao-viva.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -87,6 +88,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const executor = entrega.executor ?? "catcher";
   const resultado = entrega.resultado;
   const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
+  // Revisão do épico (S19, 2026-10-08): mensagens que o CLI recebeu e cuja confirmação não chegou numa renovação (a
+  // última falhou) — a entrega as confirma ANTES de assentar, senão viravam turno próprio e a resposta saía duas vezes.
+  // Com a linha do turno já travada (a ordem de sempre: turno, depois os recados, depois o trabalho).
+  const confirmadas = entrega.mensagensEntregues?.length && !tardia ? await confirmarNaSessao(deps, { turnoId: turno.id, executor, ids: entrega.mensagensEntregues }) : null;
   const desfecho = desfechoDaEntrega(turno, resultado, agora);
   const interrompido = tardia || desfecho.estado === "interrompido";
   // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia).
@@ -106,7 +111,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // silêncio só é honesto quando a execução foi completa.
   const silencioso = turno.semNovidadeMotivo !== null && !interrompido && (turno.origem === "rotina" || turno.origem === "retomada");
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, machineId: entrega.machineId });
-  const events: RuntimeEvent[] = [];
+  const events: RuntimeEvent[] = [...(confirmadas?.events ?? [])];
 
   // Comando da conversa (0038): /uso e /contexto voltam do Claude Code em inglês; a pessoa lê em português. O
   // /compactar não tem resposta para a pessoa: medido ao vivo em 28/09, o CLI devolveu como resultado a saída do

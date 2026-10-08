@@ -191,7 +191,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const confirma = Array.isArray(p.mensagensEntregues);
       const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
-      const { ativo, mensagens, ids, conversaSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const { ativo, mensagens, ids, semMoldura, conversaSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
@@ -214,9 +214,14 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           events.push(...(a.events ?? []));
         }
         // ADR-081 (#193): a fala mandada à task (tela da task ou mandar_para_task) entra no turno vivo dela.
+        // Revisão do épico (S18, 2026-10-08): nas mesmas duas fases da conversa (#189) — oferecida aqui, absorvida na
+        // confirmação —, com o id em `mensagensIds` e em `mensagensSemMoldura` (é recado para a task, não fala no meio).
+        let semMoldura: string[] = [];
         if (r.ativo && p.aceitaMensagens) {
-          const b = await absorverNoTrabalho(d, { turnoId: p.turnoId });
+          const b = await absorverNoTrabalho(d, { turnoId: p.turnoId, confirma, jaOferecidas: [...jaOferecidas] });
           textos = [...textos, ...b.data.textos];
+          ids = [...ids, ...b.data.ids];
+          semMoldura = b.data.ids;
           events.push(...(b.events ?? []));
         }
         const turno = r.ativo ? await d.repos.turnos.buscar(p.turnoId) : null;
@@ -229,7 +234,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (mudanca?.mudou) events.push(eventoPressao(d, mudanca, p.memoria));
         }
         if (events.length) await d.repos.events.gravarComOutbox(events);
-        return { ativo: r.ativo, mensagens: textos, ids, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
+        return { ativo: r.ativo, mensagens: textos, ids, semMoldura, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
       });
       // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".
       if (ativo) for (const id of p.mensagensEntregues ?? []) jaOferecidas.delete(id);
@@ -256,7 +261,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         for (const id of ids) jaOferecidas.add(id);
         oferecidas.set(p.turnoId, jaOferecidas);
       }
-      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}) };
+      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}), ...(semMoldura.length ? { mensagensSemMoldura: semMoldura } : {}) };
     },
 
     async entregar(e: Entrega) {

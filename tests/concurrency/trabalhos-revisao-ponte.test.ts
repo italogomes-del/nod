@@ -9,7 +9,9 @@ import { criarRepos } from "../../src/repositories/index.ts";
 import { criarInterruptor } from "../../src/services/interruptor.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
+import { mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
+import { criarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import type { Services } from "../../src/use-cases/tipos.ts";
 import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
@@ -99,7 +101,16 @@ async function montar(o: { capacidades?: boolean } = {}) {
   const falar = (texto: string) => escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services: base }), enviarMensagem, { conversaId, texto, inventario: PRONTO, executor: "local" })).data.turno.id);
   const ler = <T>(fn: (r: ReturnType<typeof criarRepos>) => Promise<T>) => escopado((trx) => fn(criarRepos(trx, PESSOA)));
   const renovar = (turnoId: string, extra: Record<string, unknown> = {}) => ponte.renovar({ turnoId, machineId, sinais: SINAIS, eventos: [], ...extra });
-  return { ponte, machineId, agenteId, conversaId, falar, ler, renovar, conectar, avancar: (ms: number) => (relogio += ms) };
+  /** Uma task da pessoa com um turno na fila (o próximo puxar o pega). */
+  const tarefa = (titulo: string) => escopado(async (trx) => {
+    const d = depsSobreTrx(trx, PESSOA, { services: base });
+    const { trabalho, events } = await criarTrabalho(d, { agenteId, conversaId, titulo, origem: "pessoa" });
+    await d.repos.events.gravarComOutbox(events);
+    const t = await d.repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+    return { trabalhoId: trabalho.id, turnoId: t!.id };
+  });
+  const recado = (trabalhoId: string, texto: string) => escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services: base }), mensagemParaTrabalho, { trabalhoId, texto })).data.mensagemTurnoId);
+  return { ponte, machineId, agenteId, conversaId, falar, ler, renovar, conectar, tarefa, recado, avancar: (ms: number) => (relogio += ms) };
 }
 
 describeIntegracao("revisão #188 pela ponte: a rede de 2 min", () => {
@@ -145,5 +156,42 @@ describeIntegracao("revisão #188 pela ponte: a rede de 2 min", () => {
     // Confirmada (o CLI recebeu e vai responder neste turno): agora promove.
     await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [segunda] });
     expect((await m.ler((r) => r.turnos.buscar(plano!.turnoId)))?.trabalhoId).toBeTruthy();
+  });
+});
+
+describeIntegracao("revisão #188 pela ponte: o recado da task em duas fases", () => {
+  it("S18: o recado é oferecido sem sair da fila, vem em mensagensIds e mensagensSemMoldura, e só sai absorvido na confirmação", async () => {
+    const m = await montar();
+    const { trabalhoId } = await m.tarefa("Relatório");
+    const plano = await m.ponte.puxar(PESSOA.pessoaId);
+    const recado = await m.recado(trabalhoId, "inclua setembro");
+    const r = await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [] });
+    expect(r).toMatchObject({ mensagens: ["inclua setembro"], mensagensIds: [recado], mensagensSemMoldura: [recado] });
+    expect((await m.ler((x) => x.turnos.buscar(recado)))?.estado).toBe("pendente");
+    // Já oferecido: não vai de novo enquanto a confirmação não volta.
+    expect((await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [] })).mensagens).toBeUndefined();
+    await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [recado] });
+    expect(await m.ler((x) => x.turnos.buscar(recado))).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: plano!.turnoId });
+  });
+
+  it("S18: o app antigo (sem confirmação) recebe o recado absorvido na hora, com o id alinhado ao texto", async () => {
+    const m = await montar();
+    const { trabalhoId } = await m.tarefa("Relatório");
+    const plano = await m.ponte.puxar(PESSOA.pessoaId);
+    const recado = await m.recado(trabalhoId, "inclua setembro");
+    const r = await m.renovar(plano!.turnoId, { aceitaMensagens: true });
+    expect(r).toMatchObject({ mensagens: ["inclua setembro"], mensagensIds: [recado] });
+    expect((await m.ler((x) => x.turnos.buscar(recado)))?.motivoInterrupcao).toBe("absorvido");
+  });
+
+  it("S19: a entrega confirma as mensagens que a última renovação não confirmou, antes de assentar", async () => {
+    const m = await montar();
+    await m.falar("monte o relatório");
+    const plano = await m.ponte.puxar(PESSOA.pessoaId);
+    const segunda = await m.falar("inclua setembro");
+    expect((await m.renovar(plano!.turnoId, { aceitaMensagens: true, mensagensEntregues: [] })).mensagensIds).toEqual([segunda]);
+    await m.ponte.entregar({ turnoId: plano!.turnoId, machineId: m.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "feito, com setembro" }, resultado: resultado({ texto: "feito, com setembro" }), mensagensEntregues: [segunda] });
+    expect(await m.ler((x) => x.turnos.buscar(segunda))).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: plano!.turnoId });
+    expect((await m.ler((x) => x.turnos.buscar(plano!.turnoId)))?.estado).toBe("concluido");
   });
 });
