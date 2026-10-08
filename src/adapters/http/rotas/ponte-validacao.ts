@@ -66,7 +66,7 @@ export function falas(v: unknown): FalaIntermediaria[] {
     return { seq: o.seq, texto: o.texto };
   });
 }
-/** definido em 2026-10-07 (ADR-081, #194): no máximo um RSS por turno vivo; 64 cobre o pico de 25 turnos do diário. */
+/** definido em 2026-10-07 (ADR-083, #194): no máximo um RSS por turno vivo; 64 cobre o pico de 25 turnos do diário. */
 const TETO_TURNOS_MEMORIA = 64;
 const TETO_MB = 1_048_576;
 /**

@@ -190,7 +190,7 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
     sobProcuracaoDe: pediu?.sobProcuracaoDe ?? null,
     modelo: remetente.modelo,
     harness: remetente.harness,
-    // ADR-081: a continuação de quem pediu segue no trabalho dele (null = a conversa dele).
+    // ADR-083: a continuação de quem pediu segue no trabalho dele (null = a conversa dele).
     trabalhoId: pediu?.trabalhoId ?? null,
   });
   if (!continuacao) throw new ErroDeDominio("estado_invalido", { cause: "turno de continuação não criado" });

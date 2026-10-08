@@ -109,7 +109,7 @@ export type NovoTurno = {
   /** definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação e os turnos de trabalho pedidos durante ela. */
   ligacaoId?: string | null;
   /**
-   * definido em 2026-10-07 (ADR-081): o trabalho do turno. Ausente numa retomada = o do turno que ela continua (a
+   * definido em 2026-10-07 (ADR-083): o trabalho do turno. Ausente numa retomada = o do turno que ela continua (a
    * retomada nunca sai do trabalho, como nunca sai do salto); null explícito = turno da conversa.
    */
   trabalhoId?: string | null;
@@ -176,7 +176,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * Reivindicação por UPDATE condicional + FOR UPDATE SKIP LOCKED numa tx curta (ADR-010).
      * EMENDA 12: turno de conversa/sala/retomada passa na frente de rotina enfileirada.
-     * EMENDA 13 (agente serial) revista em 2026-10-07 pela ADR-081: a serialização é por FAIXA — a conversa (turno sem
+     * EMENDA 13 (agente serial) revista em 2026-10-07 pela ADR-083: a serialização é por FAIXA — a conversa (turno sem
      * trabalho) ou o trabalho —, não mais por agente. O mesmo bot roda a conversa e vários trabalhos ao mesmo tempo.
      *
      * medido em 2026-09-16 (tests/concurrency/serializacao-por-conversa.test.ts, duas conexões
@@ -207,7 +207,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).
               and ((t.origem = 'ligacao' and ${p.aceitaLigacao === true})
                 or (t.origem <> 'ligacao' and t.trabalho_id is null
-                  -- revisto em 2026-10-07 (ADR-081 §3): a faixa é coalesce(trabalho_id, conversa_id). O turno da conversa
+                  -- revisto em 2026-10-07 (ADR-083 §3): a faixa é coalesce(trabalho_id, conversa_id). O turno da conversa
                   -- espera só outro turno da MESMA conversa sem trabalho. De propósito: o mesmo bot responde ao mesmo
                   -- tempo na conversa direta e numa sala (conversas diferentes), e o trabalho dele não segura a conversa.
                   and not exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao'))
@@ -398,7 +398,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * Fila lida junta (definido em 2026-09-24): logo depois de reivindicar um turno disparado por fala da
      * pessoa, os OUTROS pendentes da mesma conversa e do mesmo agente, também disparados por fala dela,
      * saem como interrompido/'absorvido' apontando para ele, e a entrada dele vira a lista de todas as
-     * falas (entradaDaFila). Rotina, retomada e peer nunca entram nem absorvem; ADR-081: só da MESMA faixa (a fala
+     * falas (entradaDaFila). Rotina, retomada e peer nunca entram nem absorvem; ADR-083: só da MESMA faixa (a fala
      * mandada a uma task não entra no turno da conversa, nem o contrário). Só toca 'pendente', então
      * um Cancelar que chegou antes deixa aquela mensagem de fora e um que chega depois recebe estado_invalido.
      */
@@ -442,7 +442,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * definido em 2026-10-07 (ADR-081, #193): as falas que esperam na faixa DESTE trabalho (a da pessoa na tela da task
+     * definido em 2026-10-07 (ADR-083, #193): as falas que esperam na faixa DESTE trabalho (a da pessoa na tela da task
      * e o recado da conversa, os dois com mensagem de origem) entram no turno vivo dele, como absorverNaSessao faz com a
      * conversa. Sem anexo, e nunca a retomada de uma decisão (que não tem mensagem de origem).
      * revisto em 2026-10-08 (revisão do épico, S18): com `ids`, só estas — as que o app confirmou (confirmarNaSessao).
@@ -508,7 +508,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * EMENDA 13: turno pendente bloqueado é renderizável — "na fila". Desde a ADR-081 (2026-10-07) o bloqueio é só a
+     * EMENDA 13: turno pendente bloqueado é renderizável — "na fila". Desde a ADR-083 (2026-10-07) o bloqueio é só a
      * faixa da conversa, então `conversaId` aponta para a própria. Pendente sem bloqueio conhecido não entra.
      *
      * revisto em 2026-09-30: em dois passos, e o segundo só quando há pendente (o caso comum é nenhum). A versão com as
@@ -518,13 +518,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * (o custo seguiu acima de 500 mil), porque a subconsulta por agente seguia varrendo a tabela.
      */
     async pendentesRenderizaveis(conversaId: string): Promise<TurnoPendenteDto[]> {
-      // ADR-081: turno de trabalho não é "agente ocupado" de ninguém, nem espera por isso: tem faixa própria.
+      // ADR-083: turno de trabalho não é "agente ocupado" de ninguém, nem espera por isso: tem faixa própria.
       const pendentes = await conn<{ id: string; agente_id: string }[]>`
         select id, agente_id from turnos
         where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and estado = 'pendente' and origem <> 'ligacao' and trabalho_id is null
         order by criado_em`;
       if (pendentes.length === 0) return [];
-      // revisto em 2026-10-07 (ADR-081): só a faixa da conversa segura um turno dela — o despachando sem trabalho NESTA
+      // revisto em 2026-10-07 (ADR-083): só a faixa da conversa segura um turno dela — o despachando sem trabalho NESTA
       // conversa (o do mesmo agente primeiro). O bot ocupado em outra conversa ou num trabalho não segura mais.
       const ocupados = await conn<{ agente_id: string; conversa_id: string }[]>`
         select agente_id, conversa_id from turnos
@@ -583,7 +583,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraTurno);
     },
 
-    /** Os turnos de um trabalho, em ordem (ADR-081): o Parar da task, a retomada e a tela da task. */
+    /** Os turnos de um trabalho, em ordem (ADR-083): o Parar da task, a retomada e a tela da task. */
     async doTrabalho(trabalhoId: string): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos where tenant_id = ${escopo.tenantId} and trabalho_id = ${trabalhoId} order by criado_em, id`;
@@ -591,7 +591,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * A rede de 2 min (ADR-081, #193): o turno de conversa que está rodando passa a ser do trabalho. Só o que ainda roda
+     * A rede de 2 min (ADR-083, #193): o turno de conversa que está rodando passa a ser do trabalho. Só o que ainda roda
      * e ainda não tem trabalho — duas renovações seguidas não promovem duas vezes.
      */
     async vincularTrabalho(id: string, trabalhoId: string): Promise<Turno | null> {

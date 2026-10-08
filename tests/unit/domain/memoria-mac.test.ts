@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { leituraDoTurno, nivelDaPressao, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
 
-/** #194 (ADR-081 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
+/** #194 (ADR-083 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
 describe("nível de pressão", () => {
   it("1 = verde, 2 = amarela, 4 = vermelha (kern.memorystatus_vm_pressure_level)", () => {
     expect(nivelDaPressao("1\n")).toBe("verde");

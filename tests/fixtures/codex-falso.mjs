@@ -99,7 +99,7 @@ else {
  *   resposta do turn/start (a ordem que o app-server real pode entregar num turno curto).
  * - model/list (NOD-167) devolve o Luna e um modelo de chat, com os esforços aceitos; uma notificação que o laço não
  *   conhece (`account/rateLimits/updated`) sai no primeiro turno.
- * - "[[chat-steer]]" no texto (chat do Codex, ADR-081 §6): fala "Começando.", chama `consultar` e espera um turn/steer;
+ * - "[[chat-steer]]" no texto (chat do Codex, ADR-083 §6): fala "Começando.", chama `consultar` e espera um turn/steer;
  *   com ele, fala "Recebi: <texto do steer>", chama `lembrar` e fecha com "Terminei.".
  * - TESTE_NOD_RECUSAR_TURNO=N (X2, revisão do épico #188): o N-ésimo turn/start responde erro (o turno não abre).
  * - stdin fechado: grava o registro (TESTE_NOD_REGISTRO) e sai 0.

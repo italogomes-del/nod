@@ -9,7 +9,7 @@
  *  - uma ferramenta mcp__nod__lembrar: o item mcpToolCall aparece e o MCP falso recebe o tools/call?
  *  - turn/steer com o turno em curso: aceito? a fala muda?
  *  - turn/interrupt: o turno conclui "interrupted", e em quanto tempo?
- *  - steer no chat (ADR-081 §6, 2026-10-07): com uma ferramenta rodando, a mensagem da pessoa entra pelo turn/steer com
+ *  - steer no chat (ADR-083 §6, 2026-10-07): com uma ferramenta rodando, a mensagem da pessoa entra pelo turn/steer com
  *    a moldura do chat (molduraMensagemNoMeio); aceito? a primeira fala depois dele sai no mesmo turno?
  * A saída sai no terminal e num arquivo (com a data e a versão do Codex), para anexar na homologação.
  *
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   escrever(`depois do interrupt responde: ${d5 ? `sim (${d5.em - t5.t0} ms)` : "não"}`);
   if (!d5) falhas.push("não respondeu depois do interrupt");
 
-  // Steer no chat (ADR-081 §6): a mensagem do meio entra com a moldura enquanto uma ferramenta roda, como o driver do
+  // Steer no chat (ADR-083 §6): a mensagem do meio entra com a moldura enquanto uma ferramenta roda, como o driver do
   // chat (codex-chat.ts) faz; a resposta a ela tem de sair no mesmo turno, antes de ele concluir.
   const t6 = await turno("Use a ferramenta lembrar com o texto \"chat\" e depois diga só: terminei. [[chat-steer]]");
   const ferramenta6 = await esperar((e) => e.tipo === "item" && e.fase === "inicio" && e.ferramenta !== null, t6.t0);

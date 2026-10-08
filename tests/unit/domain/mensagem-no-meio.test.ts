@@ -5,7 +5,7 @@ import { criarFalaDoMeio, molduraMensagemNoMeio } from "../../../src/domain/mens
 import { classificarResultado, classificarSessao, interpretarLinhaStreamJson } from "../../../src/domain/stream-json.ts";
 
 /**
- * ADR-081 §6 (#189): a mensagem da pessoa no meio do turno chega com moldura, e a primeira fala depois dela é sempre
+ * ADR-083 §6 (#189): a mensagem da pessoa no meio do turno chega com moldura, e a primeira fala depois dela é sempre
  * gravada — mesmo curta e antes de outra ferramenta, onde a regra da narração (NARRACAO_MAX_CHARS) a jogava fora.
  */
 const FIXTURES = new URL("../../fixtures/stream-json/", import.meta.url);

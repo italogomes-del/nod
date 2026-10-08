@@ -49,7 +49,7 @@ describe("proxy: a aprovação continua no mesmo turno (0032)", () => {
     expect(chamadas()).toBe(3);
   });
 
-  it("ADR-081 (#194): o servidor solta a espera por memória — o proxy para na hora e manda encerrar o turno", async () => {
+  it("ADR-083 (#194): o servidor solta a espera por memória — o proxy para na hora e manda encerrar o turno", async () => {
     const { proxy, chamadas } = montar([{ estado: "pendente" }, { estado: "pendente", soltar: true }, { estado: "decidida", itens: [] }], 10);
     expect(JSON.parse(await chamar(proxy))).toMatchObject({ estado: "pendente", decisao_id: "d1", instrucao: "encerre o turno; a decisão retoma depois" });
     expect(chamadas()).toBe(2);

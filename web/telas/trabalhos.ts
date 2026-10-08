@@ -9,7 +9,7 @@ import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { usd } from "./modo-dev.ts";
 
 /**
- * As telas dos trabalhos (ADR-081, épico #188; protótipo "Chat limpo", pranchas K1–K9 e M1–M3): a faixa de Trabalhos em
+ * As telas dos trabalhos (ADR-083, épico #188; protótipo "Chat limpo", pranchas K1–K9 e M1–M3): a faixa de Trabalhos em
  * cima do campo e a pílula recolhida, a tela da task, o chip da barra lateral, o ícone do topo, o nível "Trabalhos" da
  * gaveta e a tela "Todos os trabalhos". Tudo em string; main.ts põe nas regiões.
  */

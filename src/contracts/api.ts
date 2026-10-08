@@ -68,7 +68,7 @@ export type ConversaDto = {
   propostas: Proposta[];
   /** definido em 2026-09-24 (fio da pergunta): os fios com mensagem na janela carregada, com o estado derivado. */
   fios: FioDaPergunta[];
-  trabalhos?: TrabalhoDto[]; // ADR-081: trabalhos abertos do bot desta conversa (faixa); ausente = servidor antigo
+  trabalhos?: TrabalhoDto[]; // ADR-083: trabalhos abertos do bot desta conversa (faixa); ausente = servidor antigo
 };
 
 export type SuaVezDto = {

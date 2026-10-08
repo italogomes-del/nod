@@ -139,7 +139,7 @@ export async function medir(rotulo: string, cenarios: readonly Cenario[] = CENAR
     const linha = `[data-act="abrir-conversa"][data-agente="${pesada.id}"]`;
     for (let i = 0; i < 150 && !(await avaliar<boolean>(cdp, `!!document.querySelector('${linha}')`)); i++) await new Promise((r) => setTimeout(r, 200));
     await avaliar(cdp, `document.querySelector('${linha}').click()`);
-    // S10 (definido em 2026-10-07, ADR-081): conta os itens da timeline (balões e linhas centralizadas, um bloco cada), não só
+    // S10 (definido em 2026-10-07, ADR-083): conta os itens da timeline (balões e linhas centralizadas, um bloco cada), não só
     // `.message` — com o chat limpo, execuções de rotina e pedidos entre bots viram uma linha só e a conta de balões cai.
     for (let i = 0; i < 150 && (await avaliar<number>(cdp, ITENS_DA_TIMELINE)) < 100; i++) await new Promise((r) => setTimeout(r, 200));
     await new Promise((r) => setTimeout(r, 3000));

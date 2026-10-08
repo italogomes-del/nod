@@ -51,9 +51,9 @@ export type DepsPonte = {
    * Somados aos das máquinas desta ponte, deixam o despacho recusar o turno fixado num harness que nenhuma tem pronto.
    */
   harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
-  /** ADR-081 (#193): o turno já chamou alguma ferramenta? (o compositor sabe pelo `turno.atividade`). Ausente = não. */
+  /** ADR-083 (#193): o turno já chamou alguma ferramenta? (o compositor sabe pelo `turno.atividade`). Ausente = não. */
   fezFerramenta?: (turnoId: string) => boolean;
-  /** ADR-081 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
+  /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
   /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
   redeMs?: number;
@@ -100,7 +100,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    */
   const oferecidas = new Map<string, Set<string>>();
   /**
-   * ADR-081 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
+   * ADR-083 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
    */
   const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean }>();
@@ -244,7 +244,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           ids = a.data.ids;
           events.push(...(a.events ?? []));
         }
-        // ADR-081 (#193): a fala mandada à task (tela da task ou mandar_para_task) entra no turno vivo dela.
+        // ADR-083 (#193): a fala mandada à task (tela da task ou mandar_para_task) entra no turno vivo dela.
         // Revisão do épico (S18, 2026-10-08): nas mesmas duas fases da conversa (#189) — oferecida aqui, absorvida na
         // confirmação —, com o id em `mensagensIds` e em `mensagensSemMoldura` (é recado para a task, não fala no meio).
         let semMoldura: string[] = [];
@@ -258,7 +258,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         const turno = r.ativo ? await d.repos.turnos.buscar(p.turnoId) : null;
         // A decisão respondida DENTRO do turno não passa por outro caminho: a renovação acerta o estado da task.
         if (turno?.trabalhoId) events.push(...(await sincronizarTrabalho(d, turno.trabalhoId)));
-        // ADR-081 (#194): a memória do Mac. A dos turnos vai para os trabalhos deles; o nível só gera evento na mudança.
+        // ADR-083 (#194): a memória do Mac. A dos turnos vai para os trabalhos deles; o nível só gera evento na mudança.
         if (p.memoria) {
           await d.repos.trabalhos.atualizarMemoria(p.memoria.porTurno);
           const mudanca = deps.registrarMemoria?.(escopo.pessoaId, p.machineId, p.memoria);

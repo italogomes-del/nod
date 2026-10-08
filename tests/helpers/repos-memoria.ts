@@ -63,7 +63,7 @@ export type BancoMemoria = {
   artefatoEstados: (EstadoArtefato & { tenantId: string; ownerId: string; json: string })[];
   propostas: Proposta[];
   turnos: Turno[];
-  /** 0060 (ADR-081): os trabalhos, com a dona. */
+  /** 0060 (ADR-083): os trabalhos, com a dona. */
   trabalhos: (Trabalho & { ownerId: string })[];
   entregas: Set<string>;
   decisoes: (Decisao & { decididaEm: number | null })[];
@@ -1020,7 +1020,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const vivos = doTenant(b.turnos);
         const candidatos = vivos
           .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente")
-          // ADR-081: a faixa é o trabalho ou, sem ele, a conversa; o trabalho espera o de que depende.
+          // ADR-083: a faixa é o trabalho ou, sem ele, a conversa; o trabalho espera o de que depende.
           .filter((t) => {
             if (!t.trabalhoId) return !vivos.some((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === t.conversaId && d.origem !== "ligacao");
             if (vivos.some((d) => d.estado === "despachando" && d.trabalhoId === t.trabalhoId)) return false;

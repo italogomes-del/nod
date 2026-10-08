@@ -35,7 +35,7 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * definido em 2026-09-18 (ADR-040): o Codex nunca teve teto de passos, então é o Claude que se
  * alinha a ele quando `--max-turns` sai — nada a mudar aqui. `interpretarCodex` produz os mesmos
  * EventoStream do Claude. revisto em 2026-10-01 (ADR-067): o vigia de atividade de `laco.ts` saiu, e o
- * Codex segue um prompt por turno, sem sessão viva. revisto em 2026-10-07 (ADR-081 §6): com o `app-server` na sonda,
+ * Codex segue um prompt por turno, sem sessão viva. revisto em 2026-10-07 (ADR-083 §6): com o `app-server` na sonda,
  * o chat roda lá, com sessão viva e mensagem no meio por `turn/steer` (codex-chat.ts); o `codex exec` daqui fica de
  * reserva (sem app-server, com anexo, ou se o app-server não subir).
  *
@@ -177,7 +177,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         adapter(plano) {
           let proc: Processo | null = null;
           let parado = false;
-          // ADR-081 §6: a thread do app-server enquanto o chat roda nele; null no `codex exec` (sem sessão viva).
+          // ADR-083 §6: a thread do app-server enquanto o chat roda nele; null no `codex exec` (sem sessão viva).
           let sessao: SessaoChatCodex | null = null;
           return {
             async interromper() { parado = true; if (proc) await proc.interromper(); },
@@ -209,7 +209,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 });
               }
               await mkdir(cfg.cwdBase, { recursive: true });
-              // ADR-081 §6: o chat no app-server quando a sonda o acha. Anexo segue no `codex exec` (a imagem entra por
+              // ADR-083 §6: o chat no app-server quando a sonda o acha. Anexo segue no `codex exec` (a imagem entra por
               // --image, e o `localImage` do app-server não foi medido) — definido em 2026-10-07.
               if (!plano.entrada.anexos?.length) {
                 const flagsAppServer = await sondarAppServer(bin).catch(() => null);

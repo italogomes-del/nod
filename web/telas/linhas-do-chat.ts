@@ -7,7 +7,7 @@ import { aberto, abertosDoBot, juntar, pilulaMemoria, tempoDe, trabalhosConhecid
 import { usd } from "./modo-dev.ts";
 
 /**
- * Chat limpo (definido em 2026-10-07, #191/#195, ADR-081): o que NÃO é a conversa entre a pessoa e o bot sai do caminho.
+ * Chat limpo (definido em 2026-10-07, #191/#195, ADR-083): o que NÃO é a conversa entre a pessoa e o bot sai do caminho.
  * Este módulo decide, mensagem a mensagem, o que a timeline desenha:
  *
  * - **rotina**: execuções seguidas da mesma rotina, sem nada para a pessoa, viram UMA linha centralizada
@@ -45,7 +45,7 @@ function agente(estado: Estado, id: string | null | undefined): Agente | undefin
   return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
 }
 
-/** A mensagem veio de um servidor que já marca turno e trabalho (ADR-081)? Sem as marcas, nada muda. */
+/** A mensagem veio de um servidor que já marca turno e trabalho (ADR-083)? Sem as marcas, nada muda. */
 const marcada = (m: Mensagem): boolean => m.origemTurno !== undefined || m.trabalhoId !== undefined || m.fimDoTurno !== undefined;
 
 /** Fala da pessoa ou do bot que pode sumir para dentro de uma linha (os cards, recibos e avisos ficam à vista). */

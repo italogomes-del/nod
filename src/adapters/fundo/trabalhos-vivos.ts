@@ -1,7 +1,7 @@
 import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
 
 /**
- * O que só o processo sabe dos trabalhos (definido em 2026-10-07, ADR-081): a última ferramenta de cada turno vivo
+ * O que só o processo sabe dos trabalhos (definido em 2026-10-07, ADR-083): a última ferramenta de cada turno vivo
  * (a faixa mostra "o último passo"; o nome sai do mesmo `turno.atividade` que a tela já recebe) e a última leitura de
  * memória de cada Mac (#194). Nada disso vai para o banco: um reinício zera, e a próxima renovação (30 s) refaz.
  */

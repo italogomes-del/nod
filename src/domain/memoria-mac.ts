@@ -1,7 +1,7 @@
 import type { LeituraMemoria, NivelPressao } from "../contracts/trabalho.ts";
 
 /**
- * Memória do Mac (definido em 2026-10-07, ADR-081 §4, #194): o mapa do nível de pressão do macOS e a soma da memória
+ * Memória do Mac (definido em 2026-10-07, ADR-083 §4, #194): o mapa do nível de pressão do macOS e a soma da memória
  * por grupo de processos. Puro: quem lê `sysctl` e `ps` é o adapter (src/adapters/executor/amostrador-memoria.ts).
  */
 

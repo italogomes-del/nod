@@ -23,7 +23,7 @@ const NOD: Record<string, string> = {
   anotar_pendencia: "Anotou para depois",
   concluir_pendencia: "Concluiu uma pendência",
   descartar_pendencia: "Descartou uma pendência",
-  // ADR-081 (#193): a conversa coordena as tasks.
+  // ADR-083 (#193): a conversa coordena as tasks.
   abrir_task: "Abriu uma task",
   mandar_para_task: "Repassou a uma task",
 };

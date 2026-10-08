@@ -115,7 +115,7 @@ export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; 
  * fechou — por tipo, não por bot (ex.: "modo:total"). Fechou uma vez, não volta.
  */
 /**
- * `faixaTrabalhosRecolhida` (definido em 2026-10-07, ADR-081): a faixa de Trabalhos em cima do campo fica recolhida
+ * `faixaTrabalhosRecolhida` (definido em 2026-10-07, ADR-083): a faixa de Trabalhos em cima do campo fica recolhida
  * numa pílula. Reversível (diferente dos avisos fechados).
  */
 export type Preferencias = { modoDev: boolean; avisosFechados: string[]; faixaTrabalhosRecolhida?: boolean };

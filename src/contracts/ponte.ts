@@ -29,7 +29,7 @@ export type AnuncioMaquina = {
    */
   semLacoDeVoz?: IdHarness[];
   /**
-   * definido em 2026-10-08 (ADR-081, revisão do épico): as capacidades que os drivers DESTA máquina declaram, já com os
+   * definido em 2026-10-08 (ADR-083, revisão do épico): as capacidades que os drivers DESTA máquina declaram, já com os
    * pisos do CLI instalado (ex.: `bifurcaSessao` só com `--fork-session` no help). O servidor só promove pela rede de
    * 2 min quando a máquina do turno anunciou `bifurcaSessao`. Ausente = app antigo: nada que dependa disso acontece.
    */
@@ -68,14 +68,14 @@ export type PedidoRenovar = {
    */
   aceitaMensagens?: boolean;
   /**
-   * definido em 2026-10-07 (ADR-081, #189): os ids (`mensagensIds`) que o CLI recebeu desde a última renovação. Só estes
+   * definido em 2026-10-07 (ADR-083, #189): os ids (`mensagensIds`) que o CLI recebeu desde a última renovação. Só estes
    * saem da fila como absorvidos; os que nunca chegam aqui continuam `pendente` e viram turno próprio. A presença do
    * campo (mesmo vazio) diz que o app confirma: app antigo, sem ele, tem a mensagem absorvida na hora, como antes.
    */
   mensagensEntregues?: string[];
   /** #189: ids que o adapter não conseguiu escrever (a sessão fechou entre o pedido e a resposta): ficam na fila. */
   mensagensDevolvidas?: string[];
-  /** definido em 2026-10-07 (ADR-081, #194): a memória do Mac, amostrada uma vez por máquina a cada 30 s. */
+  /** definido em 2026-10-07 (ADR-083, #194): a memória do Mac, amostrada uma vez por máquina a cada 30 s. */
   memoria?: LeituraMemoria;
 };
 /**

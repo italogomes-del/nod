@@ -17,7 +17,7 @@ import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-com
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
 
 /**
- * E2E com o catcher dos trabalhos em paralelo (ADR-081, épico #188): servidor completo, laços reais, SSE e o catcher com
+ * E2E com o catcher dos trabalhos em paralelo (ADR-083, épico #188): servidor completo, laços reais, SSE e o catcher com
  * `[[espera: ms]]` (uma ferramenta longa) e `[[sessao: uuid]]` (a sessão que o "CLI" devolve).
  *
  * definido em 2026-10-08: o catcher entra no papel do Claude Code — registrado como `claude-cli`, com as capacidades de

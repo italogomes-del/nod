@@ -68,7 +68,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     ? `<section class="gv-secao"><h3>Computador do bot</h3><div class="detalhe-computador-fora"><span class="tag tag-vermelha">fora do ar</span><p>Desde ${esc(dataHora(fora.desde))} · ${esc(MOTIVO_FALHA_TEXTO[fora.motivo])}.</p><div class="dr-acoes">${botao("religar-computador", "Tentar de novo", { classe: "link sm", id: a.id })}${botao("abrir-computador", "Abrir computador", { classe: "link sm", id: a.id })}</div></div></section>`
     : "";
 
-  // ADR-081 (#196): os trabalhos do bot abrem num nível da gaveta (Precisa de você, Trabalhando, Na fila, Terminados hoje).
+  // ADR-083 (#196): os trabalhos do bot abrem num nível da gaveta (Precisa de você, Trabalhando, Na fila, Terminados hoje).
   const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
   const atalhos = `<section class="gv-secao"><h3>Atalhos</h3><div class="gv-cartao">
       ${linha(`${ICONE.brilho}<span class="gv-linha-txt">Planejar uma tarefa</span>`, 'data-act="preencher-prompt" data-texto="Me ajude a planejar esta tarefa: "')}

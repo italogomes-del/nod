@@ -67,7 +67,7 @@ export interface Adapter {
   /** true enquanto o adapter aceita mensagem nova (sessão viva com a entrada aberta). */
   aceitaMensagens?(): boolean;
   /**
-   * definido em 2026-10-07 (ADR-081, #194): o grupo de processos do turno (o pid do líder, que nasce com
+   * definido em 2026-10-07 (ADR-083, #194): o grupo de processos do turno (o pid do líder, que nasce com
    * `detached: true`), para o amostrador somar a memória dele. null = ainda não subiu ou já saiu. Só os drivers com
    * `processoProprio` respondem; o laço nem pergunta aos outros.
    */
@@ -102,7 +102,7 @@ export interface Instance {
 
 export interface Driver {
   /**
-   * `capacidades` (definido em 2026-10-07, ADR-081): o que o driver promete fazer, lido de `CAPACIDADES_HARNESS` pelo
+   * `capacidades` (definido em 2026-10-07, ADR-083): o que o driver promete fazer, lido de `CAPACIDADES_HARNESS` pelo
    * id (uma fonte só). Ausente = `capacidadesDe(id)`; o catcher e os drivers de teste declaram as suas. O laço nunca
    * compara o id: deixa de pedir mensagens quando `!mensagemNoMeio` e não mede memória quando `!processoProprio`.
    */

@@ -283,7 +283,7 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
  * Driver controlado evento a evento: o teste diz quando o modelo fala, quando fica ocioso e quando termina.
  */
 type SinksControlados = Parameters<Adapter["rodarTurno"]>[0];
-/** O driver de teste declara o que faz (ADR-081 §5): por padrão, a sessão viva do Claude sem processo próprio. */
+/** O driver de teste declara o que faz (ADR-083 §5): por padrão, a sessão viva do Claude sem processo próprio. */
 const SESSAO_VIVA: CapacidadesHarness = { ...SEM_CAPACIDADES, mensagemNoMeio: true };
 function driverControlado(o: { capacidades?: CapacidadesHarness; aceita?: () => boolean; grupo?: number; confirma?: boolean } = {}): {
   driver: Driver;
@@ -458,7 +458,7 @@ describe("sessão viva no laço (ADR-067)", () => {
     const ponte = ponteDaSessao({ fila: ["quanto é 2+2?"] });
     const laco = await cenario(d, ponte);
     expect(await d.sinks()!.ocioso!()).toBe(true);
-    // ADR-081 §6: a mensagem chega ao adapter com a moldura, igual para todo driver.
+    // ADR-083 §6: a mensagem chega ao adapter com a moldura, igual para todo driver.
     expect(d.recebidas).toEqual([molduraMensagemNoMeio("quanto é 2+2?")]);
     expect(ponte.renovacoes.at(-1)!.aceitaMensagens).toBe(true);
     expect(await d.sinks()!.ocioso!()).toBe(false);
@@ -520,7 +520,7 @@ describe("sessão viva no laço (ADR-067)", () => {
     await laco.parar();
   });
 
-  it("ADR-081 §5: driver sem capacidades — o laço não pede mensagens nem mede o grupo, e o turno roda igual", async () => {
+  it("ADR-083 §5: driver sem capacidades — o laço não pede mensagens nem mede o grupo, e o turno roda igual", async () => {
     const d = driverControlado({ capacidades: SEM_CAPACIDADES, grupo: 4242 });
     const ponte = ponteDaSessao({ fila: ["não deve entrar"] });
     const leituras: (number | null)[] = [];

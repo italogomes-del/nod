@@ -35,7 +35,7 @@ const STDERR_MAX_CHARS = 65_536;
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * Grupos de processo vivos (definido em 2026-10-07, ADR-081, #194). Cada filho nasce líder do próprio grupo
+ * Grupos de processo vivos (definido em 2026-10-07, ADR-083, #194). Cada filho nasce líder do próprio grupo
  * (`detached: true`), para o amostrador somar a memória do grupo e o Parar levar junto os netos (servidor MCP, Bash do
  * modelo). O preço do `detached` é o filho não morrer com o app: o `exit` do processo do nod (app do Mac ou servidor)
  * mata com SIGKILL todo grupo que ainda estiver aqui. `process.kill` é síncrono, o único tipo de trabalho que o `exit`

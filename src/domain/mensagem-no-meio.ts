@@ -1,7 +1,7 @@
 import type { EventoStream } from "../contracts/turno.ts";
 
 /**
- * Mensagem da pessoa no meio de um turno (definido em 2026-10-07, ADR-081 §6, emenda da ADR-067). Comum a todos os
+ * Mensagem da pessoa no meio de um turno (definido em 2026-10-07, ADR-083 §6, emenda da ADR-067). Comum a todos os
  * drivers: o laço põe a moldura antes de entregar ao adapter, e cada driver usa o rastreador para achar a resposta.
  *
  * Medido no diário (7 dias até 07/10): 38 mensagens absorvidas no meio de um turno; a resposta curta que o modelo

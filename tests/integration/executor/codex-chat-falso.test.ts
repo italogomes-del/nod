@@ -10,7 +10,7 @@ import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
 import { planoHarness } from "../../helpers/plano-harness.ts";
 
 /**
- * O chat do Codex no app-server (definido em 2026-10-07, ADR-081 §6, #189): a mesma sessão viva do Claude, com a mensagem
+ * O chat do Codex no app-server (definido em 2026-10-07, ADR-083 §6, #189): a mesma sessão viva do Claude, com a mensagem
  * do meio entrando por `turn/steer`, contra o app-server falso de tests/fixtures/codex-falso.mjs. O `codex exec` (sem
  * app-server) continua coberto em codex-cli-falso.test.ts.
  */

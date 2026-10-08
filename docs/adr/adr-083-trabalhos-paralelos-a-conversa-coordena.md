@@ -1,4 +1,4 @@
-# ADR-081 — Trabalhos em paralelo: a conversa coordena, cada trabalho longo roda à parte
+# ADR-083 — Trabalhos em paralelo: a conversa coordena, cada trabalho longo roda à parte
 
 Status: aceito · Data: 2026-10-07 · Emenda a [ADR-010](adr-010-fila-por-conversa-no-postgres-prazo-absoluto.md) (emenda 13,
 "agente serial") e a [ADR-067](adr-067-sessao-viva-o-turno-segue-ate-o-bot-terminar.md) (mensagem no meio do turno).

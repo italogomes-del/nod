@@ -30,7 +30,7 @@ export const TIPOS_QUE_AGRUPAM: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(
 
 /**
  * Mesma decisora, agente, conversa, tipo e frase; null = este tipo nunca se dobra.
- * revisto em 2026-10-08 (revisão do épico, S4): e mesma FAIXA — o trabalho do turno da decisão (ADR-081). As tasks do
+ * revisto em 2026-10-08 (revisão do épico, S4): e mesma FAIXA — o trabalho do turno da decisão (ADR-083). As tasks do
  * bot moram na conversa dele, e o "Retomar" de uma task fechava o da conversa e o das outras tasks junto.
  */
 export function chaveDeGemea(d: Pick<Decisao, "tipo" | "decisorId" | "agenteId" | "conversaId" | "frase"> & { trabalhoId?: string | null }): string | null {

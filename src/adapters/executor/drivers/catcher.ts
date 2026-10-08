@@ -32,7 +32,7 @@ export type OpcoesCatcher = {
   /** Testes: o WebSocket do canal do cérebro (padrão: o global). */
   fabricaSocket?: FabricaSocket;
   /**
-   * definido em 2026-10-07 (ADR-081 §6, S9): o catcher aceita mensagem no meio do roteiro, como a sessão viva do
+   * definido em 2026-10-07 (ADR-083 §6, S9): o catcher aceita mensagem no meio do roteiro, como a sessão viva do
    * Claude — responde "Respondendo: <mensagem>" logo depois do passo em curso. Desligado por padrão: com ele, um turno
    * de catcher com ferramenta absorveria a fala seguinte da pessoa, e os e2e de fila contam turnos separados.
    */
@@ -77,7 +77,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
           };
           const ferramentas = plano.catalogo.ferramentas.map((f) => f.nomeMcp);
           const cliente = o.urlNod ? (o.clienteNod ?? criarClienteNod)({ url: o.urlNod, token: plano.tokenDeTurno }) : null;
-          // ADR-081 §6: as mensagens do meio, respondidas entre um passo e outro; `rodando` = ainda há passo pela frente.
+          // ADR-083 §6: as mensagens do meio, respondidas entre um passo e outro; `rodando` = ainda há passo pela frente.
           const fila: string[] = [];
           const meio = criarFalaDoMeio();
           let rodando = false;

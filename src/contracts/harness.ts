@@ -14,7 +14,7 @@ export type OpcaoHarness = {
 export type CatalogoHarness = { padrao: IdHarness | null; simulacao: boolean; opcoes: OpcaoHarness[] };
 
 /**
- * O que um harness sabe fazer (definido em 2026-10-07, ADR-081). Toda diferença de comportamento entre harnesses passa
+ * O que um harness sabe fazer (definido em 2026-10-07, ADR-083). Toda diferença de comportamento entre harnesses passa
  * por aqui, nunca por comparar o id fora do driver: Cursor, Hermes e outros entram declarando as suas.
  *
  * - `mensagemNoMeio`: aceita texto num turno em andamento (Claude: stdin stream-json; Codex: `turn/steer` no
@@ -36,7 +36,7 @@ export type CapacidadesHarness = {
 export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: false, processoProprio: false, terminal: false };
 
 /**
- * definido em 2026-10-07 (ADR-081): o Codex do chat roda no app-server quando a sonda o acha (`turn/steer`), mas
+ * definido em 2026-10-07 (ADR-083): o Codex do chat roda no app-server quando a sonda o acha (`turn/steer`), mas
  * `thread/resume` e fork não foram medidos — continua recebendo o histórico recente. Mudou uma medição: troque aqui.
  */
 export const CAPACIDADES_HARNESS: Record<IdHarness, CapacidadesHarness> = {

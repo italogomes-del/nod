@@ -49,16 +49,16 @@ export type Tela =
   /** Não lidos (definido em 2026-09-29, 0039): tudo o que chegou, a conversa mais recente em cima. */
   | { tipo: "nao-lidos" }
   | { tipo: "nova-sala" }
-  /** ADR-081 (#196): "Todos os trabalhos" — os de todos os bots da pessoa, com os filtros De você / Rotinas / Entre bots. */
+  /** ADR-083 (#196): "Todos os trabalhos" — os de todos os bots da pessoa, com os filtros De você / Rotinas / Entre bots. */
   | { tipo: "trabalhos"; filtro?: FiltroTrabalhos }
   /**
-   * ADR-081 (#195): a tela da task. `voltar` é a tela de onde a pessoa veio (o Fechar e o Esc voltam para ela); abrir
+   * ADR-083 (#195): a tela da task. `voltar` é a tela de onde a pessoa veio (o Fechar e o Esc voltam para ela); abrir
    * outra task de dentro de uma task mantém o `voltar` de fora.
    */
   | { tipo: "trabalho"; id: string; voltar: Tela }
   /**
    * definido em 2026-10-07 (#191): a tela provisória de uma linha do chat sem trabalho por trás (execuções antigas de
-   * rotina, pedido a colega de antes do ADR-081): as mensagens que a linha recolheu, na ordem, com Fechar.
+   * rotina, pedido a colega de antes do ADR-083): as mensagens que a linha recolheu, na ordem, com Fechar.
    */
   | { tipo: "linha"; conversaId: string; mensagens: string[]; titulo: string; voltar: Tela };
 
@@ -85,7 +85,7 @@ export type NivelGaveta =
   | { tipo: "memoria" }
   | { tipo: "inteligencia" }
   | { tipo: "nova-rotina" }
-  /** ADR-081 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
+  /** ADR-083 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
   | { tipo: "trabalhos" };
 
 export type ConexaoApp = { url: string | null; falhou: string | null };
@@ -96,7 +96,7 @@ export type ConexaoApp = { url: string | null; falhou: string | null };
  */
 export type LigacaoVivaNaTela = { ligacaoId: string; agenteId: string; conversaId: string; local: boolean };
 
-/** `trabalhoId` (ADR-081): o turno é de um trabalho — o ao vivo dele aparece na tela da task, nunca no chat. */
+/** `trabalhoId` (ADR-083): o turno é de um trabalho — o ao vivo dele aparece na tela da task, nunca no chat. */
 export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null };
 
 export type ConversaEstado = ConversaDto & {
@@ -230,7 +230,7 @@ export type Estado = {
   /** A primeira leitura já decidiu se o onboarding abre (só uma vez por sessão; depois só pelo menu da conta). */
   onboardingResolvido?: boolean;
   /**
-   * ADR-081 (#195/#196): os trabalhos da pessoa (abertos e terminados hoje, de todos os bots) como `GET trabalhos` os
+   * ADR-083 (#195/#196): os trabalhos da pessoa (abertos e terminados hoje, de todos os bots) como `GET trabalhos` os
    * devolveu; null = ainda não leu. A faixa, o chip da barra, o ícone do topo, a gaveta e "Todos os trabalhos" leem daqui.
    */
   trabalhos: TrabalhosDto | null;
@@ -400,7 +400,7 @@ function semConversa(atividades: Estado["atividades"], conversaId: string): Esta
 }
 
 /**
- * A conversa que a tela mostra (conversa ou sala), já carregada ou ainda chegando. ADR-081: a tela da task mostra o ao
+ * A conversa que a tela mostra (conversa ou sala), já carregada ou ainda chegando. ADR-083: a tela da task mostra o ao
  * vivo do turno do trabalho, que chega pelos frames da conversa do bot dele — mesmo de outro bot, nunca aberta.
  */
 export function conversaIdNaTela(estado: Estado): string | null {
@@ -562,7 +562,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "relato.criado": (e) => e,
   // A linha "Chat de voz" da conversa e a ligação viva (a barra lateral marca o bot "Em ligação").
   "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
-  // ADR-081: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
+  // ADR-083: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
   // task", a pergunta e o resultado) e a tela da task, se ela já foi aberta.
   "trabalho.mudou": (e, f) => {
     const id = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id);
@@ -584,7 +584,7 @@ const RELEEM_A_TASK: ReadonlySet<TipoFrame> = new Set<TipoFrame>(["mensagem.nova
 export function aplicarFrame(estado: Estado, frame: FrameSse, agora: number): Estado {
   const handler = POR_FRAME[frame.tipo];
   const depois = handler ? handler(estado, frame, agora) : estado;
-  // ADR-081 (#195): a tela da task mostra as mensagens do trabalho, que chegam pelos frames da conversa do bot dele.
+  // ADR-083 (#195): a tela da task mostra as mensagens do trabalho, que chegam pelos frames da conversa do bot dele.
   const t = depois.tela;
   if (t.tipo !== "trabalho" || !RELEEM_A_TASK.has(frame.tipo) || texto(frame.dados.conversaId) !== conversaIdNaTela(depois)) return depois;
   return invalidar(depois, `trabalho:${t.id}`);
@@ -888,7 +888,7 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (!estado.suaVez) faltas.push("sua-vez");
   // O ícone de Não lidos e o ponto de cada linha da barra valem em qualquer tela, como a fila.
   if (!estado.naoLidos) faltas.push("nao-lidos");
-  // ADR-081: o chip de cada bot na barra e o ícone "Trabalhos" do topo também (e a faixa, a gaveta, a tela da task).
+  // ADR-083: o chip de cada bot na barra e o ícone "Trabalhos" do topo também (e a faixa, a gaveta, a tela da task).
   if (estado.sessao && !estado.trabalhos) faltas.push("trabalhos");
   if (t.tipo === "trabalho" && !estado.trabalhoDetalhe[t.id]) faltas.push(`trabalho:${t.id}`);
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);

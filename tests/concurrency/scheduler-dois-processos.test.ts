@@ -54,7 +54,7 @@ afterEach(async () => {
     await trx`delete from rotina_janelas where rotina_id in ${trx(criados.rotinas)}`;
     await trx`delete from turno_raio_x where turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
     await trx`delete from turnos where conversa_id in ${trx(criados.conversas)}`;
-    // ADR-081 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
+    // ADR-083 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
     await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from rotinas where id in ${trx(criados.rotinas)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;

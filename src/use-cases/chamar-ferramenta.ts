@@ -97,7 +97,7 @@ const DESPACHO: Despacho = {
  */
 const NOD_DE_CONTEUDO_NAO_CONFIAVEL: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato"]);
 
-/** As ferramentas nod que deixam uma decisão aberta para a pessoa (o estado da task do turno muda, ADR-081). */
+/** As ferramentas nod que deixam uma decisão aberta para a pessoa (o estado da task do turno muda, ADR-083). */
 const FERRAMENTAS_QUE_PEDEM_A_PESSOA: ReadonlySet<NomeFerramentaNod> = new Set(["pedir_a_pessoa", "pedir_aprovacao", "pedir_acesso"]);
 
 function ehNomeNod(nome: string): nome is NomeFerramentaNod {
@@ -180,7 +180,7 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
     if ("erros" in r) return negar("args_invalidos", "ferramenta_negada");
     await registrarChamada(null);
     if (plano.executor === "catcher") await deps.repos.catcher.registrar({ turnoId: input.turnoId, tipo: "tool_call", dados: { nome: input.nome, origem: "nod" } });
-    // ADR-081: a ferramenta que abre uma decisão põe a task do turno em "precisa de você" na hora.
+    // ADR-083: a ferramenta que abre uma decisão põe a task do turno em "precisa de você" na hora.
     if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
     return { data: r.resultado, events: [...events, ...r.events] };
   }

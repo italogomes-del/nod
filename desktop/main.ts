@@ -48,7 +48,7 @@ let janela: BrowserWindow | null = null;
 let configuracao: Config | null = null;
 let laco: PoolDeLacos | null = null;
 /**
- * definido em 2026-10-07 (ADR-081 §4, #194): UM amostrador de memória para o Mac inteiro (pressão do macOS e memória
+ * definido em 2026-10-07 (ADR-083 §4, #194): UM amostrador de memória para o Mac inteiro (pressão do macOS e memória
  * por grupo de processos), compartilhado por todos os laços do pool; cada renovação leva a última leitura.
  * `NOD_SIMULAR_PRESSAO=1|2|4` no ambiente do app força o nível (UAT). O timer não segura o app aberto.
  */

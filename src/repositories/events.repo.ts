@@ -38,7 +38,7 @@ export function eventsRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * definido em 2026-10-07 (ADR-081, #191): a telemetria das linhas do chat vai só para `events`, sem outbox — nenhum
+     * definido em 2026-10-07 (ADR-083, #191): a telemetria das linhas do chat vai só para `events`, sem outbox — nenhum
      * frame sai dela (a web que mandou já sabe). Mesmas colunas de gravarComOutbox.
      */
     async gravarSemOutbox(eventos: EventoGravavel[]): Promise<number> {

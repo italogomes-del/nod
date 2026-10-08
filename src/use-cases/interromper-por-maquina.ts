@@ -49,7 +49,7 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
   if (turno.origem === "ligacao") return { decisaoId: null, rotinaId: null, rotina: false };
   for (const anterior of await deps.repos.decisoes.pendentesDaConversa(turno.conversaId)) {
     if (anterior.tipo !== "retomar_turno") continue;
-    // revisto em 2026-10-07 (ADR-081, S6): só a retomada da MESMA faixa sai — a queda de uma task não fecha o
+    // revisto em 2026-10-07 (ADR-083, S6): só a retomada da MESMA faixa sai — a queda de uma task não fecha o
     // "Retomar" da conversa nem o de outra task do bot.
     const deQuem = anterior.turnoId ? await deps.repos.turnos.buscar(anterior.turnoId) : null;
     if ((deQuem?.trabalhoId ?? null) !== (turno.trabalhoId ?? null)) continue;
@@ -84,7 +84,7 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
   const quedas: QuedaDeMaquina[] = [];
   for (const c of emOrdem) {
     const r = await consequencias(deps, c, prazoMs, events);
-    // ADR-081: o trabalho do turno caído vira "precisa de você" (o card Retomar) ou "falhou" (rotina, sem retomada).
+    // ADR-083: o trabalho do turno caído vira "precisa de você" (o card Retomar) ou "falhou" (rotina, sem retomada).
     events.push(...(await sincronizarDoTurno(deps, c.turno)));
     saida.interrompidos.push(c.turno.id);
     saida.porMotivo[c.motivo] += 1;

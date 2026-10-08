@@ -99,7 +99,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
       return paraPreferencias(l);
     },
 
-    /** O que vier muda; o que faltar fica como está (ADR-081: `faixaTrabalhosRecolhida` chega sozinho da faixa). */
+    /** O que vier muda; o que faltar fica como está (ADR-083: `faixaTrabalhosRecolhida` chega sozinho da faixa). */
     async gravar(p: { modoDev?: boolean; faixaTrabalhosRecolhida?: boolean }): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
         insert into preferencias (tenant_id, owner_id, modo_dev, faixa_trabalhos_recolhida)

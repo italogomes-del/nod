@@ -4,7 +4,7 @@ import { leituraDoTurno, nivelDaPressao, pressaoSimulada, somarPorGrupo } from "
 import { log } from "../../obs/log.ts";
 
 /**
- * Amostrador de memória da máquina (definido em 2026-10-07, ADR-081 §4, #194; decisão S8 da revisão de engenharia):
+ * Amostrador de memória da máquina (definido em 2026-10-07, ADR-083 §4, #194; decisão S8 da revisão de engenharia):
  * UM por máquina, a cada 30 s, em vez de um `ps -A` por laço (25 laços = 25 `ps` a cada 30 s no pico do diário). Lê o
  * nível de pressão do macOS e a memória somada por grupo de processos; cada renovação leva a última leitura, com a
  * linha do próprio turno. Nada aqui para trabalho nenhum: o servidor decide o que fazer com o nível.
@@ -30,7 +30,7 @@ export type AmostradorMemoria = FonteMemoria & {
   parar(): void;
 };
 
-/** definido em 2026-10-07 (ADR-081 §4): de 30 em 30 s, a mesma batida da renovação do lease (RENOVACAO_MS). */
+/** definido em 2026-10-07 (ADR-083 §4): de 30 em 30 s, a mesma batida da renovação do lease (RENOVACAO_MS). */
 export const INTERVALO_AMOSTRA_MEMORIA_MS = 30_000;
 /** definido em 2026-10-07: `sysctl` e `ps` respondem em milissegundos; 5 s só segura um Mac travado. */
 const PRAZO_COMANDO_MS = 5_000;

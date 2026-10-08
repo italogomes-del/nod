@@ -32,7 +32,7 @@ async function montar(trx: Trx, agora = () => Date.now()) {
   return { ...base, deps, turno, ctx, plano };
 }
 
-describeIntegracao("a conversa coordena (#193, ADR-081 §7)", () => {
+describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
   it("abrir_task: cria a task da pessoa, a linha \"Abriu a task\" e o turno dela; a conversa recebe a seção Trabalhos em andamento", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

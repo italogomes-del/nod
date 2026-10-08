@@ -230,7 +230,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
       expect(status).toBe(200);
     }
   },30000);
-  it("ADR-081 (S5, #192 critério 5): duas tasks do bot pedem o computador — a segunda recebe computador_ocupado com quem usa, sem 409 e sem falhar",async()=>{
+  it("ADR-083 (S5, #192 critério 5): duas tasks do bot pedem o computador — a segunda recebe computador_ocupado com quem usa, sem 409 e sem falhar",async()=>{
     const b=await botNovo();
     const planoDe=(titulo:string)=>srv.app.dentro(srv.pessoa,async d=>{
       await d.tx(async trx=>{await trx`update agentes set confirmado = true where id = ${b.agente.id}`;});

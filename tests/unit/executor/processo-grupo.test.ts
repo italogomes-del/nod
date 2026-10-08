@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { gruposDeProcessoVivos, iniciarProcesso } from "../../../src/adapters/executor/processo.ts";
 
 /**
- * #194 (ADR-081 §4): o CLI nasce líder de um grupo de processos (`detached: true`), o grupo é o que o amostrador mede e
+ * #194 (ADR-083 §4): o CLI nasce líder de um grupo de processos (`detached: true`), o grupo é o que o amostrador mede e
  * o que o Parar encerra — o neto (servidor MCP, Bash do modelo) vai junto. stdin/stdout continuam pipes.
  */
 const vivo = (pid: number) => {

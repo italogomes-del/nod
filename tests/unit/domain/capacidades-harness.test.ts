@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CAPACIDADES_HARNESS, HARNESSES, SEM_CAPACIDADES } from "../../../src/contracts/harness.ts";
 import { capacidadesDe } from "../../../src/domain/harness.ts";
 
-describe("capacidadesDe (ADR-081): diferença entre harnesses só por capacidade", () => {
+describe("capacidadesDe (ADR-083): diferença entre harnesses só por capacidade", () => {
   it("todo harness do catálogo declara as cinco capacidades", () => {
     for (const h of HARNESSES) expect(Object.keys(CAPACIDADES_HARNESS[h.id]).sort()).toEqual(Object.keys(SEM_CAPACIDADES).sort());
   });

@@ -137,11 +137,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-28 (0030): com harness escolhido, a sessão só vale para o harness que a criou. Antes
   // `!escolha` desligava o --resume de todo turno real desde os harnesses (18/09), e cada mensagem abria uma
   // sessão com 20 falas de 1.000 caracteres. Só o Claude Code retoma sessão hoje (o Codex devolve null).
-  // revisto em 2026-10-07 (ADR-081, S3): quem retoma sessão é a capacidade do harness, nunca o nome dele. Sem escolha
+  // revisto em 2026-10-07 (ADR-083, S3): quem retoma sessão é a capacidade do harness, nunca o nome dele. Sem escolha
   // (catcher, plano de antes dos harnesses) vale como antes.
   const caps = escolha ? capacidadesDe(escolha.harness) : null;
   const retoma = caps ? caps.retomaSessao : true;
-  // definido em 2026-10-07 (ADR-081): o turno de um trabalho roda na sessão DO TRABALHO, nunca na da conversa nem na da
+  // definido em 2026-10-07 (ADR-083): o turno de um trabalho roda na sessão DO TRABALHO, nunca na da conversa nem na da
   // cadeia (a retomada dele herda o trabalho). Sem `retomaSessao`, recebe o histórico recente, como o Codex hoje.
   const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
   // revisto em 2026-10-08 (revisão do épico, S14): e só para o executor que criou a sessão, como a da conversa (0005) — a
@@ -157,7 +157,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const daCadeia = continuaCadeia && turno.retomaTurnoId ? await deps.repos.turnos.sessaoDoTurno(turno.retomaTurnoId) : null;
   const sessaoDaCadeia = daCadeia && daCadeia.executor === executor ? daCadeia.sessaoCli : null;
   const sessaoCli = sessaoDoTrabalho ?? sessaoDaConversa ?? sessaoDaCadeia;
-  // A rede de 2 min (ADR-081 §2, #193): a sessão da conversa ficou com o trabalho promovido, que segue nela. A próxima
+  // A rede de 2 min (ADR-083 §2, #193): a sessão da conversa ficou com o trabalho promovido, que segue nela. A próxima
   // mensagem continua numa CÓPIA (`--fork-session` no Claude) e o id novo vira a sessão da conversa. Só com harness que
   // bifurca: sem isso a rede nunca promove, e esta busca não acha nada.
   const bifurcar = sessaoDaConversa !== null && (caps ? caps.bifurcaSessao : true) && (await deps.repos.trabalhos.redeComSessao(turno.conversaId, sessaoDaConversa)) !== null;
@@ -192,7 +192,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const comPendencias = input.aFazer === true && turno.profundidade === 0 && (modo === "conversa" || modo === "criacao" || modo === "rotina");
   const pendencias = comPendencias ? pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(agente.id), agora) : [];
 
-  // ADR-081 (#193): a conversa coordenadora vê as tasks abertas do bot (com o último passo), a cada turno.
+  // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot (com o último passo), a cada turno.
   // revisto em 2026-10-08 (revisão do épico, S12): a task de rotina que pode abrir outras também (a mãe, nunca a filha).
   const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
@@ -260,9 +260,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).
-    // revisto em 2026-10-07 (ADR-081, S3): pela capacidade `terminal`, não pelo nome do harness.
+    // revisto em 2026-10-07 (ADR-083, S3): pela capacidade `terminal`, não pelo nome do harness.
     terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true),
-    // ADR-081: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
+    // ADR-083: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
     trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId } : null,
     trabalhosAbertos,
@@ -326,7 +326,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     turnoId: turno.id,
     dados: {
       machine_id: input.machineId,
-      // ADR-081: o frame turno.iniciado diz de que trabalho é o turno (a web põe o ao vivo na task, não no chat).
+      // ADR-083: o frame turno.iniciado diz de que trabalho é o turno (a web põe o ao vivo na task, não no chat).
       trabalhoId: turno.trabalhoId ?? null,
       executor,
       harness: escolha?.harness ?? null,

@@ -59,7 +59,7 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
     });
   });
 
-  it("revisto em 2026-10-07 (ADR-081 §3): o mesmo agente roda na sala e na conversa própria ao mesmo tempo; o pendente da MESMA conversa diz que ela está ocupada", async () => {
+  it("revisto em 2026-10-07 (ADR-083 §3): o mesmo agente roda na sala e na conversa própria ao mesmo tempo; o pendente da MESMA conversa diz que ela está ocupada", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const sala = await repos.conversas.criar({ tipo: "sala", salaId: randomUUID() });

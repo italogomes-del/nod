@@ -92,7 +92,7 @@ afterEach(async () => {
     await trx`delete from agente_memorias where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
-    // ADR-081 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
+    // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
     await trx`delete from trabalhos where owner_id = ${p}`;
     await trx`delete from inventario_motores where owner_id = ${p}`;
     if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;

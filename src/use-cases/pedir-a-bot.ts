@@ -76,7 +76,7 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   const pessoaNome = (await deps.repos.pessoas.buscar(pessoaId))?.nome ?? "a pessoa";
   const pedidos = (await mensagensDaPessoa(deps, turnoRemetente)).map((m) => m.texto);
   const agora = deps.agora();
-  // definido em 2026-10-07 (ADR-081, S7): o pedido de colega é sempre uma task de quem RECEBE (origem `colega`), na
+  // definido em 2026-10-07 (ADR-083, S7): o pedido de colega é sempre uma task de quem RECEBE (origem `colega`), na
   // conversa dele, com os acessos dele (ADR-058): roda em paralelo com a conversa e com as outras tasks dele.
   const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: alvo.id, conversaId: conversaAlvo.id, titulo: pedido, origem: "colega", pedidoPorAgenteId: remetente.id });
   const turno = await deps.repos.turnos.enfileirar({

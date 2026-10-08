@@ -69,14 +69,14 @@ export function renderSeloModoDev(estado: Estado, conversaId: string | undefined
 }
 
 /**
- * A taxa de abertura das linhas do chat (definido em 2026-10-07, #191; ADR-081, gatilho de reversão): abertas / mostradas
+ * A taxa de abertura das linhas do chat (definido em 2026-10-07, #191; ADR-083, gatilho de reversão): abertas / mostradas
  * nos últimos 14 dias, por tipo. Um tipo acima de 30% por duas semanas volta a ser balão (a decisão é manual).
  */
 export function renderTaxasLinhas(estado: Estado): string {
   const taxas = estado.modoDev.taxasLinhas;
   if (!estado.modoDev.ligado || !taxas?.length) return "";
   const partes = taxas.map((t) => `${t.tipo} ${t.taxa === null ? "—" : `${Math.round(t.taxa * 100)}%`}`).join(" · ");
-  return `<span class="dev-hoje dev-linhas" title="Linhas do chat abertas nos últimos 14 dias (abertas / mostradas). Acima de 30% por 2 semanas, o tipo volta a ser balão (ADR-081).">Linhas abertas: ${esc(partes)}</span>`;
+  return `<span class="dev-hoje dev-linhas" title="Linhas do chat abertas nos últimos 14 dias (abertas / mostradas). Acima de 30% por 2 semanas, o tipo volta a ser balão (ADR-083).">Linhas abertas: ${esc(partes)}</span>`;
 }
 
 /**

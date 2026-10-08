@@ -102,7 +102,7 @@ export type PlanoTurno = {
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
   /**
-   * `bifurcar` (definido em 2026-10-07, ADR-081, rede de 2 min): continuar `sessaoCli` numa CÓPIA (`--fork-session` no
+   * `bifurcar` (definido em 2026-10-07, ADR-083, rede de 2 min): continuar `sessaoCli` numa CÓPIA (`--fork-session` no
    * Claude), porque a original segue com o trabalho promovido. Só vem com harness que declara `bifurcaSessao`.
    */
   entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente; bifurcar?: boolean };

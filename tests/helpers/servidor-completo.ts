@@ -39,7 +39,7 @@ export type OpcoesServidorCompleto = {
   drivers?: OpcoesBoot["drivers"];
   /** Provedores de voz prontos (NOD-180), para observar o TTS falso. */
   voz?: OpcoesBoot["voz"];
-  /** O prazo da rede de 2 min (ADR-081 §2) para o e2e da #193 não esperar 120 s; ausente = REDE_MS. */
+  /** O prazo da rede de 2 min (ADR-083 §2) para o e2e da #193 não esperar 120 s; ausente = REDE_MS. */
   redeMs?: number;
 };
 

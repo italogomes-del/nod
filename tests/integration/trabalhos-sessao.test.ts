@@ -37,7 +37,7 @@ async function montar(trx: Trx) {
   return { ...base, deps, turno, plano };
 }
 
-describeIntegracao("trabalhos: sessão, pasta, retomada e parada (#192, ADR-081)", () => {
+describeIntegracao("trabalhos: sessão, pasta, retomada e parada (#192, ADR-083)", () => {
   it("o turno do trabalho roda na sessão e na pasta DELE, nunca na da conversa; duas tasks nunca dividem sessão nem pasta", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

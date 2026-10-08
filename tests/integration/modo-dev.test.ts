@@ -91,7 +91,7 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
 
       expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false });
       expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true, avisosFechados: [], faixaTrabalhosRecolhida: false });
-      // ADR-081: a faixa manda só o campo dela; o modo dev fica como está. Corpo vazio ou não booleano é recusado.
+      // ADR-083: a faixa manda só o campo dela; o modo dev fica como está. Corpo vazio ou não booleano é recusado.
       expect((await executar(deps, gravarPreferencias, { faixaTrabalhosRecolhida: true })).data).toEqual({ modoDev: true, avisosFechados: [], faixaTrabalhosRecolhida: true });
       await expect(executar(deps, gravarPreferencias, {})).rejects.toMatchObject({ codigo: "entrada_invalida" });
       await expect(executar(deps, gravarPreferencias, { faixaTrabalhosRecolhida: "sim" })).rejects.toMatchObject({ codigo: "entrada_invalida" });

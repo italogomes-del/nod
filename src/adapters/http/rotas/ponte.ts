@@ -154,7 +154,7 @@ export function criarPonteHttpServidor(d: {
       const fs = falas(b.falas);
       // #189: o que o app escreveu na sessão (confirmado) e o que não conseguiu (fica na fila).
       const entregues = idsDeMensagens(b.mensagensEntregues), devolvidas = idsDeMensagens(b.mensagensDevolvidas);
-      // ADR-081 (#194): a memória do Mac, amostrada uma vez por máquina e mandada em cada renovação.
+      // ADR-083 (#194): a memória do Mac, amostrada uma vez por máquina e mandada em cada renovação.
       const mem = memoria(b.memoria);
       const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}), ...(entregues ? { mensagensEntregues: entregues } : {}), ...(devolvidas?.length ? { mensagensDevolvidas: devolvidas } : {}), ...(mem ? { memoria: mem } : {}) });
       if (fs.length && r.ativo) d.fala?.(plano);

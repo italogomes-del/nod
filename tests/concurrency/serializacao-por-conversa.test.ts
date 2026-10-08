@@ -51,7 +51,7 @@ afterEach(async () => {
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
-    // ADR-081 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
+    // ADR-083 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
     await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     await trx`delete from agentes where id in ${trx(criados.agentes)}`;
@@ -71,7 +71,7 @@ async function disputaSimultanea(): Promise<(string | null)[]> {
   return [a?.id ?? null, b?.id ?? null];
 }
 
-describeIntegracao("concorrência: serialização por faixa (conversa ou trabalho, ADR-081)", () => {
+describeIntegracao("concorrência: serialização por faixa (conversa ou trabalho, ADR-083)", () => {
   it("dois turnos pendentes da mesma conversa, duas máquinas AO MESMO TEMPO: sai um só; o segundo só depois de assentar o primeiro", async () => {
     const { conversaId, turnos } = await conversaComTurnos(2);
     const resultados = await disputaSimultanea();
@@ -88,7 +88,7 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
     expect(segundo?.id).not.toBe(ganhos[0]);
   });
 
-  it("revisto em 2026-10-07 (ADR-081 §3): o mesmo agente em duas conversas (direta e sala) roda nas duas ao mesmo tempo", async () => {
+  it("revisto em 2026-10-07 (ADR-083 §3): o mesmo agente em duas conversas (direta e sala) roda nas duas ao mesmo tempo", async () => {
     const agenteId = randomUUID();
     await conversaComTurnos(1, agenteId);
     await conversaComTurnos(1, agenteId);
@@ -96,7 +96,7 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
     expect(resultados.filter((r) => r !== null), `esperava as duas: ${JSON.stringify(resultados)}`).toHaveLength(2);
   });
 
-  it("ADR-081 (#192, critério 1): rotina, pedido de colega e task da pessoa do MESMO bot saem juntos, e a mensagem da conversa sai enquanto os três rodam", async () => {
+  it("ADR-083 (#192, critério 1): rotina, pedido de colega e task da pessoa do MESMO bot saem juntos, e a mensagem da conversa sai enquanto os três rodam", async () => {
     const agenteId = randomUUID();
     const colegaId = randomUUID();
     const conversaId = randomUUID();
@@ -127,7 +127,7 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
     expect(vivos.filter((t) => t.estado === "despachando")).toHaveLength(4);
   });
 
-  it("ADR-081: na fila, a mensagem da pessoa passa na frente da rotina e do pedido de colega", async () => {
+  it("ADR-083: na fila, a mensagem da pessoa passa na frente da rotina e do pedido de colega", async () => {
     const agenteId = randomUUID();
     const conversaId = randomUUID();
     const ids = { rotina: randomUUID(), colega: randomUUID(), conversa: randomUUID() };
@@ -149,7 +149,7 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
     expect(primeiro?.id).toBe(ids.conversa);
   });
 
-  it("ADR-081 (#192, critério 3): o trabalho com depois_de só sai quando o outro termina", async () => {
+  it("ADR-083 (#192, critério 3): o trabalho com depois_de só sai quando o outro termina", async () => {
     const agenteId = randomUUID();
     const conversaId = randomUUID();
     const turnoDepois = randomUUID();

@@ -12,7 +12,7 @@ import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
- * Trabalhos (definido em 2026-10-07, ADR-081, épico #188): criar, manter o estado e montar o que a tela recebe. O
+ * Trabalhos (definido em 2026-10-07, ADR-083, épico #188): criar, manter o estado e montar o que a tela recebe. O
  * estado nunca é transição solta: quem mexe num turno ou numa decisão de um trabalho chama `sincronizarTrabalho`, que
  * relê os fatos e decide por `estadoDoTrabalho` (src/domain/trabalho.ts).
  */

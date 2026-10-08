@@ -1,7 +1,7 @@
 import type { EventoLinha } from "../../src/contracts/trabalho.ts";
 
 /**
- * Telemetria das linhas do chat (definido em 2026-10-07, #191, ADR-081 "gatilho de reversão"): cada linha que a tela
+ * Telemetria das linhas do chat (definido em 2026-10-07, #191, ADR-083 "gatilho de reversão"): cada linha que a tela
  * mostrou conta UMA vez por carga da página (`linha_mostrada`), e cada clique conta (`linha_aberta`). Os eventos saem em
  * lote para `POST telemetria/linhas`; a falha de rede some em silêncio — a telemetria nunca quebra a conversa nem
  * reenvia (o que se perdeu, perdeu-se). O servidor conta por `chaveLinha` distinta, então repetir não infla a taxa.

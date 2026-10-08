@@ -10,7 +10,7 @@ import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-com
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
 
 /**
- * Critério de aceite da #189 (ADR-081 §6), de ponta a ponta e sem custo: servidor completo, laço real e o catcher com a
+ * Critério de aceite da #189 (ADR-083 §6), de ponta a ponta e sem custo: servidor completo, laço real e o catcher com a
  * sessão viva ligada. Um turno com três ferramentas de 5 s (`[[espera]]`); a pessoa manda uma mensagem no meio; a
  * resposta vira fala GRAVADA do mesmo turno em até 10 s depois do fim da ferramenta em curso — não um passo do card, e
  * não uma resposta que espera o turno acabar.
@@ -20,7 +20,7 @@ const NOME_PESSOA = `E2E meio ${randomUUID().slice(0, 8)}`;
 const TETO_DEPOIS_DA_FERRAMENTA_MS = 10_000;
 const ESPERA_MS = 5_000;
 
-describeIntegracao("mensagem no meio com o catcher (ADR-081 §6, #189)", () => {
+describeIntegracao("mensagem no meio com o catcher (ADR-083 §6, #189)", () => {
   let srv: ServidorCompleto;
   const criados = { agentes: [] as string[], conversas: [] as string[] };
 

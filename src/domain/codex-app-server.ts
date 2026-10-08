@@ -81,7 +81,7 @@ export type SandboxCodex = "read-only" | "workspace-write";
  * proxy), sandbox só de leitura. As instruções de voz vão como `developerInstructions`, o mesmo canal que o
  * `codex exec` usa (`-c developer_instructions`).
  *
- * definido em 2026-10-07 (ADR-081 §6): o chat do Codex abre a thread NÃO efêmera (`efemera: false`) e com a sandbox
+ * definido em 2026-10-07 (ADR-083 §6): o chat do Codex abre a thread NÃO efêmera (`efemera: false`) e com a sandbox
  * das pastas autorizadas (`workspace-write` com projeto, como o `codex exec`); a ligação segue com os padrões.
  */
 export function pedidoThreadStart(id: IdRpc, p: { modelo: string; instrucoes: string; cwd: string; sandbox?: SandboxCodex; efemera?: boolean }): string {

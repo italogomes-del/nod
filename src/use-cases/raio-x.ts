@@ -9,7 +9,7 @@ export const TURNOS_NO_RAIO_X_DA_CONVERSA = 300;
 export const lerPreferencias: CasoDeUso<Record<string, never>, Preferencias> = async (deps) => ({ data: await deps.repos.preferencias.buscar() });
 
 /**
- * PUT preferencias: o que vier (booleano) muda, o resto fica. revisto em 2026-10-07 (ADR-081): a faixa de Trabalhos
+ * PUT preferencias: o que vier (booleano) muda, o resto fica. revisto em 2026-10-07 (ADR-083): a faixa de Trabalhos
  * manda só `faixaTrabalhosRecolhida`; corpo sem nenhum dos dois, ou com valor que não é booleano, é entrada inválida.
  */
 export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; faixaTrabalhosRecolhida?: unknown }, Preferencias> = async (deps, input) => {

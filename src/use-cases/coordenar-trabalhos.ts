@@ -11,7 +11,7 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 import { criarTrabalho, linhaTrabalhoAberto, marcarParado, sincronizarTrabalho, trabalhosParaDto, travarTrabalhoComTurnos } from "./trabalhos.ts";
 
 /**
- * A conversa coordena (definido em 2026-10-07, ADR-081 §7, issue #193): abrir uma task, repassar um recado, "Fazer
+ * A conversa coordena (definido em 2026-10-07, ADR-083 §7, issue #193): abrir uma task, repassar um recado, "Fazer
  * depois da …", "Fazer aqui" e a rede de 2 min. O estado do trabalho continua saindo de `sincronizarTrabalho`.
  */
 
@@ -298,7 +298,7 @@ export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDt
 };
 
 /**
- * Mensagem a uma task no meio do trabalho (ADR-081, #193): as falas que esperam na faixa DESTE trabalho entram no turno
+ * Mensagem a uma task no meio do trabalho (ADR-083, #193): as falas que esperam na faixa DESTE trabalho entram no turno
  * vivo dele, como a absorção da conversa (ADR-067) faz com a conversa. Só falas com mensagem de origem (a da pessoa
  * na tela da task e o recado da conversa) e sem anexo; a retomada de uma decisão nunca é absorvida.
  */
@@ -335,7 +335,7 @@ export async function contaminarSeAbsorveuDeFora(deps: Pick<Deps, "repos" | "ago
 }
 
 /**
- * A rede de 2 min (ADR-081 §2, #193): na renovação, o turno de conversa que passou de 2 min trabalhando (e já chamou
+ * A rede de 2 min (ADR-083 §2, #193): na renovação, o turno de conversa que passou de 2 min trabalhando (e já chamou
  * ferramenta) vira o trabalho `rede`. O processo segue intocado; a sessão dele passa a ser do trabalho, e a próxima
  * mensagem da conversa sai com `bifurcar` (emitir-plano-turno). Só com harness que `bifurcaSessao`.
  */

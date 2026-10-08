@@ -83,7 +83,7 @@ export type NovoTrabalho = {
 export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[]; deFora: boolean };
 
 /**
- * Trabalhos do bot (ADR-081, 0060). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
+ * Trabalhos do bot (ADR-083, 0060). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
  * da dona (owner_id), T | null sem lançar. O estado é decidido em src/domain/trabalho.ts (estadoDoTrabalho) a partir de
  * `fatos`; aqui só se grava.
  */

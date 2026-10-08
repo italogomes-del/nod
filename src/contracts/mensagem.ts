@@ -28,7 +28,7 @@ export type KindMensagem =
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
   | { kind: "boas_vindas" }
-  /** `trabalhoId` (definido em 2026-10-07, ADR-081): o trabalho de quem RECEBEU o pedido; a linha "Enviou mensagem para…" abre a tela dele. */
+  /** `trabalhoId` (definido em 2026-10-07, ADR-083): o trabalho de quem RECEBEU o pedido; a linha "Enviou mensagem para…" abre a tela dele. */
   | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string }
   /**
    * `delegacao` (definido em 2026-09-24, ADR-047): o pedido é tarefa delegada — o texto é a mensagem
@@ -95,7 +95,7 @@ export type PayloadMensagem =
   /** definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a transcrição vem por GET ligacoes/:id/falas. */
   | PayloadLinhaLigacao
   /**
-   * definido em 2026-10-07 (ADR-081): a linha centralizada "Abriu a task <titulo>" na conversa do bot. Mensagem
+   * definido em 2026-10-07 (ADR-083): a linha centralizada "Abriu a task <titulo>" na conversa do bot. Mensagem
    * `sistema`; a web abre a tela do trabalho ao clicar.
    */
   | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho };
@@ -116,7 +116,7 @@ export type Mensagem = {
   /** ADR-046: arquivos que a pessoa mandou com esta mensagem (só metadados; bytes por rota própria). */
   anexos?: AnexoMeta[];
   /**
-   * definido em 2026-10-07 (ADR-081, épico #188): de onde veio o turno que gravou a mensagem, para a web agrupar sem
+   * definido em 2026-10-07 (ADR-083, épico #188): de onde veio o turno que gravou a mensagem, para a web agrupar sem
    * adivinhar. `origemTurno`: a origem do turno (null = sem turno, como a fala da pessoa); `trabalhoId`: o trabalho do
    * turno (null = turno da conversa); `fimDoTurno`: é a última fala de um turno já encerrado — as outras falas desse
    * turno foram do meio (ADR-067). Ausentes = servidor anterior ao épico.

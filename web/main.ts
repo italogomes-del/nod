@@ -415,7 +415,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "conectores") return { tipo: "hidratar-conectores", ...(await api.conectores()) };
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
-  // ADR-081: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
+  // ADR-083: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
   if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }) };
   if (q.startsWith("trabalho:")) {
     // Revisão W2 (2026-10-08): a task que sumiu (404) fecha a tela em vez de ficar "carregando" e pedir de novo.
@@ -586,7 +586,7 @@ function renderSidebar(estado: Estado): string {
     // definido em 2026-10-04 (ADR-071): "Em ligação" ganha da última mensagem, discreto, com o fone.
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
     const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
-    // ADR-081 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
+    // ADR-083 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
     const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + chipTrabalhosDoBot(estado, a);
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
@@ -697,7 +697,7 @@ function renderPrincipal(): void {
     case "nova-sala":
       corpo = renderNovaSala(estado);
       break;
-    // ADR-081 (#195/#196): "Todos os trabalhos", a tela da task e a tela provisória de uma linha do chat.
+    // ADR-083 (#195/#196): "Todos os trabalhos", a tela da task e a tela provisória de uma linha do chat.
     case "trabalhos":
       corpo = renderTodosOsTrabalhos(estado, t.filtro);
       break;
@@ -732,7 +732,7 @@ function renderPrincipal(): void {
   regiao("cabecalho", cabecalho);
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   regiao("erro", erro);
-  // ADR-081 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
+  // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
   regiao("faixa-trabalhos", t.tipo === "conversa" ? renderFaixaTrabalhos(estado, t.agenteId) : "");
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
@@ -1987,7 +1987,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       dispatch({ tipo: "hidratar-executor", executor: estadoNovo });
       dispatch({ tipo: "invalidar", quais: ["inventario", "frota"] });
     }),
-  // ADR-081 (#195): com tasks abertas, o Parar do chat para tudo do bot — e mostra a lista antes; sem tasks, igual a antes.
+  // ADR-083 (#195): com tasks abertas, o Parar do chat para tudo do bot — e mostra a lista antes; sem tasks, igual a antes.
   "parar-conversa": () => {
     const t = estado.tela;
     const tasks = t.tipo === "conversa" ? abertosDoBot(estado, t.agenteId, t.conversaId) : [];

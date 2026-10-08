@@ -146,7 +146,7 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
     if (!emVolta) process.exit(0);
   });
 } else
-// ADR-081 §6 (#189), mensagem no meio: a 1ª mensagem abre a volta ("Vou revisar as tasks." e `consultar`) e a
+// ADR-083 §6 (#189), mensagem no meio: a 1ª mensagem abre a volta ("Vou revisar as tasks." e `consultar`) e a
 // ferramenta só "termina" quando chega a 2ª mensagem pelo stdin — o CLI a lê no limite da ferramenta e o modelo
 // responde curto ("Recebi: …") antes de chamar `lembrar` e fechar com "Revisei as três." num `result` só.
 // NOD_FALSO_MEIO_CEDO=1 (X1, revisão do épico #188): a 2ª mensagem chega enquanto a narração ainda sai (só o delta

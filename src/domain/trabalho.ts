@@ -4,7 +4,7 @@ import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho } fr
 import type { EstadoTurno, OrigemTurno } from "../contracts/turno.ts";
 
 /**
- * Regras puras dos trabalhos (definido em 2026-10-07, ADR-081, épico #188). Quem lê o banco e grava é o caso de uso
+ * Regras puras dos trabalhos (definido em 2026-10-07, ADR-083, épico #188). Quem lê o banco e grava é o caso de uso
  * (src/use-cases/trabalhos.ts); aqui só decisão.
  */
 
@@ -125,7 +125,7 @@ export function podeAbrirTask(trabalho: { origem: OrigemTrabalho; trabalhoMaeId:
 
 /**
  * definido em 2026-10-08 (revisão do épico, S12, decisão do Marlon): uma execução de rotina abre no máximo isto de tasks;
- * a seguinte é recusada com instrução. Sem teto por bot — o limite é a máquina (ADR-081 §4).
+ * a seguinte é recusada com instrução. Sem teto por bot — o limite é a máquina (ADR-083 §4).
  */
 export const TETO_TASKS_POR_EXECUCAO_DE_ROTINA = 10;
 
@@ -135,7 +135,7 @@ export function podeMandarParaTask(trabalho: unknown): boolean {
 }
 
 /**
- * definido em 2026-10-07 (ADR-081 §4, #194): sob pressão amarela (ou pior), a task que espera a pessoa DENTRO do turno
+ * definido em 2026-10-07 (ADR-083 §4, #194): sob pressão amarela (ou pior), a task que espera a pessoa DENTRO do turno
  * há mais disto solta a espera: o turno encerra, o processo fecha e a decisão segue pendente, voltando por --resume.
  */
 export const FECHAR_OCIOSA_SOB_PRESSAO_MS = 5 * 60_000;
@@ -145,7 +145,7 @@ export function soltarPorMemoria(p: { nivel: "verde" | "amarela" | "vermelha" | 
   return (p.nivel === "amarela" || p.nivel === "vermelha") && p.agora - p.esperandoDesde > FECHAR_OCIOSA_SOB_PRESSAO_MS;
 }
 
-/** definido em 2026-10-07 (ADR-081 §2): a resposta de conversa que passa disto trabalhando vira task sozinha. */
+/** definido em 2026-10-07 (ADR-083 §2): a resposta de conversa que passa disto trabalhando vira task sozinha. */
 export const REDE_MS = 120_000;
 
 /**

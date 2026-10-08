@@ -95,7 +95,7 @@ function foraDoArParaAgente(c: Computador): { erro: MotivoFalhaComputador; instr
 }
 
 /**
- * definido em 2026-10-07 (ADR-081, S5): o computador é um por bot (ADR-037), e com tasks em paralelo a segunda que o
+ * definido em 2026-10-07 (ADR-083, S5): o computador é um por bot (ADR-037), e com tasks em paralelo a segunda que o
  * pede encontra a reserva da primeira. Antes isso subia como 409, e o proxy tratava como servidor fora do ar. Agora
  * volta como resultado para o modelo, com quem está usando e quando tentar de novo; nenhuma das duas falha.
  */
@@ -344,7 +344,7 @@ export function criarComputadores(o: Opcoes) {
         if (c.indisponivelDesde !== null) return { ok: true, isError: true, conteudo: JSON.stringify(foraDoArParaAgente(c)), confianca: "confiavel" };
         if (c.controle !== "bot") { esquecerObservacao(plano.turnoId, c.id); return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" }; }
         const args = argumentos as Record<string, unknown>;
-        // ADR-081 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
+        // ADR-083 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
         if (c.ocupadoAte && c.ocupadoAte > d.agora()) {
           const uso = (await d.repos.computadores.emUsoPor(c.id)) ?? { titulo: "outra tarefa", deFora: false };
           esperando.set(plano.turnoId, uso.titulo);
@@ -414,7 +414,7 @@ export function criarComputadores(o: Opcoes) {
         return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
     },
-    /** ADR-081 (S5): quem segurava o computador quando este turno o pediu pela última vez; null = não espera. */
+    /** ADR-083 (S5): quem segurava o computador quando este turno o pediu pela última vez; null = não espera. */
     esperandoPor(turnoId: string): string | null {
       return esperando.get(turnoId) ?? null;
     },

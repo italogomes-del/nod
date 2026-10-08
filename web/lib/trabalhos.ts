@@ -4,7 +4,7 @@ import { duracaoCurta } from "./relogio.ts";
 import { esc } from "./render.ts";
 
 /**
- * Trabalhos (ADR-081, épico #188): o que a faixa, a barra, a gaveta, "Todos os trabalhos" e as linhas do chat leem dos
+ * Trabalhos (ADR-083, épico #188): o que a faixa, a barra, a gaveta, "Todos os trabalhos" e as linhas do chat leem dos
  * trabalhos da pessoa. Puro: recebe o estado (ou a lista) e devolve dados ou HTML curto, sem DOM.
  */
 

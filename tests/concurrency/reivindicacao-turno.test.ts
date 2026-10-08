@@ -50,7 +50,7 @@ afterEach(async () => {
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
-    // ADR-081 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
+    // ADR-083 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
     await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     await trx`delete from agentes where id in ${trx(criados.agentes)}`;
@@ -110,7 +110,7 @@ describeIntegracao("concorrência: reivindicação de turno (advisory lock por p
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, maquinaA, { promptSubmitted: true }, Date.now()))).toEqual({ ativo: true });
   });
 
-  it("ADR-081: dois turnos do MESMO trabalho, duas conexões ao mesmo tempo — sai um só; o do trabalho não espera a conversa", async () => {
+  it("ADR-083: dois turnos do MESMO trabalho, duas conexões ao mesmo tempo — sai um só; o do trabalho não espera a conversa", async () => {
     const agenteId = randomUUID();
     const conversaId = randomUUID();
     const trabalhoId = randomUUID();

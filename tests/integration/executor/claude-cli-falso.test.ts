@@ -522,7 +522,7 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
         },
       });
 
-      // revisto em 2026-10-07 (ADR-081 §6): a resposta à mensagem nova é a primeira fala depois dela — sai na hora.
+      // revisto em 2026-10-07 (ADR-083 §6): a resposta à mensagem nova é a primeira fala depois dela — sai na hora.
       expect(falas).toEqual(["Disparei os testes.", "Testes verdes.", "Recebi: quanto é 2+2?"]);
       expect(ociosos).toBe(2);
       expect(resultado.desfecho).toBe("sucesso");
@@ -575,7 +575,7 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     });
   });
 
-  describe("mensagem no meio (ADR-081 §6, #189)", () => {
+  describe("mensagem no meio (ADR-083 §6, #189)", () => {
     const HELP = { NOD_FALSO_HELP: "--input-format --output-format" };
 
     it("a resposta curta à mensagem do meio, antes de outra ferramenta, vira fala na hora e não se repete na entrega", async () => {

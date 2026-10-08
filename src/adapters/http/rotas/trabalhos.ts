@@ -12,7 +12,7 @@ const ID = "(?<id>[^/]+)";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Trabalhos do bot (definido em 2026-10-07, ADR-081 §8): a faixa, a gaveta, "Todos os trabalhos" e a tela da task.
+ * Trabalhos do bot (definido em 2026-10-07, ADR-083 §8): a faixa, a gaveta, "Todos os trabalhos" e a tela da task.
  * O estado vivo chega pelo frame `trabalho.mudou`; a web relê por aqui.
  */
 export function criarRotasTrabalhos(d: DepsRotas): Rota[] {

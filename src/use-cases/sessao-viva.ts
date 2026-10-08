@@ -39,7 +39,7 @@ const RAIZES_SEM_MENSAGEM: readonly OrigemTurno[] = ["rotina", "delegacao", "pee
  * de colega (delegação, peer, e o que corre sob procuração), sala e ligação ficam de fora: a resposta deles vai a outro
  * bot ou passa pelos responders, e uma fala da pessoa no meio a misturaria.
  *
- * revisto em 2026-10-07 (ADR-081 §6, #189): rotina e turno de trabalho (`trabalhoId`) também ficam de fora — a
+ * revisto em 2026-10-07 (ADR-083 §6, #189): rotina e turno de trabalho (`trabalhoId`) também ficam de fora — a
  * mensagem esperava dentro da rotina (uma esperou 71 min no diário) e a resposta virava passo do card. A mensagem fica
  * `pendente` e vira turno de conversa próprio. A retomada cuja raiz é rotina, delegação ou peer é conferida em
  * `aceitaNaSessao`, que sobe a cadeia.

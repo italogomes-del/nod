@@ -29,7 +29,7 @@ export type DepsRotasInternas = {
   /** Intervalo entre consultas (1 s + jitter até 250 ms, definido em 2026-09-16); injetável no teste. */
   intervaloMs?: number;
   dormir?: (ms: number) => Promise<void>;
-  /** ADR-081 (#194): a pressão de memória dos Macs da pessoa; amarela ou pior solta a espera longa de uma task. */
+  /** ADR-083 (#194): a pressão de memória dos Macs da pessoa; amarela ou pior solta a espera longa de uma task. */
   pressao?: (pessoaId: string) => NivelPressao | null;
 };
 
@@ -141,7 +141,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             }
             return { estado: "pendente" as const, desde: Date.parse(decisao.criadoEm) };
           });
-          // ADR-081 (#194): sob pressão, a task que espera a pessoa há mais de 5 min solta a espera — o turno encerra, o
+          // ADR-083 (#194): sob pressão, a task que espera a pessoa há mais de 5 min solta a espera — o turno encerra, o
           // processo fecha e a decisão vira retomada (--resume) quando ela responder.
           if (olhada.estado === "pendente" && deps.pressao && soltarPorMemoria({ nivel: deps.pressao(ctx.escopo.pessoaId), esperandoDesde: olhada.desde ?? deps.agora(), agora: deps.agora() })) {
             const fechou = await deps.dentro(ctx.escopo, async (d) => {

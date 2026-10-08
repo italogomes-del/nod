@@ -236,7 +236,7 @@ export const FERRAMENTA_DE_BUSCA = "ToolSearch";
 /**
  * Args do `claude -p` para um plano (função pura: é o que os testes de args conferem).
  *
- * `bifurcar` (definido em 2026-10-07, ADR-081, #193, rede de 2 min): com `plano.entrada.bifurcar` e uma sessão, o turno
+ * `bifurcar` (definido em 2026-10-07, ADR-083, #193, rede de 2 min): com `plano.entrada.bifurcar` e uma sessão, o turno
  * continua NUMA CÓPIA dela (`--resume <sessão> --fork-session`), porque a original segue com o trabalho promovido. O CLI
  * escolhe o id novo, que volta no `init`/`result` (e daí no `sessaoCli` do resultado); por isso `sessaoCli` é null aqui.
  * Só com a flag no help (`bifurcar` = o driver conferiu): sem ela, quem chama recusa o turno antes, para nunca continuar
@@ -424,7 +424,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
           // ADR-067: a entrada da sessão viva fica aberta até o modelo responder sem nada em segundo plano e sem
           // mensagem nova; só então fecha e o processo sai. Fora da sessão viva ela fecha logo depois do prompt.
           let entradaAberta = false;
-          // ADR-081 §6: a primeira fala depois de uma mensagem do meio sai na hora, de qualquer tamanho.
+          // ADR-083 §6: a primeira fala depois de uma mensagem do meio sai na hora, de qualquer tamanho.
           const meio = criarFalaDoMeio();
           // X1 (revisto em 2026-10-08): o modelo está parado entre voltas (o último evento foi um `result`). Uma mensagem
           // escrita agora abre a próxima volta, sem narração de antes no caminho: a próxima fala já é a resposta.
@@ -603,7 +603,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                     momentos.push(Date.now() - inicio);
                     sinks.evento(ev);
                     if (ev.tipo === "delta") sinks.delta(ev.texto);
-                    // ADR-081 §6: a resposta à mensagem do meio vira fala gravada agora, não passo do card.
+                    // ADR-083 §6: a resposta à mensagem do meio vira fala gravada agora, não passo do card.
                     const resposta = meio.avaliar(ev, falaNaHora);
                     if (resposta !== null && falaNaHora) sinks.falaIntermediaria!(resposta);
                     if (ev.tipo === "result") entreVoltas = true;

@@ -1077,7 +1077,7 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .msg-linha > .msg-computador-fora { max-width: 620px; margin: 4px auto 12px; }
 
 /* =====================================================================================================================
-   Chat limpo e Tasks (definido em 2026-10-07, ADR-081, épico 188; protótipo "Chat limpo", pranchas R1, B1, B2, K1–K9,
+   Chat limpo e Tasks (definido em 2026-10-07, ADR-083, épico 188; protótipo "Chat limpo", pranchas R1, B1, B2, K1–K9,
    M1–M3). Tudo que não é balão fica no centro da conversa: as linhas de rotina, de bots entre si e de task, os passos
    da task e as pílulas de memória. A cor do agente só aparece no ponto de "trabalhando" (tokens.css).
    ===================================================================================================================== */

@@ -75,7 +75,7 @@ export type NovaMensagem = {
   idEnvio?: string;
 };
 
-/** A linha lida com o turno (ADR-081, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
+/** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
 type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null };
 
 function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
@@ -83,7 +83,7 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
 }
 
 /**
- * definido em 2026-10-07 (ADR-081, S2): o que a web usa para agrupar sem adivinhar, no MESMO select (S3 da revisão: a
+ * definido em 2026-10-07 (ADR-083, S2): o que a web usa para agrupar sem adivinhar, no MESMO select (S3 da revisão: a
  * janela `max(criado_em) over (partition by turno_id)`, nunca subconsulta por linha). A fala da pessoa não tem turno
  * próprio: o trabalho dela é o do turno que ela abriu (`mensagem_origem_id`, índice da 0060). `fimDoTurno` olha só as
  * falas de texto do bot e só turno já encerrado; a janela é a mesma página lida, e a última fala de um turno é sempre a
@@ -142,7 +142,7 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraMensagem);
     },
 
-    /** listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-081). */
+    /** listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-083). */
     async listarComTurno(conversaId: string, limite = 200): Promise<Mensagem[]> {
       const linhas = await selectComTurno(conn, escopo.tenantId, conn`
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
@@ -151,7 +151,7 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * As mensagens de um trabalho (a tela da task, ADR-081): as falas dos turnos dele, inclusive as do meio, e as da
+     * As mensagens de um trabalho (a tela da task, ADR-083): as falas dos turnos dele, inclusive as do meio, e as da
      * pessoa que abriram um turno dele. As mais recentes, até `limite`.
      */
     async doTrabalho(trabalhoId: string, limite = 300): Promise<Mensagem[]> {

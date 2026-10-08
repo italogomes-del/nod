@@ -161,7 +161,7 @@ export async function mensagemExecutorIndisponivel(
 /**
  * GET conversas/:id/mensagens (EMENDA 13): mensagens + turnos pendentes renderizáveis ("na fila — ocupado em …").
  * definido em 2026-09-24 (fio da pergunta): + os fios das perguntas com mensagem na janela, já com o estado.
- * definido em 2026-10-07 (ADR-081, S2): cada mensagem leva `origemTurno`, `trabalhoId` e `fimDoTurno`, e a conversa, as
+ * definido em 2026-10-07 (ADR-083, S2): cada mensagem leva `origemTurno`, `trabalhoId` e `fimDoTurno`, e a conversa, as
  * tasks abertas do bot dela (a faixa). As falas do meio dos turnos de trabalho continuam na página: quem as esconde é a
  * web, e elas contam no `limite` (documentado: uma task muito falante empurra as mais antigas para fora da janela).
  */

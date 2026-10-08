@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { criarAmostradorMemoria, type Executar } from "../../../src/adapters/executor/amostrador-memoria.ts";
 
-/** #194 (ADR-081 §4, decisão S8): um amostrador por máquina; `sysctl` e `ps` injetados, nenhum comando real. */
+/** #194 (ADR-083 §4, decisão S8): um amostrador por máquina; `sysctl` e `ps` injetados, nenhum comando real. */
 function executorFalso(o: { nivel?: string; ps?: string; falhaSysctl?: boolean; falhaPs?: boolean } = {}) {
   const chamadas: string[] = [];
   const executar: Executar = async (bin) => {

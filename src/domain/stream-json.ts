@@ -237,7 +237,7 @@ const juntarBlocos = (partes: readonly string[]) => partes.map((p) => p.trim()).
 /**
  * Fala = relatórios escritos antes da última ferramenta (> NARRACAO_MAX_CHARS, ainda não contidos no
  * texto final) + texto final, separados por linha em branco. Sem relatório a acrescentar, o texto final
- * sai intacto. `obrigatorios` (definido em 2026-10-07, ADR-081 §6): índices de `antesDaUltimaFerramenta` que entram
+ * sai intacto. `obrigatorios` (definido em 2026-10-07, ADR-083 §6): índices de `antesDaUltimaFerramenta` que entram
  * de qualquer tamanho — a resposta a uma mensagem do meio que não pôde sair como fala na hora.
  */
 export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string, obrigatorios: ReadonlySet<number> = new Set()): string {
@@ -275,7 +275,7 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
  *  - sem result (interrompido): tudo o que foi escrito — os blocos separados por linha em branco mais o
  *    trecho em streaming que não chegou a fechar um bloco; sem blocos, os deltas colados, como antes.
  *
- * `falaDoMeio` (definido em 2026-10-07, ADR-081 §6): a resposta a uma mensagem da pessoa no meio do turno. A que o
+ * `falaDoMeio` (definido em 2026-10-07, ADR-083 §6): a resposta a uma mensagem da pessoa no meio do turno. A que o
  * driver já mandou como fala intermediária (`falados`) sai da fala, e o `result.texto` igual a ela também; a que não
  * saiu (`obrigatorios`) entra mesmo curta, antes de outra ferramenta. Sem nenhuma, tudo como antes.
  */

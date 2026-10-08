@@ -36,7 +36,7 @@ export type RespostaFerramenta =
 export type RespostaAguardar =
   /** `resultado` (0032): o que a ação aprovada no computador devolveu — conteúdo NÃO confiável. */
   | { estado: "decidida"; itens: { idx: number; desfecho: DesfechoItem | null; resultado?: string }[] }
-  /** `soltar` (ADR-081, #194): a memória do Mac apertou — pare de esperar agora e encerre o turno. */
+  /** `soltar` (ADR-083, #194): a memória do Mac apertou — pare de esperar agora e encerre o turno. */
   | { estado: "pendente"; soltar?: true };
 
 export type FalhaTransporte = { transporte: "servidor_fora" | "timeout" | "falha_tecnica"; status: number | null };

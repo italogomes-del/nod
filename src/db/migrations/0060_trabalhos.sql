@@ -1,4 +1,4 @@
--- definido em 2026-10-07 (ADR-081, épico #188, issue #192): trabalhos em paralelo — a conversa coordena, cada trabalho
+-- definido em 2026-10-07 (ADR-083, épico #188, issue #192): trabalhos em paralelo — a conversa coordena, cada trabalho
 -- longo roda à parte, com sessão do CLI e pasta próprias.
 --
 -- Medido no diário, 7 dias até 07/10: pedido de colega dura 73 min no p90 (até 7 h) e rotina chega a 16 h. Pela regra

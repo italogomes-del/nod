@@ -26,7 +26,7 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
 
   const parada = await deps.repos.paradas.ativar({ conversaId, agora });
   if (!parada) throw new ErroDeDominio("estado_invalido", { cause: "parada não gravada" });
-  // definido em 2026-10-07 (ADR-081): o Parar do chat para tudo do bot, inclusive as tasks dele (os turnos delas
+  // definido em 2026-10-07 (ADR-083): o Parar do chat para tudo do bot, inclusive as tasks dele (os turnos delas
   // moram na conversa do bot e já caem abaixo); sem conversa, as de todos os bots. A lista volta para a tela.
   const conversa = conversaId !== null ? await deps.repos.conversas.buscar(conversaId) : null;
   const abertos = conversaId === null

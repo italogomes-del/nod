@@ -84,7 +84,7 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       return acao(l!);
     },
     /**
-     * ADR-081 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"
+     * ADR-083 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"
      * (turno sem trabalho), ou "a pessoa" (ação dela, sem turno). null = nenhuma ação executando.
      */
     /**

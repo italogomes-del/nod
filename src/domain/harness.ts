@@ -94,7 +94,7 @@ export function iaAtualDoCatalogo(catalogo: CatalogoHarness): IdHarness {
 }
 
 /**
- * definido em 2026-10-07 (ADR-081): o que o harness sabe fazer. Toda diferença entre harnesses fora do driver passa
+ * definido em 2026-10-07 (ADR-083): o que o harness sabe fazer. Toda diferença entre harnesses fora do driver passa
  * por aqui; harness desconhecido (ou ausente) não tem nenhuma capacidade.
  */
 export function capacidadesDe(harness: string | null | undefined): CapacidadesHarness {

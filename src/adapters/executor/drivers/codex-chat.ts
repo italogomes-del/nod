@@ -15,7 +15,7 @@ import { configMcpCodex, escreverLauncherProxy, type RecusadasCodex } from "./co
 import { argsAppServer } from "./codex-ligacao.ts";
 
 /**
- * O chat do Codex no `codex app-server` (definido em 2026-10-07, ADR-081 §6, decisão S4). O `codex exec` é um prompt
+ * O chat do Codex no `codex app-server` (definido em 2026-10-07, ADR-083 §6, decisão S4). O `codex exec` é um prompt
  * por turno, sem sessão: a mensagem da pessoa no meio do trabalho esperava o turno acabar. Aqui o turno é uma thread
  * (efêmera, X8) aberta enquanto o bot trabalha, com a mesma sessão viva do Claude (ADR-067): cada volta do modelo
  * fecha com um `turn/completed` (vira um `result`), a mensagem nova entra pelo `turn/steer` no turno ativo (ou abre o
@@ -128,7 +128,7 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       eventos.push(ev);
       sinks.evento(ev);
       if (ev.tipo === "delta") sinks.delta(ev.texto);
-      // ADR-081 §6: a resposta à mensagem do meio vira fala gravada agora, não passo do card.
+      // ADR-083 §6: a resposta à mensagem do meio vira fala gravada agora, não passo do card.
       const resposta = meio.avaliar(ev, falaNaHora);
       if (resposta !== null && falaNaHora) sinks.falaIntermediaria!(resposta);
       const depois = reduzirSinais(sinais, ev);

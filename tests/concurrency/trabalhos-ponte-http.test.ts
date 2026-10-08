@@ -10,7 +10,7 @@ import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-com
 import { limparPessoaE2E } from "./limpeza-e2e.ts";
 
 /**
- * ADR-081 pela ponte HTTP das máquinas (modo compartilhado), com commit: a memória do Mac na renovação (#194) e a fala
+ * ADR-083 pela ponte HTTP das máquinas (modo compartilhado), com commit: a memória do Mac na renovação (#194) e a fala
  * mandada à task entrando no turno vivo dela (#193). Limpeza própria por pessoa.
  */
 describeIntegracao("trabalhos pela ponte HTTP: memória do Mac e mensagem para a task", () => {

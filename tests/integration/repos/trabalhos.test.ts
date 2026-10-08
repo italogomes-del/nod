@@ -14,7 +14,7 @@ const turno = (conversaId: string, agenteId: string, trabalhoId: string | null) 
   conversaId, agenteId, origem: "conversa" as const, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m", trabalhoId,
 });
 
-describeIntegracao("trabalhos (0060, ADR-081)", () => {
+describeIntegracao("trabalhos (0060, ADR-083)", () => {
   it("cria, lista os abertos e os terminados desde, muda de estado com os carimbos e guarda sessão, custo e memória", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);

@@ -1,7 +1,7 @@
 import type { JsonSchema } from "./json-schema.ts";
 
 /**
- * As ferramentas da conversa coordenadora (definido em 2026-10-07, ADR-081 §7, issue #193). Moram fora de
+ * As ferramentas da conversa coordenadora (definido em 2026-10-07, ADR-083 §7, issue #193). Moram fora de
  * ferramentas-nod.ts pelo gatilho de 200 linhas da EMENDA 26, como as de pendência; são espalhadas em FERRAMENTAS_NOD.
  * `abrir_task` entra no turno de conversa (sem trabalho) e no da task de rotina sem mãe; `mandar_para_task`, só na
  * conversa. O teto do título (200) é o CHECK trabalho_titulo da 0060.

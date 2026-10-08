@@ -41,7 +41,7 @@ const SAIDA_APOS_RESUMO_MS = 2_000;
  */
 export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[]; recusadas?: RecusadasCodex; sandbox?: SandboxCodex }): string[] {
   return [
-    // definido em 2026-10-07 (ADR-081 §6): o chat com projeto autorizado escreve na pasta, como o `codex exec`.
+    // definido em 2026-10-07 (ADR-083 §6): o chat com projeto autorizado escreve na pasta, como o `codex exec`.
     "-c", `mcp_servers=${p.configMcp}`, "-c", 'approval_policy="never"', "-c", `sandbox_mode="${p.sandbox ?? "read-only"}"`,
     ...overridesIsolamentoCodex(p.recusadas ?? SEM_RECUSADAS).flatMap((o) => ["-c", o]),
     "app-server",
@@ -116,7 +116,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
       sinais = depois;
     };
 
-    // definido em 2026-10-07 (ADR-081, S4): o JSON-RPC, a máquina do turno e a recusa dos pedidos do servidor moram no
+    // definido em 2026-10-07 (ADR-083, S4): o JSON-RPC, a máquina do turno e a recusa dos pedidos do servidor moram no
     // cliente compartilhado com o chat do Codex; aqui fica só o que é da voz (as vezes, o resumo, o canal do cérebro).
     const cliente = criarClienteAppServer({
       bin: c.bin,

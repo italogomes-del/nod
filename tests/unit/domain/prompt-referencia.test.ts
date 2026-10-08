@@ -65,7 +65,7 @@ const kitConversa = [
 const turno1 = {
   memorias: [mem("mem-1", "o time usa um quadro de tarefas fictício", 1), mem("mem-2", "prefere respostas curtas", 2)],
   pendencias: [pend("pend-1", "revisar o PR de exemplo #1", 1_700_000_000_000)],
-  // ADR-081 (#193): a conversa coordenadora vê as tasks abertas do bot.
+  // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot.
   trabalhosAbertos: [{ id: "trab-1", titulo: "Dashboard de exemplo", estado: "rodando", ultimoPasso: "Rodou um comando" }],
   contextoConversa: '{"historico":[{"autor":"Pessoa Exemplo","texto":"bom dia","confianca":"confiavel"}]}',
 };
@@ -141,7 +141,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
     conectores: [],
     memorias: [],
   },
-  // 8. Task filha de uma rotina (ADR-081, #193): não abre outra, e a linha da task diz por quê.
+  // 8. Task filha de uma rotina (ADR-083, #193): não abre outra, e a linha da task diz por quê.
   "task-filha-de-rotina": {
     agente,
     ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("anotar_pendencia")],

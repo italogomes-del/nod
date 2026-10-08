@@ -161,7 +161,7 @@ export type OpcoesCompor = {
   detectorGh?: DetectorGh;
   /** Provedores de voz prontos (NOD-180); só em teste, para observar o TTS falso. Default: pelas envs NOD_VOZ_*. */
   voz?: ProvedoresVoz;
-  /** Só em teste (definido em 2026-10-08): o prazo da rede de 2 min (ADR-081 §2), para o e2e não esperar 120 s. Default: REDE_MS. */
+  /** Só em teste (definido em 2026-10-08): o prazo da rede de 2 min (ADR-083 §2), para o e2e não esperar 120 s. Default: REDE_MS. */
   redeMs?: number;
 };
 
@@ -354,7 +354,7 @@ export function comporApp(o: OpcoesCompor): App {
   // O detector aquece no boot: o primeiro pedir_acesso não espera o `gh auth status` dentro da transação.
   if (detectorGh) void detectorGh.logado().catch(() => false);
 
-  // ADR-081: a última ferramenta de cada turno vivo e a memória dos Macs, em memória do processo.
+  // ADR-083: a última ferramenta de cada turno vivo e a memória dos Macs, em memória do processo.
   const trabalhosVivos = criarTrabalhosVivos(relogio);
   const services: Services = {
     trabalhosVivos,
@@ -419,7 +419,7 @@ export function comporApp(o: OpcoesCompor): App {
       interruptor.esquecer(id);
       trabalhosVivos.esquecerTurno(id);
     },
-    // ADR-081: a rede de 2 min só promove quem já chamou ferramenta; a memória do Mac fica em memória do processo.
+    // ADR-083: a rede de 2 min só promove quem já chamou ferramenta; a memória do Mac fica em memória do processo.
     fezFerramenta: (id) => trabalhosVivos.ultimaFerramenta(id) !== null,
     registrarMemoria: (pessoaId, machineId, leitura) => trabalhosVivos.registrarMemoria(pessoaId, machineId, leitura),
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
@@ -915,7 +915,7 @@ export function comporApp(o: OpcoesCompor): App {
   ];
 
   function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
-    // ADR-081: o "último passo" da faixa de Trabalhos é o rótulo da última ferramenta do turno vivo.
+    // ADR-083: o "último passo" da faixa de Trabalhos é o rótulo da última ferramenta do turno vivo.
     if (tipo === "turno.atividade" && typeof dados.rotulo === "string") trabalhosVivos.ferramenta(plano.turnoId, dados.rotulo);
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
@@ -936,7 +936,7 @@ export function comporApp(o: OpcoesCompor): App {
     const plano = planosVivos.get(turnoId);
     if (plano) publicarDoPlano(plano, "turno.tarefas", { tarefas });
   });
-  // definido em 2026-10-07 (ADR-081 §4, #194): a memória desta máquina (o executor local roda aqui), um amostrador só
+  // definido em 2026-10-07 (ADR-083 §4, #194): a memória desta máquina (o executor local roda aqui), um amostrador só
   // para todos os pools; preguiçoso — sem turno rodando, nem `sysctl` nem `ps` rodam.
   const memoriaDaMaquina = criarAmostradorMemoria({ env });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.

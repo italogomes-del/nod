@@ -4,8 +4,8 @@ import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
- * Telemetria das linhas do chat (definido em 2026-10-07, ADR-081, #191): a web conta o que mostrou e o que a pessoa
- * abriu; o gatilho de reversão da ADR-081 é um tipo de linha aberto em mais de 30% das vezes em 2 semanas. Vai só para
+ * Telemetria das linhas do chat (definido em 2026-10-07, ADR-083, #191): a web conta o que mostrou e o que a pessoa
+ * abriu; o gatilho de reversão da ADR-083 é um tipo de linha aberto em mais de 30% das vezes em 2 semanas. Vai só para
  * `events` (sem outbox): nenhum frame sai daqui.
  */
 

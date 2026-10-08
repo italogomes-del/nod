@@ -166,7 +166,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-09-24 (ADR-047): a tarefa delegada roda em sessão própria (emitir-plano-turno) e não
   // pode virar a sessão da conversa do alvo com a pessoa.
   // definido em 2026-10-04 (ADR-072): a sessão do laço de voz é efêmera e nunca vira a sessão da conversa.
-  // definido em 2026-10-07 (ADR-081): o turno de um trabalho grava a sessão no TRABALHO, nunca na conversa — a conversa
+  // definido em 2026-10-07 (ADR-083): o turno de um trabalho grava a sessão no TRABALHO, nunca na conversa — a conversa
   // segue livre e na sessão dela enquanto o trabalho roda à parte.
   const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
@@ -298,7 +298,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-09-28 (0032): aprovação já decidida que este turno não chegou a receber (a espera acabou
   // um instante antes do clique) vira UMA retomada — nunca duas, e nunca nenhuma.
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
-  // ADR-081: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
+  // ADR-083: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
   events.push(...(await sincronizarDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };
 };

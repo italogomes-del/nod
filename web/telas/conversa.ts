@@ -666,7 +666,7 @@ export function renderAoVivoDaTimeline(c: ConversaEstado, estado: Estado): strin
 }
 
 /**
- * Os turnos do bot que são de um trabalho (ADR-081): o ao vivo deles mora na tela da task, nunca no chat. O frame
+ * Os turnos do bot que são de um trabalho (ADR-083): o ao vivo deles mora na tela da task, nunca no chat. O frame
  * `turno.iniciado` pode dizer (`trabalhoId`); a conversa relida diz pelo `turnosEmCurso`; a lista, pelo `turnoVivoId`.
  */
 export function turnosDeTrabalho(c: ConversaEstado, estado: Estado): ReadonlySet<string> {
@@ -778,7 +778,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   const mudo = vivo && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[vivo.turnoId], estado.agora) : null;
   const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
   const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
-  // ADR-081 (#195): com task aberta o Parar fica no cabeçalho mesmo sem turno da conversa — ele para tudo do bot.
+  // ADR-083 (#195): com task aberta o Parar fica no cabeçalho mesmo sem turno da conversa — ele para tudo do bot.
   const tasks = abertosDoBot(estado, agenteId, a?.conversaId).length;
   // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
   // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o

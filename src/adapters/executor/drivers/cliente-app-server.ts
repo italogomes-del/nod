@@ -13,7 +13,7 @@ import {
 import { iniciarProcesso, type Processo } from "../processo.ts";
 
 /**
- * Cliente do `codex app-server` (definido em 2026-10-07, ADR-081 §6, decisão S4 da revisão de engenharia): o que o laço
+ * Cliente do `codex app-server` (definido em 2026-10-07, ADR-083 §6, decisão S4 da revisão de engenharia): o que o laço
  * de voz (codex-ligacao.ts, ADR-076) e o chat do Codex (codex-chat.ts) têm em comum, extraído do laço de voz sem mudar
  * o comportamento dele. JSON-RPC por linha no stdio: handshake (initialize → initialized → thread/start), pedidos
  * casados com a resposta pelo id, a máquina de estado do turno (livre → iniciando → ativo → livre), o `turn/steer` contra

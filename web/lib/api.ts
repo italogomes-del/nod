@@ -152,7 +152,7 @@ export function criarApi(escopo: Escopo) {
     relatar: (entrada: EntradaRelato) => post<RespostaMutacao>("relatos", entrada),
     // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
     preferencias: () => get<Preferencias>("preferencias"),
-    // ADR-081: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
+    // ADR-083: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
     gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "faixaTrabalhosRecolhida">>) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
     // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa — o app do Mac limpa o localStorage.
     fecharAviso: (chave: string) => pedir<Preferencias>("POST", `${base}/preferencias/avisos-fechados`, { chave }),
@@ -162,7 +162,7 @@ export function criarApi(escopo: Escopo) {
     comandos: () => get<ComandosDto>("comandos"),
     novaSessao: (conversaId: string) => post<RespostaMutacao>(`conversas/${encodeURIComponent(conversaId)}/nova-sessao`),
     relatos: () => get<{ relatos: Relato[] }>("relatos"),
-    // ADR-081 §8 (definido em 2026-10-07): os trabalhos (tasks) dos bots, a tela da task e o que se faz nela.
+    // ADR-083 §8 (definido em 2026-10-07): os trabalhos (tasks) dos bots, a tela da task e o que se faz nela.
     trabalhos: (agenteId?: string) => get<TrabalhosDto>(agenteId ? `trabalhos?agenteId=${encodeURIComponent(agenteId)}` : "trabalhos"),
     trabalho: (id: string) => get<TrabalhoDetalheDto>(`trabalhos/${encodeURIComponent(id)}`),
     escreverNoTrabalho: (id: string, texto: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/mensagens`, { texto }),

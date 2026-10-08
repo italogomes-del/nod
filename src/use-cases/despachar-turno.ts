@@ -83,7 +83,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
 
   try {
     const plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
-    // ADR-081: o trabalho do turno passa a rodando (ou a precisa de você, se uma decisão dele segue aberta).
+    // ADR-083: o trabalho do turno passa a rodando (ou a precisa de você, se uma decisão dele segue aberta).
     events.push(...(await sincronizarDoTurno(deps, comFila)));
     return { data: { plano, turno: comFila, motivo: null }, events };
   } catch (e) {

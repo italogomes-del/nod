@@ -54,7 +54,7 @@ export type OpcoesLaco = {
   /** definido em 2026-10-05: o resultado que o driver devolveu, antes da entrega (o app do Mac lê `causaSemIa`). */
   aoResultado?: (plano: PlanoTurno, resultado: ResultadoTurno) => void;
   /**
-   * definido em 2026-10-07 (ADR-081 §4, #194): a memória da máquina (um amostrador só, compartilhado pelos laços). Cada
+   * definido em 2026-10-07 (ADR-083 §4, #194): a memória da máquina (um amostrador só, compartilhado pelos laços). Cada
    * renovação leva a última leitura; o grupo do turno entra na soma só com driver de `processoProprio`.
    */
   memoria?: FonteMemoria;
@@ -127,7 +127,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let falas: FalaIntermediaria[] = [];
     let seqFala = 0;
     let mensagensRecebidas = 0;
-    // definido em 2026-10-07 (ADR-081 §5): só pede mensagens a driver que declara `mensagemNoMeio` (lido abaixo).
+    // definido em 2026-10-07 (ADR-083 §5): só pede mensagens a driver que declara `mensagemNoMeio` (lido abaixo).
     let aceitando = false;
     // #189: os ids das mensagens que o adapter escreveu na sessão (confirmados na renovação seguinte) e das que ele não
     // conseguiu escrever (a sessão fechou). O servidor só tira da fila as confirmadas; o resto vira turno próprio.
@@ -184,7 +184,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           const semMoldura = r.mensagensSemMoldura ?? [];
           for (const [i, texto] of (r.mensagens ?? []).entries()) {
             const id = ids[i];
-            // ADR-081 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver. X3 (revisto
+            // ADR-083 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver. X3 (revisto
             // em 2026-10-08): o recado para a task não é fala da pessoa — entra como veio.
             const entrada = id !== undefined && semMoldura.includes(id) ? texto : molduraMensagemNoMeio(texto);
             // X2: `true` = o adapter vai escrevê-la; ela só é confirmada quando ele avisar que entrou (mensagemEntrou).

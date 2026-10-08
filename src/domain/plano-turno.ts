@@ -76,7 +76,7 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * quando algo fica para depois. concluir/descartar_pendencia entram onde a lista aparece: conversa, criação e
  * rotina (emitir-plano-turno.ts só a manda em profundidade 0).
  *
- * Tasks (definido em 2026-10-07, ADR-081 §7): abrir_task e mandar_para_task são da conversa coordenadora; a rotina abre
+ * Tasks (definido em 2026-10-07, ADR-083 §7): abrir_task e mandar_para_task são da conversa coordenadora; a rotina abre
  * tasks (profundidade 1). Quem decide no turno é `podeAbrirTask`/`podeMandarParaTask` pelo trabalho dele: o turno de uma
  * task da pessoa, de colega, da rede ou filha de rotina não abre nem repassa (montarPlano filtra).
  */
@@ -184,13 +184,13 @@ export type EntradaPlano = {
   /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
   onboarding?: boolean;
   /**
-   * definido em 2026-10-07 (ADR-081): a pasta do trabalho relativa a `~/nod` (`<bot>/<slug>`). Com o terminal, ela vira a
+   * definido em 2026-10-07 (ADR-083): a pasta do trabalho relativa a `~/nod` (`<bot>/<slug>`). Com o terminal, ela vira a
    * `pastaDoBot` do plano: o driver a cria e a usa como diretório, e a cerca do git vale para ela. Ausente = a do bot.
    */
   pastaTrabalho?: string | null;
-  /** ADR-081: o trabalho deste turno (null = turno da conversa). Decide abrir_task/mandar_para_task e a linha da task. */
+  /** ADR-083: o trabalho deste turno (null = turno da conversa). Decide abrir_task/mandar_para_task e a linha da task. */
   trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null } | null;
-  /** ADR-081: as tasks abertas do bot, para a seção "Trabalhos em andamento" da conversa coordenadora. */
+  /** ADR-083: as tasks abertas do bot, para a seção "Trabalhos em andamento" da conversa coordenadora. */
   trabalhosAbertos?: readonly TrabalhoNoPrompt[];
   agora: number;
 };

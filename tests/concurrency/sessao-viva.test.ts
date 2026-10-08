@@ -17,7 +17,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
 import { SEM_CAPACIDADES } from "../../src/contracts/harness.ts";
 import { molduraMensagemNoMeio } from "../../src/domain/mensagem-no-meio.ts";
 
-/** O driver de teste declara a sessão viva (ADR-081 §5): sem isso o laço nem pede mensagens. */
+/** O driver de teste declara a sessão viva (ADR-083 §5): sem isso o laço nem pede mensagens. */
 const SESSAO_VIVA = { ...SEM_CAPACIDADES, mensagemNoMeio: true };
 const semMoldura = (t: string) => /«([\s\S]*)»/.exec(t)?.[1] ?? t;
 
@@ -58,7 +58,7 @@ afterEach(async () => {
     await trx`delete from agente_memorias where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
-    // ADR-081 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
+    // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
     await trx`delete from trabalhos where owner_id = ${p}`;
     await trx`delete from inventario_motores where owner_id = ${p}`;
     if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;
@@ -151,7 +151,7 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
         estado = await lido();
       }
 
-      // ADR-081 §6: chega com a moldura; #189: só sai "absorvido" depois que o app confirma a escrita.
+      // ADR-083 §6: chega com a moldura; #189: só sai "absorvido" depois que o app confirma a escrita.
       expect(recebidas).toEqual([molduraMensagemNoMeio("quanto é 2+2?")]);
       expect(etapa.rodados).toEqual([primeiro]);
       expect(estado.primeiro?.estado).toBe("concluido");
@@ -273,7 +273,7 @@ describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nov
   });
 
   for (const caso of ["rotina", "retomada de uma rotina"] as const) {
-    it(`ADR-081 §6: mensagem durante a ${caso} fica pendente e roda como turno de conversa próprio`, { timeout: 25_000 }, async () => {
+    it(`ADR-083 §6: mensagem durante a ${caso} fica pendente e roda como turno de conversa próprio`, { timeout: 25_000 }, async () => {
       const { d, conversaId, longo, laco } = await rodarCenario({
         escreve: true,
         montar: async (deps, agenteId, conversaId) => {

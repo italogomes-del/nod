@@ -147,7 +147,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   if (rotina.soComPendencia && !input.preservarAgenda && (input.aFazer !== true || pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0)) {
     return registrarSemPendencia(deps, input, agora);
   }
-  // definido em 2026-10-07 (ADR-081, S7): cada execução é um trabalho (nunca um por rotina), com sessão própria como já
+  // definido em 2026-10-07 (ADR-083, S7): cada execução é um trabalho (nunca um por rotina), com sessão própria como já
   // era. revisto em 2026-10-08 (revisão do épico, S13): e com pasta própria `~/nod/<bot>/<slug>`, como toda task — na
   // pasta do bot ela rodava em paralelo com a conversa. A cerca do git (ADR-065) aceita qualquer pasta dentro de
   // `~/nod/<bot>`, então a rotina continua entrando nas worktrees que mantém lá.

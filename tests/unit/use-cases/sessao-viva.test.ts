@@ -103,7 +103,7 @@ describe("absorverNaSessao (ADR-067)", () => {
   });
 });
 
-describe("mensagem no meio só em turno de conversa (ADR-081 §6, #189)", () => {
+describe("mensagem no meio só em turno de conversa (ADR-083 §6, #189)", () => {
   it("rotina, retomada de rotina e turno de trabalho não absorvem: a mensagem fica pendente e vira turno próprio", async () => {
     const { d, agenteId, conversaId } = await cenario();
     const rotina = await turno(d, agenteId, conversaId, { estado: "despachando", origem: "rotina", daPessoa: false });
