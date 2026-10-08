@@ -1,0 +1,265 @@
+import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { CasoNod } from "../contracts/servicos.ts";
+import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
+import type { Turno } from "../contracts/turno.ts";
+import { capacidadesDe } from "../domain/harness.ts";
+import { ErroDeDominio } from "../domain/erro.ts";
+import { podeAbrirTask, promoveNaRede, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
+import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
+import { criarTrabalho, linhaTrabalhoAberto, marcarParado, sincronizarTrabalho, trabalhosParaDto } from "./trabalhos.ts";
+
+/**
+ * A conversa coordena (definido em 2026-10-07, ADR-081 §7, issue #193): abrir uma task, repassar um recado, "Fazer
+ * depois da …", "Fazer aqui" e a rede de 2 min. O estado do trabalho continua saindo de `sincronizarTrabalho`.
+ */
+
+/** A moldura do pedido que abre a task: a task não vê a conversa, então o pedido vai inteiro e com quem pediu. */
+function entradaDaTask(titulo: string, pedido: string, deRotina: boolean): string {
+  return deRotina
+    ? `[nod] Task "${titulo}", aberta pela sua rotina. Faça o trabalho até o fim e entregue o resultado.\n${pedido}`
+    : `[nod] Task "${titulo}", aberta por você na conversa com a pessoa. Ela acompanha pela tela da task; faça o trabalho até o fim e entregue o resultado.\n${pedido}`;
+}
+
+/** A conversa própria do bot: é ali que a linha "Abriu a task …" e o resultado aparecem. */
+async function conversaDoBot(deps: Deps, turno: Turno): Promise<string> {
+  const conversa = await deps.repos.conversas.buscar(turno.conversaId);
+  if (conversa?.tipo === "propria") return conversa.id;
+  const propria = await deps.repos.conversas.buscarPropriaDoAgente(turno.agenteId);
+  if (!propria) throw new ErroDeDominio("nao_encontrado", { cause: "conversa própria do bot" });
+  return propria.id;
+}
+
+/**
+ * Ferramenta `abrir_task`: cria o trabalho (`pessoa`; da task de rotina, `rotina` com mãe), grava a linha "Abriu a
+ * task …" na conversa e enfileira o primeiro turno dele com o pedido. A task de uma task com mãe, de colega, da pessoa
+ * ou da rede não abre outra: a recusa volta escrita para o bot (o catálogo já tira a ferramenta; isto é a 2ª camada).
+ */
+export const abrirTask: CasoNod<Deps, "abrir_task"> = async (deps, input) => {
+  const turno = await deps.repos.turnos.buscar(input.turnoId);
+  if (!turno || turno.agenteId !== input.agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
+  const atual = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
+  if (!podeAbrirTask(atual)) return { data: { ok: false, erro: "nao_abre_task", instrucao: "Você já está numa task, e uma task não abre outra (só a rotina abre, um nível). Faça este trabalho aqui mesmo." } };
+  const depoisDe = input.depois_de ? await deps.repos.trabalhos.buscar(input.depois_de) : null;
+  if (input.depois_de && (!depoisDe || depoisDe.agenteId !== turno.agenteId || !trabalhoAberto(depoisDe.estado))) {
+    return { data: { ok: false, erro: "depois_de_invalido", instrucao: "depois_de precisa ser o id de uma task sua ainda aberta, como veio em \"Trabalhos em andamento\". Abra sem depois_de ou corrija o id." } };
+  }
+  const agente = await deps.repos.agentes.buscar(turno.agenteId);
+  const deRotina = atual?.origem === "rotina";
+  const conversaId = await conversaDoBot(deps, turno);
+  const { trabalho, events } = await criarTrabalho(deps, {
+    agenteId: turno.agenteId,
+    conversaId,
+    titulo: input.titulo,
+    origem: deRotina ? "rotina" : "pessoa",
+    rotinaId: atual?.rotinaId ?? null,
+    trabalhoMaeId: deRotina ? atual.id : null,
+    depoisDeTrabalhoId: depoisDe?.id ?? null,
+  });
+  events.push(...(await linhaTrabalhoAberto(deps, trabalho, turno.id)));
+  const agora = deps.agora();
+  const novo = await deps.repos.turnos.enfileirar({
+    conversaId,
+    agenteId: turno.agenteId,
+    origem: deRotina ? "rotina" : "conversa",
+    trabalhoId: trabalho.id,
+    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: turno.profundidade,
+    entradaTexto: entradaDaTask(trabalho.titulo, input.pedido.trim(), deRotina),
+    entradaConfianca: turno.entradaConfianca,
+    sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
+    modelo: agente?.modelo ?? turno.modelo,
+    harness: agente?.harness ?? turno.harness,
+  });
+  if (!novo) throw new ErroDeDominio("estado_invalido", { cause: "turno da task não criado" });
+  // A marca de quem leu algo de fora (ADR-062) atravessa para a task, como no pedido a colega.
+  if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(novo.id, agora);
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher" });
+  events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId, turnoId: novo.id, dados: { origem: novo.origem, agente_id: turno.agenteId, trabalhoId: trabalho.id } }));
+  const espera = depoisDe ? ` Ela começa quando "${depoisDe.titulo}" terminar.` : "";
+  return { data: { ok: true, trabalho_id: trabalho.id, instrucao: `Abriu a task "${trabalho.titulo}".${espera} Diga em uma frase que abriu e siga com a pessoa; o resultado e as perguntas da task chegam aqui.` }, events };
+};
+
+/**
+ * Põe um recado na faixa do trabalho: a fala (da pessoa, ou do bot que repassa) é gravada sem turno e abre um turno
+ * do trabalho com `mensagem_origem_id` — a leitura da conversa a marca com o `trabalhoId`, e a tela a mostra na task.
+ * O turno é a RETOMADA do último turno dele, para seguir no modo e na procuração dele (rotina, colega ou conversa).
+ * Rodando, a renovação o absorve no meio (absorverNoTrabalho); senão ele roda quando a faixa estiver livre.
+ */
+async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string; entrada: string; deQuem: "pessoa" | { agenteId: string } }): Promise<{ turno: Turno; events: RuntimeEvent[] }> {
+  const agora = deps.agora();
+  const turnos = await deps.repos.turnos.doTrabalho(t.id);
+  const ultimo = turnos.filter((x) => x.motivoInterrupcao !== "absorvido").at(-1) ?? null;
+  const autoria = p.deQuem === "pessoa" ? autoriaPessoa(deps.escopo) : autoriaAgente({ agenteId: p.deQuem.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher" });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: t.conversaId, autoria, kind: "texto", texto: p.texto, confianca: p.deQuem === "pessoa" ? "confiavel" : "nao_confiavel" });
+  if (!mensagem) throw new ErroDeDominio("nao_permitido");
+  const agente = await deps.repos.agentes.buscar(t.agenteId);
+  const turno = await deps.repos.turnos.enfileirar({
+    conversaId: t.conversaId,
+    agenteId: t.agenteId,
+    origem: ultimo ? "retomada" : "conversa",
+    retomaTurnoId: ultimo?.id ?? null,
+    trabalhoId: t.id,
+    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: ultimo?.profundidade ?? 0,
+    entradaTexto: p.entrada,
+    entradaConfianca: ultimo?.entradaConfianca ?? "confiavel",
+    sobProcuracaoDe: ultimo?.sobProcuracaoDe ?? null,
+    modelo: ultimo?.modelo ?? agente?.modelo ?? "auto",
+    harness: ultimo?.harness ?? agente?.harness,
+    mensagemOrigemId: mensagem.id,
+  });
+  if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do recado não criado" });
+  if (ultimo && (await deps.repos.turnos.contaminado(ultimo.id))) await deps.repos.turnos.contaminar(turno.id, agora);
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto", trabalho_id: t.id } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { origem: turno.origem, agente_id: t.agenteId, trabalhoId: t.id } }),
+    ...(await sincronizarTrabalho(deps, t.id)),
+  ];
+  return { turno, events };
+}
+
+/** Ferramenta `mandar_para_task`: só a conversa coordenadora repassa (a task não manda recado a outra task). */
+export const mandarParaTask: CasoNod<Deps, "mandar_para_task"> = async (deps, input) => {
+  const turno = await deps.repos.turnos.buscar(input.turnoId);
+  if (!turno || turno.agenteId !== input.agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
+  if (turno.trabalhoId) return { data: { ok: false, erro: "nao_repassa", instrucao: "Uma task não manda recado a outra. Termine a sua e diga o que falta no resultado." } };
+  const t = await deps.repos.trabalhos.buscar(input.trabalho_id);
+  if (!t || t.agenteId !== turno.agenteId) return { data: { ok: false, erro: "task_nao_encontrada", instrucao: "Esse id não é de uma task sua. Use o id de \"Trabalhos em andamento\"." } };
+  const rodando = (await deps.repos.turnos.doTrabalho(t.id)).some((x) => x.estado === "despachando");
+  const texto = input.texto.trim();
+  const r = await enfileirarNoTrabalho(deps, t, { texto, entrada: `[nod] Recado da conversa com a pessoa, repassado por você: ${texto}`, deQuem: { agenteId: turno.agenteId } });
+  return {
+    data: { ok: true, entrou: rodando ? "no_meio" : "na_fila", instrucao: rodando ? "O recado entra na task no meio do trabalho dela." : "O recado vira o próximo passo da task." },
+    events: r.events,
+  };
+};
+
+/** POST trabalhos/:id/mensagens: a pessoa escreve na tela da task. */
+export const mensagemParaTrabalho: CasoDeUso<{ trabalhoId: string; texto: string }, { trabalho: TrabalhoDto; mensagemTurnoId: string }> = async (deps, input) => {
+  const texto = typeof input.texto === "string" ? input.texto.trim() : "";
+  if (texto === "") throw new ErroDeDominio("texto_vazio");
+  const t = await deps.repos.trabalhos.buscar(input.trabalhoId);
+  if (!t) throw new ErroDeDominio("nao_encontrado");
+  const r = await enfileirarNoTrabalho(deps, t, { texto, entrada: texto, deQuem: "pessoa" });
+  const [dto] = await trabalhosParaDto(deps, [(await deps.repos.trabalhos.buscar(t.id)) ?? t]);
+  return { data: { trabalho: dto!, mensagemTurnoId: r.turno.id }, events: r.events };
+};
+
+/** O trabalho de que `de` depende, subindo a corrente: impede o ciclo A depois de B depois de A. */
+async function dependeDe(deps: Deps, de: Trabalho, alvoId: string): Promise<boolean> {
+  let atual: Trabalho | null = de;
+  for (let saltos = 0; atual && saltos < 50; saltos++) {
+    if (atual.id === alvoId) return true;
+    atual = atual.depoisDeTrabalhoId ? await deps.repos.trabalhos.buscar(atual.depoisDeTrabalhoId) : null;
+  }
+  return false;
+}
+
+/** POST trabalhos/:id/depois {depoisDe}: "Fazer depois da …" — a task espera a outra terminar, parar ou falhar. null tira. */
+export const fazerDepois: CasoDeUso<{ trabalhoId: string; depoisDe: string | null }, { trabalho: TrabalhoDto }> = async (deps, input) => {
+  const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
+  if (!t) throw new ErroDeDominio("nao_encontrado");
+  if (input.depoisDe !== null && typeof input.depoisDe !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "depoisDe" });
+  if (input.depoisDe !== null) {
+    const outro = await deps.repos.trabalhos.buscar(input.depoisDe);
+    if (!outro || outro.agenteId !== t.agenteId) throw new ErroDeDominio("nao_encontrado");
+    if (outro.id === t.id || (await dependeDe(deps, outro, t.id))) throw new ErroDeDominio("entrada_invalida", { cause: "ciclo de depois_de" });
+  }
+  const marcado = await deps.repos.trabalhos.marcarDepoisDe(t.id, input.depoisDe);
+  if (!marcado) throw new ErroDeDominio("estado_invalido");
+  const events = await sincronizarTrabalho(deps, t.id);
+  const atual = (await deps.repos.trabalhos.buscar(t.id)) ?? marcado;
+  if (events.length === 0) events.push(eventoDe(deps, atual));
+  const [dto] = await trabalhosParaDto(deps, [atual]);
+  return { data: { trabalho: dto! }, events };
+};
+
+function eventoDe(deps: Deps, t: Trabalho): RuntimeEvent {
+  return evento(deps.escopo, { kind: "trabalho_mudou", autoria: autoriaPessoa(deps.escopo), agora: deps.agora(), conversaId: t.conversaId, dados: { trabalhoId: t.id, agenteId: t.agenteId, conversaId: t.conversaId, estado: t.estado, origem: t.origem } });
+}
+
+/**
+ * POST trabalhos/:id/fazer-aqui: a pessoa desfaz a task. Ela é parada (os turnos dela interrompidos) e o pedido que a
+ * abriu vira um turno da CONVERSA, que roda na sessão dela.
+ */
+export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDto; turnoId: string }> = async (deps, input) => {
+  const t = await deps.repos.trabalhos.buscarTravado(input.trabalhoId);
+  if (!t) throw new ErroDeDominio("nao_encontrado");
+  if (trabalhoFinal(t.estado)) throw new ErroDeDominio("estado_invalido", { cause: "task já acabou" });
+  const agora = deps.agora();
+  const turnos = await deps.repos.turnos.doTrabalho(t.id);
+  const primeiro = turnos[0];
+  const autoria = autoriaPessoa(deps.escopo);
+  const events: RuntimeEvent[] = [];
+  for (const p of turnos.filter((x) => x.estado === "pendente")) {
+    if (await deps.repos.turnos.interromper(p.id, "parado_pela_pessoa")) events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: p.conversaId, turnoId: p.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente", trabalho_id: t.id } }));
+  }
+  const vivos = turnos.filter((x) => x.estado === "despachando").map((x) => x.id);
+  await deps.repos.turnos.pedirInterrupcao(vivos, agora);
+  for (const id of vivos) await deps.services.interruptor.interromper(id).catch(() => false);
+  events.push(...(await marcarParado(deps, t)));
+  const agente = await deps.repos.agentes.buscar(t.agenteId);
+  const pedido = primeiro?.entradaTexto ?? t.titulo;
+  const turno = await deps.repos.turnos.enfileirar({
+    conversaId: t.conversaId,
+    agenteId: t.agenteId,
+    origem: "conversa",
+    trabalhoId: null,
+    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: 0,
+    entradaTexto: `[nod] A pessoa pediu para fazer aqui, na conversa, o que ia virar a task "${t.titulo}". Faça agora:\n${pedido}`,
+    entradaConfianca: primeiro?.entradaConfianca ?? "confiavel",
+    modelo: agente?.modelo ?? primeiro?.modelo ?? "auto",
+    harness: agente?.harness ?? primeiro?.harness,
+  });
+  if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno da conversa não criado" });
+  events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { origem: "conversa", agente_id: t.agenteId, fez_aqui: t.id } }));
+  const [dto] = await trabalhosParaDto(deps, [(await deps.repos.trabalhos.buscar(t.id)) ?? t]);
+  return { data: { trabalho: dto!, turnoId: turno.id }, events };
+};
+
+/**
+ * Mensagem a uma task no meio do trabalho (ADR-081, #193): as falas que esperam na faixa DESTE trabalho entram no turno
+ * vivo dele, como a absorção da conversa (ADR-067) faz com a conversa. Só falas com mensagem de origem (a da pessoa
+ * na tela da task e o recado da conversa) e sem anexo; a retomada de uma decisão nunca é absorvida.
+ */
+export const absorverNoTrabalho: CasoDeUso<{ turnoId: string }, { textos: string[] }> = async (deps, input) => {
+  const turno = await deps.repos.turnos.buscar(input.turnoId);
+  if (!turno?.trabalhoId || turno.estado !== "despachando") return { data: { textos: [] } };
+  const absorvidos = await deps.repos.turnos.absorverDoTrabalho(turno);
+  if (absorvidos.length === 0) return { data: { textos: [] } };
+  const agora = deps.agora();
+  const autoria = autoriaPessoa(deps.escopo);
+  const events = absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: turno.id, trabalho_id: turno.trabalhoId ?? null } }));
+  return { data: { textos: absorvidos.map((a) => a.entradaTexto) }, events };
+};
+
+/**
+ * A rede de 2 min (ADR-081 §2, #193): na renovação, o turno de conversa que passou de 2 min trabalhando (e já chamou
+ * ferramenta) vira o trabalho `rede`. O processo segue intocado; a sessão dele passa a ser do trabalho, e a próxima
+ * mensagem da conversa sai com `bifurcar` (emitir-plano-turno). Só com harness que `bifurcaSessao`.
+ */
+export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null }, { trabalho: Trabalho | null }> = async (deps, input) => {
+  const turno = await deps.repos.turnos.buscar(input.turnoId);
+  if (!turno) return { data: { trabalho: null } };
+  const capacidades = capacidadesDe(input.harness);
+  if (!promoveNaRede({ origem: turno.origem, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades })) return { data: { trabalho: null } };
+  const { trabalho, events } = await criarTrabalho(deps, {
+    agenteId: turno.agenteId,
+    conversaId: turno.conversaId,
+    titulo: turno.entradaTexto,
+    origem: "rede",
+    estado: "rodando",
+    iniciadoEm: deps.agora(),
+    sessaoCli: input.sessaoCli,
+    sessaoHarness: input.harness,
+    // O processo já roda na pasta do bot: a task promovida continua nela.
+    pasta: null,
+  });
+  // Quem chama roda isto numa transação própria, fora da renovação: a corrida com a entrega desfaz só a promoção.
+  const vinculado = await deps.repos.turnos.vincularTrabalho(turno.id, trabalho.id);
+  if (!vinculado) throw new ErroDeDominio("estado_invalido", { cause: "turno saiu do despachando durante a promoção" });
+  events.push(...(await linhaTrabalhoAberto(deps, trabalho, turno.id)));
+  return { data: { trabalho }, events };
+};

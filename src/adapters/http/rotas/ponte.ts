@@ -12,7 +12,7 @@ import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { entrega, exigir, falas, inventario, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { entrega, exigir, falas, inventario, memoria, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 
 /**
@@ -150,7 +150,9 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       // ADR-067: as falas da sessão viva e o pedido de mensagens novas viajam na renovação.
       const fs = falas(b.falas);
-      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}) });
+      // ADR-081 (#194): a memória do Mac, amostrada uma vez por máquina e mandada em cada renovação.
+      const mem = memoria(b.memoria);
+      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}), ...(mem ? { memoria: mem } : {}) });
       if (fs.length && r.ativo) d.fala?.(plano);
       if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(plano, b.delta);
       if (r.ativo) for (const t of trechos(b.trechos)) {

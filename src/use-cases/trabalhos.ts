@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
-import type { Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
+import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
-import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoFinal } from "../domain/trabalho.ts";
+import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -60,6 +60,19 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   if (novo === atual.estado) return [];
   const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora());
   return mudou ? [eventoTrabalhoMudou(deps, mudou)] : [];
+}
+
+/**
+ * O evento `pressao_memoria` (#194): o nível que a pessoa vê mudou. Pelo outbox ele vira o frame `memoria.mudou {nivel}`
+ * (despachar-outbox.ts); grava também o anterior e o total, só números (DadosEvento é escalar).
+ */
+export function eventoPressao(deps: DepsTrabalho, mudanca: { nivel: NivelPressao; anterior: NivelPressao | null }, leitura: Pick<LeituraMemoria, "totalMb">): RuntimeEvent {
+  return evento(deps.escopo, {
+    kind: "pressao_memoria",
+    autoria: autoriaPessoa(deps.escopo),
+    agora: deps.agora(),
+    dados: { nivel: mudanca.nivel, anterior: mudanca.anterior, totalMb: Math.round(leitura.totalMb) },
+  });
 }
 
 /** O turno pertence a um trabalho? Sincroniza o dele. */
@@ -140,6 +153,26 @@ export const detalharTrabalho: CasoDeUso<{ trabalhoId: string }, TrabalhoDetalhe
   const mensagens: Mensagem[] = await deps.repos.mensagens.doTrabalho(t.id);
   return { data: { trabalho: dto!, mensagens } };
 };
+
+/**
+ * #194: a memória do Mac apertou e a task esperava a pessoa dentro do turno — a espera é solta (o turno encerra e o
+ * processo fecha), a task fica `fechado_ocioso` e volta do mesmo ponto (--resume) quando a pessoa responder. A conversa
+ * ganha uma linha curta. Turno sem trabalho não é fechado (a conversa é a da pessoa).
+ */
+export async function fecharPorMemoria(deps: DepsTrabalho, turnoId: string): Promise<{ fechou: boolean; events: RuntimeEvent[] }> {
+  const turno = await deps.repos.turnos.buscar(turnoId);
+  if (!turno?.trabalhoId) return { fechou: false, events: [] };
+  const t = await deps.repos.trabalhos.buscarTravado(turno.trabalhoId);
+  if (!t || !trabalhoAberto(t.estado)) return { fechou: false, events: [] };
+  if (t.estado === "fechado_ocioso") return { fechou: true, events: [] };
+  const fechado = await deps.repos.trabalhos.mudarEstado(t.id, "fechado_ocioso", deps.agora());
+  if (!fechado) return { fechou: false, events: [] };
+  const autoria = autoriaAgente({ agenteId: t.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:memoria" });
+  const linha = await deps.repos.mensagens.criar({ conversaId: t.conversaId, autoria, kind: "sistema", texto: `Fechei a task "${t.titulo}", parada esperando você, para liberar memória. Ela volta do mesmo ponto quando você responder.`, confianca: "confiavel" });
+  const events = [eventoTrabalhoMudou(deps, fechado)];
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: deps.agora(), conversaId: t.conversaId, dados: { mensagem_id: linha.id, kind: "sistema", trabalho_id: t.id } }));
+  return { fechou: true, events };
+}
 
 /** Os abertos de um trabalho que o Parar mexe: o trabalho é parado mesmo que o turno ainda esteja acabando. */
 export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<RuntimeEvent[]> {

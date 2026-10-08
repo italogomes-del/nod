@@ -142,6 +142,8 @@ export interface UseCasesNod<Deps> {
   anotarEntrevista: CasoNod<Deps, "anotar_entrevista">;
   concluirEntrevista: CasoNod<Deps, "concluir_entrevista">;
   proporBot: CasoNod<Deps, "propor_bot">;
+  abrirTask: CasoNod<Deps, "abrir_task">;
+  mandarParaTask: CasoNod<Deps, "mandar_para_task">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -172,4 +174,6 @@ export const USE_CASE_POR_FERRAMENTA = {
   anotar_entrevista: "anotarEntrevista",
   concluir_entrevista: "concluirEntrevista",
   propor_bot: "proporBot",
+  abrir_task: "abrirTask",
+  mandar_para_task: "mandarParaTask",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

@@ -1,6 +1,7 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { pastaRelativa } from "../domain/trabalho.ts";
+import { trabalhosParaDto } from "./trabalhos.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
 import { modeloDeVoz } from "../domain/modelo-ligacao.ts";
@@ -189,6 +190,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const comPendencias = input.aFazer === true && turno.profundidade === 0 && (modo === "conversa" || modo === "criacao" || modo === "rotina");
   const pendencias = comPendencias ? pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(agente.id), agora) : [];
 
+  // ADR-081 (#193): a conversa coordenadora vê as tasks abertas do bot (com o último passo), a cada turno.
+  const trabalhosAbertos = !trabalho && (modo === "conversa" || modo === "criacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimoPasso: t.ultimoPasso })) : [];
+
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
 
@@ -257,6 +261,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true),
     // ADR-081: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
+    trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId } : null,
+    trabalhosAbertos,
     harness: escolha?.harness ?? null,
     agora,
   });

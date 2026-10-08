@@ -1090,6 +1090,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return absorvidos;
       },
+      async absorverDoTrabalho(turno) {
+        if (!turno.trabalhoId) return [];
+        const absorvidos = doTenant(b.turnos)
+          .filter((t) => t.id !== turno.id && t.trabalhoId === turno.trabalhoId && t.estado === "pendente" && t.mensagemOrigemId && t.entradaAnexos.length === 0)
+          .sort((x, y) => x.criadoEm - y.criadoEm);
+        for (const t of absorvidos) {
+          t.estado = "interrompido";
+          t.motivoInterrupcao = "absorvido";
+          t.absorvidoPor = turno.id;
+          t.leaseAte = null;
+        }
+        return absorvidos;
+      },
       async cancelarPendente(id) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");
         if (!t) return null;

@@ -13,6 +13,7 @@ import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { nomeParaTrilha, registrarNegacao } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { sincronizarTrabalho } from "./trabalhos.ts";
 
 /** Corpo devolvido por POST /api/interno/ferramentas/:nome (o proxy consome; src/adapters/executor/cliente-nod.ts espelha). */
 export type ResultadoChamada =
@@ -85,6 +86,8 @@ const DESPACHO: Despacho = {
   anotar_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.anotar_entrevista](deps, { ...ctx, ...args }),
   concluir_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.concluir_entrevista](deps, { ...ctx, ...args }),
   propor_bot: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.propor_bot](deps, { ...ctx, ...args }),
+  abrir_task: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_task](deps, { ...ctx, ...args }),
+  mandar_para_task: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.mandar_para_task](deps, { ...ctx, ...args }),
 };
 
 /**
@@ -93,6 +96,9 @@ const DESPACHO: Despacho = {
  * que é código do bot rodando no navegador, e o HTML pode ter vindo de um turno que leu conteúdo de fora.
  */
 const NOD_DE_CONTEUDO_NAO_CONFIAVEL: ReadonlySet<NomeFerramentaNod> = new Set(["ler_artefato"]);
+
+/** As ferramentas nod que deixam uma decisão aberta para a pessoa (o estado da task do turno muda, ADR-081). */
+const FERRAMENTAS_QUE_PEDEM_A_PESSOA: ReadonlySet<NomeFerramentaNod> = new Set(["pedir_a_pessoa", "pedir_aprovacao", "pedir_acesso"]);
 
 function ehNomeNod(nome: string): nome is NomeFerramentaNod {
   return Object.prototype.hasOwnProperty.call(FERRAMENTAS_NOD, nome);
@@ -174,6 +180,8 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
     if ("erros" in r) return negar("args_invalidos", "ferramenta_negada");
     await registrarChamada(null);
     if (plano.executor === "catcher") await deps.repos.catcher.registrar({ turnoId: input.turnoId, tipo: "tool_call", dados: { nome: input.nome, origem: "nod" } });
+    // ADR-081: a ferramenta que abre uma decisão põe a task do turno em "precisa de você" na hora.
+    if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
     return { data: r.resultado, events: [...events, ...r.events] };
   }
 

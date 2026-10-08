@@ -83,7 +83,8 @@ export type FatosTrabalho = {
  * estado sai daqui.
  *
  * - turno com o Parar pedido e ainda acabando: `parado` (a renovação seguinte o encerra);
- * - turno rodando: `rodando`, ou `precisa_de_voce` se ele parou numa decisão (a aprovação dentro do turno);
+ * - turno rodando: `rodando`, ou `precisa_de_voce` se ele parou numa decisão (a aprovação dentro do turno) — ou segue
+ *   `fechado_ocioso` se a memória já mandou soltar essa espera (#194) e o processo está acabando;
  * - turno na fila: `rodando` se o trabalho já começou, senão `na_fila` (inclusive esperando o `depois_de`);
  * - nada vivo e decisão pendente: `precisa_de_voce` (ou continua `fechado_ocioso`, #194);
  * - nada vivo nem pendente: o desfecho do último turno — concluído `terminado`, parado pela pessoa `parado`, o resto
@@ -91,7 +92,7 @@ export type FatosTrabalho = {
  */
 export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   if (f.parando > 0 && f.despachando === 0) return "parado";
-  if (f.despachando > 0) return f.decisaoPendente ? "precisa_de_voce" : "rodando";
+  if (f.despachando > 0) return f.decisaoPendente ? (f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce") : "rodando";
   if (f.pendentes > 0) return f.iniciado ? "rodando" : "na_fila";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";
   if (f.ultimo === null) return f.estadoAtual === "parado" ? "parado" : "na_fila";
@@ -111,6 +112,17 @@ export function podeAbrirTask(trabalho: { origem: OrigemTrabalho; trabalhoMaeId:
 /** `mandar_para_task` é da conversa coordenadora: só turno sem trabalho repassa a uma task. */
 export function podeMandarParaTask(trabalho: unknown): boolean {
   return trabalho === null || trabalho === undefined;
+}
+
+/**
+ * definido em 2026-10-07 (ADR-081 §4, #194): sob pressão amarela (ou pior), a task que espera a pessoa DENTRO do turno
+ * há mais disto solta a espera: o turno encerra, o processo fecha e a decisão segue pendente, voltando por --resume.
+ */
+export const FECHAR_OCIOSA_SOB_PRESSAO_MS = 5 * 60_000;
+
+/** A espera de uma decisão dentro do turno deve ser solta para liberar memória? Só com a máquina sob pressão. */
+export function soltarPorMemoria(p: { nivel: "verde" | "amarela" | "vermelha" | null; esperandoDesde: number; agora: number }): boolean {
+  return (p.nivel === "amarela" || p.nivel === "vermelha") && p.agora - p.esperandoDesde > FECHAR_OCIOSA_SOB_PRESSAO_MS;
 }
 
 /** definido em 2026-10-07 (ADR-081 §2): a resposta de conversa que passa disto trabalhando vira task sozinha. */
