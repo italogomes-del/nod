@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -331,7 +331,7 @@ export async function contaminarSeAbsorveuDeFora(deps: Pick<Deps, "repos" | "ago
  * ferramenta) vira o trabalho `rede`. O processo segue intocado; a sessão dele passa a ser do trabalho, e a próxima
  * mensagem da conversa sai com `bifurcar` (emitir-plano-turno). Só com harness que `bifurcaSessao`.
  */
-export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null; redeMs?: number }, { trabalho: Trabalho | null }> = async (deps, input) => {
+export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null; sessaoExecutor?: Executor | null; redeMs?: number }, { trabalho: Trabalho | null }> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   if (!turno) return { data: { trabalho: null } };
   const capacidades = capacidadesDe(input.harness);
@@ -345,8 +345,10 @@ export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; 
     iniciadoEm: deps.agora(),
     sessaoCli: input.sessaoCli,
     sessaoHarness: input.harness,
-    // O processo já roda na pasta do bot: a task promovida continua nela.
-    pasta: null,
+    sessaoExecutor: input.sessaoExecutor ?? null,
+    // revisto em 2026-10-08 (revisão do épico, S13): a task da rede ganha pasta própria, como toda task. O turno promovido
+    // segue no cwd em que já roda (o processo não muda); só os turnos SEGUINTES dela usam a pasta nova — o --resume
+    // funciona de qualquer cwd. Antes ela ficava na pasta do bot, em paralelo com a conversa.
   });
   // Quem chama roda isto numa transação própria, fora da renovação: a corrida com a entrega desfaz só a promoção.
   const vinculado = await deps.repos.turnos.vincularTrabalho(turno.id, trabalho.id);

@@ -144,7 +144,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-10-07 (ADR-081): o turno de um trabalho roda na sessão DO TRABALHO, nunca na da conversa nem na da
   // cadeia (a retomada dele herda o trabalho). Sem `retomaSessao`, recebe o histórico recente, como o Codex hoje.
   const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
-  const sessaoDoTrabalho = trabalho && retoma && input.permitirResume !== false && trabalho.sessaoCli && (!escolha || trabalho.sessaoHarness === null || trabalho.sessaoHarness === escolha.harness) ? trabalho.sessaoCli : null;
+  // revisto em 2026-10-08 (revisão do épico, S14): e só para o executor que criou a sessão, como a da conversa (0005) — a
+  // sessão do catcher não existe no CLI real, e a do CLI real não serve ao catcher.
+  const sessaoDoTrabalho = trabalho && retoma && input.permitirResume !== false && trabalho.sessaoCli && trabalho.sessaoExecutor === executor && (!escolha || trabalho.sessaoHarness === null || trabalho.sessaoHarness === escolha.harness) ? trabalho.sessaoCli : null;
   const sessaoDoHarness = escolha ? retoma && conversa?.sessaoHarness === escolha.harness : true;
   const sessaoDaConversa = !trabalho && sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "ligacao" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   // definido em 2026-10-01 (ADR-066): a retomada de rotina ou de pedido de colega volta na sessão DO TURNO que ela

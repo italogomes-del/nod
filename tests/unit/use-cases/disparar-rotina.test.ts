@@ -58,8 +58,8 @@ describe("dispararRotina", () => {
     expect(d.banco.rotinas[0]?.proximaExecucao).toBe(r.data.proximaExecucao);
     expect(d.banco.janelas).toEqual([{ tenantId: rotina.tenantId, rotinaId: rotina.id, instanteAgendado: JANELA, executor: "catcher", machineId: "m1", turnoId: r.data.turno.id }]);
     expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
-    // ADR-081 (S7): cada execução é um trabalho `rotina`, na pasta do bot; o turno nasce nele.
-    expect(d.banco.trabalhos).toMatchObject([{ origem: "rotina", rotinaId: rotina.id, estado: "na_fila", pasta: null }]);
+    // ADR-081 (S7): cada execução é um trabalho `rotina`; o turno nasce nele. Revisão do épico (S13): com pasta própria.
+    expect(d.banco.trabalhos).toMatchObject([{ origem: "rotina", rotinaId: rotina.id, estado: "na_fila", pasta: expect.stringMatching(/^~\/nod\/Vera\/poste-o-resumo-[a-z0-9]{6}$/) }]);
     expect(r.data.turno.trabalhoId).toBe(d.banco.trabalhos[0]?.id);
     // nenhuma execução ainda: o enum não tem 'pendente'; a janela com turno é o "em curso"
     expect(d.banco.execucoes).toHaveLength(0);

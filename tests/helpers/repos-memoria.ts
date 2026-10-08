@@ -802,6 +802,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           estado: n.estado ?? "na_fila",
           sessaoCli: n.sessaoCli ?? null,
           sessaoHarness: n.sessaoHarness ?? null,
+          sessaoExecutor: n.sessaoCli ? (n.sessaoExecutor ?? null) : null,
           pasta: n.pasta ?? null,
           memoriaMb: null,
           custoUsd: null,
@@ -844,11 +845,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.terminadoEm = estado === "terminado" || estado === "parado" || estado === "falhou" ? em : null;
         return semDonoTrabalho(t);
       },
-      async atualizarSessao(id, sessaoCli, harness) {
+      async atualizarSessao(id, sessaoCli, harness, executor = null) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
         if (!t) return false;
         t.sessaoCli = sessaoCli;
         t.sessaoHarness = harness;
+        t.sessaoExecutor = executor;
         return true;
       },
       async somarCusto(id, custoUsd) {

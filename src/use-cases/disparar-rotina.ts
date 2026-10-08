@@ -148,9 +148,10 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
     return registrarSemPendencia(deps, input, agora);
   }
   // definido em 2026-10-07 (ADR-081, S7): cada execução é um trabalho (nunca um por rotina), com sessão própria como já
-  // era. A pasta fica a do bot (pasta: null): a rotina volta à mesma pasta a cada execução e a cerca do git (ADR-065)
-  // não pode passar a negar a worktree que ela mantém lá; quem ganha pasta própria são as tasks que ela abrir.
-  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: rotina.instrucao, origem: "rotina", rotinaId: rotina.id, pasta: null });
+  // era. revisto em 2026-10-08 (revisão do épico, S13): e com pasta própria `~/nod/<bot>/<slug>`, como toda task — na
+  // pasta do bot ela rodava em paralelo com a conversa. A cerca do git (ADR-065) aceita qualquer pasta dentro de
+  // `~/nod/<bot>`, então a rotina continua entrando nas worktrees que mantém lá.
+  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: rotina.instrucao, origem: "rotina", rotinaId: rotina.id });
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,

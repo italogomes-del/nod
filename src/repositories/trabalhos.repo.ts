@@ -1,4 +1,5 @@
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
+import type { Executor } from "../contracts/evento.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
@@ -19,6 +20,7 @@ interface Linha {
   estado: EstadoTrabalho;
   sessao_cli: string | null;
   sessao_harness: string | null;
+  sessao_executor: string | null;
   pasta: string | null;
   memoria_mb: number | null;
   custo_usd: string | null;
@@ -28,7 +30,7 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, pasta, memoria_mb, custo_usd, criado_em, iniciado_em, terminado_em";
+  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, criado_em, iniciado_em, terminado_em";
 
 const paraTrabalho = (l: Linha): Trabalho => ({
   tenantId: l.tenant_id,
@@ -44,6 +46,7 @@ const paraTrabalho = (l: Linha): Trabalho => ({
   estado: l.estado,
   sessaoCli: l.sessao_cli,
   sessaoHarness: l.sessao_harness,
+  sessaoExecutor: l.sessao_executor === "local" || l.sessao_executor === "catcher" ? l.sessao_executor : null,
   pasta: l.pasta,
   memoriaMb: l.memoria_mb,
   custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
@@ -66,6 +69,7 @@ export type NovoTrabalho = {
   estado?: EstadoTrabalho;
   sessaoCli?: string | null;
   sessaoHarness?: string | null;
+  sessaoExecutor?: Executor | null;
   pasta?: string | null;
   iniciadoEm?: number | null;
 };
@@ -84,10 +88,10 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async criar(n: NovoTrabalho): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         insert into trabalhos (tenant_id, id, owner_id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id,
-          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, pasta, iniciado_em)
+          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em)
         values (${escopo.tenantId}, ${n.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.titulo}, ${n.origem},
           ${n.pedidoPorAgenteId ?? null}, ${n.rotinaId ?? null}, ${n.trabalhoMaeId ?? null}, ${n.depoisDeTrabalhoId ?? null}, ${n.estado ?? "na_fila"},
-          ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)})
+          ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.sessaoCli ? (n.sessaoExecutor ?? null) : null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTrabalho(l) : null;
     },
@@ -157,10 +161,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
-    /** A sessão do CLI do trabalho (nunca a da conversa) e o harness que a criou, como conversas.sessao_harness (0030). */
-    async atualizarSessao(id: string, sessaoCli: string, harness: string | null): Promise<boolean> {
+    /**
+     * A sessão do CLI do trabalho (nunca a da conversa), o harness e o executor que a criaram, como conversas.sessao_harness
+     * (0030) e conversas.sessao_executor (0005).
+     */
+    async atualizarSessao(id: string, sessaoCli: string, harness: string | null, executor: Executor | null = null): Promise<boolean> {
       const r = await conn`
-        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}
+        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}, sessao_executor = ${executor}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
     },

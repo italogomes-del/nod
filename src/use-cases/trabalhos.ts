@@ -31,8 +31,8 @@ export function eventoTrabalhoMudou(deps: DepsTrabalho, t: Pick<Trabalho, "id" |
 }
 
 /**
- * Cria o trabalho. A pasta é `~/nod/<bot>/<slug>` (ADR-065), salvo quando quem chama já decidiu outra (a rotina usa
- * uma por rotina; a rede de 2 min, nenhuma: o processo já roda na pasta do bot). `pasta: null` = a pasta do bot.
+ * Cria o trabalho. A pasta é `~/nod/<bot>/<slug>` (ADR-065), salvo quando quem chama já decidiu outra. revisto em
+ * 2026-10-08 (revisão do épico, S13): toda origem ganha a sua — rotina e rede também. `pasta: null` = a pasta do bot.
  */
 export async function criarTrabalho(deps: DepsTrabalho, n: Omit<NovoTrabalho, "titulo"> & { titulo: string }): Promise<{ trabalho: Trabalho; events: RuntimeEvent[] }> {
   const titulo = tituloDoTrabalho(n.titulo);
@@ -151,7 +151,7 @@ export async function linhaTrabalhoAberto(deps: DepsTrabalho, t: Trabalho, turno
 export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services">, trabalhos: readonly Trabalho[]): Promise<TrabalhoDto[]> {
   const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id));
   return trabalhos.map((t): TrabalhoDto => {
-    const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, ...publico } = t;
+    const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, sessaoExecutor: _executor, ...publico } = t;
     const e = extras.get(t.id);
     const vivo = e?.turnoVivoId ?? null;
     return {

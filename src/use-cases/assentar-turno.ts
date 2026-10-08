@@ -162,7 +162,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
   if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
-  if (resultado.sessaoCli && turno.trabalhoId) await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, resultado.sessaoCli, entrega.harness ?? null);
+  if (resultado.sessaoCli && turno.trabalhoId) await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, resultado.sessaoCli, entrega.harness ?? null, executor);
   // 0035: o `total_cost_usd` do CLI é o total da SESSÃO; numa sessão retomada ele traz o custo dos turnos
   // anteriores. O turno custa a diferença — em gastos, no turno e nos eventos.
   const anterior = resultado.sessaoCli ? await deps.repos.turnos.totalAnteriorDaSessao(resultado.sessaoCli, turno.id) : null;

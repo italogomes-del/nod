@@ -237,7 +237,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       if (ativo && conversaSemTrabalho && despachado && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness: harnesses.get(p.turnoId) ?? null, sessaoCli: despachado.sessaoCli, redeMs });
+          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness: harnesses.get(p.turnoId) ?? null, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, redeMs });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
       }
