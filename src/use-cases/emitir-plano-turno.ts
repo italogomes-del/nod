@@ -1,5 +1,6 @@
 import type { IdHarness } from "../contracts/harness.ts";
-import { causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
+import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
+import { pastaRelativa } from "../domain/trabalho.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
 import { modeloDeVoz } from "../domain/modelo-ligacao.ts";
@@ -135,16 +136,28 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-09-28 (0030): com harness escolhido, a sessão só vale para o harness que a criou. Antes
   // `!escolha` desligava o --resume de todo turno real desde os harnesses (18/09), e cada mensagem abria uma
   // sessão com 20 falas de 1.000 caracteres. Só o Claude Code retoma sessão hoje (o Codex devolve null).
-  const sessaoDoHarness = escolha ? escolha.harness === "claude-cli" && conversa?.sessaoHarness === escolha.harness : true;
-  const sessaoDaConversa = sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "ligacao" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
+  // revisto em 2026-10-07 (ADR-081, S3): quem retoma sessão é a capacidade do harness, nunca o nome dele. Sem escolha
+  // (catcher, plano de antes dos harnesses) vale como antes.
+  const caps = escolha ? capacidadesDe(escolha.harness) : null;
+  const retoma = caps ? caps.retomaSessao : true;
+  // definido em 2026-10-07 (ADR-081): o turno de um trabalho roda na sessão DO TRABALHO, nunca na da conversa nem na da
+  // cadeia (a retomada dele herda o trabalho). Sem `retomaSessao`, recebe o histórico recente, como o Codex hoje.
+  const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
+  const sessaoDoTrabalho = trabalho && retoma && input.permitirResume !== false && trabalho.sessaoCli && (!escolha || trabalho.sessaoHarness === null || trabalho.sessaoHarness === escolha.harness) ? trabalho.sessaoCli : null;
+  const sessaoDoHarness = escolha ? retoma && conversa?.sessaoHarness === escolha.harness : true;
+  const sessaoDaConversa = !trabalho && sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "ligacao" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   // definido em 2026-10-01 (ADR-066): a retomada de rotina ou de pedido de colega volta na sessão DO TURNO que ela
   // continua (nunca na da conversa, pelos motivos acima). Antes ela começava do zero: em 30/09 o Milton, retomado 13
   // min depois de uma aprovação cujo comentário falhou, leu a task, chamou sem_novidade e não refez nem avisou. Com o
   // terminal fora da conversa, a sessão é o que guarda os arquivos mexidos e o resultado dos testes.
-  const continuaCadeia = !sessaoDaConversa && turno.origem === "retomada" && turno.retomaTurnoId !== null && (ligacao !== null || ehDelegacao) && input.permitirResume !== false && (escolha ? escolha.harness === "claude-cli" : true);
+  const continuaCadeia = !trabalho && !sessaoDaConversa && turno.origem === "retomada" && turno.retomaTurnoId !== null && (ligacao !== null || ehDelegacao) && input.permitirResume !== false && retoma;
   const daCadeia = continuaCadeia && turno.retomaTurnoId ? await deps.repos.turnos.sessaoDoTurno(turno.retomaTurnoId) : null;
   const sessaoDaCadeia = daCadeia && daCadeia.executor === executor ? daCadeia.sessaoCli : null;
-  const sessaoCli = sessaoDaConversa ?? sessaoDaCadeia;
+  const sessaoCli = sessaoDoTrabalho ?? sessaoDaConversa ?? sessaoDaCadeia;
+  // A rede de 2 min (ADR-081 §2, #193): a sessão da conversa ficou com o trabalho promovido, que segue nela. A próxima
+  // mensagem continua numa CÓPIA (`--fork-session` no Claude) e o id novo vira a sessão da conversa. Só com harness que
+  // bifurca: sem isso a rede nunca promove, e esta busca não acha nada.
+  const bifurcar = sessaoDaConversa !== null && (caps ? caps.bifurcaSessao : true) && (await deps.repos.trabalhos.redeComSessao(turno.conversaId, sessaoDaConversa)) !== null;
   const autorDe = (m: (typeof mensagens)[number]) => (m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot");
   // /nova-sessao (0038): o bot começa do zero — o histórico do prompt só leva o que veio depois do recomeço.
   const recomeco = conversa?.recomecoEm ?? null;
@@ -240,12 +253,16 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).
-    terminal: modo !== "ligacao" && executor === "local" && (escolha ? escolha.harness === "claude-cli" : true),
+    // revisto em 2026-10-07 (ADR-081, S3): pela capacidade `terminal`, não pelo nome do harness.
+    terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true),
+    // ADR-081: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
+    pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
     harness: escolha?.harness ?? null,
     agora,
   });
 
   parcial.workspaceId = workspaceId;
+  if (bifurcar) parcial.entrada = { ...parcial.entrada, bifurcar: true };
   if (input.ghNaMaquina) {
     // O login do gh serve à dona: só o conector github DELA roda na máquina; o de outra pessoa, nunca.
     const meu = guardados.find((c) => c.slug === SLUG_GITHUB && c.comando === COMANDO_GITHUB_NATIVO && c.ownerId === deps.escopo.pessoaId);
@@ -300,6 +317,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     turnoId: turno.id,
     dados: {
       machine_id: input.machineId,
+      // ADR-081: o frame turno.iniciado diz de que trabalho é o turno (a web põe o ao vivo na task, não no chat).
+      trabalhoId: turno.trabalhoId ?? null,
       executor,
       harness: escolha?.harness ?? null,
       modelo: plano.entrada.modelo,

@@ -7,6 +7,7 @@ import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import type { Deps } from "./tipos.ts";
+import { sincronizarDoTurno } from "./trabalhos.ts";
 
 /** O que a regra de queda usa de Deps: o varredor de lease (laço de fundo) monta só isto. */
 export type DepsQueda = Pick<Deps, "repos" | "escopo" | "agora">;
@@ -48,6 +49,10 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
   if (turno.origem === "ligacao") return { decisaoId: null, rotinaId: null, rotina: false };
   for (const anterior of await deps.repos.decisoes.pendentesDaConversa(turno.conversaId)) {
     if (anterior.tipo !== "retomar_turno") continue;
+    // revisto em 2026-10-07 (ADR-081, S6): só a retomada da MESMA faixa sai — a queda de uma task não fecha o
+    // "Retomar" da conversa nem o de outra task do bot.
+    const deQuem = anterior.turnoId ? await deps.repos.turnos.buscar(anterior.turnoId) : null;
+    if ((deQuem?.trabalhoId ?? null) !== (turno.trabalhoId ?? null)) continue;
     const fechada = await deps.repos.decisoes.fecharPorRegra(anterior.id, { regra: REGRA_RETOMADA_SUBSTITUIDA, regraVersao: 1, agora });
     if (fechada) events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria: { ...autoria, decidido_por: REGRA_RETOMADA_SUBSTITUIDA }, agora, conversaId: fechada.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_RETOMADA_SUBSTITUIDA } }));
   }
@@ -79,6 +84,8 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
   const quedas: QuedaDeMaquina[] = [];
   for (const c of emOrdem) {
     const r = await consequencias(deps, c, prazoMs, events);
+    // ADR-081: o trabalho do turno caído vira "precisa de você" (o card Retomar) ou "falhou" (rotina, sem retomada).
+    events.push(...(await sincronizarDoTurno(deps, c.turno)));
     saida.interrompidos.push(c.turno.id);
     saida.porMotivo[c.motivo] += 1;
     if (r.decisaoId) saida.decisoes.push(r.decisaoId);

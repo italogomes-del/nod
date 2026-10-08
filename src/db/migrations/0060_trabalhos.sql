@@ -58,12 +58,15 @@ ALTER TABLE turnos ADD FOREIGN KEY (tenant_id, trabalho_id) REFERENCES trabalhos
 CREATE INDEX turnos_trabalho_despachando ON turnos (tenant_id, trabalho_id) WHERE estado = 'despachando';
 -- As mensagens de um trabalho saem dos turnos dele (GET trabalhos/:id).
 CREATE INDEX turnos_por_trabalho ON turnos (tenant_id, trabalho_id, criado_em) WHERE trabalho_id IS NOT NULL;
+-- A fala da pessoa mandada a uma task é do trabalho do turno que ela abriu (a leitura da conversa marca `trabalhoId`).
+CREATE INDEX turnos_por_mensagem_origem ON turnos (tenant_id, mensagem_origem_id) WHERE mensagem_origem_id IS NOT NULL;
 
 -- A faixa de Trabalhos em cima do campo recolhida numa pílula (reversível, por pessoa; a 0036 já escopa a tabela).
 ALTER TABLE preferencias ADD COLUMN IF NOT EXISTS faixa_trabalhos_recolhida boolean NOT NULL DEFAULT false;
 
 -- ROLLBACK:
 -- ALTER TABLE preferencias DROP COLUMN faixa_trabalhos_recolhida;
+-- DROP INDEX turnos_por_mensagem_origem;
 -- DROP INDEX turnos_por_trabalho;
 -- DROP INDEX turnos_trabalho_despachando;
 -- ALTER TABLE turnos DROP COLUMN trabalho_id;

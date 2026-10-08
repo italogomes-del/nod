@@ -94,8 +94,22 @@ function foraDoArParaAgente(c: Computador): { erro: MotivoFalhaComputador; instr
   return { erro: motivo, instrucao: `O computador está fora do ar desde ${new Date(c.indisponivelDesde ?? 0).toISOString()}: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. A pessoa já foi avisada. Não tente usá-lo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.` };
 }
 
+/**
+ * definido em 2026-10-07 (ADR-081, S5): o computador é um por bot (ADR-037), e com tasks em paralelo a segunda que o
+ * pede encontra a reserva da primeira. Antes isso subia como 409, e o proxy tratava como servidor fora do ar. Agora
+ * volta como resultado para o modelo, com quem está usando e quando tentar de novo; nenhuma das duas falha.
+ */
+const TENTE_EM_MIN_S = 5;
+const TENTE_EM_MAX_S = 60;
+function ocupadoParaAgente(emUsoPor: string, ocupadoAte: number, agora: number): string {
+  const tenteEmS = Math.min(TENTE_EM_MAX_S, Math.max(TENTE_EM_MIN_S, Math.ceil((ocupadoAte - agora) / 1000)));
+  return JSON.stringify({ erro: "computador_ocupado", emUsoPor, tenteEmS, instrucao: `Seu computador está em uso por ${emUsoPor}. Nada foi executado. Siga com o que dá sem ele e tente de novo em ${tenteEmS} s; não diga que o computador está fora do ar.` });
+}
+
 export function criarComputadores(o: Opcoes) {
   const agora = o.agora ?? Date.now;
+  /** S5: o turno que pediu o computador ocupado e quem o segurava, até a próxima ação dele passar (TrabalhoDto). */
+  const esperando = new Map<string, string>();
   const observacoes = new Map<string, HashesObservacao & { em: number }>();
   const chaveObservacao = (turnoId: string, computadorId: string) => `${turnoId}:${computadorId}`;
   /** O modelo pode não ter a tela no contexto (aprovação, pessoa no controle): a próxima vai completa. */
@@ -330,6 +344,15 @@ export function criarComputadores(o: Opcoes) {
         if (c.indisponivelDesde !== null) return { ok: true, isError: true, conteudo: JSON.stringify(foraDoArParaAgente(c)), confianca: "confiavel" };
         if (c.controle !== "bot") { esquecerObservacao(plano.turnoId, c.id); return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" }; }
         const args = argumentos as Record<string, unknown>;
+        // ADR-081 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
+        if (c.ocupadoAte && c.ocupadoAte > d.agora()) {
+          const emUsoPor = (await d.repos.computadores.emUsoPor(c.id)) ?? "outra tarefa";
+          esperando.set(plano.turnoId, emUsoPor);
+          // Turno que acabou esperando não volta para tirar a marca: guarda as 500 mais novas.
+          if (esperando.size > 500) esperando.delete(esperando.keys().next().value!);
+          return { ok: true, isError: true, conteudo: ocupadoParaAgente(emUsoPor, c.ocupadoAte, d.agora()), confianca: "confiavel" };
+        }
+        esperando.delete(plano.turnoId);
         if (nome === "computador_pedir_ajuda") {
           livre(c, d.agora());
           const motivo = String(args.motivo).slice(0, 1000);
@@ -388,6 +411,10 @@ export function criarComputadores(o: Opcoes) {
       } catch (e) {
         return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
+    },
+    /** ADR-081 (S5): quem segurava o computador quando este turno o pediu pela última vez; null = não espera. */
+    esperandoPor(turnoId: string): string | null {
+      return esperando.get(turnoId) ?? null;
     },
     async executarAprovado(p: Escopo & { agenteId: string; turnoId: string; acaoId: string }): Promise<void> {
       const { r, tipo } = await o.dentro(p, async (d) => {

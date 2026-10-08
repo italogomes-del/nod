@@ -71,7 +71,8 @@ export type NovoTrabalho = {
 };
 
 /** O que a faixa, as listas e o prompt mostram além da linha: lido junto, numa consulta. */
-export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null };
+/** `turnosAbertos`: pendentes e rodando (o computador ocupado olha os dois). */
+export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[] };
 
 /**
  * Trabalhos do bot (ADR-081, 0060). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
@@ -192,9 +193,10 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ despachando: number; pendentes: number; decisao: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; decisao: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
-          (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando') as despachando,
+          (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
+          (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente') as pendentes,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')) as decisao,
@@ -206,14 +208,15 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { despachando: l.despachando, pendentes: l.pendentes, decisaoPendente: l.decisao, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, decisaoPendente: l.decisao, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
     async extras(ids: readonly string[]): Promise<Map<string, ExtrasTrabalho>> {
       if (ids.length === 0) return new Map();
-      const linhas = await conn<{ id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null }[]>`
-        select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id
+      const linhas = await conn<{ id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null }[]>`
+        select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
+          (select array_agg(t.id order by t.criado_em) from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as abertos
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
         left join rotinas r on r.tenant_id = w.tenant_id and r.id = w.rotina_id
@@ -226,7 +229,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           select t.id from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'despachando' order by t.criado_em limit 1
         ) v on true
         where w.tenant_id = ${escopo.tenantId} and w.id = any(${[...ids]}::uuid[])`;
-      return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id }]));
+      return new Map(linhas.map((l) => [l.id, { pedidoPorNome: l.pedido_por_nome, rotinaNome: l.rotina_instrucao, ultimaFala: l.ultima_fala, turnoVivoId: l.turno_vivo_id, turnosAbertos: l.abertos ?? [] }]));
     },
   };
 }

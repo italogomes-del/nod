@@ -79,6 +79,8 @@ import { criarPonteHttpServidor } from "./rotas/ponte.ts";
 import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
 import { criarRotasPendencias } from "./rotas/pendencias.ts";
+import { criarRotasTrabalhos } from "./rotas/trabalhos.ts";
+import { criarTrabalhosVivos } from "../fundo/trabalhos-vivos.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
@@ -348,7 +350,10 @@ export function comporApp(o: OpcoesCompor): App {
   // O detector aquece no boot: o primeiro pedir_acesso não espera o `gh auth status` dentro da transação.
   if (detectorGh) void detectorGh.logado().catch(() => false);
 
+  // ADR-081: a última ferramenta de cada turno vivo e a memória dos Macs, em memória do processo.
+  const trabalhosVivos = criarTrabalhosVivos(relogio);
   const services: Services = {
+    trabalhosVivos,
     relogio,
     tokenTurno: tokens,
     planos: {
@@ -822,6 +827,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
     ...(aFazer ? criarRotasPendencias(depsRotas) : []),
     ...criarRotasConversas(depsRotas),
+    ...criarRotasTrabalhos(depsRotas),
     ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),
@@ -898,6 +904,8 @@ export function comporApp(o: OpcoesCompor): App {
   ];
 
   function publicarDoPlano(plano: PlanoTurno, tipo: "turno.delta" | "turno.atividade" | "turno.tarefas" | "turno.fala" | "turno.vigia", dados: Record<string, unknown>): void {
+    // ADR-081: o "último passo" da faixa de Trabalhos é o rótulo da última ferramenta do turno vivo.
+    if (tipo === "turno.atividade" && typeof dados.rotulo === "string") trabalhosVivos.ferramenta(plano.turnoId, dados.rotulo);
     barramento.publicar(plano.autoria.conta_de_execucao, tipo, { turnoId: plano.turnoId, conversaId: plano.conversaId, agenteId: plano.agenteId, executor: plano.executor, machineId: plano.machineId, ...dados });
   }
   // NOD-73: o vigia do turno (só avisa), igual para o app do Mac e o modo servidor — frame e log saem do mesmo lugar.

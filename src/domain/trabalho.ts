@@ -69,6 +69,8 @@ export function pastaRelativa(pasta: string): string | null {
 export type FatosTrabalho = {
   estadoAtual: EstadoTrabalho;
   iniciado: boolean;
+  /** Turnos rodando com o Parar já pedido (o processo ainda está acabando). */
+  parando: number;
   despachando: number;
   pendentes: number;
   decisaoPendente: boolean;
@@ -80,6 +82,7 @@ export type FatosTrabalho = {
  * evento deixa um lugar só para a regra: quem muda um turno ou uma decisão de um trabalho chama a sincronização e o
  * estado sai daqui.
  *
+ * - turno com o Parar pedido e ainda acabando: `parado` (a renovação seguinte o encerra);
  * - turno rodando: `rodando`, ou `precisa_de_voce` se ele parou numa decisão (a aprovação dentro do turno);
  * - turno na fila: `rodando` se o trabalho já começou, senão `na_fila` (inclusive esperando o `depois_de`);
  * - nada vivo e decisão pendente: `precisa_de_voce` (ou continua `fechado_ocioso`, #194);
@@ -87,6 +90,7 @@ export type FatosTrabalho = {
  *   `falhou` (máquina sumiu sem "Retomar", IA indisponível, erro).
  */
 export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
+  if (f.parando > 0 && f.despachando === 0) return "parado";
   if (f.despachando > 0) return f.decisaoPendente ? "precisa_de_voce" : "rodando";
   if (f.pendentes > 0) return f.iniciado ? "rodando" : "na_fila";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";

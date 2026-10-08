@@ -45,7 +45,7 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const w = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Fatos", origem: "pessoa" });
-      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ despachando: 0, pendentes: 0, decisaoPendente: false, ultimo: null });
+      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, decisaoPendente: false, ultimo: null });
       const t1 = await repos.turnos.enfileirar(turno(conversaId, agenteId, w!.id));
       expect((await repos.trabalhos.fatos(w!.id))?.pendentes).toBe(1);
       await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() });
@@ -67,7 +67,7 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
       const autoria = { autor_tipo: "agente" as const, autor_id: agenteId, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
       await repos.mensagens.criar({ conversaId, turnoId: t!.id, autoria, kind: "texto", texto: "Lendo o PR", confianca: "confiavel" });
       const extras = (await repos.trabalhos.extras([w!.id])).get(w!.id);
-      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id });
+      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id] });
     });
   });
 

@@ -177,6 +177,11 @@ export type EntradaPlano = {
   harness?: IdHarness | null;
   /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
   onboarding?: boolean;
+  /**
+   * definido em 2026-10-07 (ADR-081): a pasta do trabalho relativa a `~/nod` (`<bot>/<slug>`). Com o terminal, ela vira a
+   * `pastaDoBot` do plano: o driver a cria e a usa como diretório, e a cerca do git vale para ela. Ausente = a do bot.
+   */
+  pastaTrabalho?: string | null;
   agora: number;
 };
 
@@ -243,7 +248,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
   const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true });
-  const pasta = nativas.includes("Bash") ? pastaDoBot(entrada.agente.nome) : undefined;
+  const pasta = nativas.includes("Bash") ? (entrada.pastaTrabalho ?? pastaDoBot(entrada.agente.nome)) : undefined;
   return {
     tenantId: entrada.turno.tenantId,
     turnoId: entrada.turno.id,
