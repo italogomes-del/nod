@@ -45,7 +45,7 @@ describeIntegracao("trabalhos (0060, ADR-081)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const w = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Fatos", origem: "pessoa" });
-      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, ultimo: null });
+      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null });
       // "Fazer depois da …": espera enquanto a outra está aberta, e para de esperar quando ela acaba.
       const antes = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Antes", origem: "pessoa" });
       await repos.trabalhos.marcarDepoisDe(w!.id, antes!.id);

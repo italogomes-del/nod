@@ -12,6 +12,7 @@ import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCA
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
+import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /** definido em 2026-09-16: 30 s — a spec aceita "em ≤30s" para o vencimento aparecer (fluxo SUA VEZ E EXPIRAÇÃO). */
@@ -91,6 +92,8 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
         const r = await avisarFalhaDelegacao(deps, { turnoId: d.turnoId, motivo });
         events.push(...(r.events ?? []));
       }
+      // Revisão do épico (S2, 2026-10-08): vencida, a decisão não segura mais a task do turno dela (nem o depois_de).
+      events.push(...(await sincronizarDasDecisoes(deps, [d])));
       await repos.events.gravarComOutbox(events);
       log("info", "decisao_vencida_varrida", { decisao_id: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atraso_ms: agora - Date.parse(d.prazoDecisaoEm) });
     }

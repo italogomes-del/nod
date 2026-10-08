@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
@@ -78,6 +79,49 @@ export function eventoPressao(deps: DepsTrabalho, mudanca: { nivel: NivelPressao
 /** O turno pertence a um trabalho? Sincroniza o dele. */
 export function sincronizarDoTurno(deps: DepsTrabalho, turno: Pick<Turno, "trabalhoId"> | null | undefined): Promise<RuntimeEvent[]> {
   return sincronizarTrabalho(deps, turno?.trabalhoId ?? null);
+}
+
+/**
+ * definido em 2026-10-08 (revisão do épico, S2): uma decisão saiu de aberta (decidida, respondida, dispensada, vencida,
+ * fechada por regra) — o trabalho do turno dela relê os fatos. Sem isto a task ficava `precisa_de_voce` para sempre, e
+ * a que esperava por ela (`depois_de`) nunca começava. É o ponto comum de todos esses caminhos; roda na transação da
+ * DONA (mudarEstado exige owner = pessoa) e depois de a retomada, se houver, já estar na fila.
+ */
+export async function sincronizarDasDecisoes(deps: DepsTrabalho, decisoes: readonly Pick<Decisao, "turnoId">[]): Promise<RuntimeEvent[]> {
+  const trabalhos = new Set<string>();
+  for (const d of decisoes) {
+    const turno = d.turnoId ? await deps.repos.turnos.buscar(d.turnoId) : null;
+    if (turno?.trabalhoId) trabalhos.add(turno.trabalhoId);
+  }
+  const events: RuntimeEvent[] = [];
+  for (const id of trabalhos) events.push(...(await sincronizarTrabalho(deps, id)));
+  return events;
+}
+
+/** A regra que fecha as decisões de uma task parada (revisão do épico, S1). */
+export const REGRA_TRABALHO_PARADO = "regra:trabalho_parado" as const;
+
+/**
+ * definido em 2026-10-08 (revisão do épico, S1): o Parar da task, o "Fazer aqui" e o Parar do chat fecham por regra as
+ * decisões ainda abertas dos turnos do trabalho (a proposta de mesmo id, pendente, sai recusada, como em fecharGemeas).
+ * Antes a aprovação aberta voltava a task para `precisa_de_voce` e, aprovada depois do Parar, abria uma retomada que a
+ * reabria. Na transação da dona (fecharPorRegra exige owner = pessoa).
+ */
+export async function fecharDecisoesDoTrabalho(deps: DepsTrabalho, trabalhoId: string): Promise<RuntimeEvent[]> {
+  const agora = deps.agora();
+  const events: RuntimeEvent[] = [];
+  const autoria = { ...autoriaPessoa(deps.escopo), decidido_por: REGRA_TRABALHO_PARADO };
+  for (const d of await deps.repos.decisoes.abertasDoTrabalho(trabalhoId)) {
+    const fechada = await deps.repos.decisoes.fecharPorRegra(d.id, { regra: REGRA_TRABALHO_PARADO, regraVersao: 1, agora });
+    if (!fechada) continue;
+    // Ninguém continua esta decisão: sem a marca, o assentamento do turno parado (continuarAprovacoesDoTurno) via uma
+    // aprovação 'decidida' sem continuação e abria a retomada que reabria a task (medido no teste da S1).
+    await deps.repos.decisoes.reivindicarContinuacao(fechada.id, "turno", agora);
+    const proposta = await deps.repos.propostas.buscar(fechada.id);
+    if (proposta?.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "recusada");
+    events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: fechada.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_TRABALHO_PARADO, trabalho_id: trabalhoId } }));
+  }
+  return events;
 }
 
 /**
@@ -174,11 +218,16 @@ export async function fecharPorMemoria(deps: DepsTrabalho, turnoId: string): Pro
   return { fechou: true, events };
 }
 
-/** Os abertos de um trabalho que o Parar mexe: o trabalho é parado mesmo que o turno ainda esteja acabando. */
+/**
+ * Os abertos de um trabalho que o Parar mexe: o trabalho é parado mesmo que o turno ainda esteja acabando, e as decisões
+ * abertas dele fecham por regra (S1) — `parado` vence a decisão na derivação, e nenhuma aprovação depois o reabre.
+ */
 export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<RuntimeEvent[]> {
   if (trabalhoFinal(t.estado)) return [];
+  const events = await fecharDecisoesDoTrabalho(deps, t.id);
   const parado = await deps.repos.trabalhos.mudarEstado(t.id, "parado", deps.agora());
-  return parado ? [eventoTrabalhoMudou(deps, parado)] : [];
+  if (parado) events.push(eventoTrabalhoMudou(deps, parado));
+  return events;
 }
 
 /**

@@ -344,6 +344,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.geracoes.set(id, (b.geracoes.get(id) ?? 0) + 1);
         for (const r of doTenant(b.rotinas).filter((r) => r.agenteId === id)) r.estado = "pausada";
         b.concessoes = b.concessoes.filter((c) => c.agenteId !== id);
+        for (const t of doTenant(b.trabalhos).filter((t) => t.agenteId === id && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado))) {
+          t.estado = "parado";
+          t.terminadoEm = em;
+        }
         return a;
       },
       async restaurar(id) {
@@ -883,7 +887,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           pendentes: dele.filter((t) => t.estado === "pendente").length,
           esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
           decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta")),
-          ultimo: ultimo ? { estado: ultimo.estado, motivo: ultimo.motivoInterrupcao } : null,
+          aguardandoColega: doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
+            && !doTenant(b.mensagens).some((r) => r.conversaId === h.conversaId && r.payload?.kind === "peer_ask" && h.payload?.kind === "handoff" && r.payload.tarefaId === h.payload.tarefaId)
+            && !doTenant(b.trabalhos).some((c) => h.payload?.kind === "handoff" && c.id === h.payload.trabalhoId && ["terminado", "parado", "falhou"].includes(c.estado))),
+          ultimo:ultimo ? { estado: ultimo.estado, motivo: ultimo.motivoInterrupcao } : null,
         };
       },
       async extras(ids) {
@@ -1232,7 +1239,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((d) => d.decisorId === escopo.pessoaId)
           .filter((d) => d.estado === "pendente" || d.estado === "reaberta" || (d.estado === "vencida" && Date.parse(d.prazoDecisaoEm) >= em - 7 * 24 * 60 * 60 * 1000))
           .sort((x, y) => Date.parse(x.criadoEm) - Date.parse(y.criadoEm))
-          .map((d) => ({ ...d, agenteNome: b.agentes.find((a) => a.id === d.agenteId)?.nome ?? "agente" }));
+          .map((d) => ({ ...d, agenteNome: b.agentes.find((a) => a.id === d.agenteId)?.nome ?? "agente", trabalhoId: b.turnos.find((t) => t.id === d.turnoId)?.trabalhoId ?? null }));
+      },
+      async abertasDoTrabalho(trabalhoId) {
+        const turnos = new Set(doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId).map((t) => t.id));
+        return doTenant(b.decisoes).filter((d) => d.turnoId !== null && turnos.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta"));
       },
       async pendentesDaConversa(conversaId) {
         return doTenant(b.decisoes).filter((d) => d.conversaId === conversaId && (d.estado === "pendente" || d.estado === "reaberta"));

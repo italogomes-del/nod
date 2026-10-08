@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CAPACIDADES_HARNESS, SEM_CAPACIDADES } from "../../../src/contracts/harness.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, pastaRelativa, podeAbrirTask, podeMandarParaTask, promoveNaRede, REDE_MS, slugDoTrabalho, tituloDoTrabalho, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
 
-const base: FatosTrabalho = { estadoAtual: "na_fila", iniciado: false, parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, ultimo: null };
+const base: FatosTrabalho = { estadoAtual: "na_fila", iniciado: false, parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null };
 
 describe("estadoDoTrabalho (a tabela de estados da #192)", () => {
   it.each([
@@ -20,6 +20,13 @@ describe("estadoDoTrabalho (a tabela de estados da #192)", () => {
     ["o turno parado pelo \"Fazer depois\" ainda acaba, e o pedido já voltou à fila", { iniciado: true, parando: 1, pendentes: 1, esperandoOutro: true }, "na_fila"],
     ["a máquina sumiu sem retomada", { iniciado: true, ultimo: { estado: "interrompido", motivo: "maquina_sem_contato" } }, "falhou"],
     ["parado sem turno nenhum continua parado", { estadoAtual: "parado" }, "parado"],
+    // Revisão do épico (S1): o Parar vence a decisão que sobrou e o desfecho do turno que acabou depois dele.
+    ["parado com decisão ainda aberta continua parado", { estadoAtual: "parado", iniciado: true, decisaoPendente: true, ultimo: { estado: "concluido", motivo: null } }, "parado"],
+    ["parado e o turno acabou concluído depois do Parar: continua parado", { estadoAtual: "parado", iniciado: true, ultimo: { estado: "concluido", motivo: null } }, "parado"],
+    ["parado e a pessoa escreveu na task: o turno novo o reabre", { estadoAtual: "parado", iniciado: true, pendentes: 1 }, "rodando"],
+    // S3: o turno acabou mas pediu a um colega; a resposta ainda não voltou.
+    ["aguardando a resposta de um colega", { estadoAtual: "rodando", iniciado: true, aguardandoColega: true, ultimo: { estado: "concluido", motivo: null } }, "rodando"],
+    ["aguardando colega e com pergunta aberta: precisa de você", { iniciado: true, aguardandoColega: true, decisaoPendente: true, ultimo: { estado: "concluido", motivo: null } }, "precisa_de_voce"],
   ] as const)("%s → %s", (_nome, fatos, esperado) => {
     expect(estadoDoTrabalho({ ...base, ...fatos })).toBe(esperado);
   });

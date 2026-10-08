@@ -193,7 +193,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; esperando: boolean; decisao: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
@@ -202,6 +202,15 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')) as decisao,
+          -- definido em 2026-10-08 (revisão do épico, S3): pedido a colega feito por um turno do trabalho que não voltou —
+          -- handoff com tarefaId sem peer_ask da mesma tarefa (a regra de pedidosEmAberto). O trabalho do colega já
+          -- acabado sem peer_ask (a pessoa o parou) não segura este: senão ele ficaria rodando para sempre.
+          exists (select 1 from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
+            where h.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
+              and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
+                and r.payload->>'tarefaId' = h.payload->>'tarefaId')
+              and not exists (select 1 from trabalhos c where c.tenant_id = h.tenant_id and c.id::text = h.payload->>'trabalhoId'
+                and c.estado in ('terminado', 'parado', 'falhou'))) as colega,
           u.estado as ultimo_estado, u.motivo_interrupcao as ultimo_motivo
         from (select 1) um
         left join lateral (
@@ -210,7 +219,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, esperandoOutro: l.esperando, decisaoPendente: l.decisao, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */

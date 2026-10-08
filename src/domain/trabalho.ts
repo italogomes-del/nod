@@ -76,6 +76,12 @@ export type FatosTrabalho = {
   /** O trabalho de `depois_de` ("Fazer depois da …") ainda não acabou: o turno na fila espera por ele. */
   esperandoOutro: boolean;
   decisaoPendente: boolean;
+  /**
+   * definido em 2026-10-08 (revisão do épico, S3): pedidos a colegas (`pedir_a_bot`) feitos por um turno do trabalho que
+   * ainda não voltaram — handoff sem peer_ask da mesma tarefa, a regra de `pedidosEmAberto` (entregar-resposta-peer.ts).
+   * A resposta vira a continuação do trabalho: até lá ele está trabalhando, não terminou.
+   */
+  aguardandoColega: boolean;
   ultimo: { estado: EstadoTurno; motivo: MotivoInterrupcao | null } | null;
 };
 
@@ -89,7 +95,10 @@ export type FatosTrabalho = {
  *   `fechado_ocioso` se a memória já mandou soltar essa espera (#194) e o processo está acabando;
  * - turno na fila: `rodando` se o trabalho já começou, senão `na_fila`; esperando o `depois_de`, sempre `na_fila`
  *   (revisto em 2026-10-08: "Fazer depois" com a task já começada a devolve à fila — fazerDepois);
+ * - nada vivo e já `parado`: continua `parado` (revisão do épico, S1, 2026-10-08) — nem a decisão que sobrou nem o
+ *   desfecho do turno que acabou depois do Parar o reabrem; só um turno novo (a pessoa escreveu na task) o tira daí;
  * - nada vivo e decisão pendente: `precisa_de_voce` (ou continua `fechado_ocioso`, #194);
+ * - nada vivo e pedido a colega sem resposta: `rodando` (S3) — a resposta volta como turno do trabalho;
  * - nada vivo nem pendente: o desfecho do último turno — concluído `terminado`, parado pela pessoa `parado`, o resto
  *   `falhou` (máquina sumiu sem "Retomar", IA indisponível, erro).
  */
@@ -97,8 +106,10 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   if (f.parando > 0 && f.despachando === 0 && f.pendentes === 0) return "parado";
   if (f.despachando > 0) return f.decisaoPendente ? (f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce") : "rodando";
   if (f.pendentes > 0) return f.iniciado && !f.esperandoOutro ? "rodando" : "na_fila";
+  if (f.estadoAtual === "parado") return "parado";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";
-  if (f.ultimo === null) return f.estadoAtual === "parado" ? "parado" : "na_fila";
+  if (f.aguardandoColega) return "rodando";
+  if (f.ultimo === null) return "na_fila";
   if (f.ultimo.estado === "concluido") return "terminado";
   if (f.ultimo.motivo === "parado_pela_pessoa") return "parado";
   return "falhou";
