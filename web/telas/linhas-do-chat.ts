@@ -55,10 +55,24 @@ function recolhivel(m: Mensagem): boolean {
   return m.kind === "texto" || m.kind === "rotina_execucao" || m.kind === "handoff" || m.kind === "peer_ask";
 }
 
+/**
+ * A fala da pessoa fica no chat, salvo a que ela escreveu no campo da tela da task (definido em 2026-10-08, revisão W8):
+ * essa leva o `trabalhoId` e mora na task. A da `rede` é a exceção — ali a conversa é que virou task, e a fala foi
+ * escrita no chat. Sem saber a origem (o trabalho fora da lista e sem a linha "Abriu a task"), a fala fica à vista.
+ */
+function falaDaPessoaNoChat(m: Mensagem, origens: ReadonlyMap<string, string>): boolean {
+  if (m.autoria.autor_tipo !== "pessoa" || m.kind !== "texto") return false;
+  const origem = m.trabalhoId ? origens.get(m.trabalhoId) : undefined;
+  return origem === undefined || origem === "rede";
+}
+
 function unidadesDe(mensagens: readonly Mensagem[], conhecidos: ReadonlyMap<string, TrabalhoDto>): Map<string, Unidade> {
   const unidades = new Map<string, Unidade>();
+  const origens = new Map<string, string>();
+  for (const m of mensagens) if (m.payload?.kind === "trabalho_aberto") origens.set(m.payload.trabalhoId, m.payload.origem);
+  for (const t of conhecidos.values()) origens.set(t.id, t.origem);
   for (const m of mensagens) {
-    if (!marcada(m) || (m.autoria.autor_tipo === "pessoa" && m.kind === "texto")) continue;
+    if (!marcada(m) || falaDaPessoaNoChat(m, origens)) continue;
     const chave = m.trabalhoId ? `trabalho:${m.trabalhoId}` : m.turnoId ? `turno:${m.turnoId}` : null;
     if (!chave) continue;
     const u = unidades.get(chave) ?? { chave, tipo: null, mensagens: [], trabalhoId: m.trabalhoId ?? null, trabalho: m.trabalhoId ? conhecidos.get(m.trabalhoId) : undefined, rotinaId: null };
@@ -151,7 +165,10 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     }
     const recolhidas = u.mensagens.filter((m) => !planos.has(m.id) && recolhivel(m) && !(m.payload?.kind === "rotina_execucao" && DESFECHOS_A_VISTA.has(m.payload.desfecho)));
     for (const m of recolhidas) planos.set(m.id, { tipo: "oculta" });
-    if (u.tipo === "rotina" && baloes.length === 0 && !execucoes.some((d) => DESFECHOS_A_VISTA.has(d)) && recolhidas.length > 0) nadaParaVoce.add(u);
+    // Revisão W7 (2026-10-08): "nada para você" só da execução que acabou — com o trabalho aberto, ou sem a linha da
+    // execução nem a última fala do turno, ela ainda pode ter algo a dizer.
+    const acabou = !(u.trabalho && aberto(u.trabalho)) && (execucoes.length > 0 || u.mensagens.some((m) => m.fimDoTurno === true));
+    if (u.tipo === "rotina" && acabou && baloes.length === 0 && !execucoes.some((d) => DESFECHOS_A_VISTA.has(d)) && recolhidas.length > 0) nadaParaVoce.add(u);
     if (u.tipo === "colega" && recolhidas[0]) {
       const pedido = u.mensagens.find((m) => m.payload?.kind === "peer_pedido");
       const quemPediu = u.trabalho?.pedidoPorAgenteId ?? (pedido?.autoria.autor_tipo === "agente" ? pedido.autoria.autor_id : null);
@@ -219,10 +236,13 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   type Grupo = { primeira: Mensagem; unidades: Unidade[] };
   const gruposRotina: Grupo[] = [];
   let atual: Grupo | null = null;
+  // Revisão W10 (2026-10-08): a linha entra no lugar da primeira mensagem ESCONDIDA da execução, nunca de uma à vista (um
+  // card, um aviso) — essa continua desenhada como sempre.
+  const ancora = (u: Unidade): Mensagem | undefined => u.mensagens.find((x) => planos.get(x.id)?.tipo === "oculta");
   for (const m of mensagens) {
     const u = unidadeDe.get(m.id);
     if (u && nadaParaVoce.has(u)) {
-      if (u.mensagens[0] !== m) continue;
+      if (ancora(u) !== m) continue;
       const anterior = atual?.unidades[atual.unidades.length - 1];
       const mesma = anterior && (anterior.rotinaId === null || u.rotinaId === null || anterior.rotinaId === u.rotinaId);
       if (atual && mesma) atual.unidades.push(u);

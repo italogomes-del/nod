@@ -213,6 +213,46 @@ describe("tasks na conversa (#195)", () => {
   });
 });
 
+describe("revisão W7/W8/W10 (2026-10-08)", () => {
+  const rotina = (id: string, criadoEm: number, extra: Partial<Mensagem> = {}): Mensagem => msg(id, criadoEm, { turnoId: "tr1", origemTurno: "rotina", trabalhoId: "tb-r1", ...extra });
+
+  it("W7: a rotina em andamento não diz 'nada para você' (trabalho aberto, ou sem a linha da execução nem a última fala)", () => {
+    const meio = [daPessoa("p1", t0), rotina("r1", t0 + MIN, { texto: "Lendo o #suporte" })];
+    const comTrabalho = cenario(meio, { trabalhos: { trabalhos: [trabalho("tb-r1", { origem: "rotina", rotinaNome: "Triagem", estado: "rodando" })], pressao: null, memoriaTotalMb: null } });
+    expect(itens(comTrabalho.c, comTrabalho.e).map((b) => b.html).join("")).not.toContain("nada para você");
+    const semTrabalho = cenario(meio);
+    expect(itens(semTrabalho.c, semTrabalho.e).map((b) => b.html).join("")).not.toContain("nada para você");
+    // A última fala com o trabalho ainda aberto (a lista atrasada) também espera.
+    const fimComAberto = cenario([rotina("r1", t0, { fimDoTurno: true })], { trabalhos: { trabalhos: [trabalho("tb-r1", { origem: "rotina", estado: "rodando" })], pressao: null, memoriaTotalMb: null } });
+    expect(itens(fimComAberto.c, fimComAberto.e).map((b) => b.html).join("")).not.toContain("nada para você");
+    // Acabou (a última fala do turno chegou e o trabalho fechou): a linha volta.
+    const acabou = cenario([rotina("r1", t0, { fimDoTurno: true })], { trabalhos: { trabalhos: [trabalho("tb-r1", { origem: "rotina", estado: "terminado", terminadoEm: t0 + MIN })], pressao: null, memoriaTotalMb: null } });
+    expect(itens(acabou.c, acabou.e)[0]?.html).toContain("rodou 1 vez · 09:00 · nada para você");
+  });
+
+  it("W8: o que a pessoa escreveu no campo da task mora na task; na `rede` (a conversa virou task) e sem saber a origem, fica no chat", () => {
+    const naTask = (id: string, trabalhoId: string): Mensagem => msg(id, t0 + 5 * MIN, { autoria: { autor_tipo: "pessoa", autor_id: "p" } as never, origemTurno: null, trabalhoId, texto: `recado ${id}` });
+    const aberta = (trabalhoId: string, origem: "pessoa" | "rede"): Mensagem => msg(`a-${trabalhoId}`, t0, { kind: "sistema", texto: "Abriu", payload: { kind: "trabalho_aberto", trabalhoId, titulo: `Task ${trabalhoId}`, origem }, turnoId: "tc", origemTurno: "conversa" });
+    const { e, c } = cenario([aberta("tb-1", "pessoa"), naTask("x1", "tb-1"), aberta("tb-2", "rede"), naTask("x2", "tb-2"), naTask("x3", "tb-desconhecida")]);
+    const html = itens(c, e).map((b) => b.html).join("");
+    expect(html).not.toContain("recado x1");
+    expect(html).toContain("recado x2");
+    expect(html).toContain("recado x3");
+    // Pela lista de trabalhos também (a linha "Abriu a task" saiu da janela carregada).
+    const pelaLista = cenario([naTask("x4", "tb-4")], { trabalhos: { trabalhos: [trabalho("tb-4")], pressao: null, memoriaTotalMb: null } });
+    expect(itens(pelaLista.c, pelaLista.e).map((b) => b.html).join("")).not.toContain("recado x4");
+  });
+
+  it("W10: a linha da rotina entra no lugar da primeira mensagem ESCONDIDA da execução, nunca no de uma à vista", () => {
+    const aviso = rotina("rs", t0, { kind: "sistema", texto: "A rotina reconectou o Slack" });
+    const { e, c } = cenario([aviso, rotina("r1", t0 + MIN, { fimDoTurno: true, texto: "Li o #suporte: nada" })]);
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["rs", "linha:r1"]);
+    expect(blocos[0]?.html).toContain("A rotina reconectou o Slack");
+    expect(blocos[1]?.html).toContain("rodou 1 vez · 09:00 · nada para você");
+  });
+});
+
 describe("quem pede a um colega (padrão Grok)", () => {
   it("'Enviou mensagem para Chico' no pedido e 'N mensagens com Chico' na volta; a fala de quem pediu continua balão", () => {
     const handoff = msg("h1", t0, { turnoId: "t-pede", origemTurno: "conversa", kind: "handoff", texto: "x", payload: { kind: "handoff", de: "clarice", para: "chico", motivo: "revisar", tarefaId: "tarefa-1", trabalhoId: "tb-chico" } });
