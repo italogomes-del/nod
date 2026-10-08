@@ -162,7 +162,16 @@ export function iniciarProcesso(o: {
   }).then((r) => {
     // O líder saiu e o stdout fechou: o grupo sai da lista, senão o `exit` do app mataria um grupo novo que reusasse o
     // pid. Quem interrompeu solta o grupo no fim do interromper(), depois do SIGKILL nos netos.
-    if (pid !== undefined && !interrompido) gruposVivos.delete(pid);
+    // revisto em 2026-10-08 (revisão do épico #188, X6): o líder que sai sozinho pode deixar neto no grupo (um
+    // `sleep 60 &` do Bash do modelo, um servidor MCP). Fora da lista, o `exit` do app não o mataria mais: o grupo é
+    // levado agora, enquanto o pid ainda é nosso (o grupo vive enquanto houver membro, então não foi reusado).
+    if (pid !== undefined && !interrompido && gruposVivos.delete(pid)) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // o grupo já acabou junto com o líder
+      }
+    }
     return r;
   });
 
