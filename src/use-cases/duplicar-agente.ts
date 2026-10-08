@@ -3,6 +3,7 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { nuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { ehNod } from "../domain/nod.ts";
 import { ordemComCopia } from "../domain/ordem-barra.ts";
 import { redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
@@ -25,6 +26,8 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; conversa: Conversa }> = async (deps, input) => {
   const original = await deps.repos.agentes.buscar(input.agenteId);
   if (!original) throw new ErroDeDominio("nao_encontrado");
+  // ADR-081: o Nod é um por pessoa; a cópia seria um bot comum se passando por ele.
+  if (ehNod(original)) throw new ErroDeDominio("nod_protegido", { cause: "duplicar" });
   const dona = original.ownerId === deps.escopo.pessoaId;
 
   const agente = await deps.repos.agentes.criar({

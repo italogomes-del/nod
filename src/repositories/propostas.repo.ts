@@ -109,6 +109,13 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraProposta);
     },
 
+    /** ADR-082: o lote do Nod grava o desfecho de cada ação no próprio payload ao ser decidido. Só a dona. */
+    async atualizarPayload(id: string, payload: PayloadProposta): Promise<Proposta | null> {
+      const [l] = await conn<Linha[]>`
+        update propostas set payload = ${conn.json(payload)} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and kind = ${payload.kind} returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraProposta(l) : null;
+    },
+
     /** Só sai de 'pendente': confirmar/recusar duas vezes devolve null (idempotência para a rota). */
     async decidir(id: string, estado: "confirmada" | "recusada"): Promise<Proposta | null> {
       const [l] = await conn<Linha[]>`

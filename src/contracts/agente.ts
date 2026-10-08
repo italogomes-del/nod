@@ -63,5 +63,12 @@ export type Agente = {
   voz?: string | null;
   /** Velocidade da fala nas ligações: 1, 1,25 ou 1,5. */
   vozVelocidade?: number;
+  /**
+   * definido em 2026-10-07 (0061, ADR-081): 'nod' = o bot fixo da pessoa (um por pessoa). Não se exclui, não se oculta,
+   * não se renomeia, não se move nem se duplica (`nod_protegido`). Ausente = bot comum.
+   */
+  papel?: PapelAgente | null;
   criadoEm: EpochMs;
 };
+
+export type PapelAgente = "nod";

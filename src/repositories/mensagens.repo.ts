@@ -85,7 +85,7 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
 /**
  * definido em 2026-10-07 (ADR-083, S2): o que a web usa para agrupar sem adivinhar, no MESMO select (S3 da revisão: a
  * janela `max(criado_em) over (partition by turno_id)`, nunca subconsulta por linha). A fala da pessoa não tem turno
- * próprio: o trabalho dela é o do turno que ela abriu (`mensagem_origem_id`, índice da 0060). `fimDoTurno` olha só as
+ * próprio: o trabalho dela é o do turno que ela abriu (`mensagem_origem_id`, índice da 0063). `fimDoTurno` olha só as
  * falas de texto do bot e só turno já encerrado; a janela é a mesma página lida, e a última fala de um turno é sempre a
  * mais nova dele, então ela está na página sempre que alguma fala dele estiver.
  */

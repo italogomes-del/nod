@@ -23,6 +23,10 @@
     "estavel": 6816,
     "volatil": 0
   },
+  "nod": {
+    "estavel": 9130,
+    "volatil": 0
+  },
   "rotina-com-inventario": {
     "estavel": 8174,
     "volatil": 1590

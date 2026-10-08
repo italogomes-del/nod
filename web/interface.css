@@ -577,6 +577,25 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .icone-topo { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
   background: none; color: var(--ink-2); cursor: pointer; }
 .icone-topo:hover, .icone-topo:focus-visible { background: var(--surface-raised); }
+/* definido em 2026-10-07 (ADR-081, canvas "Nod — bot fixo", Alt E): o Nod discreto — o logo (fundo da ação, olhos do
+   texto sobre ela) e o nome, à esquerda da lupa. O ponto do aviso é o mesmo do mascote (âmbar decisão, azul pergunta). */
+.nod-topo { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-right: auto; padding: 0 10px 0 5px;
+  border: 0; border-radius: 10px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.nod-topo:hover, .nod-topo:focus-visible, .nod-topo[aria-current="true"] { background: var(--surface-raised); color: var(--ink); }
+.nod-topo .logo-fundo { fill: var(--action); }
+.nod-topo .logo-olhos { fill: var(--on-action); }
+.nod-topo-aviso { position: absolute; top: 4px; left: 21px; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 2px var(--surface-side); }
+.nod-topo-aviso[data-aviso="decisao"] { background: var(--warning); }
+.menu-nota { margin: 6px 12px 8px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
+/* ADR-082: o card do lote do Nod — uma linha por ação, a caixa à esquerda, o verbo num selo. */
+.lote-acoes { display: flex; flex-direction: column; margin: 4px 0 2px; border-top: 1px solid var(--line); }
+.lote-acao { display: flex; gap: 10px; align-items: flex-start; padding: 9px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.lote-acao input { margin: 3px 0 0; width: 15px; height: 15px; accent-color: var(--action); flex: none; }
+.lote-texto { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; line-height: 18px; }
+.lote-texto > span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lote-texto small { color: var(--ink-3); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.lote-verbo { font-style: normal; font-size: 11px; font-weight: 500; color: var(--ink-2); background: var(--surface-raised); border-radius: 6px; padding: 1px 6px; }
+.lote-texto .lote-motivo { color: var(--warning); }
 .search[hidden] { display: none; }
 .search { height: 36px; }
 
@@ -1201,3 +1220,14 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
   .tt-passo { display: none; }
   .lugar-faixa-trabalhos { padding: 0 12px; }
 }
+
+/* 0062: o filtro por tipo da tela Relatos (data-filtro na seção, data-tipo em cada relato). */
+.filtros-relato { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 16px; }
+.filtro-relato { font: inherit; font-size: 13px; font-weight: 500; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.filtro-relato[aria-pressed="true"] { background: var(--surface-selected); border-color: var(--surface-selected); color: var(--ink); }
+.relatos[data-filtro="bug"] details[data-tipo]:not([data-tipo="bug"]),
+.relatos[data-filtro="melhoria"] details[data-tipo]:not([data-tipo="melhoria"]),
+.relatos[data-filtro="duvida"] details[data-tipo]:not([data-tipo="duvida"]) { display: none; }
+.lote-sua-vez { margin: 6px 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.lote-sua-vez li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lote-sua-vez small { color: var(--ink-3); font-size: 12px; }

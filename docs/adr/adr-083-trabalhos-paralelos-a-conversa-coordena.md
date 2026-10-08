@@ -59,7 +59,7 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
   uma sessão por trabalho.
 - **Teto de trabalhos por bot ou por pessoa.** A máquina varia (8 a 36 GB); um teto de 8 travaria o pico de 25 turnos
   que o diário já tem. O aviso pela pressão do macOS se adapta sozinho.
-- **Interruptor `NOD_TASKS`.** Só o Marlon usa o Nod por enquanto; voltar atrás é reverter o PR (a migração 0060 é
+- **Interruptor `NOD_TASKS`.** Só o Marlon usa o Nod por enquanto; voltar atrás é reverter o PR (a migração 0063 é
   aditiva).
 
 ## Limites

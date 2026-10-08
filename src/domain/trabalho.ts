@@ -8,7 +8,7 @@ import type { EstadoTurno, OrigemTurno } from "../contracts/turno.ts";
  * (src/use-cases/trabalhos.ts); aqui só decisão.
  */
 
-/** CHECK trabalho_titulo da 0060. */
+/** CHECK trabalho_titulo da 0063. */
 export const TITULO_TRABALHO_MAX = 200;
 
 /** Estados em que o trabalho acabou: o `depois_de` de outro libera, e a linha vai para "Terminados hoje". */

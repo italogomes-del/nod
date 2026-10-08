@@ -7,6 +7,8 @@ export const AGENTES = {
   tabela: "agentes",
   trigger: "nod_agente_dono_imutavel",
   funcao: "nod_agente_dono_imutavel",
+  /** 0061 (ADR-081): o Nod não some, não muda de nome nem deixa de ser o Nod; um por pessoa. */
+  nod: { trigger: "nod_agente_nod_protegido", funcao: "nod_agente_nod_protegido", indice: "agentes_um_nod_por_pessoa" },
   /** Coluna STORED sem índice (ADR-008 revisado): só a configuração e a coluna são caras em base populada. */
   busca: { configuracao: "nod_pt", coluna: "search_tsv" },
 } as const;
@@ -18,14 +20,14 @@ export const ENUMS_DE_ESTADO = {
   confianca: ["confiavel", "nao_confiavel"],
   dono_agente: ["pessoa", "empresa"],
   politica_resposta: ["so_mencoes", "lead", "todos"],
-  tipo_decisao: ["aprovacao", "acesso", "retomar_turno", "gate_rotina", "perfil", "rotina", "pergunta", "falta_de_dado", "permissao", "rotina_atualizacao", "rotina_exclusao", "bot"],
+  tipo_decisao: ["aprovacao", "acesso", "retomar_turno", "gate_rotina", "perfil", "rotina", "pergunta", "falta_de_dado", "permissao", "rotina_atualizacao", "rotina_exclusao", "bot", "lote_bots"],
   estado_decisao: ["pendente", "decidida", "vencida", "reaberta"],
   kind_mensagem: ["texto", "sistema", "handoff", "passe", "consentimento", "rotina_execucao", "resultado_aprovacao", "negacao", "parada", "peer_ask", "artefato"],
   memoria_tipo: ["preferencia", "fato", "resumo"],
   transporte_conector: ["stdio", "http"],
   declaracao_sensibilidade: ["toca", "nao-toca", "nao-declarou"],
   tipo_conversa: ["propria", "sala"],
-  kind_proposta: ["perfil", "rotina", "acesso", "pasta", "rotina_atualizacao", "rotina_exclusao", "bot"],
+  kind_proposta: ["perfil", "rotina", "acesso", "pasta", "rotina_atualizacao", "rotina_exclusao", "bot", "lote_bots"],
   estado_proposta: ["pendente", "confirmada", "recusada"],
   estado_rotina: ["ativa", "pausada"],
   estado_inventario: ["ausente", "nao_autenticado", "pronto"],

@@ -14,6 +14,8 @@ import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../sr
 import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-cases/onboarding.ts";
 import { abrirTask, mandarParaTask } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
+import { registrarRelatoDoNod, verAppsConectados } from "../../src/use-cases/nod.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
 import { pedirAPessoa } from "../../src/use-cases/pedir-a-pessoa.ts";
 import { pedirAprovacao } from "../../src/use-cases/pedir-aprovacao.ts";
@@ -127,6 +129,9 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     proporBot,
     abrirTask,
     mandarParaTask,
+    gerirBots,
+    verAppsConectados,
+    registrarRelatoDoNod,
     ...sobrescrita,
   };
 }

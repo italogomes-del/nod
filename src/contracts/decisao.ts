@@ -12,6 +12,8 @@ export type TipoDecisao =
   | "rotina_exclusao"
   /** definido em 2026-10-04 (ADR-077, 0050): o primeiro bot que a Nina propõe no onboarding (propor_bot). */
   | "bot"
+  /** definido em 2026-10-07 (ADR-082, 0060): as mudanças em vários bots que o Nod pediu de uma vez (gerir_bots). */
+  | "lote_bots"
   | "pergunta"
   | "falta_de_dado"
   | "permissao";

@@ -1,5 +1,5 @@
 import type { PreferenciaHarness } from "../contracts/harness.ts";
-import type { Agente, CorAgente, DonoAgente, EsforcoAgente, FormaAgente, ModoAprovacao, Visibilidade } from "../contracts/agente.ts";
+import type { Agente, CorAgente, DonoAgente, EsforcoAgente, FormaAgente, ModoAprovacao, PapelAgente, Visibilidade } from "../contracts/agente.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { ms } from "./conversao.ts";
 
@@ -28,10 +28,11 @@ interface Linha {
   excluido_em: Date | null;
   voz: string | null;
   voz_velocidade: number | null;
+  papel: PapelAgente | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade, papel";
 
 function paraAgente(l: Linha): Agente {
   return {
@@ -59,6 +60,7 @@ function paraAgente(l: Linha): Agente {
     excluidoEm: l.excluido_em ? ms(l.excluido_em) : null,
     voz: l.voz ?? null,
     vozVelocidade: l.voz_velocidade ?? 1,
+    papel: l.papel ?? null,
     criadoEm: ms(l.criado_em),
   };
 }
@@ -214,6 +216,37 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
     async definirModoAprovacao(id: string, modo: ModoAprovacao): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`update agentes set modo_aprovacao = ${modo}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraAgente(l) : null;
+    },
+
+    /**
+     * definido em 2026-10-07 (ADR-081): o Nod da pessoa, com a TRAVA da pessoa até o fim da transação — dois `GET
+     * /onboarding` ao mesmo tempo (duas abas) esperam um pelo outro e o segundo já vê o Nod que o primeiro criou. O índice
+     * único da 0061 fica de rede. Só a dona: o Nod de outra pessoa nunca volta.
+     */
+    async travarNod(): Promise<Agente | null> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`nod:${escopo.pessoaId}`}))`;
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from agentes
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and papel = 'nod'`;
+      return l ? paraAgente(l) : null;
+    },
+
+    /** O Nod da pessoa (sem trava), excluído ou não; null = ainda não existe. */
+    async buscarNod(): Promise<Agente | null> {
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from agentes
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and papel = 'nod'`;
+      return l ? paraAgente(l) : null;
+    },
+
+    /**
+     * O ÚNICO caminho que grava `papel` (ADR-081): marca um bot da pessoa como o Nod, já com o nome, o título, a descrição,
+     * o mascote preto e fixado. Nenhuma rota nem ferramenta recebe `papel`.
+     */
+    async marcarComoNod(id: string, perfil: { nome: string; titulo: string; descricao: string }): Promise<Agente | null> {
+      const [l] = await conn<Linha[]>`update agentes set papel = 'nod', nome = ${perfil.nome}, titulo = ${perfil.titulo}, descricao = ${perfil.descricao},
+          cor = 'c-black', fixado = true, oculto = false, confirmado = true, secao = ''
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and dono = 'pessoa' and excluido_em is null and papel is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;
     },

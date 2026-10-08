@@ -220,7 +220,7 @@ function nivelPerfil(a: Bot): Nivel {
   const corpo = `<div class="gv-mascote">${iconeAgente(a, "xl", "disponivel", "data-mascote-preview")}
       <div class="gv-formas" role="radiogroup" aria-label="Forma do mascote">${formas}</div>
       <div class="gv-cores" role="radiogroup" aria-label="Cor do mascote">${cores}</div></div>
-    <label class="gv-campo">Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60" /></label>
+    <label class="gv-campo">Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60"${a.papel === "nod" ? ' readonly aria-describedby="nome-do-nod"' : ""} />${a.papel === "nod" ? '<small id="nome-do-nod" class="mudo">O nome do Nod não muda.</small>' : ""}</label>
     <label class="gv-campo">Título<input name="titulo" value="${esc(a.titulo)}" maxlength="80" /></label>
     <label class="gv-campo">Missão e orientações<textarea name="descricao" rows="10">${esc(a.descricao)}</textarea></label>
     ${campoVoz(a)}`;

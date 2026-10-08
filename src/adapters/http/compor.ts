@@ -115,6 +115,8 @@ import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
 import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, estadoOnboardingParaVoz, proporBot } from "../../use-cases/onboarding.ts";
 import { abrirTask, mandarParaTask } from "../../use-cases/coordenar-trabalhos.ts";
+import { gerirBots } from "../../use-cases/gerir-bots.ts";
+import { registrarRelatoDoNod, verAppsConectados } from "../../use-cases/nod.ts";
 import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
 import type { IaNoMac } from "../../contracts/onboarding.ts";
 import { criarRotasOnboarding } from "./rotas/onboarding.ts";
@@ -228,6 +230,8 @@ export function comporApp(o: OpcoesCompor): App {
   const modelosLigacao = lerModelosLigacao(env);
   // definido em 2026-10-06: o "A fazer" (ADR-064) desligado sem NOD_PENDENCIAS=1 — ver aFazerLigado.
   const aFazer = aFazerLigado(env.NOD_PENDENCIAS);
+  // definido em 2026-10-07 (ADR-082): as mãos do Nod ligadas por padrão; NOD_GERIR_BOTS=0 as tira do catálogo sem deploy de código.
+  const semFerramentasDoNod = env.NOD_GERIR_BOTS?.trim() === "0";
   const compartilhado = env.NOD_MODO === "compartilhado";
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
@@ -270,7 +274,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, gerirBots, verAppsConectados, registrarRelatoDoNod };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -365,7 +369,7 @@ export function comporApp(o: OpcoesCompor): App {
         const d = depsSobre(trx);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer });
+          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },

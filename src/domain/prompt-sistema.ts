@@ -196,6 +196,8 @@ export type EntradaPromptSistema = {
   trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null } | null;
   /** ADR-083: as tasks abertas do bot, na parte volátil ("Trabalhos em andamento"); só no turno da conversa. */
   trabalhosAbertos?: readonly TrabalhoNoPrompt[];
+  /** ADR-081: o manual do Nod (manual-do-nod.ts), só quando o bot do turno é o Nod; parte estável, logo depois do que faz. */
+  manualDoNod?: string;
 };
 
 /** Uma task aberta do bot como entra no prompt da conversa: id (para mandar_para_task), título, estado e o último passo. */
@@ -231,6 +233,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   linhas.push("Formatação: a conversa mostra **negrito**, *itálico*, `código`, blocos de código, tabelas em markdown (cabeçalho e linha |---|) e links http(s). Ao citar uma mensagem, tarefa, PR ou página, ponha o link no próprio nome, como [PR #481](https://…), em vez de colar a URL solta.");
   const queFaz = linhaDoQueFaz(entrada.agente.descricao);
   if (queFaz) linhas.push(queFaz);
+  if (entrada.manualDoNod) linhas.push(entrada.manualDoNod);
   const pede = entrada.ferramentas.some((f) => f.nome === "pedir_a_bot");
   // A linha da delegação traz o nome de quem pediu: vai para a parte volátil. Os outros modos são poucos valores fixos.
   if (entrada.modo === "delegacao") volatil.push(instrucaoDelegacao(entrada.delegacao, pede));

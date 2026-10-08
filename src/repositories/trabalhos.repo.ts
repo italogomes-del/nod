@@ -83,7 +83,7 @@ export type NovoTrabalho = {
 export type ExtrasTrabalho = { pedidoPorNome: string | null; rotinaNome: string | null; ultimaFala: string | null; turnoVivoId: string | null; turnosAbertos: string[]; deFora: boolean };
 
 /**
- * Trabalhos do bot (ADR-083, 0060). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
+ * Trabalhos do bot (ADR-083, 0063). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito sob RLS, escrita só
  * da dona (owner_id), T | null sem lançar. O estado é decidido em src/domain/trabalho.ts (estadoDoTrabalho) a partir de
  * `fatos`; aqui só se grava.
  */
@@ -156,7 +156,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
-    /** Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0060). */
+    /** Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0063). */
     async mudarEstado(id: string, estado: EstadoTrabalho, agora: number): Promise<Trabalho | null> {
       const final = estado === "terminado" || estado === "parado" || estado === "falhou";
       const [l] = await conn<Linha[]>`

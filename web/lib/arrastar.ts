@@ -18,7 +18,8 @@ export function compararNaBarra(x: Bot, y: Bot): number {
 
 /** Os ids do grupo de destino na ordem da barra, com o bot solto em `indice` (fora do alcance = no fim). */
 export function ordemAoSoltar(agentes: readonly Bot[], pessoaId: string, id: string, destino: Destino, indice: number): string[] {
-  const grupo = agentes.filter((b) => b.ownerId === pessoaId && b.id !== id && !b.excluidoEm && noGrupo(b, destino)).map((b) => b.id);
+  // ADR-081: o Nod não entra na ordem de grupo nenhum — a barra o desenha à parte (primeiro dos fixados, ou na barra de cima).
+  const grupo = agentes.filter((b) => b.ownerId === pessoaId && b.id !== id && !b.excluidoEm && b.papel !== "nod" && noGrupo(b, destino)).map((b) => b.id);
   grupo.splice(Math.max(0, Math.min(indice, grupo.length)), 0, id);
   return grupo;
 }

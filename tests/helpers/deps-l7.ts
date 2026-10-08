@@ -95,6 +95,9 @@ export function useCasesFalsos(): UseCasesNod {
     proporBot: naoImplementado("useCases.proporBot"),
     abrirTask: naoImplementado("useCases.abrirTask"),
     mandarParaTask: naoImplementado("useCases.mandarParaTask"),
+    gerirBots: naoImplementado("useCases.gerirBots"),
+    verAppsConectados: naoImplementado("useCases.verAppsConectados"),
+    registrarRelatoDoNod: naoImplementado("useCases.registrarRelatoDoNod"),
   };
 }
 

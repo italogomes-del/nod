@@ -98,16 +98,17 @@ async function aprovarPorVoz(cli: Cliente, ligacaoId: string, jaVistas: number):
   return decisaoId;
 }
 
-it("a Nina liga, entrevista, encolhe, propõe o bot aprovado por voz, pede o app e a rotina PARA o bot novo, e o onboarding conclui", async () => {
+it("o Nod (a guia, ADR-081) liga, entrevista, encolhe, propõe o bot aprovado por voz, pede o app e a rotina PARA o bot novo, e o onboarding conclui", async () => {
   // Pessoa nova: o onboarding aparece, e o catcher conta como IA pronta.
   const inicio = await srv.json<EstadoOnboarding>("GET", "onboarding");
-  expect(inicio).toMatchObject({ etapa: null, mostrar: true, guia: null, bot: null, passo: "bot", executor: { pronto: true } });
+  // ADR-081: o primeiro GET já cria o Nod da pessoa, e ele é a guia.
+  expect(inicio).toMatchObject({ etapa: null, mostrar: true, guia: { nome: "Nod" }, bot: null, passo: "bot", executor: { pronto: true } });
   expect(inicio.modelo.objetivo).toBe("clientes");
 
   // 'chamando': a guia nasce e a ligação começa iniciada pelo produto, tocando, ANTES do consentimento.
   const chamando = await srv.json<EstadoOnboarding>("POST", "onboarding/etapa", { etapa: "chamando" });
   expect(chamando.etapa).toBe("chamando");
-  expect(chamando.guia?.nome).toBe("Nina");
+  expect(chamando.guia).toMatchObject({ id: inicio.guia?.id, nome: "Nod" });
   expect(chamando.recusa).toBeNull();
   const ligacao = chamando.ligacao;
   if (!ligacao) throw new Error("sem ligação");
@@ -130,7 +131,7 @@ it("a Nina liga, entrevista, encolhe, propõe o bot aprovado por voz, pede o app
 
   const cli = abrirMidia(ligacao.id);
   await cli.esperarMsg((m) => m.t === "pronto", "pronto");
-  await cli.esperarMsg((m) => m.t === "bot-fala" && m.texto.startsWith("Oi! Eu sou a Nina, sua primeira bot aqui no nod."), "primeira fala do roteiro");
+  await cli.esperarMsg((m) => m.t === "bot-fala" && m.texto.startsWith("Oi! Eu sou o Nod, seu bot fixo aqui no nod."), "primeira fala do roteiro");
   await cli.esperarMsg((m) => m.t === "sugestoes" && m.itens.includes("Me chama de Ana"), "chip do apelido");
   await cli.esperarMsg((m) => m.t === "cerebro" && m.online, "cérebro online", 10_000);
 

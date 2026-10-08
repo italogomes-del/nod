@@ -6,6 +6,7 @@ import { FERRAMENTAS_ARTEFATO, type ContratoFerramentasArtefato } from "./ferram
 import { FERRAMENTAS_PENDENCIA, type ContratoFerramentasPendencia } from "./ferramentas-pendencia.ts";
 import { FERRAMENTAS_LIGACAO, type ContratoFerramentasLigacao } from "./ferramentas-ligacao.ts";
 import { FERRAMENTAS_TRABALHO, type ContratoFerramentasTrabalho } from "./ferramentas-trabalho.ts";
+import { FERRAMENTAS_DO_NOD, type ContratoFerramentasDoNod } from "./ferramentas-do-nod.ts";
 import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
 
@@ -16,13 +17,14 @@ export type { ArgsAtualizarPerfil, ArgsVerColegas, AppDoColega, ColegaListado, R
 export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina, RotinaListada } from "./ferramentas-rotina.ts";
 
 /**
- * As VINTE E UMA ferramentas nod (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
+ * As ferramentas nod (vinte e nove em 2026-10-07; eram VINTE E UMA na contagem original) (EMENDA 16 acrescenta pedir_a_pessoa; sem_novidade entra em 2026-09-21
  * para que uma rotina possa encerrar em silêncio; o ciclo de vida de rotina, do mesmo dia, mora em
  * ferramentas-rotina.ts pelo gatilho de 200 linhas da EMENDA 26; pedir_a_bot substitui perguntar_a_bot e
  * delegar_tarefa em 2026-09-29, ADR-058; ver_colegas entra em 2026-09-28, ADR-050, e mora com atualizar_perfil em
  * ferramentas-perfil.ts pelo mesmo gatilho; publicar_artefato/ler_artefato também em 2026-09-28, ADR-051,
  * em ferramentas-artefato.ts; anotar/concluir/descartar_pendencia em 2026-09-30, ADR-064, em
- * ferramentas-pendencia.ts). Lista FECHADA: cada nome tem um
+ * ferramentas-pendencia.ts; gerir_bots, ver_apps_conectados e registrar_relato, só do Nod, em 2026-10-07, ADR-081/082,
+ * em ferramentas-do-nod.ts). Lista FECHADA: cada nome tem um
  * case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é
  * `${slug}__${tool}` e não mora aqui.
@@ -34,6 +36,7 @@ export const FERRAMENTAS_NOD = {
   ...FERRAMENTAS_PENDENCIA,
   ...FERRAMENTAS_LIGACAO,
   ...FERRAMENTAS_TRABALHO,
+  ...FERRAMENTAS_DO_NOD,
   lembrar: {
     type: "object",
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
@@ -146,6 +149,7 @@ export const NOMES_FERRAMENTAS_NOD = [
   "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot", "ver_colegas", "publicar_artefato", "ler_artefato",
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "iniciar_tarefa", "desligar",
   "anotar_entrevista", "concluir_entrevista", "propor_bot", "abrir_task", "mandar_para_task",
+  "gerir_bots", "ver_apps_conectados", "registrar_relato",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -173,7 +177,7 @@ export type ResultadoOk = { ok: true };
 export type ResultadoPedirABot = { tarefa_id: string };
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
-export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & {
+export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasDoNod & {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoAtualizarPerfil };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };

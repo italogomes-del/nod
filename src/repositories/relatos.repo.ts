@@ -1,6 +1,6 @@
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
-import type { AlcanceRelato, CategoriaRelato, DiagnosticoRelato, Relato } from "../contracts/relato.ts";
+import type { AlcanceRelato, CategoriaRelato, DiagnosticoRelato, OrigemRelato, Relato, TipoRelato } from "../contracts/relato.ts";
 import type { EstadoTurno, OrigemTurno, SinaisTurno } from "../contracts/turno.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, jsonb, ms } from "./conversao.ts";
@@ -8,7 +8,9 @@ import { data, jsonb, ms } from "./conversao.ts";
 interface Linha {
   tenant_id: string;
   id: string;
-  mensagem_id: string;
+  mensagem_id: string | null;
+  tipo: TipoRelato;
+  origem: OrigemRelato;
   conversa_id: string;
   turno_id: string | null;
   categoria: CategoriaRelato;
@@ -33,13 +35,15 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, mensagem_id, conversa_id, turno_id, categoria, alcance, mensagens_anexadas, estado_turno, origem_turno, sinais, motivo_falha, motivo_interrupcao, modelo, harness, executor, machine_id, custo_usd, reenvios, confianca_mensagem, mensagem_parcial, versao_app, correlation_id, criado_em";
+  "tenant_id, id, mensagem_id, tipo, origem, conversa_id, turno_id, categoria, alcance, mensagens_anexadas, estado_turno, origem_turno, sinais, motivo_falha, motivo_interrupcao, modelo, harness, executor, machine_id, custo_usd, reenvios, confianca_mensagem, mensagem_parcial, versao_app, correlation_id, criado_em";
 
 function paraRelato(l: Linha): Relato {
   return {
     tenantId: l.tenant_id,
     id: l.id,
     mensagemId: l.mensagem_id,
+    tipo: l.tipo ?? "bug",
+    origem: l.origem ?? "botao",
     conversaId: l.conversa_id,
     turnoId: l.turno_id,
     categoria: l.categoria,
@@ -68,7 +72,10 @@ function paraRelato(l: Linha): Relato {
 }
 
 export type NovoRelato = {
-  mensagemId: string;
+  mensagemId: string | null;
+  /** Ausentes = 'bug' pelo 'botao' (o relato da mensagem, ADR-041). */
+  tipo?: TipoRelato;
+  origem?: OrigemRelato;
   conversaId: string;
   turnoId: string | null;
   categoria: CategoriaRelato;
@@ -94,6 +101,8 @@ export type NovoRelato = {
 /** O que a pessoa escreveu e o recorte que ela anexou. Vive separado e some sozinho (ADR-004). */
 export type NovaProsaRelato = {
   relatoId: string;
+  /** 0062: o título do relato contado ao Nod; o do botão não tem. */
+  titulo?: string | null;
   textoPessoa: string | null;
   trecho: { mensagens: { id: string; autor: string; kind: string; texto: string; em: number }[] } | null;
 };
@@ -116,11 +125,11 @@ export function relatosRepo(conn: Conn, escopo: Escopo) {
     async criar(r: NovoRelato): Promise<Relato | null> {
       const [l] = await conn<Linha[]>`
         insert into relatos (
-          tenant_id, owner_id, mensagem_id, conversa_id, turno_id, categoria, alcance, mensagens_anexadas,
+          tenant_id, owner_id, mensagem_id, tipo, origem, conversa_id, turno_id, categoria, alcance, mensagens_anexadas,
           estado_turno, origem_turno, sinais, motivo_falha, motivo_interrupcao, modelo, harness, executor,
           machine_id, custo_usd, reenvios, confianca_mensagem, mensagem_parcial, versao_app, correlation_id)
         values (
-          ${escopo.tenantId}, ${escopo.pessoaId}, ${r.mensagemId}, ${r.conversaId}, ${r.turnoId},
+          ${escopo.tenantId}, ${escopo.pessoaId}, ${r.mensagemId}, ${r.tipo ?? "bug"}, ${r.origem ?? "botao"}, ${r.conversaId}, ${r.turnoId},
           ${r.categoria}, ${r.alcance}, ${r.mensagensAnexadas}, ${r.estadoTurno}, ${r.origemTurno},
           ${r.sinais === null ? null : jsonb(conn, r.sinais)}, ${r.motivoFalha}, ${r.motivoInterrupcao},
           ${r.modelo}, ${r.harness}, ${r.executor}, ${r.machineId}, ${r.custoUsd}, ${r.reenvios},
@@ -132,10 +141,10 @@ export function relatosRepo(conn: Conn, escopo: Escopo) {
     async gravarProsa(p: NovaProsaRelato): Promise<void> {
       // Nada a guardar: sem texto e sem trecho, a linha de prosa não existe (o relato fica só com
       // os metadados). O caso de uso hoje sempre manda trecho, mas o repositório não depende disso.
-      if (p.textoPessoa === null && (p.trecho === null || p.trecho.mensagens.length === 0)) return;
+      if (!p.titulo && p.textoPessoa === null && (p.trecho === null || p.trecho.mensagens.length === 0)) return;
       await conn`
-        insert into relato_prosa (tenant_id, owner_id, relato_id, texto_pessoa, trecho)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.relatoId}, ${p.textoPessoa},
+        insert into relato_prosa (tenant_id, owner_id, relato_id, titulo, texto_pessoa, trecho)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.relatoId}, ${p.titulo ?? null}, ${p.textoPessoa},
                 ${p.trecho === null ? null : jsonb(conn, p.trecho)})`;
     },
 
@@ -146,10 +155,15 @@ export function relatosRepo(conn: Conn, escopo: Escopo) {
      * da falha é a da primeira (definido em 2026-09-21).
      */
     async listar(limite = 100): Promise<Relato[]> {
-      const linhas = await conn<(Linha & { erro_cru: string | null; ferramentas: string[] | null; negacoes: string[] | null; sessao_cli: string | null })[]>`
+      // 0062: o título e o começo do texto só dos relatos que a PRÓPRIA pessoa contou ao Nod — sem eles o relato do Nod
+      // seria só "Bug" na lista. O do botão continua sem prosa na listagem (ADR-041). O filtro por owner_id no join
+      // repete a RLS de relato_prosa (privada, ADR-004) de propósito, para a lista não depender só dela.
+      const linhas = await conn<(Linha & { erro_cru: string | null; ferramentas: string[] | null; negacoes: string[] | null; sessao_cli: string | null; titulo: string | null; resumo: string | null })[]>`
         select r.${conn.unsafe(COLUNAS.split(", ").join(", r."))},
-               d.erro_cru, d.ferramentas, d.negacoes, d.sessao_cli
+               d.erro_cru, d.ferramentas, d.negacoes, d.sessao_cli,
+               p.titulo, left(p.texto_pessoa, 160) as resumo
         from relatos r
+        left join relato_prosa p on p.tenant_id = r.tenant_id and p.relato_id = r.id and p.owner_id = ${escopo.pessoaId} and r.origem = 'nod'
         left join (
           select distinct on (tenant_id, turno_id) tenant_id, turno_id, erro_cru, ferramentas, negacoes, sessao_cli
           from turno_diagnosticos where tenant_id = ${escopo.tenantId}
@@ -159,6 +173,8 @@ export function relatosRepo(conn: Conn, escopo: Escopo) {
         order by r.criado_em desc, r.id desc limit ${limite}`;
       return linhas.map((l) => ({
         ...paraRelato(l),
+        titulo: l.titulo,
+        resumo: l.resumo,
         diagnostico: l.erro_cru === null && l.ferramentas === null ? null : { erroCru: l.erro_cru, ferramentas: l.ferramentas ?? [], negacoes: l.negacoes ?? [], sessaoCli: l.sessao_cli },
       }));
     },
@@ -169,7 +185,14 @@ export function relatosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraRelato(l) : null;
     },
 
-    /** Só quem for abrir o relato lê a prosa: ela não viaja na listagem. */
+    /** Quantos relatos esta pessoa contou ao Nod desde `desde` (o teto diário de registrar_relato). */
+    async contarDoNodDesde(desde: number): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`select count(*)::int as n from relatos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and origem = 'nod' and criado_em >= ${data(desde)}`;
+      return l?.n ?? 0;
+    },
+
+    /** Só quem for abrir o relato lê a prosa: ela não viaja na listagem (o título e o resumo, só os próprios). */
     async prosaDe(relatoId: string): Promise<NovaProsaRelato | null> {
       const [l] = await conn<{ relato_id: string; texto_pessoa: string | null; trecho: NovaProsaRelato["trecho"] }[]>`
         select relato_id, texto_pessoa, trecho from relato_prosa

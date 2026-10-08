@@ -19,6 +19,15 @@ export const CATEGORIAS_RELATO = [
 ] as const;
 export type CategoriaRelato = (typeof CATEGORIAS_RELATO)[number];
 
+/**
+ * definido em 2026-10-07 (0062, a caixa do Nod): o que o relato é — o botão da mensagem só registra 'bug'; o Nod registra
+ * os três. E de onde veio: o botão numa mensagem (ADR-041) ou a conversa com o Nod (sem mensagem apontada).
+ */
+export const TIPOS_RELATO = ["bug", "melhoria", "duvida"] as const;
+export type TipoRelato = (typeof TIPOS_RELATO)[number];
+export const ORIGENS_RELATO = ["botao", "nod"] as const;
+export type OrigemRelato = (typeof ORIGENS_RELATO)[number];
+
 /** O que a pessoa escolheu anexar na etapa 1: só a mensagem apontada ou a janela que a precede. */
 export const ALCANCES_RELATO = ["mensagem", "janela"] as const;
 export type AlcanceRelato = (typeof ALCANCES_RELATO)[number];
@@ -76,7 +85,16 @@ export type MetadadosRelato = {
 export type Relato = {
   tenantId: TenantId;
   id: string;
-  mensagemId: string;
+  /** null = contado ao Nod (origem 'nod'); o do botão sempre aponta a mensagem (CHECK relatos_botao_tem_mensagem). */
+  mensagemId: string | null;
+  tipo: TipoRelato;
+  origem: OrigemRelato;
+  /**
+   * Só nos relatos da PRÓPRIA pessoa (a prosa é privada, ADR-004): o título que o Nod escreveu e o começo do texto.
+   * Relato de outro membro do tenant vem sem os dois.
+   */
+  titulo?: string | null;
+  resumo?: string | null;
   conversaId: string;
   turnoId: string | null;
   categoria: CategoriaRelato;

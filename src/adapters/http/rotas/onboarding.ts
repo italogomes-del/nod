@@ -5,7 +5,7 @@ import type { MotivoFimLigacao } from "../../../contracts/voz.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { disponibilidadeLigacao, encerrarLigacao, ligacaoViva, ligar, type ContextoLigacao, type SaidaLigar } from "../../../use-cases/ligacoes.ts";
-import { concluirOnboarding, criarBotDoOnboarding, criarRotinaDoOnboarding, definirEtapaOnboarding, estadoOnboarding, garantirGuia } from "../../../use-cases/onboarding.ts";
+import { concluirOnboarding, criarBotDoOnboarding, criarRotinaDoOnboarding, definirEtapaOnboarding, estadoOnboarding, garantirNod } from "../../../use-cases/onboarding.ts";
 import type { CasoDeUso } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
@@ -27,13 +27,15 @@ const consentimento: CasoDeUso<Record<string, never>, number> = async (deps) => 
 
 /**
  * Rotas do onboarding por ligação (definido em 2026-10-04, ADR-077). A etapa é do servidor: entrar em 'chamando'
- * garante a guia e começa a ligação (iniciada pelo produto, tocando); 'entrevista' é o Atender (exige o consentimento
+ * garante a guia (o Nod, ADR-081) e começa a ligação (iniciada pelo produto, tocando); 'entrevista' é o Atender (exige o consentimento
  * já gravado e libera a mídia); 'configurando' com `semVoz` encerra a ligação como recusada; 'ola' recomeça.
  */
 export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
   const executar = criarExecutor(d);
   const estado = (escopo: Escopo, recusa: { motivo: MotivoRecusaLigacao; texto: string } | null = null) =>
     executar(escopo, estadoOnboarding, { executor: d.executorDoMac(escopo), recusa });
+  // ADR-081: a web pede o onboarding ao entrar — é ali que toda pessoa ganha o seu Nod (uma vez; depois é só leitura).
+  const garantir = (escopo: Escopo) => executar(escopo, garantirNod, {});
   const vivaDaGuia = async (escopo: Escopo, guiaId: string): Promise<Ligacao | null> => {
     const { ligacao } = await executar(escopo, ligacaoViva, {});
     return ligacao && ligacao.agenteId === guiaId ? ligacao : null;
@@ -44,6 +46,7 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
       metodo: "GET",
       padrao: /^\/onboarding$/,
       async handler(ctx) {
+        await garantir(ctx.escopo);
         ctx.json(200, await estado(ctx.escopo));
       },
     },
@@ -54,7 +57,7 @@ export function criarRotasOnboarding(d: DepsRotasOnboarding): Rota[] {
         const b = corpoObjeto(await ctx.corpo());
         const escopo = ctx.escopo;
         if (b.etapa === "chamando") {
-          const { guia } = await executar(escopo, garantirGuia, {});
+          const { nod: guia } = await garantir(escopo);
           await executar(escopo, definirEtapaOnboarding, { etapa: "chamando" });
           if (await vivaDaGuia(escopo, guia.id)) {
             ctx.json(200, await estado(escopo));
