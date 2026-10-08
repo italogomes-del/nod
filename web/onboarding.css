@@ -41,7 +41,8 @@
 .ob-ia-txt span.aviso { color: var(--warning); }
 .ob-ia-txt span svg { flex: none; }
 .ob-nota { margin: 0; font-size: 13px; color: var(--ink-3); min-height: 20px; text-align: center; max-width: 560px; }
-.ob-cabeca h1:focus { outline: none; } /* recebe o foco só pelo código, quando a tela troca (web/main.ts) */
+/* foco-ok: recebe o foco só pelo código, quando a tela troca (web/main.ts); não é um controle */
+.ob-cabeca h1:focus { outline: none; }
 
 /* O teste de verdade (definido em 2026-10-05): a pergunta do nod e a resposta da IA, dentro do card. */
 .ob-prova { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--surface-side); }
@@ -212,4 +213,11 @@
   /* Sem movimento, os três pontinhos ficam em degraus (como no protótipo parado). */
   .ob-pontos i:nth-child(2) { opacity: .6; }
   .ob-pontos i:nth-child(3) { opacity: .3; }
+}
+
+/* NOD-122: alto contraste (forced-colors). O sistema troca os fundos pelas cores dele, então o foco que era só fundo some.
+   Aqui o foco ganha contorno em Highlight; nada muda fora deste modo. Gate: tests/unit/web/foco-forced-colors.test.ts. */
+@media (forced-colors: active) {
+  /* O "olá" cobre a janela inteira: o contorno vai para dentro. */
+  .ob-ola:focus-visible { outline: 2px solid Highlight; outline-offset: -4px; }
 }

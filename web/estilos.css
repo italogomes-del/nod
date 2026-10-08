@@ -28,6 +28,7 @@ body.ocupado { cursor: progress; }
 .search-row { display: grid; grid-template-columns: 1fr 26px; gap: 8px; align-items: center; }
 .search { height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; display: flex;
   align-items: center; gap: 6px; background: var(--surface-raised); color: var(--ink-3); }
+/* foco-no-conteiner: .search */
 .search input { border: 0; background: none; width: 100%; outline: none; font-size: 13px; }
 .create-trigger { width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line-strong);
   background: var(--surface); color: var(--ink-3); font-size: 16px; line-height: 1;
@@ -262,6 +263,7 @@ body.ocupado { cursor: progress; }
 .composer .box { max-width: 100%; margin: 0 auto; border: 1px solid var(--line-strong); border-radius: 14px;
   min-height: 38px; padding: 6px 8px; display: flex; align-items: flex-end; gap: 7px; background: var(--surface); position: relative; }
 .composer .box:focus-within { border-color: var(--ink); }
+/* foco-no-conteiner: .composer .box */
 .composer textarea { flex: 1; border: 0; background: none; resize: none; outline: none; min-height: 22px;
   max-height: 170px; line-height: 1.44; font-size: 13.5px; padding-top: 3px; }
 .composer .send { width: 24px; height: 24px; border-radius: 50%; background: var(--action); color: var(--on-action);
@@ -634,3 +636,11 @@ details[open] > summary .rx-seta { transform: translateY(-4px) rotate(45deg); }
 .barra-dica b { font: 600 12.5px var(--font-mono); color: var(--ink); }
 .barra-dica span { color: var(--ink-3); }
 .chip-comando { display: inline-block; margin-right: 6px; padding: 2px 9px; border-radius: 10px; background: var(--surface-raised); color: var(--ink-2); font: 500 12.5px var(--font-mono); }
+
+/* NOD-122: alto contraste (forced-colors). O sistema troca os fundos pelas cores dele, então o foco que era só fundo some.
+   Aqui o foco ganha contorno em Highlight; nada muda fora deste modo. Gate: tests/unit/web/foco-forced-colors.test.ts. */
+@media (forced-colors: active) {
+  .relato-campo textarea:focus-visible, .search:focus-within, .composer .box:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
+  /* O Raio-X ocupa a altura da janela: o contorno vai para dentro. */
+  .raio-x:focus-visible { outline: 2px solid Highlight; outline-offset: -4px; }
+}

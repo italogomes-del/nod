@@ -1275,3 +1275,12 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .lote-sua-vez { margin: 6px 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .lote-sua-vez li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .lote-sua-vez small { color: var(--ink-3); font-size: 12px; }
+
+/* NOD-122: alto contraste (forced-colors). O sistema troca os fundos pelas cores dele, então o foco que era só fundo some.
+   Aqui o foco ganha contorno em Highlight; nada muda fora deste modo. Gate: tests/unit/web/foco-forced-colors.test.ts. */
+@media (forced-colors: active) {
+  .bot-menu button:focus-visible, .me:focus-visible, .rodape .me:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  /* O item atual/selecionado era só fundo (ou sombra, que o modo apaga): contorno em CanvasText, por dentro; o foco ganha dele. */
+  [aria-current="true"]:not(:focus-visible), [aria-current="page"]:not(:focus-visible), [aria-selected="true"]:not(:focus-visible),
+  [aria-pressed="true"]:not(:focus-visible), .app-card.selected { outline: 2px solid CanvasText; outline-offset: -2px; }
+}

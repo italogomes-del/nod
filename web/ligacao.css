@@ -41,6 +41,7 @@
 .lc-card:empty, .lc-teclado-wrap:empty { display: none; }
 .lc-teclado-wrap { width: min(820px, calc(100vw - 48px)); margin: 8px auto 0; }
 .lc-teclado { display: flex; gap: 8px; align-items: center; padding: 6px 6px 6px 18px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); }
+/* foco-no-conteiner: .lc-teclado */
 .lc-teclado input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
 .lc-teclado .bt.pri { width: 40px; height: 40px; border-radius: 50%; padding: 0; display: grid; place-items: center; }
 .lc-teclado:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -216,4 +217,10 @@
   .lc-fala { font-size: 20px; }
   .lp-nome { display: none; }
   .lsi-cards { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* NOD-122: alto contraste (forced-colors). O sistema troca os fundos pelas cores dele, então o foco que era só fundo some.
+   Aqui o foco ganha contorno em Highlight; nada muda fora deste modo. Gate: tests/unit/web/foco-forced-colors.test.ts. */
+@media (forced-colors: active) {
+  .lc-teclado:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
 }

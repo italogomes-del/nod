@@ -63,6 +63,8 @@ import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
+import { comportamentoDaRolagem, movimentoReduzido } from "./lib/movimento.ts";
+import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from "./lib/foco-gaveta.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
@@ -91,7 +93,7 @@ let composerDe: string | null = null;
 const envios = criarEnvios();
 const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { return null; } });
 /** A conversa acompanha o fim e a pílula da base sobe às não lidas (definido em 2026-10-05, web/lib/rolagem-na-tela.ts). */
-const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !movimentoReduzido());
 let reidratando = false;
 let ambienteBanco: AmbienteBancoDto | null = null;
 /**
@@ -989,9 +991,13 @@ function render(): void {
     regiao("timeline", renderEntrada());
     regiao("composer", "");
     rolagem.depoisDeDesenhar(null, true);
+    prenderFocoNaGaveta(null);
     return;
   }
   document.querySelector(".app")?.classList.remove("sem-sessao");
+  // NOD-122: quem tem o foco quando a gaveta do app abre é para onde ele volta quando ela fecha.
+  const gavetaDoApp = gavetaPrendeFoco(estado.tela);
+  if (gavetaDoApp && !gavetaMontada) origemDaGaveta = origemDoFoco();
   if (!arrastandoBot) redesenharSidebar();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
   regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela)) : "");
@@ -1012,6 +1018,43 @@ function render(): void {
     queueMicrotask(() => telaLigacao.retomar(retomar));
   }
   renderPrincipal();
+  prenderFocoNaGaveta(gavetaDoApp);
+}
+
+/**
+ * NOD-122 (web/lib/foco-gaveta.ts): com a gaveta do app aberta, o resto da `.app` fica inerte e o Tab circula só nela.
+ * A `.app` em si não fica inerte, porque a gaveta mora dentro dela. Ao abrir, o foco vai ao × da gaveta; ao fechar
+ * (×, "Pronto", fundo ou Esc), volta a quem a abriu. Refeito a cada render, porque a grade é regravada.
+ */
+let gavetaMontada: string | null = null;
+let origemDaGaveta: { act?: string; id?: string } | null = null;
+let inertesDaGaveta: Element[] = [];
+/** O que o Tab alcança dentro da gaveta (o ciclo de `voltaDoTab`). */
+const FOCAVEIS_DA_GAVETA = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+function origemDoFoco(): { act?: string; id?: string } | null {
+  const ativo = document.activeElement;
+  if (!(ativo instanceof HTMLElement) || !ativo.closest(".mkt")) return null;
+  return { act: ativo.dataset.act, id: ativo.dataset.id };
+}
+
+function prenderFocoNaGaveta(slug: string | null): void {
+  for (const el of inertesDaGaveta) el.removeAttribute("inert");
+  inertesDaGaveta = [];
+  const app = document.querySelector(".app");
+  const gaveta = slug ? document.querySelector<HTMLElement>(".tela-conectores .gaveta") : null;
+  if (app && gaveta) {
+    inertesDaGaveta = irmaosAteARaiz<Element>(gaveta, app, (no) => no.classList.contains("gaveta-fundo"));
+    for (const el of inertesDaGaveta) el.setAttribute("inert", "");
+  }
+  const antes = gavetaMontada;
+  gavetaMontada = gaveta ? slug : null;
+  if (gavetaMontada && gavetaMontada !== antes) gaveta?.querySelector<HTMLElement>(".gaveta-fechar")?.focus();
+  if (antes && !gavetaMontada) {
+    const volta = seletoresDaOrigem(origemDaGaveta, antes, CSS.escape).map((s) => document.querySelector<HTMLElement>(s)).find((el) => el);
+    volta?.focus();
+    origemDaGaveta = null;
+  }
 }
 
 /**
@@ -1604,7 +1647,7 @@ function verPergunta(decisaoId: string): void {
   const balao = document.querySelector<HTMLElement>(`[data-pergunta="${CSS.escape(decisaoId)}"]`);
   if (!balao) return;
   rolagem.soltar();
-  balao.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  balao.scrollIntoView({ block: "center", behavior: comportamentoDaRolagem(movimentoReduzido()) });
   balao.classList.add("realce");
   window.setTimeout(() => balao.classList.remove("realce"), 1600);
 }
@@ -1615,7 +1658,7 @@ function verDecisao(decisaoId: string): void {
   const card = document.querySelector<HTMLElement>(`[data-decisao="${id}"], [data-proposta="${id}"]`);
   if (!card) return;
   rolagem.soltar();
-  card.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  card.scrollIntoView({ block: "center", behavior: comportamentoDaRolagem(movimentoReduzido()) });
   card.classList.add("realce");
   window.setTimeout(() => card.classList.remove("realce"), 1600);
 }
@@ -2428,6 +2471,13 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }
+  // NOD-122: com a gaveta aberta o Tab dá a volta nela, em vez de sair para a barra do navegador.
+  if (ev.key === "Tab" && gavetaMontada && !ev.altKey && !ev.metaKey && !ev.ctrlKey) {
+    const gaveta = document.querySelector<HTMLElement>(".tela-conectores .gaveta");
+    const focaveis = gaveta ? [...gaveta.querySelectorAll<HTMLElement>(FOCAVEIS_DA_GAVETA)].filter((el) => el.getClientRects().length > 0) : [];
+    const alvo = voltaDoTab(focaveis.length, focaveis.indexOf(document.activeElement as HTMLElement), ev.shiftKey);
+    if (alvo !== null) { ev.preventDefault(); focaveis[alvo]?.focus(); return; }
+  }
   // Sem gaveta, Esc no Marketplace volta para onde a pessoa estava (definido em 2026-10-04) — menos digitando num campo.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.voltar && !(ev.target as HTMLElement).closest?.("dialog, input, textarea, select")) { ev.preventDefault(); void ACOES["voltar-conexao"]?.(document.body); return; }
   // A tela da task (e a provisória de uma linha) fecha no Esc — menos com algo digitado no campo dela.
@@ -2656,6 +2706,8 @@ function encerrarArrasto(): void {
  * Rolagem automática enquanto se arrasta (definido em 2026-10-06, web/lib/arrastar.ts): com o cursor perto da borda da
  * lista, ou em cima do rodapé ou da busca, a lista rola um passo por quadro. O dragover chega a cada ~50 ms mesmo com o
  * cursor parado e só guarda a posição; o laço anda e se reagenda enquanto a lista ainda tem para onde rolar.
+ * NOD-122: não para com "Reduzir movimento": não é enfeite, é a pessoa levando o bot até uma linha fora da vista, e a
+ * rolagem só anda enquanto o cursor fica na borda (como a rolagem do próprio navegador ao arrastar).
  */
 let cursorDoArrasto = { x: 0, y: 0 };
 let quadroDaRolagem = 0;
