@@ -11,6 +11,7 @@ import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
 import { executarColetando } from "../src/adapters/executor/processo.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
+import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { resolverBinario } from "../src/adapters/executor/caminho.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
@@ -46,6 +47,12 @@ const setupUrl = pathToFileURL(setup).href;
 let janela: BrowserWindow | null = null;
 let configuracao: Config | null = null;
 let laco: PoolDeLacos | null = null;
+/**
+ * definido em 2026-10-07 (ADR-081 §4, #194): UM amostrador de memória para o Mac inteiro (pressão do macOS e memória
+ * por grupo de processos), compartilhado por todos os laços do pool; cada renovação leva a última leitura.
+ * `NOD_SIMULAR_PRESSAO=1|2|4` no ambiente do app força o nível (UAT). O timer não segura o app aberto.
+ */
+const memoriaDoMac = criarAmostradorMemoria({ env: process.env });
 let registry: Registry | null = null;
 let cliente: ReturnType<typeof criarPonteHttp> | null = null;
 let mensagem = "";
@@ -374,7 +381,7 @@ async function conectar(c: Config) {
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId),
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId),
       // NOD-73: o vigia do turno só avisa — o aviso vai como trecho vivo, só nome e números (os argumentos ficam no Mac).
       aoVigia: (p, aviso) => cliente?.vigia(p.turnoId, aviso),
       // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.

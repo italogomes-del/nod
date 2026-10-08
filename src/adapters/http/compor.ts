@@ -69,6 +69,7 @@ import type { RegistroCatcher } from "../executor/drivers/catcher.ts";
 import { iniciarLaco } from "../executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
+import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
 import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
@@ -917,11 +918,15 @@ export function comporApp(o: OpcoesCompor): App {
     const plano = planosVivos.get(turnoId);
     if (plano) publicarDoPlano(plano, "turno.tarefas", { tarefas });
   });
+  // definido em 2026-10-07 (ADR-081 §4, #194): a memória desta máquina (o executor local roda aqui), um amostrador só
+  // para todos os pools; preguiçoso — sem turno rodando, nem `sysctl` nem `ps` rodam.
+  const memoriaDaMaquina = criarAmostradorMemoria({ env });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
   const iniciar: IniciarLaco = (p) =>
     iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
       ponte,
+      memoria: memoriaDaMaquina,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
       aoFalaGravada: (plano) => publicarDoPlano(plano, "turno.fala", {}),
       aoVigia: (plano, aviso) => avisoDoVigia(plano, aviso),

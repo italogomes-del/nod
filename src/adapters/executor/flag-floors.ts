@@ -60,6 +60,12 @@ export const FLAG_FLOORS = {
    * turno sai como antes.
    */
   "--system-prompt-snapshot": { piso: "2.1.290", ocultaNoHelp: false },
+  /**
+   * definido em 2026-10-07 (ADR-081, #193, rede de 2 min): a cópia da sessão. Listada no `claude --help` da versão do
+   * piso (revisão de engenharia de 07/10); o turno que pede o fork confere a flag no help e recusa sem ela. O piso é o
+   * PISO_CLI de hoje: abaixo dele nenhum turno roda.
+   */
+  "--fork-session": { piso: "2.1.290", ocultaNoHelp: false },
 } as const satisfies Record<string, { piso: string; ocultaNoHelp: boolean }>;
 
 export type FlagComPiso = keyof typeof FLAG_FLOORS;

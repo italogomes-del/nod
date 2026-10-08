@@ -3,6 +3,7 @@
 // --session-id/--resume, morre em SIGTERM sem `result` (exit 143, como a sonda s6 mediu), e sai 1
 // com "Session ID … is already in use" quando o mesmo --session-id é reutilizado (s2c).
 // Sem console.*: a saída é o protocolo, escrita direto em stdout/stderr.
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -145,6 +146,54 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
     if (!emVolta) process.exit(0);
   });
 } else
+// ADR-081 §6 (#189), mensagem no meio: a 1ª mensagem abre a volta ("Vou revisar as tasks." e `consultar`) e a
+// ferramenta só "termina" quando chega a 2ª mensagem pelo stdin — o CLI a lê no limite da ferramenta e o modelo
+// responde curto ("Recebi: …") antes de chamar `lembrar` e fechar com "Revisei as três." num `result` só.
+if (process.env.NOD_FALSO_CENARIO === "mensagem-no-meio") {
+  const sessaoMeio = valor("--session-id") ?? valor("--resume") ?? "00000000-0000-4000-8000-000000000000";
+  const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
+  const texto = (t) => out({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: t }] } });
+  const ferramenta = (id, nome) => out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name: `mcp__nod__${nome}`, input: {} }] } });
+  const resultado = (id) => out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+  const fim = (t) => out({ type: "result", subtype: "success", is_error: false, session_id: sessaoMeio, result: t, total_cost_usd: 0.01, num_turns: 3, usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, permission_denials: [] });
+  let mensagens = 0;
+  let emVolta = false;
+  let fechada = false;
+  process.on("SIGTERM", () => process.exit(143));
+  let resto = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (pedaco) => {
+    resto += pedaco;
+    let i;
+    while ((i = resto.indexOf("\n")) !== -1) {
+      const linha = resto.slice(0, i);
+      resto = resto.slice(i + 1);
+      if (linha.trim() === "") continue;
+      const conteudo = JSON.parse(linha).message.content;
+      const recebido = typeof conteudo === "string" ? conteudo : conteudo.filter((b) => b.type === "text").map((b) => b.text).join("");
+      mensagens += 1;
+      if (mensagens === 1) {
+        emVolta = true;
+        out({ type: "system", subtype: "init", session_id: sessaoMeio, tools: ["mcp__nod__consultar", "mcp__nod__lembrar"], model: "claude-sonnet-4-6", claude_code_version: VERSAO, apiKeySource: "none" });
+        texto("Vou revisar as tasks.");
+        ferramenta("toolu_1", "consultar");
+      } else if (mensagens === 2) {
+        resultado("toolu_1");
+        texto(`Recebi: ${recebido.slice(0, 160)}`);
+        ferramenta("toolu_2", "lembrar");
+        resultado("toolu_2");
+        texto("Revisei as três.");
+        fim("Revisei as três.");
+        emVolta = false;
+        if (fechada) process.exit(0);
+      }
+    }
+  });
+  process.stdin.on("end", () => {
+    fechada = true;
+    if (!emVolta) process.exit(0);
+  });
+} else
 // ADR-067, sessão viva: com `--input-format stream-json` o CLI real lê mensagens pelo stdin enquanto ele está aberto.
 // Este cenário imita a medição M1 (01/10/2026, 2.1.286): a 1ª mensagem põe um comando em segundo plano e responde;
 // quando ele termina, o CLI volta sozinho ("Testes verdes."); cada mensagem seguinte ganha uma resposta; o processo
@@ -215,7 +264,8 @@ if (resume && !existsSync(join(dirSessoes, `${resume}.usada`)) && process.env.NO
   process.stderr.write(`Error: No conversation found with session ID: ${resume}\n`);
   process.exit(1);
 }
-const sessao = sessionId ?? resume ?? "00000000-0000-4000-8000-000000000000";
+// #193: `--resume X --fork-session` continua numa cópia, com id novo (o que o init e o result reportam).
+const sessao = sessionId ?? (resume && args.includes("--fork-session") ? randomUUID() : resume) ?? "00000000-0000-4000-8000-000000000000";
 
 // NOD-185: o --system-prompt-snapshot, como a sonda mediu na 2.1.290. Com `on` (o padrão), o 1º request grava o prompt
 // de sistema e o --resume reusa o gravado, seja qual for o do launch; com `off`, vale o prompt deste launch. O prompt

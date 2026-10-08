@@ -2,11 +2,14 @@ import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, FalaIntermediaria, PonteInterna, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/turno.ts";
 import { ehErroDeDominio } from "../../domain/erro.ts";
+import { capacidadesDe } from "../../domain/harness.ts";
+import { molduraMensagemNoMeio } from "../../domain/mensagem-no-meio.ts";
 import { SINAIS_ZERADOS } from "../../domain/stream-json.ts";
 import { AVALIACAO_VIGIA_MS, criarVigiaTurno } from "../../domain/vigia-turno.ts";
 import { log } from "../../obs/log.ts";
 import { CHECAGEM_MENSAGENS_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
+import type { FonteMemoria } from "./amostrador-memoria.ts";
 import type { Adapter, IdDriver, Registry } from "./spi.ts";
 
 /**
@@ -50,6 +53,11 @@ export type OpcoesLaco = {
   vigiaMs?: number;
   /** definido em 2026-10-05: o resultado que o driver devolveu, antes da entrega (o app do Mac lê `causaSemIa`). */
   aoResultado?: (plano: PlanoTurno, resultado: ResultadoTurno) => void;
+  /**
+   * definido em 2026-10-07 (ADR-081 §4, #194): a memória da máquina (um amostrador só, compartilhado pelos laços). Cada
+   * renovação leva a última leitura; o grupo do turno entra na soma só com driver de `processoProprio`.
+   */
+  memoria?: FonteMemoria;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
 };
@@ -119,7 +127,14 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let falas: FalaIntermediaria[] = [];
     let seqFala = 0;
     let mensagensRecebidas = 0;
-    let aceitando = true;
+    // definido em 2026-10-07 (ADR-081 §5): só pede mensagens a driver que declara `mensagemNoMeio` (lido abaixo).
+    let aceitando = false;
+    // #189: os ids das mensagens que o adapter escreveu na sessão (confirmados na renovação seguinte) e das que ele não
+    // conseguiu escrever (a sessão fechou). O servidor só tira da fila as confirmadas; o resto vira turno próprio.
+    let entregues: string[] = [];
+    let devolvidas: string[] = [];
+    let medirGrupo = false;
+    const aConfirmar = () => entregues.length > 0 || devolvidas.length > 0;
 
     const renovar = async (): Promise<void> => {
       if (entregue) return;
@@ -127,7 +142,10 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       let confirmou = false;
       renovando = (async () => {
         const enviadas = falas;
+        const confirmar = entregues;
+        const devolver = devolvidas;
         const aceita = aceitando && adapterAtual?.aceitaMensagens?.() === true;
+        const memoria = o.memoria?.leitura(plano.turnoId, medirGrupo ? (adapterAtual?.grupoDeProcessos?.() ?? null) : null);
         try {
           const r = await o.ponte.renovar({
             turnoId: plano.turnoId,
@@ -136,6 +154,10 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             eventos: [],
             ...(enviadas.length ? { falas: enviadas } : {}),
             ...(aceita ? { aceitaMensagens: true } : {}),
+            // A presença do campo diz ao servidor que este app confirma o que escreveu (#189).
+            ...(aceita || confirmar.length ? { mensagensEntregues: confirmar } : {}),
+            ...(devolver.length ? { mensagensDevolvidas: devolver } : {}),
+            ...(memoria ? { memoria } : {}),
           });
           // A ponte HTTP devolve {ativo:false} quando a chamada falha: só uma resposta ativa confirma as falas. As que
           // ficarem voltam na próxima renovação (ou antes da entrega), e o servidor ignora o `seq` já gravado.
@@ -144,10 +166,24 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             falas = falas.filter((f) => !enviadas.includes(f));
             o.aoFalaGravada?.(plano);
           }
-          for (const texto of r.mensagens ?? []) {
-            if (adapterAtual?.receberMensagem?.(texto)) mensagensRecebidas += 1;
-            // Só acontece se o CLI morreu entre o pedido e a resposta: a mensagem já saiu da fila e não entrou.
-            else log("aviso", "laco_mensagem_sem_sessao", { turno_id: plano.turnoId });
+          if (r.ativo) {
+            entregues = entregues.filter((id) => !confirmar.includes(id));
+            devolvidas = devolvidas.filter((id) => !devolver.includes(id));
+          }
+          const ids = r.mensagensIds ?? [];
+          for (const [i, texto] of (r.mensagens ?? []).entries()) {
+            const id = ids[i];
+            // ADR-081 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver.
+            if (adapterAtual?.receberMensagem?.(molduraMensagemNoMeio(texto))) {
+              mensagensRecebidas += 1;
+              if (id) entregues.push(id);
+            } else {
+              // O CLI morreu entre o pedido e a resposta: a mensagem volta para a fila (#189) e vira turno próprio. A
+              // sessão que recusou a escrita não pede mais mensagens neste turno (senão a mesma voltaria a cada renovação).
+              if (id) devolvidas.push(id);
+              aceitando = false;
+              log("aviso", "laco_mensagem_sem_sessao", { turno_id: plano.turnoId, devolvida: id !== undefined });
+            }
           }
           if (!r.ativo && adapterAtual) await adapterAtual.interromper();
         } catch (erro) {
@@ -158,8 +194,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       })();
       const atual = renovando;
       await atual;
-      // Uma fala que chegou enquanto a renovação já ia: segue logo atrás, sem esperar a próxima batida.
-      if (confirmou && falas.length && !entregue) await renovar();
+      // Uma fala que chegou enquanto a renovação já ia (ou uma mensagem a confirmar): segue logo atrás, sem esperar a
+      // próxima batida — a mensagem só sai do "na fila" da tela quando o servidor sabe que ela entrou.
+      if (confirmou && (falas.length || aConfirmar()) && !entregue) await renovar();
     };
     const batida = setInterval(() => void renovar(), renovacaoMs);
     batida.unref?.();
@@ -193,8 +230,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     observacao.unref?.();
     const entregar = async (bruto: ResultadoTurno): Promise<void> => {
       if (entregue) return;
-      // A última fala intermediária vai antes da final: senão a conversa as mostraria fora de ordem.
-      if (falas.length) {
+      // A última fala intermediária vai antes da final: senão a conversa as mostraria fora de ordem. As mensagens
+      // escritas na sessão também: confirmadas antes da entrega, nunca viram turno de novo.
+      if (falas.length || aConfirmar()) {
         if (renovando) await renovando;
         await renovar();
       }
@@ -223,6 +261,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         await entregar({ ...resultadoDeExcecao(null, sinais), desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel" });
         return;
       }
+      const capacidades = registro.driver.meta.capacidades ?? capacidadesDe(registro.driver.meta.id);
+      aceitando = capacidades.mensagemNoMeio;
+      medirGrupo = capacidades.processoProprio;
       const adapter = registro.instance.adapter(plano);
       adapterAtual = adapter;
       o.aoIniciarTurno?.(plano, adapter);
@@ -265,6 +306,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       clearInterval(batida);
       clearInterval(checagem);
       clearInterval(observacao);
+      o.memoria?.soltar(plano.turnoId);
       adapterAtual = null;
       turnoAtual = null;
       o.aoTerminarTurno?.(plano);

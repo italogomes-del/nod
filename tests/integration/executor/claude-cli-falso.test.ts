@@ -12,6 +12,7 @@ import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
 import type { VigiaVivo } from "../../../src/contracts/ponte.ts";
 import { criarVigiaTurno } from "../../../src/domain/vigia-turno.ts";
+import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
 
 /**
  * Spawn REAL do binário falso (tests/fixtures/claude-falso.mjs, L3) por trás de um `claude` de
@@ -520,11 +521,12 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
         },
       });
 
-      expect(falas).toEqual(["Disparei os testes.", "Testes verdes."]);
+      // revisto em 2026-10-07 (ADR-081 §6): a resposta à mensagem nova é a primeira fala depois dela — sai na hora.
+      expect(falas).toEqual(["Disparei os testes.", "Testes verdes.", "Recebi: quanto é 2+2?"]);
       expect(ociosos).toBe(2);
       expect(resultado.desfecho).toBe("sucesso");
-      // A última volta vai na entrega; as anteriores já saíram como fala.
-      expect(resultado.texto).toBe("Recebi: quanto é 2+2?");
+      // As voltas anteriores e a resposta do meio já saíram como fala: a entrega não as repete.
+      expect(resultado.texto).toBe("");
       // total_cost_usd é acumulado (vale o último); usage é por volta (soma).
       expect(resultado.custoUsd).toBe(0.03);
       expect(resultado.tokens).toEqual({ entrada: 3, saida: 6, cacheLeitura: 30, cacheCriacao: 0 });
@@ -569,6 +571,64 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       expect(resultado.desfecho).toBe("interrompido");
       expect(resultado.texto).toBe("");
       expect(resultado.custoUsd).toBe(0.01);
+    });
+  });
+
+  describe("mensagem no meio (ADR-081 §6, #189)", () => {
+    const HELP = { NOD_FALSO_HELP: "--input-format --output-format" };
+
+    it("a resposta curta à mensagem do meio, antes de outra ferramenta, vira fala na hora e não se repete na entrega", async () => {
+      const { instance, stdin } = await instanciar("mensagem-no-meio", {}, HELP);
+      const adapter = instance.adapter(planoDeTeste(dir));
+      const falas: string[] = [];
+      let mandou = false;
+      const espiao = sinksEspiao({});
+      const resultado = await adapter.rodarTurno({
+        ...espiao.sinks,
+        evento: (e) => {
+          espiao.sinks.evento(e);
+          if (e.tipo === "tool_use" && e.nome === "mcp__nod__consultar" && !mandou) mandou = adapter.receberMensagem!(molduraMensagemNoMeio("qual é o prazo?"));
+        },
+        falaIntermediaria: (t) => falas.push(t),
+        ocioso: async () => false,
+      });
+      expect(mandou).toBe(true);
+      // Antes desta emenda a resposta (< 280 caracteres, antes do `lembrar`) era narração e sumia.
+      expect(falas).toHaveLength(1);
+      expect(falas[0]).toMatch(/^Recebi: A pessoa escreveu enquanto você trabalhava: «qual é o prazo\?»/);
+      expect(resultado).toMatchObject({ desfecho: "sucesso", texto: "Revisei as três." });
+      const entradas = (await readFile(stdin, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { message: { content: { text: string }[] } });
+      expect(entradas[1]!.message.content[0]!.text).toBe(molduraMensagemNoMeio("qual é o prazo?"));
+    });
+  });
+
+  describe("fork da sessão (#193, rede de 2 min)", () => {
+    const SESSAO = "22222222-2222-4222-8222-222222222222";
+
+    it("com bifurcar e a flag no help: --resume <sessão> --fork-session, e o resultado traz o id NOVO", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --fork-session" });
+      const resultado = await instance.adapter(planoDeTeste(dir, { sessaoCli: SESSAO, bifurcar: true })).rodarTurno(sinksEspiao({}).sinks);
+      const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+      expect(valor(r.argv, "--resume")).toBe(SESSAO);
+      expect(r.argv).toContain("--fork-session");
+      expect(r.argv).not.toContain("--session-id");
+      expect(resultado.desfecho).toBe("sucesso");
+      expect(resultado.sessaoCli).toMatch(/^[0-9a-f-]{36}$/);
+      expect(resultado.sessaoCli).not.toBe(SESSAO);
+    });
+
+    it("sem bifurcar, o --resume continua a mesma sessão (sem --fork-session)", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format --fork-session" });
+      const resultado = await instance.adapter(planoDeTeste(dir, { sessaoCli: SESSAO })).rodarTurno(sinksEspiao({}).sinks);
+      expect((JSON.parse(await readFile(registro, "utf8")) as Registro).argv).not.toContain("--fork-session");
+      expect(resultado.sessaoCli).toBe(SESSAO);
+    });
+
+    it("CLI sem --fork-session no help: o turno é recusado antes de rodar, nunca continua a original em dois processos", async () => {
+      const { instance, registro } = await instanciar("s3-mcp-ok", {}, { NOD_FALSO_HELP: "--output-format" });
+      await expect(instance.adapter(planoDeTeste(dir, { sessaoCli: SESSAO, bifurcar: true })).rodarTurno(sinksEspiao({}).sinks)).rejects.toThrow("executor_indisponivel");
+      // O shim grava também o --version/--help da sonda; nenhuma chamada levou o --resume.
+      if (existsSync(registro)) expect((JSON.parse(await readFile(registro, "utf8")) as Registro).argv).not.toContain("--resume");
     });
   });
 });
