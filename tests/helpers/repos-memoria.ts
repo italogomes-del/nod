@@ -864,6 +864,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return n;
       },
+      async travarEsperas() {
+        // Em memória tudo roda em série: não há o que travar.
+      },
       async marcarDepoisDe(id, depoisDeId) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
         if (!t) return null;

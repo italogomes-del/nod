@@ -36,10 +36,10 @@ export type ArgsMandarParaTask = { trabalho_id: string; texto: string };
 
 export type ResultadoAbrirTask =
   | { ok: true; trabalho_id: string; instrucao: string }
-  | { ok: false; erro: "nao_abre_task" | "depois_de_invalido"; instrucao: string };
+  | { ok: false; erro: "nao_abre_task" | "depois_de_invalido" | "teto_de_tasks"; instrucao: string };
 export type ResultadoMandarParaTask =
   | { ok: true; entrou: "no_meio" | "na_fila"; instrucao: string }
-  | { ok: false; erro: "task_nao_encontrada" | "nao_repassa"; instrucao: string };
+  | { ok: false; erro: "task_nao_encontrada" | "nao_repassa" | "task_fechada"; instrucao: string };
 
 /** Args ↔ resultado das duas, intersectado em ContratoFerramentaNod. */
 export type ContratoFerramentasTrabalho = {

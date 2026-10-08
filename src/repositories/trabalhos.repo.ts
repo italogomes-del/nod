@@ -170,6 +170,15 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return r.count;
     },
 
+    /**
+     * definido em 2026-10-08 (revisão do épico, S11): serializa quem mexe nas esperas (`depois_de`) dos trabalhos de um
+     * bot até o fim da transação — a checagem de ciclo lê a corrente inteira, e duas transações cruzadas a liam antes
+     * de a outra gravar.
+     */
+    async travarEsperas(agenteId: string): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`depois_de:${agenteId}`}))`;
+    },
+
     /** "Fazer depois da …": grava a espera. Null tira. */
     async marcarDepoisDe(id: string, depoisDeId: string | null): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
