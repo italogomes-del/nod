@@ -5,12 +5,21 @@ import { spawn, spawnSync } from "node:child_process";
 const temMise = spawnSync("mise", ["--version"], { stdio: "ignore" }).status === 0;
 const prefixo = temMise ? ["mise", "exec", "--"] : [];
 
+// definido em 2026-10-08: se um dos dois morre, o outro vai junto. Antes o dev.mjs saía quando a API morria e o Vite
+// ficava órfão servindo a página com o proxy para uma 8888 morta — toda tela dizia "Algo deu errado" e nada religava.
+let saindo = false;
+function encerrar(codigo) {
+  if (saindo) return;
+  saindo = true;
+  api.kill();
+  web.kill();
+  process.exitCode = codigo;
+}
+
 function run(args, extra = {}) {
   const [cmd, ...rest] = [...prefixo, ...args];
   const child = spawn(cmd, rest, { stdio: "inherit", ...extra });
-  child.on("exit", (code) => {
-    if (code && code !== 0) process.exit(code);
-  });
+  child.on("exit", (code, sinal) => encerrar(code ?? (sinal ? 1 : 0)));
   return child;
 }
 
@@ -24,9 +33,5 @@ const web = run(["npx", "vite", "--host", "127.0.0.1", "--port", webPort], {
   env: { ...process.env, NOD_API_PORT: apiPort },
 });
 
-function stop() {
-  api.kill();
-  web.kill();
-}
-process.on("SIGINT", stop);
-process.on("SIGTERM", stop);
+process.on("SIGINT", () => encerrar(130));
+process.on("SIGTERM", () => encerrar(143));
