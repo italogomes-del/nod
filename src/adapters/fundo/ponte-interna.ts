@@ -60,7 +60,7 @@ export type DepsPonte = {
   /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
   /** ADR-085: a última leitura viva deste Mac (memória, processador e, #219, disco); null = sem leitura, e nada é segurado. */
-  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null } | null;
+  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null; uso?: number | null; carga?: number | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null } | null;
   /** Revisão do #209: o evento da mudança de pressão não foi gravado (a tx desfez) — a próxima leitura refaz o frame. */
   desfazerMemoria?: (pessoaId: string, mudanca: MudancaDePressao) => void;
   /** Revisão do #209: o Mac desconectou — a leitura dele sai. */
@@ -134,7 +134,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const usos = new Map<string, { uso: UsoDoMac; ate: number; lidoEm: number }>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
-  /** ADR-085 (revisão do #209): se cada Mac está segurando agora, e por quê (#219) — o log sai só na mudança. */
+  /**
+   * ADR-085 (revisão do #209): se cada Mac está segurando agora, e por quê (#219) — o log sai só na mudança. Corrigido em
+   * 2026-10-09: por Mac E pessoa (`machineId pessoaId`) — no modo local duas pessoas puxam do mesmo Mac com usos
+   * diferentes, e a chave só do Mac fazia o log alternar segurado/solto a cada puxar.
+   */
   const segurando = new Map<string, string>();
   function esquecerVencidos(): void {
     const limite = agora() - LEASE_MS;
@@ -208,7 +212,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     async desconectar(machineId) {
       maquinas.delete(machineId);
       ultimoFundo.delete(machineId);
-      segurando.delete(machineId);
+      for (const chave of segurando.keys()) if (chave.startsWith(`${machineId} `)) segurando.delete(chave);
       deps.esquecerMaquina?.(machineId);
     },
 
@@ -231,9 +235,10 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const fundoSemPrazo = portao.semPrazo;
       const espacarFundo = uso !== "livre" && agora() - (ultimoFundo.get(maquina.machineId) ?? -Infinity) < ESPACO_FUNDO_MS;
       const situacao = segurarNovo ? `tudo:${portao.tudoNovo}` : segurarFundo ? `fundo:${portao.fundo}${fundoSemPrazo ? ":sem-prazo" : ""}` : "";
-      if ((segurando.get(maquina.machineId) ?? "") !== situacao) {
-        segurando.set(maquina.machineId, situacao);
-        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, motivo: portao.fundo, tudo_novo: segurarNovo, sem_prazo: fundoSemPrazo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
+      const chaveSegurando = `${maquina.machineId} ${pessoaId}`;
+      if ((segurando.get(chaveSegurando) ?? "") !== situacao) {
+        segurando.set(chaveSegurando, situacao);
+        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, motivo: portao.fundo, tudo_novo: segurarNovo, sem_prazo: fundoSemPrazo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, uso_cpu: pressao?.uso ?? null, carga: pressao?.carga ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
       }
       const antes = agora();
       // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do

@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { readFile, statfs } from "node:fs/promises";
-import { availableParallelism, homedir, loadavg } from "node:os";
+import { availableParallelism, cpus, homedir, loadavg } from "node:os";
 import { join } from "node:path";
 import type { LeituraDisco, LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
-import { cargaDoLoadavg, discoDoStatfs, discoSimulado, leituraDoTurno, nivelDaMemoriaLinux, nivelDaPressao, nivelDoDisco, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
+import { cargaDoLoadavg, discoDoStatfs, discoSimulado, leituraDoProcessador, leituraDoTurno, nivelDaMemoriaLinux, nivelDaPressao, nivelDoDisco, pressaoSimulada, somarPorGrupo, temposDaCpu, usoDaCpu, type TemposCpu } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 
 /**
@@ -33,6 +33,12 @@ export type FonteMemoria = {
    * 30 s); antes a mesma leitura ia em toda renovação.
    */
   amostra(): number;
+  /**
+   * Revisão do #228 (2026-10-09): a primeira amostra já terminou. Antes dela, a leitura é a inicial (verde, sem
+   * processador nem disco), que ninguém mediu: `daMaquina` não devolve nada e o laço não manda a da renovação. Com a
+   * primeira leitura virando frame (ADR-091), ela iria à tela e ao portão como se fosse real.
+   */
+  pronta?(): boolean;
 };
 
 export type AmostradorMemoria = FonteMemoria & {
@@ -48,6 +54,17 @@ const PRAZO_COMANDO_MS = 5_000;
 
 export type Executar = (bin: string, args: readonly string[]) => Promise<string>;
 
+/**
+ * definido em 2026-10-09 (ADR-091): sem amostra anterior (a primeira), a CPU é medida por 1 s — a leitura não espera a
+ * batida de 30 s para ter o processador.
+ */
+const PRIMEIRA_MEDIDA_CPU_MS = 1_000;
+/**
+ * ADR-091: a amostra fora da batida (um turno novo chama uma na hora) mediria poucos segundos, e a fração de 2 s é ruído.
+ * Abaixo de 10 s desde a última medida, vale a última.
+ */
+const JANELA_MINIMA_CPU_MS = 10_000;
+
 /** O espaço do volume de um caminho (#219). Lança se o caminho não existe. */
 export type MedirDisco = (caminho: string) => Promise<LeituraDisco | null>;
 
@@ -58,14 +75,16 @@ const executarPadrao: Executar = (bin, args) =>
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number; temposCpu?: () => TemposCpu; esperar?: (ms: number) => Promise<void>; agora?: () => number }): AmostradorMemoria {
   const nucleos = o.nucleos ?? availableParallelism();
   // ADR-085: a leitura da máquina só existe no macOS (ou simulada); fora dele seria um "verde" que ninguém mediu.
   // ADR-090: o motor numa máquina Linux também lê (memória pelo /proc/meminfo, processador pelo os.loadavg). Só quando
   // quem cria pede (`lerNoLinux`, o motor sem janela): o servidor em Linux continua sem leitura, como na revisão do #209.
   const plataforma = o.plataforma ?? process.platform;
   const linux = plataforma === "linux" && o.lerNoLinux === true;
-  const daMaquinaLe = plataforma === "darwin" || linux || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR) || Boolean(o.env.NOD_SIMULAR_DISCO);
+  const daMaquinaLe = plataforma === "darwin" || linux || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR) || Boolean(o.env.NOD_SIMULAR_FILA) || Boolean(o.env.NOD_SIMULAR_DISCO);
+  const lerTemposCpu = o.temposCpu ?? (() => temposDaCpu(cpus()));
+  const esperar = o.esperar ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
   const lerArquivo = o.lerArquivo ?? ((caminho: string) => readFile(caminho, "utf8"));
   const executar = o.executar ?? executarPadrao;
   const medirDisco = o.medirDisco ?? medirDiscoPadrao;
@@ -76,12 +95,17 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   let nivel: NivelPressao = "verde";
   let rss = new Map<number, number>();
   let processador: LeituraProcessador | null = null;
+  let temposAnteriores: TemposCpu | null = null;
+  let temposEm = 0;
+  let ultimoUso: number | null = null;
+  const relogio = o.agora ?? Date.now;
   let disco: LeituraDisco | null = null;
   let nivelDisco: NivelPressao | null = null;
   let numeroDaAmostra = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   let amostrando: Promise<void> | null = null;
   let parado = false;
+  let amostrou = false;
   // Um aviso por motivo e por processo: fora do macOS o `sysctl` falha a cada 30 s.
   const avisados = new Set<string>();
   const avisar = (evento: string, erro: unknown) => {
@@ -104,18 +128,46 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   }
 
   /**
-   * ADR-085: a carga do último minuto por núcleo. `NOD_SIMULAR_PROCESSADOR` (carga por núcleo, ex.: 1.2) força a leitura
-   * para testes e UAT, como `NOD_SIMULAR_PRESSAO` faz com a memória. Falha = sem leitura (null), nunca um aviso falso.
+   * ADR-091 (definido em 2026-10-09): o quanto os núcleos trabalharam desde a amostra anterior (`os.cpus()`, sem processo
+   * novo). Falha = sem leitura da CPU (null): o processador vai só com a fila.
+   */
+  async function lerUsoCpu(): Promise<number | null> {
+    try {
+      let antes = temposAnteriores;
+      if (antes !== null && relogio() - temposEm < JANELA_MINIMA_CPU_MS) return ultimoUso;
+      if (antes === null) {
+        antes = lerTemposCpu();
+        await esperar(PRIMEIRA_MEDIDA_CPU_MS);
+      }
+      const agora = lerTemposCpu();
+      temposAnteriores = agora;
+      temposEm = relogio();
+      ultimoUso = usoDaCpu(antes, agora);
+      return ultimoUso;
+    } catch (erro) {
+      avisar("processador_uso_sem_leitura", erro);
+      return null;
+    }
+  }
+
+  /**
+   * ADR-085, revisto em 2026-10-09 (ADR-091): o uso da CPU e a carga do último minuto por núcleo (a fila). Simulados para
+   * testes e UAT: `NOD_SIMULAR_PROCESSADOR` é o uso (0 a 1, ex.: 0.95; acima de 1 vale 1) e `NOD_SIMULAR_FILA` a carga
+   * por núcleo (ex.: 2.5); com um dos dois, o outro é 0. Sem a carga, sem leitura (null), nunca um aviso falso.
    */
   async function lerProcessador(): Promise<LeituraProcessador | null> {
-    const simulado = Number(o.env.NOD_SIMULAR_PROCESSADOR);
-    if (o.env.NOD_SIMULAR_PROCESSADOR && Number.isFinite(simulado) && simulado >= 0) return nivelDoProcessador(simulado * nucleos, nucleos);
+    const simuladoUso = Number(o.env.NOD_SIMULAR_PROCESSADOR);
+    const simuladaFila = Number(o.env.NOD_SIMULAR_FILA);
+    const temUso = Boolean(o.env.NOD_SIMULAR_PROCESSADOR) && Number.isFinite(simuladoUso) && simuladoUso >= 0;
+    const temFila = Boolean(o.env.NOD_SIMULAR_FILA) && Number.isFinite(simuladaFila) && simuladaFila >= 0;
+    if (temUso || temFila) return leituraDoProcessador(temUso ? Math.min(1, simuladoUso) : 0, temFila ? simuladaFila : 0);
+    const uso = lerUsoCpu();
     try {
-      if (linux) return nivelDoProcessador((o.cargaLinux ?? (() => loadavg()[0] ?? 0))(), nucleos);
-      const carga = cargaDoLoadavg(await executar("/usr/sbin/sysctl", ["-n", "vm.loadavg"]));
-      return carga === null ? null : nivelDoProcessador(carga, nucleos);
+      const carga = linux ? (o.cargaLinux ?? (() => loadavg()[0] ?? 0))() : cargaDoLoadavg(await executar("/usr/sbin/sysctl", ["-n", "vm.loadavg"]));
+      return carga === null ? null : leituraDoProcessador(await uso, nucleos > 0 ? carga / nucleos : 0);
     } catch (erro) {
       avisar("processador_sem_leitura", erro);
+      await uso;
       return null;
     }
   }
@@ -158,6 +210,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
         rss = r;
         processador = p;
         disco = d;
+        amostrou = true;
       } finally {
         amostrando = null;
       }
@@ -185,12 +238,14 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     daMaquina() {
       if (!daMaquinaLe) return undefined;
       comecar();
+      if (!amostrou) return undefined;
       return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco: daMaquinaLe ? disco : undefined });
     },
     soltar(turnoId) {
       grupos.delete(turnoId);
     },
     amostra: () => numeroDaAmostra,
+    pronta: () => amostrou,
     amostrar,
     parar() {
       parado = true;

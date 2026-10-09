@@ -119,6 +119,12 @@ export type TrabalhosDto = {
   memoriaTotalMb: number | null;
   processador?: NivelPressao | null;
   cargaProcessador?: number | null;
+  /**
+   * ADR-091 (definido em 2026-10-09): a fração ocupada da CPU no pior Mac (0 a 1; null = nenhum app manda) e o nível da
+   * fila (a carga por núcleo; null = nenhum app manda). Com eles, `processador` é o nível da CPU.
+   */
+  usoProcessador?: number | null;
+  fila?: NivelPressao | null;
   segurando?: boolean;
   /**
    * #219 (emenda à ADR-085, definido em 2026-10-09): o motivo de `segurando` (null = nada segura) e o disco do pior Mac
@@ -145,7 +151,16 @@ export type TaxaDeAbertura = { tipo: TipoLinha; mostradas: number; abertas: numb
  * Processador do Mac (definido em 2026-10-08, ADR-085): a carga média de 1 minuto (`vm.loadavg`) dividida pelos
  * núcleos, e o nível que sai dela (domain/memoria-mac.ts, nivelDoProcessador).
  */
-export type LeituraProcessador = { nivel: NivelPressao; carga: number };
+export type LeituraProcessador = {
+  nivel: NivelPressao;
+  carga: number;
+  /**
+   * definido em 2026-10-09 (ADR-091): a fração do tempo em que os núcleos trabalharam desde a última amostra (0 a 1). Com
+   * ela, `carga` vira a "fila" e `nivel` é o pior dos dois; o servidor recalcula os níveis dos números crus. Ausente =
+   * app anterior (o `nivel` é o da carga, como na ADR-085).
+   */
+  uso?: number;
+};
 
 /**
  * Memória que o Mac manda na renovação (#194): o nível do macOS e a soma do RSS do grupo de processos de cada turno.

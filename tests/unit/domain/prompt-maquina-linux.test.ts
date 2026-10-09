@@ -43,10 +43,13 @@ describe("memória numa máquina Linux (ADR-090)", () => {
   });
 
   it("o motor (lerNoLinux) lê /proc/meminfo e a carga; o servidor em Linux continua sem leitura", async () => {
-    const motor = criarAmostradorMemoria({ env: {}, plataforma: "linux", lerNoLinux: true, intervaloMs: 10 ** 6, nucleos: 4, lerArquivo: async () => meminfo(8_000_000, 400_000), cargaLinux: () => 4.4, executar: async () => "" });
+    // ADR-091: a CPU pelo os.cpus() (injetada: 95% ocupada) e a carga como fila (4,4 em 4 núcleos = 1,1, andando).
+    let n = 0;
+    const temposCpu = () => ({ ocupado: (n += 1) * 95, total: n * 100 });
+    const motor = criarAmostradorMemoria({ env: {}, plataforma: "linux", lerNoLinux: true, intervaloMs: 10 ** 6, nucleos: 4, lerArquivo: async () => meminfo(8_000_000, 400_000), cargaLinux: () => 4.4, executar: async () => "", temposCpu, esperar: async () => undefined });
     motor.daMaquina?.();
     await motor.amostrar();
-    expect(motor.daMaquina?.()).toMatchObject({ nivel: "vermelha", processador: { nivel: "vermelha" } });
+    expect(motor.daMaquina?.()).toMatchObject({ nivel: "vermelha", processador: { nivel: "vermelha", carga: 1.1, uso: 0.95 } });
     motor.parar();
     const servidor = criarAmostradorMemoria({ env: {}, plataforma: "linux", intervaloMs: 10 ** 6, executar: async () => "" });
     expect(servidor.daMaquina?.()).toBeUndefined();

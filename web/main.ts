@@ -1004,7 +1004,7 @@ function render(): void {
   if (gavetaDoApp && !gavetaMontada) origemDaGaveta = origemDoFoco();
   if (!arrastandoBot) redesenharSidebar();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
-  regiao("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela)) : "");
+  regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela)) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
   // A ligação em tela cheia também deixa a .app (e Seu espaço) inerte; a pílula não: a pessoa usa o nod com a ligação aberta.
   // O onboarding por cima (olá, IA do Mac, "está te ligando") também deixa a .app inerte (ADR-077).
@@ -1149,6 +1149,22 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   if (task) navegar(task);
 }
 
+/**
+ * Revisão do #228 (2026-10-09): regrava a região e reabre os `<details data-disclosure>` que estavam abertos, devolvendo
+ * o foco ao que o tinha. Este Mac é relida a cada 30 s (ADR-091), e o "porquê" aberto pela pessoa fechava sozinho.
+ */
+function regiaoReabrindo(id: string, html: string): void {
+  const raiz = document.getElementById(id);
+  if (!raiz || !regiaoMudaria(id, html)) return regiao(id, html);
+  const abertos = new Set([...raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure));
+  const ativo = document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement.closest<HTMLDetailsElement>("details[data-disclosure]")?.dataset.disclosure ?? null : null;
+  regiao(id, html);
+  for (const el of raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) {
+    if (abertos.has(el.dataset.disclosure)) el.open = true;
+    if (ativo !== null && el.dataset.disclosure === ativo) el.querySelector("summary")?.focus();
+  }
+}
+
 /** ADR-090: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
 const CHAVE_CODIGO_MAQUINA = "nod-parear-maquina";
 async function boot(): Promise<void> {
@@ -1160,6 +1176,9 @@ async function boot(): Promise<void> {
     // decisao.* (o outbox manda à dona); sem isto o pedido dela só aparecia — e só avisava — quando
     // outra coisa relesse "Sua vez".
     if (ticks % TICKS_POR_RELEITURA === 0 && estado.sessao) estado = reduzir(estado, { tipo: "invalidar", quais: ["sua-vez"] });
+    // ADR-091 (definido em 2026-10-09): o uso da CPU muda a cada leitura sem mudar de nível (e só a mudança de nível vira
+    // frame) — com Este Mac aberta, os números são relidos a cada 30 s, a batida do amostrador.
+    if (ticks % 2 === 0 && estado.sessao && estado.espaco?.secao === "este-mac") estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
