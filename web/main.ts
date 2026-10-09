@@ -2312,7 +2312,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (!c || !nova) return;
     if (c.marcados.length > 0) {
       await api!.moverBots(nova.id, c.marcados);
-      await api!.maquinaPadrao(nova.id);
+      // ADR-092: com o servidor no Mac, bot novo continua no Mac — a VM só leva os escolhidos.
+      if (!estado.maquinas?.servidorNoMac) await api!.maquinaPadrao(nova.id);
     }
     dispatch({ tipo: "conectar-maquina", conectar: null });
     dispatch({ tipo: "invalidar", quais: ["frota", "maquinas"] });

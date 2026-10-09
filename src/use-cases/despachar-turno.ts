@@ -32,6 +32,8 @@ export type EntradaDespacharTurno = {
   segurarNovo?: boolean;
   /** #219: memória crítica — o segundo plano segurado espera mesmo depois da espera máxima. */
   fundoSemPrazo?: boolean;
+  /** ADR-092: a máquina da ponte com o servidor no Mac (modo local) — só pega o turno que tem ela como alvo. */
+  soComoAlvo?: boolean;
 };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
@@ -55,7 +57,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
     : undefined;
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo });
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);

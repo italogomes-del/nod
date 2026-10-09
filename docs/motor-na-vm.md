@@ -48,6 +48,28 @@ Em **Máquinas**: marque os bots que vão para a VM no último passo do "Conecta
   desde HH:MM" e oferece "Rodar em <Mac> desta vez".
 - `journalctl -u nod-motor -f` mostra o log do motor.
 
+## Com o Nod no seu Mac (modo local, o diário)
+
+[ADR-092](adr/adr-092-motor-remoto-com-o-servidor-no-mac.md). O servidor escuta só em 127.0.0.1, então a VM chega até
+ele por um túnel SSH aberto no Mac. Nada fica exposto na internet.
+
+1. No Mac, abra o túnel e deixe-o aberto. A VM passa a ver a API do Nod em `http://127.0.0.1:8888`:
+   ```bash
+   ssh -N -o ServerAliveInterval=15 -R 127.0.0.1:8888:127.0.0.1:8888 voce@sua-vm
+   # numa VM do GCP: gcloud compute ssh <vm> --zone <zona> --tunnel-through-iap -- -N -R 127.0.0.1:8888:127.0.0.1:8888
+   ```
+2. Na VM: `curl -fsSL http://127.0.0.1:8888/api/motor/instalar | sh`. Use a porta da API (8888), não a da página
+   (5274): o motor guarda o endereço da API.
+3. Aprove o código em **Máquinas**, como no passo 2 acima. Uma VM já pareada com outro Nod troca de servidor com
+   `sudo nod-motor parear http://127.0.0.1:8888`.
+
+O que muda em relação ao compartilhado:
+
+- **Bot sem escolha roda neste Mac** ("Este Mac" em Máquinas). A VM só pega os bots escolhidos para ela, porque os
+  arquivos dos outros estão no Mac.
+- **O turno da VM não retoma sessão.** Ele recebe o histórico recente, e a sessão da conversa continua a do Mac.
+- **Se o túnel cair, a VM fica "sem contato".** Os bots dela esperam o túnel voltar, ou você os põe em "Este Mac".
+
 ## Atualizar e desligar
 
 - Atualizar: rode o mesmo `curl … | sh`. Ele troca os arquivos e mantém a conexão e os logins.

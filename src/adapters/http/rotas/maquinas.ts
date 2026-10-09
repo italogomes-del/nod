@@ -35,7 +35,7 @@ async function exigirChaveViva(d: Deps, id: unknown): Promise<string> {
   return viva.id;
 }
 
-export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[] }): Rota[] {
+export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string } }): Rota[] {
   return [
     {
       metodo: "POST",
@@ -147,7 +147,9 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
           const viva = vivas.get(c.id);
           return { id: c.id, nome: viva?.nome ?? c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false };
         });
-        ctx.json(200, { maquinas, padraoId: maquinas.some((m) => m.id === padraoId) ? padraoId : null });
+        // ADR-092: com o servidor no Mac (modo local), o bot sem máquina roda neste Mac ("Este Mac" na tela), e a VM chega à
+        // API deste Mac por um túnel SSH — a tela mostra o endereço da API, que é o que o motor guarda.
+        ctx.json(200, { maquinas, padraoId: maquinas.some((m) => m.id === padraoId) ? padraoId : null, ...(deps.servidorNoMac ? { servidorNoMac: deps.servidorNoMac } : {}) });
       },
     },
     {

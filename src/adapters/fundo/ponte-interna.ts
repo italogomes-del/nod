@@ -69,6 +69,11 @@ export type DepsPonte = {
   usoTrocadoEm?: (pessoaId: string) => number;
   /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
   redeMs?: number;
+  /**
+   * ADR-092: a ponte de uma máquina remota com o servidor no Mac (modo local). Ela só pega o turno que tem a máquina como
+   * alvo (o bot escolhido para ela, ou o padrão da pessoa); o resto é do Mac, onde estão os arquivos dos bots.
+   */
+  soComoAlvo?: boolean;
 };
 
 export type PonteInternaNod = PonteInterna & {
@@ -253,7 +258,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());

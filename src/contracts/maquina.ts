@@ -18,4 +18,9 @@ export type MaquinaDto = {
   ias: Partial<Record<IdHarness, Inventario["estado"]>>;
   gh: boolean;
 };
-export type MaquinasDto = { maquinas: MaquinaDto[]; padraoId: string | null };
+/**
+ * `servidorNoMac` (ADR-092): o Nod roda no modo local, com o servidor no Mac da pessoa. O bot sem máquina escolhida roda
+ * neste Mac, e as máquinas da lista só pegam os bots escolhidos para elas. `api` é o endereço da API neste Mac (o que a VM
+ * alcança pelo túnel SSH). Ausente = modo compartilhado ("qualquer uma").
+ */
+export type MaquinasDto = { maquinas: MaquinaDto[]; padraoId: string | null; servidorNoMac?: { api: string } };

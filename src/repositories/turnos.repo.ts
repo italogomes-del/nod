@@ -197,7 +197,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fixado num harness que não está pronto em NENHUMA delas; o despacho o recusa nomeando o harness. Sem isso ele
      * ficava pendente sem aviso no app do Mac. O fixado que outra máquina tem pronto continua esperando por ela.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         /*
@@ -227,6 +227,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               -- qualquer máquina.
               -- A ligação não espera a máquina do bot: a pessoa está na linha, e o cérebro roda em qualquer máquina com voz.
               and (t.origem = 'ligacao' or coalesce(${alvo}, ${p.machineId}) = ${p.machineId})
+              -- ADR-092: com o servidor no Mac (modo local), a máquina conectada pela ponte só pega o turno que tem ELA como alvo
+              -- (o bot escolhido para ela, ou o padrão da pessoa): sem alvo, o turno é do Mac, onde estão os arquivos dos bots.
+              ${p.soComoAlvo === true ? trx`and ${alvo} = ${p.machineId}` : trx``}
               -- definido em 2026-10-04 (ADR-072): o turno da ligação não serializa com o trabalho do bot, nos dois
               -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só
               -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).

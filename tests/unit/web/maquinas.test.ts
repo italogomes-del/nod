@@ -8,8 +8,8 @@ const maquina = (id: string, nome: string, o: Partial<MaquinaDto> = {}): Maquina
 const bot = (id: string, nome: string, maquinaId: string | null = null) => ({ id, nome, titulo: "Dev", ownerId: "p", cor: "c-red", forma: "shape-square", conversaId: `c-${id}`, maquinaId, excluidoEm: null });
 const conectar = (o: Partial<ConectarMaquina> = {}): ConectarMaquina => ({ passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes: [], marcados: [], ...o });
 
-function com(maquinas: MaquinaDto[], o: { padraoId?: string | null; conectar?: ConectarMaquina | null; bots?: ReturnType<typeof bot>[] } = {}): Estado {
-  return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, maquinas: { maquinas, padraoId: o.padraoId ?? null }, conectarMaquina: o.conectar ?? null, frota: { agentes: o.bots ?? [bot("a", "Ze 1", "vm"), bot("b", "Clarice")] } as never };
+function com(maquinas: MaquinaDto[], o: { padraoId?: string | null; conectar?: ConectarMaquina | null; bots?: ReturnType<typeof bot>[]; noMac?: boolean } = {}): Estado {
+  return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, maquinas: { maquinas, padraoId: o.padraoId ?? null, ...(o.noMac ? { servidorNoMac: { api: "http://127.0.0.1:8888" } } : {}) }, conectarMaquina: o.conectar ?? null, frota: { agentes: o.bots ?? [bot("a", "Ze 1", "vm"), bot("b", "Clarice")] } as never };
 }
 
 describe("Seu espaço › Máquinas (ADR-090)", () => {
@@ -55,5 +55,19 @@ describe("Seu espaço › Máquinas (ADR-090)", () => {
     expect(bots).toContain("1 de 2 bots");
     expect(bots).toContain("Mover 1 bot");
     expect(bots).toContain('aria-checked="true" data-act="marcar-bot-maquina" data-id="a"');
+    expect(bots).toContain("Bot novo também passa a trabalhar nela");
+  });
+
+  it("ADR-092: com o servidor no Mac, a opção sem máquina é \"Este Mac\", o Conectar mostra o túnel e a porta da API, e bot novo fica no Mac", () => {
+    const html = renderMaquinas(com([maquina("vm", "vm-sp")], { noMac: true }));
+    expect(html).toContain(">Este Mac<");
+    expect(html).not.toContain("Qualquer uma");
+    expect(html).toContain("Uma VM só pega o trabalho dos bots escolhidos para ela");
+    const comando = renderMaquinas(com([], { noMac: true, conectar: conectar() }));
+    expect(comando).toContain("ssh -N -R 8888:127.0.0.1:8888");
+    expect(comando).toContain("curl -fsSL http://127.0.0.1:8888/api/motor/instalar | sh");
+    expect(renderMaquinas(com([], { noMac: true }))).toContain("Os bots rodam neste Mac");
+    const bots = renderMaquinas(com([maquina("mac", "MacBook"), maquina("vm", "vm-sp")], { noMac: true, conectar: conectar({ passo: "bots", chavesAntes: ["mac"], marcados: ["a"] }) }));
+    expect(bots).toContain("Os outros, e bot novo, continuam neste Mac");
   });
 });
