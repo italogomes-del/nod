@@ -52,7 +52,13 @@ export type AcaoPedidoParado =
   | { tipo: "esperar" }
   | { tipo: "retomar"; turnoId: string; tentativa: number }
   | { tipo: "entregar_resultado"; turnoId: string; texto: string }
-  | { tipo: "avisar_falha"; motivo: string };
+  /**
+   * `semEsperar` (definido em 2026-10-09, #218): o aviso sai mesmo com algo da cadeia do colega "em aberto" — a task foi
+   * parada (nada nela continua) ou a regra desistiu de uma queda com o "Retomar" ainda aberto. Sem isto o aviso
+   * esperava pela pessoa ou pelo colega (entregar-resposta-peer.ts, aindaNaoEntrega), não gravava nada, e o pedido
+   * voltava a cada passada do varredor: a tarefa cf7f39aa do Nod diário passou pelo aviso 1.013 vezes em 8,5 h.
+   */
+  | { tipo: "avisar_falha"; motivo: string; semEsperar?: true };
 
 export function ehQueda(motivo: string | null): boolean {
   return motivo !== null && (MOTIVOS_DE_QUEDA as readonly string[]).includes(motivo);
@@ -73,7 +79,7 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
     if (p.textoFinal && p.turnoDoTextoFinal) return { tipo: "entregar_resultado", turnoId: p.turnoDoTextoFinal, texto: p.textoFinal };
     return { tipo: "avisar_falha", motivo: "terminou sem resposta" };
   }
-  if (p.estadoColega === "parado") return { tipo: "avisar_falha", motivo: "a task foi parada antes de terminar" };
+  if (p.estadoColega === "parado") return { tipo: "avisar_falha", motivo: "a task foi parada antes de terminar", semEsperar: true };
   const caiu = ehQueda(p.ultimoMotivo) && p.ultimoTurnoId !== null;
   // Card do "Retomar" já resolvido (a pessoa retomou, dispensou ou ele venceu): a decisão é dela, não da regra.
   const cardDecidido = p.cardRetomar !== null && !p.cardRetomar.aberto;
@@ -81,9 +87,10 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
   if (p.estadoColega !== "falhou" && p.estadoColega !== "precisa_de_voce") return { tipo: "esperar" };
   const motivo = motivoLegivel(p.ultimoMotivo ?? "trabalho_incompleto");
   if (!caiu || cardDecidido) return { tipo: "avisar_falha", motivo };
-  if (p.quedas >= MAX_QUEDAS_POR_PEDIDO) return { tipo: "avisar_falha", motivo: `${motivo} (caiu ${p.quedas} vezes)` };
-  if (p.quedaEm !== null && agora - p.quedaEm > RETOMAR_ATE_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e já faz mais de 2 h` };
+  // Daqui para baixo a regra desiste de uma queda: o "Retomar" aberto fica para a pessoa, mas não segura o aviso.
+  if (p.quedas >= MAX_QUEDAS_POR_PEDIDO) return { tipo: "avisar_falha", motivo: `${motivo} (caiu ${p.quedas} vezes)`, semEsperar: true };
+  if (p.quedaEm !== null && agora - p.quedaEm > RETOMAR_ATE_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e já faz mais de 2 h`, semEsperar: true };
   if (p.ultimoTurnoId && p.sinalDepoisDaQueda) return { tipo: "retomar", turnoId: p.ultimoTurnoId, tentativa: p.quedas + 1 };
-  if (p.quedaEm !== null && agora - p.quedaEm > DESISTIR_SEM_SINAL_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e as máquinas não voltaram em 30 min` };
+  if (p.quedaEm !== null && agora - p.quedaEm > DESISTIR_SEM_SINAL_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e as máquinas não voltaram em 30 min`, semEsperar: true };
   return { tipo: "esperar" };
 }

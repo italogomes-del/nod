@@ -215,6 +215,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     relogio: agora,
     intervaloMs: iv.orquestradorMs,
     listarPessoas: o.listarPessoas,
+    // #218: a sonda do passo 4 vale para o primeiro anúncio (sem um segundo `auth status` segundos depois).
+    inventarioInicial: inventarios[app.idDriver],
   });
   const scheduler = iniciarScheduler(
     db,

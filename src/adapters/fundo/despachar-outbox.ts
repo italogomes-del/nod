@@ -6,6 +6,7 @@ import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts
 import { criarRepos } from "../../repositories/index.ts";
 import type { Barramento } from "../../services/barramento.ts";
 import { OUTBOX_IDADE_MIN_MS, OUTBOX_TETO_TENTATIVAS } from "../../shared/constantes.ts";
+import { ouvirOutbox } from "../../shared/sinal-outbox.ts";
 import type { Conn, Db, Escopo, Relogio } from "../../shared/types.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -127,8 +128,22 @@ export async function coletarGauges(conn: Conn, escopo: Escopo, agora: number, m
 }
 
 export interface OpcoesLacoOutbox extends OpcoesDespacho, Pick<OpcoesLaco, "listarPessoas" | "aoFalhar"> {
-  /** definido em 2026-09-16: 250 ms entre passadas — abaixo do que uma pessoa percebe como atraso do frame. */
+  /**
+   * definido em 2026-09-16: 250 ms entre passadas — abaixo do que uma pessoa percebe como atraso do frame.
+   * revisto em 2026-10-09 (#218): é o passo CURTO, usado enquanto há trabalho. Fixo, eram ~345 mil transações por dia
+   * com o Nod parado (4 passadas por segundo, uma transação por pessoa em cada).
+   */
   intervaloMs?: number;
+  /**
+   * definido em 2026-10-09 (#218): o passo ocioso dobra a cada passada vazia, do curto até este teto (5 s). Linha
+   * gravada neste processo acorda o despachante na hora (sinal-outbox.ts); de outro processo, espera no máximo isto.
+   */
+  ociosoMaxMs?: number;
+  /**
+   * definido em 2026-10-09 (#218): quanto o passo curto dura (5 s) depois de achar trabalho ou de um aviso — cobre o
+   * commit de quem gravou (o aviso sai antes dele) e a rajada de frames de um turno, sem cair no passo longo no meio.
+   */
+  quenteMs?: number;
   /** definido em 2026-09-16: 30 s entre varreduras de abandono e coleta de gauges — a idade mínima é de 30 min. */
   abandonoACadaMs?: number;
 }
@@ -139,35 +154,49 @@ export interface DespachanteOutbox {
   parar(): Promise<void>;
 }
 
-/** `iniciar(db, barramento, {intervaloMs: 250})`: passa o POOL (paraCadaPessoa abre uma tx real por pessoa). */
+/**
+ * `iniciar(db, barramento, {intervaloMs: 250})`: passa o POOL (paraCadaPessoa abre uma tx real por pessoa).
+ * revisto em 2026-10-09 (#218): o passo é adaptativo — 250 ms com trabalho, dobrando até 5 s ocioso, e de volta a 250 ms
+ * quando este processo grava no outbox (sinal-outbox.ts). Ocioso, menos de uma passada por segundo.
+ */
 export function iniciarDespachanteOutbox(db: Db, barramento: Barramento, opcoes: OpcoesLacoOutbox = {}): DespachanteOutbox {
   const intervaloMs = opcoes.intervaloMs ?? 250;
+  const ociosoMaxMs = Math.max(intervaloMs, opcoes.ociosoMaxMs ?? 5_000);
+  const quenteMs = opcoes.quenteMs ?? 5_000;
   const abandonoACadaMs = opcoes.abandonoACadaMs ?? 30_000;
   const agora = opcoes.agora ?? Date.now;
   const metricas = opcoes.metricas ?? registroPadrao;
   let ultimaVarredura = 0;
   let parado = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let timerVenceEm = 0;
   let emVoo: Promise<void> | null = null;
+  // #218: o passo do próximo agendamento e até quando ele fica curto (relógio de parede: é tempo de timer, não de domínio).
+  let passo = intervaloMs;
+  let quenteAte = Date.now() + quenteMs;
 
   const passada = async (): Promise<void> => {
     const instante = agora();
     const varrer = instante - ultimaVarredura >= abandonoACadaMs;
     if (varrer) ultimaVarredura = instante;
+    let achou = false;
     await paraCadaPessoa(
       db,
       async (escopo, tx) => {
         await tx(async (trx) => {
-          await despacharPessoa(trx, escopo, barramento, { ...opcoes, metricas, varrerAbandono: varrer });
+          const r = await despacharPessoa(trx, escopo, barramento, { ...opcoes, metricas, varrerAbandono: varrer });
+          if (r.publicados + r.falhas > 0) achou = true;
           if (varrer) await coletarGauges(trx, escopo, instante, metricas);
         });
       },
       { listarPessoas: opcoes.listarPessoas, aoFalhar: opcoes.aoFalhar },
     );
+    if (achou) quenteAte = Date.now() + quenteMs;
   };
 
-  const agendar = (): void => {
+  const agendarEm = (ms: number): void => {
     if (parado) return;
+    timerVenceEm = Date.now() + ms;
     timer = setTimeout(() => {
       timer = null;
       emVoo = passada()
@@ -178,15 +207,31 @@ export function iniciarDespachanteOutbox(db: Db, barramento: Barramento, opcoes:
           emVoo = null;
           agendar();
         });
-    }, intervaloMs);
+    }, ms);
     timer.unref();
   };
-  agendar();
+  // Com trabalho (ou logo depois de um aviso), o passo curto; ocioso, o passo dobra até o teto.
+  const agendar = (): void => {
+    passo = Date.now() < quenteAte ? intervaloMs : Math.min(passo * 2, ociosoMaxMs);
+    agendarEm(passo);
+  };
+  // Aviso de linha nova neste processo: volta ao passo curto. Uma passada em curso reagenda sozinha no `finally`.
+  const pararDeOuvir = ouvirOutbox(() => {
+    quenteAte = Date.now() + quenteMs;
+    passo = intervaloMs;
+    if (timer && timerVenceEm - Date.now() > intervaloMs) {
+      clearTimeout(timer);
+      timer = null;
+      agendarEm(intervaloMs);
+    }
+  });
+  agendarEm(intervaloMs);
 
   return {
     passada,
     async parar() {
       parado = true;
+      pararDeOuvir();
       if (timer) clearTimeout(timer);
       timer = null;
       if (emVoo) await emVoo;

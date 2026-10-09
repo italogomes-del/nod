@@ -10,7 +10,7 @@ import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { expirarItensNaMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
-import { cuidarDosPedidosParados } from "../../use-cases/pedidos-parados.ts";
+import { cuidarDosPedidosParados, type PedidosAdiados } from "../../use-cases/pedidos-parados.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
@@ -19,7 +19,14 @@ import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 /** definido em 2026-09-16: 30 s — a spec aceita "em ≤30s" para o vencimento aparecer (fluxo SUA VEZ E EXPIRAÇÃO). */
 export const INTERVALO_VARREDOR_MS = 30_000;
 
-export type OpcoesVarredor = { services: Services; useCases: UseCasesNod; agora: Relogio; metricas?: Metricas };
+export type OpcoesVarredor = {
+  services: Services;
+  useCases: UseCasesNod;
+  agora: Relogio;
+  metricas?: Metricas;
+  /** #218: pedidos parados adiados entre as passadas (pedidos-parados.ts); o laço cria um mapa só para o processo. */
+  pedidosAdiados?: PedidosAdiados;
+};
 /** `pausadas` (definido em 2026-09-24, emenda da ADR-044): rotinas cujo pedido de acesso venceu. */
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[]; pausadas: string[] };
 
@@ -47,7 +54,7 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
   try {
     await tx(async (trx) => {
       const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
-      const r = await cuidarDosPedidosParados(deps);
+      const r = await cuidarDosPedidosParados(deps, { adiados: opcoes.pedidosAdiados });
       if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
     });
   } catch (e) {
@@ -145,7 +152,8 @@ export async function varrer(db: Db, opcoes: OpcoesVarredor, laco: OpcoesLaco = 
   );
 }
 
-export function iniciarVarredorExpiracao(db: Db, opcoes: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
+export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
+  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>() };
   let rodando = false;
   const timer = setInterval(() => {
     if (rodando) return;

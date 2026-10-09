@@ -13,8 +13,10 @@ try {
 
 const urlDono = process.env.DATABASE_URL_DONO;
 if (!urlDono) {
-  log("erro", "limpeza_bancos_teste_sem_url", { variavel: "DATABASE_URL_DONO" });
-  process.exit(1);
+  // #218: roda no fim do `npm run check`; uma worktree sem .env não tem bancos de teste por worktree para limpar, e
+  // isso não pode deixar o check vermelho.
+  log("info", "limpeza_bancos_teste_sem_url", { variavel: "DATABASE_URL_DONO" });
+  process.exit(0);
 }
 
 const sql = postgres(urlDono, { prepare: false, max: 1, onnotice: () => {} });

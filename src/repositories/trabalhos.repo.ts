@@ -372,7 +372,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      * feito desde `desde`, sem peer_ask da mesma tarefa na conversa de quem pediu, com a task do colega acabada ou
      * esperando a pessoa — e quem pediu não está numa task parada. Até 20 por vez, os mais antigos primeiro.
      */
-    async pedidosAColegaParados(desde: number, agora: number): Promise<PedidoParado[]> {
+    /** `adiados` (#218): tarefas que o varredor deixou para depois — fora do `limit 20`, para não segurar os pedidos novos. */
+    async pedidosAColegaParados(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
         tarefa_id: string; colega_id: string; colega_estado: EstadoTrabalho; ultimo_id: string | null; ultimo_motivo: string | null; queda_em: Date | null;
         quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; texto_final: string | null; turno_texto: string | null;
@@ -412,6 +413,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           and coalesce(rp.estado, '') <> 'parado'
           and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
             and r.payload->>'tarefaId' = h.payload->>'tarefaId')
+          and not (h.payload->>'tarefaId' = any(${[...adiados]}::text[]))
         order by h.criado_em, h.id
         limit 20`;
       return linhas.map((l) => ({
