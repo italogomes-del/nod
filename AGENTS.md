@@ -269,6 +269,15 @@ principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz d
 renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
 `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
+Definido em 2026-10-09 (ADR-093): o app acha, instala e entra nas IAs sozinho. O PATH vem em camadas
+(`caminho.ts`: pastas do nod, processo, instaladores, todas as versões do nvm, `$SHELL -l -i` em segundo plano, node do
+nod). Instalar = o npm que o app leva (`extraResources`) rodando no Electron como node, em `<userData>/ferramentas`.
+Login = `codex login --device-auth` / `claude auth login --claudeai` por pipe (`desktop/login-ia.ts`): só links da lista
+`LINKS_OFICIAIS` (host e caminho medidos), e o único texto da página que chega a um processo é o código colado, pelo
+stdin. Para medir a saída de um CLI novo, rode-o com `HOME`, `CODEX_HOME`/`CLAUDE_CONFIG_DIR` temporários e um `open`
+falso no PATH, só até o link aparecer — nunca complete login nem rode logout com o HOME real. As fixtures ficam em
+`tests/fixtures/login-ia/` com os códigos trocados por X.
+
 ## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
 
 `harness` identifica o driver; `executor` continua indicando `local`/`catcher` nos eventos existentes.
