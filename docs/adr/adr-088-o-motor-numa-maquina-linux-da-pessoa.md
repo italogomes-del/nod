@@ -1,6 +1,6 @@
 # ADR-088 — O motor numa máquina Linux da pessoa: "traga sua VM"
 
-**Status** proposto · decidido em 2026-10-09 (decisões do Marlon na conversa de estudo; aula em
+**Status** aceito · decidido e implementado em 2026-10-09 (decisões do Marlon na conversa de estudo; aula em
 https://claude.ai/artifact/9s7Evq2HLyixCeMncVSnaV) · plano em [docs/plano-motor-na-vm.md](../plano-motor-na-vm.md)
 
 Estende a ADR-021 (ponte), ADR-022 (localidade) e ADR-069 (pareamento). Emenda a ADR-020 (o app do Mac deixa de ser
@@ -88,7 +88,23 @@ credencial é logada por ela, como no Mac. A VM não é o "computador do bot" (A
 - **Promessa de aliviar o Mac.** Se, com todos os bots presos à VM, o diário ainda registrar `fundo_segurado` no Mac em
   mais de 5% dos dias, o peso não era o motor: medir o que sobrou antes de seguir para o caminho B.
 
-## Não implementado
+## Implementação (2026-10-09)
 
-Tudo. Esta ADR é a decisão; a ordem e as costuras estão no plano. O caminho B e os computadores dos bots ficam para
-ADRs próprias.
+- **Motor sem janela:** `motor/main.ts` (comandos `parear`, `entrar`, `estado`, `rodar`) e `motor/conexao.ts` (chave em
+  arquivo 0600). Reusa o laço, os drivers, a vigia das IAs e o proxy do app do Mac. `scripts/motor/build.mjs` empacota
+  em `dist/motor`, que vai na imagem do servidor.
+- **Instalação:** `curl -fsSL https://<nod>/motor | sh` (`/motor` redireciona para `/api/motor/instalar`;
+  `src/adapters/http/motor-instalacao.ts`). Node fixo, usuário `nod`, Claude Code (Codex com `NOD_COM_CODEX=1`), gh,
+  serviço `nod-motor` no systemd e o pareamento no fim. Rodar de novo atualiza.
+- **Pareamento por código:** `src/services/pareamento-dispositivo.ts` e as rotas `pareamento/dispositivo[/trocar]` e
+  `maquinas/dispositivos/:codigo[/aprovar]`.
+- **Onde o bot trabalha:** migração 0066 (`agentes.maquina_id`, `preferencias.maquina_padrao_id`,
+  `turnos.maquina_desta_vez`), filtro no `reivindicar` e as rotas `maquinas`, `maquinas/padrao`, `maquinas/:id/bots`,
+  `agentes/:id/maquina` e `conversas/:id/rodar-desta-vez`.
+- **Prompt:** `plataforma` no anúncio e `maquina` no plano; `terminalNaMaquinaLinux` em `prompt-sistema.ts`.
+- **Uso da máquina:** o amostrador lê `/proc/meminfo` e a carga no Linux, só no motor (`lerNoLinux`).
+- **Web:** Seu espaço › Máquinas (`web/telas/maquinas.ts`), o "Conectar uma máquina" em 5 passos, o link
+  `?parear-maquina=<código>` e a fila da conversa com a máquina fora do ar (protótipo 4c).
+
+Ainda não implementado: juntar "Este Mac" em "Máquinas", o timer de atualização do motor, a rotina com a máquina fora
+do ar ganhar o aviso único (hoje ela espera e vence pela regra de sempre), o caminho B e os computadores dos bots.
