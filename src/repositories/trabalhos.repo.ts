@@ -3,6 +3,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
+import type { FatosLimpeza } from "../domain/limpeza-das-tasks.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
@@ -247,6 +248,27 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
+    /**
+     * ADR-088 (2026-10-09): as tasks da pessoa encerradas (terminada ou falha) desde `desde`, com pasta, e o que a regra
+     * de limpeza precisa (src/domain/limpeza-das-tasks.ts). Lê pelo índice `trabalhos_terminados`; até 500, as mais
+     * antigas primeiro. `parado` fica de fora já aqui.
+     */
+    async candidatosALimpeza(desde: number): Promise<(FatosLimpeza & { id: string })[]> {
+      const linhas = await conn<{ id: string; estado: EstadoTrabalho; pasta: string | null; terminado_em: Date | null; vivos: number; decisao: boolean; dividida: boolean }[]>`
+        select w.id, w.estado, w.pasta, w.terminado_em,
+          (select count(*)::int from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as vivos,
+          exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+            where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.estado in ('pendente', 'reaberta')) as decisao,
+          exists (select 1 from trabalhos o where o.tenant_id = w.tenant_id and o.pasta = w.pasta and o.id <> w.id
+            and o.estado not in ('terminado', 'falhou')) as dividida
+        from trabalhos w
+        where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.terminado_em >= ${data(desde)}
+          and w.estado in ('terminado', 'falhou') and w.pasta is not null
+        order by w.terminado_em, w.id
+        limit 500`;
+      return linhas.map((l) => ({ id: l.id, estado: l.estado, pasta: l.pasta, terminadoEm: msOuNull(l.terminado_em), turnosVivos: l.vivos, decisaoPendente: l.decisao, pastaDividida: l.dividida }));
+    },
+
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
       const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
@@ -350,7 +372,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      * feito desde `desde`, sem peer_ask da mesma tarefa na conversa de quem pediu, com a task do colega acabada ou
      * esperando a pessoa — e quem pediu não está numa task parada. Até 20 por vez, os mais antigos primeiro.
      */
-    async pedidosAColegaParados(desde: number, agora: number): Promise<PedidoParado[]> {
+    /** `adiados` (#218): tarefas que o varredor deixou para depois — fora do `limit 20`, para não segurar os pedidos novos. */
+    async pedidosAColegaParados(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
         tarefa_id: string; colega_id: string; colega_estado: EstadoTrabalho; ultimo_id: string | null; ultimo_motivo: string | null; queda_em: Date | null;
         quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; texto_final: string | null; turno_texto: string | null;
@@ -390,6 +413,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           and coalesce(rp.estado, '') <> 'parado'
           and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
             and r.payload->>'tarefaId' = h.payload->>'tarefaId')
+          and not (h.payload->>'tarefaId' = any(${[...adiados]}::text[]))
         order by h.criado_em, h.id
         limit 20`;
       return linhas.map((l) => ({

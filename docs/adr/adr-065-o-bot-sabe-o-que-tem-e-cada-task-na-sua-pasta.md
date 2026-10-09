@@ -1,7 +1,9 @@
 # ADR-065 — O bot sabe o que tem neste turno, e cada task na sua pasta
 
 Status: aceito, revista pela [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) no mesmo dia (o terminal
-vale em todo modo, então a linha "Terminal:" só aparece no peer legado; os itens 5 e 7 abaixo foram feitos lá) ·
+vale em todo modo, então a linha "Terminal:" só aparece no peer legado; os itens 5 e 7 abaixo foram feitos lá);
+emendada pela [ADR-088](adr-088-limpeza-das-pastas-de-task.md) em 2026-10-09 (o `worktree add` também é cercado: a
+worktree nasce na pasta do turno, a da task quando há task, e sai quando a task acaba) ·
 Data: 2026-10-01 · Emenda a [ADR-055](adr-055-terminal-de-verdade-como-o-inhouse.md) (o git que mexe
 na pasta de trabalho só roda dentro de `~/nod/<bot>`) e a [ADR-052](adr-052-o-kit-do-terminal-com-o-nod-decidindo.md)
 (o prompt diz por que o terminal falta). Itens 8 e 6 da investigação "os Devs não executam tasks", aprovados pelo

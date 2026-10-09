@@ -18,7 +18,8 @@ import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS } from "../../share
  * `pastaDoBot` e `home` (definido em 2026-10-01, ADR-065): a cerca do git fora da pasta do bot. Config de um driver
  * antigo sem os dois campos não liga a cerca — o comando segue para o servidor como antes.
  */
-export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string };
+/** `daTask` (definido em 2026-10-09, ADR-088): `pastaDoBot` é a pasta da task, e a worktree nasce dentro dela. */
+export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean };
 
 export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "allow" | "deny"; permissionDecisionReason: string } };
 
@@ -33,12 +34,12 @@ const saida = (permitir: boolean, motivo: string): SaidaHook => ({ hookSpecificO
 export const AINDA_ESPERANDO = "o pedido de aprovação deste comando continua na conversa; quando a pessoa decidir, a tarefa retoma sozinha. Encerre o turno dizendo que está esperando — não repita o comando agora.";
 
 /** Uma decisão completa: evento do CLI → saída do hook. `confirmar` fala com o servidor (injetável no teste). */
-export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home">): Promise<SaidaHook> {
+export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask">): Promise<SaidaHook> {
   const e = (typeof evento === "object" && evento !== null ? evento : {}) as { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
   const ferramenta = typeof e.tool_name === "string" ? e.tool_name : "";
   const entrada = typeof e.tool_input === "object" && e.tool_input !== null ? (e.tool_input as Record<string, unknown>) : {};
   // ADR-065: o `cwd` do evento é a pasta em que o Bash está agora (o Claude Code a mantém entre comandos).
-  const pasta = pastas?.pastaDoBot && pastas.home ? { cwd: typeof e.cwd === "string" ? e.cwd : null, pastaDoBot: pastas.pastaDoBot, home: pastas.home } : undefined;
+  const pasta = pastas?.pastaDoBot && pastas.home ? { cwd: typeof e.cwd === "string" ? e.cwd : null, pastaDoBot: pastas.pastaDoBot, home: pastas.home, daTask: pastas.daTask === true } : undefined;
   const d = decidirNativa({ ferramenta, entrada, ...(pasta ? { pasta } : {}) });
   if (!d.permitir) return saida(false, d.motivo);
   // MCP: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).

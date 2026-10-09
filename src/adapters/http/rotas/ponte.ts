@@ -15,6 +15,7 @@ import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
+import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
 /**
  * `planos`: os turnos que esta máquina está rodando AGORA (definido em 2026-09-24). Com o pool de laços
@@ -227,6 +228,21 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       await d.concluirItemLocal?.(ctx.escopo, itemId, b.desfecho as DesfechoLocal);
       reservas.delete(itemId);
+      ctx.json(200, { ok: true });
+    }),
+    /**
+     * ADR-088 (2026-10-09): o Mac PUXA as pastas de task encerradas que pode limpar (o servidor nunca disca, ADR-021) e
+     * relata o resumo. A pessoa é a da chave; o relato só vira log (relatoValido descarta o que não é número conhecido).
+     */
+    rota("limpeza", async (ctx) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      ctx.json(200, { pastas: (await c.ponte.pastasParaLimpar?.(ctx.escopo.pessoaId)) ?? [] });
+    }),
+    rota("limpeza/resultado", async (ctx, b) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato));
       ctx.json(200, { ok: true });
     }),
     rota("desconectar", async (ctx) => {

@@ -36,6 +36,13 @@ describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
     expect(comTerminal("total")).toContain("só o que toca uma credencial do Mac vira um pedido de aprovação");
   });
 
+  it("ADR-088: na task, a worktree nasce dentro da pasta dela e o nod a apaga quando a task acaba", () => {
+    const naTask = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_aprovacao")], nativas: ["Read", "Bash"], pastaDoBot: "Vera/fix-filtros-abc123", pessoaNome: "Marlon", modo: "conversa" });
+    expect(naTask).toContain("worktree add ~/nod/Vera/fix-filtros-abc123/<repo> -b <branch> origin/main");
+    expect(naTask).toContain("o nod apaga a worktree que não tem alteração por commitar; a branch fica no clone");
+    expect(naTask).not.toContain("<repo>-<task>");
+  });
+
   it("a linha das aprovações pertence à seção do modo no Raio-X", () => {
     const linha = comTerminal("automatico").split("\n").find((l) => l.startsWith("Aprovações:")) ?? "";
     expect(secaoDaLinha(linha)).toBe("modo");
