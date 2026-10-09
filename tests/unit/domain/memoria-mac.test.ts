@@ -231,14 +231,13 @@ describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta
     expect(esperaDoMac(base, { fundo: null, tudoNovo: null, semPrazo: false }, agora)).toBeNull();
   });
 
-  it("revisão do #224: a volta marcada vencida da task já começada — o disco crítico e o segundo plano apertado a seguram; a memória crítica, não", () => {
+  it("revisão do #224: a volta marcada vencida da task já começada — só o disco crítico a segura", () => {
     const agora = 10 * ESPERA_MAXIMA_FUNDO_MS;
     const volta = { estado: "rodando" as const, origem: "pessoa" as const, iniciadoEm: agora - 3_600_000, criadoEm: agora - 7_200_000, pessoaEsperando: false, acordaEm: agora - 60_000, turnoVivoId: null };
     expect(esperaDoMac(volta, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBe("disco");
     expect(esperaDoMac(volta, { fundo: "memoria", tudoNovo: null, semPrazo: true }, agora)).toBeNull();
-    expect(esperaDoMac(volta, { fundo: "disco", tudoNovo: null, semPrazo: false }, agora)).toBe("disco");
-    // Passada a espera máxima (contada da hora marcada), ou com turno vivo, ou ainda antes da hora: nada.
-    expect(esperaDoMac({ ...volta, acordaEm: agora - 2 * ESPERA_MAXIMA_FUNDO_MS }, { fundo: "disco", tudoNovo: null, semPrazo: false }, agora)).toBeNull();
+    for (const fundo of ["disco", "memoria", "processador"] as const) expect(esperaDoMac(volta, { fundo, tudoNovo: null, semPrazo: false }, agora)).toBeNull();
+    // Com turno vivo, ou ainda antes da hora: nada.
     expect(esperaDoMac({ ...volta, turnoVivoId: "t" }, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBeNull();
     expect(esperaDoMac({ ...volta, acordaEm: agora + 60_000 }, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBeNull();
   });

@@ -87,16 +87,15 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
     });
   });
 
-  it("ADR-086 (revisão do #212): a volta marcada vencida segue as regras do Mac apertado, como trabalho em segundo plano", async () => {
+  it("revisão do #224: a volta marcada vencida da task já começada não espera o Mac apertado nem o espaço — só o disco crítico", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const daPessoa = await m.task("pessoa", "Acompanhar o CI");
       await m.repos.trabalhos.mudarEstado(daPessoa.id, "rodando", Date.now());
       const volta = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: daPessoa.id, acordarEm: Date.now() - 1_000 });
       const meus = new Set([volta!.id]);
-      expect(await m.reivindicarTudo(true, meus)).toEqual([]);
-      expect(await m.reivindicarTudo(false, meus, true)).toEqual([]);
-      expect(await m.reivindicarTudo(false, meus)).toEqual([volta!.id]);
+      expect(await m.reivindicarTudo(true, meus, true, true)).toEqual([]);
+      expect(await m.reivindicarTudo(true, meus, true)).toEqual([volta!.id]);
     });
   });
 

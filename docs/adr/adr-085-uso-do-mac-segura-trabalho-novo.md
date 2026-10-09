@@ -124,7 +124,7 @@ do Marlon, que autorizou merge e deploy (ver "Como voltar atrás").
    | Disco em alerta (< 10 GB) | segundo plano, com a espera máxima | nada espera |
    | Memória em alerta / processador | como antes (`deveSegurar`) | nada espera |
 
-   - "Segundo plano" é o de antes (`seguravelPeloMac`): rotina, pedido de colega e a volta marcada (ADR-086). O pedido
+   - "Segundo plano" é o de antes (`seguravelPeloMac`): rotina e pedido de colega que ainda não começaram. O pedido
      explícito da pessoa ("Executar agora", task pedida na conversa) passa, inclusive com a memória crítica.
    - "Nada novo começa" (`segurarNovo` no `reivindicar`) só entrega turno de trabalho com `iniciado_em` preenchido e sem
      `acordar_em`. Vale para a task da pessoa, o "Executar agora", o que passou da espera máxima e a volta marcada. É a
@@ -132,11 +132,11 @@ do Marlon, que autorizou merge e deploy (ver "Como voltar atrás").
      escolha.
    - "Sem a espera máxima" (`fundoSemPrazo`): com a memória crítica, o segundo plano novo que já espera há mais de 1 h
      continua esperando, em vez de rodar mesmo assim.
-   - **Volta marcada** (revisão do #224): a volta ("me chame às 16:00") de uma task já começada é o próximo passo de algo
-     que já começou. Com a memória crítica ela passa; só o disco crítico a segura. Com a memória em alerta, o disco em
-     alerta ou o processador, a regra de antes continua (ADR-086, revisão do #212: espera, até 1 h contada da hora
-     marcada). Quando algo segura a volta, `esperaDoMac` diz o motivo, e a linha diz "esperando…" em vez de "volta às
-     16:00" já passado.
+   - **Volta marcada** (revisão do #224, decisão do coordenador do #221): a volta ("me chame às 16:00", ADR-086) de uma
+     task já começada é o próximo passo de algo que já começou. Só o disco crítico a segura. Memória em alerta ou
+     crítica, disco em alerta, processador e o espaço entre dois começos não a seguram mais; isso revoga a revisão do
+     #212, em que ela seguia as regras do Mac apertado. Quando o disco crítico a segura, `esperaDoMac` dá o motivo, e a
+     linha diz "esperando espaço no disco" em vez de "volta às 16:00" já passado.
    - Conversa, ligação e o turno seguinte de uma task que já começou nunca esperam. Nada que roda é morto ou pausado.
    - O Mac do Marlon de 09/10 (17 GB livres) não seguraria nada pelo disco.
 4. **Sem espera máxima no disco crítico.** O item 4 rejeitou "segurar sem prazo" porque a espera não aparecia em lugar
@@ -175,8 +175,8 @@ Como voltar atrás (as escolhas que o Marlon não viu), cada uma em `portaoDoMac
 - **Memória crítica:**
   - segurar também o pedido da pessoa: devolver `tudoNovo: "memoria"`;
   - manter a espera máxima: `semPrazo: false`;
-  - segurar também a volta marcada: tirar o `p.fundoSemPrazo` da condição da volta no `reivindicar` e o
-    `!portao.semPrazo` em `esperaDoMac`.
+- **Volta marcada de novo sob as regras do Mac apertado (#212):** devolver a cláusula de `acordar_em` com
+  `segurarFundo`/`espacarFundo` no `reivindicar` (git log desta emenda) e o `fundo` em `esperaDoMac`.
 
 Gatilho de reversão:
 - `fundo_segurado` com `tudo_novo` por mais de um dia seguido em Macs com a limpeza das tasks (#216) já no ar: rever

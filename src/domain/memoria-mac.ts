@@ -182,8 +182,9 @@ export function discoDoStatfs(s: { bsize: number | bigint; blocks: number | bigi
  *   qualquer uso, até em "O quanto precisar".
  * - `fundo`: só trabalho novo em segundo plano espera (rotina, pedido de colega, a volta marcada); o que a pessoa pediu
  *   passa. Por memória crítica, disco em alerta, memória em alerta ou processador (`deveSegurar`), nunca em "livre".
- * - `semPrazo`: memória crítica — o segundo plano espera mesmo depois da espera máxima de 1 h. A volta marcada de uma
- *   task já começada passa (revisão do #224: é o próximo passo de algo que já começou); com o disco crítico ela espera.
+ * - `semPrazo`: memória crítica — o segundo plano espera mesmo depois da espera máxima de 1 h.
+ * A volta marcada de uma task já começada (ADR-086) só espera pelo disco crítico (revisão do #224: é o próximo passo de
+ * algo que já começou).
  * O motivo vai para a linha da task, pela gravidade: disco crítico, memória crítica, disco em alerta, memória em alerta,
  * processador. Sem leitura, nada espera.
  */
@@ -207,14 +208,11 @@ export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; pr
  * Por que o Mac segura este trabalho agora (null = não segura). É a regra do `reivindicar` (turnos.repo.ts): com
  * `tudoNovo`, todo trabalho que ainda não começou; com `fundo`, só o que `seguravelPeloMac` aceita (com `semPrazo`,
  * também o que passou da espera máxima). Revisão do #224: a volta marcada vencida ("me chame às 16:00", ADR-086) de task
- * sem turno vivo também — pelo disco crítico, ou pelo `fundo` sem `semPrazo` dentro da espera máxima contada da hora
- * marcada —, para a linha dizer "esperando…" em vez de "volta às 16:00" já passado.
+ * sem turno vivo também, pelo disco crítico (o único que a segura), para a linha dizer "esperando…" em vez de "volta às
+ * 16:00" já passado.
  */
 export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando"> & { acordaEm?: number | null; turnoVivoId?: string | null }, portao: PortaoDoMac, agora: number): MotivoEsperaMac | null {
-  if (t.acordaEm != null && t.acordaEm <= agora && !t.turnoVivoId && (t.estado === "rodando" || t.estado === "na_fila")) {
-    if (portao.tudoNovo) return portao.tudoNovo;
-    if (portao.fundo && !portao.semPrazo && t.acordaEm > agora - ESPERA_MAXIMA_FUNDO_MS) return portao.fundo;
-  }
+  if (t.acordaEm != null && t.acordaEm <= agora && !t.turnoVivoId && (t.estado === "rodando" || t.estado === "na_fila")) return portao.tudoNovo;
   if (t.estado !== "na_fila") return null;
   if (portao.tudoNovo && t.iniciadoEm === null) return portao.tudoNovo;
   if (portao.fundo && seguravelPeloMac(portao.semPrazo ? { ...t, criadoEm: agora } : t, agora)) return portao.fundo;

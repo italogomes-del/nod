@@ -24,7 +24,7 @@ import type { Turno } from "../../src/contracts/turno.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
-import { ESPERA_MAXIMA_FUNDO_MS, seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
@@ -1079,9 +1079,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             if (dep && !["terminado", "parado", "falhou"].includes(dep.estado)) return false;
             // ADR-085: a mesma regra do SQL (seguravelPeloMac; o espaço segura também o que passou da espera máxima).
             if (dono && p.espacarFundo === true && seguravelPeloMac({ ...dono, criadoEm: p.agora }, p.agora)) return false;
-            if (t.acordarEm && (p.espacarFundo === true || (p.segurarFundo === true && p.fundoSemPrazo !== true && t.acordarEm > p.agora - ESPERA_MAXIMA_FUNDO_MS))) return false;
-            // #219: disco crítico — nenhum trabalho novo, nem a volta marcada; memória crítica — o segundo plano novo sem
-            // prazo, e a volta marcada passa (revisão do #224).
+            // #219: disco crítico — nenhum trabalho novo, nem a volta marcada (que só ele segura, revisão do #224);
+            // memória crítica — o segundo plano novo sem prazo.
             if (p.segurarNovo === true && (t.acordarEm || (dono && dono.iniciadoEm === null))) return false;
             return !(dono && p.segurarFundo === true && seguravelPeloMac(p.fundoSemPrazo === true ? { ...dono, criadoEm: p.agora } : dono, p.agora));
           })
