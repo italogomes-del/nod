@@ -270,8 +270,10 @@ renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência d
 `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
 Definido em 2026-10-09 (ADR-093): o app acha, instala e entra nas IAs sozinho. O PATH vem em camadas
-(`caminho.ts`: pastas do nod, processo, instaladores, todas as versões do nvm, `$SHELL -l -i` em segundo plano, node do
-nod). Instalar = o npm que o app leva (`extraResources`) rodando no Electron como node, em `<userData>/ferramentas`.
+(`caminho.ts`: processo, instaladores, todas as versões do nvm, `$SHELL -l -i` em segundo plano) e nunca leva nada do
+nod nem `ELECTRON_RUN_AS_NODE`. Instalar = o npm que o app leva (`extraResources`) rodando no Electron como node, com
+configuração só do nod, em `<userData>/ferramentas/<ia>/v-…` trocado atomicamente para `atual`; o binário do nod
+(o nativo, no Codex) só é usado quando é igual ou mais novo que o de fora (`desktop/ferramentas.ts`).
 Login = `codex login --device-auth` / `claude auth login --claudeai` por pipe (`desktop/login-ia.ts`): só links da lista
 `LINKS_OFICIAIS` (host e caminho medidos), e o único texto da página que chega a um processo é o código colado, pelo
 stdin. Para medir a saída de um CLI novo, rode-o com `HOME`, `CODEX_HOME`/`CLAUDE_CONFIG_DIR` temporários e um `open`
