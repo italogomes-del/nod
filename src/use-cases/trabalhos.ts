@@ -6,7 +6,7 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, nivelDoDisco, portaoDoMac, seguravelPeloMac } from "../domain/memoria-mac.ts";
+import { DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { NovoTrabalho } from "../repositories/trabalhos.repo.ts";
@@ -198,13 +198,15 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const disco = memoria?.disco ?? null;
   // Revisão do #224: o nível vem com a histerese (trabalhos-vivos.ts); sem ele (serviço de teste), o nível cru.
   const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
-  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, { memoria: memoria.nivel, processador, discoNivel: nivelDisco });
+  // ADR-091: o portão olha o pior entre a CPU e a fila; a tela mostra os dois separados.
+  const fila = memoria?.fila ?? null;
+  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
   const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
     const motivo = esperaDoMac(t, portao, agora);
     return motivo ? { ...t, esperaDoMac: motivo } : t;
   });
-  return { data: { trabalhos: dtos, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null } };
+  return { data: { trabalhos: dtos, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null } };
 };
 
 /** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */

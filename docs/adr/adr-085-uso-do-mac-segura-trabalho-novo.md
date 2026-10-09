@@ -1,6 +1,7 @@
 # ADR-085 — Uso do Mac: o Mac apertado segura trabalho novo em segundo plano
 
-Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) §4 ("sem teto:
+Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · o processador do item 1 foi
+emendado pela [ADR-091](adr-091-regua-do-processador-cpu-e-fila.md) (uso da CPU e fila, 2026-10-09) · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) §4 ("sem teto:
 o limite é a máquina"). Decisão do Marlon em 2026-10-08: o caminho "sem teto, sem desperdício", aprovado no protótipo
 "Nod — Ritmo do Mac" (canvas VmT4WwEbgfZ14PbLy4En8d, pranchas 1–3).
 

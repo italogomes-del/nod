@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { criarAmostradorMemoria, type Executar, type MedirDisco } from "../../../src/adapters/executor/amostrador-memoria.ts";
+import { criarAmostradorMemoria as criarReal, type Executar, type MedirDisco } from "../../../src/adapters/executor/amostrador-memoria.ts";
+import type { TemposCpu } from "../../../src/domain/memoria-mac.ts";
+
+/**
+ * ADR-091: a CPU também é injetada — cada leitura soma 25 ms ocupados em 100 (uso 0,25) e a primeira medida não espera
+ * o segundo de verdade. Quem quer outra CPU passa a sua.
+ */
+function cpuFalsa(ocupadoPor100 = 25): () => TemposCpu {
+  let n = 0;
+  return () => {
+    n += 1;
+    return { ocupado: n * ocupadoPor100, total: n * 100 };
+  };
+}
+const criarAmostradorMemoria = (o: Parameters<typeof criarReal>[0]) => criarReal({ temposCpu: cpuFalsa(), esperar: async () => undefined, ...o });
 
 /** #194 (ADR-083 §4, decisão S8): um amostrador por máquina; `sysctl` e `ps` injetados, nenhum comando real. */
 function executorFalso(o: { nivel?: string; ps?: string; falhaSysctl?: boolean; falhaPs?: boolean; loadavg?: string } = {}) {
@@ -26,7 +40,7 @@ describe("amostrador de memória da máquina", () => {
     a.leitura("t1", 4242);
     a.leitura("t2", 5000);
     await a.amostrar();
-    expect(a.leitura("t1", 4242)).toEqual({ nivel: "amarela", totalMb: 2548, porTurno: [{ turnoId: "t1", mb: 2048 }], processador: { nivel: "verde", carga: 0.13 } });
+    expect(a.leitura("t1", 4242)).toEqual({ nivel: "amarela", totalMb: 2548, porTurno: [{ turnoId: "t1", mb: 2048 }], processador: { nivel: "verde", carga: 0.13, uso: 0.25 } });
     a.soltar("t2");
     await a.amostrar();
     expect(a.leitura("t1", 4242).totalMb).toBe(2048);
@@ -107,7 +121,7 @@ describe("amostrador de memória da máquina", () => {
     a.parar();
   });
 
-  it("ADR-085: o processador entra na leitura, muda o número da amostra e vai na leitura da máquina (o puxar)", async () => {
+  it("ADR-085/091: o processador entra na leitura, muda o número da amostra e vai na leitura da máquina (o puxar)", async () => {
     let loadavg = "{ 1.00 0.9 0.8 }";
     const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? loadavg : bin.endsWith("sysctl") ? "1" : "");
     const a = criarAmostradorMemoria({ env: {}, executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
@@ -115,21 +129,73 @@ describe("amostrador de memória da máquina", () => {
     expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], disco: null });
     await a.amostrar();
     const primeira = a.amostra();
-    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], processador: { nivel: "verde", carga: 0.25 }, disco: null });
+    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], processador: { nivel: "verde", carga: 0.25, uso: 0.25 }, disco: null });
+    // ADR-091: 1,25 por núcleo com a CPU a 25% é fila andando — antes isso era "processador cheio".
     loadavg = "{ 5.00 3 2 }";
     await a.amostrar();
+    expect(a.amostra()).toBe(primeira);
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "verde", carga: 1.25, uso: 0.25 });
+    // A fila engarrafada (2,25 por núcleo) muda o nível mesmo com a CPU folgada.
+    loadavg = "{ 9.00 3 2 }";
+    await a.amostrar();
     expect(a.amostra()).toBe(primeira + 1);
-    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 1.25 });
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 2.25, uso: 0.25 });
     a.parar();
   });
 
-  it("ADR-085: NOD_SIMULAR_PROCESSADOR força a carga por núcleo sem ler o vm.loadavg", async () => {
+  it("ADR-091: NOD_SIMULAR_PROCESSADOR força o uso da CPU e NOD_SIMULAR_FILA a carga por núcleo, sem ler o vm.loadavg", async () => {
     const f = executorFalso();
     const a = criarAmostradorMemoria({ env: { NOD_SIMULAR_PROCESSADOR: "0.8" }, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 10 });
     a.daMaquina?.();
     await a.amostrar();
-    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "amarela", carga: 0.8 });
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "amarela", carga: 0, uso: 0.8 });
     expect(f.chamadas).not.toContain("/usr/sbin/sysctl vm.loadavg");
+    a.parar();
+    // O valor antigo (carga por núcleo, ex.: 1.2) vale como CPU cheia: acima de 1 é 1.
+    const b = criarAmostradorMemoria({ env: { NOD_SIMULAR_PROCESSADOR: "1.2" }, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 10 });
+    b.daMaquina?.();
+    await b.amostrar();
+    expect(b.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 0, uso: 1 });
+    b.parar();
+    const c = criarAmostradorMemoria({ env: { NOD_SIMULAR_FILA: "2.5" }, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 10 });
+    c.daMaquina?.();
+    await c.amostrar();
+    expect(c.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 2.5, uso: 0 });
+    c.parar();
+  });
+
+  it("ADR-091: o uso da CPU é a fração ocupada desde a amostra anterior; a primeira mede 1 s; fora da batida vale a última", async () => {
+    const tempos: TemposCpu[] = [{ ocupado: 0, total: 1000 }, { ocupado: 500, total: 2000 }, { ocupado: 600, total: 3000 }, { ocupado: 1500, total: 4000 }];
+    let i = 0;
+    const esperas: number[] = [];
+    let agora = 0;
+    const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? "{ 1.0 1 1 }" : bin.endsWith("sysctl") ? "1" : "");
+    const a = criarReal({ env: {}, executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin", temposCpu: () => tempos[i++]!, esperar: async (ms) => void esperas.push(ms), agora: () => agora });
+    a.daMaquina?.();
+    await a.amostrar();
+    expect(esperas).toEqual([1000]);
+    expect(a.daMaquina?.()?.processador?.uso).toBe(0.5);
+    // Uma amostra fora da batida (turno novo), 2 s depois: a fração de 2 s seria ruído — vale a última, sem ler a CPU.
+    agora += 2_000;
+    await a.amostrar();
+    expect(a.daMaquina?.()?.processador?.uso).toBe(0.5);
+    expect(i).toBe(2);
+    agora += 30_000;
+    await a.amostrar();
+    expect(a.daMaquina?.()?.processador?.uso).toBe(0.1);
+    agora += 30_000;
+    await a.amostrar();
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 0.25, uso: 0.9 });
+    expect(esperas).toEqual([1000]);
+    a.parar();
+  });
+
+  it("ADR-091: sem a leitura da CPU, o processador vai só com a fila (como um app anterior, sem `uso`)", async () => {
+    const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? "{ 8.0 1 1 }" : bin.endsWith("sysctl") ? "1" : "");
+    const a = criarReal({ env: {}, executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin", temposCpu: () => { throw new Error("sem cpus"); }, esperar: async () => undefined });
+    a.daMaquina?.();
+    await a.amostrar();
+    expect(a.daMaquina?.()?.processador).toEqual({ nivel: "vermelha", carga: 2 });
     a.parar();
   });
 

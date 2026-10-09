@@ -142,6 +142,14 @@ describe("desktop: fronteiras HTTP", () => {
     }
     expect(() => memoria({ nivel: "laranja", totalMb: 10, porTurno: [] })).toThrow();
   });
+
+  it("ADR-091: o uso da CPU (0 a 1) vai junto; fora disso some só ele, e a leitura vale como a de um app anterior", () => {
+    const base = { nivel: "verde", totalMb: 10, porTurno: [] };
+    expect(memoria({ ...base, processador: { nivel: "vermelha", carga: 3, uso: 0.75 } })).toEqual({ ...base, processador: { nivel: "vermelha", carga: 3, uso: 0.75 } });
+    for (const uso of [-0.1, 1.5, Number.NaN, "0.5", null]) {
+      expect(memoria({ ...base, processador: { nivel: "vermelha", carga: 3, uso } })).toEqual({ ...base, processador: { nivel: "vermelha", carga: 3 } });
+    }
+  });
   it("#219: a leitura aceita o disco (opcional); fora do formato ele é ignorado sozinho — sem medição, nada espera", () => {
     const disco = { livreMb: 17_408, totalMb: 477_184 };
     expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], disco })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], disco });

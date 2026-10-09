@@ -5,22 +5,47 @@ import { FECHAR_OCIOSA_SOB_PRESSAO_MS, soltarPorMemoria } from "../../../src/dom
 const leitura = (nivel: "verde" | "amarela" | "vermelha", totalMb = 1000) => ({ nivel, totalMb, porTurno: [] });
 
 describe("trabalhos vivos: memória do Mac (#194)", () => {
-  it("o nível que a pessoa vê muda uma vez por transição; verde de partida não é mudança", () => {
+  it("o nível que a pessoa vê muda uma vez por transição; a primeira leitura (mesmo verde) avisa a tela", () => {
     let agora = 0;
     const v = criarTrabalhosVivos(() => agora);
+    // Corrigido em 2026-10-09: a tela aberta antes da primeira leitura ficava em "O Mac ainda não mandou leitura".
+    expect(v.registrarMemoria("p", "mac", leitura("verde")).mudou).toBe(true);
     expect(v.registrarMemoria("p", "mac", leitura("verde")).mudou).toBe(false);
     expect(v.registrarMemoria("p", "mac", leitura("amarela"))).toMatchObject({ mudou: true, nivel: "amarela", anterior: "verde" });
     expect(v.registrarMemoria("p", "mac", leitura("amarela")).mudou).toBe(false);
     expect(v.registrarMemoria("p", "mac", leitura("vermelha")).mudou).toBe(true);
-    expect(v.memoria("p")).toEqual({ nivel: "vermelha", totalMb: 1000, processador: null, carga: null, disco: null, discoNivel: null, discoSuportado: false });
+    expect(v.memoria("p")).toEqual({ nivel: "vermelha", totalMb: 1000, processador: null, carga: null, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false });
     expect(v.memoria("outra")).toBeNull();
     agora += VALIDADE_LEITURA_MS + 1;
     expect(v.memoria("p")).toBeNull();
+    // Depois de 2 min sem leitura, a próxima é a primeira de novo: avisa a tela.
+    expect(v.registrarMemoria("p", "mac", leitura("vermelha")).mudou).toBe(true);
+  });
+
+  it("corrigido em 2026-10-09: duas pessoas no mesmo Mac (modo local) — as duas veem a leitura, nenhuma apaga a da outra", () => {
+    let agora = 0;
+    const v = criarTrabalhosVivos(() => agora);
+    v.registrarMemoria("marlon", "mac", leitura("verde", 600));
+    agora += 1_000;
+    v.registrarMemoria("ana", "mac", leitura("verde", 600));
+    // Antes, a leitura ficava com o dono de quem puxou por último, e a tela do Marlon dizia "sem leitura".
+    expect(v.memoria("marlon")).toMatchObject({ nivel: "verde", totalMb: 600 });
+    expect(v.memoria("ana")).toMatchObject({ nivel: "verde", totalMb: 600 });
+    expect(v.memoria("outra")).toBeNull();
+    // Quem parou de mandar por 2 min sai do Mac; quem continua, não.
+    agora += VALIDADE_LEITURA_MS;
+    v.registrarMemoria("ana", "mac", leitura("amarela", 600));
+    expect(v.memoria("marlon")).toBeNull();
+    expect(v.memoria("ana")).toMatchObject({ nivel: "amarela" });
+    // E volta a ver quando volta a mandar (a primeira leitura dele de novo avisa a tela).
+    expect(v.registrarMemoria("marlon", "mac", leitura("amarela", 600)).mudou).toBe(true);
+    expect(v.memoria("marlon")).toMatchObject({ nivel: "amarela" });
   });
 
   it("revisão do #209: a mudança só do processador também vira frame (a pílula do Mac ocupado depende dele)", () => {
     const v = criarTrabalhosVivos(() => 0);
     const comCpu = (nivel: "verde" | "amarela" | "vermelha") => ({ ...leitura("verde"), processador: { nivel, carga: nivel === "verde" ? 0.2 : 1.4 } });
+    expect(v.registrarMemoria("p", "mac", comCpu("verde")).mudou).toBe(true);
     expect(v.registrarMemoria("p", "mac", comCpu("verde")).mudou).toBe(false);
     expect(v.registrarMemoria("p", "mac", comCpu("vermelha"))).toMatchObject({ mudou: true, nivel: "verde", processador: "vermelha" });
     expect(v.registrarMemoria("p", "mac", comCpu("vermelha")).mudou).toBe(false);
@@ -60,7 +85,7 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     v.registrarMemoria("p", "mac-a", leitura("verde", 400));
     expect(v.registrarMemoria("p", "mac-b", leitura("amarela", 600))).toMatchObject({ mudou: true, nivel: "amarela" });
     expect(v.registrarMemoria("p", "mac-a", leitura("verde", 400)).mudou).toBe(false);
-    expect(v.memoria("p")).toEqual({ nivel: "amarela", totalMb: 1000, processador: null, carga: null, disco: null, discoNivel: null, discoSuportado: false });
+    expect(v.memoria("p")).toEqual({ nivel: "amarela", totalMb: 1000, processador: null, carga: null, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false });
   });
 
   it("ADR-085: o processador de cada Mac — o pior para a pessoa, a leitura de um Mac para o puxar dele; leitura velha some", () => {
@@ -69,9 +94,9 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     v.registrarMemoria("p", "mac-a", { ...leitura("verde", 400), processador: { nivel: "amarela", carga: 0.8 } });
     v.registrarMemoria("p", "mac-b", { ...leitura("verde", 300), processador: { nivel: "vermelha", carga: 1.6 } });
     v.registrarMemoria("p", "mac-c", leitura("verde", 100));
-    expect(v.memoria("p")).toEqual({ nivel: "verde", totalMb: 800, processador: "vermelha", carga: 1.6, disco: null, discoNivel: null, discoSuportado: false });
-    expect(v.daMaquina("mac-a")).toEqual({ memoria: "verde", processador: "amarela", disco: null, discoNivel: null });
-    expect(v.daMaquina("mac-c")).toEqual({ memoria: "verde", processador: null, disco: null, discoNivel: null });
+    expect(v.memoria("p")).toEqual({ nivel: "verde", totalMb: 800, processador: "vermelha", carga: 1.6, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false });
+    expect(v.daMaquina("mac-a")).toEqual({ memoria: "verde", processador: "amarela", uso: null, carga: 0.8, disco: null, discoNivel: null });
+    expect(v.daMaquina("mac-c")).toEqual({ memoria: "verde", processador: null, uso: null, carga: null, disco: null, discoNivel: null });
     expect(v.daMaquina("mac-x")).toBeNull();
     agora = VALIDADE_LEITURA_MS + 1;
     expect(v.daMaquina("mac-a")).toBeNull();
@@ -80,8 +105,8 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
   it("#219: o disco de cada Mac vai no daMaquina; a pessoa vê o pior (o de menos espaço livre); mudar de nível vira frame", () => {
     const v = criarTrabalhosVivos(() => 0);
     const comDisco = (livreGb: number, totalGb = 500) => ({ ...leitura("verde"), disco: { livreMb: livreGb * 1024, totalMb: totalGb * 1024 } });
-    expect(v.registrarMemoria("p", "mac-a", comDisco(200)).mudou).toBe(false);
-    expect(v.daMaquina("mac-a")).toEqual({ memoria: "verde", processador: null, disco: { livreMb: 200 * 1024, totalMb: 500 * 1024 }, discoNivel: "verde" });
+    expect(v.registrarMemoria("p", "mac-a", comDisco(200)).mudou).toBe(true);
+    expect(v.daMaquina("mac-a")).toEqual({ memoria: "verde", processador: null, uso: null, carga: null, disco: { livreMb: 200 * 1024, totalMb: 500 * 1024 }, discoNivel: "verde" });
     expect(v.registrarMemoria("p", "mac-b", comDisco(8, 1000))).toMatchObject({ mudou: true, disco: "amarela" });
     expect(v.memoria("p")?.disco).toEqual({ livreMb: 8 * 1024, totalMb: 1000 * 1024 });
     expect(v.registrarMemoria("p", "mac-a", comDisco(190))).toMatchObject({ mudou: false, disco: "amarela" });
@@ -110,6 +135,24 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     const w = criarTrabalhosVivos(() => 0);
     w.registrarMemoria("q", "mac", { ...leitura("verde"), disco: null });
     expect(w.memoria("q")).toMatchObject({ disco: null, discoNivel: null, discoSuportado: true });
+  });
+
+  it("ADR-091: com o uso, o servidor recalcula — CPU com histerese, fila à parte, o portão pelo pior dos dois", () => {
+    const v = criarTrabalhosVivos(() => 0);
+    // O app manda o nível (o pior, para um servidor anterior); este recalcula dos números crus.
+    const comCpu = (uso: number, carga: number) => ({ ...leitura("verde"), processador: { nivel: "verde" as const, carga, uso } });
+    v.registrarMemoria("p", "mac", comCpu(0.92, 0.9));
+    expect(v.memoria("p")).toMatchObject({ processador: "vermelha", fila: "verde", uso: 0.92, carga: 0.9 });
+    // 87% não sai do vermelho (histerese de 5 pontos); 84% sai para o amarelo.
+    expect(v.registrarMemoria("p", "mac", comCpu(0.87, 0.9)).mudou).toBe(false);
+    expect(v.memoria("p")?.processador).toBe("vermelha");
+    expect(v.registrarMemoria("p", "mac", comCpu(0.84, 0.9))).toMatchObject({ mudou: true, processador: "amarela" });
+    // O caso de 09/10: núcleos a 75% e 3,0 por núcleo — processador apertando, fila engarrafada; o portão vê vermelho.
+    expect(v.registrarMemoria("p", "mac", comCpu(0.75, 3))).toMatchObject({ mudou: true, processador: "amarela", fila: "vermelha" });
+    expect(v.daMaquina("mac")).toMatchObject({ processador: "vermelha", uso: 0.75, carga: 3 });
+    // A fila só mudando de nível também vira frame.
+    expect(v.registrarMemoria("p", "mac", comCpu(0.75, 1))).toMatchObject({ mudou: true, fila: "verde" });
+    expect(v.daMaquina("mac")?.processador).toBe("amarela");
   });
 
   it("a última ferramenta do turno vivo (o último passo da faixa) some quando o turno acaba", () => {

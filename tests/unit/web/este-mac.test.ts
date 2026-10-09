@@ -96,6 +96,24 @@ describe("Seu espaço › Este Mac", () => {
     expect(doisSemMemoria).toContain("sem leitura de memória");
   });
 
+  it("ADR-091: com o uso da CPU, a barra é a CPU (com o porquê no clique) e a fila só aparece quando aperta", () => {
+    // 09/10: núcleos a 75%, 3,0 processos por núcleo.
+    const html = renderEsteMac(estadoCom([rodando], { processador: "amarela", usoProcessador: 0.75, cargaProcessador: 3, fila: "vermelha", segurando: true }));
+    expect(html).toMatch(/<summary class="mac-medidor"><b>Processador<\/b><span class="mac-barra nivel-amarela" aria-hidden="true"><i style="width: 75%"><\/i><\/span><span>apertando<\/span><\/summary>/);
+    expect(html).toContain("Os núcleos passaram 75% do tempo ocupados no último meio minuto.");
+    expect(html).toMatch(/<b>Fila<\/b><span class="mac-barra nivel-vermelha" aria-hidden="true"><i style="width: 100%"><\/i><\/span><span>engarrafada<\/span>/);
+    expect(html).toContain("quase sempre esperando o disco");
+    expect(html).toContain("Há 3 processos por núcleo querendo a vez.");
+    // Fila andando: a linha some (status curto à vista, detalhe escondido).
+    const folgado = renderEsteMac(estadoCom([rodando], { processador: "verde", usoProcessador: 0.3, cargaProcessador: 0.4, fila: "verde" }));
+    expect(folgado).not.toContain("<b>Fila</b>");
+    expect(folgado).toMatch(/<b>Processador<\/b><span class="mac-barra nivel-verde" aria-hidden="true"><i style="width: 30%">/);
+    // App anterior (sem o uso): a barra continua a carga, sem detalhe e sem fila.
+    const antigo = renderEsteMac(estadoCom([rodando], { processador: "vermelha", cargaProcessador: 1.3 }));
+    expect(antigo).toMatch(/<div class="mac-medidor"><b>Processador<\/b>/);
+    expect(antigo).not.toContain("<b>Fila</b>");
+  });
+
   it("o uso escolhido muda pela ação do reducer; o padrão é equilibrado", () => {
     expect(estadoInicial.usoDoMac).toBe("equilibrado");
     const e = reduzir(estadoCom([]), { tipo: "uso-do-mac", uso: "pouco" });

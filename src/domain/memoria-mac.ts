@@ -97,6 +97,79 @@ export function nivelDoProcessador(carga: number, nucleos: number): LeituraProce
   return { nivel: porNucleo >= CARGA_VERMELHA ? "vermelha" : porNucleo >= CARGA_AMARELA ? "amarela" : "verde", carga: arredondada };
 }
 
+/**
+ * A régua em duas (definido em 2026-10-09, ADR-091, opção C escolhida pelo Marlon). O `vm.loadavg` do macOS conta também
+ * quem espera o disco: em 09/10 ele marcava 3,0 por núcleo com os núcleos ~75% ocupados (um `du` em ~250 GB). A régua
+ * única dizia "Processador cheio" para um disco engarrafado. Agora são duas:
+ * - **processador**: a fração do tempo em que os núcleos trabalharam desde a última amostra (`os.cpus()`, ~30 s) — o
+ *   "% de CPU" do Monitor de Atividade. Amarela a partir de 70%, vermelha a partir de 90%;
+ * - **fila**: a mesma carga por núcleo de antes, com limiares altos — amarela a partir de 1,5, vermelha a partir de 2,0. Com
+ *   os núcleos cheios ela fica perto de 1; acima de 2 há mais gente esperando a vez do que núcleo, quase sempre o disco.
+ * Os limiares moram aqui e o servidor recalcula os níveis dos números crus: calibrar não pede app novo.
+ */
+export const USO_CPU_AMARELO = 0.7;
+export const USO_CPU_VERMELHO = 0.9;
+/** Histerese do processador (ADR-091): a fração oscila mais que o loadavg; para sair do nível, 5 pontos abaixo. */
+export const USO_CPU_SAI_AMARELO = 0.65;
+export const USO_CPU_SAI_VERMELHO = 0.85;
+export const FILA_AMARELA = 1.5;
+export const FILA_VERMELHA = 2.0;
+
+/** Tempos de CPU somados de todos os núcleos (ms), de `os.cpus()`: o ocupado e o total. */
+export type TemposCpu = { ocupado: number; total: number };
+
+export function temposDaCpu(cpus: readonly { times: { user: number; nice: number; sys: number; idle: number; irq: number } }[]): TemposCpu {
+  let ocupado = 0;
+  let total = 0;
+  for (const { times: t } of cpus) {
+    ocupado += t.user + t.nice + t.sys + t.irq;
+    total += t.user + t.nice + t.sys + t.irq + t.idle;
+  }
+  return { ocupado, total };
+}
+
+/** A fração ocupada entre duas leituras (0 a 1, duas casas). Sem tempo entre elas (ou contador que voltou), null. */
+export function usoDaCpu(antes: TemposCpu, depois: TemposCpu): number | null {
+  const total = depois.total - antes.total;
+  const ocupado = depois.ocupado - antes.ocupado;
+  if (!(total > 0) || ocupado < 0) return null;
+  return Math.round(Math.min(1, ocupado / total) * 100) / 100;
+}
+
+export function nivelDoUsoCpu(uso: number, anterior: NivelPressao | null = null): NivelPressao {
+  if (uso >= USO_CPU_VERMELHO || (anterior === "vermelha" && uso >= USO_CPU_SAI_VERMELHO)) return "vermelha";
+  if (uso >= USO_CPU_AMARELO || ((anterior === "vermelha" || anterior === "amarela") && uso >= USO_CPU_SAI_AMARELO)) return "amarela";
+  return "verde";
+}
+
+export function nivelDaFila(cargaPorNucleo: number): NivelPressao {
+  return cargaPorNucleo >= FILA_VERMELHA ? "vermelha" : cargaPorNucleo >= FILA_AMARELA ? "amarela" : "verde";
+}
+
+/**
+ * A leitura do processador que o app manda (ADR-091): `uso` e `carga` crus, e `nivel` = o pior dos dois (é o que um
+ * servidor anterior lê e usa no portão). Sem `uso` (sem a leitura da CPU), só a fila.
+ */
+export function leituraDoProcessador(uso: number | null, cargaPorNucleo: number): LeituraProcessador {
+  const carga = Math.round(cargaPorNucleo * 100) / 100;
+  const fila = nivelDaFila(carga);
+  if (uso === null) return { nivel: fila, carga };
+  return { nivel: piorNivel(nivelDoUsoCpu(uso), fila) ?? fila, carga, uso };
+}
+
+/**
+ * Os níveis que o servidor guarda de uma leitura (ADR-091): `processador` (a CPU), `fila` e `portao` (o pior dos dois, o
+ * que o portão usa). Com `uso`, recalculados aqui com a histerese do processador (`anterior`). Sem `uso` (app anterior a
+ * esta régua), a leitura vale como era: o nível mandado é o do processador e não há fila.
+ */
+export function niveisDoProcessador(p: LeituraProcessador | undefined, anterior: NivelPressao | null): { processador: NivelPressao | null; fila: NivelPressao | null; portao: NivelPressao | null } {
+  if (!p) return { processador: null, fila: null, portao: null };
+  if (p.uso === undefined) return { processador: p.nivel, fila: null, portao: p.nivel };
+  const processador = nivelDoUsoCpu(p.uso, anterior);
+  const fila = nivelDaFila(p.carga);
+  return { processador, fila, portao: piorNivel(processador, fila) };
+}
+
 const GRAVIDADE: Record<NivelPressao, number> = { verde: 0, amarela: 1, vermelha: 2 };
 const peloMenos = (n: NivelPressao | null | undefined, minimo: NivelPressao): boolean => n !== null && n !== undefined && GRAVIDADE[n] >= GRAVIDADE[minimo];
 

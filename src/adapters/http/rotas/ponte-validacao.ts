@@ -88,9 +88,11 @@ export function memoria(v: unknown): LeituraMemoria | undefined {
   // não a leitura toda — um campo novo com defeito não pode derrubar a renovação do turno.
   const p = o.processador !== null && typeof o.processador === "object" && !Array.isArray(o.processador) ? (o.processador as Record<string, unknown>) : null;
   const valido = p !== null && (p.nivel === "verde" || p.nivel === "amarela" || p.nivel === "vermelha") && typeof p.carga === "number" && Number.isFinite(p.carga) && p.carga >= 0 && p.carga <= 1000;
+  // ADR-091: o uso da CPU (0 a 1) é opcional como o resto; fora disso some só ele, e a leitura vale como a de um app anterior.
+  const uso = valido && typeof p.uso === "number" && Number.isFinite(p.uso) && p.uso >= 0 && p.uso <= 1 ? p.uso : undefined;
   // Revisão do #224: `null` é "o app mede, mas não conseguiu" (a tela diz "sem leitura"); fora do formato, como app anterior.
   const disco = o.disco === null ? null : discoValido(o.disco);
-  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, ...(valido ? { processador: { nivel: p.nivel as NivelPressao, carga: p.carga as number } } : {}), ...(disco !== undefined ? { disco } : {}) };
+  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, ...(valido ? { processador: { nivel: p.nivel as NivelPressao, carga: p.carga as number, ...(uso !== undefined ? { uso } : {}) } } : {}), ...(disco !== undefined ? { disco } : {}) };
 }
 /** definido em 2026-10-09 (#219): 1 EB em MB, folga para qualquer volume; acima disso é defeito. */
 const TETO_DISCO_MB = 1_099_511_627_776;

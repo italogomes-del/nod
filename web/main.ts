@@ -1160,6 +1160,9 @@ async function boot(): Promise<void> {
     // decisao.* (o outbox manda à dona); sem isto o pedido dela só aparecia — e só avisava — quando
     // outra coisa relesse "Sua vez".
     if (ticks % TICKS_POR_RELEITURA === 0 && estado.sessao) estado = reduzir(estado, { tipo: "invalidar", quais: ["sua-vez"] });
+    // ADR-091 (definido em 2026-10-09): o uso da CPU muda a cada leitura sem mudar de nível (e só a mudança de nível vira
+    // frame) — com Este Mac aberta, os números são relidos a cada 30 s, a batida do amostrador.
+    if (ticks % 2 === 0 && estado.sessao && estado.espaco?.secao === "este-mac") estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);

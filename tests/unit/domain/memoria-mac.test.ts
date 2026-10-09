@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, DISCO_SAI_ALERTA_MB, DISCO_SAI_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, leituraDoTurno, nivelDoDisco, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
+import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, DISCO_SAI_ALERTA_MB, DISCO_SAI_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, FILA_AMARELA, FILA_VERMELHA, leituraDoProcessador, leituraDoTurno, niveisDoProcessador, nivelDaFila, nivelDoDisco, nivelDoUsoCpu, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo, temposDaCpu, USO_CPU_AMARELO, USO_CPU_VERMELHO, usoDaCpu } from "../../../src/domain/memoria-mac.ts";
 import type { UsoDoMac } from "../../../src/contracts/raio-x.ts";
 
 /** #194 (ADR-083 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
@@ -240,5 +240,48 @@ describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta
     // Com turno vivo, ou ainda antes da hora: nada.
     expect(esperaDoMac({ ...volta, turnoVivoId: "t" }, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBeNull();
     expect(esperaDoMac({ ...volta, acordaEm: agora + 60_000 }, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBeNull();
+  });
+});
+
+/** ADR-091 (definido em 2026-10-09, opção C escolhida pelo Marlon): a régua em duas — o uso da CPU e a fila. */
+describe("ADR-091: processador pelo uso da CPU, fila pela carga por núcleo", () => {
+  it("o uso é a fração ocupada entre duas leituras de os.cpus(), somados os núcleos", () => {
+    const antes = temposDaCpu([{ times: { user: 100, nice: 0, sys: 50, idle: 850, irq: 0 } }, { times: { user: 0, nice: 0, sys: 0, idle: 1000, irq: 0 } }]);
+    expect(antes).toEqual({ ocupado: 150, total: 2000 });
+    const depois = temposDaCpu([{ times: { user: 900, nice: 0, sys: 100, idle: 1000, irq: 0 } }, { times: { user: 700, nice: 0, sys: 100, idle: 1200, irq: 0 } }]);
+    // (1800 − 150) ocupados em (4000 − 2000): 0,825.
+    expect(usoDaCpu(antes, depois)).toBe(0.83);
+    // Sem tempo entre as leituras, ou contador que voltou: sem leitura.
+    expect(usoDaCpu(antes, antes)).toBeNull();
+    expect(usoDaCpu(depois, antes)).toBeNull();
+  });
+
+  it("CPU: amarela a partir de 70%, vermelha a partir de 90%; para sair, 5 pontos abaixo", () => {
+    expect([0.69, 0.7, 0.89, 0.9].map((u) => nivelDoUsoCpu(u))).toEqual(["verde", "amarela", "amarela", "vermelha"]);
+    expect(nivelDoUsoCpu(0.86, "vermelha")).toBe("vermelha");
+    expect(nivelDoUsoCpu(0.84, "vermelha")).toBe("amarela");
+    expect(nivelDoUsoCpu(0.66, "amarela")).toBe("amarela");
+    expect(nivelDoUsoCpu(0.64, "amarela")).toBe("verde");
+    expect(nivelDoUsoCpu(0.66, "verde")).toBe("verde");
+    expect([USO_CPU_AMARELO, USO_CPU_VERMELHO, FILA_AMARELA, FILA_VERMELHA]).toEqual([0.7, 0.9, 1.5, 2]);
+  });
+
+  it("fila: amarela a partir de 1,5 por núcleo, vermelha a partir de 2,0 — o 1,0 de antes é núcleo cheio, não engarrafamento", () => {
+    expect([1, 1.49, 1.5, 1.99, 2, 22].map(nivelDaFila)).toEqual(["verde", "verde", "amarela", "amarela", "vermelha", "vermelha"]);
+  });
+
+  it("a leitura que o app manda leva o pior dos dois no `nivel` (o que um servidor anterior usa) e os números crus", () => {
+    // 09/10: núcleos a 75% e 3,0 por núcleo.
+    expect(leituraDoProcessador(0.75, 3)).toEqual({ nivel: "vermelha", carga: 3, uso: 0.75 });
+    expect(leituraDoProcessador(0.95, 1.1)).toEqual({ nivel: "vermelha", carga: 1.1, uso: 0.95 });
+    expect(leituraDoProcessador(0.3, 0.456)).toEqual({ nivel: "verde", carga: 0.46, uso: 0.3 });
+    expect(leituraDoProcessador(null, 1.6)).toEqual({ nivel: "amarela", carga: 1.6 });
+  });
+
+  it("o servidor recalcula dos números; leitura de app anterior (sem uso) vale como era", () => {
+    expect(niveisDoProcessador({ nivel: "verde", carga: 3, uso: 0.75 }, null)).toEqual({ processador: "amarela", fila: "vermelha", portao: "vermelha" });
+    expect(niveisDoProcessador({ nivel: "vermelha", carga: 0.5, uso: 0.87 }, "vermelha")).toEqual({ processador: "vermelha", fila: "verde", portao: "vermelha" });
+    expect(niveisDoProcessador({ nivel: "vermelha", carga: 1.2 }, null)).toEqual({ processador: "vermelha", fila: null, portao: "vermelha" });
+    expect(niveisDoProcessador(undefined, null)).toEqual({ processador: null, fila: null, portao: null });
   });
 });
