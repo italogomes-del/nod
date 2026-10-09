@@ -148,7 +148,10 @@ describe("espera por memória e disco", () => {
     expect(situacaoDe(rotinaPorMemoria, [], true)).toBe("esperando o Mac liberar memória");
     expect(situacaoDe(pessoaPorDisco, [], true)).toBe("esperando espaço no disco");
     expect(seguradoPeloMac(pessoaPorDisco, true)).toBe(true);
-    expect(situacaoDe(pessoaPorDisco, [], false)).toBe("na fila");
+    // Revisto em 2026-10-09 (a tela fala por máquina): o motivo do servidor já é o da máquina do trabalho — o `segurando`
+    // (o pior entre as máquinas) não o desliga; só vale para o trabalho que veio sem motivo (servidor anterior).
+    expect(situacaoDe(pessoaPorDisco, [], false)).toBe("esperando espaço no disco");
+    expect(situacaoDe({ ...pessoaPorDisco, esperaDoMac: null }, [], true)).toBe("na fila");
     // "começa depois da …" continua na frente (ela esperaria de qualquer jeito).
     const antes = trabalho("Migrar", { estado: "rodando" });
     expect(situacaoDe({ ...pessoaPorDisco, depoisDeTrabalhoId: antes.id }, [antes], true)).toBe("começa depois da Migrar");
@@ -213,7 +216,8 @@ describe("espera por memória e disco", () => {
     const volta = trabalho("Acompanhar o CI", { estado: "rodando", acordaEm: AGORA - 60_000, esperaDoMac: "disco" });
     expect(situacaoDe(volta, [], true, AGORA)).toBe("esperando espaço no disco");
     expect(situacaoDe({ ...volta, esperaDoMac: null }, [], true, AGORA)).toMatch(/^volta /);
-    expect(situacaoDe(volta, [], false, AGORA)).toMatch(/^volta /);
+    // Revisto em 2026-10-09: o motivo vem da máquina do trabalho; o `segurando` do pior não o desliga.
+    expect(situacaoDe(volta, [], false, AGORA)).toBe("esperando espaço no disco");
   });
 
   it("o CSS do detalhe usa só tokens e some a seta nativa; a barra não some no hover da linha", () => {

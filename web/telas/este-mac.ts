@@ -2,7 +2,7 @@ import type { UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { DiscoDoMac, MotivoEsperaMac, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { esc, iconeAgente } from "../lib/render.ts";
-import { aberto, foraDoMac, memoriaLegivel, pilulaMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, textoDaEspera } from "../lib/trabalhos.ts";
+import { aberto, foraDoMac, leituraDoMac, maquinasDe, memoriaLegivel, noMac, pilulaMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, textoDaEspera } from "../lib/trabalhos.ts";
 import { agente } from "./trabalhos.ts";
 
 /**
@@ -17,9 +17,9 @@ export const USOS: readonly { id: UsoDoMac; nome: string; explicacao: string }[]
   { id: "livre", nome: "O quanto precisar", explicacao: "Nada espera, nem com a memória crítica. Só o disco quase sem espaço segura trabalho novo, em qualquer opção." },
 ];
 
-const NOME_MEMORIA: Record<NivelPressao, string> = { verde: "folgada", amarela: "em alerta", vermelha: "crítica" };
-const NOME_PROCESSADOR: Record<NivelPressao, string> = { verde: "folgado", amarela: "apertando", vermelha: "cheio" };
-const NOME_FILA: Record<NivelPressao, string> = { verde: "andando", amarela: "crescendo", vermelha: "engarrafada" };
+export const NOME_MEMORIA: Record<NivelPressao, string> = { verde: "folgada", amarela: "em alerta", vermelha: "crítica" };
+export const NOME_PROCESSADOR: Record<NivelPressao, string> = { verde: "folgado", amarela: "apertando", vermelha: "cheio" };
+export const NOME_FILA: Record<NivelPressao, string> = { verde: "andando", amarela: "crescendo", vermelha: "engarrafada" };
 /**
  * A barra da memória acompanha o nível do macOS (ele não diz a porcentagem). A do processador é o uso da CPU (ADR-091);
  * com app anterior, a carga por núcleo, como na ADR-085.
@@ -89,24 +89,28 @@ function grupo(titulo: string, legenda: string, linhas: string[]): string {
 
 export function renderEsteMac(estado: Estado): string {
   const dto = estado.trabalhos;
-  const lista = (dto?.trabalhos ?? []).filter(aberto);
-  const segurando = dto?.segurando === true;
-  const motivo: MotivoEsperaMac | null = dto?.motivoEspera ?? null;
-  const tudoNovo = dto?.seguraTudoNovo === true;
-  const disco = dto?.disco ?? null;
+  // Revisto em 2026-10-09 (a tela fala por máquina): Este Mac é só do Mac — a leitura dele e os trabalhos que rodam (ou
+  // vão rodar) nele. A VM aparece em Máquinas.
+  const mac = leituraDoMac(dto);
+  const outras = (maquinasDe(dto) ?? []).filter((m) => !m.ehMac);
+  const lista = (dto?.trabalhos ?? []).filter((t) => aberto(t) && noMac(t));
+  const segurando = mac.motivoEspera !== null;
+  const motivo: MotivoEsperaMac | null = mac.motivoEspera;
+  const tudoNovo = mac.seguraTudoNovo;
+  const disco = mac.disco ?? null;
   const porMemoria = (a: TrabalhoDto, b: TrabalhoDto) => (b.memoriaMb ?? 0) - (a.memoriaMb ?? 0);
   const trabalhando = lista.filter((t) => t.estado === "rodando" && t.turnoVivoId !== null).sort(porMemoria);
   const esperandoVez = lista.filter((t) => seguradoPeloMac(t, segurando));
   // ADR-086: quem espera um colega ou a hora marcada não ocupa o Mac — aparece à parte, para a pessoa ver que a espera
   // não custa nada aqui (protótipo "Nod — Ritmo do Mac", quadros 1–2).
   const fora = lista.filter((t) => foraDoMac(t));
-  const memoria = dto?.pressao ?? null;
-  const processador = dto?.processador ?? null;
-  const carga = dto?.cargaProcessador ?? null;
+  const memoria = mac.pressao;
+  const processador = mac.processador;
+  const carga = mac.cargaProcessador;
   // ADR-091: com o uso, a barra é a CPU de verdade e a fila aparece à parte, só quando aperta (design limpo).
-  const usoCpu = dto?.usoProcessador ?? null;
-  const fila = dto?.fila ?? null;
-  const total = dto?.memoriaTotalMb ?? null;
+  const usoCpu = mac.usoProcessador;
+  const fila = mac.fila;
+  const total = mac.memoriaBotsMb;
   const usam = trabalhando.length === 0 ? "nenhum processo dos bots agora"
     : total !== null && total > 0 ? `${trabalhando.length === 1 ? "usa" : "usam"} ${memoriaLegivel(total)} do seu Mac` : "sem leitura de memória";
   // #219: "esperando o Mac liberar memória" / "esperando espaço no disco" / "esperando o Mac aliviar".
@@ -128,7 +132,7 @@ export function renderEsteMac(estado: Estado): string {
       + (disco
         ? medidor("Disco", 1 - disco.livreMb / disco.totalMb, `${discoLegivel(disco.livreMb)} livres`, disco.nivel, detalheDoDisco(disco))
         // Revisão do #224: "atualize o app" só quando nenhum app manda o disco; o app novo que não conseguiu medir, "sem leitura".
-        : medidor("Disco", null, dto?.discoSuportado ? "sem leitura" : "sem leitura (atualize o app)", null));
+        : medidor("Disco", null, mac.discoSuportado ? "sem leitura" : "sem leitura (atualize o app)", null));
   const grupos = grupo("Trabalhando", "os que mais usam memória primeiro", trabalhando.map((t) => linhaBot(estado, t, t.memoriaMb ? memoriaLegivel(t.memoriaMb) : tempoDe(t, estado.agora), segurando)))
     + grupo(esperandoO.charAt(0).toUpperCase() + esperandoO.slice(1), "começam sozinhos, na ordem da fila", esperandoVez.map((t) => linhaBot(estado, t, "", segurando)))
     + grupo("Fora do Mac", "esperando sem ocupar o Mac; voltam sozinhas", fora.map((t) => linhaBot(estado, t, "", segurando)));
@@ -143,5 +147,6 @@ export function renderEsteMac(estado: Estado): string {
       <h3 class="espaco-subtitulo">Quanto os bots podem usar</h3>
       <div class="segmentado uso-do-mac" role="group" aria-label="Quanto os bots podem usar do Mac">${botoes}</div>
       <p class="intro" aria-live="polite">${esc(explicacao)}</p>
+      ${outras.length ? `<p class="intro">Vale também para ${outras.length === 1 ? esc(outras[0]!.nome) : "as outras máquinas"}: cada uma segura trabalho novo pela própria leitura, em Máquinas.</p>` : ""}
     </section>`;
 }

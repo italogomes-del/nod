@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, foraDoMac, quandoVolta, voltaMarcada, filtrar, memoriaLegivel, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, foraDoMac, quandoVolta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { usd } from "./modo-dev.ts";
@@ -149,14 +149,17 @@ export function renderGavetaTrabalhos(estado: Estado, agenteId: string): string 
   return secoes.join("") || '<p class="mudo">Nenhuma task hoje. Quando o bot abrir uma, ela aparece aqui — e no chat, numa linha.</p>';
 }
 
-/** Contagem do topo de "Todos os trabalhos": "6 rodando · 1 na fila · 2 precisam de você · os bots usam 3,1 GB do seu Mac". */
-function resumoDosTrabalhos(g: GruposTrabalhos, memoriaMb: number | null): string {
+/**
+ * Contagem do topo de "Todos os trabalhos": "6 rodando · 1 na fila · 2 precisam de você · os bots usam 3,1 GB do seu Mac".
+ * Revisto em 2026-10-09 (a tela fala por máquina): a memória por máquina ("0,4 GB do seu Mac e 0,7 GB na nod-motor-teste").
+ */
+function resumoDosTrabalhos(g: GruposTrabalhos, memoria: string): string {
   const partes = [
     `${g.trabalhando.length} rodando`,
     g.fila.length ? `${g.fila.length} na fila` : "",
     g.precisa.length ? `${g.precisa.length} ${g.precisa.length === 1 ? "precisa" : "precisam"} de você` : "",
     // definido em 2026-10-08 (QA): sem leitura útil (0 MB, harness sem processo próprio) a frase some em vez de dizer "0 MB".
-    memoriaMb !== null && memoriaMb > 0 ? `os bots usam ${memoriaLegivel(memoriaMb)} do seu Mac` : "",
+    memoria,
   ];
   return partes.filter(Boolean).join(" · ");
 }
@@ -183,7 +186,11 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   // #219: uma pílula só; o disco quase cheio vai na frente da de memória (é o que pede a mão da pessoa).
   const motivo = estado.trabalhos.motivoEspera ?? null;
   const esperam = todos.filter((t) => seguradoPeloMac(t, segurando)).length;
-  const pilula = (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, esperam, true, motivo);
+  // Revisto em 2026-10-09 (a tela fala por máquina): a pílula nomeia quem segura (o Mac ou a VM); a de memória é só do Mac.
+  const maquinas = maquinasDe(estado.trabalhos);
+  const pilula = maquinas
+    ? pilulaDasMaquinas(maquinas.filter((m) => m.motivoEspera === "disco"), todos) || pilulaMemoria(leituraDoMac(estado.trabalhos).pressao, abertos, false) || pilulaDasMaquinas(maquinas, todos)
+    : (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, esperam, true, motivo);
   const linha = (t: TrabalhoDto): string => {
     const bot = agente(estado, t.agenteId);
     const mem = aberto(t) && t.memoriaMb !== null ? ` · ${memoriaLegivel(t.memoriaMb)}` : "";
@@ -193,7 +200,7 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => `<section class="tt-grupo" data-grupo="${g.chave}"><h2>${g.titulo} · ${grupos[g.chave].length}${g.chave === "trabalhando" && grupos.trabalhando.some((t) => t.memoriaMb !== null) ? " · os que mais usam memória primeiro" : ""}</h2><div class="tt-lista">${grupos[g.chave].map(linha).join("")}</div></section>`).join("");
   const vazio = filtro === "todos" ? "Nenhum bot está trabalhando agora. Quando um bot abrir uma task, rodar uma rotina ou atender um colega, aparece aqui." : "Nada com este filtro hoje.";
   return `<section class="tela-trabalhos" aria-label="Todos os trabalhos">
-    <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoDosTrabalhos(agrupar(todos, estado.agora), estado.trabalhos.memoriaTotalMb))}</p></div><div class="tt-filtros" role="group" aria-label="Filtrar trabalhos">${filtros}</div></header>
+    <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoDosTrabalhos(agrupar(todos, estado.agora), memoriaDosBots(estado.trabalhos)))}</p></div><div class="tt-filtros" role="group" aria-label="Filtrar trabalhos">${filtros}</div></header>
     ${pilula}
     ${secoes || `<p class="tt-vazio">${vazio}</p>`}
   </section>`;

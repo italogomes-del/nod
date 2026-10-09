@@ -7,6 +7,7 @@ import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
+import { alvoDoTurno } from "./alvo-da-maquina.ts";
 import { data, dataOuNull, ms, msOuNull } from "./conversao.ts";
 
 interface Linha {
@@ -200,17 +201,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
-        /*
-         * ADR-090: a máquina-alvo do turno `t`, em ordem — o "desta vez" (ato da pessoa), a máquina do bot, o padrão da
-         * pessoa. Cada nível só vale se a chave está viva e é da dona do turno (não revogada, não vencida); um nível que não
-         * vale passa a vez ao próximo, e sem nenhum o alvo é nulo: qualquer máquina. A fila nunca prende um turno numa
-         * máquina que não pode mais aparecer.
-         */
-        const viva = (id: ReturnType<typeof trx>) => trx`(select k.id::text from maquina_tokens k where k.tenant_id = t.tenant_id and k.owner_id = t.owner_id and k.id = ${id}
-          and k.revogado_em is null and (k.expira_em is null or k.expira_em > ${data(p.agora)}))`;
-        const alvo = trx`coalesce(${viva(trx`t.maquina_desta_vez`)},
-          ${viva(trx`(select ag.maquina_id from agentes ag where ag.tenant_id = t.tenant_id and ag.id = t.agente_id)`)},
-          ${viva(trx`(select pr.maquina_padrao_id from preferencias pr where pr.tenant_id = t.tenant_id and pr.owner_id = t.owner_id)`)})`;
+        // ADR-090: a máquina-alvo do turno `t` (alvo-da-maquina.ts; a lista de trabalhos usa a mesma regra).
+        const alvo = alvoDoTurno(trx, p.agora);
         const [l] = await trx<Linha[]>`
           update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true
           where (tenant_id, id) = (

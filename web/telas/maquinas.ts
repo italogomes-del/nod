@@ -3,6 +3,8 @@ import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConectarMaquina, Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
+import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
+import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR } from "./este-mac.ts";
 
 /**
  * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
@@ -37,6 +39,32 @@ function chipsDasIas(m: MaquinaDto): string {
   return ias.length ? `<div class="maq-ias">${ias.join("")}</div>` : "";
 }
 
+/**
+ * A leitura da máquina no cartão (definido em 2026-10-09, a tela fala por máquina): o status curto à vista — se ela
+ * segura trabalho novo agora e quantos esperam — e os números atrás do clique (memória `marlon-design-limpo-info-escondida`).
+ * Sem leitura dela (motor anterior, ou sem contato), nada.
+ */
+export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): string {
+  const l = maquinasDe(estado.trabalhos)?.find((x) => x.id === id);
+  if (!l) return "";
+  const esperam = (estado.trabalhos?.trabalhos ?? []).filter((t) => seguradoPeloMac(t, false) && t.maquina?.id === id).length;
+  const oQue = l.motivoEspera === "disco" ? "espaço no disco" : l.motivoEspera === "memoria" ? "ela liberar memória" : "ela aliviar";
+  const curto = l.motivoEspera === null ? "Trabalho novo começa na hora"
+    : `${l.motivoEspera === "disco" ? "Pouco espaço no disco" : l.motivoEspera === "memoria" ? "Pouca memória" : "Ocupada"} · ${esperam > 0 ? `${esperam} ${esperam === 1 ? "trabalho espera" : "trabalhos esperam"}` : "trabalho novo espera"} ${oQue}`;
+  const nivel = l.motivoEspera === null ? "verde" : l.seguraTudoNovo || l.pressao === "vermelha" ? "vermelha" : "amarela";
+  const numeros = [
+    `Memória ${NOME_MEMORIA[l.pressao]}`,
+    l.processador ? `processador ${NOME_PROCESSADOR[l.processador]}${l.usoProcessador !== null ? ` (${Math.round(l.usoProcessador * 100)}% do tempo ocupado)` : ""}` : "processador sem leitura",
+    l.fila && l.fila !== "verde" && l.cargaProcessador !== null ? `fila ${NOME_FILA[l.fila]} (${l.cargaProcessador.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} processos por núcleo)` : "",
+    l.disco ? `disco com ${discoLegivel(l.disco.livreMb)} livres de ${discoLegivel(l.disco.totalMb)}` : "disco sem leitura",
+    l.memoriaBotsMb > 0 ? `os bots usam ${memoriaLegivel(l.memoriaBotsMb)}` : "",
+  ].filter(Boolean).join(" · ");
+  const porque = l.motivoEspera === null ? ""
+    : l.seguraTudoNovo ? " Com o disco quase sem espaço, nenhuma task nova começa nela; as que já rodam continuam."
+      : " Rotinas e pedidos entre bots que ainda não começaram esperam; o que você pede começa.";
+  return `<details class="maq-leitura" data-disclosure="maq-leitura-${esc(id)}"><summary><span class="maq-nivel nivel-${nivel}" aria-hidden="true"></span><span>${esc(curto)}</span></summary><p class="mac-det-txt">${esc(numeros)}.${esc(porque)} O quanto os bots podem usar (Este Mac) vale para todas as máquinas.</p></details>`;
+}
+
 function cartao(estado: Estado, m: MaquinaDto): string {
   const aqui = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id);
   const quem = aqui.length === 0 ? "Nenhum bot trabalha só aqui" : aqui.length === 1 ? `${aqui[0]!.nome} trabalha aqui` : `${aqui.length} bots trabalham aqui: ${aqui.map((b) => b.nome).join(", ")}`;
@@ -50,6 +78,7 @@ function cartao(estado: Estado, m: MaquinaDto): string {
       ${estadoTxt}
     </div>
     ${chipsDasIas(m)}
+    ${m.conectada ? leituraNoCartao(estado, m.id) : ""}
     <div class="maq-quem"><span class="maq-avatares">${aqui.slice(0, 6).map((b) => iconeAgente(b, "sm")).join("")}</span><span>${esc(quem)}</span></div>
   </div>`;
 }

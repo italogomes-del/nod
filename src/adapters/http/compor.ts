@@ -384,6 +384,17 @@ export function comporApp(o: OpcoesCompor): App {
   const trabalhosVivos = criarTrabalhosVivos(relogio);
   const services: Services = {
     trabalhosVivos,
+    // A tela fala por máquina (2026-10-09): o nome de cada máquina e se é um Mac. Com o servidor no Mac (ADR-092), a
+    // máquina deste processo é "Este Mac" e o turno sem alvo é dela.
+    maquinas: {
+      leituras: (pessoaId) => trabalhosVivos.porMaquina(pessoaId),
+      identificar(escopo, id) {
+        if (!compartilhado && id === machineId) return { nome: "Este Mac", ehMac: true };
+        const m = ponteHttp.maquina(escopo, id);
+        return m ? { nome: m.nome, ehMac: m.plataforma === "darwin" } : null;
+      },
+      macDoServidor: compartilhado || !machineId ? null : machineId,
+    },
     relogio,
     tokenTurno: tokens,
     planos: {

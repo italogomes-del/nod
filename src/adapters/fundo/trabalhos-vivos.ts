@@ -1,3 +1,4 @@
+import type { LeituraDaMaquinaViva } from "../../contracts/maquina.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
 import { niveisDoProcessador, nivelDoDisco, piorNivel } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
@@ -18,7 +19,8 @@ const TURNOS_GUARDADOS = 1000;
  * O que a pessoa via da última vez: o pior nível de memória e o pior de processador entre os Macs vivos dela, e (#219) o
  * nível do pior disco.
  */
-type Visto = { nivel: NivelPressao; processador: NivelPressao | null; fila?: NivelPressao | null; disco?: NivelPressao | null };
+type Visto = { nivel: NivelPressao; processador: NivelPressao | null; fila?: NivelPressao | null; disco?: NivelPressao | null; porMaquina?: string };
+
 
 /**
  * `mudou`: o frame `memoria.mudou` sai (a pílula e a lista relêem). ADR-085: a mudança só do processador também conta
@@ -60,6 +62,19 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
   const viva = (m: LeituraGuardada) => agora() - m.em <= VALIDADE_LEITURA_MS;
   /** A pessoa mandou leitura deste Mac nos últimos 2 min (o mesmo prazo da leitura). */
   const usa = (m: LeituraGuardada, pessoaId: string) => agora() - (m.pessoas.get(pessoaId) ?? -Infinity) <= VALIDADE_LEITURA_MS;
+
+  /** As máquinas vivas que a pessoa usa, cada uma com a própria leitura (a ordem é a de chegada da primeira leitura). */
+  function porMaquina(pessoaId: string): LeituraDaMaquinaViva[] {
+    return [...maquinas.entries()].filter(([, m]) => viva(m) && usa(m, pessoaId)).map(([machineId, m]) => ({ machineId, nivel: m.nivel, totalMb: m.totalMb, processador: m.processador, fila: m.fila, portao: m.portao, uso: m.uso, carga: m.carga, disco: m.disco, discoNivel: m.discoNivel, discoMedido: m.discoMedido }));
+  }
+
+  /**
+   * A tela fala por máquina (2026-10-09): o que cada máquina mostra, numa chave só. A pior não muda quando a VM aperta com
+   * o Mac já apertado, mas a pílula e a linha da VM mudam: sem isto o frame não sairia.
+   */
+  function assinatura(pessoaId: string): string {
+    return porMaquina(pessoaId).map((m) => `${m.machineId}:${m.nivel}/${m.portao ?? "-"}/${m.discoNivel ?? "-"}`).sort().join(" ");
+  }
 
   function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; uso: number | null; fila: NivelPressao | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoSuportado: boolean } | null {
     const vivas = [...maquinas.values()].filter((m) => viva(m) && usa(m, pessoaId));
@@ -139,12 +154,12 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
       }
       const juntos = daPessoa(pessoaId);
       // #219: o disco mudar de nível também vira o frame (a lista relê o motivo da espera e Este Mac, o disco).
-      const atual: Visto = { nivel: juntos?.nivel ?? leitura.nivel, processador: juntos?.processador ?? null, fila: juntos?.fila ?? null, disco: juntos?.discoNivel ?? null };
+      const atual: Visto = { nivel: juntos?.nivel ?? leitura.nivel, processador: juntos?.processador ?? null, fila: juntos?.fila ?? null, disco: juntos?.discoNivel ?? null, porMaquina: assinatura(pessoaId) };
       const antes = vistoPorPessoa.get(pessoaId) ?? null;
       vistoPorPessoa.set(pessoaId, atual);
       // Corrigido em 2026-10-09: a primeira leitura (no boot, ou depois de 2 min sem nenhuma) sempre vira frame, mesmo
       // verde — a tela aberta antes dela dizia "O Mac ainda não mandou leitura" até o nível mudar.
-      const mudou = antes === null || antes.nivel !== atual.nivel || antes.processador !== atual.processador || (antes.fila ?? null) !== (atual.fila ?? null) || (antes.disco ?? "verde") !== (atual.disco ?? "verde");
+      const mudou = antes === null || antes.nivel !== atual.nivel || antes.processador !== atual.processador || (antes.fila ?? null) !== (atual.fila ?? null) || (antes.disco ?? "verde") !== (atual.disco ?? "verde") || (antes.porMaquina ?? "") !== (atual.porMaquina ?? "");
       return { mudou, nivel: atual.nivel, anterior: antes?.nivel ?? null, processador: atual.processador, fila: atual.fila, disco: atual.disco, vistoAntes: antes };
     },
     /** Revisão do #209: o evento da mudança não foi gravado — volta o "visto" para a próxima leitura refazer o frame. */
@@ -165,6 +180,7 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
       return usoTrocadoEm.get(pessoaId) ?? 0;
     },
     memoria: daPessoa,
+    porMaquina,
     daMaquina,
   };
 }

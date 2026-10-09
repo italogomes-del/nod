@@ -3,13 +3,14 @@ import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
-import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
+import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquina.ts";
+import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac } from "../domain/memoria-mac.ts";
+import { DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
-import type { NovoTrabalho } from "../repositories/trabalhos.repo.ts";
+import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -152,8 +153,8 @@ export async function linhaTrabalhoAberto(deps: DepsTrabalho, t: Trabalho, turno
  * instrução), o último passo (a última fala do bot no trabalho, curta) e o turno vivo. `esperandoComputadorDe` vem do
  * serviço do computador (S5), quando há.
  */
-export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "agora">, trabalhos: readonly Trabalho[]): Promise<TrabalhoDto[]> {
-  const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id));
+export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "agora">, trabalhos: readonly Trabalho[], alemDisso?: (t: TrabalhoDto, e: ExtrasTrabalho | undefined) => Partial<TrabalhoDto>): Promise<TrabalhoDto[]> {
+  const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id), deps.agora());
   return trabalhos.map((t): TrabalhoDto => {
     const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, sessaoExecutor: _executor, ...publico } = t;
     const e = extras.get(t.id);
@@ -176,7 +177,7 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       acordaEm: e?.acordaEm ?? null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
-  });
+  }).map((dto) => (alemDisso ? { ...dto, ...alemDisso(dto, extras.get(dto.id)) } : dto));
 }
 
 /** definido em 2026-10-07: "Terminados hoje" — o servidor manda as últimas 24 h e a tela corta no dia dela. */
@@ -191,23 +192,70 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const trabalhos = await deps.repos.trabalhos.listar({ agenteId: input.agenteId, terminadosDesde: deps.agora() - JANELA_TERMINADOS_MS });
   const memoria = deps.services.trabalhosVivos?.memoria(deps.escopo.pessoaId) ?? null;
   const processador = memoria?.processador ?? null;
-  // ADR-085: o puxar decide por Mac (a leitura daquele Mac); a tela junta os Macs da pessoa e mostra pelo pior deles —
-  // com dois Macs, um apertado já diz "Seu Mac está ocupado", mesmo que o outro ainda entregue trabalho.
-  // #219 (emenda à ADR-085): o portão inteiro e o motivo, que vai para cada trabalho segurado ("esperando espaço no
-  // disco") e para a pílula; o disco vai com o nível e os limites, que moram só no domínio.
+  // ADR-085: os campos de topo juntam as máquinas da pessoa e mostram a pior (a web de antes lê só eles). Revisto em
+  // 2026-10-09 (a tela fala por máquina): cada trabalho e cada máquina vêm com o portão da própria máquina (abaixo).
+  // #219 (emenda à ADR-085): o portão inteiro e o motivo; o disco vai com o nível e os limites, que moram só no domínio.
   const disco = memoria?.disco ?? null;
   // Revisão do #224: o nível vem com a histerese (trabalhos-vivos.ts); sem ele (serviço de teste), o nível cru.
   const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
   // ADR-091: o portão olha o pior entre a CPU e a fila; a tela mostra os dois separados.
   const fila = memoria?.fila ?? null;
-  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
+  const usoDoMac = memoria === null ? "livre" : (await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO;
+  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
-  const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
-    const motivo = esperaDoMac(t, portao, agora);
-    return motivo ? { ...t, esperaDoMac: motivo } : t;
+  const topo = { pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  const servico = deps.services.maquinas;
+  // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
+  if (!servico) {
+    const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
+      const motivo = esperaDoMac(t, portao, agora);
+      return motivo ? { ...t, esperaDoMac: motivo } : t;
+    });
+    return { data: { trabalhos: dtos, ...topo } };
+  }
+  const { maquinas, portoes, nomear } = maquinasDaPessoa(deps, servico, usoDoMac);
+  const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
+    if (!trabalhoAberto(t.estado)) return {};
+    // Onde roda (o turno vivo) ou vai rodar (o alvo do turno na fila, a regra do reivindicar); sem alvo, no modo local,
+    // o Mac do servidor (ADR-092); no compartilhado, qualquer uma (null).
+    const id = e?.maquinaVivaId ?? e?.maquinaAlvoId ?? servico.macDoServidor;
+    const espera = esperaNaMaquina(t, id, portoes, agora);
+    const maquina = espera?.maquinaId ?? id;
+    return { esperaDoMac: espera?.motivo ?? null, maquina: maquina === null ? null : nomear(maquina) };
   });
-  return { data: { trabalhos: dtos, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null } };
+  return { data: { trabalhos: dtos, ...topo, maquinas } };
 };
+
+/**
+ * A tela fala por máquina (2026-10-09): cada máquina viva da pessoa com o nome, o portão (pelo "uso do Mac", que vale
+ * para todas) e a leitura. Máquina que mandou leitura e já não está conectada fica com o id curto ("máquina 309ec3dd").
+ */
+function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquinas, usoDoMac: Parameters<typeof portaoDoMac>[0]) {
+  const nomear = (id: string): MaquinaDoTrabalho => {
+    const conhecida = servico.identificar(deps.escopo, id);
+    if (conhecida) return { id, ...conhecida };
+    return id === servico.macDoServidor ? { id, nome: "Este Mac", ehMac: true } : { id, nome: `máquina ${id.slice(0, 8)}`, ehMac: false };
+  };
+  const portoes = new Map<string, PortaoDoMac>();
+  const maquinas: LeituraDeMaquinaDto[] = servico.leituras(deps.escopo.pessoaId).map((l) => {
+    const portao = portaoDoMac(usoDoMac, { memoria: l.nivel, processador: l.portao, discoNivel: l.discoNivel });
+    portoes.set(l.machineId, portao);
+    return {
+      ...nomear(l.machineId),
+      pressao: l.nivel,
+      memoriaBotsMb: l.totalMb,
+      processador: l.processador,
+      usoProcessador: l.uso,
+      cargaProcessador: l.carga,
+      fila: l.fila,
+      disco: l.disco && l.discoNivel ? { ...l.disco, nivel: l.discoNivel, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null,
+      discoSuportado: l.discoMedido,
+      motivoEspera: portao.fundo,
+      seguraTudoNovo: portao.tudoNovo !== null,
+    };
+  });
+  return { maquinas, portoes, nomear };
+}
 
 /** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */
 export async function trabalhosAbertosDaConversa(deps: Pick<Deps, "repos" | "services" | "agora">, agenteId: string | null): Promise<TrabalhoDto[]> {

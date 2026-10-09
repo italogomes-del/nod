@@ -1,4 +1,5 @@
-import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
+import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../../src/contracts/maquina.ts";
+import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
 import { duracaoCurta } from "./relogio.ts";
 import { esc, hora } from "./render.ts";
@@ -121,12 +122,12 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   const volta = voltaMarcada(t);
   // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
   // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
-  if (volta) return segurando && t.esperaDoMac ? textoDaEspera(t.esperaDoMac) : `volta ${quandoVolta(volta, agora)}`;
+  if (volta) return t.esperaDoMac ? textoDaEspera(t.esperaDoMac, t.maquina) : `volta ${quandoVolta(volta, agora)}`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
       if (antes) return `começa depois da ${antes.titulo}`;
-      return seguradoPeloMac(t, segurando) ? textoDaEspera(t.esperaDoMac) : "na fila";
+      return seguradoPeloMac(t, segurando) ? textoDaEspera(t.esperaDoMac, t.maquina) : "na fila";
     }
     case "precisa_de_voce":
       return t.ultimoPasso ?? "precisa de você";
@@ -144,22 +145,115 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
 }
 
 /**
- * ADR-085 (definido em 2026-10-08): o Mac está apertado e este trabalho é dos que esperam — rotina ou pedido de colega
- * que ainda não começou, sem ninguém esperando e dentro da espera máxima. O servidor decide (`seguravel`, a mesma regra
- * do `reivindicar`); a tela só junta com o `segurando`.
+ * ADR-085 (definido em 2026-10-08): a máquina do trabalho está apertada e ele é dos que esperam — rotina ou pedido de
+ * colega que ainda não começou, sem ninguém esperando e dentro da espera máxima. O servidor decide (`esperaDoMac`, a
+ * mesma regra do `reivindicar`, pelo portão da máquina do trabalho). Revisto em 2026-10-09 (a tela fala por máquina):
+ * `segurando` só vale para o trabalho que veio sem `esperaDoMac` (o da conversa, ou servidor anterior): o "pior Mac"
+ * seguraria o trabalho de uma máquina folgada.
  */
 export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel" | "esperaDoMac">, segurando: boolean): boolean {
-  return segurando && t.estado === "na_fila" && (t.seguravel === true || (t.esperaDoMac ?? null) !== null);
+  if (t.estado !== "na_fila") return false;
+  if ((t.esperaDoMac ?? null) !== null) return true;
+  return segurando && t.seguravel === true && t.esperaDoMac === undefined;
 }
 
 /**
  * A espera na linha da task (definido em 2026-10-09, #219, com a frase base "esperando…" do #208): pela memória ou pelo
- * disco, o motivo; pelo processador (ou servidor anterior, sem motivo), "esperando o Mac aliviar".
+ * disco, o motivo; pelo processador (ou servidor anterior, sem motivo), "esperando o Mac aliviar". Revisto em 2026-10-09
+ * (a tela fala por máquina): com a máquina que não é Mac, o nome dela ("esperando nod-motor-teste aliviar").
  */
-export function textoDaEspera(motivo: MotivoEsperaMac | null | undefined): string {
+export function textoDaEspera(motivo: MotivoEsperaMac | null | undefined, maquina?: Pick<MaquinaDoTrabalho, "nome" | "ehMac"> | null): string {
+  if (maquina && !maquina.ehMac) {
+    if (motivo === "memoria") return `esperando ${maquina.nome} liberar memória`;
+    if (motivo === "disco") return `esperando espaço no disco em ${maquina.nome}`;
+    return `esperando ${maquina.nome} aliviar`;
+  }
   if (motivo === "memoria") return "esperando o Mac liberar memória";
   if (motivo === "disco") return "esperando espaço no disco";
   return "esperando o Mac aliviar";
+}
+
+/**
+ * A tela fala por máquina (2026-10-09): o servidor novo manda cada máquina com a própria leitura. `undefined` = servidor
+ * anterior, e quem chama usa os campos de topo (o pior).
+ */
+export function maquinasDe(dto: Pick<TrabalhosDto, "maquinas"> | null | undefined): readonly LeituraDeMaquinaDto[] | undefined {
+  return dto?.maquinas;
+}
+
+/**
+ * A leitura do Mac (Este Mac, a pílula de memória, o menu da conta): só das máquinas que são Mac, e com dois Macs a pior.
+ * Servidor anterior: os campos de topo, como antes. null = nenhum Mac mandou leitura.
+ */
+export type LeituraDoMac = { pressao: NivelPressao | null; processador: NivelPressao | null; usoProcessador: number | null; cargaProcessador: number | null; fila: NivelPressao | null; memoriaBotsMb: number | null; disco: TrabalhosDto["disco"]; discoSuportado: boolean; motivoEspera: MotivoEsperaMac | null; seguraTudoNovo: boolean };
+
+const GRAVIDADE: Record<NivelPressao, number> = { verde: 0, amarela: 1, vermelha: 2 };
+const MOTIVOS: readonly MotivoEsperaMac[] = ["processador", "memoria", "disco"];
+
+export function leituraDoMac(dto: TrabalhosDto | null | undefined): LeituraDoMac {
+  const ms = maquinasDe(dto);
+  if (ms === undefined) {
+    return { pressao: dto?.pressao ?? null, processador: dto?.processador ?? null, usoProcessador: dto?.usoProcessador ?? null, cargaProcessador: dto?.cargaProcessador ?? null, fila: dto?.fila ?? null, memoriaBotsMb: dto?.memoriaTotalMb ?? null, disco: dto?.disco ?? null, discoSuportado: dto?.discoSuportado === true, motivoEspera: dto?.segurando ? (dto.motivoEspera ?? "processador") : null, seguraTudoNovo: dto?.seguraTudoNovo === true };
+  }
+  const macs = ms.filter((m) => m.ehMac);
+  if (macs.length === 0) return { pressao: null, processador: null, usoProcessador: null, cargaProcessador: null, fila: null, memoriaBotsMb: null, disco: null, discoSuportado: false, motivoEspera: null, seguraTudoNovo: false };
+  // Com dois Macs (raro), o que segura mais (tudo novo, depois o motivo mais grave) e, empatado, o de pior memória; a
+  // memória dos bots é a soma.
+  const peso = (m: LeituraDeMaquinaDto): number => (m.seguraTudoNovo ? 100 : 0) + (m.motivoEspera ? 10 + MOTIVOS.indexOf(m.motivoEspera) : 0) + GRAVIDADE[m.pressao];
+  const pior = [...macs].sort((a, b) => peso(b) - peso(a))[0]!;
+  return { pressao: pior.pressao, processador: pior.processador, usoProcessador: pior.usoProcessador, cargaProcessador: pior.cargaProcessador, fila: pior.fila, memoriaBotsMb: macs.reduce((s, m) => s + m.memoriaBotsMb, 0), disco: pior.disco, discoSuportado: macs.some((m) => m.discoSuportado), motivoEspera: pior.motivoEspera, seguraTudoNovo: pior.seguraTudoNovo };
+}
+
+/** O trabalho roda (ou vai rodar) num Mac: sem máquina conhecida também conta (servidor anterior, ou qualquer uma). */
+export function noMac(t: Pick<TrabalhoDto, "maquina">): boolean {
+  return !t.maquina || t.maquina.ehMac;
+}
+
+/**
+ * A pílula por máquina (2026-10-09, a tela fala por máquina): quem segura trabalho novo agora, pelo nome.
+ * - Só o Mac: "Seu Mac está ocupado" (ou o disco), como antes, com o "Ver" para Este Mac.
+ * - Só uma outra máquina: "nod-motor-teste está ocupada · 4 trabalhos esperam ela aliviar", com o "Ver" para Máquinas.
+ * - Duas ou mais: "2 máquinas ocupadas · 5 trabalhos esperam", com o "Ver" para Máquinas.
+ * `trabalhos` são os da tela (a contagem é dos que esperam aquela máquina). Nenhuma segurando: nada.
+ */
+export function pilulaDasMaquinas(maquinas: readonly LeituraDeMaquinaDto[], trabalhos: readonly TrabalhoDto[], comVer = true): string {
+  const segurando = maquinas.filter((m) => m.motivoEspera !== null);
+  if (segurando.length === 0) return "";
+  const esperam = trabalhos.filter((t) => seguradoPeloMac(t, false));
+  if (segurando.length === 1) {
+    const m = segurando[0]!;
+    const daqui = esperam.filter((t) => !t.maquina || t.maquina.id === m.id).length;
+    if (m.ehMac) return pilulaMac(true, daqui, comVer, m.motivoEspera);
+    const disco = m.motivoEspera === "disco";
+    const oQue = disco ? "espaço no disco" : m.motivoEspera === "memoria" ? "ela liberar memória" : "ela aliviar";
+    const titulo = disco ? `Pouco espaço no disco em ${m.nome}` : m.motivoEspera === "memoria" ? `${m.nome} está com pouca memória` : `${m.nome} está ocupada`;
+    const n = daqui > 0 ? `${daqui} ${daqui === 1 ? "trabalho espera" : "trabalhos esperam"} ${oQue}` : `trabalho novo espera ${oQue}`;
+    return pilula(titulo, n, comVer ? "maquinas" : null);
+  }
+  const n = esperam.length > 0 ? `${esperam.length} ${esperam.length === 1 ? "trabalho espera" : "trabalhos esperam"}` : "trabalho novo espera";
+  return pilula(`${segurando.length} máquinas ocupadas`, n, comVer ? "maquinas" : null);
+}
+
+function pilula(titulo: string, detalhe: string, secao: string | null): string {
+  const miolo = `${ICONE_MEMORIA}<b>${esc(titulo)}</b><span class="pm-detalhe">· ${esc(detalhe)}</span>`;
+  return secao
+    ? `<div class="linha-centro-wrap" role="status"><button type="button" class="pilula-memoria amarela" data-act="secao-espaco" data-secao="${secao}">${miolo}<span class="pm-ver">Ver ›</span></button></div>`
+    : `<div class="linha-centro-wrap" role="status"><span class="pilula-memoria amarela">${miolo}</span></div>`;
+}
+
+/**
+ * "os bots usam 0,4 GB do seu Mac e 0,7 GB na nod-motor-teste": a memória dos processos dos bots em cada máquina, só as
+ * que têm (sem leitura útil, nada). Servidor anterior: o total, "do seu Mac", como antes.
+ */
+export function memoriaDosBots(dto: Pick<TrabalhosDto, "maquinas" | "memoriaTotalMb"> | null | undefined): string {
+  const ms = maquinasDe(dto);
+  if (ms === undefined) {
+    const total = dto?.memoriaTotalMb ?? null;
+    return total !== null && total > 0 ? `os bots usam ${memoriaLegivel(total)} do seu Mac` : "";
+  }
+  // O Mac primeiro (é onde a pessoa está), depois as outras na ordem do servidor.
+  const partes = [...ms.filter((m) => m.ehMac), ...ms.filter((m) => !m.ehMac)].filter((m) => m.memoriaBotsMb > 0).map((m) => (m.ehMac ? `${memoriaLegivel(m.memoriaBotsMb)} do seu Mac` : `${memoriaLegivel(m.memoriaBotsMb)} na ${m.nome}`));
+  return partes.length ? `os bots usam ${juntar(partes)}` : "";
 }
 
 /**

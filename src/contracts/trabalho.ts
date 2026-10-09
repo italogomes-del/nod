@@ -1,6 +1,7 @@
 import type { Executor } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
+import type { LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
 
 /**
  * Trabalho (definido em 2026-10-07, ADR-083, épico #188): uma unidade de trabalho longo de um bot, com sessão do CLI e
@@ -91,6 +92,13 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    */
   esperaDoMac?: MotivoEsperaMac | null;
   /**
+   * definido em 2026-10-09 (a tela fala por máquina): onde o trabalho roda (o turno vivo) ou vai rodar (o alvo do turno
+   * na fila, a regra do `reivindicar`) — só na lista de `GET trabalhos`. Com `esperaDoMac`, é a máquina que ele espera
+   * aliviar ("esperando nod-motor-teste aliviar"). null = qualquer máquina (modo compartilhado, sem escolha) ou máquina
+   * desconhecida.
+   */
+  maquina?: MaquinaDoTrabalho | null;
+  /**
    * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado pelo Marlon): o colega cuja resposta a task espera
    * (o pedido mais antigo ainda sem volta), para o status curto "esperando Eng 2". Ausente ou null: não espera colega.
    */
@@ -136,6 +144,12 @@ export type TrabalhosDto = {
   disco?: DiscoDoMac | null;
   /** Revisão do #224: algum Mac vivo tem app que mede o disco (sem disco e sem isto, o app é anterior). */
   discoSuportado?: boolean;
+  /**
+   * definido em 2026-10-09 (a tela fala por máquina): cada máquina viva da pessoa com a própria leitura e o próprio
+   * portão. Os campos acima continuam pelo pior (servidor e web de antes); a web nova fala por estes. Ausente = servidor
+   * anterior.
+   */
+  maquinas?: LeituraDeMaquinaDto[];
 };
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
@@ -180,3 +194,5 @@ export type DiscoDoMac = LeituraDisco & { nivel: NivelPressao; alertaMb: number;
 
 /** Por que o Mac segura trabalho novo (#219): o processador cheio, a memória em alerta ou crítica, ou o disco quase cheio. */
 export type MotivoEsperaMac = "processador" | "memoria" | "disco";
+/** A tela fala por máquina (2026-10-09): a leitura viva de cada máquina, o nome dela e o Mac do servidor (ADR-092: o turno sem alvo é dele; null no compartilhado). `identificar` null = não conectada. */
+export type ServicoDasMaquinas = { leituras(pessoaId: string): LeituraDaMaquinaViva[]; identificar(escopo: { tenantId: string; pessoaId: string }, machineId: string): Omit<MaquinaDoTrabalho, "id"> | null; macDoServidor: string | null };

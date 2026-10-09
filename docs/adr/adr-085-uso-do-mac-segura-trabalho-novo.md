@@ -1,6 +1,6 @@
 # ADR-085 — Uso do Mac: o Mac apertado segura trabalho novo em segundo plano
 
-Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · o processador do item 1 foi
+Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · emenda 2026-10-09 (a tela fala por máquina, abaixo) · o processador do item 1 foi
 emendado pela [ADR-091](adr-091-regua-do-processador-cpu-e-fila.md) (uso da CPU e fila, 2026-10-09) · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) §4 ("sem teto:
 o limite é a máquina"). Decisão do Marlon em 2026-10-08: o caminho "sem teto, sem desperdício", aprovado no protótipo
 "Nod — Ritmo do Mac" (canvas VmT4WwEbgfZ14PbLy4En8d, pranchas 1–3).
@@ -184,3 +184,37 @@ Gatilho de reversão:
   `DISCO_CRITICO_MB` ou o APFS (`bavail` não conta o espaço "purgável" que o Finder mostra como disponível).
 - `fundo_comecou` de rotina com `espera_ms` acima de 1 h sob memória crítica mais de uma vez por semana: rever o
   `semPrazo`.
+
+## Emenda de 2026-10-09 — a tela fala por máquina
+
+Em 09/10 o diário tinha os 16 bots presos à VM `nod-motor-teste` (ADR-090/092, 2 núcleos). A VM estava cheia (CPU em
+100%, 2,8 a 3,9 processos por núcleo, medido nela) e o Mac estava folgado (0,42). A tela dizia "Seu Mac está ocupado ·
+4 trabalhos esperam o Mac aliviar" e "os bots usam 1,1 GB do seu Mac". O `puxar` já decidia certo: cada máquina puxa com
+a própria leitura (item 4), e o `reivindicar` só entrega a ela o turno que tem ela como alvo. O erro era o item 5, que
+juntava as máquinas "pelo pior Mac" e chamava a junta de "Mac".
+
+1. **Cada trabalho espera pela máquina dele.** `GET trabalhos` calcula o portão de cada máquina viva da pessoa e, para
+   cada trabalho aberto, a máquina dele: a do turno vivo (`turnos.machine_id`) ou o alvo do turno na fila, pela regra do
+   `reivindicar` (o "desta vez", a máquina do bot e o padrão da pessoa, cada um só com a chave viva). A regra do alvo
+   mora num lugar só (`alvoDoTurno`, src/repositories/alvo-da-maquina.ts), usado pelo `reivindicar` e pela lista. Sem
+   alvo, no modo local, o Mac do servidor (ADR-092); no compartilhado, qualquer uma, e o trabalho só espera se todas as
+   máquinas com leitura o seguram (`esperaNaMaquina`, src/domain/memoria-mac.ts). Sem leitura da máquina dele, nada
+   espera, mesmo com outra cheia.
+2. **O DTO.** Cada trabalho aberto ganha `maquina` (id, nome, se é Mac) e `esperaDoMac` sempre presente (null = não
+   espera). `TrabalhosDto.maquinas` traz cada máquina com a leitura, a memória dos bots nela e o que o portão dela segura.
+   Os campos de topo (`pressao`, `processador`, `segurando`, `motivoEspera`, `disco`…) continuam pelo pior, para quem
+   lê o formato de antes. A web nova não os usa para o texto. A mudança de nível de UMA máquina também vira o frame
+   `memoria.mudou`, mesmo quando a pior não muda.
+3. **A tela.** A linha diz "esperando nod-motor-teste aliviar", "esperando nod-motor-teste liberar memória" ou "esperando
+   espaço no disco em nod-motor-teste". Para o Mac, as frases de antes. A pílula nomeia quem segura: só o Mac, "Seu Mac
+   está ocupado" (o "Ver" leva a Este Mac); só a VM, "nod-motor-teste está ocupada · 4 trabalhos esperam ela aliviar" (o
+   "Ver" leva a Máquinas); as duas, "2 máquinas ocupadas". O topo diz "os bots usam 400 MB do seu Mac e 700 MB na
+   nod-motor-teste". Este Mac mostra só a leitura e os trabalhos do Mac, e uma linha diz que o uso escolhido vale também
+   para as outras máquinas. Em Máquinas, o cartão de cada máquina conectada ganha o status curto ("Ocupada · 2 trabalhos
+   esperam ela aliviar") e os números atrás do clique. A pílula de memória ("Pouca memória no seu Mac") é só do Mac.
+4. **O "uso do Mac" continua um só por pessoa** e vale para todas as máquinas. O uso por máquina fica para quando o
+   Marlon decidir.
+
+Gatilho de reversão: se um trabalho aparecer "esperando <máquina>" e a mesma máquina o entregar no `puxar` seguinte
+(log `fundo_comecou` com a máquina do trabalho logo depois de a tela dizer que ele esperava, sem a leitura ter mudado),
+a regra da tela e a do `reivindicar` divergiram: voltar a ler `alvoDoTurno` nos dois lados antes de mexer no texto.

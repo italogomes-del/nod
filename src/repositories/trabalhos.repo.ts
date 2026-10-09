@@ -6,6 +6,7 @@ import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts"
 import type { FatosLimpeza } from "../domain/limpeza-das-tasks.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
+import { alvoDoTurno } from "./alvo-da-maquina.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
 
 interface Linha {
@@ -99,6 +100,13 @@ export type ExtrasTrabalho = {
   trabalhouMs: number;
   /** ADR-086: a volta marcada ("me chame às 16:00") ainda por vir — a mais próxima; null = nenhuma. */
   acordaEm: number | null;
+  /**
+   * definido em 2026-10-09 (a tela fala por máquina): a máquina do turno que roda agora (`turnos.machine_id`) e o alvo do
+   * turno pendente mais antigo (alvo-da-maquina.ts, a regra do `reivindicar`). null = sem turno vivo / sem alvo (qualquer
+   * máquina; com o servidor no Mac, o Mac).
+   */
+  maquinaVivaId: string | null;
+  maquinaAlvoId: string | null;
 };
 
 /**
@@ -303,13 +311,15 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
-    async extras(ids: readonly string[]): Promise<Map<string, ExtrasTrabalho>> {
+    async extras(ids: readonly string[], agora: number = Date.now()): Promise<Map<string, ExtrasTrabalho>> {
       if (ids.length === 0) return new Map();
       const linhas = await conn<{
         id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean;
+        maquina_viva_id: string | null; maquina_alvo_id: string | null;
         colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
+          v.machine_id as maquina_viva_id, case when pe.tem then pe.alvo else bt.alvo end as maquina_alvo_id,
           c.nome as colega_nome, c.desde as colega_desde, c.trabalho_id as colega_trabalho_id,
           -- definido em 2026-10-08 (tempo da task): o tempo trabalhado é o dos turnos (Raio-X: começo → último sinal); o
           -- resto do "aberta há" é espera. O turno que roda conta até agora.
@@ -328,8 +338,18 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           order by m.criado_em desc, m.id desc limit 1
         ) f on true
         left join lateral (
-          select t.id from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'despachando' order by t.criado_em limit 1
+          select t.id, t.machine_id::text as machine_id from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'despachando' order by t.criado_em limit 1
         ) v on true
+        -- A tela fala por máquina (2026-10-09): de qual máquina o turno pendente espera, pela regra do reivindicar. Sem turno
+        -- pendente (esperando um colega, a pessoa ou a hora marcada), onde o próximo turno do bot iria: a mesma regra sem o
+        -- "desta vez", que é de um turno só.
+        left join lateral (
+          select true as tem, ${alvoDoTurno(conn, agora)} as alvo from turnos t
+          where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'pendente' order by t.criado_em, t.id limit 1
+        ) pe on true
+        left join lateral (
+          select ${alvoDoTurno(conn, agora)} as alvo from (select w.tenant_id, w.owner_id, null::uuid as maquina_desta_vez, w.agente_id) t
+        ) bt on true
         -- Os abertos e a volta marcada (ADR-086) numa leitura só dos turnos vivos do trabalho. A volta aparece até ser
         -- reivindicada (a hora pode ter passado com o Mac fora).
         left join lateral (
@@ -362,6 +382,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             esperandoColega: l.colega_desde ? { nome: l.colega_nome ?? "um colega", desde: ms(l.colega_desde), trabalhoId: l.colega_trabalho_id } : null,
             trabalhouMs: Math.max(0, Math.round(Number(l.trabalhou_ms ?? 0))),
             acordaEm: l.acorda_em ? ms(l.acorda_em) : null,
+            maquinaVivaId: l.maquina_viva_id,
+            maquinaAlvoId: l.maquina_alvo_id,
           },
         ]),
       );
