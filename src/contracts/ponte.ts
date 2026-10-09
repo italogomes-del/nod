@@ -100,6 +100,44 @@ export type TrechoVivo = { texto: string } | { ferramenta: string } | { tarefas:
 export type VigiaVivo = { mudoMs: number; aberta?: string; emFundo: number; repeticao?: { nome: string; vezes: number } };
 
 /**
+ * Uma pasta de task encerrada que o Mac pode limpar (definido em 2026-10-09, ADR-088). `pasta` é relativa a `~/nod`
+ * (`<bot>/<slug>`, a forma de `trabalhos.pasta` sem o `~/nod/`). `quando`: `encerrada` = acabou há mais de 3 dias e as
+ * worktrees limpas saem; `so_com_pr_mergeado` = acabou há menos, e só sai a worktree cujo PR já foi mergeado.
+ */
+export type PastaParaLimpar = { trabalhoId: string; pasta: string; quando: "encerrada" | "so_com_pr_mergeado" };
+
+/**
+ * O que o Mac relata de uma passada da limpeza (ADR-088): só números e motivos, nunca caminho (o slug da pasta vem do
+ * título da task). `liberadoBytes` é a diferença do espaço livre do volume antes e depois de cada remoção (o `du`
+ * mente com os clones APFS do pnpm). `orfas`: worktrees na raiz das pastas dos bots, fora de qualquer task — contadas,
+ * nunca apagadas; `orfasParadas` as sem mexer há 2 dias ou mais.
+ */
+export type RelatoLimpeza = {
+  pastas: number;
+  removidas: number;
+  pastasApagadas: number;
+  liberadoBytes: number;
+  puladas: Partial<Record<MotivoPuladaLimpeza, number>>;
+  orfas: number;
+  orfasParadas: number;
+  duracaoMs: number;
+  /**
+   * Revisão do #225 (`NOD_LIMPEZA_TASKS=simular`): a passada fez todas as checagens e não apagou nada. `removidas` e
+   * `pastasApagadas` contam o que sairia; `estimadoBytes` é o `du` das worktrees que sairiam.
+   */
+  simulada?: boolean;
+  estimadoBytes?: number;
+  /** Segunda revisão do #225: o Docker está instalado e não respondeu — a passada não mexeu em nada. */
+  adiada?: boolean;
+};
+/**
+ * Revisão do #225: `aninhado` (outra worktree ou repositório dentro dela), `ignorado_valioso` (arquivo ignorado que não
+ * se refaz), `head_solto` (commit fora de qualquer branch, remoto ou tag), `em_uso` (um turno deste Mac roda na pasta) e
+ * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar).
+ */
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro";
+
+/**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois
  * sem trocar o driver. {ativo:false} em renovar manda o executor abortar.
  */
@@ -110,4 +148,11 @@ export interface PonteInterna {
   renovar(p: PedidoRenovar): Promise<RespostaRenovar>;
   entregar(e: Entrega): Promise<void>;
   desconectar(machineId: string): Promise<void>;
+  /**
+   * ADR-088 (2026-10-09): as pastas de task encerradas que este Mac pode limpar. A regra (quem pode) é do servidor, que
+   * tem o banco; o disco é do Mac, que apaga. Ausente = ponte antiga: a limpeza não roda.
+   */
+  pastasParaLimpar?(pessoaId: string): Promise<PastaParaLimpar[]>;
+  /** ADR-088: o resumo da passada, para o log `limpeza_feita` do servidor. */
+  relatarLimpeza?(pessoaId: string, relato: RelatoLimpeza): Promise<void>;
 }

@@ -26,7 +26,7 @@ import { iniciarProcesso, executarColetando, type Processo } from "../processo.t
 import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
 import type { Adapter, ConfigDriver, Driver, Instance, SinksTurno } from "../spi.ts";
 import { MARCADOR_PARTE_DINAMICA } from "../../../domain/marcador-prompt.ts";
-import { NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
+import { ehPastaDeTask, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, MAX_MCP_OUTPUT_TOKENS_FILHO } from "../../../shared/constantes.ts";
 
 /**
@@ -497,8 +497,9 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 if (pastaBot && lig.hookPath) {
                   await mkdir(pastaBot, { recursive: true });
                   const config = join(tmpdir, "hook-nativas.json");
-                  // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts).
-                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home }), { mode: 0o600 });
+                  // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts). ADR-088: com
+                  // task, o plano traz `<bot>/<slug>` (ehPastaDeTask) e a worktree nasce ali.
+                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home, daTask: ehPastaDeTask(plano.pastaDoBot!) }), { mode: 0o600 });
                   const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
                   // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
                   const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);

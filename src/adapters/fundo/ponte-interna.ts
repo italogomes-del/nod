@@ -2,7 +2,7 @@ import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { IdHarness } from "../../contracts/harness.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna, RespostaRenovar } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, Entrega, PastaParaLimpar, PedidoRenovar, PonteInterna, RelatoLimpeza, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { redigirECortar } from "../../domain/segredos.ts";
 import { log } from "../../obs/log.ts";
@@ -16,6 +16,7 @@ import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
+import { camposDoRelato, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
 import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
@@ -460,6 +461,21 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // NOD-200: a captura do turno sai só com o assentar confirmado; na falha fica, como o escopo, para a entrega repetida.
       deps.services.capturas?.esquecer(e.turnoId);
       deps.esquecerTurno?.(e.turnoId);
+    },
+
+    /** ADR-088: a regra de quem pode ser limpo lê o banco na tx escopada da pessoa; o Mac apaga. */
+    async pastasParaLimpar(pessoaId): Promise<PastaParaLimpar[]> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return [];
+      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo)));
+    },
+
+    /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
+    async relatarLimpeza(pessoaId, relato: RelatoLimpeza) {
+      const r = relatoValido(relato);
+      // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
+      // Segunda revisão do #225: com o Docker instalado e mudo a passada não mexe em nada — `limpeza_adiada`.
+      log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
     },
 
     emMemoria() {

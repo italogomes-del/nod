@@ -71,6 +71,7 @@ import { iniciarLaco } from "../executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
+import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza } from "../executor/limpeza-das-tasks.ts";
 import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
@@ -954,7 +955,7 @@ export function comporApp(o: OpcoesCompor): App {
   // máquina vai em cada um); fora do macOS, sem NOD_SIMULAR_*, não lê nada e o puxar vai sem leitura.
   const memoriaDaMaquina = criarAmostradorMemoria({ env });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
-  const iniciar: IniciarLaco = (p) =>
+  const iniciarLacoDaPessoa: IniciarLaco = (p) =>
     iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
       ponte,
@@ -970,6 +971,19 @@ export function comporApp(o: OpcoesCompor): App {
       aoIniciarTurno: (plano, adapter) => { interruptor.registrar(plano.turnoId, () => adapter.interromper()); planosVivos.set(plano.turnoId, plano); },
       aoTerminarTurno: (plano) => { interruptor.esquecer(plano.turnoId); tarefasVivas.esquecer(plano.turnoId); planosVivos.delete(plano.turnoId); },
     }), p.ponte);
+  // definido em 2026-10-09 (ADR-088): no modo local o servidor É o executor do Mac, e a limpeza das pastas de task roda
+  // aqui, uma por pessoa ao lado do pool (as passadas entram numa fila só do processo, revisão do #225).
+  // `NOD_LIMPEZA_TASKS`: sem nada (ou `simular`) confere tudo e só registra; só `ligada` apaga; `desligada` desliga.
+  const homeDoExecutor = env.HOME ?? homedir();
+  const modoLimpeza = modoDaLimpeza(env);
+  // Segunda revisão do #225: o modo efetivo no boot — o padrão é `simular`, e quem lê o log sabe se algo foi apagado.
+  if (!compartilhado) log("info", "limpeza_modo", { modo: modoLimpeza, onde: "servidor_local" });
+  const pastaEmUso = (pasta: string) => [...planosVivos.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true);
+  const iniciar: IniciarLaco = (p) => {
+    const pool = iniciarLacoDaPessoa(p);
+    const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso });
+    return { ...pool, async parar() { limpeza?.parar(); await pool.parar(); } };
+  };
 
   return {
     services,
