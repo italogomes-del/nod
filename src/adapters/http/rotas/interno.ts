@@ -3,8 +3,10 @@ import type { Workspaces } from "../../fundo/workspaces.ts";
 import type { ClasseNegacao } from "../../../contracts/negacao.ts";
 import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { esperaEmLaco, motivoDaEsperaNegada } from "../../../domain/espera-em-laco.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_TOTAL } from "../../../domain/modo-aprovacao.ts";
 import { NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
+import { log } from "../../../obs/log.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
 import type { Relogio } from "../../../shared/types.ts";
@@ -196,6 +198,16 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         // ADR-067: o Monitor roda um comando como o Bash, e passa pela mesma decisão.
         const rodaComando = ferramenta === "Bash" || ferramenta === "Monitor";
         if (rodaComando && typeof c?.comando !== "string") throw new ErroDeDominio("entrada_invalida", { cause: `${ferramenta} sem comando` });
+        // ADR-089 (#217): o laço de espera com sleep (e o sleep longo) segura o processo do bot no Mac sem trabalho. Nega
+        // antes de qualquer card ou trilha, em qualquer modo — nem o modo total aprova esperar assim. A saída é a volta
+        // marcada (me_chame_as, ADR-086) quando ela está no catálogo deste turno; senão, encerrar dizendo o que falta.
+        const espera = rodaComando ? esperaEmLaco(String(c?.comando)) : null;
+        if (espera) {
+          const comMeChameAs = plano.catalogo.ferramentas.some((f) => f.nome === "me_chame_as" && f.origem === "nod");
+          log("aviso", "espera_em_laco_negada", { turno_id: turnoId, ferramenta, tipo: espera.tipo, segundos: espera.tipo === "sleep_longo" && Number.isFinite(espera.segundos) ? espera.segundos : null, me_chame_as: comMeChameAs });
+          ctx.json(403, { codigo: "nao_permitido", mensagem: motivoDaEsperaNegada(espera, comMeChameAs) });
+          return;
+        }
         const aguardar = await deps.dentro(ctx.escopo, async (d) => {
           // ADR-059: o comando que o MODO aprovou leva a regra do modo na trilha. Sem isso ele fica igual a uma
           // leitura, e o gatilho da ADR-055 ("nativa__Bash sem decisão correspondente") dispararia à toa.

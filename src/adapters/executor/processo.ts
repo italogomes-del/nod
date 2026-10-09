@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { basename } from "node:path";
+import { gravarArquivoDeGrupos, inicioDesteProcesso, type GrupoRegistrado } from "./grupos-orfaos.ts";
 
 /**
  * Processo filho do executor: spawn, linhas do stdout, stderr acumulado, e interrupção em dois
@@ -40,9 +42,48 @@ const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * modelo). O preço do `detached` é o filho não morrer com o app: o `exit` do processo do nod (app do Mac ou servidor)
  * mata com SIGKILL todo grupo que ainda estiver aqui. `process.kill` é síncrono, o único tipo de trabalho que o `exit`
  * permite.
+ * revisto em 2026-10-09 (ADR-089, #217): o `exit` não roda num SIGKILL nem numa queda, e os grupos ficavam órfãos por
+ * horas. Com `registrarGruposEm`, cada grupo também fica anotado no arquivo da instância (grupos-orfaos.ts), e o boot
+ * seguinte mata o que sobrou. Sem arquivo (testes, sonda avulsa), nada é gravado.
  */
-const gruposVivos = new Set<number>();
+const gruposVivos = new Map<number, GrupoRegistrado>();
 let ganchoDeSaida = false;
+let arquivoDeGrupos: string | null = null;
+
+/** Anota a lista no arquivo da instância; uma falha de disco não pode derrubar o turno (o `exit` ainda mata). */
+function anotarGrupos(): void {
+  if (arquivoDeGrupos === null) return;
+  try {
+    gravarArquivoDeGrupos(arquivoDeGrupos, { dono: { pid: process.pid, inicioMs: inicioDesteProcesso() }, grupos: [...gruposVivos.values()] });
+  } catch {
+    // disco cheio ou sem permissão: segue só com o `exit`, como antes da ADR-089
+  }
+}
+
+/**
+ * Liga o registro em arquivo (ADR-089). O boot chama depois de `encerrarGruposOrfaos` dizer que este processo assumiu o
+ * arquivo; null desliga (os testes).
+ */
+export function registrarGruposEm(arquivo: string | null): void {
+  arquivoDeGrupos = arquivo;
+  anotarGrupos();
+}
+
+/**
+ * SIGKILL em todo grupo que este processo ainda tem e o arquivo anotado vazio: o caminho do `exit`, e o do app do Mac ao
+ * sair (will-quit). Síncrono e idempotente.
+ */
+export function encerrarGruposVivos(): void {
+  for (const g of gruposVivos.keys()) {
+    try {
+      process.kill(-g, "SIGKILL");
+    } catch {
+      // o grupo já acabou
+    }
+  }
+  gruposVivos.clear();
+  anotarGrupos();
+}
 
 /** Sinal para o grupo inteiro; sem grupo (plataforma sem `-pid`) ou já morto, cai no próprio processo. */
 function sinalizarGrupo(pid: number, sinal: NodeJS.Signals, sozinho: () => void): void {
@@ -57,24 +98,24 @@ function sinalizarGrupo(pid: number, sinal: NodeJS.Signals, sozinho: () => void)
   }
 }
 
-function vigiarGrupo(pid: number): void {
-  gruposVivos.add(pid);
+function vigiarGrupo(pid: number, grupo: GrupoRegistrado): void {
+  gruposVivos.set(pid, grupo);
+  anotarGrupos();
   if (ganchoDeSaida) return;
   ganchoDeSaida = true;
-  process.on("exit", () => {
-    for (const g of gruposVivos) {
-      try {
-        process.kill(-g, "SIGKILL");
-      } catch {
-        // o grupo já acabou
-      }
-    }
-  });
+  process.on("exit", encerrarGruposVivos);
+}
+
+/** Tira o grupo da lista (e do arquivo); true se ele estava lá — só então o pid ainda é nosso. */
+function soltarGrupo(pid: number): boolean {
+  if (!gruposVivos.delete(pid)) return false;
+  anotarGrupos();
+  return true;
 }
 
 /** Os grupos que este processo do nod ainda tem vivos (os testes conferem que o Parar os solta). */
 export function gruposDeProcessoVivos(): number[] {
-  return [...gruposVivos];
+  return [...gruposVivos.keys()];
 }
 
 /**
@@ -125,9 +166,11 @@ export function iniciarProcesso(o: {
 }): Processo {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
   // #194: líder de um grupo próprio (ver gruposVivos). stdin/stdout/stderr continuam pipes.
+  const desdeMs = Date.now();
   const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
   const pid = filho.pid;
-  if (pid !== undefined) vigiarGrupo(pid);
+  // ADR-089: o relógio antes e depois do spawn cerca o início que o `ps` vai mostrar para este líder.
+  if (pid !== undefined) vigiarGrupo(pid, { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin) });
   let stderr = "";
   const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;
@@ -165,7 +208,7 @@ export function iniciarProcesso(o: {
     // revisto em 2026-10-08 (revisão do épico #188, X6): o líder que sai sozinho pode deixar neto no grupo (um
     // `sleep 60 &` do Bash do modelo, um servidor MCP). Fora da lista, o `exit` do app não o mataria mais: o grupo é
     // levado agora, enquanto o pid ainda é nosso (o grupo vive enquanto houver membro, então não foi reusado).
-    if (pid !== undefined && !interrompido && gruposVivos.delete(pid)) {
+    if (pid !== undefined && !interrompido && soltarGrupo(pid)) {
       try {
         process.kill(-pid, "SIGKILL");
       } catch {
@@ -196,7 +239,7 @@ export function iniciarProcesso(o: {
       if (terminou) {
         // O líder já saiu; um neto do grupo pode estar vivo (Bash do modelo). Leva o grupo, sem esperar — só se ele
         // ainda é nosso (fora da lista, o pid pode já ser de outro).
-        if (gruposVivos.delete(pid)) sinalizarGrupo(pid, "SIGKILL", () => undefined);
+        if (soltarGrupo(pid)) sinalizarGrupo(pid, "SIGKILL", () => undefined);
         return;
       }
       // #194: SIGTERM no GRUPO (o CLI e o que ele abriu), com o mesmo 5 s até o SIGKILL.
@@ -210,7 +253,7 @@ export function iniciarProcesso(o: {
       }
       // Quem saiu no SIGTERM pode ter deixado neto no grupo: o SIGKILL final não custa nada se não houver.
       sinalizarGrupo(pid, "SIGKILL", () => undefined);
-      gruposVivos.delete(pid);
+      soltarGrupo(pid);
     },
     fim,
   };

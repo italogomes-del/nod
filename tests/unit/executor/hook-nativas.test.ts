@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { comandoDoHook, montarArgs, settingsDoTerminal, TETO_HOOK_S } from "../../../src/adapters/executor/drivers/claude-cli.ts";
-import { AINDA_ESPERANDO, confirmarNoServidor, decidirHook, type Confirmar } from "../../../src/adapters/executor/hook-nativas.ts";
+import { AINDA_ESPERANDO, confirmarNoServidor, decidirHook, PAUSA_MINIMA_ENTRE_CONSULTAS_MS, type Confirmar } from "../../../src/adapters/executor/hook-nativas.ts";
 import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS } from "../../../src/shared/constantes.ts";
 import { planoDeTeste } from "../../helpers/l5.ts";
@@ -65,7 +65,7 @@ describe("a espera pela aprovação no próprio turno (ADR-055)", () => {
 
   it("card aprovado: espera em fatias, confirma de novo e libera", async () => {
     const s = servidor({ "/api/interno/nativas": [{ aguardar: "d1" }, { ok: true }], [AGUARDAR]: [{ estado: "pendente" }, { estado: "decidida", itens: [{ desfecho: "executado" }] }] });
-    expect(await confirmarNoServidor(cfg, { fetch: s.f })({ ferramenta: "Bash", contamina: false, comando: "git push" })).toEqual({ permitir: true });
+    expect(await confirmarNoServidor(cfg, { fetch: s.f, dormir: async () => undefined })({ ferramenta: "Bash", contamina: false, comando: "git push" })).toEqual({ permitir: true });
     expect(s.chamadas.map((c) => c.rota)).toEqual(["/api/interno/nativas", AGUARDAR, AGUARDAR, "/api/interno/nativas"]);
   });
 
@@ -79,6 +79,24 @@ describe("a espera pela aprovação no próprio turno (ADR-055)", () => {
     const s = servidor({ "/api/interno/nativas": [{ aguardar: "d1" }], [AGUARDAR]: [() => { agora += 60_000; return { estado: "pendente" }; }] });
     expect(await confirmarNoServidor(cfg, { fetch: s.f, agora: () => agora })({ ferramenta: "Bash", contamina: false, comando: "npm install" })).toEqual({ permitir: false, motivo: AINDA_ESPERANDO });
     expect(s.chamadas.filter((c) => c.rota === AGUARDAR).length).toBe(Math.ceil(ESPERA_APROVACAO_NO_TURNO_MS / 60_000));
+  });
+
+  it("ADR-089: `soltar: true` encerra a espera NA HORA com AINDA_ESPERANDO, sem consultar de novo", async () => {
+    const s = servidor({ "/api/interno/nativas": [{ aguardar: "d1" }], [AGUARDAR]: [{ estado: "pendente", soltar: true }] });
+    const pausas: number[] = [];
+    const r = await confirmarNoServidor(cfg, { fetch: s.f, dormir: async (ms) => { pausas.push(ms); } })({ ferramenta: "Bash", contamina: false, comando: "npm install" });
+    expect(r).toEqual({ permitir: false, motivo: AINDA_ESPERANDO });
+    expect(s.chamadas.filter((c) => c.rota === AGUARDAR).length).toBe(1);
+    expect(pausas).toEqual([]);
+  });
+
+  it("ADR-089: a rota que responde na hora não vira laço apertado — ao menos 1 s entre duas consultas", async () => {
+    let agora = 0;
+    const pausas: number[] = [];
+    const s = servidor({ "/api/interno/nativas": [{ aguardar: "d1" }, { ok: true }], [AGUARDAR]: [() => { agora += 200; return { estado: "pendente" }; }, () => { agora += 200; return { estado: "pendente" }; }, { estado: "decidida", itens: [{ desfecho: "executado" }] }] });
+    const r = await confirmarNoServidor(cfg, { fetch: s.f, agora: () => agora, dormir: async (ms) => { pausas.push(ms); agora += ms; } })({ ferramenta: "Bash", contamina: false, comando: "git push" });
+    expect(r).toEqual({ permitir: true });
+    expect(pausas).toEqual([PAUSA_MINIMA_ENTRE_CONSULTAS_MS - 200, PAUSA_MINIMA_ENTRE_CONSULTAS_MS - 200]);
   });
 
   it("o servidor recusa: a mensagem dele vai ao modelo", async () => {
