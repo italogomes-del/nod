@@ -45,6 +45,12 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
     fallback: criarEstatico(opcoes.staticDir ?? process.env.NOD_STATIC_DIR),
   });
   const server = createServer((req, res) => {
+    // ADR-088: `curl -fsSL https://<nod>/motor | sh` — o endereço curto do script de instalação do motor (o -L segue).
+    if (req.method === "GET" && (req.url === "/motor" || req.url === "/motor/")) {
+      res.writeHead(302, { location: "/api/motor/instalar", "cache-control": "no-store" });
+      res.end();
+      return;
+    }
     if (req.method === "GET" && (req.url === "/metrics" || req.url?.startsWith("/metrics?"))) {
       responderMetricas(res);
       return;

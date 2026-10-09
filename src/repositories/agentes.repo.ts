@@ -29,10 +29,11 @@ interface Linha {
   voz: string | null;
   voz_velocidade: number | null;
   papel: PapelAgente | null;
+  maquina_id: string | null;
   criado_em: Date;
 }
 
-const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade, papel";
+const COLUNAS = "tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, fixado, oculto, confirmado, modelo, harness, esforco, modo_aprovacao, duplicado_de, criado_em, secao, posicao, nao_lido, excluido_em, voz, voz_velocidade, papel, maquina_id";
 
 function paraAgente(l: Linha): Agente {
   return {
@@ -53,6 +54,7 @@ function paraAgente(l: Linha): Agente {
     harness: l.harness ?? "auto",
     esforco: l.esforco ?? null,
     modoAprovacao: l.modo_aprovacao ?? "manual",
+    maquinaId: l.maquina_id ?? null,
     duplicadoDe: l.duplicado_de,
     secao: l.secao,
     posicao: l.posicao,
@@ -210,6 +212,18 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and excluido_em is null
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;
+    },
+
+    /**
+     * ADR-088: onde o bot trabalha (o id da chave da máquina; null = qualquer uma). Só a dona muda, como o modo; quem chama
+     * já conferiu que a chave é dela. Devolve os bots alterados (os que não são dela, não existem ou foram excluídos ficam de fora).
+     */
+    async definirMaquina(ids: readonly string[], maquinaId: string | null): Promise<Agente[]> {
+      if (ids.length === 0) return [];
+      const ls = await conn<Linha[]>`update agentes set maquina_id = ${maquinaId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = any(${[...ids]}::uuid[]) and excluido_em is null
+        returning ${conn.unsafe(COLUNAS)}`;
+      return ls.map(paraAgente);
     },
 
     /** ADR-059: só a dona muda (filtro por owner_id, como o perfil); null = não é dela, não existe ou foi excluído. */

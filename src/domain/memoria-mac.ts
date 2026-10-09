@@ -17,6 +17,22 @@ export function nivelDaPressao(bruto: string | number | null | undefined): Nivel
   return "verde";
 }
 
+/**
+ * definido em 2026-10-09 (ADR-088): o nível de memória de uma máquina Linux (o motor numa VM), pelo `/proc/meminfo`. O
+ * Linux não tem o nível de pressão do macOS; a fração `MemAvailable / MemTotal` faz o papel: amarela abaixo de 20%
+ * livres, vermelha abaixo de 10%. Leitura sem os dois campos = verde, nunca um aviso que ninguém mediu.
+ */
+export function nivelDaMemoriaLinux(meminfo: string): NivelPressao {
+  const campo = (nome: string) => Number(new RegExp(`^${nome}:\\s+(\\d+)`, "m").exec(meminfo)?.[1]);
+  const total = campo("MemTotal");
+  const livre = campo("MemAvailable");
+  if (!Number.isFinite(total) || !Number.isFinite(livre) || total <= 0) return "verde";
+  const fracao = livre / total;
+  if (fracao < 0.1) return "vermelha";
+  if (fracao < 0.2) return "amarela";
+  return "verde";
+}
+
 /** `NOD_SIMULAR_PRESSAO=1|2|4` força o nível (testes e UAT); outro valor ou ausente = ler do sistema. */
 export function pressaoSimulada(valor: string | undefined): NivelPressao | null {
   const v = valor?.trim();

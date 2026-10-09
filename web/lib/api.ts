@@ -5,6 +5,7 @@ import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
+import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
@@ -255,6 +256,14 @@ export function criarApi(escopo: Escopo) {
     chaves: () => get<{ chaves: ChaveMaquinaDto[] }>("maquinas/chaves"),
     emitirChave: (nome: string) => post<ChaveEmitidaDto>("maquinas/chaves", { nome }),
     revogarChave: (id: string) => del<{ ok: true }>(`maquinas/chaves/${id}`),
+    // ADR-088: as máquinas, onde cada bot trabalha, o pareamento por código e o "rodar em outra desta vez".
+    maquinas: () => get<MaquinasDto>("maquinas"),
+    maquinaDoBot: (agenteId: string, maquinaId: string | null) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/maquina`, { maquinaId }),
+    moverBots: (maquinaId: string, agentes: string[]) => pedir<{ movidos: number }>("PUT", `${base}/maquinas/${encodeURIComponent(maquinaId)}/bots`, { agentes }),
+    maquinaPadrao: (maquinaId: string | null) => pedir<{ padraoId: string | null }>("PUT", `${base}/maquinas/padrao`, { maquinaId }),
+    verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
+    aprovarDispositivo: (codigo: string) => post<{ ok: true }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}/aprovar`),
+    rodarDestaVez: (conversaId: string, maquinaId: string) => post<{ turnos: number }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId }),
     /** ADR-069: abre o pedido de pareamento do Mac que pediu; o código volta ao app pelo 127.0.0.1. */
     parearMac: (nome: string, desafio: string) => post<{ codigo: string }>("maquinas/pareamentos", { nome, desafio }),
     // ADR-051 (definido em 2026-09-28): o card do artefato busca o HTML da SUA versão e o estado da pessoa.

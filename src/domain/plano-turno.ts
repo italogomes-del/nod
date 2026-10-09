@@ -1,4 +1,5 @@
 import type { AnexoMeta } from "../contracts/anexo.ts";
+import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { traduzirParaOCli } from "./comandos.ts";
 import type { Agente } from "../contracts/agente.ts";
 import type { Concessao } from "../contracts/concessao.ts";
@@ -173,6 +174,8 @@ export type EntradaPlano = {
   /** ADR-046: metadados dos anexos da mensagem do turno, lidos pelo caso de uso. */
   anexos?: readonly AnexoMeta[];
   pessoaNome: string;
+  /** ADR-088: a máquina que roda o turno (nome e plataforma, do anúncio); ausente = o texto do Mac de sempre. */
+  maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
   colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];
   contextoConversa?: string;
   /** Inventário para o modelo escolher SOBRE QUAL rotina agir; não confundir com `rotina` acima. */
@@ -291,7 +294,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}) }),
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}) }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
     politicaExecucao: {
       prazoMs,

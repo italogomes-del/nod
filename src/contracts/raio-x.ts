@@ -125,4 +125,5 @@ export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; 
 export const USOS_DO_MAC = ["pouco", "equilibrado", "livre"] as const;
 export type UsoDoMac = (typeof USOS_DO_MAC)[number];
 export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
-export type Preferencias = { modoDev: boolean; avisosFechados: string[]; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac };
+/** `maquinaPadraoId` (ADR-088, 0066): onde trabalha o bot sem máquina escolhida; null = qualquer uma. */
+export type Preferencias = { modoDev: boolean; avisosFechados: string[]; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null };

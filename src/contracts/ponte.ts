@@ -34,7 +34,16 @@ export type AnuncioMaquina = {
    * 2 min quando a máquina do turno anunciou `bifurcaSessao`. Ausente = app antigo: nada que dependa disso acontece.
    */
   capacidades?: Partial<Record<IdHarness, CapacidadesHarness>>;
+  /**
+   * definido em 2026-10-09 (ADR-088): o sistema da máquina. O prompt e as telas nomeiam a máquina do turno e não afirmam
+   * "Mac" quando ela é Linux. Ausente = app do Mac anterior a este campo: vale `darwin`.
+   */
+  plataforma?: PlataformaMaquina;
 };
+
+/** ADR-088: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux. */
+export const PLATAFORMAS_MAQUINA = ["darwin", "linux"] as const;
+export type PlataformaMaquina = (typeof PLATAFORMAS_MAQUINA)[number];
 
 /** Passe é CAMPO tipado, nunca regex sobre o texto do modelo (GRUPO.passe-tipado). */
 export type FalaEntrega = { tipo: "texto"; texto: string } | { tipo: "passe"; motivo: MotivoPasse };

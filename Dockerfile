@@ -21,6 +21,8 @@ COPY tests/helpers/catcher-roteiro.ts ./tests/helpers/catcher-roteiro.ts
 # definido em 2026-10-03: src/adapters/workspace/pastas.ts importa este módulo; sem ele o servidor não sobe.
 COPY infra/computador/texto.mjs ./infra/computador/texto.mjs
 COPY --from=web /app/dist/web ./dist/web
+# definido em 2026-10-09 (ADR-088): o motor sem janela desta versão, servido em /api/motor/arquivos para a VM da pessoa.
+COPY --from=web /app/dist/motor ./dist/motor
 # Carrega o grafo inteiro do servidor (server.ts só escuta quando é o ponto de entrada): um import
 # para fora do que foi copiado falha aqui, no build, e não no primeiro boot em produção.
 RUN node -e "import('./src/adapters/http/server.ts').catch((e) => { console.error(e); process.exit(1); })"

@@ -1,4 +1,5 @@
 import type { IdHarness } from "../contracts/harness.ts";
+import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
 import { trabalhosParaDto } from "./trabalhos.ts";
@@ -52,7 +53,8 @@ export type EntradaEmitirPlano = {
   /** O "A fazer" ligado (NOD_PENDENCIAS=1, lido pelo compositor). Ausente = desligado: nem ferramentas nem lista. */
   aFazer?: boolean;
   /** ADR-082: NOD_GERIR_BOTS=0 desliga as ferramentas do Nod (o interruptor de rollback). Ausente = ligadas. */
-  semFerramentasDoNod?: boolean;
+  semFerramentasDoNod?: boolean;  /** ADR-088: nome e plataforma da máquina do turno, do anúncio dela (só no modo compartilhado). Ausente = Mac. */
+  maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
 };
 
 /**
@@ -249,6 +251,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     anexos: await deps.repos.anexos.metas(turno.entradaAnexos),
     contextoConversa,
     pessoaNome,
+    maquina: input.maquina ?? null,
     colegas: visiveis.filter((a) => ehColega(agente, a)),
     rotinasDoAgente,
     onboarding,

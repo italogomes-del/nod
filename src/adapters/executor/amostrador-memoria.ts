@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { availableParallelism } from "node:os";
+import { readFile } from "node:fs/promises";
+import { availableParallelism, loadavg } from "node:os";
 import type { LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
-import { cargaDoLoadavg, leituraDoTurno, nivelDaPressao, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
+import { cargaDoLoadavg, leituraDoTurno, nivelDaMemoriaLinux, nivelDaPressao, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 
 /**
@@ -50,10 +51,15 @@ const executarPadrao: Executar = (bin, args) =>
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; nucleos?: number; plataforma?: NodeJS.Platform }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number }): AmostradorMemoria {
   const nucleos = o.nucleos ?? availableParallelism();
   // ADR-085: a leitura da máquina só existe no macOS (ou simulada); fora dele seria um "verde" que ninguém mediu.
-  const daMaquinaLe = (o.plataforma ?? process.platform) === "darwin" || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR);
+  // ADR-088: o motor numa máquina Linux também lê (memória pelo /proc/meminfo, processador pelo os.loadavg). Só quando
+  // quem cria pede (`lerNoLinux`, o motor sem janela): o servidor em Linux continua sem leitura, como na revisão do #209.
+  const plataforma = o.plataforma ?? process.platform;
+  const linux = plataforma === "linux" && o.lerNoLinux === true;
+  const daMaquinaLe = plataforma === "darwin" || linux || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR);
+  const lerArquivo = o.lerArquivo ?? ((caminho: string) => readFile(caminho, "utf8"));
   const executar = o.executar ?? executarPadrao;
   const intervaloMs = o.intervaloMs ?? INTERVALO_AMOSTRA_MEMORIA_MS;
   const grupos = new Map<string, number>();
@@ -76,6 +82,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     const simulada = pressaoSimulada(o.env.NOD_SIMULAR_PRESSAO);
     if (simulada) return simulada;
     try {
+      if (linux) return nivelDaMemoriaLinux(await lerArquivo("/proc/meminfo"));
       return nivelDaPressao(await executar("/usr/sbin/sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]));
     } catch (erro) {
       // Falha ou fora do macOS: verde, nunca um aviso que a máquina não deu.
@@ -92,6 +99,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     const simulado = Number(o.env.NOD_SIMULAR_PROCESSADOR);
     if (o.env.NOD_SIMULAR_PROCESSADOR && Number.isFinite(simulado) && simulado >= 0) return nivelDoProcessador(simulado * nucleos, nucleos);
     try {
+      if (linux) return nivelDoProcessador((o.cargaLinux ?? (() => loadavg()[0] ?? 0))(), nucleos);
       const carga = cargaDoLoadavg(await executar("/usr/sbin/sysctl", ["-n", "vm.loadavg"]));
       return carga === null ? null : nivelDoProcessador(carga, nucleos);
     } catch (erro) {

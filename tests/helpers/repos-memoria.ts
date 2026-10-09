@@ -414,6 +414,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         });
         return a;
       },
+      async definirMaquina(ids, maquinaId) {
+        const as = doTenant(b.agentes).filter((x) => ids.includes(x.id) && x.ownerId === escopo.pessoaId && !x.excluidoEm);
+        for (const a of as) a.maquinaId = maquinaId;
+        return as;
+      },
       async definirModoAprovacao(id, modo) {
         const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm);
         if (!a) return null;
@@ -1187,6 +1192,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           t.leaseAte = null;
         }
         return absorvidos;
+      },
+      async rodarDestaVez(conversaId, maquinaId) {
+        const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
+        void maquinaId;
+        return ts.length;
       },
       async cancelarPendente(id) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");
@@ -2155,13 +2165,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     preferencias: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
-      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false, usoDoMac: "equilibrado" };
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false, usoDoMac: "equilibrado", maquinaPadraoId: null };
       return {
         async buscar() {
           return atual();
         },
         async gravar(p) {
           const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}) };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
+        async definirMaquinaPadrao(maquinaId) {
+          const nova = { ...atual(), maquinaPadraoId: maquinaId };
           b.preferencias.set(chave, nova);
           return nova;
         },

@@ -210,6 +210,18 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               ${p.harnessesProntos === undefined ? trx`` : trx`and ((t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[])
                 ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then 'claude-cli' else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
+              -- definido em 2026-10-09 (ADR-088): onde o bot trabalha. O alvo é o "desta vez" do turno (ato da pessoa), senão a
+              -- máquina do bot, senão o padrão da pessoa; o turno só sai para o alvo. Alvo que não é uma chave viva da dona
+              -- do turno (revogada, vencida, de outra pessoa ou que nunca existiu) vale como "qualquer máquina": a fila
+              -- nunca prende um turno numa máquina que não pode mais aparecer.
+              and coalesce((select k.id::text from maquina_tokens k
+                where k.tenant_id = t.tenant_id and k.owner_id = t.owner_id and k.revogado_em is null
+                  and (k.expira_em is null or k.expira_em > ${data(p.agora)})
+                  and k.id = coalesce(t.maquina_desta_vez,
+                    (select ag.maquina_id from agentes ag where ag.tenant_id = t.tenant_id and ag.id = t.agente_id
+                      and exists (select 1 from maquina_tokens k2 where k2.tenant_id = t.tenant_id and k2.id = ag.maquina_id and k2.owner_id = t.owner_id and k2.revogado_em is null)),
+                    (select pr.maquina_padrao_id from preferencias pr where pr.tenant_id = t.tenant_id and pr.owner_id = t.owner_id))),
+                ${p.machineId}) = ${p.machineId}
               -- definido em 2026-10-04 (ADR-072): o turno da ligação não serializa com o trabalho do bot, nos dois
               -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só
               -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).
@@ -504,6 +516,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
         returning ${conn.unsafe(COLUNAS)}`;
       return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+    },
+
+    /**
+     * ADR-088: "Rodar em <outra máquina> desta vez" — os turnos AINDA pendentes desta conversa vão para a máquina escolhida
+     * pela pessoa, uma vez; o que já foi reivindicado fica onde está. Quem chama já conferiu que a chave é dela.
+     */
+    async rodarDestaVez(conversaId: string, maquinaId: string): Promise<number> {
+      const r = await conn`
+        update turnos set maquina_desta_vez = ${maquinaId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${conversaId} and estado = 'pendente'`;
+      return r.count;
     },
 
     /** Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. */
