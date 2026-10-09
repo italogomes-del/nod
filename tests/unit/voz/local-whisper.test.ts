@@ -89,6 +89,19 @@ function esperar(cond: () => boolean, ms = 5_000): Promise<void> {
   });
 }
 
+/** Prazo para o whisper-server (falso) sair do 503 no /health; vale para o transcritor e para o teto do teste. */
+// NOD-194: 10 s e depois 30 s não bastaram com o Mac em load ~1000 (o binário falso é um node que precisa subir);
+// medido em 2026-10-07. O real tem TIMEOUT_PRONTO_MS = 90 s.
+const PRONTO_MS = 60_000;
+
+/**
+ * NOD-194: a sonda do /health tem prazo de 1 s (`saude()` em local-whisper.ts), e o servidor falso destes testes
+ * roda no MESMO event loop do teste. Com o Mac em load ~950 a resposta passou de 1 s, a sonda leu "ausente" e o
+ * teste caiu em integracao_nao_configurada sem defeito nenhum (medido em 2026-10-07: falhou em 1,5 s). Quem
+ * não testa a sonda usa este fetch, que troca só o prazo do /health por PRONTO_MS; o resto passa intacto.
+ */
+const sondaSemPressa: typeof fetch = (url, init) => fetch(url, String(url).endsWith("/health") ? { ...init, signal: AbortSignal.timeout(PRONTO_MS) } : init);
+
 describe("voz: whisper local (servidor falso)", () => {
   let fecharDepois: Array<() => Promise<void>> = [];
   beforeEach(() => {
@@ -104,7 +117,7 @@ describe("voz: whisper local (servidor falso)", () => {
     const falso = servidorFalso(async () => ({ text: " Cria uma rotina pro Tuca. " }));
     const porta = await falso.subir();
     fecharDepois.push(falso.fechar);
-    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta), NOD_VOZ_WHISPER_BIN: "/nao/existe" } });
+    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta), NOD_VOZ_WHISPER_BIN: "/nao/existe" }, fetchImpl: sondaSemPressa });
     expect(stt.capacidades).toEqual({ parciais: false, vocabulario: true, fimDeFalaManual: true });
     const resultados: ResultadoStt[] = [];
     const s = await stt.abrir({ idioma: "pt-BR", vocabulario: ["Tuca", "Vera"], aoResultado: (r) => resultados.push(r), aoErro: () => {} });
@@ -127,7 +140,7 @@ describe("voz: whisper local (servidor falso)", () => {
     const falso = servidorFalso(async () => ({ text: "não devia" }));
     const porta = await falso.subir();
     fecharDepois.push(falso.fechar);
-    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta) } });
+    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta) }, fetchImpl: sondaSemPressa });
     const resultados: ResultadoStt[] = [];
     const s = await stt.abrir({ idioma: "pt-BR", aoResultado: (r) => resultados.push(r), aoErro: () => {} });
     for (const q of quadros(fala(200))) s.enviar(q);
@@ -147,7 +160,7 @@ describe("voz: whisper local (servidor falso)", () => {
     });
     const porta = await falso.subir();
     fecharDepois.push(falso.fechar);
-    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta) } });
+    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta) }, fetchImpl: sondaSemPressa });
     const resultados: ResultadoStt[] = [];
     const s = await stt.abrir({ idioma: "pt-BR", aoResultado: (r) => resultados.push(r), aoErro: () => {} });
     for (const q of quadros(fala(500))) s.enviar(q);
@@ -167,7 +180,7 @@ describe("voz: whisper local (servidor falso)", () => {
     const falso = servidorFalso(async () => ({ status: 500 }));
     const porta = await falso.subir();
     fecharDepois.push(falso.fechar);
-    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta) } });
+    const stt = criarTranscritorWhisperLocal({ env: { NOD_VOZ_WHISPER_PORTA: String(porta) }, fetchImpl: sondaSemPressa });
     const erros: Error[] = [];
     const s = await stt.abrir({ idioma: "pt-BR", aoResultado: () => {}, aoErro: (e) => erros.push(e) });
     for (const q of quadros(fala(500))) s.enviar(q);
@@ -184,7 +197,10 @@ describe("voz: whisper local (servidor falso)", () => {
     await expect(abrir()).rejects.toThrow("integracao_nao_configurada");
   });
 
-  it("sobe o binário com -m -l pt --host --port, espera o /health sair do 503 e mata no encerrar", { timeout: 15_000 }, async () => {
+  // NOD-194: sobe um binário falso de verdade e espera o /health dentro de PRONTO_MS. O teste espera esse prazo e mais
+  // 30 s para a inferência e para matar o processo: medido em 2026-10-07, 7,1 s com load ~950 e mais de 10 s com
+  // load ~1000 (o teto era 15 s fixo).
+  it("sobe o binário com -m -l pt --host --port, espera o /health sair do 503 e mata no encerrar", { timeout: PRONTO_MS + 30_000 }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "nod-whisper-falso-"));
     fecharDepois.push(() => rm(dir, { recursive: true, force: true }));
     await writeFile(join(dir, "ggml-base-q5_1.bin"), "modelo falso");
@@ -209,7 +225,7 @@ http.createServer((req, res) => {
     const env = { NOD_VOZ_WHISPER_PORTA: String(porta), NOD_VOZ_WHISPER_BIN: bin, NOD_VOZ_LOCAL: dir };
     expect(await acharBinarioWhisper(env)).toBe(bin);
     expect(caminhoModeloWhisper(env)).toBe(join(dir, "ggml-base-q5_1.bin"));
-    const stt = criarTranscritorWhisperLocal({ env, timeoutProntoMs: 10_000 });
+    const stt = criarTranscritorWhisperLocal({ env, timeoutProntoMs: PRONTO_MS });
     const resultados: ResultadoStt[] = [];
     const s = await stt.abrir({ idioma: "pt-BR", aoResultado: (r) => resultados.push(r), aoErro: () => {} });
     expect(JSON.parse(await readFile(argsArquivo, "utf8"))).toEqual(["-m", join(dir, "ggml-base-q5_1.bin"), "-l", "pt", "--host", "127.0.0.1", "--port", String(porta)]);

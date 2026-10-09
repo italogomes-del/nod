@@ -15,6 +15,8 @@ import {
 
 /** NOD-169: o ensaio classifica pela evidência; cada verificador tem caso de sucesso, de sucesso falso e de falha honesta. */
 const PAGINAS = join(import.meta.dirname, "../../../scripts/ensaio-computador/paginas");
+/** Prazo de cada `bash ensaio-computador.sh` de verdade; passou dele, o spawnSync mata e o status vem null. */
+const PRAZO_SH = 30_000;
 
 function ev(p: Partial<Evidencia> = {}): Evidencia {
   return { resposta: "", ferramentas: [], registro: [], arquivos: {}, ajuda: null, aprovacaoInesperada: false, estado: "concluido", ...p };
@@ -206,12 +208,15 @@ describe("portão, tarefas e opções", () => {
     expect(o.tarefas.map((t) => t.id)).toEqual([10]);
     expect(o.confirmado).toBe(true);
   });
-  it("ensaio-computador.sh --so-portao é seco: sai no portão sem banco, servidor nem sonda paga (QA)", () => {
+  // NOD-194: três `bash ensaio-computador.sh` de verdade, cada um com prazo de PRAZO_SH no spawnSync (que é o que
+  // pega um .sh travado: status null). O teste espera os três prazos e mais 10 s, senão o vitest cortava antes do
+  // spawnSync: medido em 2026-10-07, 14,7 s com o Mac em load ~950, contra os 5 s padrão do projeto unit.
+  it("ensaio-computador.sh --so-portao é seco: sai no portão sem banco, servidor nem sonda paga (QA)", { timeout: 3 * PRAZO_SH + 10_000 }, () => {
     // Regressão: QA da NOD-169 — o .sh repassava --so-portao ao rodar.ts só no fim, depois de subir banco efêmero e servidor
     // (cuja sonda do Claude custa um turno). Fora do Mac ou em CI, sai antes pelo recusaDeAmbiente. Found by /qa on 2026-10-06
     const sh = join(import.meta.dirname, "../../../scripts/ensaio-computador.sh");
     for (const [args, codigos] of [[["--so-portao"], [0, 3]], [["--so-portao", "--tarefas", "todas"], [3]], [["--seco"], [1, 3]]] as const) {
-      const r = spawnSync("bash", [sh, ...args], { encoding: "utf8", timeout: 30_000 });
+      const r = spawnSync("bash", [sh, ...args], { encoding: "utf8", timeout: PRAZO_SH });
       expect(r.stdout + r.stderr, args.join(" ")).not.toMatch(/== PREPARO|== SUBIR/);
       expect(codigos, `${args.join(" ")} → ${r.status}: ${r.stderr}`).toContain(r.status);
     }
@@ -302,7 +307,9 @@ describe("paginas/login.html", () => {
 });
 
 describe("paginas/servidor.mjs", () => {
-  it("registra POST sem senha e o beacon só com o tamanho", async () => {
+  // NOD-194: sobe o servidor.mjs de verdade (node filho) e conversa com ele. medido em 2026-10-07: 3,8 s com o Mac em
+  // load ~950, encostando nos 5 s padrão; 30 s dá folga sem esconder um servidor que não sobe.
+  it("registra POST sem senha e o beacon só com o tamanho", { timeout: 30_000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), "nod-ensaio-"));
     const registro = join(dir, "registro.jsonl");
     const proc = spawn(process.execPath, [join(PAGINAS, "servidor.mjs")], { env: { ...process.env, PORTA: "0", REGISTRO: registro } });

@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { gruposDeProcessoVivos, iniciarProcesso } from "../../../src/adapters/executor/processo.ts";
+
+/**
+ * NOD-194 (QA): filho e neto de verdade (node -e, sleep). medido em 2026-10-08 (Mac, duas `test:unit` em paralelo,
+ * load ~500): 0,8–1,9 s por caso, no padrão de 5 s do unit e com esperas internas de 5 s e 2 s, sem folga para o
+ * load 600–950 do AGENTS.md. Cada espera vai a 20 s (~10x o pior medido), que fica ABAIXO dos 60 s do `sleep 60`
+ * do X6: um neto órfão ainda está vivo quando a espera acaba, e o teste falha. O prazo cobre as três esperas do
+ * primeiro caso e o Parar.
+ */
+const ESPERA_MS = 20_000;
+vi.setConfig({ testTimeout: 3 * ESPERA_MS + 10_000 });
 
 /**
  * #194 (ADR-083 §4): o CLI nasce líder de um grupo de processos (`detached: true`), o grupo é o que o amostrador mede e
@@ -13,7 +23,7 @@ const vivo = (pid: number) => {
     return false;
   }
 };
-const esperarAte = async (cond: () => boolean, ms = 5_000) => {
+const esperarAte = async (cond: () => boolean, ms = ESPERA_MS) => {
   const fim = Date.now() + ms;
   while (!cond() && Date.now() < fim) await new Promise((r) => setTimeout(r, 20));
   return cond();
@@ -62,7 +72,7 @@ process.stdout.write("neto " + neto.pid + "\\n");
     await p.fim;
     const neto = Number(linhas.find((l) => l.startsWith("neto "))!.slice(5));
     expect(neto).toBeGreaterThan(0);
-    expect(await esperarAte(() => !vivo(neto), 2_000)).toBe(true);
+    expect(await esperarAte(() => !vivo(neto))).toBe(true);
     expect(gruposDeProcessoVivos()).not.toContain(pid);
   });
 

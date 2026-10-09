@@ -53,10 +53,13 @@ async function compartilhadoComMaquina(env: Record<string, string> = {}) {
   return { srv, machineId: dados.id, pedir, bot, limpar };
 }
 
+/** O long-poll dos testes que medem "voltou na hora"; o puxar vazio na drenagem tem que voltar bem antes dele. */
+const LONGPOLL_MS = 5_000;
+
 describeIntegracao("NOD-175: drenagem com turno em execução", () => {
   let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
   beforeAll(async () => {
-    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "5000" });
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: String(LONGPOLL_MS) });
   });
   afterAll(async () => {
     await m?.limpar();
@@ -80,7 +83,7 @@ describeIntegracao("NOD-175: drenagem com turno em execução", () => {
     const enviadaB = await srv.json<RespostaMutacao>("POST", `conversas/${conversaB}/mensagens`, { texto: "Chegou no deploy" });
     const inicio = Date.now();
     const vazio = await pedir("puxar");
-    expect(Date.now() - inicio).toBeLessThan(500);
+    expect(Date.now() - inicio).toBeLessThan(LONGPOLL_MS / 2); // NOD-194: contra o próprio long-poll, não um número mágico
     expect(await vazio.json()).toEqual({ plano: null });
     expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${enviadaB.ids.turno}`)).turno.estado).toBe("pendente");
 
@@ -136,7 +139,7 @@ describeIntegracao("NOD-175: drenagem com o prazo vencido", () => {
 describeIntegracao("NOD-176: drenagem com uma reserva em voo", () => {
   let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
   beforeAll(async () => {
-    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "5000" });
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: String(LONGPOLL_MS) });
   });
   afterAll(async () => {
     await m?.limpar();

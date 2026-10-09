@@ -135,6 +135,20 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
 conexões de verdade, serial, limpeza própria por id). Testes nunca dependem do seed: criam as próprias
 linhas com `randomUUID` dentro do envelope; só `tests/helpers/ids.ts` (identidade) é fixo.
 
+**Teste sob carga** (NOD-194, 2026-10-07). O Mac roda a suíte de vários bots ao mesmo tempo (load 600–950),
+e o relógio de parede mede a fila, não o código. Guarda de desempenho (regex O(n²), backtracking) não usa
+`performance.now() < N`: usa `razaoDeCrescimento` de `tests/helpers/crescimento.ts` (tempo de CPU, entrada 4x
+maior, razão < 8, cada medida repetida até ≥ 5 ms de CPU para o caso rápido não cair no ruído) e prova no PR que ela falha com o teto revertido. O `it` da guarda leva o `PRAZO_GUARDA` (30 s) do mesmo helper, cobrado por
+`tests/unit/helpers/crescimento-prazo.test.ts`. Espera de rede afirma contra o próprio
+prazo (`< LONGPOLL_MS / 2`, `< 2 * PRAZO_...`), nunca contra um número mágico. Teste do `unit` que sobe processo
+de verdade, faz `import()` ou é CPU pesada leva prazo explícito por teste ou por arquivo (`vi.setConfig`), com o
+`medido em …` ao lado; o padrão de 5 s do projeto `unit` não muda. Quando há `spawnSync` com `timeout`, o
+prazo do teste cobre a soma deles, senão o vitest corta antes do processo. Prazo INTERNO do código (sonda de
+1 s do whisper, 12 s da capacidade do gh, 5 s do `gh auth status`) também estoura com carga: o teste que não mede
+esse prazo injeta o que o código já aceita (`fetchImpl`, `criarBackendGh({prazoMs})`); se o prazo é fixo no código,
+um `vi.mock` do arquivo de teste troca SÓ o prazo (`executarPorRest` em `github-gh`, `execFile` em `github-nativo`) e
+mantém o teste que mede o prazo com o valor explícito; ou deixa o falso mais barato. O código não muda.
+
 ## Composição (L9)
 
 `src/adapters/http/compor.ts` é o único lugar que liga as lanes: `comporApp({db, env})` monta o

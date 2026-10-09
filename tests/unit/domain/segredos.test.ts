@@ -3,6 +3,7 @@ import { cunharChaveMaquina } from "../../../src/services/token-maquina.ts";
 import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../src/domain/codex-stream.ts";
 import { redigirCampos, redigirECortar, redigirSegredos } from "../../../src/domain/segredos.ts";
 import { interpretarLinhaStreamJson } from "../../../src/domain/stream-json.ts";
+import { PRAZO_GUARDA, RAZAO_MAXIMA_LINEAR, razaoDeCrescimento } from "../../helpers/crescimento.ts";
 
 const m = (n: number) => `«redigido: ${n} caracteres»`;
 // Montados em tempo de execução: um literal com cara de chave real dispara o secret scanning do push.
@@ -118,13 +119,17 @@ describe("redigirSegredos (NOD-158)", () => {
   });
 
   // Sem teto nas repetições a redação era O(n²): 8000 caracteres de `a-`/`a.`/`eyJ-` levavam 250–360 ms, e
-  // 16000 passam de 1 s. Com o teto, poucos ms. O dobro do teto da costura e o limite largo separam os dois
-  // casos mesmo numa máquina carregada (relógio de parede, não CPU).
-  it.each(["a=", "a-", "a.", "ab-", "a-ke", "eyJ-", "token=", "x://", "senha=", "a_password", "password:\"", "Authorization: Basic "])("16000 caracteres de `%s` repetido não travam as regex", (unidade) => {
-    const t = rep(unidade, Math.ceil(16000 / unidade.length));
-    const inicio = performance.now();
-    redigirSegredos(t);
-    expect(performance.now() - inicio).toBeLessThan(500);
+  // 16000 passam de 1 s. Com o teto, poucos ms. NOD-194: a guarda mede o crescimento (4000 → 16000 caracteres)
+  // em tempo de CPU, não o relógio de parede, que caía com o Mac em load ~950 sem regressão nenhuma.
+  // medido em 2026-10-07 (load ~950): com o teto, razão 3,3–4,4 nos 12 casos; com os tetos removidos de
+  // segredos.ts ({0,64}→*, {8,256}→{8,}, {0,31}→*, {1,256}→+), `a-`, `a.`, `ab-`, `a-ke` e `eyJ-` deram 16–17,5 e
+  // falharam (os mesmos que já eram quadráticos); os outros casos cobrem regex que não dependem do teto.
+  // 4000 fica bem acima do maior teto (256), senão o próprio teto ainda pareceria quadrático.
+  // São 11 execuções por caso (aquecimento + 5 de cada tamanho): com load ~950 o `eyJ-` passou dos 5 s padrão
+  // (medido em 2026-10-07), daí o PRAZO_GUARDA (30 s) por caso. Uma regex quadrática falha pela razão, não pelo prazo.
+  it.each(["a=", "a-", "a.", "ab-", "a-ke", "eyJ-", "token=", "x://", "senha=", "a_password", "password:\"", "Authorization: Basic "])("o custo de `%s` repetido cresce linear (4000 → 16000 caracteres)", PRAZO_GUARDA, (unidade) => {
+    const razao = razaoDeCrescimento((n) => rep(unidade, Math.ceil(n / unidade.length)), redigirSegredos, 4000);
+    expect(razao).toBeLessThan(RAZAO_MAXIMA_LINEAR);
   });
 });
 

@@ -69,9 +69,13 @@ describe("mascote: pintura sem getComputedStyle", () => {
 });
 
 describe("PintorMascote", () => {
-  it("remendar atributos dá o mesmo SVG que reescrever, quadro a quadro, em toda forma e estado", () => {
+  // NOD-194: um teste por forma, em vez de um só com todas. O de antes tinha 15 s fixos e (medido em 2026-10-07) levou 39,6 s com o Mac em
+  // load ~950 (duas `test:unit` em paralelo): é CPU pura (serializar o SVG a cada quadro), sem relógio na asserção.
+  // Por forma, o pior medido no mesmo load fica na casa de 4 s; 30 s dá folga sem esconder um laço que não termina.
+  // A proporção agora vale em cada forma, o que é mais estrito que a soma de todas.
+  it.each(SHAPES.map((s) => [s.id, s] as const))("remendar atributos dá o mesmo SVG que reescrever, quadro a quadro, em todo estado (forma %s)", { timeout: 30_000 }, (_id, shape) => {
     let quadros = 0, reescritas = 0;
-    for (const shape of SHAPES) for (const state of STATES) {
+    for (const state of STATES) {
       const host = new No("nod-mascote");
       const pintor = new PintorMascote(host, "m1", TINTA);
       const e = new BotEngine(100, "idle", shape.radii, REPOUSO_NOD);
@@ -87,7 +91,7 @@ describe("PintorMascote", () => {
     }
     // o esqueleto quase nunca muda: a maioria dos quadros é remendo
     expect(reescritas).toBeLessThan(quadros / 4);
-  }, 15000);
+  });
 
   it("não escreve atributo que não mudou", () => {
     const host = new No("nod-mascote");

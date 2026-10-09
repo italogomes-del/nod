@@ -83,6 +83,8 @@ function rodar(args: string[]) {
 }
 
 // processo de verdade, vários por caso: sob o check inteiro em paralelo, cada um leva segundos
+// NOD-194 (QA): medido em 2026-10-08 (Mac, duas `test:unit` em paralelo, load ~500): 3–4 s por caso, no pior 3,9 s.
+// 60 s cobre com folga larga; cada `spawnSync` ainda corta em 30 s.
 describe("scripts/uat/relatorio-ligacao.ts: uso inválido (NOD-165)", { timeout: 60_000 }, () => {
   const dir = mkdtempSync(join(tmpdir(), "qa-relatorio-"));
   const comLigacao = join(dir, "com.log");

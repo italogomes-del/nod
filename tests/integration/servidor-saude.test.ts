@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { criarDb } from "../../src/db/client.ts";
 import { listen } from "../../src/adapters/http/server.ts";
+import { PRAZO_SAUDE_BANCO_MS } from "../../src/adapters/http/rotas/saude.ts";
 import type { Rota } from "../../src/adapters/http/roteador.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -222,7 +223,9 @@ describeIntegracao("NOD-175: /api/saude verifica o banco", () => {
       proxy.engolir();
       const inicio = Date.now();
       const fora = await saude();
-      expect(Date.now() - inicio).toBeLessThan(3_000);
+      // NOD-194: o 503 sai no prazo do `select 1`, não pendurado no banco; afirmado contra o próprio prazo, com folga
+      // de 1x para a fila da máquina carregada (sem prazo, o pedido ficaria pendurado até o timeout do teste).
+      expect(Date.now() - inicio).toBeLessThan(2 * PRAZO_SAUDE_BANCO_MS);
       expect(fora.status).toBe(503);
       expect(await fora.json()).toEqual({ ok: false });
 

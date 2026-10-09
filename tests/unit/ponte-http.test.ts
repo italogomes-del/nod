@@ -165,13 +165,14 @@ describe("desktop: fronteiras HTTP", () => {
 
 describe("NOD-175: ponte do servidor na drenagem", () => {
   const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const LONGPOLL_MS = 2_000;
   const plano = { turnoId: "00000000-0000-4000-8000-000000000003" } as PlanoTurno;
 
   function montar(puxar: PonteInternaNod["puxar"]) {
     const ponte: PonteInternaNod = { conectar: async () => undefined, puxar, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null };
     const p = criarPonteHttpServidor({
       criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
-      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: LONGPOLL_MS,
     });
     const chamar = async (nome: string, corpo: unknown = {}) => {
       const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
@@ -229,7 +230,8 @@ describe("NOD-175: ponte do servidor na drenagem", () => {
     const inicio = Date.now();
     p.iniciarDrenagem();
     expect(await esperando).toEqual({ status: 200, body: { plano: null } });
-    expect(Date.now() - inicio).toBeLessThan(500);
+    // NOD-194: o que importa é não ter esperado o long-poll; afirmado contra ele, não contra um número mágico.
+    expect(Date.now() - inicio).toBeLessThan(LONGPOLL_MS / 2);
     puxar.mockClear();
     expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: null } });
     expect(puxar).not.toHaveBeenCalled();

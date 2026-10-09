@@ -194,6 +194,7 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
   });
 
   it("puxar que lança não derruba o laço; parar() acorda o sono e interrompe o turno em curso", async () => {
+    const ESPERA_VAZIA_MS = 60_000;
     let vezes = 0;
     const ponte = ponteFalsa([]);
     ponte.puxar = async () => {
@@ -208,7 +209,7 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
       pessoaId: "p",
       machineId: "m1",
       relogio: Date.now,
-      esperaVaziaMs: 60_000,
+      esperaVaziaMs: ESPERA_VAZIA_MS,
       jitterMs: 0,
       dormir: (ms) => {
         dormidas.push(ms);
@@ -217,10 +218,11 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     });
     // o puxar lançou e o laço foi dormir 60 s em vez de morrer
     await esperarAte(() => vezes === 1 && dormidas.length === 1);
-    expect(dormidas).toEqual([60_000]);
+    expect(dormidas).toEqual([ESPERA_VAZIA_MS]);
     const inicio = Date.now();
     await laco.parar();
-    expect(Date.now() - inicio).toBeLessThan(2_000);
+    // NOD-194: o que importa é o parar não esperar a soneca; afirmado contra ela, não contra 2 s de relógio de parede.
+    expect(Date.now() - inicio).toBeLessThan(ESPERA_VAZIA_MS / 2);
     expect(vezes).toBe(1);
     expect(laco.turnoAtual()).toBeNull();
   });
