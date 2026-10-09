@@ -108,25 +108,36 @@ export function protegidoPorMontagem(caminho: string, montagens: readonly string
 
 /**
  * definido em 2026-10-09 (revisão do #225): o que o `git worktree remove` apagaria junto sem perguntar (arquivo IGNORADO)
- * e que se refaz sozinho — dependência, build, cache, log. Qualquer outro ignorado (`.env`, `backups/*.dump`, um banco
+ * e que se refaz sozinho — dependência, build, cache. Qualquer outro ignorado (`.env`, `backups/*.dump`, um banco
  * local) segura a worktree com o motivo `ignorado_valioso`: o git não protege o que está no .gitignore, e é melhor
- * recusar demais do que apagar algo que não volta.
+ * recusar demais do que apagar algo que não volta. revisto na segunda revisão do #225: `build`, `out` e `output` saíram
+ * (são nomes genéricos, e `output/relatorio.csv` é resultado de trabalho); a pasta só conta pelo PRIMEIRO nome do
+ * caminho; `.env*` nunca é regenerável, em nível nenhum.
  */
-const PASTAS_REGENERAVEIS = new Set(["node_modules", "dist", "build", "out", "output", "coverage", ".vite", ".next", ".turbo", ".cache", ".parcel-cache", ".pnpm-store", "__pycache__", ".pytest_cache"]);
-const ARQUIVOS_REGENERAVEIS = new Set([".DS_Store", "tsconfig.tsbuildinfo"]);
+const PASTAS_REGENERAVEIS = new Set(["node_modules", "dist", "coverage", ".vite", ".next", ".turbo", ".cache", ".parcel-cache", ".pnpm-store", "__pycache__", ".pytest_cache"]);
 
-/** O caminho ignorado (relativo à worktree, como o `git status --ignored` mostra) se refaz sozinho? */
-export function ignoradoRegeneravel(caminho: string): boolean {
-  const partes = caminho.replace(/\/+$/, "").split("/").filter((p) => p !== "");
-  if (partes.length === 0) return false;
-  if (partes.some((p) => PASTAS_REGENERAVEIS.has(p))) return true;
-  const nome = partes[partes.length - 1]!;
-  return ARQUIVOS_REGENERAVEIS.has(nome) || nome.endsWith(".log");
-}
-
-/** Os nomes de arquivo de compose que, sem a lista de montagens do Docker, seguram a worktree (fail-closed). */
-export function ehArquivoDeCompose(nome: string): boolean {
-  return /^(docker-)?compose(\.[\w.-]+)?\.ya?ml$/.test(nome);
+/**
+ * O caminho ignorado (relativo à worktree, como o `git status --ignored=traditional` mostra: pasta inteira ignorada vem
+ * com `/` no fim) se refaz sozinho?
+ * - `valioso`: segura a worktree;
+ * - `regeneravel`: sai junto;
+ * - `conferir_env`: pasta regenerável inteira (`dist/`) — sai junto só se não houver `.env*` dentro (quem chama olha).
+ *
+ * Exceções ao "só o primeiro nome", todas de coisa que nunca é trabalho: a pasta `node_modules` em qualquer nível (o
+ * monorepo pnpm do gamefik e do leapy tem uma por pacote, e sem isso nenhuma worktree deles sairia), e os arquivos
+ * `.DS_Store` (o Finder) e `*.tsbuildinfo` (cache do tsc) em qualquer nível. `*.log` só na raiz.
+ */
+export function classificarIgnorado(caminho: string): "valioso" | "regeneravel" | "conferir_env" {
+  const pasta = caminho.endsWith("/");
+  const partes = caminho.split("/").filter((p) => p !== "");
+  if (partes.length === 0) return "valioso";
+  if (partes.some((p) => p.startsWith(".env"))) return "valioso";
+  const ultimo = partes[partes.length - 1]!;
+  if (pasta && ultimo === "node_modules") return "regeneravel";
+  if (!pasta && (ultimo === ".DS_Store" || ultimo.endsWith(".tsbuildinfo"))) return "regeneravel";
+  if (PASTAS_REGENERAVEIS.has(partes[0]!)) return pasta && partes.length === 1 ? "conferir_env" : partes.length > 1 ? "regeneravel" : "valioso";
+  if (!pasta && partes.length === 1 && ultimo.endsWith(".log")) return "regeneravel";
+  return "valioso";
 }
 
 /** Por que o `git worktree remove` (sem --force) recusou, pela saída de erro dele. */

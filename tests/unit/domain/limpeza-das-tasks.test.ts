@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ehArquivoDeCompose, ignoradoRegeneravel, LIMPAR_APOS_MS, motivoDaRecusa, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, LIMPAR_APOS_MS, motivoDaRecusa, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
 
 const AGORA = Date.UTC(2026, 9, 9, 12);
 const DIA = 24 * 3_600_000;
@@ -52,14 +52,12 @@ describe("proteções do disco (ADR-088)", () => {
     expect(protegidoPorMontagem(nfc.normalize("NFD").toUpperCase(), [`${nfc}/init`])).toBe(true);
   });
 
-  it("revisão #225: só o ignorado que se refaz pode sair junto com a worktree", () => {
-    for (const c of ["node_modules/", "packages/web/node_modules/", "dist/", "apps/x/.next/", "coverage/", ".turbo/", "npm-debug.log", ".DS_Store", "tsconfig.tsbuildinfo", "a/__pycache__/"]) expect(ignoradoRegeneravel(c), c).toBe(true);
-    for (const c of [".env", ".env.local", "backups/", "backups/local/nod.dump", ".claude/", "dados.sqlite", ""]) expect(ignoradoRegeneravel(c), c).toBe(false);
-  });
-
-  it("arquivos de compose reconhecidos", () => {
-    for (const n of ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "docker-compose.efemero.yml"]) expect(ehArquivoDeCompose(n), n).toBe(true);
-    for (const n of ["package.json", "compose.ts", "docker-compose.yml.bak"]) expect(ehArquivoDeCompose(n), n).toBe(false);
+  it("revisão #225: só o ignorado que se refaz pode sair junto com a worktree (pelo primeiro nome do caminho)", () => {
+    for (const c of ["node_modules/", "packages/web/node_modules/", "dist/x.map", "coverage/lcov.info", ".turbo/cache/a", "npm-debug.log", ".DS_Store", "a/b/.DS_Store", "tsconfig.tsbuildinfo", "packages/x/tsconfig.tsbuildinfo"]) expect(classificarIgnorado(c), c).toBe("regeneravel");
+    // Pasta regenerável inteira: sai só se não houver `.env*` dentro (o Mac confere).
+    for (const c of ["dist/", ".next/", "coverage/", "__pycache__/"]) expect(classificarIgnorado(c), c).toBe("conferir_env");
+    // Segunda revisão: build/out/output saíram da lista; o nome no meio do caminho não conta; `.env*` nunca, em nível nenhum.
+    for (const c of [".env", ".env.local", "dist/.env.production", "node_modules/.env", "backups/", "backups/local/nod.dump", ".claude/", "dados.sqlite", "build/", "out/", "output/", "output/relatorio.csv", "apps/x/.next/", "a/__pycache__/", "logs/app.log", "dist", ""]) expect(classificarIgnorado(c), c).toBe("valioso");
   });
 
   it("a recusa do git vira motivo", () => {

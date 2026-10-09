@@ -65,7 +65,7 @@ beforeEach(async () => {
   clone = join(home, "code", "acme");
   await mkdir(clone, { recursive: true });
   git(clone, "init", "-q", "-b", "main");
-  await writeFile(join(clone, ".gitignore"), "node_modules/\ndist/\n*.log\n.claude/\nbackups/\n.env\n");
+  await writeFile(join(clone, ".gitignore"), "node_modules/\ndist/\n*.log\n.claude/\nbackups/\n.env\noutput/\n");
   await writeFile(join(clone, "README.md"), "acme\n");
   git(clone, "add", ".");
   git(clone, "commit", "-q", "-m", "inicio");
@@ -78,11 +78,17 @@ afterEach(async () => {
 const encerrada = (pasta: string, trabalhoId = "t-1"): PastaParaLimpar => ({ trabalhoId, pasta, quando: "encerrada" });
 
 describe("limpeza das pastas de task no Mac (ADR-088)", () => {
-  it("task encerrada: a worktree limpa sai (com node_modules, dist e log), a pasta vazia sai e o clone esquece a worktree", async () => {
+  it("task encerrada: a worktree limpa sai (com node_modules, também o de pacote do monorepo, dist e log), a pasta vazia sai e o clone esquece a worktree", async () => {
     const wt = await worktree("Dev 1/fix-filtros-abc123/acme", "feat/filtros");
     await mkdir(join(wt, "dist"), { recursive: true });
     await writeFile(join(wt, "dist", "app.js"), "x");
     await writeFile(join(wt, "npm-debug.log"), "x");
+    await mkdir(join(wt, "packages", "web", "node_modules", "react"), { recursive: true });
+    await writeFile(join(wt, "packages", "web", "node_modules", "react", "index.js"), "x");
+    // O pacote tem arquivo rastreado (num monorepo de verdade); sem isso o git recolhe `packages/` inteira como ignorada.
+    await writeFile(join(wt, "packages", "web", "package.json"), "{}\n");
+    git(wt, "add", "packages/web/package.json");
+    git(wt, "commit", "-q", "-m", "pacote");
     const r = await limparPastas([encerrada("Dev 1/fix-filtros-abc123")], opcoes(executor()));
     expect(r).toMatchObject({ pastas: 1, removidas: 1, pastasApagadas: 1, puladas: {} });
     expect(existsSync(wt)).toBe(false);
@@ -121,16 +127,28 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(await readFile(join(comClone, ".claude", "clone", "nota.txt"), "utf8")).toBe("só aqui\n");
   });
 
-  it("revisão #225 (1): arquivo ignorado que não se refaz (backup, .env) segura a worktree", async () => {
+  it("revisão #225 (1 e 2ª revisão): arquivo ignorado que não se refaz (backup, .env, output/, .env dentro de dist/) segura a worktree", async () => {
     const comBackup = await worktree("Dev 2/backup-eeeeee/acme", "feat/backup");
     await mkdir(join(comBackup, "backups", "local"), { recursive: true });
     await writeFile(join(comBackup, "backups", "local", "nod.dump"), "dados");
     const comEnv = await worktree("Dev 2/env-ffffff/acme", "feat/env");
     await writeFile(join(comEnv, ".env"), "SEGREDO=1\n");
-    const r = await limparPastas([encerrada("Dev 2/backup-eeeeee", "t-e"), encerrada("Dev 2/env-ffffff", "t-f")], opcoes(executor()));
-    expect(r).toMatchObject({ removidas: 0, puladas: { ignorado_valioso: 2 } });
+    const comOutput = await worktree("Dev 2/output-121212/acme", "feat/output");
+    await mkdir(join(comOutput, "output"), { recursive: true });
+    await writeFile(join(comOutput, "output", "relatorio.csv"), "a,b\n");
+    const comEnvNoDist = await worktree("Dev 2/dist-env-131313/acme", "feat/dist-env");
+    await mkdir(join(comEnvNoDist, "dist"), { recursive: true });
+    await writeFile(join(comEnvNoDist, "dist", "app.js"), "x");
+    await writeFile(join(comEnvNoDist, "dist", ".env.production"), "SEGREDO=2\n");
+    const r = await limparPastas(
+      [encerrada("Dev 2/backup-eeeeee", "t-e"), encerrada("Dev 2/env-ffffff", "t-f"), encerrada("Dev 2/output-121212", "t-o"), encerrada("Dev 2/dist-env-131313", "t-d")],
+      opcoes(executor()),
+    );
+    expect(r).toMatchObject({ removidas: 0, puladas: { ignorado_valioso: 4 } });
     expect(existsSync(join(comBackup, "backups", "local", "nod.dump"))).toBe(true);
     expect(existsSync(join(comEnv, ".env"))).toBe(true);
+    expect(existsSync(join(comOutput, "output", "relatorio.csv"))).toBe(true);
+    expect(existsSync(join(comEnvNoDist, "dist", ".env.production"))).toBe(true);
   });
 
   it("revisão #225 (2): commit com HEAD solto (fora de branch, remoto ou tag) segura a worktree", async () => {
@@ -196,20 +214,15 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(existsSync(join(porCaixa, "infra", "init"))).toBe(true);
   });
 
-  it("revisão #225 (4): Docker desconhecido segura worktree com compose até 2 níveis abaixo e não apaga pasta vazia", async () => {
-    const comCompose = await worktree("Ze 1/com-compose-222222/acme", "feat/compose");
-    await mkdir(join(comCompose, ".devcontainer"), { recursive: true });
-    await writeFile(join(comCompose, ".devcontainer", "docker-compose.yml"), "services: {}\n");
-    git(comCompose, "add", ".devcontainer/docker-compose.yml");
-    git(comCompose, "commit", "-q", "-m", "compose");
-    const semCompose = await worktree("Ze 1/sem-compose-333333/acme", "feat/sem");
+  it("revisão #225 (4, 2ª revisão): Docker instalado e sem resposta adia a passada inteira — nada sai", async () => {
+    const limpa = await worktree("Ze 1/limpa-222222/acme", "feat/limpa");
     await mkdir(join(home, "nod", "Ze 1", "vazia-444444"), { recursive: true });
-    const r = await limparPastas([encerrada("Ze 1/com-compose-222222", "t-1"), encerrada("Ze 1/sem-compose-333333", "t-2"), encerrada("Ze 1/vazia-444444", "t-3")], opcoes({ ...executor(), montagens: async () => null }));
-    expect(r).toMatchObject({ removidas: 1, pastasApagadas: 0, puladas: { compose_sem_docker: 1 } });
-    expect(existsSync(comCompose)).toBe(true);
-    expect(existsSync(semCompose)).toBe(false);
+    const { executar, chamadas } = executor();
+    const r = await limparPastas([encerrada("Ze 1/limpa-222222", "t-1"), encerrada("Ze 1/vazia-444444", "t-3")], opcoes({ executar, montagens: async () => null }));
+    expect(r).toMatchObject({ adiada: true, pastas: 0, removidas: 0, pastasApagadas: 0 });
+    expect(existsSync(limpa)).toBe(true);
     expect(existsSync(join(home, "nod", "Ze 1", "vazia-444444"))).toBe(true);
-    expect(existsSync(join(home, "nod", "Ze 1", "sem-compose-333333"))).toBe(true);
+    expect(chamadas.some((c) => c.startsWith("git "))).toBe(false);
   });
 
   it("revisão #225 (4): sem o binário do Docker mas com o app ou o socket, as montagens são desconhecidas", async () => {
@@ -245,6 +258,14 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     const retomada = await travarLimpeza(home, Date.now());
     expect(retomada).not.toBeNull();
     await retomada!();
+    // 2ª revisão: trava vazia ou ilegível vale como viva por 30 s; depois disso é retomada (renomeada antes de apagar).
+    await writeFile(join(home, "nod", ".limpeza.lock"), "");
+    expect(await travarLimpeza(home, Date.now())).toBeNull();
+    const retomaIlegivel = await travarLimpeza(home, Date.now() + 31_000);
+    expect(retomaIlegivel).not.toBeNull();
+    await retomaIlegivel!();
+    // Nada fica para trás: nem o temporário do link nem a vencida renomeada.
+    expect((await readdir(join(home, "nod"))).filter((n) => n.startsWith(".limpeza"))).toEqual([]);
   });
 
   it("revisão #225 (9): simular confere tudo, não apaga nada e conta o que sairia, com o tamanho", async () => {
@@ -254,6 +275,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     await mkdir(join(home, "nod", "Dev 4", "vazia-999999"), { recursive: true });
     const { executar, chamadas } = executor();
     const r = await limparPastas([encerrada("Dev 4/limpa-777777", "t-1"), encerrada("Dev 4/suja-888888", "t-2"), encerrada("Dev 4/vazia-999999", "t-3")], opcoes({ executar, simular: true }));
+    // 2ª revisão: o padrão, sem nada no ambiente, é simular; só `ligada` escrito apaga.
     expect(r).toMatchObject({ simulada: true, removidas: 1, pastasApagadas: 2, puladas: { suja: 1 } });
     expect(r.estimadoBytes).toBeGreaterThan(0);
     expect(existsSync(limpa)).toBe(true);
@@ -261,7 +283,9 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(chamadas.some((c) => c.includes("worktree remove"))).toBe(false);
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "simular" })).toBe("simular");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "desligada" })).toBe("desligada");
-    expect(modoDaLimpeza({})).toBe("ligada");
+    expect(modoDaLimpeza({})).toBe("simular");
+    expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "qualquer" })).toBe("simular");
+    expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "ligada" })).toBe("ligada");
   });
 
   it("nada fora de ~/nod/<bot>/<slug>: a raiz do bot, link para fora e caminho com .. são recusados", async () => {

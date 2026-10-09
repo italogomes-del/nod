@@ -973,9 +973,11 @@ export function comporApp(o: OpcoesCompor): App {
     }), p.ponte);
   // definido em 2026-10-09 (ADR-088): no modo local o servidor É o executor do Mac, e a limpeza das pastas de task roda
   // aqui, uma por pessoa ao lado do pool (as passadas entram numa fila só do processo, revisão do #225).
-  // `NOD_LIMPEZA_TASKS=simular` confere tudo e só registra; `desligada` desliga.
+  // `NOD_LIMPEZA_TASKS`: sem nada (ou `simular`) confere tudo e só registra; só `ligada` apaga; `desligada` desliga.
   const homeDoExecutor = env.HOME ?? homedir();
   const modoLimpeza = modoDaLimpeza(env);
+  // Segunda revisão do #225: o modo efetivo no boot — o padrão é `simular`, e quem lê o log sabe se algo foi apagado.
+  if (!compartilhado) log("info", "limpeza_modo", { modo: modoLimpeza, onde: "servidor_local" });
   const pastaEmUso = (pasta: string) => [...planosVivos.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true);
   const iniciar: IniciarLaco = (p) => {
     const pool = iniciarLacoDaPessoa(p);

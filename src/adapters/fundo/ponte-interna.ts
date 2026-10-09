@@ -474,7 +474,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     async relatarLimpeza(pessoaId, relato: RelatoLimpeza) {
       const r = relatoValido(relato);
       // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
-      log("info", r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
+      // Segunda revisão do #225: com o Docker instalado e mudo a passada não mexe em nada — `limpeza_adiada`.
+      log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
     },
 
     emMemoria() {

@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
-import { lstat, open, readdir, readFile, realpath, rmdir, stat, statfs, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
-import { ehArquivoDeCompose, ignoradoRegeneravel, motivoDaRecusa, ORFA_PARADA_MS, pastaDeTask, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, pastaDeTask, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
 
@@ -24,13 +25,15 @@ export type ResultadoComando = { codigo: number; stdout: string; stderr: string 
 export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number }) => Promise<ResultadoComando>;
 
 /**
- * Revisão do #225: `ligada` (padrão) apaga; `simular` faz a passada inteira, com todas as checagens, e só registra o que
- * sairia (`limpeza_simulada`); `desligada` não roda. Lido de `NOD_LIMPEZA_TASKS`.
+ * Revisão do #225: `simular` faz a passada inteira, com todas as checagens, e só registra o que sairia
+ * (`limpeza_simulada`); `ligada` apaga; `desligada` não roda. Lido de `NOD_LIMPEZA_TASKS`. revisto na segunda revisão
+ * do #225: o padrão é `simular` em todo modo (diário e app) até o Marlon validar os logs — só apaga com `ligada`
+ * escrito. O gatilho para mudar o padrão está na ADR-088 §7.
  */
 export type ModoLimpeza = "ligada" | "simular" | "desligada";
 export function modoDaLimpeza(env: Readonly<Record<string, string | undefined>>): ModoLimpeza {
   const v = env.NOD_LIMPEZA_TASKS?.trim().toLowerCase();
-  return v === "desligada" ? "desligada" : v === "simular" ? "simular" : "ligada";
+  return v === "desligada" ? "desligada" : v === "ligada" ? "ligada" : "simular";
 }
 
 /** definido em 2026-10-09: a primeira passada 10 min depois de subir (o boot já é pesado), e então a cada 6 h. */
@@ -54,6 +57,10 @@ const ANINHADO_PROFUNDIDADE = 8;
 const ANINHADO_MAX_PASTAS = 20_000;
 /** Revisão do #225: a trava de um processo que morreu, ou mais velha que isto, é retomada. */
 const TRAVA_VENCE_MS = 24 * 3_600_000;
+/** Segunda revisão do #225: trava vazia ou ilegível (alguém acabou de criá-la) vale como viva por isto. */
+const TRAVA_ILEGIVEL_VIVA_MS = 30_000;
+/** Segunda revisão do #225: a busca de `.env*` dentro de uma pasta regenerável inteira (`dist/`) para aqui e recusa. */
+const ENV_MAX_PASTAS = 5_000;
 
 export function criarExecutarComando(env: Readonly<Record<string, string | undefined>>, home: string): ExecutarComando {
   const ambiente = { ...env, PATH: caminhoAumentado(env.PATH, home), GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1", GIT_OPTIONAL_LOCKS: "0" };
@@ -73,8 +80,8 @@ const existePadrao = (caminho: string): Promise<boolean> => lstat(caminho).then(
 /**
  * As origens dos bind mounts de todos os containers (rodando ou parados: o parado volta a montar ao subir). `[]` = sem
  * Docker neste Mac; `null` = não se sabe — o Docker não respondeu (o Docker Desktop trava quando o disco da VM enche),
- * ou o binário não está no PATH mas o Docker existe (o app em /Applications ou o socket). Com `null` a limpeza segura
- * toda worktree que tem arquivo de compose e não apaga pasta vazia nenhuma.
+ * ou o binário não está no PATH mas o Docker existe (o app em /Applications ou o socket). revisto na segunda revisão do
+ * #225: com `null` a passada inteira é adiada — sem saber o que está montado, não se mexe em nada.
  */
 export async function montagensDoDocker(executar: ExecutarComando, home: string, existe: (c: string) => Promise<boolean> = existePadrao): Promise<string[] | null> {
   const ps = await executar("docker", ["ps", "-aq"]);
@@ -179,14 +186,23 @@ async function ficariaVazia(dir: string, profundidade: number, ausentes: Readonl
   }
 }
 
-/** Revisão do #225: arquivo de compose na worktree ou até 2 níveis abaixo (`.devcontainer/`, `infra/`), fora de node_modules. */
-async function temCompose(dir: string, profundidade = 0): Promise<boolean> {
-  let entradas;
-  try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return true; }
-  if (entradas.some((e) => !e.isDirectory() && ehArquivoDeCompose(e.name))) return true;
-  if (profundidade >= 2) return false;
-  for (const e of entradas) if (e.isDirectory() && e.name !== "node_modules" && e.name !== ".git" && (await temCompose(join(dir, e.name), profundidade + 1))) return true;
-  return false;
+/**
+ * Segunda revisão do #225: há `.env*` dentro desta pasta (a regenerável inteira que o git mostra recolhida, `dist/`)?
+ * Fora de node_modules; passou do limite, conta como sim.
+ */
+async function temEnvDentro(dir: string): Promise<boolean> {
+  let vistas = 0;
+  async function descer(d: string): Promise<boolean> {
+    if (++vistas > ENV_MAX_PASTAS) return true;
+    let entradas;
+    try { entradas = await readdir(d, { withFileTypes: true }); } catch { return true; }
+    for (const e of entradas) {
+      if (e.name.startsWith(".env")) return true;
+      if (e.isDirectory() && e.name !== "node_modules" && (await descer(join(d, e.name)))) return true;
+    }
+    return false;
+  }
+  return descer(dir);
 }
 
 const livrePadrao = async (caminho: string): Promise<number> => {
@@ -235,10 +251,9 @@ const comparavel = (c: string) => c.normalize("NFC").toLowerCase().replace(/\/+$
  * Tudo o que o `git worktree remove` sem --force não protege, conferido antes (revisão do #225). Devolve o motivo para
  * pular, ou null se a worktree pode sair. A ordem vai do mais barato ao mais caro.
  */
-async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string, montagens: readonly string[] | null, executar: ExecutarComando): Promise<MotivoPuladaLimpeza | null> {
+async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string, montagens: readonly string[], executar: ExecutarComando): Promise<MotivoPuladaLimpeza | null> {
   const wtReal = await real(wt);
-  if (montagens !== null && (protegidoPorMontagem(wt, montagens) || protegidoPorMontagem(wtReal, montagens))) return "montagem";
-  if (montagens === null && (await temCompose(wt))) return "compose_sem_docker";
+  if (protegidoPorMontagem(wt, montagens) || protegidoPorMontagem(wtReal, montagens)) return "montagem";
   const conhecidas = await worktreesDoClone(dirComum, executar);
   if (conhecidas === null) return "erro";
   const alvo = comparavel(wtReal);
@@ -256,7 +271,8 @@ async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string,
   for (const entrada of status.stdout.split("\0")) {
     if (entrada === "") continue;
     if (!entrada.startsWith("!! ")) return "suja";
-    if (!ignoradoRegeneravel(entrada.slice(3))) valioso = true;
+    const tipo = classificarIgnorado(entrada.slice(3));
+    if (tipo === "valioso" || (tipo === "conferir_env" && (await temEnvDentro(join(wt, entrada.slice(3)))))) valioso = true;
   }
   if (valioso) return "ignorado_valioso";
   // Commit que só o HEAD solto alcança se perderia com a worktree.
@@ -290,6 +306,13 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     const m = await (o.montagens ?? (() => montagensDoDocker(o.executar, o.home)))();
     return m === null ? null : [...m, ...(await Promise.all(m.map(real)))];
   })());
+  // Segunda revisão do #225: Docker instalado e mudo = a passada inteira espera a próxima. Sem saber o que está montado,
+  // nem worktree nem pasta vazia sai.
+  if (pastas.length > 0 && (await lerMontagens()) === null) {
+    relato.adiada = true;
+    log("aviso", "limpeza_adiada", { motivo: "docker_sem_resposta", pastas: pastas.length });
+    return relato;
+  }
 
   for (const p of pastas) {
     const rel = pastaDeTask(`~/nod/${p.pasta}`);
@@ -307,7 +330,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     const achados: Achados = { worktrees: [], clones: 0 };
     await procurar(base, 0, achados);
     for (let i = 0; i < achados.clones; i++) pular("clone");
-    const montagens = await lerMontagens();
+    const montagens = (await lerMontagens()) ?? [];
     const saem = new Set<string>();
     let confirmada: boolean | null = null;
 
@@ -350,9 +373,8 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       relato.liberadoBytes += liberado;
       log("info", "limpeza_worktree_removida", { trabalho_id: p.trabalhoId, pasta: nome, quando: p.quando, liberado_mb: Math.round(liberado / 1_048_576) });
     }
-    // Sem saber o que o Docker monta, nenhuma pasta vazia sai (pode ser a origem de uma montagem). Nem a da pasta que o
-    // servidor deixou de oferecer.
-    if (montagens === null || confirmada === false || o.emUso?.(rel)) continue;
+    // Nem a pasta que o servidor deixou de oferecer, nem a que ganhou turno vivo.
+    if (confirmada === false || o.emUso?.(rel)) continue;
     if (await ficariaVazia(base, 0, saem, montagens, !simular)) relato.pastasApagadas++;
   }
   // Revisão do #225: sem `git worktree prune` — o `remove` já apaga os metadados da worktree que tirou, e o prune
@@ -400,29 +422,61 @@ export async function contarOrfas(home: string, agora: number): Promise<{ orfas:
  * Revisão do #225: uma passada por Mac de cada vez, também entre processos (o diário, um servidor de teste e o app do
  * Mac podem rodar juntos). `~/nod/.limpeza.lock` guarda pid e hora; a trava de um pid morto, ou de mais de 24 h, é
  * retomada. Devolve a função que solta, ou null se outro processo está limpando.
+ *
+ * revisto na segunda revisão do #225: a trava nasce inteira — o conteúdo vai para um temporário e o `link()` o publica
+ * como `.limpeza.lock` (falha se já existe), então ninguém lê uma trava pela metade. Trava vazia ou ilegível (corrompida
+ * ou de fora) vale como viva por 30 s. A retomada de uma vencida a renomeia para um nome único e só a apaga se o
+ * conteúdo for o que foi lido; se outro processo a trocou nesse meio, devolve a dele.
  */
 export async function travarLimpeza(home: string, agora: number): Promise<(() => Promise<void>) | null> {
   const arquivo = join(home, "nod", ".limpeza.lock");
-  const conteudo = JSON.stringify({ pid: process.pid, em: agora });
+  const conteudo = JSON.stringify({ pid: process.pid, em: agora, id: randomUUID() });
+  const soltar = async () => {
+    if ((await readFile(arquivo, "utf8").catch(() => "")) === conteudo) await unlink(arquivo).catch(() => undefined);
+  };
   for (let tentativa = 0; tentativa < 2; tentativa++) {
+    const temporario = `${arquivo}.${process.pid}.${randomUUID()}`;
     try {
-      const f = await open(arquivo, "wx", 0o600);
-      await f.writeFile(conteudo);
-      await f.close();
-      return async () => {
-        if ((await readFile(arquivo, "utf8").catch(() => "")) === conteudo) await unlink(arquivo).catch(() => undefined);
-      };
+      await writeFile(temporario, conteudo, { mode: 0o600 });
+      await link(temporario, arquivo);
+      return soltar;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") return null;
-      let dono: { pid?: unknown; em?: unknown } = {};
-      try { dono = JSON.parse(await readFile(arquivo, "utf8")) as typeof dono; } catch { /* trava ilegível: tratada como vencida */ }
-      const vivo = typeof dono.pid === "number" && processoVivo(dono.pid);
-      const recente = typeof dono.em === "number" && agora - dono.em < TRAVA_VENCE_MS;
-      if (vivo && recente) return null;
-      await unlink(arquivo).catch(() => undefined);
+    } finally {
+      await unlink(temporario).catch(() => undefined);
     }
+    const lido = await readFile(arquivo, "utf8").catch(() => null);
+    if (lido === null) continue; // sumiu entre o link e a leitura: tenta de novo
+    const dono = donoDaTrava(lido);
+    if (dono === null) {
+      const mtime = await stat(arquivo).then((s) => s.mtimeMs, () => 0);
+      if (agora - mtime < TRAVA_ILEGIVEL_VIVA_MS) return null;
+    } else if (processoVivo(dono.pid) && agora - dono.em < TRAVA_VENCE_MS) {
+      return null;
+    }
+    // Vencida: tira do caminho com um nome único e confere que era a que foi lida.
+    const vencida = `${arquivo}.vencida.${process.pid}.${randomUUID()}`;
+    try { await rename(arquivo, vencida); } catch { continue; }
+    const tirada = await readFile(vencida, "utf8").catch(() => null);
+    if (tirada !== lido) {
+      // Outro processo publicou uma trava nova entre a leitura e o rename: devolve a dele e desiste.
+      await link(vencida, arquivo).catch(() => undefined);
+      await unlink(vencida).catch(() => undefined);
+      return null;
+    }
+    await unlink(vencida).catch(() => undefined);
   }
   return null;
+}
+
+/** O pid e a hora gravados na trava; null = vazia ou ilegível. */
+function donoDaTrava(texto: string): { pid: number; em: number } | null {
+  try {
+    const d = JSON.parse(texto) as { pid?: unknown; em?: unknown } | null;
+    return d && typeof d.pid === "number" && typeof d.em === "number" ? { pid: d.pid, em: d.em } : null;
+  } catch {
+    return null;
+  }
 }
 
 function processoVivo(pid: number): boolean {

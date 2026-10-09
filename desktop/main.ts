@@ -397,6 +397,7 @@ async function conectar(c: Config) {
     limpezaDasTasks?.parar();
     const homeDoMac = cfg.env.HOME ?? homedir();
     const modo = modoDaLimpeza(process.env);
+    log("info", "limpeza_modo", { modo, onde: "app_do_mac" });
     limpezaDasTasks = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: homeDoMac, executar: criarExecutarComando(cfg.env, homeDoMac), simular: modo === "simular", emUso: (pasta) => [...planosNoMac.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
   }
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.

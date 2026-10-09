@@ -319,6 +319,9 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
     await chamar("limpeza/resultado", { relato: { removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } } });
     expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }));
+    // 2ª revisão: a passada adiada (Docker mudo) também atravessa marcada.
+    await chamar("limpeza/resultado", { relato: { adiada: true } });
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }));
   });
 
   it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {

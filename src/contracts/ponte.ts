@@ -127,13 +127,15 @@ export type RelatoLimpeza = {
    */
   simulada?: boolean;
   estimadoBytes?: number;
+  /** Segunda revisão do #225: o Docker está instalado e não respondeu — a passada não mexeu em nada. */
+  adiada?: boolean;
 };
 /**
  * Revisão do #225: `aninhado` (outra worktree ou repositório dentro dela), `ignorado_valioso` (arquivo ignorado que não
  * se refaz), `head_solto` (commit fora de qualquer branch, remoto ou tag), `em_uso` (um turno deste Mac roda na pasta) e
  * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar).
  */
-export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "compose_sem_docker" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro";
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro";
 
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois

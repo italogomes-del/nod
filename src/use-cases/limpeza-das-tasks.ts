@@ -16,7 +16,7 @@ export async function pastasParaLimpar(deps: Deps): Promise<PastaParaLimpar[]> {
   });
 }
 
-const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "compose_sem_docker", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro"];
+const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro"];
 const inteiro = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), Number.MAX_SAFE_INTEGER) : 0);
 
 /**
@@ -38,6 +38,7 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     orfasParadas: inteiro(o.orfasParadas),
     duracaoMs: inteiro(o.duracaoMs),
     ...(o.simulada === true ? { simulada: true, estimadoBytes: inteiro(o.estimadoBytes) } : {}),
+    ...(o.adiada === true ? { adiada: true } : {}),
   };
 }
 
