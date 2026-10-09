@@ -37,6 +37,9 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
     gravacoes: 0,
     lacos: 0,
     agendado: null as { fn: () => void; ms: number } | null,
+    /** NOD-199: o anúncio ao servidor falha enquanto isto estiver ligado; `tentativas` conta as chamadas, falhas inclusive. */
+    anuncioFalha: null as Error | null,
+    tentativas: 0,
   };
   const registry = (): Registry => {
     const r = { "claude-cli": { estado: "sombra", motivo: "x" }, catcher: { estado: "sombra", motivo: "x" } } as Registry;
@@ -64,6 +67,8 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
     sondar: async () => { m.sondas++; return { registry: registry(), inventarios: { ...m.login } }; },
     impressao: async (ia) => m.impressao[ia],
     anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => {
+      m.tentativas++;
+      if (m.anuncioFalha) throw m.anuncioFalha;
       m.semVoz.push([...semLacoDeVoz]);
       m.anunciadas.push(capacidades);
       m.anuncios.push({
@@ -299,6 +304,41 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     vigia.parar();
     await vigia.reanunciar();
     expect(m.anuncios).toHaveLength(2);
+  });
+
+  it("NOD-199: com as duas IAs prontas e o anúncio falhando, a vigia agenda nova tentativa; quando o anúncio passa, para de agendar", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": semLogin() } });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado).toBeNull();
+    // A pessoa entrou no Codex com um turno rodando: o servidor (antigo, ou fora) recusa o anúncio.
+    m.login["codex-cli"] = pronto();
+    m.anuncioFalha = new Error("rota_ausente");
+    await vigia.contaMudou("codex-cli");
+    expect(m.tentativas).toBe(2);
+    expect(m.anuncios).toHaveLength(1);
+    // Antes da NOD-199 o erro pulava o reagendar e, com as duas prontas, nada mais rodava.
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    await tique();
+    expect(m.tentativas).toBe(3);
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    m.anuncioFalha = null;
+    await tique();
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" } });
+    expect(m.agendado).toBeNull();
+    vigia.parar();
+  });
+
+  it("NOD-199: o reanúncio do 409 que falha devolve o erro a quem chamou e também deixa nova tentativa agendada", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": pronto() } });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado).toBeNull();
+    m.anuncioFalha = new Error("servidor_fora");
+    await expect(vigia.reanunciar()).rejects.toThrow("servidor_fora");
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    m.anuncioFalha = null;
+    await tique();
+    expect(m.anuncios).toHaveLength(2);
+    expect(m.agendado).toBeNull();
   });
 
   it("parar cancela a passada agendada e nada mais roda", async () => {

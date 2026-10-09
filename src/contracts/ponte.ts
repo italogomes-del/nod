@@ -152,6 +152,11 @@ export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_merg
  */
 export interface PonteInterna {
   conectar(m: AnuncioMaquina): Promise<void>;
+  /**
+   * NOD-199 (emenda à ADR-021): reanuncia só as IAs da máquina já conectada, sem mexer nos turnos em andamento. Opcional:
+   * só o cliente HTTP do app tem; a ponte interna do servidor não precisa (o `conectar` dela já é idempotente).
+   */
+  anunciarInventario?(m: AnuncioMaquina): Promise<void>;
   /** ADR-085 (2026-10-08): `maquina` é a leitura do Mac que pede (memória e processador); ausente = app antigo ou sem leitura. */
   puxar(pessoaId: string, maquina?: LeituraMemoria): Promise<PlanoTurno | null>;
   renovar(p: PedidoRenovar): Promise<RespostaRenovar>;

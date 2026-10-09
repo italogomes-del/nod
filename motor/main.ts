@@ -168,7 +168,9 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     impressao: (ia) => impressaoDoLogin(ia, cfg),
     anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => {
       if (encerrado) return;
-      await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades });
+      // NOD-199: como no app do Mac, o reanúncio vai pela rota só de inventário — o `conectar` recusaria (409) ou, depois
+      // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
+      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades });
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });
     },
     aoRegistry: (novo, algumaPronta) => {

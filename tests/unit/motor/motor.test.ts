@@ -56,4 +56,14 @@ describe("motor sem janela (ADR-090)", () => {
     expect(script).not.toContain("${o.");
     execFileSync("sh", ["-n"], { input: script });
   });
+
+  it("QA NOD-199: o motor reanuncia pela rota só de inventário, como o app do Mac — nunca pelo conectar direto", async () => {
+    // O `conectar` com turno rodando volta 409 (o aoFalhar do motor reanuncia de novo) e, depois de 90 s, limpa os planos.
+    // Quem decide entre `inventario` e `conectar` é o cliente (`anunciarInventario`, coberto em ponte-http-inventario).
+    for (const arquivo of ["motor/main.ts", "desktop/main.ts"]) {
+      const fonte = await readFile(join(process.cwd(), arquivo), "utf8");
+      expect(fonte, arquivo).toMatch(/anunciar: async[^\n]*\n?[^]*?ponte\.anunciarInventario\(/);
+      expect(fonte, arquivo).not.toMatch(/ponteHttp\.ponte\.conectar\(/);
+    }
+  });
 });
