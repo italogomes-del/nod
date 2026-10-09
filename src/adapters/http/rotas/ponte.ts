@@ -4,7 +4,7 @@ import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
-import { PLATAFORMAS_MAQUINA, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
+import { PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -22,7 +22,28 @@ import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
  * o app roda um turno por agente em paralelo; antes era um `plano` só e a renovação do segundo turno
  * voltava {ativo:false}, matando a CLI. `recebidas` guarda a última entrega de cada turno (idempotência).
  */
-type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina };
+type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina; anuncio: AnuncioMaquina | null };
+
+/**
+ * NOD-199: o que um anúncio da máquina diz das IAs dela, lido com os mesmos filtros nas duas rotas que o recebem
+ * (`conectar` e `inventario`): só ids integrados, `semLacoDeVoz` só de harness pronto neste anúncio, capacidades validadas.
+ */
+type LeituraAnuncio = { inv: Inventario; gh: boolean; motores: Partial<Record<IdHarness, Inventario>>; harnessesAusente: boolean; semLacoDeVoz: IdHarness[]; capacidades: ReturnType<typeof capacidadesAnunciadas> };
+function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
+  const inv = inventario(b.inventario, agora);
+  // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
+  const gh = objeto(b.github ?? {}).gh === true;
+  const motores: Partial<Record<IdHarness, Inventario>> = {};
+  if (b.harnesses !== undefined) {
+    const anunciados = objeto(b.harnesses);
+    for (const h of HARNESSES) if (anunciados[h.id] !== undefined && h.integrado) motores[h.id] = inventario(anunciados[h.id], agora, h.nome);
+  }
+  // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
+  const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
+  // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (a rede de 2 min só promove com bifurcaSessao).
+  const capacidades = capacidadesAnunciadas(b.capacidades);
+  return { inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades };
+}
 
 /** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
 export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean };
@@ -76,6 +97,12 @@ export function criarPonteHttpServidor(d: {
     return vivas.find((c) => c.inv.estado === "pronto")?.inv ?? vivas[0]?.inv ?? ausente();
   }
   async function persistir(c: Conexao) { await d.persistir(c.escopo, atual(c.escopo.pessoaId)); }
+  /** Melhor esforço: o anúncio não pode falhar porque a repetição das falas barradas falhou. */
+  async function repetirBarrados(c: Conexao) {
+    if (c.inv.estado !== "pronto" || !d.repetirBarrados) return;
+    const prontos = Object.entries(harnessesDaPessoa(c.escopo.pessoaId)).filter(([, i]) => i?.estado === "pronto").map(([h]) => h as IdHarness);
+    await d.repetirBarrados(c.escopo, prontos).catch(() => log("aviso", "repetir_barrados_falhou", {}));
+  }
   function conexao(ctx: Ctx): Conexao {
     const c = conexoes.get(ctx.params.chaveId ?? "");
     if (!c || c.escopo.pessoaId !== ctx.escopo.pessoaId || c.escopo.tenantId !== ctx.escopo.tenantId) throw new ErroDeDominio("estado_invalido");
@@ -101,35 +128,44 @@ export function criarPonteHttpServidor(d: {
       const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma, anuncio: null };
         conexoes.set(id, c);
       }
       if (c.planos.size > 0) {
         if (d.agora() - c.ultimo < 90_000) throw new ErroDeDominio("estado_invalido");
         c.planos.clear();
       }
-      c.inv = inventario(b.inventario, d.agora()); c.ultimo = d.agora();
-      // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
-      c.gh = objeto(b.github ?? {}).gh === true;
+      const a = lerAnuncio(b, d.agora());
+      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
       c.nome = nome;
       c.plataforma = plataforma;
-      const motores: Partial<Record<IdHarness, Inventario>> = {};
-      if (b.harnesses !== undefined) {
-        const anunciados = objeto(b.harnesses);
-        for (const h of HARNESSES) if (anunciados[h.id] !== undefined && h.integrado) motores[h.id] = inventario(anunciados[h.id], d.agora(), h.nome);
-      }
-      // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
-      const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
-      // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (a rede de 2 min só promove com bifurcaSessao).
-      const capacidades = capacidadesAnunciadas(b.capacidades);
-      await c.ponte.conectar({ machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}), ...(capacidades ? { capacidades } : {}) });
+      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}) };
+      await c.ponte.conectar(c.anuncio);
       await persistir(c);
-      // Melhor esforço: a conexão não pode falhar porque a repetição falhou.
-      if (c.inv.estado === "pronto" && d.repetirBarrados) {
-        const prontos = Object.entries(harnessesDaPessoa(ctx.escopo.pessoaId)).filter(([, i]) => i?.estado === "pronto").map(([h]) => h as IdHarness);
-        await d.repetirBarrados(ctx.escopo, prontos).catch(() => log("aviso", "repetir_barrados_falhou", {}));
-      }
+      await repetirBarrados(c);
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
+    }),
+    /**
+     * NOD-199 (emenda à ADR-021): anúncio SÓ de inventário, para a máquina já conectada — a IA que ficou pronta (ou caiu)
+     * chega ao servidor com turno rodando. Troca inventário, harnesses, gh e capacidades da conexão e nunca toca em
+     * `planos`, `puxando` nem `recebidas`: o turno em curso termina e entrega como antes. Sem conexão desta chave (ou de
+     * outra pessoa), `conexao` lança `estado_invalido` → 409, que o app lê como `reconectar`. O nome, a plataforma e o
+     * laço de voz vêm do `conectar` (não mudam sem reabrir o app).
+     */
+    rota("inventario", async (ctx, b) => {
+      const c = conexao(ctx);
+      exigir(b.versaoContrato === 1);
+      const a = lerAnuncio(b, d.agora());
+      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
+      // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
+      // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
+      const { nome, ligacao } = c.anuncio ?? { nome: c.nome, ligacao: false };
+      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}) };
+      // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
+      await c.ponte.conectar(c.anuncio);
+      await persistir(c);
+      await repetirBarrados(c);
+      ctx.json(200, { ok: true });
     }),
     rota("puxar", async (ctx, b) => {
       const c = conexao(ctx);

@@ -430,10 +430,12 @@ async function conectar(c: Config) {
   // teste de verdade aplicado: IA logada e reprovada é anunciada como fora, com a causa.
   let lacoNoAr = false;
   const arquivoVereditos = join(app.getPath("userData"), "ias-testadas.json");
+  // NOD-199: o anúncio vai pela rota só de inventário — não recusa nem limpa um turno que roda. O primeiro anúncio e o
+  // que segue um 409 (`reconectar`) vão pelo `conectar`; quem decide é o cliente da ponte (`anunciarInventario`).
   const vigia = criarVigiaDasIas({
     sondar: () => criarRegistryDetalhado(envExecutor, drivers, { cfg }),
     impressao: (ia) => impressaoDoLogin(ia, cfg),
-    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.conectar({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades }); },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades }); },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);

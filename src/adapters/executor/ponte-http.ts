@@ -4,7 +4,8 @@ import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
 
 export class FalhaPonte extends Error {
-  readonly codigo: "servidor_fora" | "chave_invalida" | "atualize_app" | "reconectar" | "resposta_invalida";
+  /** `rota_ausente` (NOD-199): o servidor não conhece a rota (404) — só a chamada que pede `rota404` vê este código. */
+  readonly codigo: "servidor_fora" | "chave_invalida" | "atualize_app" | "reconectar" | "resposta_invalida" | "rota_ausente";
   constructor(codigo: FalhaPonte["codigo"]) { super(codigo); this.codigo = codigo; }
 }
 
@@ -29,7 +30,18 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
   /** Um buffer por turno: com o pool de laços, dois turnos renovam em paralelo e não podem trocar texto. */
   const trechos = new Map<string, TrechoVivo[]>();
   const ativos = new Set<AbortController>();
-  async function chamar<T>(nome: string, corpo: unknown): Promise<T> {
+  /**
+   * NOD-199: os turnos puxados e ainda não entregues (entregue ou abandonado). Com algum aqui, o anúncio de inventário
+   * num servidor antigo NÃO cai no `conectar`, que recusaria ou limparia os planos do servidor.
+   */
+  const emAndamento = new Set<string>();
+  /**
+   * NOD-199: já houve um `conectar` aceito — daí em diante o anúncio vai sempre pela rota de inventário. Um 409 de outra
+   * rota (o `conectar` recusado com turno rodando, um `puxar` concorrente) NÃO volta a mandar o anúncio pelo `conectar`:
+   * se o servidor de fato esqueceu a máquina, a própria rota de inventário responde 409 e só então cai no `conectar`.
+   */
+  let conectado = false;
+  async function chamar<T>(nome: string, corpo: unknown, opcoes: { rota404?: true } = {}): Promise<T> {
     const ctrl = new AbortController(); ativos.add(ctrl);
     const timer = setTimeout(() => ctrl.abort(), 35_000);
     try {
@@ -38,18 +50,41 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       if (r.status === 426 || (minima && !versaoAceita(o.versao, minima))) throw new FalhaPonte("atualize_app");
       if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
       if (r.status === 409) throw new FalhaPonte("reconectar");
+      if (r.status === 404 && opcoes.rota404) throw new FalhaPonte("rota_ausente");
       if (!r.ok) throw new FalhaPonte("servidor_fora");
       return await r.json() as T;
     } catch (e) {
       const erro = e instanceof FalhaPonte ? e : new FalhaPonte("servidor_fora");
-      o.aoFalhar?.(erro.codigo);
+      // O 404 da rota nova num servidor antigo não é falha de conexão: quem pediu decide (nada de aviso na tela).
+      if (erro.codigo !== "rota_ausente") o.aoFalhar?.(erro.codigo);
       throw erro;
     } finally { clearTimeout(timer); ativos.delete(ctrl); }
   }
-  const ponte: PonteInterna = {
-    async conectar(m) { anuncio = m; await chamar("conectar", m); },
+  const ponte: PonteInterna & Required<Pick<PonteInterna, "anunciarInventario">> = {
+    async conectar(m) { anuncio = m; await chamar("conectar", m); conectado = true; },
+    /**
+     * NOD-199: o anúncio da vigia. Antes do primeiro `conectar` aceito vai pelo `conectar`; o 409 da rota de inventário
+     * (servidor sem esta conexão) também cai nele, que é a recuperação. Conectado, vai pela rota só de inventário e guarda o anúncio, para um `reconectar` depois não
+     * reanunciar o inventário velho. Servidor antigo (404): cai no `conectar` só sem turno em andamento; com turno, lança
+     * e a vigia tenta de novo na próxima passada.
+     */
+    async anunciarInventario(m) {
+      if (!conectado) { await ponte.conectar(m); return; }
+      anuncio = m;
+      try { await chamar("inventario", m, { rota404: true }); }
+      catch (e) {
+        if (!(e instanceof FalhaPonte)) throw e;
+        if (e.codigo === "reconectar") { await ponte.conectar(m); return; }
+        if (e.codigo === "rota_ausente" && emAndamento.size === 0) { await ponte.conectar(m); return; }
+        throw e;
+      }
+    },
     async puxar(_pessoaId, maquina) {
-      try { return (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano; }
+      try {
+        const plano = (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano;
+        if (plano) emAndamento.add(plano.turnoId);
+        return plano;
+      }
       catch (e) {
         if (e instanceof FalhaPonte && e.codigo === "reconectar" && anuncio) await ponte.conectar(anuncio);
         throw e;
@@ -62,13 +97,15 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     },
     async entregar(e) {
       trechos.delete(e.turnoId);
-      for (let tentativa = 0; ; tentativa++) {
-        try { await chamar("entregar", e); return; }
-        catch (erro) {
-          if (!(erro instanceof FalhaPonte) || erro.codigo !== "servidor_fora" || tentativa >= 2) throw erro;
-          await new Promise((r) => setTimeout(r, 1_000));
+      try {
+        for (let tentativa = 0; ; tentativa++) {
+          try { await chamar("entregar", e); return; }
+          catch (erro) {
+            if (!(erro instanceof FalhaPonte) || erro.codigo !== "servidor_fora" || tentativa >= 2) throw erro;
+            await new Promise((r) => setTimeout(r, 1_000));
+          }
         }
-      }
+      } finally { emAndamento.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
     /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */

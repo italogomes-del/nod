@@ -78,3 +78,11 @@ um Codex de quatro meses atrás era anunciado como pronto e todo turno fixado ne
 
 **Gatilho de reversão.** Se um piso recusar uma versão boa (o fornecedor lançou uma versão com numeração fora do
 semver), baixar a linha do `PISO_CLI` e publicar o app e o servidor: o Mac sonda com o piso que veio no app.
+
+
+## Emenda de 2026-10-08 — o resultado da sonda chega ao servidor com turno rodando (NOD-199)
+
+O que a vigia do Mac sonda de novo (login novo, CLI atualizado, IA que volta no teste) é reanunciado pela rota só de
+inventário da ponte ([ADR-021, emenda de 2026-10-08](adr-021-a-ponte-de-execucao-o-app-local-puxa-o-servidor-nunca-di.md)),
+não pelo `conectar`: o servidor passa a saber da IA nova sem recusar nem limpar o turno que roda. Anúncio que falhou é
+repetido no passo de 30 s da vigia, mesmo com todas as IAs prontas.

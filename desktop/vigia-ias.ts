@@ -110,6 +110,11 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
   const vereditos = new Map<IaDesktop, Veredito>();
   let carregados = false;
   let ultimoAnuncio: string | null = null;
+  /**
+   * NOD-199: o último anúncio falhou (servidor fora, servidor antigo com turno rodando…). Sem isto, com todas as IAs
+   * prontas, nada reagendava e a IA nova só chegava ao servidor ao reabrir o app.
+   */
+  let anuncioPendente = false;
   let ultima: Sondagem | null = null;
   let ultimosInventarios: Inventarios | null = null;
   let timer: { cancelar(): void } | null = null;
@@ -209,7 +214,8 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     return saida;
   }
 
-  async function publicar(s: Sondagem, inventarios: Inventarios): Promise<void> {
+  /** Devolve o erro do anúncio (ou null): a falha fica em `anuncioPendente`, nunca pula o `reagendar` de quem chamou. */
+  async function publicar(s: Sondagem, inventarios: Inventarios): Promise<unknown> {
     // A principal é a pronta; sem nenhuma, a que melhor explica a falta: a reprovada no teste, depois a sem login.
     const todos = Object.values(inventarios);
     const principal = todos.find((i) => i?.estado === "pronto")
@@ -226,9 +232,13 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     ultima = s;
     ultimosInventarios = inventarios;
     d.aoRegistry(s.registry, principal.estado === "pronto");
-    if (chave === ultimoAnuncio) return;
-    await d.anunciar(inventarios, principal, semVoz, capacidades);
+    if (chave === ultimoAnuncio) { anuncioPendente = false; return null; }
+    // NOD-199: a falha não sobe — quem chamou ainda tem de reagendar; a chave não é gravada e a próxima passada reanuncia.
+    try { await d.anunciar(inventarios, principal, semVoz, capacidades); }
+    catch (erro) { anuncioPendente = true; return erro; }
     ultimoAnuncio = chave;
+    anuncioPendente = false;
+    return null;
   }
 
   function reagendar(inventarios: Inventarios): void {
@@ -241,7 +251,8 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     // NOD-171: uma IA desatualizada também é sondada de novo com a outra pronta (no passo lento: atualizar leva minutos),
     // para a tela cumprir "o nod percebe sozinho quando a versão nova estiver instalada".
     const algumaAntiga = Object.values(inventarios).some((i) => i?.estado === "ausente" && i.causa === "cli_antigo");
-    const ms = !algumaPronta || algumaLenta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 || algumaAntiga ? INTERVALO_COM_REPROVADA_MS : null;
+    // NOD-199: um anúncio que falhou é tentado de novo no passo da reprovada, mesmo com todas as IAs prontas.
+    const ms = !algumaPronta || algumaLenta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 || algumaAntiga || anuncioPendente ? INTERVALO_COM_REPROVADA_MS : null;
     if (ms === null) return;
     timer = d.agendar(() => { void emFila(passada).catch(() => undefined); }, ms);
   }
@@ -328,7 +339,10 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
       return emFila(async () => {
         if (parado || !ultima || !ultimosInventarios) return;
         ultimoAnuncio = null;
-        await publicar(ultima, ultimosInventarios);
+        const erro = await publicar(ultima, ultimosInventarios);
+        if (erro === null) return;
+        reagendar(ultimosInventarios);
+        throw erro;
       });
     },
 

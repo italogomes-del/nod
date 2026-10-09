@@ -309,6 +309,105 @@ describe("NOD-167: Codex sem app-server no anúncio do Mac", () => {
   });
 });
 
+describe("NOD-199: anúncio só de inventário no servidor", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const turnoId = "00000000-0000-4000-8000-000000000003";
+  const pronto = { estado: "pronto", versao: "fake", em: 0 };
+  const semLogin = { estado: "nao_autenticado", motivo: "entre", em: 0 };
+  function montar() {
+    const relogio = { agora: 1_800_000_000_000 };
+    const maquinas = new Map<string, AnuncioMaquina>();
+    const entregues: string[] = [];
+    const barrados: string[][] = [];
+    const ponte: PonteInternaNod = {
+      conectar: async (m) => { maquinas.set(m.machineId, m); }, puxar: async () => ({ turnoId } as PlanoTurno), renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }),
+      entregar: async (e) => { entregues.push(e.turnoId); }, desconectar: async () => undefined, maquinasConectadas: () => [...maquinas.values()], escopoDoTurno: () => null,
+    };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => relogio.agora, delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+      repetirBarrados: async (_e, prontos) => { barrados.push([...prontos]); },
+    });
+    const chamar = async (nome: string, corpo: unknown = {}, o: { escopo?: typeof escopo; versao?: string } = {}) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": o.versao ?? VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo: o.escopo ?? escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+    return { p, chamar, relogio, maquinas, entregues, barrados };
+  }
+  const base = { versaoContrato: 1, nome: "Mac", inventario: pronto, ligacao: true };
+  const entregaDe = { turnoId, machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: { desfecho: "sucesso", texto: "ok", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] } };
+
+  it.each([["logo depois do puxar", 1_000], ["mais de 90 s depois do último contato", 95_000]])("com um turno rodando, o anúncio %s atualiza as IAs sem recusar nem limpar o plano; o turno entrega", async (_n, ms) => {
+    const { p, chamar, relogio, maquinas, entregues, barrados } = montar();
+    await chamar("conectar", { ...base, harnesses: { "claude-cli": pronto, "codex-cli": semLogin } });
+    expect((await chamar("puxar")).body).toEqual({ plano: { turnoId } });
+    relogio.agora += ms;
+    expect(await chamar("inventario", { ...base, harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).toEqual({ status: 200, body: { ok: true } });
+    expect(p.harnessesDaPessoa(escopo.pessoaId)["codex-cli"]?.estado).toBe("pronto");
+    // O nome e o laço de voz vêm do conectar; o resto, do anúncio novo.
+    expect(maquinas.get("m1")).toMatchObject({ machineId: "m1", nome: "Mac", ligacao: true, harnesses: { "codex-cli": { estado: "pronto" } } });
+    expect(barrados.at(-1)).toEqual(["claude-cli", "codex-cli"]);
+    // O plano continua lá: a entrega casa e é aceita.
+    expect(await chamar("entregar", entregaDe)).toEqual({ status: 200, body: { ok: true } });
+    expect(entregues).toEqual([turnoId]);
+    // O conectar, ao contrário, recusa com turno rodando (o comportamento que a NOD-199 contorna, sem mudar).
+    await chamar("puxar");
+    await expect(chamar("conectar", base)).rejects.toThrow("estado_invalido");
+  });
+
+  it("QA: o anúncio não esquece as entregas já recebidas — a entrega repetida depois dele continua idempotente", async () => {
+    // A entrega foi aceita, mas a resposta se perdeu; antes do reenvio do app, a vigia anunciou o Codex. Se a rota de
+    // inventário zerasse `recebidas`, o reenvio cairia em nao_permitido (o plano já saiu) em vez do 200 idempotente.
+    const { chamar, entregues } = montar();
+    await chamar("conectar", { ...base, harnesses: { "claude-cli": pronto, "codex-cli": semLogin } });
+    await chamar("puxar");
+    expect(await chamar("entregar", entregaDe)).toEqual({ status: 200, body: { ok: true } });
+    expect(await chamar("inventario", { ...base, harnesses: { "claude-cli": pronto, "codex-cli": pronto } })).toEqual({ status: 200, body: { ok: true } });
+    expect(await chamar("entregar", entregaDe)).toEqual({ status: 200, body: { ok: true } });
+    expect(entregues).toEqual([turnoId]);
+  });
+
+  it("sem conexão desta chave, ou com a chave de outra pessoa, recusa com estado_invalido (409 → reconectar)", async () => {
+    const { chamar } = montar();
+    await expect(chamar("inventario", base)).rejects.toThrow("estado_invalido");
+    await chamar("conectar", base);
+    await expect(chamar("inventario", base, { escopo: { ...escopo, pessoaId: "00000000-0000-4000-8000-000000000009" } })).rejects.toThrow("estado_invalido");
+    await expect(chamar("inventario", base, { escopo: { ...escopo, tenantId: "00000000-0000-4000-8000-000000000009" } })).rejects.toThrow("estado_invalido");
+  });
+
+  it("app abaixo da versão mínima: 426, como nas outras rotas; corpo sem o contrato: entrada inválida", async () => {
+    const { chamar } = montar();
+    await chamar("conectar", base);
+    expect(await chamar("inventario", base, { versao: "0.0.1" })).toEqual({ status: 426, body: { codigo: "atualize_app", versaoMinimaApp: VERSAO_MINIMA_APP } });
+    await expect(chamar("inventario", { ...base, versaoContrato: 2 })).rejects.toThrow("entrada_invalida");
+  });
+
+  it.each(["conectar", "inventario"])("o anúncio pela rota %s filtra igual: harness não integrado, semLacoDeVoz de IA não pronta e campos extras ficam de fora", async (rota) => {
+    const { chamar, maquinas } = montar();
+    await chamar("conectar", base);
+    await chamar(rota, { ...base, harnesses: { "claude-cli": pronto, "codex-cli": semLogin, hermes: pronto, __proto__: pronto }, semLacoDeVoz: ["codex-cli", "claude-cli", "hermes"], capacidades: { "claude-cli": { bifurcaSessao: true, inventada: 1 }, hermes: { bifurcaSessao: true } }, extra: "ignorado", planos: [] });
+    const m = maquinas.get("m1")!;
+    expect(Object.keys(m.harnesses ?? {}).sort()).toEqual(["claude-cli", "codex-cli"]);
+    expect(m.semLacoDeVoz).toEqual(["claude-cli"]);
+    expect(m.capacidades).toEqual({ "claude-cli": { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: true, processoProprio: false, terminal: false } });
+    expect(m).not.toHaveProperty("extra");
+    expect(m).not.toHaveProperty("planos");
+  });
+
+  it("QA (merge com a ADR-090): o anúncio de inventário mantém o nome e a plataforma do conectar — o motor na VM segue \"linux\"", async () => {
+    const { p, chamar, maquinas } = montar();
+    await chamar("conectar", { ...base, nome: "vm-nod", plataforma: "linux", harnesses: { "claude-cli": pronto, "codex-cli": semLogin } });
+    expect(maquinas.get("m1")?.plataforma).toBe("linux");
+    await chamar("inventario", { ...base, nome: "outro", plataforma: "darwin", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
+    expect(maquinas.get("m1")).toMatchObject({ nome: "vm-nod", plataforma: "linux", harnesses: { "codex-cli": { estado: "pronto" } } });
+    expect(p.maquina(escopo, "m1")).toEqual({ nome: "vm-nod", plataforma: "linux" });
+  });
+});
+
 describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
   const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
   const pasta = { trabalhoId: "00000000-0000-4000-8000-000000000009", pasta: "Dev 1/fix-abc123", quando: "encerrada" } as const;
