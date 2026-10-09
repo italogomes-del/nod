@@ -44,12 +44,31 @@ export function textoFormatado(texto: string, opcoes: OpcoesTexto = {}): string 
   return html;
 }
 
+/**
+ * NOD-201: a linha da linguagem do bloco (```c++, ```objective-c, ```shell-session). Mesma classe que a spec da NOD-45
+ * usa para o rótulo; qualquer outra primeira linha continua dentro do código.
+ */
+const LINGUAGEM = /^[A-Za-z0-9_+#.-]{0,20}\n/;
+const SO_LINGUAGEM = /^[A-Za-z0-9_+#.-]{0,20}$/;
+
 function formatar(texto: string, opcoes: OpcoesTexto): string {
   let tabelas = 0;
-  return texto.split(/(```[\s\S]*?```)/g).map((trecho, i) => {
-    if (i % 2 === 1) return `<pre><code>${esc(trecho.slice(3, -3).replace(/^\w*\n/, ""))}</code></pre>`;
+  // NOD-201: a cerca sem par vai até o fim do texto e vira código já durante o streaming, com o mesmo HTML do bloco
+  // fechado (sem salto quando a cerca fecha). Sem a flag `m`, o `$` é o fim do texto.
+  return texto.split(/(```[\s\S]*?(?:```|$))/g).map((trecho, i) => {
+    if (i % 2 === 1) return codigo(trecho);
     return blocos(trecho).map((b) => (typeof b === "string" ? comListas(b, opcoes) : tabelaHtml(b, opcoes, tabelas++))).join("");
   }).join("");
+}
+
+function codigo(trecho: string): string {
+  const fechado = trecho.length >= 6 && trecho.endsWith("```");
+  // Bloco aberto cuja cerca de fechamento chegou partida ("\n`" ou "\n``" no fim): essas crases não piscam no código
+  // antes da terceira chegar e o bloco fechar (revisão da NOD-201).
+  const corpo = fechado ? trecho.slice(3, -3) : trecho.slice(3).replace(/(^|\n)`{1,2}$/, "$1");
+  // Cerca recém-aberta só com a palavra da linguagem ("```ty"): ela não pisca dentro do código antes do \n chegar.
+  const semLinguagem = !fechado && SO_LINGUAGEM.test(corpo) ? "" : corpo.replace(LINGUAGEM, "");
+  return `<pre><code>${esc(semLinguagem)}</code></pre>`;
 }
 
 /**
