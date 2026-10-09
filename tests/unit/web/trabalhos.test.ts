@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ESTADOS_ABERTOS_TRABALHO, type TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import type { FrameSse } from "../../../src/contracts/frame.ts";
-import { aplicarFrame, conversaIdNaTela, estadoInicial, invalidacoesDaTela, reduzir, type Estado, type Tela } from "../../../web/estado/reducer.ts";
+import { aplicarFrame, conversaIdNaTela, estadoInicial, faixaAbertaAoNavegar, invalidacoesDaTela, reduzir, type Estado, type Tela } from "../../../web/estado/reducer.ts";
 import { ESPERA_TELEMETRIA_MS, LOTE_TELEMETRIA, criarTelemetria } from "../../../web/lib/telemetria-linhas.ts";
-import { ESTADOS_ABERTOS, agrupar, filtrar, listaPararTasks, memoriaLegivel, pilulaMemoria, telaAoFechar, telaDaTask, textoPararTasks } from "../../../web/lib/trabalhos.ts";
+import { ESTADOS_ABERTOS, agrupar, filtrar, listaPararTasks, memoriaLegivel, pilulaMemoria, pontoTrabalho, resumoDaPilula, telaAoFechar, telaDaTask, textoPararTasks, tituloCurto } from "../../../web/lib/trabalhos.ts";
 import { comFerramenta, comTexto, ATIVIDADE_VAZIA } from "../../../web/lib/atividade.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { renderTaxasLinhas } from "../../../web/telas/modo-dev.ts";
@@ -40,7 +40,6 @@ function estadoCom(trabalhos: TrabalhoDto[], extra: Partial<Estado> = {}): Estad
  * o módulo entra por `vi.importActual`, que o tsc não segue; o tipo abaixo é só o que estes testes chamam.
  */
 type ApiDeTeste = { criarApi: (escopo: { tenantId: string; pessoaId: string }) => {
-  gravarPreferencias(p: { faixaTrabalhosRecolhida: boolean }): Promise<unknown>;
   escreverNoTrabalho(id: string, texto: string): Promise<unknown>;
   pararTrabalho(id: string): Promise<unknown>;
   trabalhoDepois(id: string, depoisDe: string): Promise<unknown>;
@@ -55,19 +54,36 @@ describe("faixa de Trabalhos e pílula (#195, K1/K6)", () => {
   const churn = trabalho("churn", { titulo: "Dashboard de churn Q3", criadoEm: HOJE + MIN, estado: "na_fila", depoisDeTrabalhoId: "migrar" });
   const pedido = trabalho("rev", { titulo: "Revisar dados do #505", origem: "colega", pedidoPorAgenteId: "chico", pedidoPorNome: "Chico", criadoEm: HOJE + 2 * MIN });
 
-  it("aparece com trabalho aberto do bot, uma linha por trabalho (ponto, título, origem, progresso, seta → tela da task)", () => {
-    const html = renderFaixaTrabalhos(estadoCom([migrar, churn, pedido, trabalho("feito", { estado: "terminado", terminadoEm: AGORA })]), "leo");
-    expect(html).toContain("<span>Trabalhos do Leonardo</span><span class=\"ft-n\">3</span>");
+  it("aberta, uma linha por trabalho do bot (ponto, título, status curto, seta → tela da task); origem e tempo só no hover", () => {
+    const html = renderFaixaTrabalhos(estadoCom([migrar, churn, pedido, trabalho("feito", { estado: "terminado", terminadoEm: AGORA })], { faixaTrabalhosAberta: "leo" }), "leo");
+    // revisto em 2026-10-09: "Trabalhos · Leonardo" — o print do Marlon tinha "Trabalhos do Cecília".
+    expect(html).toContain("<span>Trabalhos · Leonardo</span><span class=\"ft-n\">3</span>");
     expect(html.match(/class="ft-linha"/g)).toHaveLength(3);
     expect(html).toContain('data-act="abrir-trabalho" data-id="migrar"');
     expect(html).toContain('<span class="ponto-trabalho c-purple pulso-trab"');
-    expect(html).toContain('<span class="etiqueta-origem">de você</span>');
-    expect(html).toContain('<span class="etiqueta-origem">pedido do Chico</span>');
-    // Protótipo "Nod — tempo da task" (aprovado em 2026-10-08): o passo sem tempo; o tempo só no hover.
-    expect(html).toContain('<span class="ft-passo">18 de 42</span><span class="ft-tempo">trabalhou menos de 1 min · aberta há 15 min</span>');
-    expect(html).toContain("começa depois da Migrar relatórios");
-    expect(html).toContain('data-act="faixa-trabalhos" data-recolher="1"');
+    // A etiqueta saiu da linha (revisto em 2026-10-09): a origem vai no detalhe do hover, antes do status, junto do tempo.
+    expect(html).not.toContain("etiqueta-origem");
+    expect(html).toContain('<span class="ft-titulo">Migrar relatórios</span><span class="ft-tempo">de você · trabalhou menos de 1 min · aberta há 15 min</span><span class="ft-passo">18 de 42</span>');
+    expect(html).toContain('<span class="ft-tempo">pedido do Chico · trabalhou');
+    // Na fila ainda não há tempo a contar: o detalhe é só a origem.
+    expect(html).toContain('<span class="ft-tempo">de você</span><span class="ft-passo">começa depois da Migrar relatórios</span>');
+    expect(html).toContain('data-act="faixa-trabalhos" data-recolher="1" aria-expanded="true"');
     expect(html).not.toContain("feito");
+  });
+
+  it("o título longo perde o id técnico entre parênteses na linha; o inteiro fica no title", () => {
+    const longo = "Orquestrar a etapa de engenharia do time EngNod no Linear (team 55113aca-122d-4…)";
+    const html = renderFaixaTrabalhos(estadoCom([trabalho("orq", { titulo: longo, origem: "rotina" })], { faixaTrabalhosAberta: "leo" }), "leo");
+    expect(html).toContain(`<span class="ft-titulo" title="${longo}">Orquestrar a etapa de engenharia do time EngNod no Linear</span>`);
+    expect(tituloCurto(longo)).toBe("Orquestrar a etapa de engenharia do time EngNod no Linear");
+    expect(tituloCurto("Orquestrar (team 55113aca-122d-4")).toBe("Orquestrar");
+    expect(tituloCurto("Ler o log (id 9f8e7d6c5b4a)")).toBe("Ler o log");
+    // Parêntese sem id fica; título que é só o id também.
+    expect(tituloCurto("Dashboard de churn (Q3)")).toBe("Dashboard de churn (Q3)");
+    expect(tituloCurto("Revisar o PR #212 (commit 6c83a82)")).toBe("Revisar o PR #212 (commit 6c83a82)");
+    expect(tituloCurto("Ler (decafbad feed)")).toBe("Ler (decafbad feed)");
+    expect(tituloCurto("(55113aca-122d-4abc)")).toBe("(55113aca-122d-4abc)");
+    expect(renderFaixaTrabalhos(estadoCom([migrar], { faixaTrabalhosAberta: "leo" }), "leo")).toContain('<span class="ft-titulo">Migrar relatórios</span>');
   });
 
   it("some sem trabalho aberto (o terminado não conta; o de outro bot também não)", () => {
@@ -75,21 +91,54 @@ describe("faixa de Trabalhos e pílula (#195, K1/K6)", () => {
     expect(renderFaixaTrabalhos(estadoCom([]), "leo")).toBe("");
   });
 
-  it("recolhida, vira a pílula '● N trabalhando' que abre a faixa de novo", () => {
-    const html = renderFaixaTrabalhos(estadoCom([migrar, churn], { faixaTrabalhosRecolhida: true }), "leo");
-    expect(html).toContain("<span><b>2</b> trabalhando</span>");
-    expect(html).toContain('data-act="faixa-trabalhos" data-recolher="0"');
+  it("com task aberta, o padrão é a pílula '● N trabalhando' (pedido do Marlon em 2026-10-09: ela é muito mais sutil)", () => {
+    const html = renderFaixaTrabalhos(estadoCom([migrar, churn]), "leo");
+    expect(estadoInicial.faixaTrabalhosAberta).toBeNull();
+    expect(html).toContain('<span class="ponto-trabalho c-purple pulso-trab" aria-hidden="true"></span><span><b>2</b> trabalhando</span>');
+    expect(html).toContain('data-act="faixa-trabalhos" data-recolher="0" aria-expanded="false"');
     expect(html).not.toContain("ft-linha");
+    // Aberta para outro bot não abre a deste.
+    expect(renderFaixaTrabalhos(estadoCom([migrar], { faixaTrabalhosAberta: "dev1" }), "leo")).toContain("pilula-trab");
   });
 
-  it("a escolha é guardada no estado e vai para PUT preferencias", async () => {
-    expect(reduzir(estadoInicial, { tipo: "faixa-trabalhos", recolhida: true }).faixaTrabalhosRecolhida).toBe(true);
-    const chamadas: { url: string; init: RequestInit }[] = [];
-    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => { chamadas.push({ url, init }); return new Response(JSON.stringify({ modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: true })); });
-    await (await criarApi({ tenantId: "t", pessoaId: "p" })).gravarPreferencias({ faixaTrabalhosRecolhida: true });
-    expect(chamadas[0]?.url).toBe("/api/t/t/preferencias");
-    expect(chamadas[0]?.init.method).toBe("PUT");
-    expect(JSON.parse(String(chamadas[0]?.init.body))).toEqual({ faixaTrabalhosRecolhida: true });
+  it("a pílula diz o estado que mais importa: precisa de você > trabalhando > esperando fora do Mac > na fila", () => {
+    const fora = trabalho("fora", { esperandoColega: { nome: "Eng 1", desde: AGORA - MIN, trabalhoId: null } });
+    const precisa = trabalho("precisa", { estado: "precisa_de_voce" });
+    expect(resumoDaPilula([migrar, fora])).toEqual({ ponto: "trabalhando", texto: "trabalhando", precisa: 0 });
+    expect(resumoDaPilula([fora, churn])).toEqual({ ponto: "fora-do-mac", texto: "esperando", precisa: 0 });
+    expect(resumoDaPilula([churn])).toEqual({ ponto: "na-fila", texto: "esperando", precisa: 0 });
+    expect(resumoDaPilula([precisa])).toEqual({ ponto: "precisa", texto: "precisa de você", precisa: 1 });
+    expect(resumoDaPilula([precisa, { ...precisa, id: "p2" }])).toMatchObject({ texto: "precisam de você" });
+    expect(resumoDaPilula([migrar, precisa])).toEqual({ ponto: "precisa", texto: "trabalhando", precisa: 1 });
+
+    const esperando = renderFaixaTrabalhos(estadoCom([fora, { ...fora, id: "fora2" }]), "leo");
+    expect(esperando).toContain('<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span><span><b>2</b> esperando</span>');
+    const comVoce = renderFaixaTrabalhos(estadoCom([migrar, precisa]), "leo");
+    expect(comVoce).toContain('<span class="ponto-trabalho precisa" aria-hidden="true"></span><span><b>2</b> trabalhando</span><span class="pt-precisa">· 1 precisa de você</span>');
+    expect(renderFaixaTrabalhos(estadoCom([precisa]), "leo")).not.toContain("pt-precisa");
+  });
+
+  it("a pessoa abre a faixa no clique; ela fica aberta na conversa e na ida e volta da task, e recolhe ao entrar de outro lugar", () => {
+    const leo: Tela = { tipo: "conversa", conversaId: "c-leo", agenteId: "leo" };
+    const dev1: Tela = { tipo: "conversa", conversaId: "c-dev1", agenteId: "dev1" };
+    const task: Tela = { tipo: "trabalho", id: "migrar", voltar: leo };
+    const aberta = reduzir(estadoCom([migrar]), { tipo: "faixa-trabalhos", agenteId: "leo" });
+    expect(aberta.faixaTrabalhosAberta).toBe("leo");
+    expect(renderFaixaTrabalhos(aberta, "leo")).toContain("ft-linha");
+    expect(reduzir(aberta, { tipo: "faixa-trabalhos", agenteId: null }).faixaTrabalhosAberta).toBeNull();
+
+    const naTask = reduzir(aberta, { tipo: "navegar", tela: task });
+    expect(naTask.faixaTrabalhosAberta).toBe("leo");
+    expect(reduzir(naTask, { tipo: "navegar", tela: leo }).faixaTrabalhosAberta).toBe("leo");
+    expect(reduzir(aberta, { tipo: "navegar", tela: dev1 }).faixaTrabalhosAberta).toBeNull();
+    const deFora = reduzir(reduzir(aberta, { tipo: "navegar", tela: { tipo: "trabalhos" } }), { tipo: "navegar", tela: leo });
+    expect(deFora.faixaTrabalhosAberta).toBeNull();
+
+    expect(faixaAbertaAoNavegar(null, leo, leo)).toBeNull();
+    expect(faixaAbertaAoNavegar("leo", leo, leo)).toBe("leo");
+    expect(faixaAbertaAoNavegar("leo", { tipo: "linha", conversaId: "c-leo", mensagens: [], titulo: "x", voltar: leo }, leo)).toBe("leo");
+    expect(faixaAbertaAoNavegar("leo", task, dev1)).toBeNull();
+    expect(faixaAbertaAoNavegar("leo", dev1, leo)).toBeNull();
   });
 
   it("CSS: a faixa cola no campo (o campo perde os cantos de cima) e a região some vazia", () => {
@@ -360,19 +409,19 @@ describe("tempo da task: esperando x trabalhando (protótipo aprovado em 2026-10
   const esperando = trabalho("resumo", { titulo: "Resumo do time", iniciadoEm: AGORA - 300 * MIN, trabalhouMs: 21 * MIN, esperandoColega: pedidoAoDev });
 
   it("rodando sem turno vivo e com pedido em aberto é \"esperando Dev 1\": ponto vazado, sem pulsar; com turno vivo volta a trabalhar", () => {
-    const e = estadoCom([esperando]);
+    const e = estadoCom([esperando], { faixaTrabalhosAberta: "leo" });
     const faixa = renderFaixaTrabalhos(e, "leo");
-    expect(faixa).toContain('<span class="ponto-trabalho esperando" aria-hidden="true"></span>');
-    expect(faixa).toContain('<span class="ft-passo esperando">esperando Dev 1</span>');
-    expect(faixa).toContain('<span class="ft-tempo">trabalhou 21 min · aberta há 5h</span>');
-    const vivo = renderFaixaTrabalhos(estadoCom([{ ...esperando, turnoVivoId: "tv" }]), "leo");
+    expect(faixa).toContain('<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>');
+    // revisto em 2026-10-09: o status é texto discreto, sem classe própria (a cor do estado fica só no ponto).
+    expect(faixa).toContain('<span class="ft-tempo">de você · trabalhou 21 min · aberta há 5h</span><span class="ft-passo">esperando Dev 1</span>');
+    const vivo = renderFaixaTrabalhos(estadoCom([{ ...esperando, turnoVivoId: "tv" }], { faixaTrabalhosAberta: "leo" }), "leo");
     expect(vivo).not.toContain("esperando Dev 1");
     expect(vivo).toContain("pulso-trab");
   });
 
   it("no topo, o status curto abre o cartão: aberta há, trabalhando, esperando e o atalho para a task do colega", () => {
     const fechado = renderTopoTrabalho(estadoCom([esperando]), "resumo");
-    expect(fechado).toContain('class="tk-status esperando" data-act="tempo-task" data-id="resumo" aria-expanded="false" title="Ver o tempo da task">esperando Dev 1<svg');
+    expect(fechado).toContain('class="tk-status fora-do-mac" data-act="tempo-task" data-id="resumo" aria-expanded="false" title="Ver o tempo da task">esperando Dev 1<svg');
     expect(fechado).not.toContain("tk-pop");
 
     const e = reduzir(estadoCom([esperando]), { tipo: "tempo-task", id: "resumo" });
@@ -395,8 +444,22 @@ describe("tempo da task: esperando x trabalhando (protótipo aprovado em 2026-10
     expect(html).not.toContain("recebeu o pedido");
   });
 
+  it("o ponto e o status da espera não usam a classe `esperando` — ela é a caixa do cartão de acesso (o anel de ~36 px do print)", () => {
+    // revisto em 2026-10-09: `.esperando` (interface.css) dá padding de 12×14 px, fundo e margem ao elemento. O ponto de 8 px
+    // de "esperando Eng 1" virava um anel enorme, e o status da faixa e do topo da task, uma caixa cinza.
+    expect(css).toMatch(/^\.esperando\{[^}]*padding:12px 14px/m);
+    const html = [
+      pontoTrabalho(esperando, "c-purple"),
+      renderFaixaTrabalhos(estadoCom([esperando], { faixaTrabalhosAberta: "leo" }), "leo"),
+      renderTopoTrabalho(estadoCom([esperando]), "resumo"),
+      renderTodosOsTrabalhos(estadoCom([esperando])),
+    ].join("");
+    expect(html).not.toMatch(/class="[^"]*\besperando\b[^"]*"/);
+    expect(css).not.toContain(".ponto-trabalho.esperando");
+  });
+
   it("o CSS tem o ponto de espera, o cartão e o tempo que só aparece no hover ou no foco", () => {
-    expect(css).toContain(".ponto-trabalho.esperando {");
+    expect(css).toContain(".ponto-trabalho.fora-do-mac {");
     expect(css).toContain(".ft-tempo { display: none;");
     expect(css).toContain(".ft-linha:hover .ft-tempo, .ft-linha:focus-visible .ft-tempo { display: inline; }");
     expect(css).toContain(".tk-pop {");
