@@ -2,7 +2,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Incidente } from "../contracts/incidente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { destinoDaQueda, juntarQuedas, motivoDaQueda, ultimoSinalDoTurno, type MotivoDaQueda, type QuedaDeMaquina } from "../domain/incidente.ts";
-import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
@@ -56,7 +56,9 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
     const fechada = await deps.repos.decisoes.fecharPorRegra(anterior.id, { regra: REGRA_RETOMADA_SUBSTITUIDA, regraVersao: 1, agora });
     if (fechada) events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria: { ...autoria, decidido_por: REGRA_RETOMADA_SUBSTITUIDA }, agora, conversaId: fechada.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_RETOMADA_SUBSTITUIDA } }));
   }
-  const frase = redigir("turno-interrompido", agora, { motivo: motivoEmPortugues(motivo) });
+  // definido em 2026-10-09: a queda nomeia a máquina Linux (a VM do motor) em vez de culpar o Mac.
+  const maquina = motivo === "maquina_sem_contato" && turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
+  const frase = redigir("turno-interrompido", agora, { motivo: motivo === "maquina_sem_contato" ? motivoDaQuedaEmPortugues(maquina) : motivoEmPortugues(motivo) });
   const decisao = await deps.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, prazoDecisaoEm: agora + (prazoMs ?? PRAZO_DECISAO_PADRAO_MS), frase });
   const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: frase, confianca: "confiavel" });
   if (decisao) events.push(evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: "retomar_turno" } }));

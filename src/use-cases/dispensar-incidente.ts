@@ -24,6 +24,12 @@ export async function incidentesVisiveis(repos: Repos, agora: number): Promise<I
   const visiveis = (await repos.incidentes.visiveis(agora - INCIDENTE_VISIVEL_MS)).filter((i) => incidenteVisivel(i, agora));
   const nomes = new Map<string, string>();
   for (const id of new Set(visiveis.flatMap((i) => i.agentes))) nomes.set(id, (await repos.agentes.buscar(id, true))?.nome ?? "agente");
+  // definido em 2026-10-09: a VM que caiu é nomeada; o Mac (e a chave que ainda não disse o sistema) fica sem o campo.
+  const linux = new Map<string, string>();
+  for (const id of new Set(visiveis.flatMap((i) => (i.machineId ? [i.machineId] : [])))) {
+    const m = await repos.maquinaTokens.identificar(id);
+    if (m?.plataforma === "linux") linux.set(id, m.nome);
+  }
   return visiveis.map((i) => ({
     id: i.id,
     tipo: i.tipo,
@@ -32,5 +38,6 @@ export async function incidentesVisiveis(repos: Repos, agora: number): Promise<I
     rotinas: i.rotinas,
     conversas: i.conversas,
     agentes: [...new Set(i.agentes.map((a) => nomes.get(a) ?? "agente"))].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    ...(i.machineId && linux.has(i.machineId) ? { maquina: linux.get(i.machineId) } : {}),
   }));
 }

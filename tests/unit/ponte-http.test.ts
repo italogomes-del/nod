@@ -319,6 +319,7 @@ describe("NOD-199: anúncio só de inventário no servidor", () => {
     const maquinas = new Map<string, AnuncioMaquina>();
     const entregues: string[] = [];
     const barrados: string[][] = [];
+    const plataformas: [string, string][] = [];
     const ponte: PonteInternaNod = {
       conectar: async (m) => { maquinas.set(m.machineId, m); }, puxar: async () => ({ turnoId } as PlanoTurno), renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }),
       entregar: async (e) => { entregues.push(e.turnoId); }, desconectar: async () => undefined, maquinasConectadas: () => [...maquinas.values()], escopoDoTurno: () => null,
@@ -327,6 +328,7 @@ describe("NOD-199: anúncio só de inventário no servidor", () => {
       criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
       segredo: "s", seguro: false, agora: () => relogio.agora, delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
       repetirBarrados: async (_e, prontos) => { barrados.push([...prontos]); },
+      registrarPlataforma: async (_e, chaveId, plataforma) => { plataformas.push([chaveId, plataforma]); },
     });
     const chamar = async (nome: string, corpo: unknown = {}, o: { escopo?: typeof escopo; versao?: string } = {}) => {
       const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
@@ -336,7 +338,7 @@ describe("NOD-199: anúncio só de inventário no servidor", () => {
       await rota!.handler({ req, res: new ServerResponse(req), escopo: o.escopo ?? escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
       return resposta!;
     };
-    return { p, chamar, relogio, maquinas, entregues, barrados };
+    return { p, chamar, relogio, maquinas, entregues, barrados, plataformas };
   }
   const base = { versaoContrato: 1, nome: "Mac", inventario: pronto, ligacao: true };
   const entregaDe = { turnoId, machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: { desfecho: "sucesso", texto: "ok", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] } };
@@ -399,12 +401,16 @@ describe("NOD-199: anúncio só de inventário no servidor", () => {
   });
 
   it("QA (merge com a ADR-090): o anúncio de inventário mantém o nome e a plataforma do conectar — o motor na VM segue \"linux\"", async () => {
-    const { p, chamar, maquinas } = montar();
+    const { p, chamar, maquinas, plataformas } = montar();
     await chamar("conectar", { ...base, nome: "vm-nod", plataforma: "linux", harnesses: { "claude-cli": pronto, "codex-cli": semLogin } });
     expect(maquinas.get("m1")?.plataforma).toBe("linux");
     await chamar("inventario", { ...base, nome: "outro", plataforma: "darwin", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
     expect(maquinas.get("m1")).toMatchObject({ nome: "vm-nod", plataforma: "linux", harnesses: { "codex-cli": { estado: "pronto" } } });
     expect(p.maquina(escopo, "m1")).toEqual({ nome: "vm-nod", plataforma: "linux" });
+    // 2026-10-09 (0067): só o `conectar` grava a plataforma na chave — é ela que o aviso de queda lê depois que a conexão some.
+    expect(plataformas).toEqual([["m1", "linux"]]);
+    await chamar("conectar", { ...base, harnesses: { "claude-cli": pronto } });
+    expect(plataformas).toEqual([["m1", "linux"], ["m1", "darwin"]]);
   });
 });
 
