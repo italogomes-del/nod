@@ -168,8 +168,9 @@ function analisar(texto: string, profundidade: number, achado: Achado): Sono {
         i++;
         while (i < palavras.length && palavras[i]!.valor.startsWith("-")) i += ["-s", "-k", "--signal", "--kill-after"].includes(palavras[i]!.valor) ? 2 : 1;
         const duracao = segundosDoSleep(palavras[i]?.valor ?? "");
-        // Revisão do #223: com fim garantido em até 10 min, o que roda lá dentro não é espera sem fim.
-        if (duracao !== null && duracao <= TIMEOUT_QUE_LIMITA_S) return;
+        // Revisão do #223: com fim garantido em até 10 min, o que roda lá dentro não é espera sem fim. `timeout 0` desliga o
+        // limite (GNU) e não libera nada. A duração aceita os sufixos s/m/h/d do coreutils.
+        if (duracao !== null && duracao > 0 && duracao <= TIMEOUT_QUE_LIMITA_S) return;
         i++;
         continue;
       }

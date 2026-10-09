@@ -52,14 +52,17 @@ const matarGrupo = (pgid: number) => {
 const T0 = new Date(2026, 9, 9, 2, 34, 24).getTime();
 const BOOT = T0 - 86_400_000;
 const grupo = (pid: number, extra: Partial<GrupoRegistrado> = {}): GrupoRegistrado => ({ pid, desdeMs: T0 + 300, ateMs: T0 + 900, programa: "claude", marca: "ab12cd34-0011aa", ...extra });
-const proc = (pid: number, pgid: number, inicioMs: number, comando: string): ProcessoDoSistema => ({ pid, pgid, inicioMs, comando });
+const proc = (pid: number, pgid: number, inicioMs: number, comando: string, ppid = 1): ProcessoDoSistema => ({ pid, ppid, pgid, inicioMs, comando });
+/** O próprio servidor que faz a limpeza, fora dos grupos anotados (sem ele no `ps`, nada morre). */
+const EU = 4_242;
+const euNoPs = proc(EU, EU, T0 - 1_000, "node src/adapters/http/server.ts");
 
 describe("quais grupos anotados são candidatos (puro)", () => {
   it("lê o ps com LC_ALL=C", () => {
-    const saida = "  501   501 Fri Oct  9 02:34:24 2026     /Users/m/.local/bin/claude -p --output-format stream-json\n  77  1 Thu Oct  8 21:40:01 2026 sleep 30\nlixo\n";
+    const saida = "  501     1   501 Fri Oct  9 02:34:24 2026     /Users/m/.local/bin/claude -p --output-format stream-json\n  77  501  1 Thu Oct  8 21:40:01 2026 sleep 30\nlixo\n";
     expect(lerSaidaDoPs(saida)).toEqual([
-      { pid: 501, pgid: 501, inicioMs: T0, comando: "/Users/m/.local/bin/claude -p --output-format stream-json" },
-      { pid: 77, pgid: 1, inicioMs: new Date(2026, 9, 8, 21, 40, 1).getTime(), comando: "sleep 30" },
+      { pid: 501, ppid: 1, pgid: 501, inicioMs: T0, comando: "/Users/m/.local/bin/claude -p --output-format stream-json" },
+      { pid: 77, ppid: 501, pgid: 1, inicioMs: new Date(2026, 9, 8, 21, 40, 1).getTime(), comando: "sleep 30" },
     ]);
   });
 
@@ -120,11 +123,49 @@ describe("quais grupos anotados são candidatos (puro)", () => {
       arquivo,
       matar: (g) => mortos.push(g),
       boot: async () => BOOT,
-      listar: async () => [proc(502, 501, T0 + 2_000, "/bin/zsh -c while :; do sleep 30; done"), proc(503, 501, T0 + 2_500, "node mcp-proxy")],
+      pidAtual: EU,
+      listar: async () => [euNoPs, proc(502, 501, T0 + 2_000, "/bin/zsh -c while :; do sleep 30; done"), proc(503, 501, T0 + 2_500, "node mcp-proxy")],
       ambientes: async () => new Map([[503, "node mcp-proxy NOD_GRUPO=ab12cd34-0011aa"]]),
     });
     expect(r.encerrados.map((s) => [s.pgid, s.lider])).toEqual([[501, false]]);
     expect(mortos).toEqual([501]);
+  });
+
+  it("revisão do #223: o servidor que nasceu dentro do grupo anotado (subido por um bot) não mata o próprio grupo nem o de um ancestral", async () => {
+    const arquivo = join(dir, "meu-grupo.json");
+    gravarArquivoDeGrupos(arquivo, { dono: null, grupos: [grupo(501), grupo(601)] });
+    const mortos: number[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const r = await encerrarGruposOrfaos({
+      arquivo,
+      pidAtual: EU,
+      boot: async () => BOOT,
+      // 501: o bot (líder vivo) que subiu o servidor; o servidor (EU) está no grupo dele. 601: um bot mais acima na
+      // cadeia (o npm que subiu o servidor nasceu no grupo 601).
+      listar: async () => [
+        proc(501, 501, T0, "claude -p"),
+        proc(601, 601, T0, "claude -p"),
+        proc(700, 601, T0 + 3_000, "npm run dev", 601),
+        proc(EU, 501, T0 + 5_000, "node src/adapters/http/server.ts", 700),
+      ],
+      ambientes: async () => new Map([[501, "NOD_GRUPO=ab12cd34-0011aa"], [601, "NOD_GRUPO=ab12cd34-0011aa"]]),
+      matar: (g) => mortos.push(g),
+    });
+    const linhas = log.mock.calls.map((c) => String(c[0]));
+    log.mockRestore();
+    expect(r.encerrados).toEqual([]);
+    expect(mortos).toEqual([]);
+    expect(linhas.filter((l) => l.includes('"evento":"orfao_e_meu_grupo"'))).toHaveLength(2);
+  });
+
+  it("sem o próprio pid no ps, nada morre", async () => {
+    const arquivo = join(dir, "sem-mim.json");
+    gravarArquivoDeGrupos(arquivo, { dono: null, grupos: [grupo(501)] });
+    const mortos: number[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await encerrarGruposOrfaos({ arquivo, pidAtual: EU, boot: async () => BOOT, listar: async () => [proc(501, 501, T0, "claude -p")], ambientes: async () => new Map([[501, "NOD_GRUPO=ab12cd34-0011aa"]]), matar: (g) => mortos.push(g) });
+    log.mockRestore();
+    expect(mortos).toEqual([]);
   });
 
   it("o dono anotado ainda vivo (até 60 s de diferença no início): nada é morto e o arquivo fica com ele", async () => {
@@ -200,6 +241,28 @@ describe("religar o servidor por SIGKILL (de verdade)", () => {
     } finally {
       matarGrupo(alheioPid);
       matarGrupo(bot);
+    }
+  });
+
+  it("revisão do #223: o servidor subido por um bot da instância (no grupo dele, com a marca) roda a limpeza e não se mata", async () => {
+    const arquivo = join(dir, "servidor-no-bot.json");
+    const fixture = fileURLToPath(new URL("../../fixtures/limpeza-no-proprio-grupo.ts", import.meta.url));
+    // O "bot": líder do próprio grupo, com a marca, que depois de 1,5 s sobe o "servidor" sem setsid (mesmo grupo).
+    const BOT = `const { spawn } = require("node:child_process"); setTimeout(() => spawn(process.execPath, [${JSON.stringify(fixture)}, ${JSON.stringify(arquivo)}], { stdio: "inherit" }), 1500); setInterval(() => {}, 1000);`;
+    const desdeMs = Date.now();
+    const bot = spawn(process.execPath, ["-e", BOT], { detached: true, stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, NOD_GRUPO: "cafe0000-meu" } });
+    const botPid = bot.pid!;
+    gravarArquivoDeGrupos(arquivo, { dono: null, grupos: [{ pid: botPid, desdeMs, ateMs: Date.now(), programa: "node", marca: "cafe0000-meu" }] });
+    let saida = "";
+    bot.stdout!.setEncoding("utf8");
+    bot.stdout!.on("data", (d: string) => (saida += d));
+    try {
+      expect(await esperarAte(() => saida.includes("limpeza "))).toBe(true);
+      expect(saida).toContain('"evento":"orfao_e_meu_grupo"');
+      expect(saida).toContain('limpeza {"assumiu":true,"encerrados":[]}');
+      expect(vivo(botPid)).toBe(true);
+    } finally {
+      matarGrupo(botPid);
     }
   });
 

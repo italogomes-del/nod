@@ -30,7 +30,7 @@ export type GrupoRegistrado = { pid: number; desdeMs: number; ateMs: number; pro
 export type ArquivoDeGrupos = { dono: { pid: number; inicioMs: number } | null; grupos: GrupoRegistrado[] };
 
 /** Uma linha do `ps`: início com resolução de 1 s (lstart). */
-export type ProcessoDoSistema = { pid: number; pgid: number; inicioMs: number; comando: string };
+export type ProcessoDoSistema = { pid: number; ppid: number; pgid: number; inicioMs: number; comando: string };
 
 /**
  * Um grupo anotado que ainda tem processo vivo e passou nas conferências do `ps`. `verificar` são os pids em que a marca
@@ -52,17 +52,17 @@ const PRAZO_PS_MS = 30_000;
 const MESES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** `lstart` com LC_ALL=C: "Fri Oct  9 02:34:24 2026", na hora local (o mesmo TZ do Node, que passa o ambiente). */
-const LINHA_PS = /^\s*(\d+)\s+(\d+)\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s(.*)$/;
+const LINHA_PS = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s(.*)$/;
 
 export function lerSaidaDoPs(saida: string): ProcessoDoSistema[] {
   const processos: ProcessoDoSistema[] = [];
   for (const linha of saida.split("\n")) {
     const m = LINHA_PS.exec(linha);
     if (!m) continue;
-    const mes = MESES.indexOf(m[3]!);
+    const mes = MESES.indexOf(m[4]!);
     if (mes < 0) continue;
-    const inicioMs = new Date(Number(m[8]), mes, Number(m[4]), Number(m[5]), Number(m[6]), Number(m[7])).getTime();
-    processos.push({ pid: Number(m[1]), pgid: Number(m[2]), inicioMs, comando: m[9]!.trim() });
+    const inicioMs = new Date(Number(m[9]), mes, Number(m[5]), Number(m[6]), Number(m[7]), Number(m[8])).getTime();
+    processos.push({ pid: Number(m[1]), ppid: Number(m[2]), pgid: Number(m[3]), inicioMs, comando: m[10]!.trim() });
   }
   return processos;
 }
@@ -75,7 +75,7 @@ const executar = (bin: string, args: string[]) =>
 /** Todos os processos da máquina numa chamada só; null quando o `ps` não existe ou falha (nada é morto sem conferir). */
 export async function listarProcessosDoSistema(): Promise<ProcessoDoSistema[] | null> {
   // LC_ALL=C: no Mac em português o lstart sai "Sex  9 Out" e não daria para ler. -ww: a linha de comando inteira.
-  const saida = await executar("ps", ["-A", "-ww", "-o", "pid=,pgid=,lstart=,command="]);
+  const saida = await executar("ps", ["-A", "-ww", "-o", "pid=,ppid=,pgid=,lstart=,command="]);
   return saida === null ? null : lerSaidaDoPs(saida);
 }
 
@@ -211,6 +211,19 @@ export function inicioDesteProcesso(): number {
   return Math.round(performance.timeOrigin);
 }
 
+/** Os grupos deste processo e de todos os ancestrais dele (pela cadeia de ppid do `ps`); null se o pid não aparece. */
+export function gruposDesteProcesso(processos: readonly ProcessoDoSistema[], pid: number): Set<number> | null {
+  const porPid = new Map(processos.map((p) => [p.pid, p]));
+  if (!porPid.has(pid)) return null;
+  const grupos = new Set<number>();
+  const vistos = new Set<number>();
+  for (let atual = porPid.get(pid); atual && !vistos.has(atual.pid); atual = porPid.get(atual.ppid)) {
+    vistos.add(atual.pid);
+    grupos.add(atual.pgid);
+  }
+  return grupos;
+}
+
 export type ResultadoDaLimpeza = { assumiu: boolean; encerrados: Sobra[] };
 
 /**
@@ -242,20 +255,29 @@ export async function encerrarGruposOrfaos(o: {
   }
   const candidatos = candidatosDoRegistro(anotado.grupos, processos, await (o.boot ?? bootDaMaquina)());
   if (candidatos.length === 0) return { assumiu: true, encerrados: [] };
+  const meus = gruposDesteProcesso(processos, pidAtual);
   const ambientes = await (o.ambientes ?? ambientesDosProcessos)(candidatos.flatMap((c) => c.verificar));
   const matar = o.matar ?? ((pgid: number) => process.kill(-pgid, "SIGKILL"));
   const agora = (o.agora ?? Date.now)();
   const encerrados: Sobra[] = [];
   for (const { verificar, ...c } of candidatos) {
+    // Revisão do #223: o servidor que um bot da mesma instância subiu (`kill -9` no servidor e `npm run dev &`, sem
+    // setsid) nasce DENTRO do grupo anotado, com a marca herdada — matar o grupo seria se matar. Sem saber qual é o
+    // próprio grupo (o pid não apareceu no `ps`), nada morre.
+    if (meus === null || meus.has(c.pgid)) {
+      log("aviso", "orfao_e_meu_grupo", { pgid: c.pgid, lider_vivo: c.lider, sem_arvore: meus === null });
+      continue;
+    }
     // A marca num processo vivo do grupo é a prova: um número de grupo existe uma vez só, e a marca só nasce aqui.
     if (!verificar.some((pid) => temAMarca(ambientes.get(pid), c.marca))) {
       log("info", "orfao_sem_prova", { pgid: c.pgid, lider_vivo: c.lider, legiveis: verificar.filter((pid) => ambientes.has(pid)).length });
       continue;
     }
+    // O log vem antes do kill: se mesmo assim algo der errado, a linha fica.
+    log("aviso", "orfao_encerrado", { pgid: c.pgid, programa: c.programa, membros: c.membros, lider_vivo: c.lider, idade_min: Math.round((agora - c.desdeMs) / 60_000) });
     try {
       matar(c.pgid);
       encerrados.push(c);
-      log("aviso", "orfao_encerrado", { pgid: c.pgid, programa: c.programa, membros: c.membros, lider_vivo: c.lider, idade_min: Math.round((agora - c.desdeMs) / 60_000) });
     } catch {
       // acabou entre o `ps` e o kill
     }

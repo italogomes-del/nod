@@ -47,14 +47,19 @@ Decisão do Marlon que vale aqui: **sem teto de tempo** para sessão ou comando 
        `detached` abre uma sessão própria, os grupos dela só nascem dos descendentes dele, e o sistema não dá a processo
        novo um número de grupo ou sessão em uso — um membro vivo com a marca prova que o grupo é o anotado. O macOS não
        mostra o ambiente dos binários da Apple (`/bin/zsh`, `/bin/sleep`): um resto feito só deles fica (`orfao_sem_prova`).
-   - Logs: `orfao_encerrado`, `orfao_sem_prova`, `grupos_de_outra_copia_viva` (dono anotado vivo, com folga de 60 s
+   - **Nunca o próprio grupo.** O servidor que um bot da mesma instância subiu (`kill -9` no servidor e `npm run dev &`,
+     sem setsid) nasce dentro do grupo anotado, com a marca herdada. O grupo deste processo e o de cada ancestral (pela
+     cadeia de ppid do `ps`) nunca são mortos (`orfao_e_meu_grupo`); sem o próprio pid no `ps`, nada morre. O log
+     `orfao_encerrado` sai antes do kill.
+   - Logs: `orfao_encerrado`, `orfao_e_meu_grupo`, `orfao_sem_prova`, `grupos_de_outra_copia_viva` (dono anotado vivo, com folga de 60 s
      entre o relógio do Node e o `lstart`), `orfaos_sem_ps`.
    - Fim normal: o `exit` (servidor) e o `will-quit` (app) matam os grupos e anotam a lista vazia.
 2. **Sinais pelo mesmo caminho.** O servidor trata SIGHUP como SIGINT/SIGTERM (drenagem; o segundo sai com 130, pelo
    `exit`). O mesmo sinal repetido em menos de 3 s é eco de quem repassou e não conta como segundo. O `dev.mjs` sobe o
-   servidor com `node` direto, como o `npm start` (sem o tsx, que dava SIGKILL no filho sem drenagem), repassa SIGTERM e
-   SIGHUP a toda a árvore dos dois filhos no mesmo grupo e **não** repassa SIGINT: o Ctrl+C do terminal já chega ao grupo,
-   e o repasse atrasado pelo `ps` virava "segundo sinal".
+   servidor com `node` direto, como o `npm start` (sem o tsx, que dava SIGKILL no filho sem drenagem). Como o filho `api`
+   é o próprio servidor, SIGINT, SIGTERM e SIGHUP chegam a ele na hora, sem esperar o `ps` (o `kill -INT` de um script
+   também); o Ctrl+C do terminal, que chega pelo grupo ao mesmo tempo, vira eco e fica um só `sinal_recebido`. O Vite
+   recebe o sinal pela árvore (npm → vite) no mesmo grupo.
 3. **O hook solta.** `soltar: true` encerra a espera na hora com `AINDA_ESPERANDO`, como o proxy já fazia nas
    ferramentas MCP; entre duas consultas passa ao menos 1 s. A rota `/decisoes/:id/aguardar` passa a devolver `soltar: true`
    também quando uma retomada já ficou com a decisão — antes devolvia "pendente" e o turno seguia vivo até 7 min junto
@@ -63,7 +68,8 @@ Decisão do Marlon que vale aqui: **sem teto de tempo** para sessão ou comando 
    Monitor), em qualquer modo, antes de card e trilha:
    - laço (`while`, `until`, `for`, `select`) cujo maior `sleep` dentro é de **10 s ou mais** (`SLEEP_DE_ESPERA_S`);
    - `sleep` fora de laço que, **somado** no mesmo comando, passa de 60 s (`SLEEP_MAXIMO_S`);
-   - o que roda dentro de `timeout N` com N até 10 min (`TIMEOUT_QUE_LIMITA_S`) passa inteiro: tem fim garantido.
+   - o que roda dentro de `timeout N` com 0 < N ≤ 10 min (`TIMEOUT_QUE_LIMITA_S`, sufixos s/m/h/d) passa inteiro: tem fim
+     garantido. `timeout 0` desliga o limite e não libera nada.
 
    A mensagem aponta o `me_chame_as` quando ele está no catálogo do turno; sem ele (sala, ligação), manda encerrar dizendo
    o que falta. Fica `espera_em_laco_negada` no log (o tipo e os segundos, nunca o comando). A leitura é de shell: aspas,

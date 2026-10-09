@@ -21,6 +21,10 @@ describe("espera em laço (ADR-089)", () => {
     ["while :; do for i in 1 2; do echo $i; done; sleep 30; done", 30],
     ["bash <<EOF\nwhile :; do gh run list; sleep 30; done\nEOF", 30],
     ["for i in $(seq 100); do gh run list; sleep 60; done", 60],
+    // `timeout 0` desliga o limite; 11m e 1h passam de 10 min
+    ["timeout 0 bash -c 'while :; do gh run list; sleep 30; done'", 30],
+    ["timeout 11m bash -c 'while :; do gh run list; sleep 30; done'", 30],
+    ["timeout -k 5 1h sh -c 'until gh pr checks 1; do sleep 20; done'", 20],
   ])("nega o laço: %s", (comando, segundos) => {
     expect(esperaEmLaco(comando)).toEqual({ tipo: "laco_com_sleep", segundos });
   });
@@ -59,6 +63,8 @@ describe("espera em laço (ADR-089)", () => {
     "timeout 60 bash -c 'until curl -sf http://127.0.0.1:8897; do sleep 1; done'",
     "timeout 600 bash -c 'while :; do gh run list; sleep 30; done'",
     "timeout 5m sh -c 'sleep 200'",
+    "timeout 10m bash -c 'while :; do gh run list; sleep 30; done'",
+    "timeout -s KILL 90s bash -c 'until curl -sf x; do sleep 15; done'",
     "while read -r linha; do echo \"$linha\"; done < lista.txt",
     "tail -f /tmp/dev.log | grep --line-buffered ERRO",
     "grep -rn sleep src",

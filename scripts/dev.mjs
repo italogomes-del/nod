@@ -6,11 +6,12 @@ const temMise = spawnSync("mise", ["--version"], { stdio: "ignore" }).status ===
 const prefixo = temMise ? ["mise", "exec", "--"] : [];
 
 /**
- * Os dois filhos e os descendentes deles no MESMO grupo (definido em 2026-10-09, ADR-089, #217): npm, tsx, o servidor e
- * o Vite. Os bots nascem em grupo próprio (processo.ts) e ficam de fora — quem os leva é o `exit` do servidor. A busca
- * parte dos filhos, não deste processo, para não incluir o próprio `ps`. null = sem `ps`.
+ * O filho `web` e os descendentes dele no MESMO grupo (definido em 2026-10-09, ADR-089, #217): o npm e o Vite. A busca
+ * parte do filho, não deste processo, para não incluir o próprio `ps`. null = sem `ps`. O servidor fica de fora: ele é o
+ * próprio filho `api` e recebe o sinal direto (encerrar), e os bots nascem em grupo próprio (processo.ts) — quem os leva
+ * é o `exit` do servidor.
  */
-function arvore() {
+function arvoreDaWeb() {
   try {
     const linhas = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid="], { encoding: "utf8", timeout: 10_000 })
       .trim()
@@ -24,7 +25,7 @@ function arvore() {
       filhos.get(ppid).push(pid);
     }
     // Só o filho que ainda está vivo e é nosso: o pid de quem já saiu pode ser de outro programa.
-    const raizes = [api.pid, web.pid].filter((r) => r !== undefined && linhas.some(([pid, ppid]) => pid === r && ppid === process.pid));
+    const raizes = [web.pid].filter((r) => r !== undefined && linhas.some(([pid, ppid]) => pid === r && ppid === process.pid));
     const todos = [...raizes];
     const fila = [...raizes];
     while (fila.length > 0) {
@@ -41,29 +42,26 @@ function arvore() {
 
 // definido em 2026-10-08: se um dos dois morre, o outro vai junto. Antes o dev.mjs saía quando a API morria e o Vite
 // ficava órfão servindo a página com o proxy para uma 8888 morta — toda tela dizia "Algo deu errado" e nada religava.
-// revisto em 2026-10-09 (ADR-089, #217): o sinal vai à árvore inteira, não só ao npx/mise da ponta — quem está no meio
-// pode não repassar, e o servidor que não recebe sinal não roda o `exit` que leva os grupos dos bots. O SIGHUP (terminal
-// fechado) entra no mesmo caminho. O servidor trata o mesmo sinal repetido em menos de 3 s como eco (server.ts).
-// revisto em 2026-10-09 (revisão do #223): o SIGINT NÃO é repassado — o Ctrl+C do terminal já chega ao grupo inteiro, e
-// o repasse (depois de um `ps` que sob carga leva segundos) virava "segundo sinal" no servidor e pulava a drenagem.
-// `sinal` null = só marca a saída e espera os filhos.
+// revisto em 2026-10-09 (ADR-089, #217 e revisão do #223): o servidor é o próprio filho `api` (`node` direto) e recebe o
+// sinal NA HORA, sem esperar o `ps` — SIGINT, SIGTERM e SIGHUP, inclusive o `kill -INT` de um script, que não passa pelo
+// terminal. O Ctrl+C do terminal também chega a ele pelo grupo: o servidor trata o mesmo sinal repetido em menos de 3 s
+// como eco (server.ts), então fica um só `sinal_recebido`. O Vite vai pela árvore (npm → vite).
 let saindo = false;
 function encerrar(codigo, sinal = "SIGTERM") {
   if (saindo) return;
   saindo = true;
   process.exitCode = codigo;
-  if (sinal === null) return;
-  const pids = arvore();
+  api.kill(sinal); // já saiu: o Node não sinaliza um filho morto
+  const pids = arvoreDaWeb();
   if (pids === null) {
-    api.kill(sinal);
     web.kill(sinal);
-  } else {
-    for (const pid of pids) {
-      try {
-        process.kill(pid, sinal);
-      } catch {
-        // já saiu
-      }
+    return;
+  }
+  for (const pid of pids) {
+    try {
+      process.kill(pid, sinal);
+    } catch {
+      // já saiu
     }
   }
 }
@@ -88,6 +86,6 @@ const web = run(["npx", "vite", "--host", "127.0.0.1", "--port", webPort], {
   env: { ...process.env, NOD_API_PORT: apiPort },
 });
 
-process.on("SIGINT", () => encerrar(130, null));
+process.on("SIGINT", () => encerrar(130, "SIGINT"));
 process.on("SIGTERM", () => encerrar(143, "SIGTERM"));
 process.on("SIGHUP", () => encerrar(129, "SIGHUP"));
