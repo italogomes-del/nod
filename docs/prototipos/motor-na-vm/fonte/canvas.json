@@ -1,0 +1,21 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-09T15:00:00Z"},
+  "title": "Nod — Motor na VM",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 1320, "title": "1 · Seu espaço › Máquinas", "is_interactive": true},
+    "Conectar.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "2 · Conectar uma máquina", "is_interactive": true},
+    "Terminal.dc.html": {"x": 0, "y": 1440, "w": 960, "h": 680, "title": "3 · O terminal da VM durante a instalação"},
+    "Conversa.dc.html": {"x": 1040, "y": 1440, "w": 1440, "h": 900, "title": "4 · Conversa — o bot trabalha na VM (aviso âmbar · descartado)", "is_interactive": true},
+    "ConversaMinimo.dc.html": {"x": 0, "y": 2720, "w": 1440, "h": 900, "title": "4b · Aviso mínimo — descartado", "is_interactive": true},
+    "ConversaIntegrada.dc.html": {"x": 1520, "y": 2720, "w": 1440, "h": 900, "title": "4c · Aviso dentro da mensagem — escolhido", "is_interactive": true}
+  },
+  "order": ["Main.dc.html", "Conectar.dc.html", "Terminal.dc.html", "Conversa.dc.html", "ConversaMinimo.dc.html", "ConversaIntegrada.dc.html"],
+  "notes": {
+    "titulo": {"x": 0, "y": -300, "text": "Motor na VM — os bots trabalham numa máquina sua, o Mac fica leve", "kind": "title1", "maxW": 2960},
+    "avisos": {"x": 0, "y": 2440, "text": "Avisos com menos âmbar — escolhida a 4c, sem faixa", "kind": "title1", "maxW": 2960}
+  },
+  "designSystems": []
+}

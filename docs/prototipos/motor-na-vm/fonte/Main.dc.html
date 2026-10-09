@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Seu espaço · Máquinas</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:140%;height:140%;flex-shrink:0;max-width:none;display:block}
+.maq-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+.maq-topo .intro{margin:0;max-width:540px}
+.maq-lista{display:flex;flex-direction:column;gap:12px}
+.maq-cab{display:flex;align-items:center;gap:12px;padding:16px 18px}
+.maq-ic{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--surface-raised);color:var(--ink)}
+.maq-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.maq-id b{font-size:15px;font-weight:500}
+.maq-id small{font-size:13px;color:var(--ink-3)}
+.maq-estado{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink-2);white-space:nowrap}
+.maq-estado.fora{color:var(--warning)}
+.maq-ponto{width:8px;height:8px;border-radius:50%;background:var(--success);flex:none}
+.maq-ponto.fora{background:transparent;border:1.5px solid var(--warning);box-sizing:border-box}
+.maq-ias{display:flex;flex-wrap:wrap;gap:6px;padding:0 18px 14px 66px}
+.maq-ia{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+.maq-ia i{width:6px;height:6px;border-radius:50%;background:var(--success);display:inline-block}
+.maq-ia.nao i{background:var(--line-strong)}
+.maq-ia.nao{color:var(--ink-3)}
+.maq-medidor{display:flex;align-items:center;gap:8px;padding:11px 18px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.maq-medidor b{min-width:86px;font-weight:400;color:var(--ink)}
+.maq-barra{flex:1;height:6px;border-radius:3px;background:var(--surface-raised);overflow:hidden}
+.maq-barra i{display:block;height:100%;border-radius:3px;background:var(--ink-3)}
+.maq-quem{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-3)}
+.maq-avatares{display:flex}
+.maq-avatares .icon.mascote{width:22px;height:22px;margin-right:-5px;box-shadow:0 0 0 2px var(--surface);border-radius:50%}
+.maq-quem span b{color:var(--ink);font-weight:500}
+.maq-fora{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--warning-line);background:var(--warning-soft);font-size:13px;color:var(--warning)}
+.maq-fora div{flex:1;min-width:0}
+.maq-fora b{font-weight:500}
+.bots-cartao .bot-maq{display:flex;align-items:center;gap:12px;padding:10px 18px}
+.bots-cartao .bot-maq+.bot-maq{border-top:1px solid var(--line)}
+.bot-maq .icon.mascote{width:28px;height:28px}
+.bot-maq-txt{flex:1;min-width:0;display:flex;flex-direction:column}
+.bot-maq-txt b{font-weight:500;font-size:14px}
+.bot-maq-txt span{font-size:12.5px;color:var(--ink-3)}
+.segmentado.maq .seg{padding:5px 12px;font-size:12.5px}
+.regras-maq{margin:12px 0 0;padding-left:18px;font-size:13px;color:var(--ink-3);display:flex;flex-direction:column;gap:6px}
+</style>
+</helmet>
+<div style="position: relative; height: 1320px; background: var(--surface);">
+<div class="espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
+    <nav class="espaco-nav" aria-label="Seções de Seu espaço">
+      <div class="espaco-volta"><button type="button" class="espaco-voltar" title="Voltar para Clarice (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"></path></svg><span class="icon mascote c-red shape-circle sm"><img src="/_blob/9404de870650100b6465d1bbcf4a1e00" alt=""></span><span>Clarice</span></button><kbd>esc</kbd></div>
+      <h1 id="espaco-titulo">Seu espaço</h1>
+      <div class="espaco-itens">
+        <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"></path></svg><span>Conexão</span></button>
+        <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 6.5-2.5 7.5-2.5 8.5h17c0-1-2.5-2-2.5-8.5M10 20.5h4"></path></svg><span>Avisos</span></button>
+        <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"></path></svg><span>Preferências</span></button>
+        <button type="button" class="espaco-item" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg><span>Máquinas</span></button>
+        <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"></rect><path d="M8.5 20h7M12 16.5V20"></path></svg><span>Computadores</span></button>
+        <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="2"></rect><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"></rect><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"></rect><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"></rect></svg><span>Gerenciar agentes</span></button>
+        <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"></path></svg><span>Relatos</span></button>
+      </div>
+    </nav>
+    <main class="espaco-conteudo"><section class="espaco-secao">
+      <h2>Máquinas</h2>
+      <div class="maq-topo">
+        <p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>
+        <a class="bt pri" href="Conectar.dc.html" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px; flex: none;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Conectar uma máquina</a>
+      </div>
+
+      <div class="maq-lista">
+        <div class="espaco-cartao">
+          <div class="maq-cab">
+            <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="10.5" rx="1.6"></rect><path d="M2.5 18.5h19"></path></svg></span>
+            <span class="maq-id"><b>MacBook do Marlon</b><small>Mac · este computador · a janela do Nod</small></span>
+            <span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectado</span>
+          </div>
+          <div class="maq-ias">
+            <span class="maq-ia"><i aria-hidden="true"></i>Claude Code pronto</span>
+            <span class="maq-ia"><i aria-hidden="true"></i>Codex pronto</span>
+            <span class="maq-ia"><i aria-hidden="true"></i>GitHub</span>
+          </div>
+          <div class="maq-medidor"><b>Memória</b><span class="maq-barra" aria-hidden="true"><i style="width: 31%;"></i></span><span>folgada</span></div>
+          <div class="maq-medidor"><b>Processador</b><span class="maq-barra" aria-hidden="true"><i style="width: 18%;"></i></span><span>folgado</span></div>
+          <div class="maq-quem">
+            <span class="maq-avatares"><sc-for list="{{noMac}}" as="b" hint-placeholder-count="2"><span class="{{b.mascote}}"><img src="{{b.img}}" alt=""></span></sc-for></span>
+            <span><b>{{noMacTexto}}</b></span>
+          </div>
+        </div>
+
+        <div class="espaco-cartao">
+          <div class="maq-cab">
+            <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg></span>
+            <span class="maq-id"><b>vm-sp</b><small>Linux · Debian 12 · 4 vCPU, 8 GB · conectada desde 6 de outubro</small></span>
+            <sc-if value="{{vmOk}}" hint-placeholder-val="{{true}}"><span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectada</span></sc-if>
+            <sc-if value="{{vmFora}}" hint-placeholder-val="{{false}}"><span class="maq-estado fora"><span class="maq-ponto fora" aria-hidden="true"></span>sem contato desde 14:32</span></sc-if>
+            <button type="button" class="bt sm">Desconectar</button>
+          </div>
+          <div class="maq-ias">
+            <span class="maq-ia"><i aria-hidden="true"></i>Claude Code pronto</span>
+            <span class="maq-ia nao"><i aria-hidden="true"></i>Codex não instalado</span>
+            <span class="maq-ia"><i aria-hidden="true"></i>GitHub</span>
+          </div>
+          <sc-if value="{{vmOk}}" hint-placeholder-val="{{true}}">
+            <div class="maq-medidor"><b>Memória</b><span class="maq-barra" aria-hidden="true"><i style="width: 46%;"></i></span><span>folgada</span></div>
+            <div class="maq-medidor"><b>Processador</b><span class="maq-barra" aria-hidden="true"><i style="width: 63%;"></i></span><span>começando a apertar</span></div>
+          </sc-if>
+          <sc-if value="{{vmFora}}" hint-placeholder-val="{{false}}">
+            <div class="maq-fora">
+              <div><b>A vm-sp parou de responder.</b> 2 conversas esperam por ela; a rotina das 15:00 do Gil não rodou. Confira se a VM está ligada e se o serviço nod-motor está de pé.</div>
+              <button type="button" class="bt sm">Como reconectar</button>
+            </div>
+          </sc-if>
+          <div class="maq-quem">
+            <span class="maq-avatares"><sc-for list="{{naVm}}" as="b" hint-placeholder-count="4"><span class="{{b.mascote}}"><img src="{{b.img}}" alt=""></span></sc-for></span>
+            <span><b>{{naVmTexto}}</b></span>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="espaco-subtitulo">Onde cada bot trabalha</h3>
+      <div class="espaco-cartao bots-cartao">
+        <sc-for list="{{bots}}" as="b" hint-placeholder-count="7">
+          <div class="bot-maq">
+            <span class="{{b.mascote}}"><img src="{{b.img}}" alt=""></span>
+            <span class="bot-maq-txt"><b>{{b.nome}}</b><span>{{b.papel}}</span></span>
+            <div class="segmentado maq" role="group" aria-label="{{b.rotulo}}">
+              <button type="button" class="{{b.clsMac}}" aria-pressed="{{b.noMac}}" onClick="{{b.paraMac}}">MacBook</button>
+              <button type="button" class="{{b.clsVm}}" aria-pressed="{{b.naVm}}" onClick="{{b.paraVm}}">vm-sp</button>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <ul class="regras-maq">
+        <li>Bot novo trabalha na vm-sp. Você muda isso aqui ou no perfil do bot.</li>
+        <li>Se a máquina de um bot ficar sem contato, a conversa espera por ela; na conversa você pode rodar no outro computador só daquela vez.</li>
+        <li>Rotinas não mudam de máquina sozinhas. Os arquivos de cada bot ficam na máquina onde ele trabalha.</li>
+      </ul>
+    </section></main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"vm":{"editor":"enum","options":["conectada","fora do ar"],"default":"conectada","section":"Simulação"},"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { onde: { clarice: 'mac', ze: 'vm', elis: 'vm', dev3: 'vm', gil: 'vm', chico: 'mac', nina: 'mac' } };
+  }
+  renderVals() {
+    const fora = (this.props.vm ?? 'conectada') === 'fora do ar';
+    const BOTS = [
+      ['clarice', 'Clarice', 'Assistente pessoal', '/_blob/9404de870650100b6465d1bbcf4a1e00', 'c-red shape-circle'],
+      ['ze', 'Ze 1', 'Dev Sr · gamefik', '/_blob/2ca194a2a060ffa3b85984f5c5755935', 'c-red shape-square'],
+      ['elis', 'Elis', 'Tech Lead · gamefik', '/_blob/b1dc3432217f8bfdbc1da8680db4bf64', 'c-red shape-square'],
+      ['dev3', 'Dev 3', 'Dev · gamefik', '/_blob/133ba7987390dbb463273176296a44f7', 'c-green shape-cloud'],
+      ['gil', 'Gil', 'Rotinas do time', '/_blob/745cc89fdafb0b37b16ab169153a639b', 'c-cream shape-square'],
+      ['chico', 'Chico', 'Tech Lead', '/_blob/02a72289a7269db6dd55284c9a7b5479', 'c-brown shape-square'],
+      ['nina', 'Nina', 'Design UX/UI', '/_blob/fce77dab6ae752ea19b691ca2da235ba', 'c-purple shape-hex'],
+    ];
+    const onde = this.state.onde;
+    const mover = (id, para) => () => this.setState({ onde: { ...onde, [id]: para } });
+    const bots = BOTS.map(([id, nome, papel, img, cls]) => ({
+      nome, papel, img,
+      mascote: 'icon mascote ' + cls + ' sm',
+      rotulo: 'Onde ' + nome + ' trabalha',
+      noMac: onde[id] === 'mac' ? 'true' : 'false',
+      naVm: onde[id] === 'vm' ? 'true' : 'false',
+      clsMac: 'seg' + (onde[id] === 'mac' ? ' ativo' : ''),
+      clsVm: 'seg' + (onde[id] === 'vm' ? ' ativo' : ''),
+      paraMac: mover(id, 'mac'),
+      paraVm: mover(id, 'vm'),
+    }));
+    const noMac = bots.filter((b) => b.noMac === 'true');
+    const naVm = bots.filter((b) => b.naVm === 'true');
+    const texto = (l) => l.length === 0 ? 'Nenhum bot trabalha aqui' : (l.length === 1 ? l[0].nome + ' trabalha aqui' : l.length + ' bots trabalham aqui: ' + l.map((b) => b.nome).join(', '));
+    return {
+      bots,
+      noMac,
+      naVm,
+      noMacTexto: texto(noMac),
+      naVmTexto: texto(naVm),
+      vmOk: !fora,
+      vmFora: fora,
+    };
+  }
+}
+</script>
+</body>
+</html>

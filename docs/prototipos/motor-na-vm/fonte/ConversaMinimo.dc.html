@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Conversa · aviso mínimo</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:140%;height:140%;flex-shrink:0;max-width:none;display:block}
+.onde-chip{display:inline-flex;align-items:center;gap:5px;margin-left:10px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);font-size:11px;color:var(--ink-2);vertical-align:1px}
+.onde-chip svg{color:var(--ink-3)}
+.onde-chip.fora{border-color:var(--warning-line);background:var(--warning-soft);color:var(--warning)}
+.onde-chip.fora svg{color:var(--warning)}
+.rodou{font-size:11.5px;color:var(--ink-3);margin-left:6px}
+.aviso-maq{margin:0 auto 10px;max-width:760px;width:calc(100% - 48px);box-sizing:border-box}
+.onde-chip .onde-ponto{width:6px;height:6px;border-radius:50%;background:var(--warning);display:inline-block}
+.aviso-min{display:flex;align-items:center;gap:12px;margin:0 auto 10px;max-width:760px;width:calc(100% - 48px);box-sizing:border-box;padding:10px 10px 10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-size:13px;line-height:18px;color:var(--ink-2)}
+.aviso-min .aviso-min-ic{flex:none;color:var(--warning);display:grid;place-items:center}
+.aviso-min .aviso-min-txt{flex:1;min-width:0}
+.aviso-min b{color:var(--ink);font-weight:500}
+.aviso-min .aviso-min-acoes{display:flex;gap:4px;align-items:center;flex:none}
+.fila-chip .bt.link{margin-left:8px}
+</style>
+</helmet>
+<div class="app" style="height: 900px;">
+<aside class="sidebar" id="sidebar" aria-label="Bots e salas"><div class="search-wrap">
+      <div class="sh"><button class="nod-topo" aria-label="Abrir o Nod" title="Nod"><svg class="logo-nod" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect class="logo-fundo" width="32" height="32" rx="7.5"></rect><g class="logo-olhos" transform="rotate(14 16 16)"><rect x="8.6" y="8.5" width="5.6" height="15" rx="2.8"></rect><rect x="17.8" y="8.5" width="5.6" height="15" rx="2.8"></rect></g></svg><span>Nod</span></button><button class="icone-topo" aria-label="Buscar agentes" title="Buscar (⌘K)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5 14 14"></path></svg></button><button class="icone-topo trabalhos-bt" aria-current="false" aria-label="Trabalhos: 4 abertos" title="Trabalhos"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="14" height="11" rx="2.2"></rect><path d="M7.5 5.5V4.2a1.2 1.2 0 0 1 1.2-1.2h2.6a1.2 1.2 0 0 1 1.2 1.2v1.3"></path><path d="M3 10h14"></path></svg><span class="contagem-topo" aria-hidden="true">4</span></button><span class="create-actions"><button class="create-trigger" aria-label="Nova conversa"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+    </div>
+    <div class="list">
+      <section class="fixados" aria-label="Fixados"><div class="fixado"><button class="fixado-bt" aria-label="Abrir conversa com Clarice" title="Clarice · Assistente pessoal"><span class="icon mascote c-red shape-circle lg" role="img" aria-label="Clarice"><img src="/_blob/9404de870650100b6465d1bbcf4a1e00" alt=""></span><b>Clarice</b></button></div></section>
+      <section class="section"><h3><button type="button" class="secao-cab" aria-expanded="true" aria-label="Meus agentes"><span class="secao-nome">Meus agentes</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6l6 6-6 6"></path></svg></button></h3><div class="bot-row"><button class="row" aria-label="Abrir conversa com Milton" title="Milton · PM"><span class="icon mascote c-black shape-drop" role="img" aria-label="Milton"><img src="/_blob/31f485bb66190dc785eefb3874015cf8" alt=""></span><span class="txt"><span class="nome-linha"><b>Milton</b><i class="chip">PM</i></span><span>Pedi a arte do post para a Tarsila</span></span></button></div><div class="bot-row"><button class="row" aria-label="Abrir conversa com Chico" title="Chico · Tech Lead"><span class="icon mascote c-brown shape-square" role="img" aria-label="Chico"><img src="/_blob/02a72289a7269db6dd55284c9a7b5479" alt=""></span><span class="txt"><span class="nome-linha"><b>Chico</b><i class="chip">Tech Lead</i></span><span>Revisei o PR e deixei dois comentários</span></span></button></div><div class="bot-row"><button class="row" aria-label="Abrir conversa com Nina" title="Nina · Design UX/UI"><span class="icon mascote c-purple shape-hex" role="img" aria-label="Nina"><img src="/_blob/fce77dab6ae752ea19b691ca2da235ba" alt=""></span><span class="txt"><span class="nome-linha"><b>Nina</b><i class="chip">Design UX/UI</i></span><span>O protótipo novo está no canvas</span></span></button></div></section><section class="section"><h3><button type="button" class="secao-cab" aria-expanded="true" aria-label="Gamefik"><span class="secao-nome">Gamefik</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6l6 6-6 6"></path></svg></button></h3><div class="bot-row"><button class="row" aria-label="Abrir conversa com Elis" title="Elis · Tech Lead"><span class="icon mascote c-red shape-square" role="img" aria-label="Elis"><img src="/_blob/b1dc3432217f8bfdbc1da8680db4bf64" alt=""></span><span class="txt"><span class="nome-linha"><b>Elis</b><i class="chip">Tech Lead</i></span><span>A fila do time Tech está em dia</span></span></button></div><div class="bot-row"><button class="row" aria-current="true" aria-label="Abrir conversa com Ze 1" title="Ze 1 · Dev Sr"><span class="icon mascote c-red shape-square" role="img" aria-label="Ze 1"><img src="/_blob/2ca194a2a060ffa3b85984f5c5755935" alt=""></span><span class="txt"><span class="nome-linha"><b>Ze 1</b><i class="chip">Dev Sr</i><span class="chip-trab" title="1 trabalho aberto"><span class="{{pontoChip}}" aria-hidden="true"></span>1</span></span><span>{{previa}}</span></span></button></div></section></div>
+    <div class="rodape">
+      <button class="me" aria-haspopup="menu" aria-expanded="false" aria-label="Menu da conta" title="Menu da conta"><span class="av-me">eu</span><span class="me-conexao conexao-aberto"></span></button>
+      <button class="marketplace-bt" aria-current="false"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 4.5 3h11L17 7.5"></path><path d="M3 7.5a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.7 0"></path><path d="M4.2 10v7h11.6v-7"></path><path d="M8 17v-4h4v4"></path></svg>Marketplace</button>
+    </div></aside>
+<main class="stage">
+<header class="cabecalho" id="cabecalho"><div class="cab-esq"><span class="icon mascote c-red shape-square lg"><img src="/_blob/2ca194a2a060ffa3b85984f5c5755935" alt=""></span><div class="cab-identidade"><div><span class="nome">Ze 1</span><span class="{{presencaClasse}}">{{presenca}}</span><span class="{{ondeClasse}}" title="Onde Ze 1 trabalha"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect></svg><sc-if value="{{pontoEspera}}" hint-placeholder-val="{{false}}"><span class="onde-ponto" aria-hidden="true"></span></sc-if>{{onde}}</span></div><p>Dev Sr · gamefik</p></div></div>
+    <div class="cab-acoes">
+      <button type="button" class="bt ligar" title="Ligar para Ze 1" aria-label="Ligar para Ze 1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h3.5l1.5 4-2 1.5a11 11 0 0 0 6.5 6.5l1.5-2 4 1.5V19a1.5 1.5 0 0 1-1.6 1.5A16 16 0 0 1 3.5 5.6 1.5 1.5 0 0 1 5 4z"></path></svg><span>Ligar</span></button>
+      <button type="button" class="bt perigo" title="para a conversa e as tasks deste bot">Parar</button>
+      <button type="button" class="bt toggle-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"></rect><path d="M12.5 3.5v13"></path></svg></button>
+    </div></header>
+<section class="timeline-wrap" id="timeline"><div class="timeline-parte">
+  <div class="bloco"><article class="message you"><div class="bubble-wrap"><div class="msg-autor"><b>Você</b><time>14:10</time></div><div class="bubble">Ze 1, roda a suíte de integração da GFK-1780 e abre o PR se passar.</div></div></article></div>
+  <div class="bloco"><article class="message bot"><span class="icon mascote c-red shape-square md"><img src="/_blob/2ca194a2a060ffa3b85984f5c5755935" alt=""></span><div class="bubble-wrap"><div class="msg-autor"><b>Ze 1</b><time>14:24</time><span class="rodou">na vm-sp</span></div><div class="bubble">Rodei a suíte de integração na vm-sp: 212 testes, todos passaram. Abri o PR #541 e marquei o Chico para revisar.</div></div></article></div>
+
+  <sc-if value="{{temSegunda}}" hint-placeholder-val="{{true}}">
+    <div class="bloco"><article class="{{segundaClasse}}"><div class="bubble-wrap"><div class="msg-autor"><b>Você</b><time>14:41</time></div><div class="bubble">Agora roda a mesma suíte na branch do Chico, a GFK-1782.</div>
+      <sc-if value="{{naFila}}" hint-placeholder-val="{{true}}"><div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>{{filaTexto}}<sc-if value="{{integrado}}" hint-placeholder-val="{{false}}"><button type="button" class="bt link" onClick="{{rodarNoMac}}">Rodar no MacBook desta vez</button></sc-if><button type="button" class="bt link perigo" aria-label="Cancelar esta mensagem da fila">Cancelar</button></div></sc-if>
+    </div></article></div>
+  </sc-if>
+
+  <sc-if value="{{noMacDestaVez}}" hint-placeholder-val="{{false}}">
+    <div class="bloco"><div class="linha-centro-wrap"><span class="linha-centro"><span class="linha-ic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="10.5" rx="1.6"></rect><path d="M2.5 18.5h19"></path></svg></span><span>Você pediu para rodar esta no MacBook ·</span><b>só desta vez</b></span></div></div>
+    <div class="bloco"><article class="message bot"><span class="icon mascote c-red shape-square md"><img src="/_blob/2ca194a2a060ffa3b85984f5c5755935" alt=""></span><div class="bubble-wrap"><div class="msg-autor"><b>Ze 1</b><time>14:43</time><span class="rodou">no MacBook</span></div><div class="bubble">Estou no seu Mac desta vez. A pasta com o clone fica na vm-sp, então vou clonar a GFK-1782 aqui em ~/nod/ze-1 e rodar a suíte. Te aviso quando terminar.</div></div></article></div>
+  </sc-if>
+</div></section>
+
+<sc-if value="{{mostrarAvisoMinimo}}" hint-placeholder-val="{{false}}">
+  <div class="aviso-min" role="status">
+    <span class="aviso-min-ic" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg></span>
+    <span class="aviso-min-txt"><b>A vm-sp não responde desde 14:32.</b> Sua mensagem roda quando ela voltar.</span>
+    <span class="aviso-min-acoes"><button type="button" class="bt" onClick="{{rodarNoMac}}">Rodar no MacBook desta vez</button><a class="bt link" href="Main.dc.html" style="text-decoration: none;">Ver máquinas</a></span>
+  </div>
+</sc-if>
+
+<sc-if value="{{mostrarAviso}}" hint-placeholder-val="{{true}}">
+  <div class="aviso-estado tom-alerta aviso-maq" role="status">
+    <span class="aviso-estado-ic" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg></span>
+    <span class="aviso-estado-txt"><b>Ze 1 trabalha na vm-sp, que não responde desde 14:32.</b> Sua mensagem roda assim que ela voltar.</span>
+    <span class="aviso-estado-acoes"><button type="button" class="bt pri" onClick="{{rodarNoMac}}">Rodar no MacBook desta vez</button><a class="bt" href="Main.dc.html" style="text-decoration: none;">Ver máquinas</a></span>
+  </div>
+</sc-if>
+
+<footer class="composer-wrap" id="composer"><div class="composer"><div class="box com-anexos com-modo"><button type="button" class="clipe" aria-label="Anexar arquivo"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"></path></svg></button><button type="button" class="modo-chip" aria-haspopup="menu" aria-expanded="false" aria-label="Aprovações: Aprovar automaticamente"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 19l9-7-9-7z"></path><path d="M2 19l9-7-9-7z"></path></svg><span>Auto</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><textarea rows="1" placeholder="Escreva uma mensagem para Ze 1…" aria-label="Mensagem para Ze 1"></textarea><button class="send" aria-label="Enviar">➤</button></div>
+  <p class="nota">Enter envia · Shift+Enter quebra linha · / para comandos · arraste ou cole imagens e PDFs</p></div></footer>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"aviso":{"editor":"enum","options":["atual","minimo","integrado"],"default":"minimo","section":"Simulação"},"vm":{"editor":"enum","options":["conectada","fora do ar"],"default":"fora do ar","section":"Simulação"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { noMac: false };
+  }
+  renderVals() {
+    const fora = (this.props.vm ?? 'fora do ar') === 'fora do ar';
+    const noMac = fora && this.state.noMac;
+    const esperando = fora && !noMac;
+    const aviso = this.props.aviso ?? 'atual';
+    return {
+      integrado: aviso === 'integrado',
+      pontoEspera: esperando && aviso !== 'atual',
+      filaTexto: aviso === 'integrado' ? 'Na fila · a vm-sp não responde desde 14:32' : 'Na fila · esperando a vm-sp voltar',
+      mostrarAvisoMinimo: esperando && aviso === 'minimo',
+      temSegunda: fora,
+      naFila: esperando,
+      segundaClasse: esperando ? 'message you fila-na_fila' : 'message you',
+      noMacDestaVez: noMac,
+      mostrarAviso: esperando && aviso === 'atual',
+      rodarNoMac: () => this.setState({ noMac: true }),
+      presenca: esperando ? 'Esperando a máquina' : 'Ativo',
+      presencaClasse: esperando ? 'presenca' : 'presenca ativa',
+      onde: noMac ? 'no MacBook desta vez' : (fora ? 'vm-sp · sem contato' : 'na vm-sp'),
+      ondeClasse: esperando && aviso === 'atual' ? 'onde-chip fora' : 'onde-chip',
+      pontoChip: esperando ? 'ponto-trabalho fora' : 'ponto-trabalho c-red pulso-trab',
+      previa: esperando ? 'Esperando a vm-sp voltar' : (noMac ? 'Rodando a suíte no seu Mac' : 'Abri o PR #541'),
+    };
+  }
+}
+</script>
+</body>
+</html>
