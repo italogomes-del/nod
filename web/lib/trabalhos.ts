@@ -44,6 +44,17 @@ export function abertosDoBot(estado: Pick<Estado, "trabalhos" | "conversas" | "t
     .sort((a, b) => a.criadoEm - b.criadoEm);
 }
 
+/**
+ * O título para as listas (definido em 2026-10-09, pedido do Marlon): sem o parêntese técnico que o bot copia do sistema
+ * de fora — "Orquestrar a etapa … no Linear (team 55113aca-122d-4…)" vira "Orquestrar a etapa … no Linear". Só sai o
+ * parêntese com um id (8+ caracteres hexadecimais com algum dígito, inteiro ou cortado em "…"); o título inteiro continua
+ * no `title` da linha e na tela da task.
+ */
+export function tituloCurto(titulo: string): string {
+  const limpo = titulo.replace(/\s*\((?=[^()]*?(?<![0-9a-z])(?=[a-z]*\d)[0-9a-f]{8,})[^()]*(?:\)|$)/gi, "").trim();
+  return limpo || titulo;
+}
+
 /** A etiqueta de origem ("de você", "rotina", "pedido do Chico"): a mesma na faixa, na gaveta e em "Todos os trabalhos". */
 export function etiquetaOrigem(t: Pick<TrabalhoDto, "origem" | "pedidoPorNome">): string {
   if (t.origem === "rotina") return "rotina";
@@ -219,7 +230,9 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "acordaEm">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   // Esperando colega ou a hora marcada (ADR-086): ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
-  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho esperando" aria-hidden="true"></span>';
+  // revisto em 2026-10-09: a classe era `esperando`, que já é a caixa "Esperando você entrar no …" do cartão de acesso
+  // (interface.css, `.esperando` com padding e fundo) — o ponto de 8 px virava um anel de ~30 px e empurrava a linha.
+  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.
@@ -227,6 +240,19 @@ export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<Trab
   if (t.estado === "falhou") return '<span class="ponto-trabalho feito falhou" aria-hidden="true">!</span>';
   if (!aberto(t)) return '<span class="ponto-trabalho feito" aria-hidden="true">✓</span>';
   return `<span class="ponto-trabalho ${esc(cor ?? "")}${t.estado === "rodando" ? " pulso-trab" : ""}" aria-hidden="true"></span>`;
+}
+
+/**
+ * A pílula da faixa recolhida (revisto em 2026-10-09: ela é o padrão da conversa com task aberta). O ponto diz o estado
+ * que mais importa — precisa de você (azul) > trabalhando (cor do bot, pulsando) > esperando fora do Mac (vazado âmbar)
+ * > na fila (vazado) — e o texto conta: "3 trabalhando", "2 esperando", com "· 1 precisa de você" quando há.
+ */
+export function resumoDaPilula(lista: readonly TrabalhoDto[]): { ponto: "precisa" | "trabalhando" | "fora-do-mac" | "na-fila"; texto: string; precisa: number } {
+  const precisa = lista.filter((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso").length;
+  const trabalhando = lista.filter((t) => t.estado === "rodando" && !foraDoMac(t)).length;
+  const fora = lista.filter((t) => foraDoMac(t)).length;
+  const ponto = precisa ? "precisa" : trabalhando ? "trabalhando" : fora ? "fora-do-mac" : "na-fila";
+  return { ponto, texto: trabalhando ? "trabalhando" : precisa === lista.length ? (precisa === 1 ? "precisa de você" : "precisam de você") : "esperando", precisa };
 }
 
 /** O chip de memória das pranchas M1–M3: traço na cor do texto da pílula (currentColor), sem cor própria. */
