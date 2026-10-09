@@ -200,6 +200,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
+        /*
+         * ADR-088: a máquina-alvo do turno `t`, em ordem — o "desta vez" (ato da pessoa), a máquina do bot, o padrão da
+         * pessoa. Cada nível só vale se a chave está viva e é da dona do turno (não revogada, não vencida); um nível que não
+         * vale passa a vez ao próximo, e sem nenhum o alvo é nulo: qualquer máquina. A fila nunca prende um turno numa
+         * máquina que não pode mais aparecer.
+         */
+        const viva = (id: ReturnType<typeof trx>) => trx`(select k.id::text from maquina_tokens k where k.tenant_id = t.tenant_id and k.owner_id = t.owner_id and k.id = ${id}
+          and k.revogado_em is null and (k.expira_em is null or k.expira_em > ${data(p.agora)}))`;
+        const alvo = trx`coalesce(${viva(trx`t.maquina_desta_vez`)},
+          ${viva(trx`(select ag.maquina_id from agentes ag where ag.tenant_id = t.tenant_id and ag.id = t.agente_id)`)},
+          ${viva(trx`(select pr.maquina_padrao_id from preferencias pr where pr.tenant_id = t.tenant_id and pr.owner_id = t.owner_id)`)})`;
         const [l] = await trx<Linha[]>`
           update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true
           where (tenant_id, id) = (
@@ -207,21 +218,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
               -- ADR-086: a retomada marcada para mais tarde ("me chame às 16:00") só sai a partir da hora.
               and (t.acordar_em is null or t.acordar_em <= ${data(p.agora)})
-              ${p.harnessesProntos === undefined ? trx`` : trx`and ((t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[])
+              -- ADR-088 (revisão do PR): a máquina que é o alvo do turno o pega mesmo sem a IA pronta; o despacho recusa nomeando a
+              -- IA (NOD-171), em vez de o turno esperar em silêncio uma máquina que nunca vai pegá-lo.
+              ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[])
                 ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then 'claude-cli' else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
-              -- definido em 2026-10-09 (ADR-088): onde o bot trabalha. O alvo é o "desta vez" do turno (ato da pessoa), senão a
-              -- máquina do bot, senão o padrão da pessoa; o turno só sai para o alvo. Alvo que não é uma chave viva da dona
-              -- do turno (revogada, vencida, de outra pessoa ou que nunca existiu) vale como "qualquer máquina": a fila
-              -- nunca prende um turno numa máquina que não pode mais aparecer.
-              and coalesce((select k.id::text from maquina_tokens k
-                where k.tenant_id = t.tenant_id and k.owner_id = t.owner_id and k.revogado_em is null
-                  and (k.expira_em is null or k.expira_em > ${data(p.agora)})
-                  and k.id = coalesce(t.maquina_desta_vez,
-                    (select ag.maquina_id from agentes ag where ag.tenant_id = t.tenant_id and ag.id = t.agente_id
-                      and exists (select 1 from maquina_tokens k2 where k2.tenant_id = t.tenant_id and k2.id = ag.maquina_id and k2.owner_id = t.owner_id and k2.revogado_em is null)),
-                    (select pr.maquina_padrao_id from preferencias pr where pr.tenant_id = t.tenant_id and pr.owner_id = t.owner_id))),
-                ${p.machineId}) = ${p.machineId}
+              -- definido em 2026-10-09 (ADR-088): onde o bot trabalha (o alvo, abaixo). O turno só sai para o alvo; sem alvo, para
+              -- qualquer máquina.
+              -- A ligação não espera a máquina do bot: a pessoa está na linha, e o cérebro roda em qualquer máquina com voz.
+              and (t.origem = 'ligacao' or coalesce(${alvo}, ${p.machineId}) = ${p.machineId})
               -- definido em 2026-10-04 (ADR-072): o turno da ligação não serializa com o trabalho do bot, nos dois
               -- sentidos — a conversa por voz segue enquanto o bot trabalha, e o trabalho segue durante a ligação. Só
               -- vai para a máquina que anunciou o laço de voz, e passa na frente da fila (a pessoa está esperando).

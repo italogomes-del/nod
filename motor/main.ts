@@ -23,7 +23,7 @@ import { versaoAceita } from "../src/domain/versao-app.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vigia-ias.ts";
-import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
+import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
  * O motor do Nod sem janela (ADR-088): o mesmo laço do app do Mac (`desktop/main.ts`, `conectar()`) numa máquina Linux
@@ -58,6 +58,9 @@ function caminhoAoLado(bundle: string, fonte: string): string {
 const INTERVALO_ITENS_GITHUB_MS = 5_000;
 /** Depois de uma queda (servidor fora, deploy), o motor tenta de novo: 5 s, 10 s, ... até 1 min. */
 const ESPERAS_RECONEXAO_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
+/** Chave recusada (401/403): três vezes seguidas, a 1 min uma da outra, antes de desistir com o código 2. */
+const RECUSAS_PARA_DESISTIR = 3;
+const ESPERA_RECUSA_MS = 60_000;
 /** O 409 do puxar (o servidor reiniciou e esqueceu a máquina) reanuncia, no máximo a cada 10 s (como no Mac). */
 const ESPERA_REANUNCIO_MS = 10_000;
 
@@ -73,7 +76,7 @@ async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<strin
 type Sessao = { parar(): Promise<void>; terminou: Promise<FalhaPonte["codigo"] | "parado"> };
 
 /** Uma conexão inteira: sessão, vigia das IAs, laços e gh. Termina quando a chave não vale ou o app precisa atualizar. */
-async function conectar(c: ConexaoMotor, pasta: string, versao: string): Promise<Sessao> {
+async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao: string): Promise<Sessao> {
   const r = await fetch(`${c.url}/api/maquina/sessao`, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${c.chave}`, "x-nod-versao": versao, "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(15_000) });
   const minima = r.headers.get("x-nod-versao-minima");
   if (r.status === 426 || (minima && !versaoAceita(versao, minima))) throw new FalhaPonte("atualize_app");
@@ -91,7 +94,8 @@ async function conectar(c: ConexaoMotor, pasta: string, versao: string): Promise
   let encerrado = false;
 
   const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env) };
-  const envExecutor = { ...process.env, NOD_HOME: join(pasta, "executor") };
+  // A pasta do executor (sessões e turnos do CLI) fica fora da pasta da chave (pastaDoExecutor): um turno não está a um `../` dela.
+  const envExecutor = { ...process.env, NOD_HOME: executor };
   const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
   const cfg = await configDosDrivers(envExecutor);
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
@@ -164,7 +168,14 @@ async function conectar(c: ConexaoMotor, pasta: string, versao: string): Promise
     agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; },
   });
   vigia = vigiaAtual;
-  await vigiaAtual.iniciar(criado);
+  // A primeira passada anuncia ao servidor; se ela falha (servidor caiu no meio), desliga o que já subiu antes de o laço
+  // de reconexão tentar de novo — senão cada tentativa deixaria um timer de gh e um amostrador vivos.
+  try {
+    await vigiaAtual.iniciar(criado);
+  } catch (e) {
+    await parar();
+    throw e;
+  }
   log("info", "motor_conectado", { servidor: c.url, machine_id: dados.machineId, nome: anuncio.nome });
 
   async function parar() {
@@ -183,32 +194,48 @@ async function conectar(c: ConexaoMotor, pasta: string, versao: string): Promise
 }
 
 /** O serviço: conecta, e se a conexão cai por rede ou deploy, tenta de novo. Chave inválida ou versão velha param. */
+/** Chave inválida ou motor desatualizado: um log e uma mensagem só, e o código 2 (o systemd não reinicia, RestartPreventExitStatus). */
+function sairPor(codigo: "chave_invalida" | "atualize_app", url: string): number {
+  log("erro", `motor_${codigo}`, {});
+  process.stderr.write(codigo === "chave_invalida" ? "A chave desta máquina não vale mais (cancelada?). Rode: nod-motor parear <servidor>\n" : `O servidor pede um motor mais novo. Rode de novo: curl -fsSL ${url}/motor | sh\n`);
+  return 2;
+}
+
 async function rodar(): Promise<number> {
   const pasta = pastaDoMotor(process.env);
   const c = await carregarConexao(pasta);
   if (!c) { process.stderr.write("Esta máquina ainda não está conectada. Rode: nod-motor parear https://seu-nod\n"); return 2; }
   const versao = await versaoDoMotor();
   let sessao: Sessao | null = null;
-  let saindo = false;
-  const sair = () => { saindo = true; void sessao?.parar(); };
+  // O SIGTERM pode chegar no meio do conectar ou da espera entre tentativas: a espera é abortável e, se a sessão nascer
+  // depois do sinal, ela é parada na hora (revisão do PR: antes o sinal se perdia e o systemd matava só aos 30 s).
+  const saida = new AbortController();
+  const sair = () => { saida.abort(); void sessao?.parar(); };
   process.once("SIGTERM", sair);
   process.once("SIGINT", sair);
   let tentativa = 0;
-  while (!saindo) {
+  let recusas = 0;
+  while (!saida.signal.aborted) {
     try {
-      sessao = await conectar(c, pasta, versao);
+      sessao = await conectar(c, pastaDoExecutor(process.env), pasta, versao);
+      if (saida.signal.aborted) { await sessao.parar(); return 0; }
       tentativa = 0;
+      recusas = 0;
       const motivo = await sessao.terminou;
-      if (motivo === "chave_invalida") { log("erro", "motor_chave_invalida", {}); process.stderr.write("A chave desta máquina não vale mais (revogada?). Rode: nod-motor parear <servidor>\n"); return 2; }
-      if (motivo === "atualize_app") { log("erro", "motor_desatualizado", {}); process.stderr.write(`O servidor pede um motor mais novo. Rode de novo: curl -fsSL ${c.url}/motor | sh\n`); return 2; }
+      if (motivo === "atualize_app") return sairPor(motivo, c.url);
+      // Um 401/403 de passagem (proxy, deploy) não desliga a máquina de vez: só a terceira recusa seguida sai com o código 2.
+      if (motivo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(motivo, c.url);
+      if (motivo === "chave_invalida") { await esperar(ESPERA_RECUSA_MS, undefined, { signal: saida.signal }).catch(() => undefined); continue; }
       if (motivo === "parado") return 0;
     } catch (e) {
       const codigo = e instanceof FalhaPonte ? e.codigo : "servidor_fora";
-      if (codigo === "chave_invalida" || codigo === "atualize_app") { log("erro", `motor_${codigo}`, {}); process.stderr.write(codigo === "chave_invalida" ? "A chave desta máquina não vale mais. Rode: nod-motor parear <servidor>\n" : `Atualize o motor: curl -fsSL ${c.url}/motor | sh\n`); return 2; }
+      if (codigo === "atualize_app") return sairPor(codigo, c.url);
+      if (codigo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(codigo, c.url);
+      if (saida.signal.aborted) return 0;
       const ms = ESPERAS_RECONEXAO_MS[Math.min(tentativa, ESPERAS_RECONEXAO_MS.length - 1)]!;
       tentativa += 1;
       log("aviso", "motor_sem_servidor", { codigo, nova_tentativa_ms: ms, erro: e instanceof Error ? e.name : "desconhecido" });
-      await esperar(ms);
+      await esperar(ms, undefined, { signal: saida.signal }).catch(() => undefined);
     }
   }
   return 0;
@@ -228,7 +255,8 @@ async function parear(servidorBruto: string, nomeBruto: string | null): Promise<
   while (Date.now() < ate) {
     await esperar(p.intervaloS * 1000);
     const r = await fetch(`${url}/api/pareamento/dispositivo/trocar`, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ codigoDispositivo: p.codigoDispositivo }), signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    if (!r || r.status === 202) continue;
+    // Só o 400 (código vencido ou já usado) encerra: um 5xx ou 429 de passagem (deploy) não derruba o pareamento.
+    if (!r || r.status !== 201 && r.status !== 400) continue;
     if (r.status === 201) {
       const { chave } = (await r.json()) as { chave: string };
       await guardarConexao(pastaDoMotor(process.env), { url, chave });
@@ -238,14 +266,14 @@ async function parear(servidorBruto: string, nomeBruto: string | null): Promise<
     process.stderr.write("O código venceu ou não vale mais. Rode o pareamento de novo.\n");
     return 1;
   }
-  process.stderr.write("O código venceu (10 min). Rode o pareamento de novo.\n");
+  process.stderr.write(`O código venceu (${Math.round(p.prazoS / 60)} min). Rode o pareamento de novo.\n`);
   return 1;
 }
 
 /** O login é da pessoa, direto com o fornecedor, neste terminal: o Nod não vê a senha nem a chave (ADR-015/019). */
 async function entrar(ia: "claude" | "codex" | "github"): Promise<number> {
   const { nome, args } = comandoDeEntrar(ia);
-  const cfg = await configDosDrivers({ ...process.env, NOD_HOME: join(pastaDoMotor(process.env), "executor") });
+  const cfg = await configDosDrivers({ ...process.env, NOD_HOME: pastaDoExecutor(process.env) });
   const home = cfg.env.HOME ?? "";
   const bin = nome === "gh" ? await resolverBinario(undefined, cfg.env.PATH ?? "", home, "gh") : await resolverBinario(nome === "claude" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome as "claude" | "codex");
   if (!bin) { process.stderr.write(`${nome} não está instalado nesta máquina. Rode a instalação de novo com a opção dele.\n`); return 1; }
@@ -262,7 +290,7 @@ async function estado(): Promise<number> {
   process.stdout.write(`Motor ${await versaoDoMotor()} · ${hostname()}\n`);
   process.stdout.write(c ? `Conectado a ${c.url}\n` : "Ainda não conectado: nod-motor parear https://seu-nod\n");
   const lig = { urlNod: c?.url ?? "https://127.0.0.1", proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), sondaSemTurno: true, electronComoNode: false };
-  const envExecutor = { ...process.env, NOD_HOME: join(pasta, "executor") };
+  const envExecutor = { ...process.env, NOD_HOME: pastaDoExecutor(process.env) };
   const cfg = await configDosDrivers(envExecutor);
   const criado = await criarRegistryDetalhado(envExecutor, [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)], { cfg });
   for (const [id, inv] of Object.entries(criado.inventarios)) process.stdout.write(`  ${id === "claude-cli" ? "Claude Code" : id === "codex-cli" ? "Codex" : id}: ${inv?.estado ?? "?"}${inv && "motivo" in inv && inv.motivo ? ` (${inv.motivo})` : ""}\n`);

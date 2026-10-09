@@ -98,7 +98,9 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const corpo = (await ctx.corpo()) as { nome?: unknown; plataforma?: unknown };
         const plataforma = lerPlataforma(corpo.plataforma);
         if (!plataforma) throw new ErroDeDominio("entrada_invalida", { cause: "plataforma" });
-        ctx.json(201, deps.dispositivo.pedir({ nome: nomeDaMaquina(corpo.nome), plataforma }));
+        const pedido = deps.dispositivo.pedir({ nome: nomeDaMaquina(corpo.nome), plataforma });
+        if (!pedido) { ctx.json(429, { codigo: "muitos_pedidos", mensagem: "Pedidos de pareamento demais agora. Tente de novo em alguns minutos." }); return; }
+        ctx.json(201, pedido);
       },
     },
     {

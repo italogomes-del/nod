@@ -281,8 +281,11 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   const nome = agente?.nome ?? "o agente";
   // ADR-088: o bot trabalha numa máquina que está sem contato — a fila espera por ela, e a linha diz isso.
   const doBot = agente ? maquinaDoBot(estado, agente) : null;
+  // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
+  const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
+  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude)` };
   if (doBot && !doBot.conectada) {
-    const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== doBot.id);
+    const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
     return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}`, ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };
   }
   const outra = c.turnosPendentes.find((p) => p.id === emCurso.id && p.conversaId !== c.conversa.id);

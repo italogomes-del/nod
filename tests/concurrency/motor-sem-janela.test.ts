@@ -64,7 +64,7 @@ describeIntegracao("motor sem janela: parear e conectar (processo real, commita)
         if (m) { clearTimeout(t); resolver(m[1]!); }
       });
     });
-    expect(await (await api("GET", `maquinas/dispositivos/${codigo}`)).json()).toEqual({ nome: "vm-teste", plataforma: "linux" });
+    expect(await (await api("GET", `maquinas/dispositivos/${codigo}`)).json()).toMatchObject({ nome: "vm-teste", plataforma: "linux" });
     expect((await api("POST", `maquinas/dispositivos/${codigo}/aprovar`)).status).toBe(200);
     const codigoSaida = await new Promise<number | null>((resolver) => parear.once("exit", resolver));
     expect(codigoSaida, saida).toBe(0);

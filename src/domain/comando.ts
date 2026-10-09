@@ -34,9 +34,13 @@ const SIMPLES = new Set([
 // revisto em 2026-09-30: `.key`/`.pem` só como NOME DE ARQUIVO (argumento que começa depois de espaço, aspa, `=` ou
 // `:` e termina num separador). `\.(pem|…|key)\b` casava `e.key` em JavaScript embutido: 11 blocos das skills do
 // Marlon (gstack-learn) paravam por credencial, e credencial pede a pessoa até no modo total.
-const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube)(\/|$|[\s"'])|id_(rsa|ed25519|ecdsa|dsa)\b|(^|[\s"'=:])[\w./~*?-]*[\w*?]\.(pem|p12|pfx|key)(?=$|[\s"';|&)])|(^|[\s;&|])security\s+(find|dump|export)|gh\s+auth\s+token|Library\/Keychains/;
+const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.config\/nod-motor|\.netrc|\.git-credentials|\.npmrc|\.docker\/config\.json|\.kube|\.claude\/\.credentials\.json|\.codex\/auth\.json)(\/|$|[\s"'])|(^|[\s"'=/:~])conexao\.json(?=$|[\s"';|&)])|id_(rsa|ed25519|ecdsa|dsa)\b|(^|[\s"'=:])[\w./~*?-]*[\w*?]\.(pem|p12|pfx|key)(?=$|[\s"';|&)])|(^|[\s;&|])security\s+(find|dump|export)|gh\s+auth\s+token|Library\/Keychains/;
 
-/** O comando ou o caminho toca uma credencial da pessoa (chaves SSH, AWS, login do gh, Keychain)? */
+/**
+ * O comando ou o caminho toca uma credencial da pessoa (chaves SSH, AWS, login do gh, Keychain)? revisto em 2026-10-09
+ * (ADR-088): numa máquina Linux o login do Claude Code e do Codex é arquivo (~/.claude/.credentials.json, ~/.codex/auth.json),
+ * e a chave do motor fica em ~/.config/nod-motor/conexao.json — o bot não lê nenhum deles sem a pessoa.
+ */
 export function tocaCredencial(texto: string): boolean {
   return CREDENCIAL.test(texto);
 }

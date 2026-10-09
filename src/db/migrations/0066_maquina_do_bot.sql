@@ -9,7 +9,8 @@ ALTER TABLE preferencias ADD COLUMN IF NOT EXISTS maquina_padrao_id uuid;
 ALTER TABLE turnos ADD COLUMN IF NOT EXISTS maquina_desta_vez uuid;
 
 -- ROLLBACK:
--- -- O reivindicar antigo ignora as três colunas: os turnos voltam a ir para qualquer máquina, nada fica preso.
+-- -- Primeiro volte o código para antes da ADR-088 (o código novo lê as três colunas); só depois os DROPs. Com o código
+-- -- antigo as colunas são inofensivas: num rollback de emergência, dá para deixá-las.
 -- ALTER TABLE turnos DROP COLUMN IF EXISTS maquina_desta_vez;
 -- ALTER TABLE preferencias DROP COLUMN IF EXISTS maquina_padrao_id;
 -- ALTER TABLE agentes DROP COLUMN IF EXISTS maquina_id;

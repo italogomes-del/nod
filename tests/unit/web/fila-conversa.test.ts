@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
@@ -50,7 +51,7 @@ describe("fila da conversa: cada mensagem com seu Cancelar", () => {
 
 describe("fila da conversa com a máquina do bot fora do ar (ADR-088, protótipo 4c)", () => {
   const emCurso = (id: string, mensagemId: string) => ({ id, estado: "pendente" as const, desde: AGORA, mensagemId });
-  const maquina = (id: string, nome: string, conectada: boolean) => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: Date.UTC(2026, 9, 9, 14, 32), conectada, plataforma: conectada ? ("darwin" as const) : null, ias: {}, gh: false });
+  const maquina = (id: string, nome: string, conectada: boolean) => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: Date.UTC(2026, 9, 9, 14, 32), conectada, plataforma: conectada ? ("darwin" as const) : null, ias: (conectada ? { "claude-cli": "pronto" } : {}) as MaquinaDto["ias"], gh: false });
   function com(maquinaIdDoBot: string | null, maquinas: ReturnType<typeof maquina>[], padraoId: string | null = null): Estado {
     const e = comConversa({ turnosEmCurso: [emCurso("t2", "m2")] });
     return { ...e, frota: { agentes: [{ id: "a", nome: "Ze 1", conversaId: C, maquinaId: maquinaIdDoBot }] } as never, maquinas: { maquinas, padraoId } };
@@ -73,6 +74,11 @@ describe("fila da conversa com a máquina do bot fora do ar (ADR-088, protótipo
     expect(s).toMatchObject({ tipo: "na_fila", turnoId: "t2" });
     expect(s && "destaVez" in s ? s.destaVez : undefined).toBeUndefined();
     expect(renderMensagem(mensagem("m2"), e)).not.toContain("rodar-desta-vez");
+  });
+
+  it("máquina do bot conectada mas sem IA pronta: a linha diz o que falta", () => {
+    const e = com("vm", [{ ...maquina("vm", "vm-sp", true), ias: { "claude-cli": "nao_autenticado" as const } }]);
+    expect(situacaoNaFila(mensagem("m2"), e)).toMatchObject({ texto: expect.stringContaining("vm-sp está sem IA pronta") });
   });
 
   it("máquina do bot conectada: a fila de sempre", () => {

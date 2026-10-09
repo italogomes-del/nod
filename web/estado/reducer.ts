@@ -79,10 +79,9 @@ export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
 export type ConectarMaquina = {
   passo: "comando" | "codigo" | "confirmar" | "ias" | "bots";
   codigo: string;
-  pedido: { nome: string; plataforma: string } | null;
+  pedido: { nome: string; plataforma: string; pedidoHaS: number } | null;
   erro: string | null;
   chavesAntes: string[];
-  novaId: string | null;
   marcados: string[];
 };
 

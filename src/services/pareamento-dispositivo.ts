@@ -14,11 +14,13 @@ import type { Escopo } from "../shared/types.ts";
  * O código da pessoa sozinho não entrega a chave: quem troca precisa do codigoDispositivo, que nunca sai da máquina. A
  * chave nasce na troca, no escopo de quem aprovou. Errar o código conta por pessoa, para o código curto não ser adivinhado.
  */
-export type PedidoDispositivo = { nome: string; plataforma: PlataformaMaquina };
+/** `pedidoHaS`: há quantos segundos a máquina pediu — a confirmação mostra, para a pessoa notar um pedido que não é dela. */
+export type PedidoDispositivo = { nome: string; plataforma: PlataformaMaquina; pedidoHaS: number };
 export type TrocaDispositivo = { estado: "pendente" } | { estado: "aprovado"; escopo: Escopo; nome: string } | { estado: "invalido" };
 
 export interface PareamentoDispositivo {
-  pedir(e: { nome: string; plataforma: PlataformaMaquina }): { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number };
+  /** null = cheio (pedidos demais abertos): quem chama responde 429, e nenhum pedido válido é despejado. */
+  pedir(e: { nome: string; plataforma: PlataformaMaquina }): { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number } | null;
   /** O pedido do código, para a tela confirmar; null = não existe, venceu, já foi aprovado ou a pessoa errou demais. */
   ver(e: { codigoPessoa: string; escopo: Escopo }): PedidoDispositivo | null;
   aprovar(e: { codigoPessoa: string; escopo: Escopo }): boolean;
@@ -32,7 +34,7 @@ export const INTERVALO_DISPOSITIVO_S = 5;
 /** definido em 2026-10-09: 10 códigos errados por pessoa em 10 min; depois, nenhum código vale até a janela passar. */
 export const MAX_ERROS_POR_PESSOA = 10;
 const JANELA_ERROS_MS = 600_000;
-const MAX_PEDIDOS = 1_000;
+export const MAX_PEDIDOS_DISPOSITIVO = 1_000;
 /** Sem 0/O, 1/I/L e U (RFC 8628 §6.1): 31 símbolos, 8 caracteres ≈ 2^39 combinações para um código que vive 10 min. */
 const ALFABETO = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODIGO_DISPOSITIVO = /^[A-Za-z0-9_-]{43}$/;
@@ -50,7 +52,7 @@ export function lerPlataforma(v: unknown): PlataformaMaquina | null {
   return PLATAFORMAS_MAQUINA.find((p) => p === v) ?? null;
 }
 
-type Pedido = PedidoDispositivo & { codigoPessoa: string; ate: number; aprovadoPor: Escopo | null };
+type Pedido = { nome: string; plataforma: PlataformaMaquina; codigoPessoa: string; criado: number; ate: number; aprovadoPor: Escopo | null };
 
 export function criarPareamentoDispositivo(agora: () => number = Date.now): PareamentoDispositivo {
   const porDispositivo = new Map<string, Pedido>();
@@ -87,19 +89,17 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
   return {
     pedir({ nome, plataforma }) {
       varrer();
-      while (porDispositivo.size >= MAX_PEDIDOS) {
-        const [c, p] = porDispositivo.entries().next().value as [string, Pedido];
-        porDispositivo.delete(c); porPessoa.delete(p.codigoPessoa);
-      }
+      // Revisão do PR: a rota é pública; despejar o mais antigo deixaria qualquer um derrubar os pareamentos dos outros.
+      if (porDispositivo.size >= MAX_PEDIDOS_DISPOSITIVO) return null;
       const codigoDispositivo = randomBytes(32).toString("base64url");
       const codigoPessoa = novoCodigoPessoa();
-      porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: null });
+      porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: null });
       porPessoa.set(codigoPessoa, codigoDispositivo);
       return { codigoDispositivo, codigoPessoa: formatarCodigoPessoa(codigoPessoa), intervaloS: INTERVALO_DISPOSITIVO_S, prazoS: PRAZO_DISPOSITIVO_MS / 1000 };
     },
     ver({ codigoPessoa, escopo }) {
       const p = aberto(codigoPessoa, escopo);
-      return p ? { nome: p.nome, plataforma: p.plataforma } : null;
+      return p ? { nome: p.nome, plataforma: p.plataforma, pedidoHaS: Math.max(0, Math.round((agora() - p.criado) / 1000)) } : null;
     },
     aprovar({ codigoPessoa, escopo }) {
       const p = aberto(codigoPessoa, escopo);

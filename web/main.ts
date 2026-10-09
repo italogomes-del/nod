@@ -36,7 +36,7 @@ import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
-import { maquinaNova } from "./telas/maquinas.ts";
+import { botsDaPessoa, maquinaNova } from "./telas/maquinas.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
@@ -2262,12 +2262,17 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
   // ADR-088: Seu espaço › Máquinas.
-  "conectar-maquina": () => dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes: (estado.maquinas?.maquinas ?? []).map((m) => m.id), novaId: null, marcados: [] } }),
+  // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
+  // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
+  "conectar-maquina": () => agir(async () => {
+    const chavesAntes = await chavesAtuais();
+    dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes, marcados: [] } });
+  }),
   "fechar-conectar-maquina": () => dispatch({ tipo: "conectar-maquina", conectar: null }),
   "passo-conectar-maquina": (el) => {
     const passo = el.dataset.passo as NonNullable<typeof estado.conectarMaquina>["passo"];
     // Na escolha dos bots, todos começam marcados: quem conecta uma VM quer tirar o trabalho do Mac.
-    const marcados = passo === "bots" && estado.conectarMaquina?.marcados.length === 0 ? (estado.frota?.agentes ?? []).filter((a) => a.ownerId === estado.sessao?.pessoaId && !a.excluidoEm).map((a) => a.id) : undefined;
+    const marcados = passo === "bots" && estado.conectarMaquina?.marcados.length === 0 ? botsDaPessoa(estado).map((a) => a.id) : undefined;
     atualizarConectar({ passo, erro: null, ...(marcados ? { marcados } : {}) });
   },
   "ver-codigo-maquina": () => agir(async () => {
@@ -2289,7 +2294,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const id = el.dataset.id ?? "";
     if (c) atualizarConectar({ marcados: c.marcados.includes(id) ? c.marcados.filter((x) => x !== id) : [...c.marcados, id] });
   },
-  "marcar-bots-maquina": (el) => atualizarConectar({ marcados: el.dataset.todos === "1" ? (estado.frota?.agentes ?? []).filter((a) => a.ownerId === estado.sessao?.pessoaId && !a.excluidoEm).map((a) => a.id) : [] }),
+  "marcar-bots-maquina": (el) => atualizarConectar({ marcados: el.dataset.todos === "1" ? botsDaPessoa(estado).map((a) => a.id) : [] }),
   "mover-bots-maquina": () => agir(async () => {
     const c = estado.conectarMaquina;
     const nova = c ? maquinaNova(estado, c) : null;
@@ -2924,7 +2929,14 @@ function abrirCodigoDeMaquinaGuardado(): void {
   try { codigo = window.sessionStorage.getItem(CHAVE_CODIGO_MAQUINA); window.sessionStorage.removeItem(CHAVE_CODIGO_MAQUINA); } catch { /* sem storage */ }
   if (!codigo || !estado.sessao) return;
   abrirEspaco("maquinas");
-  dispatch({ tipo: "conectar-maquina", conectar: { passo: "codigo", codigo, pedido: null, erro: null, chavesAntes: (estado.maquinas?.maquinas ?? []).map((m) => m.id), novaId: null, marcados: [] } });
+  const guardado = codigo;
+  void chavesAtuais().then((chavesAntes) => dispatch({ tipo: "conectar-maquina", conectar: { passo: "codigo", codigo: guardado, pedido: null, erro: null, chavesAntes, marcados: [] } }));
+}
+/** As chaves de máquina da pessoa agora (relê do servidor e hidrata a seção). */
+async function chavesAtuais(): Promise<string[]> {
+  const dados = await api!.maquinas().catch(() => estado.maquinas ?? { maquinas: [], padraoId: null });
+  dispatch({ tipo: "hidratar-maquinas", maquinas: dados });
+  return dados.maquinas.map((m) => m.id);
 }
 /** Depois do "Conectar", a chave nova aparece quando o motor troca o código (a cada 5 s): relê até ela aparecer, por 2 min. */
 async function esperarMaquinaNova(): Promise<void> {

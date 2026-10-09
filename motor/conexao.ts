@@ -16,6 +16,15 @@ export function pastaDoMotor(env: Readonly<Record<string, string | undefined>>):
 
 export const arquivoDaConexao = (pasta: string) => join(pasta, "conexao.json");
 
+/**
+ * Onde o executor guarda sessões e turnos do CLI (NOD_HOME): fora da pasta da chave, para nenhum turno ficar a um `../` do
+ * conexao.json (revisão do PR). Com NOD_MOTOR_HOME (testes, instalação fora do padrão), dentro dela.
+ */
+export function pastaDoExecutor(env: Readonly<Record<string, string | undefined>>): string {
+  if (env.NOD_MOTOR_HOME?.trim()) return join(env.NOD_MOTOR_HOME.trim(), "executor");
+  return join(env.HOME?.trim() || homedir(), ".local", "share", "nod-motor", "executor");
+}
+
 export function lerConexao(texto: string): ConexaoMotor | null {
   try {
     const v = JSON.parse(texto) as Partial<ConexaoMotor>;
@@ -53,7 +62,9 @@ export type ComandoMotor =
 /** `nod-motor [rodar] | parear <servidor> [--nome N] | entrar claude|codex|github | estado | versao`. */
 export function lerComando(args: readonly string[]): ComandoMotor {
   const [cmd, ...resto] = args;
-  if (cmd === undefined || cmd === "rodar") return { tipo: "rodar" };
+  // Sem argumento mostra a ajuda: quem digita "nod-motor" não quer subir um segundo motor ao lado do serviço.
+  if (cmd === undefined) return { tipo: "ajuda", erro: null };
+  if (cmd === "rodar") return { tipo: "rodar" };
   if (cmd === "estado") return { tipo: "estado" };
   if (cmd === "versao" || cmd === "--version") return { tipo: "versao" };
   if (cmd === "parear") {

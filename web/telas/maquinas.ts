@@ -24,7 +24,7 @@ export function maquinaDoBot(estado: Estado, bot: Pick<Agente, "maquinaId">): Ma
 }
 
 /** Os bots da pessoa (só a dona escolhe onde o bot trabalha), sem os excluídos. */
-function botsDaPessoa(estado: Estado): Agente[] {
+export function botsDaPessoa(estado: Estado): Agente[] {
   return (estado.frota?.agentes ?? []).filter((a) => a.ownerId === estado.sessao?.pessoaId && !a.excluidoEm);
 }
 
@@ -83,6 +83,12 @@ export function renderMaquinas(estado: Estado): string {
   </section>`;
 }
 
+function haQuantoPediu(s: number): string {
+  if (s < 60) return "agora há pouco";
+  const min = Math.round(s / 60);
+  return min === 1 ? "há 1 minuto" : `há ${min} minutos`;
+}
+
 /** A máquina que apareceu depois do "Conectar" (a chave nova), quando o motor já trocou o código pela chave. */
 export function maquinaNova(estado: Estado, c: ConectarMaquina): MaquinaDto | null {
   return (estado.maquinas?.maquinas ?? []).find((m) => !c.chavesAntes.includes(m.id)) ?? null;
@@ -113,14 +119,14 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
       <div class="cx-rodape">${fechar}${botao("passo-conectar-maquina", "Apareceu um código", { classe: "pri", dados: { passo: "codigo" } })}</div>`;
   } else if (c.passo === "codigo") {
     corpo = `<h3>Digite o código da máquina</h3>
-      <p>Ele aparece no fim da instalação e vale por 10 minutos.</p>
+      <p>Ele aparece no fim da instalação e vale por alguns minutos.</p>
       <label class="cx-codigo" for="codigo-maquina"><span>Código</span><input id="codigo-maquina" type="text" value="${esc(c.codigo)}" autocomplete="off" spellcheck="false" maxlength="12" placeholder="K7QM-4F2X"></label>
       ${erro}
       <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: "comando" } })}${botao("ver-codigo-maquina", "Continuar", { classe: "pri" })}</div>`;
   } else if (c.passo === "confirmar" && c.pedido) {
     corpo = `<h3>Conectar ${esc(c.pedido.nome)}?</h3>
-      <div class="cx-confirma"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><div><b>${esc(c.pedido.nome)}</b><small>${c.pedido.plataforma === "linux" ? "Linux" : "Mac"} · pediu agora há pouco</small></div></div>
-      <p class="cx-nota">Conecte só se foi você quem rodou o comando nessa máquina.</p>
+      <div class="cx-confirma"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><div><b>${esc(c.pedido.nome)}</b><small>${c.pedido.plataforma === "linux" ? "Linux" : "Mac"} · código ${esc(c.codigo.toUpperCase())} · pediu ${esc(haQuantoPediu(c.pedido.pedidoHaS))}</small></div></div>
+      <p class="cx-nota">Conecte só se foi você quem rodou o comando nessa máquina agora e o código é o que apareceu nela. Quem conecta uma máquina passa a receber o trabalho dos bots que você mover para ela.</p>
       ${erro}
       <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: "codigo" } })}${botao("aprovar-maquina", `Conectar ${esc(c.pedido.nome)}`, { classe: "pri" })}</div>`;
   } else if (c.passo === "ias") {

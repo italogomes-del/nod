@@ -8,7 +8,8 @@ import { arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, ler
 
 describe("motor sem janela (ADR-088)", () => {
   it("lê os comandos do nod-motor", () => {
-    expect(lerComando([])).toEqual({ tipo: "rodar" });
+    expect(lerComando([])).toEqual({ tipo: "ajuda", erro: null });
+    expect(lerComando(["rodar"])).toEqual({ tipo: "rodar" });
     expect(lerComando(["parear", "https://nod.exemplo.com", "--nome", "vm-sp"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp" });
     expect(lerComando(["parear", "--nome", "vm-sp", "https://nod.exemplo.com"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp" });
     expect(lerComando(["parear"]).tipo).toBe("ajuda");

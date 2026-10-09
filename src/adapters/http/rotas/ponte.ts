@@ -24,7 +24,7 @@ import { versaoAceita } from "../../../domain/versao-app.ts";
 type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina };
 
 /** ADR-088: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
-export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ultimoContato: number; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean };
+export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean };
 
 /** Um item aprovado que roda no Mac da dona (ADR-048): o que a máquina recebe ao puxar `itens-locais`. */
 export type ItemLocal = { itemId: string; capacidade: string; argumentos: Record<string, unknown> };
@@ -95,9 +95,12 @@ export function criarPonteHttpServidor(d: {
     rota("conectar", async (ctx, b) => {
       exigir(b.versaoContrato === 1 && texto(b.nome, 100) && b.nome.trim());
       const id = ctx.params.chaveId!;
+      // ADR-088: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
+      const nome = b.nome.trim();
+      const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome: b.nome.trim(), plataforma: "darwin" };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma };
         conexoes.set(id, c);
       }
       if (c.planos.size > 0) {
@@ -107,9 +110,8 @@ export function criarPonteHttpServidor(d: {
       c.inv = inventario(b.inventario, d.agora()); c.ultimo = d.agora();
       // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
       c.gh = objeto(b.github ?? {}).gh === true;
-      // ADR-088: o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
-      c.nome = b.nome.trim();
-      c.plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
+      c.nome = nome;
+      c.plataforma = plataforma;
       const motores: Partial<Record<IdHarness, Inventario>> = {};
       if (b.harnesses !== undefined) {
         const anunciados = objeto(b.harnesses);
@@ -299,7 +301,7 @@ export function criarPonteHttpServidor(d: {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
       const ias = Object.fromEntries(Object.entries(harnesses(c.escopo, id)).map(([h, inv]) => [h, inv?.estado])) as MaquinaConectada["ias"];
-      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ultimoContato: c.ultimo, ias, gh: c.gh }];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, gh: c.gh }];
     });
   }
   /** NOD-175: a partir daqui o puxar volta `{plano:null}` na hora; renovar e entregar seguem aceitos. Não se desfaz. */

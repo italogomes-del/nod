@@ -1193,6 +1193,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return absorvidos;
       },
+      // ADR-088: o fake não guarda nem aplica a máquina do turno (o reivindicar dele ignora onde o bot trabalha); a regra é
+      // coberta só por tests/integration/maquina-do-bot.test.ts, contra o Postgres.
       async rodarDestaVez(conversaId, maquinaId) {
         const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
         void maquinaId;

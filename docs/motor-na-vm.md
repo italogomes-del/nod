@@ -31,8 +31,9 @@ nod-motor entrar github    # opcional (para o bot usar gh)
 nod-motor estado           # o servidor conectado e o estado de cada IA
 ```
 
-O login é seu, direto com o fornecedor. O Nod não vê a senha nem a chave; o serviço recomeça sozinho depois de cada
-`entrar` e a tela do Nod marca a IA como pronta.
+O login é seu, direto com o fornecedor. O Nod não vê a senha nem a chave. Com o serviço ainda sem IA pronta, ele percebe
+o login sozinho em segundos e a tela do Nod marca a IA como pronta. Se você entrar numa segunda IA com o motor já
+trabalhando, ela passa a valer no próximo `sudo systemctl restart nod-motor` (que interrompe o que estiver rodando).
 
 ## 4. Escolher onde cada bot trabalha
 
@@ -56,5 +57,8 @@ Em **Máquinas**: marque os bots que vão para a VM no último passo do "Conecta
 ## Problemas conhecidos
 
 - **O pareamento venceu:** o código vale 10 min. Rode `nod-motor parear https://<seu-nod>`.
-- **"Chave não vale mais":** a chave foi cancelada. Rode o pareamento de novo.
+- **"Chave não vale mais":** a chave foi cancelada (o motor só desiste depois de três recusas seguidas, a 1 min uma da
+  outra). Rode `nod-motor parear https://<seu-nod>` e mova os bots para a máquina nova em Máquinas.
+- **Segurança:** a chave do motor, o login do Claude Code (`~/.claude/.credentials.json`) e o do Codex
+  (`~/.codex/auth.json`) contam como credenciais para o terminal do bot: ele não os lê sem você aprovar.
 - **"O servidor pede um motor mais novo":** rode o `curl … | sh` de novo.

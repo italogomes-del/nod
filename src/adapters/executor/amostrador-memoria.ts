@@ -85,7 +85,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       if (linux) return nivelDaMemoriaLinux(await lerArquivo("/proc/meminfo"));
       return nivelDaPressao(await executar("/usr/sbin/sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]));
     } catch (erro) {
-      // Falha ou fora do macOS: verde, nunca um aviso que a máquina não deu.
+      // Falha na leitura (sysctl no Mac, /proc/meminfo no motor Linux): verde, nunca um aviso que a máquina não deu.
       avisar("memoria_pressao_sem_leitura", erro);
       return "verde";
     }

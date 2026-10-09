@@ -261,7 +261,7 @@ export function criarApi(escopo: Escopo) {
     maquinaDoBot: (agenteId: string, maquinaId: string | null) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/maquina`, { maquinaId }),
     moverBots: (maquinaId: string, agentes: string[]) => pedir<{ movidos: number }>("PUT", `${base}/maquinas/${encodeURIComponent(maquinaId)}/bots`, { agentes }),
     maquinaPadrao: (maquinaId: string | null) => pedir<{ padraoId: string | null }>("PUT", `${base}/maquinas/padrao`, { maquinaId }),
-    verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
+    verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string; pedidoHaS: number }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
     aprovarDispositivo: (codigo: string) => post<{ ok: true }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}/aprovar`),
     rodarDestaVez: (conversaId: string, maquinaId: string) => post<{ turnos: number }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId }),
     /** ADR-069: abre o pedido de pareamento do Mac que pediu; o código volta ao app pelo 127.0.0.1. */

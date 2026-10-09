@@ -32,6 +32,10 @@ export function scriptDeInstalacao(o: { servidor: string; versao: string }): str
   return `#!/bin/sh
 # Nod: instala ou atualiza o motor nesta máquina (ADR-088). Servido por ${o.servidor}/motor
 set -eu
+# Tudo roda dentro de principal(), chamada na última linha: se o curl cortar a conexão no meio, nada pela metade executa.
+# /usr/sbin e /sbin no PATH: runuser e useradd moram lá, e o root de "su" sem hífen (Debian) não os tem.
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+cd /
 NOD_SERVIDOR="${o.servidor}"
 NOD_VERSAO="${o.versao}"
 NODE_VERSAO="${NODE_DO_MOTOR}"
@@ -41,6 +45,8 @@ CASA=/home/nod
 
 falhar() { printf '\\n\\342\\234\\227 %s\\n' "$1" >&2; exit 1; }
 passo() { printf '\\342\\234\\223 %s\\n' "$1"; }
+
+principal() {
 
 [ "$(uname -s)" = "Linux" ] || falhar "O motor do Nod roda em Linux (Debian ou Ubuntu)."
 command -v apt-get >/dev/null 2>&1 || falhar "Esta instalação usa o apt (Debian ou Ubuntu)."
@@ -60,8 +66,10 @@ como_nod() {
 
 printf 'Nod \\302\\267 instalando o motor %s nesta máquina\\n' "$NOD_VERSAO"
 
-$SUDO apt-get update -qq >/dev/null
-$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates git xz-utils procps >/dev/null
+# Numa VM recém-criada o cloud-init ou o unattended-upgrades seguram a trava do dpkg por alguns minutos: espera até 5 min.
+APT="apt-get -o DPkg::Lock::Timeout=300"
+$SUDO $APT update -qq >/dev/null
+$SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq curl ca-certificates git xz-utils procps >/dev/null
 passo "curl e git"
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -69,17 +77,22 @@ if ! command -v gh >/dev/null 2>&1; then
   curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
   $SUDO chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | $SUDO tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-  $SUDO apt-get update -qq >/dev/null
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gh >/dev/null
+  $SUDO $APT update -qq >/dev/null
+  $SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq gh >/dev/null
 fi
 passo "gh (GitHub)"
 
 if [ "$("$PASTA/node/bin/node" --version 2>/dev/null || true)" != "v$NODE_VERSAO" ]; then
   TMP=$(mktemp -d)
   curl -fsSL "https://nodejs.org/dist/v$NODE_VERSAO/node-v$NODE_VERSAO-linux-$ARQ.tar.xz" -o "$TMP/node.tar.xz"
+  # Extrai ao lado e só troca se deu certo (disco cheio não deixa a máquina sem Node). --no-same-owner + chown: o tarball
+  # oficial traz uid 1001, que pode ser o do usuário nod — e o root executa este Node na próxima atualização.
+  $SUDO rm -rf "$PASTA/node.novo"
+  $SUDO mkdir -p "$PASTA/node.novo"
+  $SUDO tar --no-same-owner -xJf "$TMP/node.tar.xz" -C "$PASTA/node.novo" --strip-components=1
+  $SUDO chown -R root:root "$PASTA/node.novo"
   $SUDO rm -rf "$PASTA/node"
-  $SUDO mkdir -p "$PASTA/node"
-  $SUDO tar -xJf "$TMP/node.tar.xz" -C "$PASTA/node" --strip-components=1
+  $SUDO mv "$PASTA/node.novo" "$PASTA/node"
   rm -rf "$TMP"
 fi
 passo "Node $NODE_VERSAO"
@@ -97,11 +110,14 @@ if [ "\${NOD_COM_CODEX:-0}" = "1" ]; then
 fi
 
 $SUDO mkdir -p "$PASTA/app"
+BAIXADOS=$(mktemp -d)
 for ARQUIVO in ${ARQUIVOS_DO_MOTOR.join(" ")}; do
-  curl -fsSL "$NOD_SERVIDOR/api/motor/arquivos/$ARQUIVO" -o "/tmp/nod-motor-$ARQUIVO.$$"
-  $SUDO mv "/tmp/nod-motor-$ARQUIVO.$$" "$PASTA/app/$ARQUIVO"
+  curl -fsSL "$NOD_SERVIDOR/api/motor/arquivos/$ARQUIVO" -o "$BAIXADOS/$ARQUIVO"
 done
-$SUDO chmod 644 "$PASTA/app/"*.mjs
+for ARQUIVO in ${ARQUIVOS_DO_MOTOR.join(" ")}; do
+  $SUDO install -o root -g root -m 644 "$BAIXADOS/$ARQUIVO" "$PASTA/app/$ARQUIVO"
+done
+rm -rf "$BAIXADOS"
 passo "motor $NOD_VERSAO"
 
 $SUDO tee /usr/local/bin/nod-motor >/dev/null <<'NODMOTOR'
@@ -119,7 +135,13 @@ else
   sudo -u nod -H env PATH="$CAMINHO" $MOTOR "$@" && ok=1 || ok=0
   SUDO="sudo"
 fi
-if [ "$ok" = 1 ] && { [ "\${1:-}" = parear ] || [ "\${1:-}" = entrar ]; }; then $SUDO systemctl restart nod-motor || true; fi
+# Depois de parear o serviço recomeça (a chave é nova). Depois de entrar numa IA só sobe se estava parado: reiniciar
+# derrubaria os turnos rodando; a vigia das IAs percebe o login sozinha quando nenhuma IA estava pronta.
+if [ "$ok" = 1 ] && [ "\${1:-}" = parear ]; then $SUDO systemctl restart nod-motor || true; fi
+if [ "$ok" = 1 ] && [ "\${1:-}" = entrar ]; then
+  $SUDO systemctl is-active --quiet nod-motor || $SUDO systemctl start nod-motor || true
+  echo "Se o motor já estava rodando com outra IA, ela passa a valer no próximo reinício: sudo systemctl restart nod-motor (interrompe o que estiver rodando)."
+fi
 [ "$ok" = 1 ]
 NODMOTOR
 $SUDO chmod 755 /usr/local/bin/nod-motor
@@ -144,6 +166,8 @@ RestartSec=5
 RestartPreventExitStatus=2
 KillMode=mixed
 TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -152,7 +176,8 @@ $SUDO systemctl daemon-reload
 $SUDO systemctl enable nod-motor >/dev/null 2>&1
 passo "serviço nod-motor (volta sozinho se a máquina reiniciar)"
 
-if [ -f "$CASA/.config/nod-motor/conexao.json" ]; then
+# A pasta da conexão é 0700 do nod: quem roda com sudo não a enxerga sem o $SUDO.
+if $SUDO test -f "$CASA/.config/nod-motor/conexao.json"; then
   $SUDO systemctl restart nod-motor
   printf '\\nMotor atualizado e no ar. Estado: nod-motor estado\\n'
   exit 0
@@ -161,5 +186,8 @@ fi
 printf '\\n'
 /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"
 printf 'Dica: deixe esta máquina só para o Nod, com atualizações de segurança automáticas e SSH só por chave.\\n'
+}
+
+principal "$@"
 `;
 }

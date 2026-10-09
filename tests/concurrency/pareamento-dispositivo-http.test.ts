@@ -9,6 +9,7 @@ import { db } from "../helpers/db.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
+import { agenteComConversa } from "../helpers/fabricas.ts";
 
 /**
  * ADR-088: o pareamento por código de ponta a ponta, pelo app composto em porta 0. A máquina pede o código (rota pública,
@@ -47,7 +48,7 @@ describeIntegracao("pareamento por código (HTTP real, commita)", () => {
 
     const visto = await srv.chamar(sessao(dona), "GET", `maquinas/dispositivos/${encodeURIComponent(p.codigoPessoa)}`);
     expect(visto.status).toBe(200);
-    expect(await visto.json()).toEqual({ nome: "vm-sp", plataforma: "linux" });
+    expect(await visto.json()).toMatchObject({ nome: "vm-sp", plataforma: "linux" });
     expect((await srv.chamar(sessao(dona), "POST", `maquinas/dispositivos/${encodeURIComponent(p.codigoPessoa)}/aprovar`)).status).toBe(200);
     // Aprovado, o código não vale para mais ninguém.
     expect((await srv.chamar(sessao(outra), "GET", `maquinas/dispositivos/${encodeURIComponent(p.codigoPessoa)}`)).status).toBe(404);
@@ -84,5 +85,35 @@ describeIntegracao("pareamento por código (HTTP real, commita)", () => {
     expect(await script.text()).toContain(`NOD_SERVIDOR="${srv.url}"`);
     expect((await fetch(`${srv.url}/api/motor/arquivos/..%2Fpackage.json`)).status).toBe(404);
     expect((await fetch(`${srv.url}/api/motor/arquivos/outro.mjs`)).status).toBe(404);
+  });
+
+  it("onde o bot trabalha pela HTTP: só a dona, só com chave dela; lote limitado; desta vez só nas conversas dela", async () => {
+    const emitir = async (e: typeof dona, nome: string) => {
+      const r = (await (await srv.chamar(sessao(e), "POST", "maquinas/chaves", { nome })).json()) as { dados: { id: string } };
+      if (e === dona) criadas.push(r.dados.id);
+      return r.dados.id;
+    };
+    const chaveDaDona = await emitir(dona, "vm-dona");
+    const chaveDaOutra = await emitir(outra, "vm-outra");
+    const bot = await abrirTxEscopada(db, dona)((trx) => agenteComConversa(trx, dona, { nome: "Ze" }));
+    try {
+      const fixar = await srv.chamar(sessao(dona), "PUT", `agentes/${bot.agenteId}/maquina`, { maquinaId: chaveDaDona });
+      expect(fixar.status).toBe(200);
+      expect(((await fixar.json()) as { agente: { maquinaId: string } }).agente.maquinaId).toBe(chaveDaDona);
+      // A chave de outra pessoa não serve, e o bot de outra pessoa não muda.
+      expect((await srv.chamar(sessao(dona), "PUT", `agentes/${bot.agenteId}/maquina`, { maquinaId: chaveDaOutra })).status).toBe(404);
+      expect((await srv.chamar(sessao(outra), "PUT", `agentes/${bot.agenteId}/maquina`, { maquinaId: chaveDaOutra })).status).toBe(404);
+      expect(await (await srv.chamar(sessao(outra), "PUT", `maquinas/${chaveDaOutra}/bots`, { agentes: [bot.agenteId] })).json()).toEqual({ movidos: 0 });
+      expect((await srv.chamar(sessao(dona), "PUT", `maquinas/${chaveDaDona}/bots`, { agentes: Array.from({ length: 201 }, () => bot.agenteId) })).status).toBe(400);
+      expect((await srv.chamar(sessao(dona), "PUT", `maquinas/${chaveDaDona}/bots`, { agentes: [1] })).status).toBe(400);
+      expect(await (await srv.chamar(sessao(dona), "PUT", `maquinas/${chaveDaDona}/bots`, { agentes: [bot.agenteId] })).json()).toEqual({ movidos: 1 });
+      expect(await (await srv.chamar(sessao(outra), "POST", `conversas/${bot.conversaId}/rodar-desta-vez`, { maquinaId: chaveDaOutra })).json()).toEqual({ turnos: 0 });
+      // null desfaz a escolha.
+      const solto = await srv.chamar(sessao(dona), "PUT", `agentes/${bot.agenteId}/maquina`, { maquinaId: null });
+      expect(((await solto.json()) as { agente: { maquinaId: string | null } }).agente.maquinaId).toBeNull();
+    } finally {
+      await abrirTxEscopada(db, dona)(async (trx) => { await trx`delete from conversas where id = ${bot.conversaId}`; await trx`delete from agentes where id = ${bot.agenteId}`; }).catch(() => undefined);
+      await abrirTxEscopada(db, outra)((trx) => trx`delete from maquina_tokens where id = ${chaveDaOutra}`);
+    }
   });
 });
