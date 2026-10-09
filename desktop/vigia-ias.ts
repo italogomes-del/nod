@@ -34,6 +34,13 @@ export const INTERVALO_COM_REPROVADA_MS = 30_000;
  */
 export const ESPERA_RETESTE_MS = 60_000;
 export const ESPERA_RETESTE_MAX_MS = 3_600_000;
+/**
+ * definido em 2026-10-09 (teste do Breno): com uma IA pronta, a vigia parava de olhar a outra, e o Codex instalado ou
+ * logado depois nunca aparecia sem reabrir o app. Agora a outra continua sondada a cada 60 s — só a sonda GRÁTIS dela
+ * (versão e login), sem tocar no registro da que está pronta (a sessão viva dela continua). O teste pago segue a regra
+ * de sempre: só quando a conta muda, com o freio do reteste.
+ */
+export const INTERVALO_SONDA_OUTRA_IA_MS = 60_000;
 
 type Inventarios = Partial<Record<IdDriver, Inventario>>;
 /** X9: as capacidades de cada IA pronta, já com os pisos do CLI instalado (o `AnuncioMaquina.capacidades`). */
@@ -41,8 +48,11 @@ export type CapacidadesAnunciadas = Partial<Record<IaDesktop, CapacidadesHarness
 export type Sondagem = { registry: Registry; inventarios: Inventarios };
 
 export type DepsVigia = {
-  /** A conferência de LOGIN de cada IA (grátis): um registry novo e o inventário de cada driver. */
-  sondar(): Promise<Sondagem>;
+  /**
+   * A conferência de LOGIN de cada IA (grátis): um registry novo e o inventário de cada driver. Com `ias`, só essas
+   * (definido em 2026-10-09: a sonda da outra IA com uma já pronta); o registry devolvido pode não trazer as demais.
+   */
+  sondar(ias?: readonly IaDesktop[]): Promise<Sondagem>;
   /** A impressão da conta logada nesta IA; null quando não dá para saber. */
   impressao(ia: IaDesktop): Promise<string | null>;
   /**
@@ -58,6 +68,10 @@ export type DepsVigia = {
   agora(): number;
   /** Timer injetável (o teste avança o relógio à mão). */
   agendar(fn: () => void, ms: number): { cancelar(): void };
+  /** definido em 2026-10-09: o inventário de cada passada (já com os vereditos), para o estado único da IA na tela. */
+  aoInventarios?(inventarios: Inventarios): void;
+  /** definido em 2026-10-09: as IAs com o teste de verdade rodando agora (o estado "testando"). */
+  aoTestando?(ias: IaDesktop[]): void;
 };
 
 export type VigiaDasIas = {
@@ -77,6 +91,10 @@ export type VigiaDasIas = {
    * novo, mesmo sem nada ter mudado; sem isto a fila da pessoa fica parada até ela reabrir o app.
    */
   reanunciar(): Promise<void>;
+  /** definido em 2026-10-09: o "Verificar" da tela — uma passada agora (sonda grátis; reteste só pela regra de sempre). */
+  sondarAgora(): Promise<void>;
+  /** As IAs com o teste de verdade rodando agora. */
+  testando(): IaDesktop[];
   parar(): void;
 };
 
@@ -125,6 +143,12 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
   const retestes = new Map<IaDesktop, { em: number; espera: number }>();
   /** IAs cujo login acabou de terminar: o veredito delas não vale até o próximo teste. */
   const forcadas = new Set<IaDesktop>();
+  /** definido em 2026-10-09: as IAs com o teste de verdade em curso (o estado "testando" da tela). */
+  const emTeste = new Set<IaDesktop>();
+  const mudarTeste = (ia: IaDesktop, rodando: boolean) => {
+    if (rodando) emTeste.add(ia); else emTeste.delete(ia);
+    d.aoTestando?.([...emTeste]);
+  };
 
   async function carregar(): Promise<void> {
     if (carregados) return;
@@ -146,7 +170,10 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     const testar = registro?.estado === "pronto" ? registro.instance.testar?.bind(registro.instance) : undefined;
     // Driver sem teste (app montado sem ele): vale o que a conferência de login disse.
     if (!testar) return { inventario: s.inventarios[ia] ?? AUSENTE(d.agora()), resposta: null };
-    const t = await testar(pergunta).catch((): { inventario: Inventario; resposta: null } => ({ inventario: reprovado("teste_falhou", s.inventarios[ia], d.agora()), resposta: null }));
+    mudarTeste(ia, true);
+    const t = await testar(pergunta)
+      .catch((): { inventario: Inventario; resposta: null } => ({ inventario: reprovado("teste_falhou", s.inventarios[ia], d.agora()), resposta: null }))
+      .finally(() => mudarTeste(ia, false));
     forcadas.delete(ia);
     // NOD-178: sonda lenta não é veredito do teste: não vira reprovação (que acionaria o freio do reteste) nem apaga
     // a que já existia (a conta reprovada voltaria a "pronto" só porque o Mac estava carregado).
@@ -231,6 +258,7 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     const chave = JSON.stringify([IAS_DESKTOP.map((ia) => { const i = inventarios[ia]; return [ia, i?.estado ?? null, i && i.estado !== "pronto" ? i.causa ?? null : null]; }), semVoz, capacidades]);
     ultima = s;
     ultimosInventarios = inventarios;
+    d.aoInventarios?.(inventarios);
     d.aoRegistry(s.registry, principal.estado === "pronto");
     if (chave === ultimoAnuncio) { anuncioPendente = false; return null; }
     // NOD-199: a falha não sobe — quem chamou ainda tem de reagendar; a chave não é gravada e a próxima passada reanuncia.
@@ -253,8 +281,36 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     const algumaAntiga = Object.values(inventarios).some((i) => i?.estado === "ausente" && i.causa === "cli_antigo");
     // NOD-199: um anúncio que falhou é tentado de novo no passo da reprovada, mesmo com todas as IAs prontas.
     const ms = !algumaPronta || algumaLenta ? INTERVALO_SONDA_IA_MS : vereditos.size > 0 || algumaAntiga || anuncioPendente ? INTERVALO_COM_REPROVADA_MS : null;
-    if (ms === null) return;
-    timer = d.agendar(() => { void emFila(passada).catch(() => undefined); }, ms);
+    if (ms !== null) {
+      timer = d.agendar(() => { void emFila(passada).catch(() => undefined); }, ms);
+      return;
+    }
+    // revisto em 2026-10-09: uma pronta e outra não — a outra continua sondada (grátis), sem mexer na pronta.
+    const outras = IAS_DESKTOP.filter((ia) => ultima?.inventarios[ia]?.estado !== "pronto");
+    if (outras.length > 0) timer = d.agendar(() => { void emFila(() => passadaParcial(outras)).catch(() => undefined); }, INTERVALO_SONDA_OUTRA_IA_MS);
+  }
+
+  /**
+   * Sonda só as IAs dadas e junta com a última sondagem completa: o registro (e a instância viva) das outras não muda.
+   * O resto é a passada de sempre (vereditos, anúncio, próximo agendamento).
+   */
+  async function passadaParcial(ias: readonly IaDesktop[]): Promise<void> {
+    if (parado) return;
+    const base = ultima;
+    if (!base) return passada();
+    const parcial = await d.sondar(ias);
+    if (parado) return;
+    const registry = { ...base.registry } as Registry;
+    const inventarios: Inventarios = { ...base.inventarios };
+    for (const ia of ias) {
+      const reg = parcial.registry[ia];
+      if (reg) registry[ia] = reg;
+      if (parcial.inventarios[ia]) inventarios[ia] = parcial.inventarios[ia];
+    }
+    const s: Sondagem = { registry, inventarios };
+    const ajustados = await ajustar(s, { retestar: true });
+    await publicar(s, ajustados);
+    reagendar(ajustados);
   }
 
   async function passada(): Promise<void> {
@@ -344,6 +400,14 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
         reagendar(ultimosInventarios);
         throw erro;
       });
+    },
+
+    sondarAgora() {
+      return emFila(async () => { await carregar(); await passada(); });
+    },
+
+    testando() {
+      return [...emTeste];
     },
 
     parar() {
